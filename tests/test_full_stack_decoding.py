@@ -24,6 +24,9 @@ pymatching = pytest.importorskip("pymatching")
 
 from qecsim.message import Operation
 from qecsim.wiring import build_and_run
+from qecsim.controllers import ModularController
+from qecsim.frontends.circuit import CircuitFrontend
+from qecsim.orchestrators import PauliFrameOrchestrator
 from qecsim.adapters.stim_device import StimDevice
 from qecsim.adapters.pymatching_decoder import PyMatchingDecoder
 from qecsim.adapters.window_error_models import (build_window_error_models,
@@ -40,6 +43,11 @@ D, ROUNDS, P = 3, 12, 0.003
 class _ZeroLatency:
     def latency(self, job):
         return 1
+
+
+def _zero_link_controller(engine):
+    return ModularController(engine, t_qc=0, t_cd=0, t_dd=0, t_do=0,
+                             t_oc=0, t_cq=0, log_syndromes=False)
 
 
 def _circuit():
@@ -116,6 +124,61 @@ def test_engine_matches_offline_reference_and_global_exactly():
         assert pred_engine == pred_offline, f"shot {s}: engine != offline reference"
         assert pred_engine == pred_global, f"shot {s}: engine != global decode"
     assert defect_bits > 0, "no artificial defects ever crossed a commit boundary"
+
+
+def test_gated_successor_waits_for_real_pymatching_result():
+    """A feedback-gated successor is released only after the real PyMatching result
+    for the gating op has been computed and delivered through the orchestrator.
+
+    The operations are T-labelled to exercise feedback, but each carries a memory
+    stim circuit so the decode path is the same real StimDevice -> PyMatchingDecoder
+    path certified above.
+    """
+    circuit = _circuit()
+    nwin = len(SlidingWindowScheme().plan_windows(0, ROUNDS, SurfaceCodeModel(d=D)))
+
+    class RecordingDecoder(PyMatchingDecoder):
+        def __init__(self):
+            super().__init__(_ZeroLatency())
+            self.seen = []
+            self.accumulated = {}
+
+        def decode(self, job):
+            r = super().decode(job)
+            self.seen.append((job.op_id, job.window_id))
+            if r.logical_value is not None:
+                self.accumulated[job.op_id] = (
+                    self.accumulated.get(job.op_id, 0) ^ int(r.logical_value))
+            return r
+
+    decoder = RecordingDecoder()
+
+    class AssertingOrchestrator(PauliFrameOrchestrator):
+        def integrate(self, op, result):
+            if op.id == 0:
+                assert set(decoder.seen) >= {(0, k) for k in range(nwin)}
+                assert result.logical_value == decoder.accumulated[0]
+            return super().integrate(op, result)
+
+    ops = CircuitFrontend([
+        Operation(0, "T0(memory)", (0,), clifford=False, gated_by=None,
+                  consumes_magic_state=False, circuit=circuit),
+        Operation(1, "T1(memory)", (0,), clifford=False, gated_by=0,
+                  consumes_magic_state=False, circuit=circuit),
+    ]).build()
+    device = StimDevice(seed=23)
+    res = build_and_run(
+        ops=ops, num_units=4, d=D, rounds_policy=FixedRounds(ROUNDS),
+        code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(), device=device,
+        decoder=decoder, make_controller=_zero_link_controller,
+        make_orchestrator=lambda e: AssertingOrchestrator(e),
+        verbose=False)
+
+    global_m = pymatching.Matching.from_detector_error_model(
+        circuit.detector_error_model(decompose_errors=True))
+    assert res["cluster"].op_results[0] == int(global_m.decode(device._dets[0])[0])
+    assert res["chip"].gate_release_time[1] == res["cluster"].windows[(0, nwin - 1)].t_done
+    assert res["chip"].gate_release_time[1] <= res["chip"].body_done_time[1]
 
 
 def test_timing_only_ops_still_run():

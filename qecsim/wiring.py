@@ -72,6 +72,7 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
     if num_units is None:     num_units = cfg.num_units
     if rounds_per_op is None: rounds_per_op = cfg.rounds_per_op
     if round_us is None:      round_us = cfg.round_us
+    if scheme is None:        scheme = cfg.make_scheme()   # default 'sliding' == cluster default
 
     # INPUT seam: take a frontend (Circuit today; OpenQASM / Surgery IR later) or a
     # ready-made operation list. The frontend is the place new input formats plug in.

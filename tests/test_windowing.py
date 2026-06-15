@@ -140,5 +140,7 @@ def test_naive_scheme_decodes_only_after_the_last_round():
                       decoder=PresetLatencyDecoder(1.0), scheme=NaiveOnlineScheme(),
                       verbose=False)
     lines = r["engine"].log_lines
-    assert trace_time(lines, "START DECODE M(q0) W0") >= \
+    # naive = one batch decode of the whole op (no "Wk"/commit vocabulary); match the
+    # decode-start independent of that wording.
+    assert trace_time(lines, "START DECODE M(q0)") >= \
            trace_time(lines, "round 11 of M(q0) arrived")

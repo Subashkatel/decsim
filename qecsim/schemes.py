@@ -40,6 +40,7 @@ class SlidingWindowScheme:
     # line: a scheme describes ITSELF (ground truth), so the trace never has to infer
     # "is this windowed?" from the window count. Override in subclasses.
     scheme_label = "sliding-window (serial commit/buffer chain)"
+    windowed = True            # decodes in sliding windows: commit + buffer, inter-window boundaries
 
     def plan_windows(self, op_id: int, n_rounds: int, code: CodeModel) -> list[tuple[int, int, int]]:
         """Lay out the windows for an operation: commit C rounds behind a B-round look-ahead buffer."""
@@ -100,7 +101,8 @@ class NaiveOnlineScheme(SlidingWindowScheme):
     scheme reproduce Eq. 5 and concurrent windows would not)."""
 
     batches_idle_rounds_into_next_op = True
-    scheme_label = "naive online -- GLOBAL decode: the whole history as ONE window, no windowing"
+    scheme_label = "naive online -- GLOBAL batch decode (no windowing)"
+    windowed = False           # one batch decode of the whole operation: no windows, no boundaries
 
     def plan_windows(self, op_id: int, n_rounds: int, code: CodeModel) -> list[tuple[int, int, int]]:
         """One batch window: commit every round, look ahead none."""

@@ -256,10 +256,24 @@ class DecoderCluster:
         # the scheme reports its OWN strategy (ground truth); the trace never infers
         # "is this windowed?" from the window count. NaiveOnlineScheme => global decode.
         label = getattr(self.scheme, "scheme_label", type(self.scheme).__name__)
-        self.engine.log("DecoderClstr",
-                        f"received execution plan: d={self.d}, scheme={label}; "
-                        f"{rpo} rounds/op, commit={self.commit}, buffer={self.buffer} -> "
-                        f"{wpo} window(s)/operation, {plan.total_windows} decode job(s) total")
+        # describe the ACTUAL first-window geometry from the plan, NOT the code's nominal
+        # commit/buffer: a global scheme ignores those (its single window spans the whole op
+        # with no buffer), so printing commit=d/buffer=d would falsely imply a size-2d window.
+        first_op = next(iter(self.ops), None)
+        w0 = self.windows.get((first_op, 0)) if (first_op is not None and self.windows) else None
+        njobs = plan.total_windows
+        jobs = f"{njobs} decode job" + ("" if njobs == 1 else "s")
+        if not self._windowed:
+            struct = f"each {rpo}-round operation decoded as one batch"
+        elif w0 is not None:
+            cs, bf = w0.commit_hi - w0.commit_lo + 1, max(0, w0.buffer_hi - w0.commit_hi)
+            struct = (f"each {rpo}-round operation split into {wpo} window" + ("" if wpo == 1 else "s")
+                      + f" of {cs} commit + {bf} buffer ({cs + bf} rounds each)")
+        else:
+            struct = f"{wpo} window(s) per operation"
+        # two short lines: the strategy, then the job structure in plain words.
+        self.engine.log("DecoderClstr", f"received execution plan: d={self.d}, scheme={label}")
+        self.engine.log("DecoderClstr", f"  -> {jobs}: {struct}")
         self._build_window_error_models()
 
     def _build_window_error_models(self) -> None:
@@ -439,6 +453,22 @@ class DecoderCluster:
             memory_rounds=self.memory_rounds[w.op_id], n_rounds=self.rounds_for(op),
             has_successor=op.has_successor, op=op, layout=self.layout)
  
+    @property
+    def _windowed(self) -> bool:
+        """True if the scheme decodes in sliding windows; False for a batch/global scheme
+        (NaiveOnlineScheme). The scheme is the single source of truth -- the trace never infers
+        windowing from window counts."""
+        return getattr(self.scheme, "windowed", True)
+
+    def _job_desc(self, w, op) -> str:
+        """Scheme-appropriate identity for a decode job, used at EVERY decode-lifecycle log
+        line so the trace stays consistent. Windowing scheme -> 'name W0 [commit 1-7]';
+        batch/global scheme -> 'name [whole op, rounds 1-3]' (no window index, no commit
+        vocabulary -- it decodes the whole operation in one shot)."""
+        if self._windowed:
+            return f"{op.name} W{w.k} [commit {w.commit_lo}-{w.commit_hi}]"
+        return f"{op.name} [whole op, rounds {w.commit_lo}-{w.commit_hi}]"
+
     def _check_window(self, key: tuple) -> None:
         """If a window has its data and its dependencies, build its job and enqueue it."""
         w = self.windows[key]
@@ -455,9 +485,8 @@ class DecoderCluster:
             if not w.blocked_logged:
                 w.blocked_logged = True
                 self.engine.log("DecoderClstr",
-                                f"{op.name} W{w.k} (commit {w.commit_lo}-{w.commit_hi}) "
-                                f"has all its data, but is WAITING for the boundary from "
-                                f"{w.deps_remaining} predecessor window(s)")
+                                f"{self._job_desc(w, op)} has all its data, but is WAITING for "
+                                f"the boundary from {w.deps_remaining} predecessor window(s)")
             return
         w.t_queued = self.engine.now                     # data AND deps met -> ready queue
         # the DEADLINE policy decides this job's urgency; windows of an op whose result
@@ -471,14 +500,14 @@ class DecoderCluster:
                         dem=self.window_models.get(key),         # this window's decoding problem (R2)
                         code=self.layout.code_for_op(op).name,   # G1: route to this code's decoder
                         window=w,                                # commit geometry for boundary defects
-                        label=f"{op.name} W{w.k}[commit {w.commit_lo}-{w.commit_hi}]")
+                        label=self._job_desc(w, op))             # scheme-aware (window vs batch)
         pool = self._pool_for(job)
         queue = self._queue_for(pool)
         self.scheduler.insert(queue, job)
         w.queued = True
         self.engine.log("DecoderClstr",
-                        f"{op.name} W{w.k} (commit {w.commit_lo}-{w.commit_hi}) READY "
-                        f"-> enqueue ({self._pool_tag(pool)}ready-queue length = {len(queue)})")
+                        f"{self._job_desc(w, op)} READY -> enqueue "
+                        f"({self._pool_tag(pool)}ready-queue length = {len(queue)})")
         self.queue_log.append((self.engine.now, self._queued_total()))
         self._try_dispatch()
  
@@ -549,9 +578,9 @@ class DecoderCluster:
         self.committed_windows.add(key)
         self._committed_per_op[op_id] = self._committed_per_op.get(op_id, 0) + 1
         self.engine.log("DecoderClstr",
-                        f"DECODE DONE {op.name} W{w.k}: rounds {w.commit_lo}-{w.commit_hi} "
-                        f"committed ({self._pool_tag(job.pool)}units free now "
-                        f"{self.pool_free[job.pool]})")
+                        f"DECODE DONE {self._job_desc(w, op)} -- "
+                        f"{'committed' if self._windowed else 'decoded'} "
+                        f"({self._pool_tag(job.pool)}units free now {self.pool_free[job.pool]})")
         # run the actual decode and KEEP its result. For a real decoder this is a genuine
         # logical value; for a timing-only stub it is None and the orchestrator falls back
         # to its toy outcome. Per-operation windows are combined (parity) into one outcome.

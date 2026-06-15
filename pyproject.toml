@@ -19,3 +19,7 @@ pymatching = ["pymatching"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["qecsim*"]
+
+# (qecsim.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
+[tool.setuptools.package-data]
+"qecsim.stimcircuits" = ["LICENSE", "NOTICE.md"]

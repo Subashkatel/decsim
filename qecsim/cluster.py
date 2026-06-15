@@ -251,12 +251,15 @@ class DecoderCluster:
         self._plan_spatial = plan.spatial_nodes
         self.total_windows = plan.total_windows
         # wire dependents into the cluster's view (the plan already filled them on the Windows)
+        wpo = plan.nwin.get(next(iter(self.ops), 0), 0)
+        rpo = plan.summary.get('rounds_per_op', '?')
+        # the scheme reports its OWN strategy (ground truth); the trace never infers
+        # "is this windowed?" from the window count. NaiveOnlineScheme => global decode.
+        label = getattr(self.scheme, "scheme_label", type(self.scheme).__name__)
         self.engine.log("DecoderClstr",
-                        f"received execution plan: d={self.d}, commit={self.commit}, "
-                        f"buffer={self.buffer}, "
-                        f"{plan.summary.get('rounds_per_op', '?')} rounds/op -> "
-                        f"{plan.nwin.get(next(iter(self.ops), 0), 0)} "
-                        f"windows per operation, {plan.total_windows} windows total")
+                        f"received execution plan: d={self.d}, scheme={label}; "
+                        f"{rpo} rounds/op, commit={self.commit}, buffer={self.buffer} -> "
+                        f"{wpo} window(s)/operation, {plan.total_windows} decode job(s) total")
         self._build_window_error_models()
 
     def _build_window_error_models(self) -> None:
@@ -290,8 +293,9 @@ class DecoderCluster:
                                                detector_rounds=folded)
             for key, model in zip(keys, models):
                 self.window_models[key] = model
+            n = len(models)
             self.engine.log("DecoderClstr",
-                            f"{op.name}: built {len(models)} window error models "
+                            f"{op.name}: built {n} decode error model(s) "
                             f"({sum(m.check.shape[1] for m in models)} fault columns)")
  
     def build_windows(self) -> None:

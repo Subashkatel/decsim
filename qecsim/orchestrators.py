@@ -72,7 +72,7 @@ class PauliFrameOrchestrator:
         path (arXiv:2511.10633 Sec III), so it never contributes to reaction time."""
         self.engine.log("Orchestrator",
                         f"compiled execution plan off the reaction path (0 ticks); sending "
-                        f"{plan.total_windows} windows across {len(plan.nwin)} operation(s) "
+                        f"{plan.total_windows} decode job(s) across {len(plan.nwin)} operation(s) "
                         f"to the decoder cluster ahead of time")
  
     def _record_and_gc(self, op: Operation, kind: str, outcome: int,

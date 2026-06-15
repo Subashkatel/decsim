@@ -36,6 +36,11 @@ class SlidingWindowScheme:
     exists precisely to break that chain -- see ParallelWindowScheme below, which implements
     it through the scheme's own wire_deps hook with no planner change."""
 
+    # Human-readable decoding strategy, reported verbatim in the cluster's execution-plan log
+    # line: a scheme describes ITSELF (ground truth), so the trace never has to infer
+    # "is this windowed?" from the window count. Override in subclasses.
+    scheme_label = "sliding-window (serial commit/buffer chain)"
+
     def plan_windows(self, op_id: int, n_rounds: int, code: CodeModel) -> list[tuple[int, int, int]]:
         """Lay out the windows for an operation: commit C rounds behind a B-round look-ahead buffer."""
         import math
@@ -95,6 +100,7 @@ class NaiveOnlineScheme(SlidingWindowScheme):
     scheme reproduce Eq. 5 and concurrent windows would not)."""
 
     batches_idle_rounds_into_next_op = True
+    scheme_label = "naive online -- GLOBAL decode: the whole history as ONE window, no windowing"
 
     def plan_windows(self, op_id: int, n_rounds: int, code: CodeModel) -> list[tuple[int, int, int]]:
         """One batch window: commit every round, look ahead none."""
@@ -130,6 +136,8 @@ class ParallelWindowScheme(SlidingWindowScheme):
 
     Inherits data_complete (a window is decodable once its own rounds arrived, with
     successor/memory spillover for lookahead past the operation's end)."""
+
+    scheme_label = "parallel A/B two-layer window (arXiv:2511.10633 Sec II.4)"
 
     def plan_windows(self, op_id: int, n_rounds: int, code: CodeModel) -> list[tuple[int, int, int, int]]:
         """Lay out interleaved A/B windows: A commits every 2C+2B rounds, B commits the

@@ -129,6 +129,78 @@ class WindowLatencyBreakdown:
                     "max": max(r[s] for r in rows), "n": len(rows)} for s in stages}
 
 
+class DecodeBacklog:
+    """Decoder backlog in ROUNDS of unprocessed syndrome -- the windowed-decode, cluster-side
+    analogue of BacklogTrajectory's per-gate r_i, in the SAME currency the literature uses
+    (rounds, never 'number of windows/jobs'). At any instant the backlog is the count of
+    syndrome rounds that have been GENERATED (arrived at the cluster) but not yet RESOLVED
+    (committed by a window):
+
+        backlog(t) = sum_op  max(0, rounds_arrived[op] - resolved_frontier[op])
+
+    resolved_frontier[op] = the largest R such that rounds 1..R all lie in committed windows
+    (the HEAD-OF-LINE frontier: the logical frame cannot be finalised past the earliest
+    still-undecoded round). This is exactly the quantity Terhal's backlog argument tracks
+    (Rev. Mod. Phys. 87, 307): syndrome data accumulating faster than the decoder resolves it.
+    It DIVERGES iff the decode time per commit-region exceeds the time to generate it:
+        f = tau_dec / tau_gen > 1            (decoder-switching arXiv:2510.25222, Eq. 5)
+        tau_W >= n_com * tau_rd              (Skoric parallel-window arXiv:2209.08552)
+        latency factor r > 0.5               (SWIPER arXiv:2412.05115)
+    -- three statements of one condition. Below threshold it stays bounded.
+
+    WHY THIS METRIC EXISTS (distinct from ReadyQueueStats): ReadyQueueStats counts jobs
+    waiting for a free DECODER UNIT. In a serial sliding-window chain only one window is ever
+    'ready' (each waits on its predecessor's committed boundary over the t_dd hop), so the
+    ready-queue pins at <= 1 even while the backlog in rounds grows without bound. Ready-queue
+    length is therefore the WRONG lens for backlog; SWIPER (Sec. 1) likewise stresses backlog
+    is a throughput problem, not a queue count. This metric is the right lens.
+
+    Event-driven and read-only: the cluster updates rounds_arrived and commits windows at
+    events it already handles, so observe() merely samples the current backlog (time-weighted,
+    the ReadyQueueStats pattern) -- registering it never changes the trace or the timing."""
+    name = "decode_backlog"
+
+    def __init__(self, cluster):
+        """Start the backlog accumulator (rounds, time-weighted)."""
+        self.cluster = cluster
+        self._t = 0
+        self._area = 0.0
+        self._last = 0
+        self.peak = 0
+
+    def _resolved_frontier(self, op_id: int) -> int:
+        """Largest round R with rounds 1..R all covered by committed windows of op_id -- the
+        contiguous committed prefix (exact for a serial chain; head-of-line for an out-of-order
+        or parallel A/B scheme, since the frame cannot advance past the first undecoded round)."""
+        ranges = sorted((self.cluster.windows[k].commit_lo, self.cluster.windows[k].commit_hi)
+                        for k in self.cluster.committed_windows if k[0] == op_id)
+        frontier = 0
+        for lo, hi in ranges:
+            if lo <= frontier + 1:
+                frontier = max(frontier, hi)
+            else:
+                break                              # gap: frame is stuck at `frontier`
+        return frontier
+
+    def _backlog(self) -> int:
+        """Unprocessed syndrome rounds summed over all ops: generated (arrived) minus resolved."""
+        return sum(max(0, self.cluster.rounds_arrived.get(op_id, 0)
+                          - self._resolved_frontier(op_id))
+                   for op_id in self.cluster.ops)
+
+    def observe(self, engine: "Engine") -> None:
+        """Accumulate time-weighted backlog (rounds) and track the peak high-water."""
+        self._area += self._last * (engine.now - self._t)
+        self._t = engine.now
+        self._last = self._backlog()
+        self.peak = max(self.peak, self._last)
+
+    def result(self) -> dict:
+        """Peak and time-average backlog, in rounds of unprocessed syndrome."""
+        return {"peak_rounds": self.peak,
+                "time_avg_rounds": (self._area / self._t if self._t else 0.0)}
+
+
 class BacklogTrajectory:
     """Per-gate backlog -- the r_i of the decoder-switching paper (arXiv:2510.25222
     Sec III.C, Fig 9). For every gated operation it records the REACTION WAIT (from the

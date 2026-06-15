@@ -11,6 +11,7 @@ from .orchestrators import PauliFrameOrchestrator
 from .schedulers import FifoScheduler
 from .cluster import DecoderCluster
 from .factories import InfiniteFactory
+from .metrics import DecodeBacklog
 from .chip import Chip
 from .planner import WindowPlanner
 
@@ -148,6 +149,13 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
     if make_metrics is not None:
         for m in make_metrics(engine, cluster, chip, factory):
             engine.add_metric(m)
+    # backlog instrument for the verbose SUMMARY: unprocessed-syndrome rounds over time
+    # (Terhal / arXiv:2510.25222 Eq. 5 / 2209.08552). Read-only and registered ONLY when
+    # verbose, so bulk (non-verbose) runs pay nothing. The ready-queue alone is the wrong
+    # lens for windowed decode -- it measures decoder-unit contention, not backlog.
+    backlog_metric = DecodeBacklog(cluster) if verbose else None
+    if backlog_metric is not None:
+        engine.add_metric(backlog_metric)
 
     # register T-gate gating relationships with the orchestrator
     for op in ops:
@@ -181,7 +189,15 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
         print(f"  decoder fully finished          : {fmt(last_event)}")
         print(f"  reaction tail (chip->fully done): {fmt(last_event - chip_done)}")
         peak_q = max((q for _, q in getattr(cluster, "queue_log", [])), default=0)
-        print(f"  peak ready-queue length         : {peak_q}")
+        print(f"  peak ready-queue (contention)   : {peak_q}")
+        # the FAITHFUL backlog signal: unprocessed-syndrome ROUNDS (generated - resolved),
+        # the currency of Terhal / arXiv:2510.25222 Eq. 5 / 2209.08552 / 2412.05115. Diverges
+        # iff decode time per commit-region > its generation time (f = tau_dec/tau_gen > 1).
+        # In a serial chain the ready-queue above pins at <=1 while THIS grows -- the point.
+        if backlog_metric is not None:
+            bl = backlog_metric.result()
+            print(f"  peak decode backlog (rounds)    : {bl['peak_rounds']}")
+            print(f"  decode backlog, mean (rounds)   : {bl['time_avg_rounds']:.1f}")
         # TODO: verify the the cluster peak payload is calculated correctly ---
         # NOTE: cluster.peak_payloads (syndrome RAM high-water, arXiv:2511.10633 Sec III)
         # is still measured but deliberately NOT printed: it counts payloads RESIDENT under

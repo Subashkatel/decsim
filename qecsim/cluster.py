@@ -148,14 +148,16 @@ class DecoderCluster:
         # so the high-water mark costs O(1) per round instead of recounting the store.
         self.payloads_held = 0                     # payloads retained right now
         self.peak_payloads = 0                     # most ever retained at once (storage high-water)
-        # PER-WINDOW syndrome-RAM release (arXiv:2511.10633 Sec VI.B: syndromes "can be discarded
-        # as soon as the associated decoding tasks are complete"). A round is read by its
-        # commit-owner window, the previous window (which holds it as buffer), and any predecessor
-        # op whose buffer overflows into it; _round_refs counts those readers per (op_id, round)
-        # and _on_decode_done frees the round when the LAST reader commits -- so peak_payloads is
-        # the true live-set high-water, not the per-op resident upper bound (the paper's overestimate).
-        self._round_refs: dict[tuple, int] = {}    # (op_id, round) -> # uncommitted reader windows
-        self._read_sets: dict[tuple, list] = {}    # window key -> [(op_id, round), ...] it reads
+        # Free each round's syndrome data from memory as soon as every window that needs it has
+        # finished decoding (paper: arXiv:2511.10633 Sec VI.B). A single round is needed by a few
+        # windows: the window that decodes it, the window just before it (which looks at it as
+        # look-ahead), and -- across operations -- a previous operation whose look-ahead spilled
+        # into it. _round_refs counts, for each round, how many of those windows haven't finished
+        # yet; when that count hits zero (in _on_decode_done) we drop the round. This keeps
+        # peak_payloads at the real amount of data held at once, instead of keeping a whole
+        # operation's data until the operation completely finishes.
+        self._round_refs: dict[tuple, int] = {}    # (operation, round) -> windows still needing it
+        self._read_sets: dict[tuple, list] = {}    # window -> the (operation, round)s it reads
  
         # the sliding-window plan (built once all ops are loaded)
         self.windows: dict[tuple, Window] = {}
@@ -322,16 +324,17 @@ class DecoderCluster:
                             f"({sum(m.check.shape[1] for m in models)} fault columns)")
  
     def _build_round_refcounts(self) -> None:
-        """Per-round reader refcount for per-window syndrome-RAM release (arXiv:2511.10633
-        Sec VI.B: discard a syndrome "as soon as the associated decoding tasks are complete").
+        """Work out which rounds each window reads, then count how many windows read each round --
+        so we can free a round from memory the moment the last window that needs it has decoded
+        (paper: arXiv:2511.10633 Sec VI.B, "discard ... as soon as the associated decoding tasks
+        are complete").
 
-        Each window's read-set is the EXACT set of stored rounds _assemble_payloads pulls for it:
-        its own [start_round .. min(buffer_hi, R_op)] rounds, plus the early rounds [1 .. overflow]
-        of every successor op its buffer overflows into. A round stays needed until EVERY window
-        reading it has committed (its commit-owner, the previous window holding it as buffer, and
-        any overflow predecessor), so we count readers per (op_id, round). _on_decode_done counts
-        them down and frees the round when the last reader commits -- correct for overlapping
-        windows, cross-op buffer overflow, and any commit order (serial chain or parallel A/B)."""
+        For each window we list the exact rounds it reads (the same ones _assemble_payloads hands
+        to the decoder): its own commit + look-ahead rounds, and -- if its look-ahead runs past the
+        end of this operation -- the first few rounds of the next operation. We then tally, per
+        round, how many windows read it. Because neighbouring windows share rounds (one window's
+        look-ahead is the next window's commit region) and a previous operation can spill over,
+        freeing only when the tally reaches zero is correct no matter what order windows finish."""
         self._round_refs = {}
         self._read_sets = {}
         for key, w in self.windows.items():
@@ -638,18 +641,17 @@ class DecoderCluster:
                                  lambda dk=dep_key, sn=op.name, sk=w.k, so=op_id, bd=defects:
                                      self._receive_boundary(dk, sn, sk, so, bd),
                                  label=f"defects {op.name}W{w.k}->{dst.name}W{dep_key[1]}")
-        # PER-WINDOW syndrome-RAM release (arXiv:2511.10633 Sec VI.B): free each round this window
-        # read whose LAST reader has now committed -- "discarded as soon as the associated decoding
-        # tasks are complete". Safe here: the decode above already consumed job.payloads (assembled
-        # at ready time) and the boundary send uses the decoded defects, not raw rounds, so freeing
-        # cannot starve this window; a round still needed by an uncommitted reader keeps a positive
-        # refcount and stays. This makes peak_payloads the live-set high-water (the paper's
-        # acknowledged-correct quantity), not the per-op resident upper bound.
-        for rk in self._read_sets.get(key, ()):
-            self._round_refs[rk] = self._round_refs.get(rk, 0) - 1
-            if self._round_refs[rk] <= 0:
-                r_op, r = rk
-                frags = self.payload_store.get(r_op, {}).pop(r, None)
+        # This window just finished, so drop every round it read that no other unfinished window
+        # still needs (paper: arXiv:2511.10633 Sec VI.B). This is safe: the decoder already took
+        # its copy of the data when the job was built, and the hand-off to the next window carries
+        # the *decoded* boundary, not the raw rounds -- so freeing here can never leave a
+        # not-yet-decoded window short of data (its rounds keep a non-zero count and stay). This is
+        # what keeps peak_payloads equal to the data actually held at once.
+        for round_key in self._read_sets.get(key, ()):
+            self._round_refs[round_key] = self._round_refs.get(round_key, 0) - 1
+            if self._round_refs[round_key] <= 0:                 # no window needs this round anymore
+                round_op, round_no = round_key
+                frags = self.payload_store.get(round_op, {}).pop(round_no, None)
                 if frags is not None:
                     self.payloads_held -= len(frags)
         # the operation's logical outcome is known when ALL its windows have committed ->
@@ -661,11 +663,10 @@ class DecoderCluster:
             self.engine.schedule(self.links.do.cost(),
                                  lambda: self._deliver_to_orchestrator(op),
                                  label=f"result->orch({op.name})")
-            # this op is fully decoded: its syndrome RAM was already released round-by-round above
-            # (the discard-on-decode-completion rule, arXiv:2511.10633 Sec VI.B). Drop the now-empty
-            # op key so a stray round arriving after completion is caught loudly (on_syndrome_arrival
-            # raises), and free any straggler as a safety net (none under the refcount, but this
-            # keeps payloads_held exact even if a future scheme leaves a round unread).
+            # This operation is fully decoded. Its rounds were already freed one by one above, so
+            # here we just remove the (now empty) operation from the store. That also means a stray
+            # round arriving after the operation finished gets caught and reported, rather than
+            # silently kept. The sum is a safety net (normally zero) in case any round was missed.
             freed = self.payload_store.pop(op_id, None)
             if freed:
                 self.payloads_held -= sum(len(frags) for frags in freed.values())

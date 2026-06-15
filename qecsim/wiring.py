@@ -149,10 +149,10 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
     if make_metrics is not None:
         for m in make_metrics(engine, cluster, chip, factory):
             engine.add_metric(m)
-    # backlog instrument for the verbose SUMMARY: unprocessed-syndrome rounds over time
-    # (Terhal / arXiv:2510.25222 Eq. 5 / 2209.08552). Read-only and registered ONLY when
-    # verbose, so bulk (non-verbose) runs pay nothing. The ready-queue alone is the wrong
-    # lens for windowed decode -- it measures decoder-unit contention, not backlog.
+    # Track how far the decoder falls behind (rounds of syndrome waiting to be decoded), for the
+    # summary below. Only set up when verbose, so normal high-volume runs pay nothing. We need
+    # this because the ready-queue length alone doesn't reveal backlog for windowed decoding
+    # (see the DecodeBacklog docstring).
     backlog_metric = DecodeBacklog(cluster) if verbose else None
     if backlog_metric is not None:
         engine.add_metric(backlog_metric)
@@ -190,19 +190,18 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
         print(f"  reaction tail (chip->fully done): {fmt(last_event - chip_done)}")
         peak_q = max((q for _, q in getattr(cluster, "queue_log", [])), default=0)
         print(f"  peak ready-queue (contention)   : {peak_q}")
-        # the FAITHFUL backlog signal: unprocessed-syndrome ROUNDS (generated - resolved),
-        # the currency of Terhal / arXiv:2510.25222 Eq. 5 / 2209.08552 / 2412.05115. Diverges
-        # iff decode time per commit-region > its generation time (f = tau_dec/tau_gen > 1).
-        # In a serial chain the ready-queue above pins at <=1 while THIS grows -- the point.
+        # How far the decoder fell behind, in rounds of syndrome waiting to be decoded. This is
+        # the real backlog signal: with sliding windows the ready-queue above stays at 0-1 even
+        # when the decoder is hopelessly behind, but this number climbs. It only grows without
+        # limit when the decoder is slower than the chip produces syndromes.
         if backlog_metric is not None:
             bl = backlog_metric.result()
             print(f"  peak decode backlog (rounds)    : {bl['peak_rounds']}")
             print(f"  decode backlog, mean (rounds)   : {bl['time_avg_rounds']:.1f}")
-        # syndrome-RAM high-water = the LIVE set. The cluster now releases each round's payload
-        # the moment its last reader window commits (arXiv:2511.10633 Sec VI.B: discard "as soon
-        # as the associated decoding tasks are complete"), so for a sliding window this stays
-        # ~window size (commit+buffer) regardless of computation length -- the paper's
-        # acknowledged-correct quantity, not the per-op resident upper bound.
+        # The most syndrome data held in the decoder's memory at once. The cluster now frees each
+        # round as soon as the last window that needs it has decoded (paper: arXiv:2511.10633
+        # Sec VI.B), so for sliding-window decoding this stays about one window's worth no matter
+        # how long the computation runs -- the real amount of memory the decoder needs.
         print(f"  peak syndrome RAM (payloads)    : {getattr(cluster, 'peak_payloads', 0)}")
         # factory stats, duck-typed: any factory exposing the scalar counters gets the
         # lines (a custom factory without them simply prints nothing extra).

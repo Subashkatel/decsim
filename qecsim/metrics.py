@@ -130,73 +130,68 @@ class WindowLatencyBreakdown:
 
 
 class DecodeBacklog:
-    """Decoder backlog in ROUNDS of unprocessed syndrome -- the windowed-decode, cluster-side
-    analogue of BacklogTrajectory's per-gate r_i, in the SAME currency the literature uses
-    (rounds, never 'number of windows/jobs'). At any instant the backlog is the count of
-    syndrome rounds that have been GENERATED (arrived at the cluster) but not yet RESOLVED
-    (committed by a window):
+    """How far behind the decoder is falling, measured in ROUNDS of syndrome data still waiting
+    to be decoded. This is the standard way the literature measures "backlog" (Terhal, Rev. Mod.
+    Phys. 87, 307; and arXiv:2510.25222, 2209.08552, 2412.05115), so we count rounds, not windows.
 
-        backlog(t) = sum_op  max(0, rounds_arrived[op] - resolved_frontier[op])
+    At any moment:
 
-    resolved_frontier[op] = the largest R such that rounds 1..R all lie in committed windows
-    (the HEAD-OF-LINE frontier: the logical frame cannot be finalised past the earliest
-    still-undecoded round). This is exactly the quantity Terhal's backlog argument tracks
-    (Rev. Mod. Phys. 87, 307): syndrome data accumulating faster than the decoder resolves it.
-    It DIVERGES iff the decode time per commit-region exceeds the time to generate it:
-        f = tau_dec / tau_gen > 1            (decoder-switching arXiv:2510.25222, Eq. 5)
-        tau_W >= n_com * tau_rd              (Skoric parallel-window arXiv:2209.08552)
-        latency factor r > 0.5               (SWIPER arXiv:2412.05115)
-    -- three statements of one condition. Below threshold it stays bounded.
+        backlog = sum over operations of  max(0, rounds_arrived - rounds_decoded)
 
-    WHY THIS METRIC EXISTS (distinct from ReadyQueueStats): ReadyQueueStats counts jobs
-    waiting for a free DECODER UNIT. In a serial sliding-window chain only one window is ever
-    'ready' (each waits on its predecessor's committed boundary over the t_dd hop), so the
-    ready-queue pins at <= 1 even while the backlog in rounds grows without bound. Ready-queue
-    length is therefore the WRONG lens for backlog; SWIPER (Sec. 1) likewise stresses backlog
-    is a throughput problem, not a queue count. This metric is the right lens.
+    "rounds_decoded" only counts rounds finished in an unbroken run from the start: a later round
+    doesn't count as done until every round before it is, because the final correction can't be
+    settled past the first round that's still waiting.
 
-    Event-driven and read-only: the cluster updates rounds_arrived and commits windows at
-    events it already handles, so observe() merely samples the current backlog (time-weighted,
-    the ReadyQueueStats pattern) -- registering it never changes the trace or the timing."""
+    The backlog only grows without limit when the decoder is slower than the chip produces
+    syndromes -- i.e. when decode time per round is longer than the time to make a round. Below
+    that, it stays small. (All three papers above state this same threshold in different terms.)
+
+    Why this exists and ReadyQueueStats isn't enough: ReadyQueueStats counts jobs waiting for a
+    free decoder. With sliding windows only one window is ever ready at a time (each waits for the
+    previous window's boundary), so that queue sits at 0-1 even when the decoder is hopelessly
+    behind. The queue length simply doesn't show backlog; this number does.
+
+    Read-only: the cluster already records when rounds arrive and when windows finish, so this
+    just samples those numbers as the run goes -- it never changes the simulation."""
     name = "decode_backlog"
 
     def __init__(self, cluster):
-        """Start the backlog accumulator (rounds, time-weighted)."""
+        """Start the running average and peak (both in rounds)."""
         self.cluster = cluster
         self._t = 0
         self._area = 0.0
         self._last = 0
         self.peak = 0
 
-    def _resolved_frontier(self, op_id: int) -> int:
-        """Largest round R with rounds 1..R all covered by committed windows of op_id -- the
-        contiguous committed prefix (exact for a serial chain; head-of-line for an out-of-order
-        or parallel A/B scheme, since the frame cannot advance past the first undecoded round)."""
+    def _rounds_decoded(self, op_id: int) -> int:
+        """How many rounds of this operation have been decoded in an unbroken run from round 1.
+        Sort the finished windows and walk from the start; stop at the first gap, because a round
+        isn't really 'done' for the correction until every round before it is done too."""
         ranges = sorted((self.cluster.windows[k].commit_lo, self.cluster.windows[k].commit_hi)
                         for k in self.cluster.committed_windows if k[0] == op_id)
-        frontier = 0
+        decoded = 0
         for lo, hi in ranges:
-            if lo <= frontier + 1:
-                frontier = max(frontier, hi)
+            if lo <= decoded + 1:
+                decoded = max(decoded, hi)
             else:
-                break                              # gap: frame is stuck at `frontier`
-        return frontier
+                break                              # hit a gap: nothing past here counts yet
+        return decoded
 
     def _backlog(self) -> int:
-        """Unprocessed syndrome rounds summed over all ops: generated (arrived) minus resolved."""
+        """Total rounds waiting across all operations: arrived minus already-decoded."""
         return sum(max(0, self.cluster.rounds_arrived.get(op_id, 0)
-                          - self._resolved_frontier(op_id))
+                          - self._rounds_decoded(op_id))
                    for op_id in self.cluster.ops)
 
     def observe(self, engine: "Engine") -> None:
-        """Accumulate time-weighted backlog (rounds) and track the peak high-water."""
+        """Sample the current backlog; keep a running time-average and the largest value seen."""
         self._area += self._last * (engine.now - self._t)
         self._t = engine.now
         self._last = self._backlog()
         self.peak = max(self.peak, self._last)
 
     def result(self) -> dict:
-        """Peak and time-average backlog, in rounds of unprocessed syndrome."""
+        """The largest backlog seen and the time-average, both in rounds waiting to be decoded."""
         return {"peak_rounds": self.peak,
                 "time_avg_rounds": (self._area / self._t if self._t else 0.0)}
 

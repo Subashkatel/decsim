@@ -54,6 +54,41 @@ def test_accounting_with_gated_ops_and_store_drains_to_zero():
     assert cluster.payloads_held == 0
 
 
+def test_per_window_release_holds_only_the_live_set():
+    """arXiv:2511.10633 Sec VI.B: syndromes are discarded "as soon as the associated decoding
+    tasks are complete". With per-window release the syndrome-RAM high-water is the LIVE set --
+    ~one sliding window (commit+buffer) -- so it stays bounded as the computation grows, instead
+    of scaling with the operation length (the per-op resident upper bound)."""
+    from qecsim.config import us
+    from qecsim.codes import SurfaceCodeModel
+    from qecsim.controllers import ModularController
+    from qecsim.message import DecodeResult, Operation
+    from qecsim.schemes import SlidingWindowScheme
+
+    class _Dec:
+        def latency(self, job):
+            return us(1.0)
+        def decode(self, job):
+            return DecodeResult(job.op_id, job.window_id, logical_value=0)
+
+    def _links(engine):
+        return ModularController(engine, t_qc=0, t_cd=0, t_dd=0, t_do=0, t_oc=0, t_cq=0,
+                                 log_syndromes=False)
+
+    def peak_for(rounds):
+        op = Operation(0, "mem", (0,), clifford=True, patches=(0,))
+        res = build_and_run([op], num_units=4, d=3, rounds_per_op=rounds, round_us=1.0,
+                            decoder=_Dec(), scheme=SlidingWindowScheme(),
+                            code=SurfaceCodeModel(d=3), make_controller=_links, verbose=False)
+        c = res["cluster"]
+        assert c.payloads_held == 0            # drains fully
+        return c.peak_payloads
+
+    short, long = peak_for(15), peak_for(120)
+    assert short == long                       # live set is independent of computation length
+    assert long <= 4 * 3                       # bounded by ~one window (commit+buffer = 2d), not R
+
+
 def test_round_arriving_after_op_completed_fails_loudly():
     """A payload for an op whose syndrome RAM was already freed (its last window
     committed) means the device emitted more rounds than planned -- the cluster must

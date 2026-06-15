@@ -198,11 +198,12 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
             bl = backlog_metric.result()
             print(f"  peak decode backlog (rounds)    : {bl['peak_rounds']}")
             print(f"  decode backlog, mean (rounds)   : {bl['time_avg_rounds']:.1f}")
-        # TODO: verify the the cluster peak payload is calculated correctly ---
-        # NOTE: cluster.peak_payloads (syndrome RAM high-water, arXiv:2511.10633 Sec III)
-        # is still measured but deliberately NOT printed: it counts payloads RESIDENT under
-        # the per-op release rule, not the minimal live set a cluster must provision, and
-        # we don't want to show a storage number until that accounting is verified.
+        # syndrome-RAM high-water = the LIVE set. The cluster now releases each round's payload
+        # the moment its last reader window commits (arXiv:2511.10633 Sec VI.B: discard "as soon
+        # as the associated decoding tasks are complete"), so for a sliding window this stays
+        # ~window size (commit+buffer) regardless of computation length -- the paper's
+        # acknowledged-correct quantity, not the per-op resident upper bound.
+        print(f"  peak syndrome RAM (payloads)    : {getattr(cluster, 'peak_payloads', 0)}")
         # factory stats, duck-typed: any factory exposing the scalar counters gets the
         # lines (a custom factory without them simply prints nothing extra).
         if isinstance(getattr(factory, "produced", None), int):

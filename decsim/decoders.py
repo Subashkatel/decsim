@@ -107,6 +107,94 @@ class ParityDecoder:
         return DecodeResult(job.op_id, job.window_id, correction=None,
                             logical_value=(sum(bits) % 2))
 
+class UnionFindDecoder:
+    """A REAL Union-Find decoder for the harness, backed by the ported ``decsim.uf_decoder``
+    (Coset Ensemble Decoder, arXiv:2606.11076 -- see decsim/uf_decoder/README.md). Like every
+    decoder here it is a black box with ``latency(job)`` and ``decode(job)``; this one actually
+    runs the UF clustering + peeling on the window's syndrome and returns the logical value.
+
+    Self-contained for toric codes: build one with ``UnionFindDecoder.for_toric(L, circuit,
+    latency_model, channel)`` -- the check matrices, the ``CodeStructure``, and the
+    detector->(row,col,t) remap are all constructed inside decsim, no experiment code needed. The
+    bare constructor takes those pieces directly, so the same adapter serves any code whose
+    syndrome maps to (row,col,t) vertices.
+
+    Latency is delegated to a latency_model (any object with ``latency(job)``) -- decode WORK and
+    decode TIME are separate concerns, exactly as in the rest of this module.
+
+    Imports of ``decsim.uf_decoder`` are deferred to construction time: importing that package
+    inserts its directory on ``sys.path`` (so its vendored ``software``/``tools`` resolve), and we
+    don't want that side effect merely from importing ``decsim.decoders``."""
+    def __init__(self, code_structure, detector_remap: dict, latency_model, channel: str = "x"):
+        """Hold the prebuilt CodeStructure, the {detector_id: (row,col,t)} remap, a latency model,
+        and the error channel ('x' or 'z')."""
+        from decsim.uf_decoder import uf_original
+        self._uf_original = uf_original
+        self.cs = code_structure
+        self.remap = dict(detector_remap)
+        self.latency_model = latency_model
+        self.channel = channel
+
+    @classmethod
+    def for_toric(cls, L: int, circuit, latency_model, channel: str = "x") -> "UnionFindDecoder":
+        """Build a toric-code UF decoder entirely from decsim: the coset toric check matrices +
+        logicals (``decsim.uf_decoder.toric_codes``), the ``CodeStructure``, and the detector
+        remap read from the stim ``circuit``'s detector coordinates (coset convention:
+        col=coord0//2, row=coord1//2, the channel selected by the parity of coord1)."""
+        from decsim.uf_decoder import CodeStructure
+        from decsim.uf_decoder.codes import (toric_code_x_stabilisers, toric_code_z_stabilisers,
+                                             toric_code_x_logicals, toric_code_z_logicals)
+        parity = 0 if channel == "x" else 1
+        cs = CodeStructure(toric_code_x_stabilisers(L), toric_code_z_stabilisers(L),
+                           toric_code_x_logicals(L), toric_code_z_logicals(L), L, repetitions=L)
+        remap = {}
+        for det, c in circuit.get_detector_coordinates().items():
+            if int(c[1]) % 2 == parity:
+                remap[int(det)] = (int(c[1]) // 2, int(c[0]) // 2, int(c[2]))   # (row, col, t)
+        return cls(cs, remap, latency_model, channel)
+
+    def latency(self, job: DecodeJob) -> int:
+        """Decode time from the latency model (decode WORK is done in decode())."""
+        return self.latency_model.latency(job)
+
+    def _predict(self, syndrome_dict) -> "np.ndarray":
+        """Coset's run_branch=0 dispatch + scoring: empty syndrome -> zero logical; else run
+        ``uf_original(grow_mode='parallel')`` and project the correction onto the logicals."""
+        import numpy as np
+        from collections import defaultdict
+        logicals = self.cs.logicals_x if self.channel == "x" else self.cs.logicals_z
+        sd = defaultdict(int)
+        for k, v in syndrome_dict.items():
+            sd[k] = v
+        if not any(sd.values()):
+            return np.zeros(logicals.shape[0], dtype=int)
+        corr, _ = self._uf_original(sd, self.cs, self.channel, grow_mode="parallel")
+        if corr is not None and len(corr) > 0 and corr[0] is not None:
+            return np.asarray((corr[0] @ logicals.T) % 2).ravel()
+        return np.zeros(logicals.shape[0], dtype=int)
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        """Assemble the window syndrome from the job payloads (bits aligned to
+        ``job.dem.detector_ids``), map fired detectors to (row,col,t), run the UF decode, and
+        return the logical value. A timing-only job (no DEM) returns an empty result."""
+        import numpy as np
+        from collections import defaultdict
+        model = job.dem
+        if model is None:                                  # timing-only job
+            return DecodeResult(job.op_id, job.window_id)
+        syndrome = (np.concatenate([np.asarray(p.bits, np.uint8) for p in job.payloads
+                                    if p.bits is not None])
+                    if job.payloads else np.zeros(0, np.uint8))
+        sd = defaultdict(int)
+        for i, det in enumerate(model.detector_ids):
+            if syndrome[i]:
+                rc = self.remap.get(int(det))
+                if rc is not None:
+                    sd[rc] = 1
+        pred = self._predict(sd)
+        return DecodeResult(job.op_id, job.window_id, logical_value=int(pred[0]))
+
+
 class SwitchingDecoder:
     """TIMING-LEVEL decoder switching (Toshio et al., arXiv:2510.25222): a fast weak
     decoder backed by a slow strong decoder. With probability `gamma_switch` a window's

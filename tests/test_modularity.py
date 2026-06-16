@@ -1,37 +1,37 @@
 #==================================================================
 # MODULARITY CONFORMANCE TESTS
-# Two guarantees a researcher extending qecsim relies on:
+# Two guarantees a researcher extending decsim relies on:
 #   1. every default implementation satisfies its protocol seam, and
 #   2. the standard wiring runs with the seams replaced by minimal
 #      from-scratch implementations that know nothing about the defaults.
 # If a future change breaks an extension point, these tests fail first.
 #==================================================================
-from qecsim import protocols as P
-from qecsim.adapters.pymatching_decoder import PyMatchingDecoder
-from qecsim.adapters.stim_device import StimDevice
-from qecsim.chip import Chip
-from qecsim.cluster import DecoderCluster
-from qecsim.codes import (BBCodeModel, ColorCodeModel, SurfaceCodeModel,
+from decsim import protocols as P
+from decsim.adapters.pymatching_decoder import PyMatchingDecoder
+from decsim.adapters.stim_device import StimDevice
+from decsim.chip import Chip
+from decsim.cluster import DecoderCluster
+from decsim.codes import (BBCodeModel, ColorCodeModel, SurfaceCodeModel,
                           ToricCodeModel)
-from qecsim.config import us
-from qecsim.controllers import ModularController
-from qecsim.decoders import (CodeRouter, LatencyModelDecoder, ParityDecoder,
+from decsim.config import us
+from decsim.controllers import ModularController
+from decsim.decoders import (CodeRouter, LatencyModelDecoder, ParityDecoder,
                              PresetLatencyDecoder, RelayBPDecoder, SwitchingDecoder)
-from qecsim.devices import SyndromeBitDevice, TimingOnlyDevice
-from qecsim.engine import Engine
-from qecsim.factories import (DistillationFactory, DistillLevel, InfiniteFactory,
+from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
+from decsim.engine import Engine
+from decsim.factories import (DistillationFactory, DistillLevel, InfiniteFactory,
                               MultiLevelDistillationFactory)
-from qecsim.frontends.circuit import CircuitFrontend, SurgeryIRFrontend
-from qecsim.layouts import UniformLayout, ZonedLayout
-from qecsim.message import DecodeResult, Decision, Operation, SyndromePayload
-from qecsim.metrics import (DecoderUtilization, MagicStateLatency, ReadyQueueStats,
+from decsim.frontends.circuit import CircuitFrontend, SurgeryIRFrontend
+from decsim.layouts import UniformLayout, ZonedLayout
+from decsim.message import DecodeResult, Decision, Operation, SyndromePayload
+from decsim.metrics import (DecoderUtilization, MagicStateLatency, ReadyQueueStats,
                             WindowLatencyBreakdown)
-from qecsim.orchestrators import PauliFrameOrchestrator
-from qecsim.planner import CodeRounds, FixedRounds, WindowPlanner
-from qecsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
+from decsim.orchestrators import PauliFrameOrchestrator
+from decsim.planner import CodeRounds, FixedRounds, WindowPlanner
+from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
                                FifoScheduler, ReactionPathDeadline)
-from qecsim.schemes import ParallelWindowScheme, SlidingWindowScheme
-from qecsim.wiring import build_and_run
+from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
+from decsim.wiring import build_and_run
 
 
 def test_default_implementations_satisfy_their_protocols():

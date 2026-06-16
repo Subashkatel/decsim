@@ -8,10 +8,10 @@ single arrival, and that the store drains back to zero when the workload complet
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from qecsim.cluster import DecoderCluster
-from qecsim.decoders import PresetLatencyDecoder
-from qecsim.frontends.circuit import cnot_plus_two_t_circuit, three_cnot_circuit
-from qecsim.wiring import build_and_run
+from decsim.cluster import DecoderCluster
+from decsim.decoders import PresetLatencyDecoder
+from decsim.frontends.circuit import cnot_plus_two_t_circuit, three_cnot_circuit
+from decsim.wiring import build_and_run
 
 
 class RecountingCluster(DecoderCluster):
@@ -59,11 +59,11 @@ def test_per_window_release_holds_only_the_live_set():
     tasks are complete". With per-window release the syndrome-RAM high-water is the LIVE set --
     ~one sliding window (commit+buffer) -- so it stays bounded as the computation grows, instead
     of scaling with the operation length (the per-op resident upper bound)."""
-    from qecsim.config import us
-    from qecsim.codes import SurfaceCodeModel
-    from qecsim.controllers import ModularController
-    from qecsim.message import DecodeResult, Operation
-    from qecsim.schemes import SlidingWindowScheme
+    from decsim.config import us
+    from decsim.codes import SurfaceCodeModel
+    from decsim.controllers import ModularController
+    from decsim.message import DecodeResult, Operation
+    from decsim.schemes import SlidingWindowScheme
 
     class _Dec:
         def latency(self, job):
@@ -94,7 +94,7 @@ def test_round_arriving_after_op_completed_fails_loudly():
     committed) means the device emitted more rounds than planned -- the cluster must
     say so, not die on a KeyError or corrupt the running counter."""
     import pytest
-    from qecsim.message import SyndromePayload
+    from decsim.message import SyndromePayload
     cluster = _run(three_cnot_circuit())                  # run to completion
     with pytest.raises(RuntimeError, match="syndrome RAM was freed"):
         cluster.on_syndrome_arrival(SyndromePayload(0, 0, 99))

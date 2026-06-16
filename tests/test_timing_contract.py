@@ -2,13 +2,13 @@ import time
 
 from conftest import trace_time
 
-from qecsim.config import TICKS_PER_US, us
-from qecsim.controllers import ModularController
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import DecodeResult, Operation
-from qecsim.metrics import WindowLatencyBreakdown
-from qecsim.schemes import NaiveOnlineScheme
-from qecsim.wiring import build_and_run
+from decsim.config import TICKS_PER_US, us
+from decsim.controllers import ModularController
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import DecodeResult, Operation
+from decsim.metrics import WindowLatencyBreakdown
+from decsim.schemes import NaiveOnlineScheme
+from decsim.wiring import build_and_run
 
 
 class BlockingDecoder:

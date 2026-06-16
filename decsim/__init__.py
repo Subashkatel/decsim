@@ -1,5 +1,5 @@
-# Public API for the qecsim package. Re-exports the names examples and external
-# callers use, so they can do `from qecsim import build_and_run, ...` instead of
+# Public API for the decsim package. Re-exports the names examples and external
+# callers use, so they can do `from decsim import build_and_run, ...` instead of
 # reaching into individual submodules.
 
 from .config import SimConfig, us, fmt

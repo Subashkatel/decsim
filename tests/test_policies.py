@@ -1,14 +1,14 @@
 #==================================================================
 # TESTS FOR POLICY SEAMS (deadlines, routing, switching, round time, idle decode)
 #==================================================================
-from qecsim.codes import SurfaceCodeModel
-from qecsim.config import us
-from qecsim.decoders import (CodeRouter, PresetLatencyDecoder, SwitchingDecoder)
-from qecsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
-from qecsim.message import DecodeJob, Operation
-from qecsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
+from decsim.codes import SurfaceCodeModel
+from decsim.config import us
+from decsim.decoders import (CodeRouter, PresetLatencyDecoder, SwitchingDecoder)
+from decsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
+from decsim.message import DecodeJob, Operation
+from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
                                ReactionPathDeadline)
-from qecsim.wiring import build_and_run
+from decsim.wiring import build_and_run
 
 
 # ---- deadline policies ----------------------------------------------------------------

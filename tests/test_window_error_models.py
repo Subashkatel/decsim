@@ -24,12 +24,12 @@ import pytest
 stim = pytest.importorskip("stim")
 np = pytest.importorskip("numpy")
 
-from qecsim.adapters.window_error_models import (build_window_error_models,
+from decsim.adapters.window_error_models import (build_window_error_models,
                                              decode_windowed,
                                              detector_error_model_to_faults,
                                              matching_window_decoder)
-from qecsim.codes import SurfaceCodeModel
-from qecsim.schemes import SlidingWindowScheme
+from decsim.codes import SurfaceCodeModel
+from decsim.schemes import SlidingWindowScheme
 
 
 def _memory_circuit(d=3, rounds=12, p=0.003):
@@ -206,7 +206,7 @@ def test_bb_windowed_accuracy_matches_global_decoding():
     pytest.importorskip("ldpc")
     sp = pytest.importorskip("scipy.sparse")
     from ldpc import BpOsdDecoder
-    from qecsim.adapters.window_error_models import bposd_window_decoder
+    from decsim.adapters.window_error_models import bposd_window_decoder
 
     circuit = _bb_circuit()
     models = _bb_models(circuit)

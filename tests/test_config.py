@@ -2,7 +2,7 @@
 # TESTS FOR CONFIG
 #==================================================================
 
-from qecsim.config import TICKS_PER_US, us , fmt
+from decsim.config import TICKS_PER_US, us , fmt
 
 def test_ticks_per_us():
     assert TICKS_PER_US == 1_000_000
@@ -25,11 +25,11 @@ def test_fmt_output():
 # Covers backward compat (default unchanged), resolution, validation, flow-through.
 #==================================================================
 import pytest
-from qecsim.config import SimConfig, DECODER_FITS, SCHEME_NAMES
-from qecsim.codes import SurfaceCodeModel
-from qecsim.decoders import (LatencyModelDecoder, SwitchingDecoder, RelayBPDecoder,
+from decsim.config import SimConfig, DECODER_FITS, SCHEME_NAMES
+from decsim.codes import SurfaceCodeModel
+from decsim.decoders import (LatencyModelDecoder, SwitchingDecoder, RelayBPDecoder,
                              PresetLatencyDecoder)
-from qecsim.schemes import (SlidingWindowScheme, NaiveOnlineScheme,
+from decsim.schemes import (SlidingWindowScheme, NaiveOnlineScheme,
                             ParallelWindowScheme, DoubleWindowScheme)
 
 _CODE = SurfaceCodeModel(d=3)
@@ -111,9 +111,9 @@ def test_validation_rejects_bad_values(kw):
 
 def test_config_flows_through_build_and_run():
     """decoder_model + scheme_name + num_units all take effect via build_and_run."""
-    from qecsim.message import Operation
-    from qecsim.wiring import build_and_run
-    from qecsim.planner import FixedRounds
+    from decsim.message import Operation
+    from decsim.wiring import build_and_run
+    from decsim.planner import FixedRounds
     op = Operation(id=1, name="memory", qubits=(0,), clifford=True)
     cfg = SimConfig(decoder_model="cc_asic", scheme_name="naive", num_units=2)
     res = build_and_run(ops=[op], d=3, rounds_policy=FixedRounds(6),

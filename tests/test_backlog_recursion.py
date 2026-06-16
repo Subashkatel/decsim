@@ -8,7 +8,7 @@ diverging geometrically with ratio f for f > 1. The mechanism (Terhal, RMP 87, 3
 Sec III.B): the data a patch generates WHILE WAITING for a decode must itself be
 processed before the next feedback -- so waiting creates work, which creates waiting.
 
-In qecsim this emerges from one rule: a patch's idle stretch joins the next op's
+In decsim this emerges from one rule: a patch's idle stretch joins the next op's
 batch window (chip.idle_rounds_by_patch -> cluster.prepend_idle_rounds, honored by
 NaiveOnlineScheme.batches_idle_rounds_into_next_op). These tests pin the simulated
 r_i (BacklogTrajectory) to the closed form.
@@ -22,12 +22,12 @@ feedback yet, must match to the TICK."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from qecsim.config import us
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import DecodeResult, Operation
-from qecsim.metrics import BacklogTrajectory
-from qecsim.schemes import NaiveOnlineScheme, SlidingWindowScheme
-from qecsim.wiring import build_and_run
+from decsim.config import us
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import DecodeResult, Operation
+from decsim.metrics import BacklogTrajectory
+from decsim.schemes import NaiveOnlineScheme, SlidingWindowScheme
+from decsim.wiring import build_and_run
 
 TAU_GEN_US = 1.1                       # syndrome round time
 D = 3

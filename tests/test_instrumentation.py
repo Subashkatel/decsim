@@ -1,11 +1,11 @@
 #==================================================================
 # TESTS FOR INSTRUMENTATION (window-lifecycle latency breakdown)
 #==================================================================
-from qecsim.config import us
-from qecsim.decoders import PresetLatencyDecoder
-from qecsim.frontends.circuit import cnot_plus_two_t_circuit, three_cnot_circuit
-from qecsim.metrics import BacklogTrajectory, WindowLatencyBreakdown
-from qecsim.wiring import build_and_run
+from decsim.config import us
+from decsim.decoders import PresetLatencyDecoder
+from decsim.frontends.circuit import cnot_plus_two_t_circuit, three_cnot_circuit
+from decsim.metrics import BacklogTrajectory, WindowLatencyBreakdown
+from decsim.wiring import build_and_run
 
 
 def test_window_latency_breakdown_stages():
@@ -82,8 +82,8 @@ def test_backlog_grows_when_the_decoder_is_too_slow():
 def test_backlog_rows_cover_fan_out_gating():
     """ONE decoded outcome can release SEVERAL gated gates: one row each, and they
     share the same reaction wait (same gating decode, same dispatch event)."""
-    from qecsim.frontends.circuit import CircuitFrontend
-    from qecsim.message import Operation
+    from decsim.frontends.circuit import CircuitFrontend
+    from decsim.message import Operation
     ops = CircuitFrontend([
         Operation(0, "A:T(q0)", (0,), clifford=False),
         Operation(1, "B:T(q1)", (1,), clifford=False, gated_by=0),
@@ -101,9 +101,9 @@ def test_backlog_rows_cover_fan_out_gating():
 def test_backlog_rounds_use_the_ops_own_cadence():
     """A per-code round_us override changes how many rounds fit in a wait; the metric
     must divide by the OP'S cadence, not the chip's global one."""
-    from qecsim.codes import SurfaceCodeModel
-    from qecsim.frontends.circuit import CircuitFrontend
-    from qecsim.message import Operation
+    from decsim.codes import SurfaceCodeModel
+    from decsim.frontends.circuit import CircuitFrontend
+    from decsim.message import Operation
     fast = SurfaceCodeModel(d=3, round_us=0.5)             # != the global 1.1 us
     ops = CircuitFrontend([
         Operation(0, "A:T(q0)", (0,), clifford=False),

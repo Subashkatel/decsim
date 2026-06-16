@@ -3,11 +3,11 @@
 #==================================================================
 import pytest
 
-from qecsim.config import us
-from qecsim.engine import Engine
-from qecsim.factories import (DistillationFactory, DistillLevel,
+from decsim.config import us
+from decsim.engine import Engine
+from decsim.factories import (DistillationFactory, DistillLevel,
                               MultiLevelDistillationFactory)
-from qecsim.metrics import MagicStateLatency
+from decsim.metrics import MagicStateLatency
 
 
 class ImmediateService:

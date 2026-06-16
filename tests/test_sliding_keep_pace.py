@@ -16,11 +16,11 @@ Two pinned results:
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from qecsim.config import us
-from qecsim.controllers import ModularController
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import DecodeResult, Operation
-from qecsim.wiring import build_and_run
+from decsim.config import us
+from decsim.controllers import ModularController
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import DecodeResult, Operation
+from decsim.wiring import build_and_run
 
 TAU_GEN_US = 1.1
 

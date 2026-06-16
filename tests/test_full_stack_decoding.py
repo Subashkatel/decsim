@@ -22,19 +22,19 @@ stim = pytest.importorskip("stim")
 np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
-from qecsim.message import Operation
-from qecsim.wiring import build_and_run
-from qecsim.controllers import ModularController
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.orchestrators import PauliFrameOrchestrator
-from qecsim.adapters.stim_device import StimDevice
-from qecsim.adapters.pymatching_decoder import PyMatchingDecoder
-from qecsim.adapters.window_error_models import (build_window_error_models,
+from decsim.message import Operation
+from decsim.wiring import build_and_run
+from decsim.controllers import ModularController
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.orchestrators import PauliFrameOrchestrator
+from decsim.adapters.stim_device import StimDevice
+from decsim.adapters.pymatching_decoder import PyMatchingDecoder
+from decsim.adapters.window_error_models import (build_window_error_models,
                                              decode_windowed,
                                              matching_window_decoder)
-from qecsim.schemes import SlidingWindowScheme
-from qecsim.codes import SurfaceCodeModel
-from qecsim.planner import FixedRounds
+from decsim.schemes import SlidingWindowScheme
+from decsim.codes import SurfaceCodeModel
+from decsim.planner import FixedRounds
 
 
 D, ROUNDS, P = 3, 12, 0.003

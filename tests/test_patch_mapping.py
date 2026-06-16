@@ -12,12 +12,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import pytest
 
 from conftest import trace_time
-from qecsim.decoders import PresetLatencyDecoder
-from qecsim.frontends.circuit import CircuitFrontend, _wire_circuit
-from qecsim.layouts import UniformLayout
-from qecsim.codes import SurfaceCodeModel
-from qecsim.message import Operation
-from qecsim.wiring import build_and_run
+from decsim.decoders import PresetLatencyDecoder
+from decsim.frontends.circuit import CircuitFrontend, _wire_circuit
+from decsim.layouts import UniformLayout
+from decsim.codes import SurfaceCodeModel
+from decsim.message import Operation
+from decsim.wiring import build_and_run
 
 
 TWO_QUBITS_PER_PATCH = {0: "patch0", 1: "patch0", 2: "patch1", 3: "patch1"}

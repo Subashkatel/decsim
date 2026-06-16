@@ -2,7 +2,7 @@
 # TESTS FOR ENGINE
 #==================================================================
 import pytest
-from qecsim.engine import Engine
+from decsim.engine import Engine
 
 def test_engine():
     eng = Engine(verbose=False)

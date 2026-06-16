@@ -4,18 +4,18 @@
 # correction chains that cross out of the commit region creates artificial
 # defects just outside it; the dependent window must include them.
 #==================================================================
-from qecsim.cluster import DecoderCluster
-from qecsim.codes import SurfaceCodeModel
-from qecsim.config import us
-from qecsim.controllers import ModularController
-from qecsim.decoders import PresetLatencyDecoder
-from qecsim.devices import SyndromeBitDevice
-from qecsim.engine import Engine
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import DecodeResult, Operation, SyndromePayload
-from qecsim.orchestrators import PauliFrameOrchestrator
-from qecsim.schedulers import FifoScheduler
-from qecsim.wiring import build_and_run
+from decsim.cluster import DecoderCluster
+from decsim.codes import SurfaceCodeModel
+from decsim.config import us
+from decsim.controllers import ModularController
+from decsim.decoders import PresetLatencyDecoder
+from decsim.devices import SyndromeBitDevice
+from decsim.engine import Engine
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import DecodeResult, Operation, SyndromePayload
+from decsim.orchestrators import PauliFrameOrchestrator
+from decsim.schedulers import FifoScheduler
+from decsim.wiring import build_and_run
 
 
 MASK = (1, 0, 1, 0, 1, 0, 1, 0)

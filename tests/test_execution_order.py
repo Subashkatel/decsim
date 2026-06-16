@@ -13,11 +13,11 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import pytest
 
 from conftest import trace_time
-from qecsim.decoders import PresetLatencyDecoder
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import Operation
-from qecsim.planner import GateRounds
-from qecsim.wiring import build_and_run
+from decsim.decoders import PresetLatencyDecoder
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import Operation
+from decsim.planner import GateRounds
+from decsim.wiring import build_and_run
 
 
 def _run(ops, **kw):

@@ -1,4 +1,4 @@
-from qecsim.message import Operation
+from decsim.message import Operation
 
 def test_operation_needs_magic_state():
     assert Operation(0, "CNOT", (0, 1), clifford=True).needs_magic_state is False

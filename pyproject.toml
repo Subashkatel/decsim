@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "qecsim"
+name = "decsim"
 version = "0.1.0"
 description = "QEC control/decoding simulator package scaffold"
 readme = "README.md"
@@ -14,12 +14,12 @@ dependencies = []
 stim = ["stim"]
 pymatching = ["pymatching"]
 
-# Flat layout: the qecsim/ package sits at the repo root. Discover it (and its
-# subpackages qecsim.adapters / qecsim.frontends) from there. No package-dir remap.
+# Flat layout: the decsim/ package sits at the repo root. Discover it (and its
+# subpackages decsim.adapters / decsim.frontends) from there. No package-dir remap.
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["qecsim*"]
+include = ["decsim*"]
 
-# (qecsim.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
+# (decsim.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
 [tool.setuptools.package-data]
-"qecsim.stimcircuits" = ["LICENSE", "NOTICE.md"]
+"decsim.stimcircuits" = ["LICENSE", "NOTICE.md"]

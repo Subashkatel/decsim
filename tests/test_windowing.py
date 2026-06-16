@@ -1,14 +1,14 @@
 #==================================================================
 # TESTS FOR WINDOWING (dependency seam + parallel A/B scheme)
 #==================================================================
-from qecsim.codes import SurfaceCodeModel
-from qecsim.config import us
-from qecsim.decoders import LatencyModelDecoder, PresetLatencyDecoder
-from qecsim.layouts import UniformLayout
-from qecsim.message import Operation
-from qecsim.planner import WindowPlanner
-from qecsim.schemes import SlidingWindowScheme, ParallelWindowScheme
-from qecsim.wiring import build_and_run
+from decsim.codes import SurfaceCodeModel
+from decsim.config import us
+from decsim.decoders import LatencyModelDecoder, PresetLatencyDecoder
+from decsim.layouts import UniformLayout
+from decsim.message import Operation
+from decsim.planner import WindowPlanner
+from decsim.schemes import SlidingWindowScheme, ParallelWindowScheme
+from decsim.wiring import build_and_run
 
 
 def _memory_op(rounds_unused=None):
@@ -123,7 +123,7 @@ def test_backlog_sweep_parallel_vs_sequential():
 # ---- the naive (batch) baseline of arXiv:2510.25222 Sec III.C ------------------------
 
 def test_naive_scheme_is_one_batch_window_per_op():
-    from qecsim.schemes import NaiveOnlineScheme
+    from decsim.schemes import NaiveOnlineScheme
     plan = _plan(NaiveOnlineScheme(), _memory_op(), rounds_per_op=11, d=3)
     assert plan.nwin[0] == 1
     w = plan.windows[(0, 0)]
@@ -135,7 +135,7 @@ def test_naive_scheme_decodes_only_after_the_last_round():
     import sys, pathlib
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     from conftest import trace_time
-    from qecsim.schemes import NaiveOnlineScheme
+    from decsim.schemes import NaiveOnlineScheme
     r = build_and_run(_memory_op(), num_units=1, d=3, rounds_per_op=11,
                       decoder=PresetLatencyDecoder(1.0), scheme=NaiveOnlineScheme(),
                       verbose=False)

@@ -11,13 +11,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from qecsim.cluster import DecoderCluster
-from qecsim.config import us
-from qecsim.decoders import PresetLatencyDecoder
-from qecsim.engine import Engine
-from qecsim.frontends.circuit import cnot_plus_two_t_circuit
-from qecsim.schedulers import FifoScheduler
-from qecsim.wiring import build_and_run
+from decsim.cluster import DecoderCluster
+from decsim.config import us
+from decsim.decoders import PresetLatencyDecoder
+from decsim.engine import Engine
+from decsim.frontends.circuit import cnot_plus_two_t_circuit
+from decsim.schedulers import FifoScheduler
+from decsim.wiring import build_and_run
 
 
 def _run(**kw):
@@ -79,7 +79,7 @@ def test_units_conserved_when_a_decoder_mutates_the_hint_mid_flight():
     """SwitchingDecoder sets job.hint='strong' DURING latency() -- after the job already
     dispatched on the default pool. The done-path must free the pool the job actually
     ran on (job.pool), not the pool its mutated hint now names."""
-    from qecsim.decoders import SwitchingDecoder
+    from decsim.decoders import SwitchingDecoder
     for seed in range(5):
         sw = SwitchingDecoder(PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0),
                               gamma_switch=0.5, seed=seed)
@@ -93,7 +93,7 @@ def test_units_conserved_when_a_decoder_mutates_the_hint_mid_flight():
 def test_pools_with_deadline_scheduler_complete_and_conserve():
     """EDF sorts each pool's queue independently; every job finishes and every pool's
     units all come back."""
-    from qecsim.schedulers import EarliestDeadlineScheduler
+    from decsim.schedulers import EarliestDeadlineScheduler
     engine = Engine(verbose=False)
     cluster = DecoderCluster(engine, PresetLatencyDecoder(7.0),
                              EarliestDeadlineScheduler(), None, None,
@@ -114,7 +114,7 @@ def test_metrics_see_every_pool():
     """Utilization and queue depth must count ALL pools: with traffic ONLY on the
     strong pool, a default-pool-only metric would read 0.0 / 0 (the blind spot this
     test pins down)."""
-    from qecsim.metrics import DecoderUtilization, ReadyQueueStats
+    from decsim.metrics import DecoderUtilization, ReadyQueueStats
     engine = Engine(verbose=False)
     cluster = DecoderCluster(engine, PresetLatencyDecoder(10.0), FifoScheduler(),
                              None, None, num_units=1, code_distance=3,

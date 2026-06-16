@@ -1,11 +1,11 @@
-# qecsim
+# decsim
 
 A discrete-event simulator for quantum error correction.
 
 ## Requirements
 
 - Python 3.9 or newer. The core has **no required dependencies**.
-- Optional, only for the real-decoder adapters in `qecsim/adapters/`:
+- Optional, only for the real-decoder adapters in `decsim/adapters/`:
   `stim` and `pymatching` (`pip install stim pymatching`).
 
 ## Running the examples
@@ -20,7 +20,7 @@ python examples/run_examples.py
 ```
 
 To build your own circuit instead of using a preset, create `Operation`s (or
-use a frontend in [`qecsim/frontends/`](qecsim/frontends/)) and pass the list as
+use a frontend in [`decsim/frontends/`](decsim/frontends/)) and pass the list as
 the first argument to `build_and_run`.
 
 ## Running the tests

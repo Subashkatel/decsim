@@ -20,12 +20,12 @@ These tests assert the two consequences that make the fused model honest:
 """
 from conftest import trace_time  # noqa: F401  (kept for parity with sibling tests)
 
-from qecsim.config import us
-from qecsim.controllers import ModularController
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import DecodeResult, Operation
-from qecsim.schemes import NaiveOnlineScheme
-from qecsim.wiring import build_and_run
+from decsim.config import us
+from decsim.controllers import ModularController
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import DecodeResult, Operation
+from decsim.schemes import NaiveOnlineScheme
+from decsim.wiring import build_and_run
 
 
 class _FixedLatency:

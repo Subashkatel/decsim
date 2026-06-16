@@ -1,4 +1,4 @@
-"""Smoke tests for qecsim.stimcircuits (vendored Oscar Higgott / Apache-2.0 generator).
+"""Smoke tests for decsim.stimcircuits (vendored Oscar Higgott / Apache-2.0 generator).
 
 These pin the first-class circuit-generation capability: it imports, returns stim.Circuit
 objects for the code tasks we rely on (incl. toric, which stim's built-in generator lacks),
@@ -7,7 +7,7 @@ and behaves sanely with/without noise.
 import pytest
 
 stim = pytest.importorskip("stim")
-from qecsim.stimcircuits import generate_circuit
+from decsim.stimcircuits import generate_circuit
 
 
 def test_toric_memory_x_generates():

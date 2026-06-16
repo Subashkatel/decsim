@@ -17,13 +17,13 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from qecsim.codes import SurfaceCodeModel
-from qecsim.config import us
-from qecsim.controllers import ModularController
-from qecsim.message import DecodeResult, Operation
-from qecsim.metrics import DecodeBacklog, ReadyQueueStats
-from qecsim.schemes import SlidingWindowScheme
-from qecsim.wiring import build_and_run
+from decsim.codes import SurfaceCodeModel
+from decsim.config import us
+from decsim.controllers import ModularController
+from decsim.message import DecodeResult, Operation
+from decsim.metrics import DecodeBacklog, ReadyQueueStats
+from decsim.schemes import SlidingWindowScheme
+from decsim.wiring import build_and_run
 
 D = 3                       # commit = buffer = d = 3 rounds; window = 2d = 6 rounds
 GEN_US = D * 1.0            # one commit region generated every 3 us (round = 1 us)

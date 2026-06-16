@@ -24,7 +24,7 @@ if TYPE_CHECKING:                      # type-only; defaults are built from the 
 
 # ============================================================================================
 # WIRING
-# This module defines the default wiring of the qecsim package: how the components are connected
+# This module defines the default wiring of the decsim package: how the components are connected
 # together, and the default policies for the planner and the decoder. The build_and_run()
 # function is the main entry point: it assembles the standard pipeline (engine, components, chip),
 # runs it, and returns results 

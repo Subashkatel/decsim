@@ -7,10 +7,10 @@ the chip logs a loud WARNING when it fires while a gated successor is still wait
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from qecsim.decoders import PresetLatencyDecoder
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import Operation
-from qecsim.wiring import build_and_run
+from decsim.decoders import PresetLatencyDecoder
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import Operation
+from decsim.wiring import build_and_run
 
 
 def _t_then_gated_t():

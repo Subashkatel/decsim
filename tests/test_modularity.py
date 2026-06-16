@@ -7,7 +7,7 @@
 # If a future change breaks an extension point, these tests fail first.
 #==================================================================
 from decsim import protocols as P
-from decsim.adapters.pymatching_decoder import PyMatchingDecoder
+from decsim.mwpm_decoder import PyMatchingDecoder
 from decsim.adapters.stim_device import StimDevice
 from decsim.chip import Chip
 from decsim.cluster import DecoderCluster

@@ -26,8 +26,8 @@ np = pytest.importorskip("numpy")
 
 from decsim.adapters.window_error_models import (build_window_error_models,
                                              decode_windowed,
-                                             detector_error_model_to_faults,
-                                             matching_window_decoder)
+                                             detector_error_model_to_faults)
+from decsim.mwpm_decoder import matching_window_decoder
 from decsim.codes import SurfaceCodeModel
 from decsim.schemes import SlidingWindowScheme
 

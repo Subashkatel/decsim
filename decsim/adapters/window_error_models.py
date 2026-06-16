@@ -211,23 +211,9 @@ def decode_windowed(window_models: list, detection_events, decode_window) -> "ob
     return total
 
 
-def matching_window_decoder():
-    """A PyMatching inner decoder for decode_windowed, caching one Matching per
-    WindowErrorModel (the matrices are shot-independent). Boundary edges arise from
-    single-detector columns; weights are the standard log((1-p)/p)."""
-    import numpy as np
-    import pymatching
-    cache: dict = {}
-
-    def decode(model: WindowErrorModel, syndrome):
-        m = cache.get(id(model))
-        if m is None:
-            weights = np.log((1 - model.priors) / model.priors)
-            m = pymatching.Matching.from_check_matrix(model.check, weights=weights)
-            cache[id(model)] = m
-        return m.decode(syndrome)
-
-    return decode
+# The PyMatching inner decoder, matching_window_decoder(), now lives in decsim.mwpm_decoder
+# (decsim/mwpm_decoder/window_decoder.py) alongside PyMatchingDecoder. The shared engine above
+# (WindowErrorModel / build_window_error_models / decode_windowed) is code-agnostic and stays here.
 
 
 def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,

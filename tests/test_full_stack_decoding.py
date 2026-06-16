@@ -28,10 +28,9 @@ from decsim.controllers import ModularController
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.orchestrators import PauliFrameOrchestrator
 from decsim.adapters.stim_device import StimDevice
-from decsim.adapters.pymatching_decoder import PyMatchingDecoder
+from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
 from decsim.adapters.window_error_models import (build_window_error_models,
-                                             decode_windowed,
-                                             matching_window_decoder)
+                                             decode_windowed)
 from decsim.schemes import SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import FixedRounds

@@ -196,6 +196,48 @@ class DecodeBacklog:
                 "time_avg_rounds": (self._area / self._t if self._t else 0.0)}
 
 
+class StrongDecoderBacklog:
+    """The strong decoder's backlog under the double-window switching scheme (arXiv:2510.25222
+    Theorem 1): the escalated decode jobs still outstanding on the strong unit pool -- waiting
+    in its queue plus the one being decoded. The weak decoder is kept on pace by the scheme, so
+    only this strong backlog can grow; Theorem 1 / Eq. 8 say it stays bounded when the switching
+    rate is inside the boundary and grows without bound outside it. One job covers strong_rounds
+    rounds, so the backlog in ROUNDS is this count times strong_rounds.
+
+    Read-only: samples the cluster's strong-pool counters, never changes the simulation."""
+    name = "strong_backlog"
+
+    def __init__(self, cluster, pool: str = "strong"):
+        """Watch one unit pool's outstanding work; start the running average and peak."""
+        self.cluster = cluster
+        self.pool = pool
+        self.peak_jobs = 0
+        self._t = 0
+        self._area = 0.0
+        self._last = 0
+
+    def _outstanding(self) -> int:
+        """Strong jobs not yet finished: waiting on the strong pool plus in flight on it."""
+        queued = len(self.cluster.pool_ready.get(self.pool, []))
+        busy = (self.cluster.unit_totals.get(self.pool, 0)
+                - self.cluster.pool_free.get(self.pool, 0))
+        return queued + busy
+
+    def observe(self, engine: "Engine") -> None:
+        """Sample the outstanding strong work; keep the peak and a time-average."""
+        self._area += self._last * (engine.now - self._t)
+        self._t = engine.now
+        self._last = self._outstanding()
+        self.peak_jobs = max(self.peak_jobs, self._last)
+
+    def result(self) -> dict:
+        """Peak and time-average outstanding strong jobs, plus the total escalation count
+        (multiply the job counts by strong_rounds for the backlog in rounds)."""
+        return {"peak_jobs": self.peak_jobs,
+                "time_avg_jobs": (self._area / self._t if self._t else 0.0),
+                "escalations": getattr(self.cluster, "escalations", 0)}
+
+
 class BacklogTrajectory:
     """Per-gate backlog -- the r_i of the decoder-switching paper (arXiv:2510.25222
     Sec III.C, Fig 9). For every gated operation it records the REACTION WAIT (from the

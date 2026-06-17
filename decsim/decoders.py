@@ -81,6 +81,25 @@ class PresetLatencyDecoder:
         return DecodeResult(job.op_id, job.window_id)
 
 
+class PerRoundDecoder:
+    """A decoder whose decode time is LINEAR in the window's rounds: `tau_us` microseconds per
+    round, so a window of r rounds takes tau_us * r. This is the decoder-switching paper's exact
+    latency model T_dec(r) = tau_dec * r (arXiv:2510.25222), with tau_dec set relative to the
+    syndrome-round time. decode() is a stub (returns no logical value -- TIMING-ONLY); swap in
+    wherever a Decoder is expected."""
+    def __init__(self, tau_us: float = 1.0):
+        """Store the per-round decode time (microseconds)."""
+        self.tau_us = tau_us
+
+    def latency(self, job: DecodeJob) -> int:
+        """Decode time = per-round time times the window's rounds (ticks)."""
+        return us(job.n_rounds * self.tau_us)
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        """Return a result with NO logical value (TIMING-ONLY)."""
+        return DecodeResult(job.op_id, job.window_id)
+
+
 #TODO: Fix these these are temporory stubs for testing
 class ParityDecoder:
     """A minimal REAL decoder: it actually consumes the window's assembled payloads and
@@ -217,11 +236,10 @@ class SwitchingDecoder:
     path's syndrome delivery -- set it only for standalone studies that reproduce the
     paper's recursion parameters, or you double-count that communication.
 
-    What it does NOT model is the double-window interaction (the strong decoder taking
-    r_strong = r_com + 2*r_buf rounds while the weak stream pauses and resumes) -- that
-    needs the DoubleWindowScheme (schemes.py, currently a documented stub) plus the
-    DecoderRouter escalation path. The switch decision is drawn once per job in latency()
-    and recorded on job.hint, so decode() reports the same path."""
+    What it does NOT model is the double-window interaction (the weak stream sliding on while a
+    separate strong decoder reprocesses commit + 2*buffer rounds in parallel) -- that is the
+    Switching path (switching.py) plus the cluster's start/cancel logic. The switch decision here is
+    drawn once per job in latency() and recorded on job.hint, so decode() reports the same path."""
     def __init__(self, weak: "Decoder", strong: "Decoder", gamma_switch: float,
                  handoff_us: float = 0.5, seed: int = 0,
                  t_comm_weak_us: float = 0.0):
@@ -262,14 +280,14 @@ class SwitchingDecoder:
 
 
 class SwitchingRouter:
-    """The DecoderRouter for the DOUBLE-WINDOW scheme (arXiv:2510.25222): send escalated
-    jobs (hint == "strong", set by the cluster on a low-confidence window) to the strong
-    decoder, and every other job to the weak decoder.
+    """The DecoderRouter for decoder switching (arXiv:2510.25222): send escalated jobs
+    (hint == "strong", set by the cluster on a low-confidence window) to the strong decoder,
+    and every other job to the weak decoder.
 
-    Unlike SwitchingDecoder, the switch decision is NOT made here -- the DoubleWindowScheme
-    and the cluster decide it from the weak decoder's soft output, then route the strong job
-    through this router. Pair it with a {"default", "strong"} unit-pool split so the weak
-    windows and the strong escalations run on separate decoder units."""
+    Unlike SwitchingDecoder, the switch decision is NOT made here -- the Switching object
+    (switching.py) and the cluster decide it from the weak decoder's soft output, then route the
+    strong job through this router. Pair it with a {"default", "strong"} unit-pool split so the weak
+    windows and the strong re-decodes run on separate decoder units."""
     def __init__(self, weak: "Decoder", strong: "Decoder"):
         """Hold the fast weak decoder and the slow strong decoder."""
         self.weak = weak
@@ -288,15 +306,22 @@ class SampledSoftOutputDecoder:
     confident (soft output 1.0).
 
     This gives a controllable switching rate without computing a real gap, which is all the
-    timing/backlog studies need. In the paper's notation the per-window escalation
-    probability is gamma_switch * commit_rounds / d (Sec III.C), so it equals gamma_switch
-    when commit_rounds = d. For a real complementary or cluster gap, swap in a decoder that
-    computes one -- the cluster only reads DecodeResult.soft_output."""
-    def __init__(self, inner: "Decoder", escalation_probability: float, seed: int = 0):
-        """Hold the inner weak decoder, the per-window escalation probability, and the seed."""
+    timing/backlog studies need. By default every window escalates with the flat
+    `escalation_probability`; in the paper's notation the per-window probability is
+    gamma_switch * commit_rounds / d (Sec III.C), so the flat value equals gamma_switch when
+    commit_rounds = d. For a SIZE-DEPENDENT rate (commit != d, or the naive scheme's variable
+    batch sizes) pass `probability_for` -- see switch_probability_per_round. For a real
+    complementary or cluster gap, swap in a decoder that computes one -- the cluster only reads
+    DecodeResult.soft_output."""
+    def __init__(self, inner: "Decoder", escalation_probability: float, seed: int = 0,
+                 probability_for=None):
+        """Hold the inner weak decoder, the seed, and the escalation rule: a flat
+        `escalation_probability` by default, or a `probability_for` job -> probability function
+        for a size-dependent per-window rate (overrides the flat value when given)."""
         import random
         self.inner = inner
         self.escalation_probability = escalation_probability
+        self.probability_for = probability_for
         self.rng = random.Random(seed)
 
     def latency(self, job: DecodeJob) -> int:
@@ -304,10 +329,27 @@ class SampledSoftOutputDecoder:
         return self.inner.latency(job)
 
     def decode(self, job: DecodeJob) -> DecodeResult:
-        """Weak-decode the window, then attach the sampled soft output (confident vs flagged)."""
+        """Weak-decode the window, then attach the sampled soft output (confident vs flagged).
+        The escalation probability is probability_for(job) when set, else the flat default."""
         res = self.inner.decode(job)
-        res.soft_output = 0.0 if self.rng.random() < self.escalation_probability else 1.0
+        p = self.probability_for(job) if self.probability_for is not None \
+            else self.escalation_probability
+        res.soft_output = 0.0 if self.rng.random() < p else 1.0
         return res
+
+
+def switch_probability_per_round(gamma_switch: float, d: int):
+    """Build the paper's SIZE-DEPENDENT per-window switch probability (arXiv:2510.25222
+    Sec III.C, Fig 10): a window escalates with probability gamma_switch * commit_rounds / d,
+    where commit_rounds is the window's committed rounds -- the whole batch for the naive scheme
+    (so gamma_switch * n_rounds / d), the commit region for sliding windows (so it equals
+    gamma_switch exactly when commit_rounds = d). Pass the result to
+    SampledSoftOutputDecoder(..., probability_for=...)."""
+    def probability(job: DecodeJob) -> float:
+        w = job.window
+        commit = (w.commit_hi - w.commit_lo + 1) if w is not None else job.n_rounds
+        return gamma_switch * commit / d
+    return probability
 
 
 #TODO: Fix these these are temporory stubs for testing

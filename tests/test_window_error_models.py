@@ -206,7 +206,7 @@ def test_bb_windowed_accuracy_matches_global_decoding():
     pytest.importorskip("ldpc")
     sp = pytest.importorskip("scipy.sparse")
     from ldpc import BpOsdDecoder
-    from decsim.adapters.window_error_models import bposd_window_decoder
+    from decsim.bposd_decoder import bposd_window_decoder
 
     circuit = _bb_circuit()
     models = _bb_models(circuit)

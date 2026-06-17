@@ -8,12 +8,14 @@ from .frontends.circuit import (CircuitFrontend, SurgeryIRFrontend,
                                 three_cnot_circuit, cnot_plus_two_t_circuit,
                                 independent_t_circuit,
                                 three_cnot_six_qubits_circuit)
-from .decoders import PresetLatencyDecoder, RelayBPDecoder, SwitchingDecoder
+from .decoders import (PresetLatencyDecoder, RelayBPDecoder, SwitchingDecoder,
+                      SwitchingRouter, SampledSoftOutputDecoder)
 from .factories import InfiniteFactory, DistillationFactory
-from .schemes import ParallelWindowScheme
+from .schemes import ParallelWindowScheme, DoubleWindowScheme, ThresholdSwitch
 from .schedulers import EarliestDeadlineScheduler, ReactionPathDeadline
 from .metrics import (DecoderUtilization, ReadyQueueStats,
-                      WindowLatencyBreakdown, MagicStateLatency)
+                      WindowLatencyBreakdown, MagicStateLatency,
+                      StrongDecoderBacklog)
 
 __all__ = [
     "SimConfig", "us", "fmt",
@@ -22,9 +24,10 @@ __all__ = [
     "three_cnot_circuit", "cnot_plus_two_t_circuit", "independent_t_circuit",
     "three_cnot_six_qubits_circuit",
     "PresetLatencyDecoder", "RelayBPDecoder", "SwitchingDecoder",
+    "SwitchingRouter", "SampledSoftOutputDecoder",
     "InfiniteFactory", "DistillationFactory",
-    "ParallelWindowScheme",
+    "ParallelWindowScheme", "DoubleWindowScheme", "ThresholdSwitch",
     "EarliestDeadlineScheduler", "ReactionPathDeadline",
     "DecoderUtilization", "ReadyQueueStats",
-    "WindowLatencyBreakdown", "MagicStateLatency",
+    "WindowLatencyBreakdown", "MagicStateLatency", "StrongDecoderBacklog",
 ]

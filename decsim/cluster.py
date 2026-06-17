@@ -302,6 +302,11 @@ class DecoderCluster:
         timing-only, as before. Idle-round growth (the naive scheme's
         prepend_idle_rounds) happens after planning; those ops are skipped too since
         their window geometry no longer matches the circuit."""
+        # A belief-matching (or other BP-reweighting) decoder needs the per-window hyperedge
+        # graph too; it advertises that via needs_hyperedges. Build the extra matrices iff some
+        # routed decoder wants them -- otherwise the slice is byte-identical to before.
+        want_bm = getattr(self.decoder, "needs_hyperedges", False) or any(
+            getattr(d, "needs_hyperedges", False) for d in self.decoders.values())
         for op_id, op in self.ops.items():
             if op.circuit is None:
                 continue
@@ -315,7 +320,8 @@ class DecoderCluster:
             folded = {det: min(int(c[-1]) + 1, R) for det, c in coords.items()}
             plan = [(w.commit_lo, w.commit_hi, min(w.buffer_hi, R)) for w in wins]
             models = build_window_error_models(op.circuit, plan,
-                                               detector_rounds=folded)
+                                               detector_rounds=folded,
+                                               belief_matching=want_bm)
             for key, model in zip(keys, models):
                 self.window_models[key] = model
             n = len(models)

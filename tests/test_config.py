@@ -30,7 +30,8 @@ from decsim.codes import SurfaceCodeModel
 from decsim.decoders import (LatencyModelDecoder, SwitchingDecoder, RelayBPDecoder,
                              PresetLatencyDecoder)
 from decsim.schemes import (SlidingWindowScheme, NaiveOnlineScheme,
-                            ParallelWindowScheme, DoubleWindowScheme)
+                            ParallelWindowScheme)
+from decsim.switching import Switching
 
 _CODE = SurfaceCodeModel(d=3)
 
@@ -93,16 +94,25 @@ def test_make_relaybp_decoder():
 
 @pytest.mark.parametrize("name,cls", [("sliding", SlidingWindowScheme),
                                        ("naive", NaiveOnlineScheme),
-                                       ("parallel", ParallelWindowScheme),
-                                       ("double", DoubleWindowScheme)])
+                                       ("parallel", ParallelWindowScheme)])
 def test_make_scheme(name, cls):
     assert isinstance(SimConfig(scheme_name=name).make_scheme(), cls)
+
+
+@pytest.mark.parametrize("mode,run_both", [("serial", False), ("parallel", True)])
+def test_make_switching(mode, run_both):
+    """switch_mode builds the Switching object; "none" (default) means no switching, "parallel"
+    sets run_both_at_once."""
+    assert SimConfig().make_switching() is None
+    switching = SimConfig(switch_mode=mode, switch_confidence_threshold=0.5).make_switching()
+    assert isinstance(switching, Switching)
+    assert switching.run_both_at_once is run_both
 
 
 @pytest.mark.parametrize("kw", [
     {"decoder_model": "nope"}, {"switch_gamma": 1.5}, {"switch_gamma": -0.1},
     {"switch_handoff_us": -1}, {"relaybp_iterations": 0}, {"relaybp_t_iter_ns": -1},
-    {"scheme_name": "bogus"},
+    {"scheme_name": "bogus"}, {"switch_mode": "bogus"},
 ])
 def test_validation_rejects_bad_values(kw):
     with pytest.raises(ValueError):

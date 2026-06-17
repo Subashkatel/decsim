@@ -177,6 +177,7 @@ class DecoderCluster:
         self.pool_ready: dict[str, list] = {p: [] for p in self.unit_totals
                                             if p != "default"}   # other pools' queues
         self.queue_log: list[tuple[int, int]] = []
+        self.escalations = 0          # windows sent to the strong decoder (double-window switching)
         # Dependency INVERSION (no back-reference to the chip): the cluster -- the paper's
         # "workload manager" (arXiv:2511.10633 Sec III) -- never reaches into the chip or factory.
         # It queues decoding jobs, exchanges committed window boundaries (the t_dd dependencies),
@@ -574,6 +575,35 @@ class DecoderCluster:
         self.queue_log.append((self.engine.now, self._queued_total()))
         self._try_dispatch()
  
+    def _double_window_escalates(self, job: DecodeJob, res: Optional[DecodeResult]) -> bool:
+        """Whether a just-decoded weak window must also go to the strong decoder. Only a
+        switching scheme (DoubleWindowScheme, arXiv:2510.25222) exposes should_escalate, which
+        defers to its swappable SwitchPolicy; every other scheme lacks it, so this returns False
+        and the decode path is unchanged. Only first-pass windows (attempt 0) can escalate."""
+        decide = getattr(self.scheme, "should_escalate", None)
+        return decide is not None and job.attempt == 0 and decide(job, res)
+
+    def _dispatch_strong_decode(self, w: Window) -> None:
+        """Hand a low-confidence window to the strong decoder as a PARALLEL job over
+        strong_rounds = commit + 2*buffer rounds (arXiv:2510.25222 Sec III.C, Fig 12). The
+        weak window still commits (caller), so the weak stream never stalls -- the scheme's
+        defining property. The job carries hint="strong" so the SwitchingRouter routes it to
+        the strong decoder and, when a "strong" unit pool exists, to that pool's queue, which
+        is then the strong-decoder backlog Theorem 1 bounds. The weak->strong shipment is
+        charged the `ws` link before the job competes for a strong unit."""
+        self.escalations += 1
+        op = self.ops[w.op_id]
+        strong_rounds = self.scheme.strong_rounds(w)
+        label = f"strong({op.name} W{w.k})"
+        self.engine.log("DecoderClstr",
+                        f"SWITCH to strong decoder: {self._job_desc(w, op)} soft output "
+                        f"below g_th -> {strong_rounds}-round strong decode (arrives after ws)")
+        self.engine.schedule(
+            self.links.ws.cost(),
+            lambda: self.submit_decode(strong_rounds, on_done=lambda: None, label=label,
+                                       hint="strong", spatial_nodes=self._spatial_nodes(op)),
+            label=f"weak->strong handoff {label}")
+
     def _try_dispatch(self) -> None:
         """While a pool has a free unit and a ready job, dispatch. Pools are independent:
         a busy strong pool never blocks the default queue (and vice versa)."""
@@ -605,16 +635,19 @@ class DecoderCluster:
             self._try_dispatch()
             return
         # ---- an operation window ----
-        # TODO(double-window escalation): when DoubleWindowScheme lands, the branch goes
-        # here -- if the scheme is double-window and result.soft_output < g_th: do NOT
-        # commit; re-enqueue a job covering r_strong = r_com + 2*r_buf rounds with
-        # attempt += 1, hint="strong" (the router sends it to the strong decoder),
-        # boundaries pinned from the weak results, the weak->strong shipment charged, and
-        # the strong result commits the region (arXiv:2510.25222 Sec III.3).
         key = (job.op_id, job.window_id)
         w = self.windows[key]
         op_id = job.op_id
         op = self.ops[op_id]
+        # Decode FIRST, before committing. The result is needed twice: its soft output
+        # decides whether this window ALSO goes to the strong decoder (double-window
+        # switching), and its boundary defects feed the dependent windows below. decode()
+        # emits no engine events, so running it ahead of the commit log leaves the trace
+        # order unchanged for every scheme. For a timing-only stub the result carries no
+        # logical value and the orchestrator falls back to its toy outcome.
+        res = self._decoder_for(job).decode(job)             # routed decoder (G1 / per-job)
+        if self._double_window_escalates(job, res):
+            self._dispatch_strong_decode(w)
         w.committed = True
         w.t_done = self.engine.now
         self.committed_windows.add(key)
@@ -623,13 +656,6 @@ class DecoderCluster:
                         f"DECODE DONE {self._job_desc(w, op)} -- "
                         f"{'committed' if self._windowed else 'decoded'} "
                         f"({self._pool_tag(job.pool)}units free now {self.pool_free[job.pool]})")
-        # run the actual decode and KEEP its result. For a real decoder this is a genuine
-        # logical value; for a timing-only stub it is None and the orchestrator falls back
-        # to its toy outcome. Per-operation windows are combined (parity) into one outcome.
-        # Decoded BEFORE the boundary send below, because the result may carry the
-        # ARTIFICIAL DEFECTS the dependent windows need (decode itself emits no events,
-        # so the trace order is unchanged).
-        res = self._decoder_for(job).decode(job)             # routed decoder (G1 / per-job)
         if res is not None and res.logical_value is not None:
             self.op_results[op_id] = self.op_results.get(op_id, 0) ^ int(res.logical_value)
         defects = res.boundary_defects if res is not None else None

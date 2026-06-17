@@ -23,8 +23,9 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.config import us
+from decsim.decoders import PerRoundDecoder
 from decsim.frontends.circuit import CircuitFrontend
-from decsim.message import DecodeResult, Operation
+from decsim.message import Operation
 from decsim.metrics import BacklogTrajectory
 from decsim.schemes import NaiveOnlineScheme, SlidingWindowScheme
 from decsim.wiring import build_and_run
@@ -34,18 +35,6 @@ D = 3
 ROP = 9 * D                            # the paper's rop = 9d rounds per gate
 NGATES = 15
 T_COMM_US = 0.15 + 2.0 + 1.0 + 4.0 + 0.15   # qc+cd (in) + do + oc+cq (back): Table 2
-
-
-class PerRoundDecoder:
-    """Decode time = tau_dec per round in the window (the paper's Tdec(r))."""
-    def __init__(self, tau_us):
-        self.tau_us = tau_us
-
-    def latency(self, job):
-        return us(job.n_rounds * self.tau_us)
-
-    def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id)
 
 
 def _t_gate_chain(n=NGATES):

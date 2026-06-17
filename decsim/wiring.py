@@ -21,6 +21,7 @@ if TYPE_CHECKING:                      # type-only; defaults are built from the 
                            Scheduler, DeviceModel, CodeModel, DecodingScheme,
                            LayoutModel, InputFrontend, RoundsPolicy,
                            DecoderRouter, DeadlinePolicy, ExecutionPlanner)
+    from .switching import Switching
 
 # ============================================================================================
 # WIRING
@@ -57,6 +58,7 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
                   make_metrics: Optional[Callable] = None,
                   code: Optional[CodeModel] = None,
                   scheme: Optional["DecodingScheme"] = None,
+                  switching: Optional["Switching"] = None,
                   layout: Optional["LayoutModel"] = None,
                   frontend: Optional["InputFrontend"] = None,
                   config: Optional[SimConfig] = None,
@@ -74,6 +76,7 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
     if rounds_per_op is None: rounds_per_op = cfg.rounds_per_op
     if round_us is None:      round_us = cfg.round_us
     if scheme is None:        scheme = cfg.make_scheme()   # default 'sliding' == cluster default
+    if switching is None:     switching = cfg.make_switching()   # default None == no switching
 
     # INPUT seam: take a frontend (Circuit today; OpenQASM / Surgery IR later) or a
     # ready-made operation list. The frontend is the place new input formats plug in.
@@ -117,7 +120,7 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
                                  scheme=scheme, layout=layout, decoders=decoders,
                                  rounds_policy=rounds_policy, router=router,
                                  deadline_policy=deadline_policy, links=links,
-                                 unit_pools=unit_pools)
+                                 unit_pools=unit_pools, switching=switching)
 
     # FACTORY seam: an explicit factory, or a make_factory(engine, cluster) hook for
     # factories that must route their correction decodes through THIS cluster (the

@@ -261,6 +261,55 @@ class SwitchingDecoder:
         return res
 
 
+class SwitchingRouter:
+    """The DecoderRouter for the DOUBLE-WINDOW scheme (arXiv:2510.25222): send escalated
+    jobs (hint == "strong", set by the cluster on a low-confidence window) to the strong
+    decoder, and every other job to the weak decoder.
+
+    Unlike SwitchingDecoder, the switch decision is NOT made here -- the DoubleWindowScheme
+    and the cluster decide it from the weak decoder's soft output, then route the strong job
+    through this router. Pair it with a {"default", "strong"} unit-pool split so the weak
+    windows and the strong escalations run on separate decoder units."""
+    def __init__(self, weak: "Decoder", strong: "Decoder"):
+        """Hold the fast weak decoder and the slow strong decoder."""
+        self.weak = weak
+        self.strong = strong
+
+    def route(self, job: DecodeJob):
+        """Strong decoder for escalated jobs, weak decoder for everything else."""
+        return self.strong if job.hint == "strong" else self.weak
+
+
+class SampledSoftOutputDecoder:
+    """A WEAK decoder that emits a soft output for the double-window scheme. It decodes with
+    `inner` (for the logical value and the weak latency), then attaches a soft output drawn
+    from a seeded Bernoulli trial: with probability `escalation_probability` the window is
+    flagged as low-confidence (soft output 0.0, below any positive g_th); otherwise it is
+    confident (soft output 1.0).
+
+    This gives a controllable switching rate without computing a real gap, which is all the
+    timing/backlog studies need. In the paper's notation the per-window escalation
+    probability is gamma_switch * commit_rounds / d (Sec III.C), so it equals gamma_switch
+    when commit_rounds = d. For a real complementary or cluster gap, swap in a decoder that
+    computes one -- the cluster only reads DecodeResult.soft_output."""
+    def __init__(self, inner: "Decoder", escalation_probability: float, seed: int = 0):
+        """Hold the inner weak decoder, the per-window escalation probability, and the seed."""
+        import random
+        self.inner = inner
+        self.escalation_probability = escalation_probability
+        self.rng = random.Random(seed)
+
+    def latency(self, job: DecodeJob) -> int:
+        """The weak decode latency; the strong path is the cluster's separate parallel job."""
+        return self.inner.latency(job)
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        """Weak-decode the window, then attach the sampled soft output (confident vs flagged)."""
+        res = self.inner.decode(job)
+        res.soft_output = 0.0 if self.rng.random() < self.escalation_probability else 1.0
+        return res
+
+
 #TODO: Fix these these are temporory stubs for testing
 class RelayBPDecoder:
     """A latency model for BELIEF-PROPAGATION decoding of QLDPC / bivariate-bicycle codes,

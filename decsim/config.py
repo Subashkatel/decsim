@@ -88,6 +88,7 @@ class SimConfig:
     switch_handoff_us: float = 0.5     # decoder<->decoder handoff cost (default = the t_dd link)
     switch_comm_weak_us: float = 0.0   # T_comm^weak paid on every decode (0 in a full-stack run)
     switch_seed: int = 0               # RNG seed for the switch draw
+    switch_g_th: float = 0.0           # double-window soft-output threshold; escalate when soft output < g_th (0 = never, since soft outputs are >= 0)
 
     # Relay-BP decoder (arXiv:2510.21600) for qLDPC / bivariate-bicycle codes
     relaybp_iterations: int = 40       # BP iteration budget (a worst-case cap, not the average)
@@ -166,5 +167,9 @@ class SimConfig:
         return RelayBPDecoder(iterations=self.relaybp_iterations, t_iter_ns=self.relaybp_t_iter_ns)
 
     def make_scheme(self) -> "DecodingScheme":
-        """Build the named decoding scheme (schemes.py); default 'sliding' == the cluster default."""
+        """Build the named decoding scheme (schemes.py); default 'sliding' == the cluster default.
+        The double-window scheme takes its soft-output threshold from switch_g_th."""
+        if self.scheme_name == "double":
+            from .schemes import DoubleWindowScheme
+            return DoubleWindowScheme(g_th=self.switch_g_th)
         return _scheme_registry()[self.scheme_name]()

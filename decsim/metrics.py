@@ -156,12 +156,13 @@ class DecodeBacklog:
     name = "decode_backlog"
 
     def __init__(self, cluster):
-        """Start the running average and peak (both in rounds)."""
+        """Start the running average, peak (both in rounds), and the time series."""
         self.cluster = cluster
         self._t = 0
         self._area = 0.0
         self._last = 0
         self.peak = 0
+        self.trace = []          # (time_ticks, backlog_rounds) step samples, for plotting
 
     def _rounds_decoded(self, op_id: int) -> int:
         """How many rounds of this operation have been decoded in an unbroken run from round 1.
@@ -184,11 +185,19 @@ class DecodeBacklog:
                    for op_id in self.cluster.ops)
 
     def observe(self, engine: "Engine") -> None:
-        """Sample the current backlog; keep a running time-average and the largest value seen."""
+        """Sample the current backlog; keep a running time-average, the largest value seen, and a
+        step trace (a point whenever the backlog changes) for backlog-vs-time plots."""
         self._area += self._last * (engine.now - self._t)
         self._t = engine.now
         self._last = self._backlog()
         self.peak = max(self.peak, self._last)
+        if not self.trace or self.trace[-1][1] != self._last:
+            self.trace.append((engine.now, self._last))
+
+    def rows(self) -> list:
+        """The backlog-vs-time series, one record per change: {t, backlog_rounds}. Read this to
+        plot how the backlog evolves (paper arXiv:2510.25222 Fig 9-11); result() summarizes it."""
+        return [{"t": t, "backlog_rounds": b} for t, b in self.trace]
 
     def result(self) -> dict:
         """The largest backlog seen and the time-average, both in rounds waiting to be decoded."""
@@ -197,24 +206,25 @@ class DecodeBacklog:
 
 
 class StrongDecoderBacklog:
-    """The strong decoder's backlog under the double-window switching scheme (arXiv:2510.25222
-    Theorem 1): the escalated decode jobs still outstanding on the strong unit pool -- waiting
-    in its queue plus the one being decoded. The weak decoder is kept on pace by the scheme, so
-    only this strong backlog can grow; Theorem 1 / Eq. 8 say it stays bounded when the switching
-    rate is inside the boundary and grows without bound outside it. One job covers strong_rounds
-    rounds, so the backlog in ROUNDS is this count times strong_rounds.
+    """The strong decoder's backlog under decoder switching (arXiv:2510.25222 Theorem 1): the
+    strong re-decode jobs still outstanding on the strong unit pool -- waiting in its queue plus
+    the one being decoded. The weak decoder is kept on pace, so only this strong backlog can grow;
+    Theorem 1 / Eq. 8 say it stays bounded when the switching rate is inside the boundary and grows
+    without bound outside it. One job covers calculate_strong_redo_rounds rounds, so the backlog in
+    ROUNDS is this count times calculate_strong_redo_rounds.
 
     Read-only: samples the cluster's strong-pool counters, never changes the simulation."""
     name = "strong_backlog"
 
     def __init__(self, cluster, pool: str = "strong"):
-        """Watch one unit pool's outstanding work; start the running average and peak."""
+        """Watch one unit pool's outstanding work; start the running average, peak, and trace."""
         self.cluster = cluster
         self.pool = pool
         self.peak_jobs = 0
         self._t = 0
         self._area = 0.0
         self._last = 0
+        self.trace = []          # (time_ticks, outstanding_strong_jobs) step samples
 
     def _outstanding(self) -> int:
         """Strong jobs not yet finished: waiting on the strong pool plus in flight on it."""
@@ -224,18 +234,27 @@ class StrongDecoderBacklog:
         return queued + busy
 
     def observe(self, engine: "Engine") -> None:
-        """Sample the outstanding strong work; keep the peak and a time-average."""
+        """Sample the outstanding strong work; keep the peak, a time-average, and a step trace
+        (a point whenever the count changes) for strong-backlog-vs-time plots."""
         self._area += self._last * (engine.now - self._t)
         self._t = engine.now
         self._last = self._outstanding()
         self.peak_jobs = max(self.peak_jobs, self._last)
+        if not self.trace or self.trace[-1][1] != self._last:
+            self.trace.append((engine.now, self._last))
+
+    def rows(self) -> list:
+        """The strong-backlog time series, one record per change: {t, jobs, rounds}. `rounds` uses
+        the standard re-decode size commit + 2*buffer per job (Theorem 1, arXiv:2510.25222)."""
+        per_job = self.cluster.commit + 2 * self.cluster.buffer
+        return [{"t": t, "jobs": j, "rounds": j * per_job} for t, j in self.trace]
 
     def result(self) -> dict:
-        """Peak and time-average outstanding strong jobs, plus the total escalation count
-        (multiply the job counts by strong_rounds for the backlog in rounds)."""
+        """Peak and time-average outstanding strong jobs, plus how many windows needed the strong
+        decoder (multiply the job counts by calculate_strong_redo_rounds for the backlog in rounds)."""
         return {"peak_jobs": self.peak_jobs,
                 "time_avg_jobs": (self._area / self._t if self._t else 0.0),
-                "escalations": getattr(self.cluster, "escalations", 0)}
+                "strong_needed": getattr(self.cluster, "strong_needed", 0)}
 
 
 class BacklogTrajectory:

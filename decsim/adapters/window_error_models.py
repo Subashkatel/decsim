@@ -60,6 +60,13 @@ class WindowErrorModel:
     #                            turn handed-forward defects into the per-round bit masks
     #                            Window.boundary_in speaks (cluster XORs them into the
     #                            dependent window's payloads)
+    # Belief-matching only (None unless build_window_error_models(belief_matching=True)):
+    # the UNDECOMPOSED hyperedge graph for the BP pass, plus the edge<-hyperedge map, so a
+    # belief-matching inner decoder can run BP on the hypergraph and reweight the matching
+    # (edge) graph -- the `check`/`owned`/`future_flips` above stay the edge model.
+    h_check: "object" = None       # uint8 (n_rows, n_hyperedges): hyperedge -> in-window detector flips
+    h_priors: "object" = None      # float (n_hyperedges,): each hyperedge's probability
+    h2e: "object" = None           # uint8 (n_edges, n_hyperedges): h2e[e,h]=1 iff edge e is a component of hyperedge h
 
 
 def detector_error_model_to_faults(dem) -> tuple:
@@ -97,9 +104,66 @@ def detector_error_model_to_faults(dem) -> tuple:
     return det_sets, obs_sets, priors
 
 
+def detector_error_model_to_faults_bm(dem) -> tuple:
+    """Belief-matching variant of detector_error_model_to_faults: returns the SAME
+    decomposed edge list (det_sets, obs_sets, priors -- byte-identical to the function
+    above) PLUS the UNDECOMPOSED hyperedge list and the edge<-hyperedge map needed for the
+    BP pass (Higgott & Gidney, arXiv:2203.04948: BP runs on the hyperedge graph, then the
+    matching graph is reweighted by the BP posteriors).
+
+    Returns (det_sets, obs_sets, priors, h_det_sets, h_priors, H2E) where h_det_sets /
+    h_priors are the undecomposed mechanisms (a hyperedge = the union of an error's
+    components, before stim's `^` split) and H2E is a uint8 (n_edges x n_hyperedges) map:
+    H2E[e,h]=1 iff edge e is a decomposition component of hyperedge h. Identical-mechanism
+    merging uses the same p (+) q = p(1-q)+q(1-p) rule as the edge list, so the edge
+    columns come out in the same order as detector_error_model_to_faults."""
+    import numpy as np
+    edge_merged: dict = {}            # edge (dets,obs) -> prob  (same keying/order as above)
+    hyper_merged: dict = {}           # hyper (dets,obs) -> index
+    hyper_list: list = []             # [ [dets, obs, prob], ... ]
+    h2e_pairs: set = set()            # (hyper_index, edge_key)
+    for inst in dem.flattened():
+        if inst.type != "error":
+            continue
+        p = inst.args_copy()[0]
+        comps, dets, obs, all_dets, all_obs = [], [], [], [], []
+        for t in inst.targets_copy():
+            if t.is_separator():
+                comps.append((tuple(sorted(dets)), tuple(sorted(obs))))
+                dets, obs = [], []
+            elif t.is_relative_detector_id():
+                dets.append(t.val); all_dets.append(t.val)
+            elif t.is_logical_observable_id():
+                obs.append(t.val); all_obs.append(t.val)
+        comps.append((tuple(sorted(dets)), tuple(sorted(obs))))
+        h_key = (tuple(sorted(all_dets)), tuple(sorted(all_obs)))
+        if not h_key[0]:
+            continue
+        hi = hyper_merged.get(h_key)
+        if hi is None:
+            hi = len(hyper_list); hyper_merged[h_key] = hi
+            hyper_list.append([h_key[0], h_key[1], 0.0])
+        hyper_list[hi][2] = hyper_list[hi][2] * (1 - p) + p * (1 - hyper_list[hi][2])
+        for ck in comps:
+            if not ck[0]:
+                continue
+            q = edge_merged.get(ck, 0.0)
+            edge_merged[ck] = q * (1 - p) + p * (1 - q)
+            h2e_pairs.add((hi, ck))
+    edge_keys = list(edge_merged)
+    edge_index = {k: i for i, k in enumerate(edge_keys)}
+    H2E = np.zeros((len(edge_keys), len(hyper_list)), dtype=np.uint8)
+    for hi, ck in h2e_pairs:
+        H2E[edge_index[ck], hi] = 1
+    return ([k[0] for k in edge_keys], [k[1] for k in edge_keys],
+            [edge_merged[k] for k in edge_keys],
+            [h[0] for h in hyper_list], [h[2] for h in hyper_list], H2E)
+
+
 def build_window_error_models(circuit, plan: list, num_observables: Optional[int] = None,
                           *, decompose_errors: bool = True,
-                          detector_rounds: Optional[dict] = None) -> list:
+                          detector_rounds: Optional[dict] = None,
+                          belief_matching: bool = False) -> list:
     """Slice an operation's circuit into one WindowErrorModel per planned window.
 
     `plan` is scheme-style: [(commit_lo, commit_hi, buffer_hi), ...] in 1-based rounds,
@@ -115,10 +179,19 @@ def build_window_error_models(circuit, plan: list, num_observables: Optional[int
 
     `detector_rounds` maps global detector id -> 1-based round, for circuits whose
     detectors carry no time coordinates (e.g. QUITS-built BB circuits, where
-    round = id // checks_per_round + 1). Default reads stim coordinates (t + 1)."""
+    round = id // checks_per_round + 1). Default reads stim coordinates (t + 1).
+
+    `belief_matching` (default False): also fill each window's h_check / h_priors / h2e
+    (the undecomposed hyperedge graph + edge<-hyperedge map) so belief_matching_window_decoder
+    can run BP on the hypergraph. The decomposed edge model is byte-identical either way;
+    only the extra hyperedge fields are added, so default callers are unchanged."""
     import numpy as np
     dem = circuit.detector_error_model(decompose_errors=decompose_errors)
-    det_sets, obs_sets, priors = detector_error_model_to_faults(dem)
+    if belief_matching:
+        det_sets, obs_sets, priors, h_det_sets, h_priors, H2E = \
+            detector_error_model_to_faults_bm(dem)
+    else:
+        det_sets, obs_sets, priors = detector_error_model_to_faults(dem)
     n_obs = num_observables if num_observables is not None else circuit.num_observables
     if detector_rounds is not None:
         round_of = dict(detector_rounds)
@@ -173,11 +246,28 @@ def build_window_error_models(circuit, plan: list, num_observables: Optional[int
                     future_flips[j] = beyond
         defect_positions = {det: (round_of[det], pos_of[det])
                             for flips in future_flips.values() for det in flips}
+        h_fields: dict = {}
+        if belief_matching:
+            # hyperedge slice aligned to this window's edge cols: every hyperedge that
+            # parents an in-window edge joins the BP graph (so BP and matching agree).
+            h_cols = sorted({h for f in cols for h in np.nonzero(H2E[f])[0]})
+            h_index = {h: i for i, h in enumerate(h_cols)}
+            h_check = np.zeros((len(rows), len(h_cols)), dtype=np.uint8)
+            for h in h_cols:
+                for d in h_det_sets[h]:
+                    if d in row_index:
+                        h_check[row_index[d], h_index[h]] = 1
+            h2e = np.zeros((len(cols), len(h_cols)), dtype=np.uint8)
+            for j, f in enumerate(cols):
+                for h in np.nonzero(H2E[f])[0]:
+                    h2e[j, h_index[h]] = 1
+            h_fields = dict(h_check=h_check,
+                            h_priors=np.array([h_priors[h] for h in h_cols]), h2e=h2e)
         models.append(WindowErrorModel(
             detector_ids=tuple(rows), commit_hi=commit_hi,
             check=check, priors=np.array([priors[f] for f in cols]),
             obs=obs, owned=owned, future_flips=future_flips,
-            defect_positions=defect_positions))
+            defect_positions=defect_positions, **h_fields))
     return models
 
 
@@ -211,32 +301,10 @@ def decode_windowed(window_models: list, detection_events, decode_window) -> "ob
     return total
 
 
-# The PyMatching inner decoder, matching_window_decoder(), now lives in decsim.mwpm_decoder
-# (decsim/mwpm_decoder/window_decoder.py) alongside PyMatchingDecoder. The shared engine above
-# (WindowErrorModel / build_window_error_models / decode_windowed) is code-agnostic and stays here.
-
-
-def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,
-                         bp_method: str = "product_sum", schedule: str = "serial",
-                         osd_method: str = "osd_cs"):
-    """A BP-OSD inner decoder for decode_windowed -- BB / qLDPC windows, whose faults
-    may flip > 2 detectors (build the models with decompose_errors=False; matching
-    does not apply). Defaults follow QUITS's sliding_window_bposd_* functions.
-    Caches one ldpc.BpOsdDecoder per WindowErrorModel (matrices are shot-independent;
-    only the syndrome changes per shot)."""
-    cache: dict = {}
-
-    def decode(model: WindowErrorModel, syndrome):
-        d = cache.get(id(model))
-        if d is None:
-            from ldpc import BpOsdDecoder
-            from scipy.sparse import csr_matrix
-            d = BpOsdDecoder(csr_matrix(model.check),
-                             error_channel=list(model.priors),
-                             max_iter=max_iter, bp_method=bp_method,
-                             schedule=schedule, osd_method=osd_method,
-                             osd_order=osd_order)
-            cache[id(model)] = d
-        return d.decode(syndrome)
-
-    return decode
+# INNER DECODERS live in their own per-algorithm packages (each is library-specific), NOT here:
+#   * matching_window_decoder()        -> decsim.mwpm_decoder           (pymatching)
+#   * bposd_window_decoder()           -> decsim.bposd_decoder          (ldpc BP-OSD)
+#   * belief_matching_window_decoder() -> decsim.belief_matching_decoder (ldpc BP + pymatching)
+# Only the CODE-AGNOSTIC windowing engine stays in this module: WindowErrorModel (incl. the
+# belief-matching h_* fields), build_window_error_models (incl. its belief_matching flag),
+# decode_windowed, and detector_error_model_to_faults / _bm. It is shared by every inner decoder.

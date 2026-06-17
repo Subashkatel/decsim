@@ -51,6 +51,9 @@ class DecodeJob:
     hint: Optional[str] = None # routing hint for a DecoderRouter (e.g. "strong" for an escalated decoder-switching job); None = route normally. When the hint names one of the cluster's unit pools, the job also runs on that pool's units/queue
     pool: Optional[str] = None # the unit pool this job dispatched on (set by the cluster AT DISPATCH, so the right pool's unit is freed even if a decoder mutates `hint` mid-flight)
     window: Optional["Window"] = None # the Window this job decodes (None for external jobs). Gives the decoder the commit/buffer geometry it needs to place artificial defects (DecodeResult.boundary_defects) at the commit boundary -- the one place decoder and windowing scheme must agree (arXiv:2209.08552 Fig. 2)
+    # The next two fields are only used for decoder switching (switching.py).
+    strong_decode_for: Optional[tuple] = None # if this is a strong re-decode of a window, the (op_id, window_id) it belongs to; None for every ordinary job. Lets the cluster find this job later (to cancel it) and clean it up when it finishes.
+    cancelled: bool = False # a strong re-decode that was cancelled before it finished, because the weak decoder turned out to be confident (only happens in "run both at once" mode). The cluster frees its decoder unit at the moment of cancellation; when this job's already-scheduled "finished" event later fires, it sees this flag and does nothing.
 
 @dataclass
 class Window:

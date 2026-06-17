@@ -36,16 +36,17 @@ DECODER_FITS = {
     "pymatching": (5.91e-9,  1.17),   # PyMatching (MWPM) at p = 0.1%
 }
 
-# Decoding schemes selectable by name from config (schemes.py). "double" is a documented stub.
-SCHEME_NAMES = ("sliding", "naive", "parallel", "double")
+# Decoding schemes selectable by name from config (schemes.py). Decoder switching is NOT a
+# scheme -- it is a separate Switching object (switch_mode below; switching.py).
+SCHEME_NAMES = ("sliding", "naive", "parallel")
+SWITCH_MODES = ("none", "serial", "parallel")     # decoder switching (switching.py): off / serial / run-both-at-once
 
 
 def _scheme_registry() -> dict:
     """name -> scheme class (lazy import: schemes.py imports nothing from here at module load)."""
-    from .schemes import (SlidingWindowScheme, NaiveOnlineScheme,
-                          ParallelWindowScheme, DoubleWindowScheme)
+    from .schemes import SlidingWindowScheme, NaiveOnlineScheme, ParallelWindowScheme
     return {"sliding": SlidingWindowScheme, "naive": NaiveOnlineScheme,
-            "parallel": ParallelWindowScheme, "double": DoubleWindowScheme}
+            "parallel": ParallelWindowScheme}
 
 
 @dataclass(frozen=True)
@@ -88,7 +89,9 @@ class SimConfig:
     switch_handoff_us: float = 0.5     # decoder<->decoder handoff cost (default = the t_dd link)
     switch_comm_weak_us: float = 0.0   # T_comm^weak paid on every decode (0 in a full-stack run)
     switch_seed: int = 0               # RNG seed for the switch draw
-    switch_g_th: float = 0.0           # double-window soft-output threshold; escalate when soft output < g_th (0 = never, since soft outputs are >= 0)
+    switch_confidence_threshold: float = 0.0  # keep the weak answer when its confidence >= this; below it, use the strong decoder (0 = never switch, since confidence is >= 0)
+    switch_mode: str = "none"          # decoder switching (switching.py): "none" | "serial" | "parallel" (run both at once)
+    switch_weak_keepup_ratio: Optional[float] = None  # weak decode time / syndrome time per round; if set, checks the window is big enough (None = skip)
 
     # Relay-BP decoder (arXiv:2510.21600) for qLDPC / bivariate-bicycle codes
     relaybp_iterations: int = 40       # BP iteration budget (a worst-case cap, not the average)
@@ -124,6 +127,8 @@ class SimConfig:
             raise ValueError("relaybp_t_iter_ns must be >= 0")
         if self.scheme_name not in SCHEME_NAMES:
             raise ValueError(f"scheme_name must be one of {SCHEME_NAMES} (got {self.scheme_name!r})")
+        if self.switch_mode not in SWITCH_MODES:
+            raise ValueError(f"switch_mode must be one of {SWITCH_MODES} (got {self.switch_mode!r})")
 
     def make_links(self) -> "LinkModel":
         """Build the communication fabric (links.py) from these link-latency knobs --
@@ -167,9 +172,17 @@ class SimConfig:
         return RelayBPDecoder(iterations=self.relaybp_iterations, t_iter_ns=self.relaybp_t_iter_ns)
 
     def make_scheme(self) -> "DecodingScheme":
-        """Build the named decoding scheme (schemes.py); default 'sliding' == the cluster default.
-        The double-window scheme takes its soft-output threshold from switch_g_th."""
-        if self.scheme_name == "double":
-            from .schemes import DoubleWindowScheme
-            return DoubleWindowScheme(g_th=self.switch_g_th)
+        """Build the named decoding scheme (schemes.py); default 'sliding' == the cluster default."""
         return _scheme_registry()[self.scheme_name]()
+
+    def make_switching(self):
+        """Build the decoder-switching object (switching.py) from switch_mode: "none" -> None (no
+        switching), "serial" -> Switching, "parallel" -> Switching with run_both_at_once=True. It
+        gets the confidence threshold switch_confidence_threshold and the optional window-size guard
+        switch_weak_keepup_ratio."""
+        if self.switch_mode == "none":
+            return None
+        from .switching import Switching
+        return Switching(confidence_threshold=self.switch_confidence_threshold,
+                         run_both_at_once=(self.switch_mode == "parallel"),
+                         weak_keepup_ratio=self.switch_weak_keepup_ratio)

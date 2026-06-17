@@ -8,10 +8,12 @@ from .frontends.circuit import (CircuitFrontend, SurgeryIRFrontend,
                                 three_cnot_circuit, cnot_plus_two_t_circuit,
                                 independent_t_circuit,
                                 three_cnot_six_qubits_circuit)
-from .decoders import (PresetLatencyDecoder, RelayBPDecoder, SwitchingDecoder,
-                      SwitchingRouter, SampledSoftOutputDecoder)
+from .decoders import (PresetLatencyDecoder, PerRoundDecoder, RelayBPDecoder,
+                      SwitchingDecoder, SwitchingRouter, SampledSoftOutputDecoder,
+                      switch_probability_per_round)
 from .factories import InfiniteFactory, DistillationFactory
-from .schemes import ParallelWindowScheme, DoubleWindowScheme, ThresholdSwitch
+from .schemes import ParallelWindowScheme
+from .switching import Switching
 from .schedulers import EarliestDeadlineScheduler, ReactionPathDeadline
 from .metrics import (DecoderUtilization, ReadyQueueStats,
                       WindowLatencyBreakdown, MagicStateLatency,
@@ -23,10 +25,11 @@ __all__ = [
     "CircuitFrontend", "SurgeryIRFrontend",
     "three_cnot_circuit", "cnot_plus_two_t_circuit", "independent_t_circuit",
     "three_cnot_six_qubits_circuit",
-    "PresetLatencyDecoder", "RelayBPDecoder", "SwitchingDecoder",
-    "SwitchingRouter", "SampledSoftOutputDecoder",
+    "PresetLatencyDecoder", "PerRoundDecoder", "RelayBPDecoder", "SwitchingDecoder",
+    "SwitchingRouter", "SampledSoftOutputDecoder", "switch_probability_per_round",
     "InfiniteFactory", "DistillationFactory",
-    "ParallelWindowScheme", "DoubleWindowScheme", "ThresholdSwitch",
+    "ParallelWindowScheme",
+    "Switching",
     "EarliestDeadlineScheduler", "ReactionPathDeadline",
     "DecoderUtilization", "ReadyQueueStats",
     "WindowLatencyBreakdown", "MagicStateLatency", "StrongDecoderBacklog",

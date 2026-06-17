@@ -125,6 +125,28 @@ def test_engine_matches_offline_reference_and_global_exactly():
     assert defect_bits > 0, "no artificial defects ever crossed a commit boundary"
 
 
+def test_engine_bposd_matches_offline_reference():
+    """BP-OSD runs THROUGH the DES under the sliding scheme and equals the offline windowed
+    BP-OSD reference per shot -- the runtime BPOSDDecoder drops into the same scheme machinery
+    as PyMatchingDecoder, with no extra cluster wiring (it decodes the window check matrix)."""
+    pytest.importorskip("ldpc")
+    from decsim.bposd_decoder import BPOSDDecoder, bposd_window_decoder
+
+    circuit = _circuit()
+    coords = circuit.get_detector_coordinates()
+    folded = {det: min(int(c[-1]) + 1, ROUNDS) for det, c in coords.items()}
+    plan = [(lo, hi, min(b, ROUNDS)) for lo, hi, b in
+            SlidingWindowScheme().plan_windows(0, ROUNDS, SurfaceCodeModel(d=D))]
+    ref_models = build_window_error_models(circuit, plan, detector_rounds=folded)
+    ref_inner = bposd_window_decoder()
+
+    device = StimDevice(seed=29)
+    for s in range(15):
+        pred_engine = _run_engine_shot(circuit, device, BPOSDDecoder(_ZeroLatency()))
+        pred_offline = int(decode_windowed(ref_models, device._dets[1], ref_inner)[0])
+        assert pred_engine == pred_offline, f"shot {s}: engine != offline BP-OSD reference"
+
+
 def test_gated_successor_waits_for_real_pymatching_result():
     """A feedback-gated successor is released only after the real PyMatching result
     for the gating op has been computed and delivered through the orchestrator.

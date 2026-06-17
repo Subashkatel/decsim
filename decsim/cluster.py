@@ -18,6 +18,7 @@ if TYPE_CHECKING:                      # type-only; these collaborators are hand
     from .protocols import (Decoder, Scheduler, Controller, Orchestrator,
                             CodeModel, DecodingScheme, LayoutModel, RoundsPolicy,
                             DecoderRouter, DeadlinePolicy)
+    from .switching import Switching
 # ========================================================================================
 # CLUSTER
 # This module defines the decoder cluster -- the paper's decoder cluster with its
@@ -52,7 +53,8 @@ class DecoderCluster:
                  router: Optional["DecoderRouter"] = None,
                  deadline_policy: Optional["DeadlinePolicy"] = None,
                  links: Optional[LinkModel] = None,
-                 unit_pools: Optional[dict] = None):
+                 unit_pools: Optional[dict] = None,
+                 switching: Optional["Switching"] = None):
         """Set up the cluster: decoder units, ready queue, syndrome buffer, bookkeeping.
         `controller` is accepted as part of the construction contract (the make_cluster
         hook signature) but no longer read -- link prices come from `links`."""
@@ -177,7 +179,14 @@ class DecoderCluster:
         self.pool_ready: dict[str, list] = {p: [] for p in self.unit_totals
                                             if p != "default"}   # other pools' queues
         self.queue_log: list[tuple[int, int]] = []
-        self.escalations = 0          # windows sent to the strong decoder (double-window switching)
+        # DECODER SWITCHING (a Switching object from switching.py, or None for no switching).
+        # When set, the weak `decoder` is paired with a strong one (reached through the router via
+        # hint="strong"), and the cluster runs the strong decoder on the windows the weak decoder is
+        # unsure about. None = no switching, so every switching branch below is skipped.
+        self.switching = switching
+        self.strong_needed = 0        # windows the weak decoder was unsure about (the strong decoder was needed)
+        self.strong_cancelled = 0     # strong re-decodes cancelled early ("run both at once", weak turned out confident)
+        self._running_strong_decodes: dict[tuple, DecodeJob] = {}   # window key -> its strong re-decode job
         # Dependency INVERSION (no back-reference to the chip): the cluster -- the paper's
         # "workload manager" (arXiv:2511.10633 Sec III) -- never reaches into the chip or factory.
         # It queues decoding jobs, exchanges committed window boundaries (the t_dd dependencies),
@@ -285,6 +294,10 @@ class DecoderCluster:
         # two short lines: the strategy, then the job structure in plain words.
         self.engine.log("DecoderClstr", f"received execution plan: d={self.d}, scheme={label}")
         self.engine.log("DecoderClstr", f"  -> {jobs}: {struct}")
+        # Switching can require a minimum window size (the weak decoder must keep pace with its
+        # commit region). Check it once, loudly, when the plan loads.
+        if self.switching is not None:
+            self.switching.check_window_size(self.commit, self.buffer)
         self._build_window_error_models()
         self._build_round_refcounts()
 
@@ -552,6 +565,12 @@ class DecoderCluster:
                         f"{self._job_desc(w, op)} READY -> enqueue "
                         f"({self._pool_tag(pool)}ready-queue length = {len(queue)})")
         self.queue_log.append((self.engine.now, self._queued_total()))
+        # "Run both at once" switching: start the strong decoder on this same window right now,
+        # alongside the weak one. If the weak answer later turns out confident we cancel it
+        # (_cancel_strong_decode); otherwise it finishes and its result is ready sooner than if we
+        # had waited for the weak verdict first.
+        if self.switching is not None and self.switching.run_both_at_once:
+            self._start_strong_decode(w, in_parallel=True)
         self._try_dispatch()
  
     def submit_decode(self, n_rounds: int, on_done: Callable[[], None],
@@ -575,34 +594,59 @@ class DecoderCluster:
         self.queue_log.append((self.engine.now, self._queued_total()))
         self._try_dispatch()
  
-    def _double_window_escalates(self, job: DecodeJob, res: Optional[DecodeResult]) -> bool:
-        """Whether a just-decoded weak window must also go to the strong decoder. Only a
-        switching scheme (DoubleWindowScheme, arXiv:2510.25222) exposes should_escalate, which
-        defers to its swappable SwitchPolicy; every other scheme lacks it, so this returns False
-        and the decode path is unchanged. Only first-pass windows (attempt 0) can escalate."""
-        decide = getattr(self.scheme, "should_escalate", None)
-        return decide is not None and job.attempt == 0 and decide(job, res)
+    def _start_strong_decode(self, window: Window, in_parallel: bool = False) -> None:
+        """Queue a strong re-decode of `window`. It is a side job: it occupies a strong decoder
+        unit and adds to the strong decoder's queue, but it does NOT commit the window -- the weak
+        decoder already committed it, so the weak stream keeps flowing. We remember the job (in
+        _running_strong_decodes) so we can cancel it later.
 
-    def _dispatch_strong_decode(self, w: Window) -> None:
-        """Hand a low-confidence window to the strong decoder as a PARALLEL job over
-        strong_rounds = commit + 2*buffer rounds (arXiv:2510.25222 Sec III.C, Fig 12). The
-        weak window still commits (caller), so the weak stream never stalls -- the scheme's
-        defining property. The job carries hint="strong" so the SwitchingRouter routes it to
-        the strong decoder and, when a "strong" unit pool exists, to that pool's queue, which
-        is then the strong-decoder backlog Theorem 1 bounds. The weak->strong shipment is
-        charged the `ws` link before the job competes for a strong unit."""
-        self.escalations += 1
-        op = self.ops[w.op_id]
-        strong_rounds = self.scheme.strong_rounds(w)
-        label = f"strong({op.name} W{w.k})"
-        self.engine.log("DecoderClstr",
-                        f"SWITCH to strong decoder: {self._job_desc(w, op)} soft output "
-                        f"below g_th -> {strong_rounds}-round strong decode (arrives after ws)")
-        self.engine.schedule(
-            self.links.ws.cost(),
-            lambda: self.submit_decode(strong_rounds, on_done=lambda: None, label=label,
-                                       hint="strong", spatial_nodes=self._spatial_nodes(op)),
-            label=f"weak->strong handoff {label}")
+        in_parallel=True  ("run both at once"): queue it right away, on the same data the weak
+                          decoder got, with no extra hand-off cost.
+        in_parallel=False (serial): the data has to travel from the weak decoder to the strong one
+                          first, so we queue it after the weak->strong link delay (links.ws)."""
+        op = self.ops[window.op_id]
+        key = (window.op_id, window.k)
+        n_rounds = self.switching.calculate_strong_redo_rounds(window)
+        label = f"strong({op.name} W{window.k})"
+
+        def queue_it():
+            job = DecodeJob(op_id=-1, window_id=0, n_rounds=n_rounds,
+                            ready_time=self.engine.now, deadline=self.engine.now,
+                            on_done=lambda: None, label=label, hint="strong",
+                            spatial_nodes=self._spatial_nodes(op), strong_decode_for=key)
+            self._running_strong_decodes[key] = job
+            self.scheduler.insert(self._queue_for(self._pool_for(job)), job)
+            self.queue_log.append((self.engine.now, self._queued_total()))
+            self._try_dispatch()
+
+        if in_parallel:
+            queue_it()
+        else:
+            self.engine.log("DecoderClstr",
+                            f"weak decoder unsure about {self._job_desc(window, op)} -> hand "
+                            f"{n_rounds} rounds to the strong decoder (after the weak->strong link)")
+            self.engine.schedule(self.links.ws.cost(), queue_it,
+                                 label=f"weak->strong handoff {label}")
+
+    def _cancel_strong_decode(self, key: tuple) -> None:
+        """Cancel the strong re-decode of window `key`, if one is still running. Used in "run both
+        at once" mode when the weak decoder turns out confident, so the strong result is no longer
+        needed. If the strong job is still waiting in the queue, just remove it. If it is already
+        running on a unit, free that unit right now and mark the job cancelled, so when its
+        already-scheduled "finished" event fires later it does nothing. (In serial mode there is
+        no strong job to cancel here, so this does nothing.)"""
+        job = self._running_strong_decodes.pop(key, None)
+        if job is None:
+            return
+        if job.pool is None:                          # still waiting in the queue: just remove it
+            queue = self._queue_for(self._pool_for(job))
+            if job in queue:
+                queue.remove(job)
+        else:                                         # already running: free its unit now
+            job.cancelled = True
+            self.pool_free[job.pool] += 1
+            self._try_dispatch()
+        self.strong_cancelled += 1
 
     def _try_dispatch(self) -> None:
         """While a pool has a free unit and a ready job, dispatch. Pools are independent:
@@ -626,8 +670,12 @@ class DecoderCluster:
  
     def _on_decode_done(self, job: DecodeJob) -> None:
         """Commit a finished window, hand its boundary to the next window, report the op result on its last window."""
+        if job.cancelled:                            # a strong re-decode that was cancelled early:
+            return                                   # its unit was already freed, so do nothing here
         self.pool_free[job.pool] += 1
-        if job.on_done is not None:                  # factory correction-qubit job
+        if job.strong_decode_for is not None:        # a strong re-decode finished -> forget it
+            self._running_strong_decodes.pop(job.strong_decode_for, None)
+        if job.on_done is not None:                  # factory / idle / strong re-decode
             self.engine.log("DecoderClstr",
                             f"DECODE DONE {job.label} ({self._pool_tag(job.pool)}units "
                             f"free now {self.pool_free[job.pool]})")
@@ -646,8 +694,19 @@ class DecoderCluster:
         # order unchanged for every scheme. For a timing-only stub the result carries no
         # logical value and the orchestrator falls back to its toy outcome.
         res = self._decoder_for(job).decode(job)             # routed decoder (G1 / per-job)
-        if self._double_window_escalates(job, res):
-            self._dispatch_strong_decode(w)
+        # DECODER SWITCHING (switching.py). This weak window commits either way below -- the weak
+        # stream never stalls. We only decide here what to do about the STRONG decoder.
+        if self.switching is not None and job.attempt == 0:
+            if self.switching.keep_weak_result(res):
+                # weak answer is good enough. In "run both at once" mode a strong re-decode of this
+                # window is already running, so cancel it; in serial mode there is none.
+                self._cancel_strong_decode(key)
+            else:
+                # weak answer is shaky -> we need the strong decoder for this window.
+                self.strong_needed += 1
+                if not self.switching.run_both_at_once:
+                    self._start_strong_decode(w)     # serial: start it now (data travels over ws)
+                # "run both at once": its strong re-decode is already running, so just let it finish.
         w.committed = True
         w.t_done = self.engine.now
         self.committed_windows.add(key)

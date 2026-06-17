@@ -18,23 +18,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.config import us
 from decsim.controllers import ModularController
+from decsim.decoders import PerRoundDecoder
 from decsim.frontends.circuit import CircuitFrontend
-from decsim.message import DecodeResult, Operation
+from decsim.message import Operation
 from decsim.wiring import build_and_run
 
 TAU_GEN_US = 1.1
-
-
-class PerRoundDecoder:
-    """Decode time = tau_dec per round in the window."""
-    def __init__(self, tau_us):
-        self.tau_us = tau_us
-
-    def latency(self, job):
-        return us(job.n_rounds * self.tau_us)
-
-    def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id)
 
 
 class WindowedCode:

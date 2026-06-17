@@ -143,6 +143,18 @@ class DeadlinePolicy(Protocol):
 
 
 @runtime_checkable
+class SwitchPolicy(Protocol):
+    """Decides whether a weak decode is unreliable enough to escalate to the strong decoder
+    (decoder switching, arXiv:2510.25222 Sec III.A, Step 3). This isolates the SWITCH DECISION
+    as its own swappable piece, separate from the windowing scheme and the cluster: the default
+    schemes.ThresholdSwitch compares the soft output to a fixed threshold, but a policy may use
+    any function of the weak result -- a distance-dependent or adaptive threshold, the raw gap
+    value, decode history, and so on. `should_escalate` sees the job (its code, window, and
+    spatial size) and the weak DecodeResult (its soft_output)."""
+    def should_escalate(self, job: DecodeJob, result: DecodeResult) -> bool: ...
+
+
+@runtime_checkable
 class DecoderRouter(Protocol):
     """Picks the decoder for each DecodeJob at dispatch time. The default CodeRouter
     routes by job.code (per-code decoders, G1); a custom router can route by job.hint /

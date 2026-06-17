@@ -17,9 +17,22 @@ class SurfaceCodeModel:
     d-round look-ahead buffer (the W = 2d, C = d sliding window -- "conventionally W = d"
     per window-half in ADaPT arXiv:2605.01149 Sec II-C; arXiv:2511.10633 likewise builds
     its memory windows from d-sized commit/buffer sub-regions); the per-round decoding
-    graph has ~d^2 nodes (arXiv:2511.10633 evaluates tau_d at N = d^2 per round)."""
+    graph has ~d^2 nodes (arXiv:2511.10633 evaluates tau_d at N = d^2 per round).
+
+    Commit and buffer both default to d; set commit_rounds_override / buffer_rounds_override to
+    size them independently -- e.g. to a commit region above the keep-pace minimum of Eq. 7
+    (arXiv:2510.25222) for the decoder-switching studies."""
     d: int = 3
     round_us: Optional[float] = None  # per-code syndrome-round time (us); None = chip's global cadence. Lets heterogeneous zones run different physical cycle times (e.g. ~0.5 us superconducting stabilization rounds, arXiv:2411.10406 Sec I.2.1, vs 1 us/cycle, arXiv:2510.21600)
+    commit_rounds_override: Optional[int] = None  # commit rounds per decode window; None = d
+    buffer_rounds_override: Optional[int] = None  # look-ahead buffer rounds per window; None = d
+
+    def __post_init__(self):
+        """Reject non-positive commit/buffer overrides (None means 'use d')."""
+        for label, v in (("commit_rounds_override", self.commit_rounds_override),
+                         ("buffer_rounds_override", self.buffer_rounds_override)):
+            if v is not None and v < 1:
+                raise ValueError(f"{label} must be a positive number of rounds; got {v}")
 
     @property
     def name(self) -> str:
@@ -41,12 +54,12 @@ class SurfaceCodeModel:
         return self.rounds_per_logical_cycle()
 
     def commit_rounds(self) -> int:
-        """Rounds committed per decode window."""
-        return self.d
+        """Rounds committed per decode window (commit_rounds_override, else d)."""
+        return self.commit_rounds_override if self.commit_rounds_override is not None else self.d
 
     def buffer_rounds(self) -> int:
-        """Look-ahead buffer rounds per window."""
-        return self.d
+        """Look-ahead buffer rounds per window (buffer_rounds_override, else d)."""
+        return self.buffer_rounds_override if self.buffer_rounds_override is not None else self.d
 
     def spatial_nodes(self, num_patches: int) -> int:
         """Decoding-graph node count for this many patches (drives decode latency)."""

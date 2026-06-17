@@ -21,26 +21,14 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from decsim.config import us
-from decsim.decoders import SampledSoftOutputDecoder, SwitchingRouter
-from decsim.message import DecodeResult, Operation
+from decsim.decoders import PerRoundDecoder, SampledSoftOutputDecoder, SwitchingRouter
+from decsim.message import Operation
 from decsim.schedulers import EarliestDeadlineScheduler
-from decsim.schemes import DoubleWindowScheme, ParallelWindowScheme, SlidingWindowScheme
+from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
+from decsim.switching import Switching
 from decsim.wiring import build_and_run
 
 TAU = 1.0
-
-
-class PerRoundDecoder:
-    """Timing-only decoder: latency proportional to the window's rounds."""
-    def __init__(self, tau_us):
-        self.tau_us = tau_us
-
-    def latency(self, job):
-        return us(job.n_rounds * self.tau_us)
-
-    def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id)
 
 
 class InvariantGuard:
@@ -124,29 +112,43 @@ def test_parallel_scheme_under_load_stays_consistent():
     assert guard.peak_busy["default"] >= 2, "the parallel scheme should run windows concurrently"
 
 
-def _switching_run(escalation_probability, rounds, patches, pools, seed=3,
-                   scheduler=None, metrics_box=None):
-    weak = SampledSoftOutputDecoder(PerRoundDecoder(0.2 * TAU), escalation_probability, seed=seed)
+def _switching_run(low_confidence_probability, rounds, patches, pools, seed=3,
+                   scheduler=None, metrics_box=None, switching=None):
+    weak = SampledSoftOutputDecoder(PerRoundDecoder(0.2 * TAU), low_confidence_probability, seed=seed)
     strong = PerRoundDecoder(5.0 * TAU)
     return build_and_run(
         _independent_patches(patches), d=3, rounds_per_op=rounds, round_us=TAU,
-        scheme=DoubleWindowScheme(g_th=0.5), decoder=weak,
-        router=SwitchingRouter(weak, strong), unit_pools=pools, scheduler=scheduler,
+        scheme=SlidingWindowScheme(), switching=switching or Switching(confidence_threshold=0.5),
+        decoder=weak, router=SwitchingRouter(weak, strong), unit_pools=pools, scheduler=scheduler,
         make_metrics=lambda e, c, ch, fa: [metrics_box.setdefault("g", InvariantGuard(c))]
                      if metrics_box is not None else [],
         verbose=False)
 
 
-def test_high_escalation_switching_stays_consistent():
-    """Half of all windows escalate, across several patches, hammering a small strong pool:
+def test_high_switch_rate_stays_consistent():
+    """Half of all windows are unsure, across several patches, hammering a small strong pool:
     weak windows all commit exactly once and the strong pool never over-dispatches."""
     box = {}
     result = _switching_run(0.5, rounds=300, patches=3,
                             pools={"default": 2, "strong": 2}, metrics_box=box)
     guard = box["g"]
     _assert_clean(result, guard)
-    assert result["cluster"].escalations > 50, "the run did not actually stress switching"
+    assert result["cluster"].strong_needed > 50, "the run did not actually stress switching"
     assert guard.peak_busy.get("strong", 0) >= 1, "strong pool never ran a job"
+
+
+def test_run_both_at_once_cancel_under_load_stays_consistent():
+    """"Run both at once" starts a strong job on every window and cancels the confident ones,
+    freeing their units early -- the cancel path (mark + early free) must keep the unit accounting
+    exact under load. Most windows are confident here, so the cancel fires constantly."""
+    box = {}
+    result = _switching_run(0.1, rounds=300, patches=3, pools={"default": 2, "strong": 2},
+                            switching=Switching(confidence_threshold=0.5, run_both_at_once=True),
+                            metrics_box=box)
+    cluster = result["cluster"]
+    _assert_clean(result, box["g"])
+    assert cluster.strong_cancelled > 50, "the cancel path was barely exercised"
+    assert cluster.strong_cancelled + cluster.strong_needed == cluster.total_windows
 
 
 def test_switching_with_deadline_scheduler_stays_consistent():
@@ -157,7 +159,7 @@ def test_switching_with_deadline_scheduler_stays_consistent():
                             pools={"default": 2, "strong": 1},
                             scheduler=EarliestDeadlineScheduler(), metrics_box=box)
     _assert_clean(result, box["g"])
-    assert result["cluster"].escalations > 0
+    assert result["cluster"].strong_needed > 0
 
 
 def test_switching_stress_is_deterministic():
@@ -167,6 +169,6 @@ def test_switching_stress_is_deterministic():
     a = _switching_run(0.5, rounds=250, patches=3, pools={"default": 2, "strong": 2})
     b = _switching_run(0.5, rounds=250, patches=3, pools={"default": 2, "strong": 2})
     assert a["cluster"].op_results == b["cluster"].op_results
-    assert a["cluster"].escalations == b["cluster"].escalations
+    assert a["cluster"].strong_needed == b["cluster"].strong_needed
     assert len(a["cluster"].committed_windows) == len(b["cluster"].committed_windows)
     assert a["engine"].now == b["engine"].now

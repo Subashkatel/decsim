@@ -175,38 +175,93 @@ class ParallelWindowScheme(SlidingWindowScheme):
                 w.deps.append((w.op_id, k + 1))            # A on the right (absent for tail)
 
 
-# TODO: currently just a stub -- documents how decoder switching's windowing works; see the
-# docstring recipe to finish it (plan_windows + the cluster escalation branch + the resume rule),
-# then add acceptance tests for the paper's Eq. 15 constraint and Theorem 1 stability boundary.
-class DoubleWindowScheme:
-    """STUB. The double-window scheme of decoder switching (arXiv:2510.25222 Sec III.3).
+class ThresholdSwitch:
+    """The default switch decision for DoubleWindowScheme: escalate a window to the strong
+    decoder when the weak decoder's soft output is below a fixed threshold g_th
+    (arXiv:2510.25222 Sec III.A). This is the simplest possible policy; it is a separate object
+    precisely so the decision can be changed without touching the scheme or the cluster -- swap
+    in any other SwitchPolicy (a distance-dependent or adaptive threshold, a rule on the raw gap
+    value, etc.) and the rest of the switching machinery is unchanged."""
+    def __init__(self, g_th: float):
+        """Escalate any window whose soft output is below g_th."""
+        self.g_th = g_th
 
-    The runtime protocol to implement (verified against the paper):
-      - A weak decoder processes ordinary (r_com, r_buf) sliding windows and returns a
-        SOFT OUTPUT g with each result (DecodeResult.soft_output; Sec II.2-II.3 --
-        complementary gap or cluster gap).
-      - When g < g_th for some window, "the syndrome data of r_strong rounds, which
-        includes the region with the small soft output", is assigned to the strong
-        decoder, with r_strong = r_com + 2*r_buf, "after the boundary conditions at both
-        ends have been determined by the weak decoder".
-      - The weak decoder "resumes its process after allocating a data region of r_strong
-        rounds to the strong decoder, and after r_com + r_buf rounds are subsequently
-        stored".
-      - No backlog (Theorem 1) iff: tau_weak < tau_gen; tau_strong <=
-        gamma_switch^-1 * (d/r_strong) * tau_gen; r_com >= ceil(tau_weak/(tau_gen -
-        tau_weak) * r_buf).
+    def should_escalate(self, job, result) -> bool:
+        """True when the weak result carries a soft output below the threshold."""
+        return (result is not None and result.soft_output is not None
+                and result.soft_output < self.g_th)
 
-    How to finish it on the existing seams:
-      1. plan_windows: like SlidingWindowScheme with (r_com, r_buf) from the code.
-      2. The cluster's _on_decode_done branch: on result.soft_output < g_th, hold the
-         window's commit, re-enqueue a DecodeJob covering r_strong rounds with
-         attempt=1, hint="strong" (the DecoderRouter sends it to the strong decoder; the
-         handoff is a weak->strong shipment, so charge the cluster's links.ws channel).
-      3. data_complete of the NEXT window: require r_com + r_buf rounds beyond the
-         escalated region (the resume rule above).
-    Until then, use SwitchingDecoder (decoders.py) for timing-level switching studies --
-    it models the same latency mix without the window interaction."""
-    def plan_windows(self, op_id: int, n_rounds: int, code: CodeModel) -> list:
-        """(stub) Would lay out (r_com, r_buf) windows; see the class docstring."""
-        raise NotImplementedError("see DoubleWindowScheme docstring for the recipe; "
-                                  "use SwitchingDecoder for timing-level studies meanwhile")
+
+class DoubleWindowScheme(SlidingWindowScheme):
+    """The double-window decoder-switching scheme of arXiv:2510.25222 (Sec III.C, Fig 12).
+
+    A fast WEAK decoder runs ordinary sliding windows and emits a soft output (its confidence)
+    each window. When that confidence is too low, the window is ALSO handed to a slow STRONG
+    decoder over `strong_rounds = commit + 2*buffer` rounds. The weak decoder never waits for
+    the strong one, so the weak stream never backs up (the scheme's defining property); only
+    the strong decoder accumulates a backlog, which Theorem 1 bounds.
+
+    Three pieces, each swappable on its own:
+      - the WHEN: a SwitchPolicy (`switch_policy`); the default ThresholdSwitch(g_th) escalates
+        on soft output < g_th. The cluster asks should_escalate(job, result) and never sees the
+        rule itself.
+      - the WHERE: decoders.SwitchingRouter sends escalated (hint="strong") jobs to the strong
+        decoder; a {"default", "strong"} unit-pool split runs the two on separate units, so the
+        strong pool's queue IS the backlog.
+      - the LAYOUT and resume rule: inherited from SlidingWindowScheme unchanged (a continuous
+        weak stream makes "resume after commit + buffer rounds" just the next window's turn).
+
+    Pass `f_weak = tau_weak / tau_gen` to enable the Eq. 7 keep-up guard in plan_windows.
+
+    Scope: the SERIAL variant (decode weak, then maybe strong), modelled at the timing/backlog
+    level -- the whole of the paper's double-window analysis. The parallel-feed variant and
+    real-decode refinement of the logical outcome are documented follow-ups."""
+
+    scheme_label = "double-window (weak sliding + strong escalation, arXiv:2510.25222)"
+
+    def __init__(self, g_th: float = None, switch_policy=None, f_weak: float = None):
+        """Configure how switching is decided and, optionally, the Eq. 7 keep-up check.
+
+        Pass exactly one of: `g_th` (the simple soft-output threshold, wrapped in a
+        ThresholdSwitch) or `switch_policy` (any object with should_escalate(job, result) --
+        see the SwitchPolicy protocol). `f_weak = tau_weak / tau_gen` enables the Eq. 7 guard."""
+        if (g_th is None) == (switch_policy is None):
+            raise ValueError("provide exactly one of g_th (a threshold) or switch_policy "
+                             "(a custom SwitchPolicy)")
+        self.switch_policy = switch_policy if switch_policy is not None else ThresholdSwitch(g_th)
+        self.g_th = getattr(self.switch_policy, "g_th", None)   # exposed for logs / config
+        if f_weak is not None and not 0 < f_weak < 1:
+            raise ValueError(f"f_weak must be in (0, 1) -- the weak decoder must be faster "
+                             f"than syndrome generation (got {f_weak})")
+        self.f_weak = f_weak
+
+    def should_escalate(self, job, result) -> bool:
+        """Delegate the switch decision to the policy (the cluster calls this per weak window)."""
+        return self.switch_policy.should_escalate(job, result)
+
+    def plan_windows(self, op_id: int, n_rounds: int, code: CodeModel) -> list[tuple[int, int, int]]:
+        """The weak decoder's sliding-window layout, after checking the Eq. 7 keep-up bound."""
+        self._require_keep_up(code.commit_rounds(), code.buffer_rounds())
+        return super().plan_windows(op_id, n_rounds, code)
+
+    def _require_keep_up(self, commit_rounds: int, buffer_rounds: int) -> None:
+        """Raise if the commit region is too small for the weak decoder to keep pace with
+        syndrome generation (Eq. 7 of arXiv:2510.25222). Skipped when f_weak is None."""
+        import math
+        if self.f_weak is None:
+            return
+        minimum = math.ceil(self.f_weak / (1 - self.f_weak) * buffer_rounds)
+        if commit_rounds < minimum:
+            raise ValueError(
+                f"DoubleWindowScheme: a commit region of {commit_rounds} rounds is too small "
+                f"for a weak decoder with tau_weak/tau_gen = {self.f_weak}. Eq. 7 of "
+                f"arXiv:2510.25222 requires commit >= {minimum} rounds (for buffer = "
+                f"{buffer_rounds}), or the weak decoder falls behind. Raise the commit rounds, "
+                f"lower f_weak, or pass f_weak=None to skip this check.")
+
+    def strong_rounds(self, window: "Window") -> int:
+        """The escalated region size r_strong = commit + 2*buffer: the suspect commit region
+        plus one buffer on each side (Fig 12 of arXiv:2510.25222)."""
+        commit_rounds = window.commit_hi - window.commit_lo + 1
+        buffer_rounds = window.buffer_hi - window.commit_hi
+        return commit_rounds + 2 * buffer_rounds

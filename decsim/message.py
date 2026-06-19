@@ -138,7 +138,9 @@ class Operation:
     consumes_magic_state: Optional[bool] = None # does this operation consume a magic state 
     patches: tuple = () # the patches involved in this operations (for routing and window planning)
     predecessors: tuple = () # operation ids that share a patch and run before this one (for routing and window planning)
-    has_successor: bool = False # does this operation have a successor that shares a patch and runs after it 
+    has_successor: bool = False # does this operation have a successor that shares a patch and runs after it
+    stream_id: Optional[Any] = None # CONTINUOUS-PATCH DECODING (3b/5-real): when set, this op is one segment of a continuous per-patch syndrome stream whose decode spans operation seams (no destructive measurement between segments). All segments of one stream share the SAME `circuit` (the continuous circuit) and a distinct stream_id; the cluster windows/decodes the stream as one sequence with ONE observable, the segments only emit rounds + carry scheduling/gating. None = a standalone operation (its own circuit + observable), the default unchanged behaviour.
+    stream_offset: Optional[int] = None # this segment's 0-based round offset within its stream's continuous circuit: its local round r maps to global round stream_offset + r. None for a standalone op.
 
     @property
     def needs_magic_state(self) -> bool :

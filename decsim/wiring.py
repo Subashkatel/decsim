@@ -62,6 +62,8 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
                   layout: Optional["LayoutModel"] = None,
                   frontend: Optional["InputFrontend"] = None,
                   config: Optional[SimConfig] = None,
+                  decode_ops: Optional[list] = None,
+                  dynamic_streams: Optional[list] = None,
                   verbose: bool = True, title: str = "") -> dict:
     """Assemble the standard pipeline (engine, components, chip), run it, and return results plus any metrics. Every collaborator is optional and swappable."""
     engine = Engine(verbose=verbose)
@@ -173,11 +175,22 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
     # default WindowPlanner is built from the cluster's own scheme/layout/rounds policy.
     if planner is None:
         planner = WindowPlanner(cluster.scheme, cluster.layout, cluster.rounds_policy)
-    for op in ops:
+    # DECODE UNITS vs SCHEDULING UNITS (3b/5-real): normally these are the same `ops`. For a
+    # CONTINUOUS STREAM, the decode unit is the synthetic stream op (windowed over the whole
+    # continuous circuit) while the chip schedules the segment ops (which emit rounds tagged --
+    # by the device -- to the stream). decode_ops names the decode units; the chip always loads
+    # the workload `ops`.
+    planning_ops = decode_ops if decode_ops is not None else ops
+    for op in planning_ops:
         cluster.register_op(op)
-    plan = planner.plan(ops)
+    plan = planner.plan(planning_ops)
     orchestrator.announce_plan(plan)            # Orchestrator: "sending ... to the cluster"
     cluster.load_execution_plan(plan)           # DecoderClstr: "received execution plan ..."
+
+    # DYNAMIC STREAMS (5-real): decode units whose windows are built at RUNTIME (round-driven), not
+    # in the compile-time plan above. Registered after the plan so the cluster knows its scheme/code.
+    for s in (dynamic_streams or []):
+        cluster.register_dynamic_stream(s, code)
 
     chip.load(ops)
     engine.run()

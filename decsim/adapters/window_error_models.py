@@ -213,18 +213,42 @@ def build_window_error_models(circuit, plan: list, num_observables: Optional[int
     models: list = []
     committed_elsewhere: set = set()               # fault indices owned by past windows
     last = len(plan) - 1
-    for k, (commit_lo, commit_hi, buffer_hi) in enumerate(plan):
-        # rows: this window's detectors (the last window keeps everything to the end)
+    for k, win in enumerate(plan):
+        # A plan entry is (commit_lo, commit_hi, buffer_hi) for a TRAILING-buffer-only window,
+        # or (buffer_lo, commit_lo, commit_hi, buffer_hi) when the window ALSO has a LEADING
+        # buffer -- look-ahead rounds BEFORE the commit region (the parallel A/B / two-sided
+        # buffer scheme, Skoric arXiv:2209.08552 Sec I.C: an A window's past time boundary is
+        # rough). buffer_lo defaults to commit_lo, so 3-tuple callers and every trailing-only
+        # window are byte-identical to before.
+        if len(win) == 4:
+            buffer_lo, commit_lo, commit_hi, buffer_hi = win
+        else:
+            commit_lo, commit_hi, buffer_hi = win
+            buffer_lo = commit_lo
+        # rows: this window's detectors, from its first (leading-buffer or commit) round; the
+        # last window keeps everything to the end (the experiment's true closing boundary).
         if k == last:
-            rows = sorted(d for d, r in round_of.items() if r >= commit_lo)
+            rows = sorted(d for d, r in round_of.items() if r >= buffer_lo)
         else:
             rows = sorted(d for d, r in round_of.items()
-                          if commit_lo <= r <= buffer_hi)
+                          if buffer_lo <= r <= buffer_hi)
         row_index = {d: i for i, d in enumerate(rows)}
-        # columns: faults touching the rows, not committed by an earlier window
-        cols = [f for f in range(len(det_sets))
-                if f not in committed_elsewhere
-                and any(d in row_index for d in det_sets[f])]
+        # leading-buffer rounds (strictly before the commit region): their detectors were
+        # already committed by earlier windows, but a handed-forward artificial defect can land
+        # on them, so they need an incident edge to match it to. Empty for a trailing-only window.
+        lead_rows = {d for d in rows if round_of[d] < commit_lo}
+        # columns: uncommitted faults touching the rows (as before), PLUS -- only for a window
+        # with a leading buffer -- already-committed faults reaching a leading-buffer row,
+        # included as UNOWNED boundary edges (the rough past boundary). No leading buffer => no
+        # extra columns => identical matrices to before.
+        cols: list = []
+        for f in range(len(det_sets)):
+            if not any(d in row_index for d in det_sets[f]):
+                continue
+            if f not in committed_elsewhere:
+                cols.append(f)
+            elif lead_rows and any(d in lead_rows for d in det_sets[f]):
+                cols.append(f)                     # rough past-boundary edge (not owned here)
         check = np.zeros((len(rows), len(cols)), dtype=np.uint8)
         obs = np.zeros((n_obs, len(cols)), dtype=np.uint8)
         owned = np.zeros(len(cols), dtype=bool)
@@ -235,10 +259,15 @@ def build_window_error_models(circuit, plan: list, num_observables: Optional[int
                     check[row_index[d], j] = 1
             for o in obs_sets[f]:
                 obs[o, j] = 1
-            # ownership: the fault touches this window's commit region (any detector
-            # at-or-before commit_hi -- earlier windows already took theirs), or this
-            # is the last window (everything remaining must be decided)
-            if k == last or any(r <= commit_hi for r in fault_rounds[f]):
+            # ownership: a fault is committed by the FIRST window whose COMMIT REGION it
+            # touches (the range commit_lo..commit_hi -- a leading buffer must NOT claim faults
+            # belonging to an earlier commit), or by the last window (everything remaining).
+            # Already-committed faults (the boundary edges above) are never re-owned -- every
+            # fault is owned exactly once. For a trailing-only window this range test is
+            # equivalent to the old prefix test (commit regions tile, so an in-cols fault always
+            # has a detector at-or-after commit_lo).
+            if f not in committed_elsewhere and (
+                    k == last or any(commit_lo <= r <= commit_hi for r in fault_rounds[f])):
                 owned[j] = True
                 committed_elsewhere.add(f)
                 beyond = tuple(d for d in det_sets[f] if round_of[d] > commit_hi)
@@ -269,6 +298,119 @@ def build_window_error_models(circuit, plan: list, num_observables: Optional[int
             obs=obs, owned=owned, future_flips=future_flips,
             defect_positions=defect_positions, **h_fields))
     return models
+
+
+class WindowSlicer:
+    """Per-window slicing of ONE circuit's detector error model, one window AT A TIME. Built once
+    from a circuit; slice_window() mints one WindowErrorModel per call, threading
+    committed_elsewhere so every fault is owned by exactly one window -- regardless of whether the
+    windows are sliced all at once (as build_window_error_models does) or INCREMENTALLY as a
+    continuous syndrome stream grows. The incremental mode is the runtime round-driven WindowBuilder
+    of SWIPER (arXiv:2412.05115 Sec 2.4 / Sec 5.1, Fig. 9): a window is cut and decoded as soon as
+    its commit+buffer rounds exist, so an idle stretch of any (runtime-determined) length is
+    absorbed by minting more windows -- no compile-time plan.
+
+    slice_window's per-window math is byte-identical to the loop body of build_window_error_models
+    (tests/test_window_slicer.py pins this), so the static and runtime builders agree exactly. The
+    final, stream-closing window is sliced with is_last=True (Tan arXiv:2209.09219's closed final
+    time boundary: it keeps every remaining detector); every interior window uses is_last=False
+    (open boundary, defects handed forward)."""
+    def __init__(self, circuit, num_observables: Optional[int] = None, *,
+                 decompose_errors: bool = True, detector_rounds: Optional[dict] = None,
+                 belief_matching: bool = False):
+        """Precompute the circuit's fault list, per-fault rounds, and detector positions (the
+        compile-time data shared by every window); start with no fault committed."""
+        import numpy as np
+        self.belief_matching = belief_matching
+        dem = circuit.detector_error_model(decompose_errors=decompose_errors)
+        if belief_matching:
+            (self.det_sets, self.obs_sets, self.priors,
+             self.h_det_sets, self.h_priors, self.H2E) = detector_error_model_to_faults_bm(dem)
+        else:
+            self.det_sets, self.obs_sets, self.priors = detector_error_model_to_faults(dem)
+            self.h_det_sets = self.h_priors = self.H2E = None
+        self.n_obs = num_observables if num_observables is not None else circuit.num_observables
+        if detector_rounds is not None:
+            round_of = dict(detector_rounds)
+        else:
+            coords = circuit.get_detector_coordinates()
+            coordless = sum(1 for c in coords.values() if not c)
+            if coordless:
+                raise ValueError(
+                    f"{coordless} detectors carry no coordinates; pass detector_rounds "
+                    "(global detector id -> 1-based round) explicitly")
+            round_of = {det: int(c[-1]) + 1 for det, c in coords.items()}
+        self.round_of = round_of
+        self.fault_rounds = [tuple(round_of[d] for d in dets) for dets in self.det_sets]
+        by_round: dict = {}
+        for det in sorted(round_of):
+            by_round.setdefault(round_of[det], []).append(det)
+        self.pos_of = {det: i for dets in by_round.values() for i, det in enumerate(dets)}
+        self.committed_elsewhere: set = set()
+
+    def slice_window(self, buffer_lo: int, commit_lo: int, commit_hi: int, buffer_hi: int,
+                     *, is_last: bool) -> WindowErrorModel:
+        """Mint one WindowErrorModel with this geometry (rounds 1-based). is_last keeps every
+        remaining detector (the closed final boundary); otherwise rows span buffer_lo..buffer_hi
+        with open interior boundaries. Mutates committed_elsewhere so each fault is owned once."""
+        import numpy as np
+        det_sets, obs_sets, priors = self.det_sets, self.obs_sets, self.priors
+        round_of, fault_rounds, pos_of = self.round_of, self.fault_rounds, self.pos_of
+        committed_elsewhere = self.committed_elsewhere
+        if is_last:
+            rows = sorted(d for d, r in round_of.items() if r >= buffer_lo)
+        else:
+            rows = sorted(d for d, r in round_of.items() if buffer_lo <= r <= buffer_hi)
+        row_index = {d: i for i, d in enumerate(rows)}
+        lead_rows = {d for d in rows if round_of[d] < commit_lo}
+        cols: list = []
+        for f in range(len(det_sets)):
+            if not any(d in row_index for d in det_sets[f]):
+                continue
+            if f not in committed_elsewhere:
+                cols.append(f)
+            elif lead_rows and any(d in lead_rows for d in det_sets[f]):
+                cols.append(f)
+        check = np.zeros((len(rows), len(cols)), dtype=np.uint8)
+        obs = np.zeros((self.n_obs, len(cols)), dtype=np.uint8)
+        owned = np.zeros(len(cols), dtype=bool)
+        future_flips: dict = {}
+        for j, f in enumerate(cols):
+            for d in det_sets[f]:
+                if d in row_index:
+                    check[row_index[d], j] = 1
+            for o in obs_sets[f]:
+                obs[o, j] = 1
+            if f not in committed_elsewhere and (
+                    is_last or any(commit_lo <= r <= commit_hi for r in fault_rounds[f])):
+                owned[j] = True
+                committed_elsewhere.add(f)
+                beyond = tuple(d for d in det_sets[f] if round_of[d] > commit_hi)
+                if beyond and not is_last:
+                    future_flips[j] = beyond
+        defect_positions = {det: (round_of[det], pos_of[det])
+                            for flips in future_flips.values() for det in flips}
+        h_fields: dict = {}
+        if self.belief_matching:
+            H2E, h_det_sets, h_priors = self.H2E, self.h_det_sets, self.h_priors
+            h_cols = sorted({h for f in cols for h in np.nonzero(H2E[f])[0]})
+            h_index = {h: i for i, h in enumerate(h_cols)}
+            h_check = np.zeros((len(rows), len(h_cols)), dtype=np.uint8)
+            for h in h_cols:
+                for d in h_det_sets[h]:
+                    if d in row_index:
+                        h_check[row_index[d], h_index[h]] = 1
+            h2e = np.zeros((len(cols), len(h_cols)), dtype=np.uint8)
+            for j, f in enumerate(cols):
+                for h in np.nonzero(H2E[f])[0]:
+                    h2e[j, h_index[h]] = 1
+            h_fields = dict(h_check=h_check,
+                            h_priors=np.array([h_priors[h] for h in h_cols]), h2e=h2e)
+        return WindowErrorModel(
+            detector_ids=tuple(rows), commit_hi=commit_hi,
+            check=check, priors=np.array([priors[f] for f in cols]),
+            obs=obs, owned=owned, future_flips=future_flips,
+            defect_positions=defect_positions, **h_fields)
 
 
 def decode_windowed(window_models: list, detection_events, decode_window) -> "object":

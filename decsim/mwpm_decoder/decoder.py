@@ -32,7 +32,14 @@ class PyMatchingDecoder:
     def __init__(self, latency_model: Decoder):
         """Reuse a latency model for timing; pymatching imports lazily on first decode."""
         self.latency_model = latency_model
-        self._matchings: dict = {}     # id(model) -> cached pymatching.Matching
+        # id(model) -> (weakref(model), pymatching.Matching). The weakref guards against
+        # id() REUSE: each run builds fresh WindowErrorModels, and CPython recycles a freed
+        # model's id() for a new one, so a plain id()-keyed cache would hand back a stale
+        # matcher (wrong detectors -- silently wrong, or a shape error) when ONE decoder is
+        # reused across runs (e.g. the multi-shot LER harness). The weakref also avoids
+        # pinning every model a long-lived decoder ever saw.
+        self._matchings: dict = {}
+
 
     def latency(self, job: DecodeJob) -> int:
         """Timing comes from the wrapped latency model."""
@@ -43,13 +50,15 @@ class PyMatchingDecoder:
         model = job.dem
         if model is None:                        # timing-only job: no real data to decode
             return DecodeResult(job.op_id, job.window_id)
+        import weakref
         import numpy as np
         import pymatching
-        m = self._matchings.get(id(model))
-        if m is None:
+        entry = self._matchings.get(id(model))
+        m = entry[1] if entry is not None and entry[0]() is model else None
+        if m is None:                            # cache miss, or a recycled id() (stale entry)
             weights = np.log((1 - model.priors) / model.priors)
             m = pymatching.Matching.from_check_matrix(model.check, weights=weights)
-            self._matchings[id(model)] = m
+            self._matchings[id(model)] = (weakref.ref(model), m)
         syndrome = np.concatenate(
             [np.asarray(p.bits, dtype=np.uint8) for p in job.payloads
              if p.bits is not None]) if job.payloads else np.zeros(0, dtype=np.uint8)

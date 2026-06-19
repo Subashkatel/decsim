@@ -174,6 +174,12 @@ class DecoderCluster:
         #                                           for ops that carry a stim circuit (real decoding)
         self.total_windows = 0
         self._windows_built = False
+        # DYNAMIC STREAMS (5-real, runtime window insertion): stream_id -> builder state. Their
+        # windows are NOT in the compile-time plan; grow_stream creates them as rounds arrive (the
+        # SWIPER round-driven WindowBuilder), seal_stream closes them. _unsealed_streams gates the
+        # completion checks so a growing stream's window count is only "final" once sealed.
+        self._dyn_streams: dict = {}
+        self._unsealed_streams: set = set()
         self._plan_spatial = None                 # per-op decode sizes from the loaded plan
         self.ready: list[DecodeJob] = []          # THE ready queue (= the default pool's)
         self.pool_ready: dict[str, list] = {p: [] for p in self.unit_totals
@@ -186,6 +192,7 @@ class DecoderCluster:
         self.switching = switching
         self.strong_needed = 0        # windows the weak decoder was unsure about (the strong decoder was needed)
         self.strong_cancelled = 0     # strong re-decodes cancelled early ("run both at once", weak turned out confident)
+        self.strong_running_rounds = 0  # rounds in the strong batch currently being decoded (bulk_strong mode); read by StrongBacklogRounds
         self._running_strong_decodes: dict[tuple, DecodeJob] = {}   # window key -> its strong re-decode job
         # Dependency INVERSION (no back-reference to the chip): the cluster -- the paper's
         # "workload manager" (arXiv:2511.10633 Sec III) -- never reaches into the chip or factory.
@@ -210,6 +217,92 @@ class DecoderCluster:
             # the GATING op's decode result releases this op: its windows sit on the
             # reaction path (used by the DeadlinePolicy to prioritize them).
             self._gating_ops.add(op.gated_by)
+
+    # ---- DYNAMIC STREAMS: runtime window insertion (5-real) ------------------
+    def register_dynamic_stream(self, stream_op: "Operation", code) -> None:
+        """Register a continuous stream whose windows are built AT RUNTIME rather than from the
+        compile-time plan (SWIPER arXiv:2412.05115 Sec 2.4/5.1, Fig. 9: windows cut from rounds as
+        they arrive), so an idle stretch of length unknown at plan time is absorbed by creating more
+        windows. The stream gets NO windows now; grow_stream creates them as rounds arrive,
+        seal_stream closes it. Decode/commit/boundary handling is identical to a planned op."""
+        from .adapters.window_error_models import WindowSlicer
+        sid = stream_op.id
+        self.ops[sid] = stream_op
+        self.rounds_arrived.setdefault(sid, 0)
+        self.memory_rounds.setdefault(sid, 0)
+        self.payload_store.setdefault(sid, {})
+        self.nwin[sid] = 0
+        self.op_windows[sid] = []
+        self.successors.setdefault(sid, [])
+        R = self.rounds_for(stream_op)            # the stream circuit's length (its window capacity)
+        coords = stream_op.circuit.get_detector_coordinates()
+        folded = {det: min(int(c[-1]) + 1, R) for det, c in coords.items()}
+        self._dyn_streams[sid] = {
+            "slicer": WindowSlicer(stream_op.circuit, detector_rounds=folded),
+            "commit": code.commit_rounds(), "buffer": code.buffer_rounds(),
+            "next_k": 0, "sealed": False, "R_cap": R}
+        self._unsealed_streams.add(sid)
+
+    def grow_stream(self, sid) -> None:
+        """Mint every window whose COMMIT region has begun (commit_lo <= rounds arrived). Eager on
+        purpose: a window created at its commit_lo exists before its predecessor's buffer completes B
+        rounds later, so the sequential dependency chain (and the artificial-defect handoff) is wired
+        BEFORE any window commits. The decode still waits for the window's full data + its boundary via
+        _check_window (SWIPER arXiv:2412.05115 Sec 3.2: a window decodes once its rounds and its
+        dependency are present). For a sliding stream the final window needs no special is_last pass:
+        its commit_hi = (k+1)*C runs to/past the realized end, so it keeps every remaining detector and
+        owns every remaining fault (equivalent to the closed final boundary)."""
+        st = self._dyn_streams[sid]
+        if st["sealed"]:
+            return
+        C, B = st["commit"], st["buffer"]
+        arrived = self.rounds_arrived[sid]
+        while st["next_k"] * C + 1 <= arrived:            # window k's commit region has started
+            k = st["next_k"]
+            self._create_window(sid, k, k * C + 1, (k + 1) * C, (k + 1) * C + B, is_last=False)
+            st["next_k"] += 1
+
+    def seal_stream(self, sid, total_rounds: int) -> None:
+        """Close the stream at its realized length: ensure every window up to total_rounds is created
+        (eager grow normally has already), then mark it sealed so the completion checks may fire."""
+        st = self._dyn_streams[sid]
+        if st["sealed"]:
+            return
+        self.grow_stream(sid)
+        st["sealed"] = True
+        self._unsealed_streams.discard(sid)
+
+    def _create_window(self, sid, k, commit_lo, commit_hi, buffer_hi, *, is_last) -> None:
+        """Build window k of a dynamic stream and wire it into the live plan exactly as the static
+        planner would: same Window fields, the sequential dependency on window k-1, its sliced
+        decoding problem (via the stream's WindowSlicer, byte-identical to build_window_error_models),
+        and its round refcounts; then check whether it can decode now."""
+        from .message import Window
+        buffer_lo = commit_lo
+        w = Window(op_id=sid, k=k, commit_lo=commit_lo, commit_hi=commit_hi, buffer_hi=buffer_hi,
+                   n_rounds=buffer_hi - buffer_lo + 1, buffer_lo=buffer_lo)
+        if k > 0:
+            w.deps.append((sid, k - 1))
+            w.deps_remaining = 1
+            self.windows[(sid, k - 1)].dependents.append((sid, k))
+        self.windows[(sid, k)] = w
+        self.op_windows[sid].append(k)
+        self.nwin[sid] += 1
+        self.total_windows += 1
+        st = self._dyn_streams[sid]
+        self.window_models[(sid, k)] = st["slicer"].slice_window(
+            buffer_lo, commit_lo, commit_hi, buffer_hi, is_last=is_last)
+        R_op = self.rounds_for(self.ops[sid])
+        reads = [(sid, r) for r in range(w.start_round, min(w.buffer_hi, R_op) + 1)]
+        self._read_sets[(sid, k)] = reads
+        for rk in reads:
+            self._round_refs[rk] = self._round_refs.get(rk, 0) + 1
+        self._check_window((sid, k))
+
+    def _stream_sealed(self, op_id) -> bool:
+        """True unless op_id is a dynamic stream still waiting for more windows."""
+        st = self._dyn_streams.get(op_id)
+        return st is None or st["sealed"]
 
     @property
     def free_units(self) -> int:
@@ -311,11 +404,15 @@ class DecoderCluster:
         layers past the chip's last round fold into the last round (round = min(t+1, R)),
         so a window's concatenated payload bits equal its model's rows exactly.
 
-        Scope (documented limits, loud where it matters): windows with a LEADING buffer
-        (the parallel A/B scheme) are skipped -- their jobs keep dem=None and decode as
-        timing-only, as before. Idle-round growth (the naive scheme's
-        prepend_idle_rounds) happens after planning; those ops are skipped too since
-        their window geometry no longer matches the circuit."""
+        Two-sided buffers: a window with a LEADING buffer (the parallel A/B scheme) is sliced
+        too -- its plan entry carries buffer_lo (a 4-tuple), so build_window_error_models opens
+        its rough past boundary; the cluster's real dependency graph hands each B window both
+        neighbouring A windows' artificial defects (which the single-forward-pass offline
+        decode_windowed cannot, so the ENGINE is the A/B reference, not decode_windowed).
+
+        Scope (documented limits): idle-round growth (the naive scheme's prepend_idle_rounds)
+        happens after planning and is timing-only anyway (those ops carry no circuit). Cross-op
+        buffers that spill into a successor op still slice from THIS op's circuit only."""
         # A belief-matching (or other BP-reweighting) decoder needs the per-window hyperedge
         # graph too; it advertises that via needs_hyperedges. Build the extra matrices iff some
         # routed decoder wants them -- otherwise the slice is byte-identical to before.
@@ -326,13 +423,16 @@ class DecoderCluster:
                 continue
             keys = [(op_id, k) for k in self.op_windows.get(op_id, [])]
             wins = [self.windows[key] for key in keys]
-            if not wins or any(w.buffer_lo not in (None, w.commit_lo) for w in wins):
-                continue                       # A/B leading buffers: timing-only for now
+            if not wins:
+                continue
             from .adapters.window_error_models import build_window_error_models
             R = self.rounds_for(op)
             coords = op.circuit.get_detector_coordinates()
             folded = {det: min(int(c[-1]) + 1, R) for det, c in coords.items()}
-            plan = [(w.commit_lo, w.commit_hi, min(w.buffer_hi, R)) for w in wins]
+            # 4-tuple (buffer_lo, commit_lo, commit_hi, buffer_hi); start_round = buffer_lo when
+            # the window has a leading buffer (A/B), else commit_lo (trailing-only / sliding ==
+            # byte-identical to the old 3-tuple).
+            plan = [(w.start_round, w.commit_lo, w.commit_hi, min(w.buffer_hi, R)) for w in wins]
             models = build_window_error_models(op.circuit, plan,
                                                detector_rounds=folded,
                                                belief_matching=want_bm)
@@ -409,6 +509,14 @@ class DecoderCluster:
         self.engine.log("DecoderClstr",
                         f"round {payload.round_index} of {op.name} arrived "
                         f"(op now has rounds 1..{self.rounds_arrived[op.id]})")
+        # DYNAMIC STREAM: create any window whose rounds are now present, and -- once the stream's full
+        # length has arrived -- seal it (the round-driven WindowBuilder; the idle length need not be
+        # known ahead of time).
+        if op.id in self._dyn_streams:
+            self.grow_stream(op.id)
+            st = self._dyn_streams[op.id]
+            if not st["sealed"] and self.rounds_arrived[op.id] >= st["R_cap"]:
+                self.seal_stream(op.id, st["R_cap"])
         for k in range(self.nwin[op.id]):
             self._check_window((op.id, k))
         # this op's early rounds also feed the BUFFER overflow of its predecessors' last windows
@@ -648,13 +756,41 @@ class DecoderCluster:
             self._try_dispatch()
         self.strong_cancelled += 1
 
+    def _merge_strong_batch(self, queue: list) -> DecodeJob:
+        """Drain every queued strong re-decode and fuse them into ONE batch job whose round count is
+        their sum (bulk_strong, arXiv:2510.25222 Sec. IV: "the strong decoder processes all the
+        assigned data at once"). The batch carries every member's window key (merged_keys) so they
+        are all cleaned up together when it finishes. A single queued job is returned as-is (with a
+        one-element merged_keys). This is what makes a backed-up strong decoder reprocess its whole
+        accumulated backlog in one shot, so the strong backlog snowballs (Fig. 13)."""
+        jobs = [self.scheduler.pop(queue) for _ in range(len(queue))]
+        keys = [j.strong_decode_for for j in jobs if j.strong_decode_for is not None]
+        if len(jobs) == 1:
+            jobs[0].merged_keys = keys
+            return jobs[0]
+        total = sum(j.n_rounds for j in jobs)
+        batch = DecodeJob(op_id=-1, window_id=0, n_rounds=total,
+                          ready_time=min(j.ready_time for j in jobs), deadline=self.engine.now,
+                          on_done=lambda: None, label=f"strong-batch x{len(jobs)} ({total}r)",
+                          hint="strong", spatial_nodes=jobs[0].spatial_nodes,
+                          strong_decode_for=keys[0] if keys else None)
+        batch.merged_keys = keys
+        for k in keys:                          # the batch now IS each member's running strong job
+            self._running_strong_decodes[k] = batch
+        return batch
+
     def _try_dispatch(self) -> None:
         """While a pool has a free unit and a ready job, dispatch. Pools are independent:
         a busy strong pool never blocks the default queue (and vice versa)."""
+        bulk = self.switching is not None and getattr(self.switching, "bulk_strong", False)
         for pool in self.unit_totals:
             queue = self._queue_for(pool)
             while self.pool_free[pool] > 0 and queue:
-                job = self.scheduler.pop(queue)
+                if bulk and pool != "default":               # batch the whole strong backlog at once
+                    job = self._merge_strong_batch(queue)
+                    self.strong_running_rounds = job.n_rounds
+                else:
+                    job = self.scheduler.pop(queue)
                 job.pool = pool                              # so done() frees THIS pool
                 self.pool_free[pool] -= 1
                 if job.op_id >= 0:                           # window job: stamp dispatch
@@ -673,8 +809,10 @@ class DecoderCluster:
         if job.cancelled:                            # a strong re-decode that was cancelled early:
             return                                   # its unit was already freed, so do nothing here
         self.pool_free[job.pool] += 1
-        if job.strong_decode_for is not None:        # a strong re-decode finished -> forget it
-            self._running_strong_decodes.pop(job.strong_decode_for, None)
+        if job.strong_decode_for is not None:        # a strong re-decode (or bulk batch) finished -> forget it
+            for k in getattr(job, "merged_keys", None) or [job.strong_decode_for]:
+                self._running_strong_decodes.pop(k, None)
+            self.strong_running_rounds = max(0, self.strong_running_rounds - job.n_rounds)
         if job.on_done is not None:                  # factory / idle / strong re-decode
             self.engine.log("DecoderClstr",
                             f"DECODE DONE {job.label} ({self._pool_tag(job.pool)}units "
@@ -750,7 +888,7 @@ class DecoderCluster:
         # guarantees that window finishes last; the parallel A/B scheme's windows commit
         # out of order under contention.) For the sequential default this fires at the
         # exact same event as before.
-        if self._committed_per_op[op_id] == self.nwin[op_id]:
+        if self._committed_per_op[op_id] == self.nwin[op_id] and self._stream_sealed(op_id):
             self.engine.schedule(self.links.do.cost(),
                                  lambda: self._deliver_to_orchestrator(op),
                                  label=f"result->orch({op.name})")
@@ -764,7 +902,8 @@ class DecoderCluster:
         self._try_dispatch()
         # WORKLOAD COMPLETE: the last window has committed. The cluster does not know about
         # factories or chips -- it just fires the lifecycle callback the wiring installed.
-        if len(self.committed_windows) == self.total_windows and self.on_workload_complete is not None:
+        if (len(self.committed_windows) == self.total_windows and not self._unsealed_streams
+                and self.on_workload_complete is not None):
             self.on_workload_complete()
  
     def _store_boundary(self, w: Window, src_op_id: int, defects: Optional[dict]) -> None:

@@ -31,20 +31,35 @@ class StimDevice:
         self._dets: dict = {}
         # the TRUE observable values of each sample -- not consumed by the timing
         # pipeline; retained for accuracy studies (compare against the decoder's
-        # logical_value, e.g. the LogicalErrorRate metric stub in metrics.py).
+        # logical_value, e.g. the LogicalErrorRate metric).
         self._truth: dict = {}
         self._by_round: dict = {}
 
+    @staticmethod
+    def _key(op: Operation):
+        """Sample key: the STREAM id for a continuous-stream segment (one sample shared by
+        every segment of the stream), else the op id (a standalone memory experiment)."""
+        return op.stream_id if op.stream_id is not None else op.id
+
     def begin_operation(self, op: Operation) -> None:
-        """Sample one fresh shot of this operation's stim circuit."""
-        sampler = self._samplers.get(op.id)
+        """Sample one fresh shot. For a CONTINUOUS STREAM (op.stream_id set) the shared circuit
+        is sampled ONCE per shot -- when the first segment (stream_offset == 0) begins -- and the
+        other segments reuse that one sample, so the stream decodes as a single continuous record
+        with one observable. Across shots the offset-0 segment re-samples, giving fresh shots."""
+        key = self._key(op)
+        if op.stream_id is not None and op.stream_offset:
+            # a later stream segment: reuse this shot's stream sample (already drawn by segment 0)
+            self._dets[op.id] = self._dets[key]
+            self._truth[op.id] = self._truth[key]
+            return
+        sampler = self._samplers.get(key)
         if sampler is None:
             sampler = op.circuit.compile_detector_sampler(seed=self._seed) \
                 if self._seed is not None else op.circuit.compile_detector_sampler()
-            self._samplers[op.id] = sampler
+            self._samplers[key] = sampler
         dets, obs = sampler.sample(shots=1, separate_observables=True)
-        self._dets[op.id] = dets[0]
-        self._truth[op.id] = obs[0]
+        self._dets[key] = dets[0]
+        self._truth[key] = obs[0]
         coords = op.circuit.get_detector_coordinates()
         max_t = max((int(c[-1]) for c in coords.values()), default=0)
         R = self._rounds_for(op) if self._rounds_for is not None else max_t
@@ -54,11 +69,21 @@ class StimDevice:
             buckets.setdefault(min(t + 1, R), []).append(det_index)
         for idx in buckets.values():
             idx.sort()                     # ascending detector id within each round
-        self._by_round[op.id] = buckets
+        self._by_round[key] = buckets
+        # mirror access by op id so device._dets[op_id] / _truth[op_id] work for any segment
+        self._dets[op.id] = self._dets[key]
+        self._truth[op.id] = self._truth[key]
 
     def round_payload(self, op: Operation, round_index: int) -> SyndromePayload:
-        """Emit this round's REAL detection-event bits."""
-        idx = self._by_round[op.id].get(round_index, [])
-        bits = self._dets[op.id][idx]
+        """Emit this round's REAL detection-event bits. For a stream segment, the op-local round
+        maps to the continuous circuit's GLOBAL round (stream_offset + round), and the payload is
+        TAGGED to the stream (operation_id = stream_id, round = global) so the cluster files it
+        into the one continuous decode record. A standalone op tags itself with its own id and
+        round, unchanged."""
+        key = self._key(op)
+        global_round = round_index + (op.stream_offset or 0)
+        idx = self._by_round[key].get(global_round, [])
+        bits = self._dets[key][idx]
         patch = op.patches[0] if op.patches else (op.qubits[0] if op.qubits else 0)
-        return SyndromePayload(op.id, patch, round_index, bits=bits)
+        target = op.stream_id if op.stream_id is not None else op.id
+        return SyndromePayload(target, patch, global_round, bits=bits)

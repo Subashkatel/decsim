@@ -14,5 +14,6 @@ well-tested substrate, so decsim uses them directly for code/noise generation.
 Requires the optional ``stim`` dependency:  pip install decsim[stim]
 """
 from .surface_code import generate_circuit
+from .noise import NoiseModel
 
-__all__ = ["generate_circuit"]
+__all__ = ["generate_circuit", "NoiseModel"]

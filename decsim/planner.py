@@ -39,6 +39,23 @@ class FixedRounds:
         """Return the fixed round count (ignores op and code)."""
         return self.n
 
+class PerOpRounds:
+    """Explicit per-operation round counts from a {op_id: rounds} map, with a fallback policy
+    for any op not in the map. Used for CONTINUOUS STREAMS (3b/5-real): the synthetic stream op
+    runs for the whole continuous circuit (R_total) while each scheduling segment runs for its
+    own length, so the chip emits each segment's rounds and the cluster windows the full stream."""
+    def __init__(self, rounds_by_op: dict, fallback=None):
+        """Hold the {op_id: rounds} map and a fallback RoundsPolicy (default CodeRounds())."""
+        self.rounds_by_op = dict(rounds_by_op)
+        self.fallback = fallback if fallback is not None else CodeRounds()
+
+    def rounds_for(self, op, code) -> int:
+        """The mapped round count for this op, else the fallback policy's."""
+        if op.id in self.rounds_by_op:
+            return int(self.rounds_by_op[op.id])
+        return self.fallback.rounds_for(op, code)
+
+
 class CodeRounds:
     """Per-code rounds: each operation runs for its code's rounds_per_op() (the distance by
     default, a code may have more or fewer), optionally scaled."""

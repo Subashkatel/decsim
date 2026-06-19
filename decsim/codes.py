@@ -26,6 +26,11 @@ class SurfaceCodeModel:
     round_us: Optional[float] = None  # per-code syndrome-round time (us); None = chip's global cadence. Lets heterogeneous zones run different physical cycle times (e.g. ~0.5 us superconducting stabilization rounds, arXiv:2411.10406 Sec I.2.1, vs 1 us/cycle, arXiv:2510.21600)
     commit_rounds_override: Optional[int] = None  # commit rounds per decode window; None = d
     buffer_rounds_override: Optional[int] = None  # look-ahead buffer rounds per window; None = d
+    # Analytic memory-error model (arXiv:2511.10633 Eq. 2/5): Pmem(d, r) = mu*d*r*Lambda^(-(d+1)/2).
+    # Defaults are the paper's "as reported previously" fit (mu=0.019(4), Lambda=9.3(3)); set them
+    # to the surface lattice-surgery fit (mu=0.021, Lambda=10.7) for a surgery-consistent budget.
+    mu_mem: float = 0.019    # memory-error prefactor mu
+    lam_mem: float = 9.3     # error-suppression factor Lambda
 
     def __post_init__(self):
         """Reject non-positive commit/buffer overrides (None means 'use d')."""
@@ -60,6 +65,15 @@ class SurfaceCodeModel:
     def buffer_rounds(self) -> int:
         """Look-ahead buffer rounds per window (buffer_rounds_override, else d)."""
         return self.buffer_rounds_override if self.buffer_rounds_override is not None else self.d
+
+    def memory_error(self, rounds: int) -> float:
+        """Analytic logical error from `rounds` idle (memory) syndrome rounds on this patch:
+        Pmem(d, r) = mu*d*r*Lambda^(-(d+1)/2) (arXiv:2511.10633 Eq. 5). LINEAR in r -- the
+        closed-form memory-error model the utility-scale and decoder-switching papers use for
+        their error budgets (they do not stim-sample the idle stretch). With the default
+        mu_mem/lam_mem, memory_error(d) reproduces their per-logical-cycle rate Pmem(d) =
+        mu*d^2*Lambda^(-(d+1)/2) (Eq. 2: Pmem(3)=1.98e-3, Pmem(5)=5.9e-4, ...)."""
+        return self.mu_mem * self.d * rounds * self.lam_mem ** (-(self.d + 1) / 2)
 
     def spatial_nodes(self, num_patches: int) -> int:
         """Decoding-graph node count for this many patches (drives decode latency)."""

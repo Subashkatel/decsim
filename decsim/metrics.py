@@ -257,6 +257,48 @@ class StrongDecoderBacklog:
                 "strong_needed": getattr(self.cluster, "strong_needed", 0)}
 
 
+class StrongBacklogRounds:
+    """The strong decoder's backlog in ROUNDS (not jobs), for the bulk_strong double-window scheme
+    (arXiv:2510.25222 Sec. IV / Fig. 13). Under bulk decoding each strong batch covers a different
+    number of rounds, so the rounds-backlog is the queued re-decode rounds still waiting plus the
+    rounds in the batch currently being decoded -- exactly what snowballs past the Eq. 8 boundary.
+
+    Read-only: samples the cluster's strong-pool queue and its strong_running_rounds counter."""
+    name = "strong_backlog_rounds"
+
+    def __init__(self, cluster, pool: str = "strong"):
+        self.cluster = cluster
+        self.pool = pool
+        self.peak_rounds = 0
+        self._t = 0
+        self._area = 0.0
+        self._last = 0
+        self.trace = []          # (time_ticks, outstanding_strong_rounds) step samples
+
+    def _rounds(self) -> int:
+        """Strong rounds not yet decoded: every job still queued on the strong pool plus the rounds
+        in the batch on the unit right now (cluster.strong_running_rounds, set at bulk dispatch)."""
+        queued = sum(j.n_rounds for j in self.cluster.pool_ready.get(self.pool, []))
+        return queued + getattr(self.cluster, "strong_running_rounds", 0)
+
+    def observe(self, engine: "Engine") -> None:
+        self._area += self._last * (engine.now - self._t)
+        self._t = engine.now
+        self._last = self._rounds()
+        self.peak_rounds = max(self.peak_rounds, self._last)
+        if not self.trace or self.trace[-1][1] != self._last:
+            self.trace.append((engine.now, self._last))
+
+    def rows(self) -> list:
+        """The strong-backlog-in-rounds time series, one record per change: {t, rounds}."""
+        return [{"t": t, "rounds": r} for t, r in self.trace]
+
+    def result(self) -> dict:
+        return {"peak_rounds": self.peak_rounds,
+                "time_avg_rounds": (self._area / self._t if self._t else 0.0),
+                "strong_needed": getattr(self.cluster, "strong_needed", 0)}
+
+
 class BacklogTrajectory:
     """Per-gate backlog -- the r_i of the decoder-switching paper (arXiv:2510.25222
     Sec III.C, Fig 9). For every gated operation it records the REACTION WAIT (from the
@@ -389,22 +431,87 @@ class MagicStateStall:
 
 
 
-
-
-
-# TODO: currently just a stub -- needs a real error model + a failure-reporting decoder. 
 class LogicalErrorRate:
-    """STUB (domain). Logical error rate per operation -- requires a real error model on the
-    DeviceModel + a decoding Decoder that reports failures, which this timing/structure DES does
-    not model. Wire it once a StimDevice + real decoder are in place; observe() would count
-    decode failures, result() would divide by operations."""
+    """Per-shot logical-error VERDICT for a memory experiment (the real-decoding path:
+    StimDevice + a failure-reporting decoder). One DES run = ONE shot, so this does NOT
+    compute a rate by itself -- it reports, per operation, whether THIS shot's decoded
+    logical value matched the true observable. A multi-shot harness
+    (``decsim.sampling.logical_error_rate``) runs the engine once per shot and tallies these
+    verdicts into a rate with a confidence interval.
+
+    Holds the cluster (decoded logical values in ``op_results``, XOR-accumulated across
+    committed windows) and the device (true observables in ``_truth``, sampled per shot).
+    Encapsulating the comparison here is the point: callers stop re-deriving
+    ``device._truth[op][0]`` and the observable indexing by hand (it was duplicated across
+    every experiment harness).
+
+    Register it via ``make_metrics=lambda e, c, ch, f: [LogicalErrorRate(c, ch.device)]``
+    (the device is reachable as ``chip.device``), or just construct it from a build_and_run
+    result: ``LogicalErrorRate(res['cluster'], device).verdicts()``."""
     name = "logical_error_rate"
-    def __init__(self):
-        """Start failure and operation counters."""
-        self.failures = 0; self.ops = 0
+    def __init__(self, cluster, device):
+        """Hold the cluster (predictions) and the device (truth) for THIS run/shot."""
+        self.cluster = cluster
+        self.device = device
     def observe(self, engine: "Engine") -> None:
-        """Nothing to sample yet (needs a real error model)."""
+        """Nothing to sample mid-run: the prediction is only final once the last window
+        commits (engine.run() return), so the verdict is read at end-of-run, not during it."""
         pass
-    def result(self):
-        """(stub) Would return failures / operations."""
-        raise NotImplementedError("needs a real error model + failure-reporting decoder")
+    def verdicts(self) -> dict:
+        """{op_id: {'predicted', 'truth', 'error'}} for every op that produced a logical
+        value AND has a sampled truth. Ops with no real decode (timing-only) are skipped.
+        Memory experiments score one observable; a multi-observable op uses its first."""
+        truth = getattr(self.device, "_truth", {}) or {}
+        out = {}
+        for op_id, obs in truth.items():
+            pred = self.cluster.op_results.get(op_id)
+            if pred is None:
+                continue                       # timing-only / no logical value for this op
+            true_bit = int(obs[0])
+            out[op_id] = {"predicted": int(pred), "truth": true_bit,
+                          "error": int(int(pred) != true_bit)}
+        return out
+    def result(self) -> dict:
+        """The per-op verdict for this shot (see verdicts())."""
+        return self.verdicts()
+
+
+class MemoryErrorPenalty:
+    """Analytic IDLING logical-error penalty (arXiv:2511.10633 Eq. 5). While a feedback-gated
+    gate waits for its decode, its patch idles in storage and keeps measuring stabilizers; each
+    such idle (memory) round adds Pmem(d, 1) = mu*d*Lambda^(-(d+1)/2) of logical error, LINEAR
+    in the idle-round count. This metric sums Pmem(d_patch, r_patch) over every idling patch,
+    reading the idle-round counts the cluster already tracks (cluster.memory_rounds) and each
+    patch's own code (distance + mu/Lambda, configurable on the CodeModel).
+
+    This is the closed-form memory-error model the utility-scale and decoder-switching papers
+    use for their error budgets -- they do NOT stim-sample the idle stretch -- so it is the
+    literature-faithful idling penalty and needs no real syndromes. It does NOT capture a
+    specific decoder's per-shot failures across the stall; a real idle-window simulation would
+    (the heavier Phase-2 path, docs/DESIGN-idle-stream-windows.md)."""
+    name = "memory_error_penalty"
+    def __init__(self, cluster):
+        """Hold the cluster (idle-round counts in memory_rounds; codes via layout)."""
+        self.cluster = cluster
+    def observe(self, engine: "Engine") -> None:
+        """Nothing to sample: the counts are read at end-of-run."""
+        pass
+    def result(self) -> dict:
+        """{'total': summed idling penalty, 'per_op': {op_id: {idle_rounds, d, penalty}}}.
+        Ops whose code has no memory_error model (e.g. a stub code) are skipped."""
+        per_op: dict = {}
+        total = 0.0
+        for op_id, r in getattr(self.cluster, "memory_rounds", {}).items():
+            if r <= 0:
+                continue
+            op = self.cluster.ops.get(op_id)
+            patch = (op.patches[0] if op and op.patches else
+                     (op.qubits[0] if op and op.qubits else op_id))
+            code = self.cluster.layout.code_for_patch(patch)
+            pmem = getattr(code, "memory_error", None)
+            if pmem is None:
+                continue
+            p = pmem(r)
+            per_op[op_id] = {"idle_rounds": r, "d": code.distance, "penalty": p}
+            total += p
+        return {"total": total, "per_op": per_op}

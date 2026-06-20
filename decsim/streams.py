@@ -22,13 +22,15 @@ from .message import Operation
 def continuous_stream(circuit, segment_rounds, *, patch: int = 0, base_id: int = 0,
                       name: str = "stream"):
     """Build a continuous-patch workload from one continuous `circuit` and the per-segment round
-    counts `segment_rounds` (summing to the circuit's total rounds).
+    counts `segment_rounds` (summing to the circuit's total rounds). Pass ``circuit=None`` for a
+    timing-only stream: the same decode windows/dependencies are planned, but payloads carry no
+    syndrome bits and no window error models are built.
 
     Returns ``(segments, stream_op, rounds_by_op)``:
       - ``segments``     -- the SCHEDULING ops the chip runs (``build_and_run(ops=segments, ...)``);
                             each emits its own rounds, which the StimDevice tags to the stream.
       - ``stream_op``    -- the DECODE unit (``build_and_run(decode_ops=[stream_op], ...)``);
-                            windowed over the whole continuous circuit, one observable.
+                            windowed over the whole continuous circuit/round stream.
       - ``rounds_by_op`` -- ``{op_id: rounds}`` for ``PerOpRounds`` (stream -> R_total, each
                             segment -> its own length).
 

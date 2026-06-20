@@ -13,17 +13,28 @@ if TYPE_CHECKING:
 # round to get that round's payload(s).
 #===============================================================================
 
+def _stream_payload_target(op: Operation, round_index: int) -> tuple:
+    """Return (decode_op_id, global_round) for standalone ops or stream segments."""
+    return (op.stream_id if op.stream_id is not None else op.id,
+            round_index + (op.stream_offset or 0))
+
+
 #TODO: This is just simple timing only it doesn't emit actual syndrom bits.
 class TimingOnlyDevice:
-    """Emits payloads with no bits. Fast: studies timing only."""
+    """Emits payloads with no bits. Fast: studies timing only.
+
+    Stream-aware: when an operation is a segment of a continuous decode stream, its payloads are
+    tagged with the stream id and global stream round. This keeps timing-only runs on the same
+    planning/buffering path as real Stim-backed streams; only the syndrome bits are absent."""
     def begin_operation(self, op: Operation) -> None:
         """Nothing to set up for this device."""
         pass
  
     def round_payload(self, op: Operation, round_index: int) -> SyndromePayload:
         """Emit an EMPTY payload (timing-only; carries no syndrome bits)."""
-        return SyndromePayload(op.id, op.patches[0] if op.patches else op.qubits[0],
-                               round_index)
+        target, global_round = _stream_payload_target(op, round_index)
+        return SyndromePayload(target, op.patches[0] if op.patches else op.qubits[0],
+                               global_round)
     
 #TODO: This emits fake syndrome bits upate it to use stim to get real detection events
 class SyndromeBitDevice:
@@ -57,8 +68,9 @@ class SyndromeBitDevice:
 
     def round_payload(self, op: Operation, round_index: int) -> SyndromePayload:
         """Emit this round's syndrome bits. NOTE: THESE ARE FAKE (PSEUDO-RANDOM) BITS."""
-        return SyndromePayload(op.id, op.patches[0] if op.patches else op.qubits[0],
-                               round_index, bits=self._bits(len(op.qubits)),
+        target, global_round = _stream_payload_target(op, round_index)
+        return SyndromePayload(target, op.patches[0] if op.patches else op.qubits[0],
+                               global_round, bits=self._bits(len(op.qubits)),
                                code=self.code.name)
 
     def round_payloads(self, op: Operation, round_index: int) -> list[SyndromePayload]:
@@ -66,6 +78,7 @@ class SyndromeBitDevice:
         if not self.per_patch:
             return [self.round_payload(op, round_index)]
         patches = op.patches if op.patches else op.qubits
-        return [SyndromePayload(op.id, p, round_index, bits=self._bits(1),
+        target, global_round = _stream_payload_target(op, round_index)
+        return [SyndromePayload(target, p, global_round, bits=self._bits(1),
                                 code=self.code.name)
                 for p in patches]

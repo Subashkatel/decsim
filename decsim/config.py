@@ -69,6 +69,7 @@ class SimConfig:
     t_do_us: float = 1.0   # decoder -> orchestrator latency (microseconds)
     t_oc_us: float = 4.0   # orchestrator -> controller latency (microseconds)
     t_cq_us: float = 0.15  # controller -> chip latency (microseconds)
+    t_ws_us: Optional[float] = None  # weak<->strong decoder escalation latency; None = follow t_dd_us
     t_pack_us: float = 0.0 # controller packaging cost per round packet (microseconds): the controller aggregates a round's fragments into one t_cd packet (arXiv:2511.10633 Sec III.1); this prices the serialization/compression step (0 = free, the paper folds it into t_cd)
 
     # Decoder speed model tau_d(N) = alpha * N^beta (arXiv:2511.10633 Eq. 12): time to decode
@@ -92,6 +93,7 @@ class SimConfig:
     switch_confidence_threshold: float = 0.0  # keep the weak answer when its confidence >= this; below it, use the strong decoder (0 = never switch, since confidence is >= 0)
     switch_mode: str = "none"          # decoder switching (switching.py): "none" | "serial" | "parallel" (run both at once)
     switch_weak_keepup_ratio: Optional[float] = None  # weak decode time / syndrome time per round; if set, checks the window is big enough (None = skip)
+    switch_bulk_strong: bool = False   # serial switching only: when the strong pool has backlog, batch-decode all currently outstanding strong work
 
     # Relay-BP decoder (arXiv:2510.21600) for qLDPC / bivariate-bicycle codes
     relaybp_iterations: int = 40       # BP iteration budget (a worst-case cap, not the average)
@@ -112,6 +114,8 @@ class SimConfig:
                      "t_pack_us"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0 (got {getattr(self, name)})")
+        if self.t_ws_us is not None and self.t_ws_us < 0:
+            raise ValueError(f"t_ws_us must be >= 0 when set (got {self.t_ws_us})")
         if self.decoder_alpha < 0 or self.decoder_beta < 0:
             raise ValueError("decoder_alpha and decoder_beta must be >= 0")
         if self.decoder_model is not None and self.decoder_model not in DECODER_FITS:
@@ -129,6 +133,8 @@ class SimConfig:
             raise ValueError(f"scheme_name must be one of {SCHEME_NAMES} (got {self.scheme_name!r})")
         if self.switch_mode not in SWITCH_MODES:
             raise ValueError(f"switch_mode must be one of {SWITCH_MODES} (got {self.switch_mode!r})")
+        if self.switch_bulk_strong and self.switch_mode != "serial":
+            raise ValueError("switch_bulk_strong requires switch_mode='serial'")
 
     def make_links(self) -> "LinkModel":
         """Build the communication fabric (links.py) from these link-latency knobs --
@@ -137,7 +143,8 @@ class SimConfig:
         from .links import LinkModel
         return LinkModel(qc=us(self.t_qc_us), cd=us(self.t_cd_us),
                          dd=us(self.t_dd_us), do=us(self.t_do_us),
-                         oc=us(self.t_oc_us), cq=us(self.t_cq_us))
+                         oc=us(self.t_oc_us), cq=us(self.t_cq_us),
+                         ws=us(self.t_dd_us if self.t_ws_us is None else self.t_ws_us))
 
     def make_controller(self, engine: "Engine") -> "Controller":
         """Build the modular controller on a fabric from these knobs (lazy import, as above)."""
@@ -179,10 +186,11 @@ class SimConfig:
         """Build the decoder-switching object (switching.py) from switch_mode: "none" -> None (no
         switching), "serial" -> Switching, "parallel" -> Switching with run_both_at_once=True. It
         gets the confidence threshold switch_confidence_threshold and the optional window-size guard
-        switch_weak_keepup_ratio."""
+        switch_weak_keepup_ratio. switch_bulk_strong enables serial strong-pool batch service."""
         if self.switch_mode == "none":
             return None
         from .switching import Switching
         return Switching(confidence_threshold=self.switch_confidence_threshold,
                          run_both_at_once=(self.switch_mode == "parallel"),
-                         weak_keepup_ratio=self.switch_weak_keepup_ratio)
+                         weak_keepup_ratio=self.switch_weak_keepup_ratio,
+                         bulk_strong=self.switch_bulk_strong)

@@ -1,43 +1,29 @@
 
+"""Code models used by planning, timing, and metrics."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
-# ================================================================================
-# CODES
-# The code model implementations: everything code-specific that the control and
-# decoding simulation needs, so the rest of the engine stays code-agnostic and
-# we can swap codes in and out without changing the rest of the system.
-# ================================================================================
+
 
 @dataclass(frozen=True)
 class SurfaceCodeModel:
-    """Rotated surface code, [[d^2, 1, d]] (arXiv:2411.03202 Sec 2.2). Conventions used
-    here: one logical cycle = d syndrome rounds; decode windows commit d rounds behind a
-    d-round look-ahead buffer (the W = 2d, C = d sliding window -- "conventionally W = d"
-    per window-half in ADaPT arXiv:2605.01149 Sec II-C; arXiv:2511.10633 likewise builds
-    its memory windows from d-sized commit/buffer sub-regions); the per-round decoding
-    graph has ~d^2 nodes (arXiv:2511.10633 evaluates tau_d at N = d^2 per round).
+    """Rotated surface-code timing and sizing model."""
 
-    Commit and buffer both default to d; set commit_rounds_override / buffer_rounds_override to
-    size them independently -- e.g. to a commit region above the keep-pace minimum of Eq. 7
-    (arXiv:2510.25222) for the decoder-switching studies."""
     d: int = 3
-    round_us: Optional[float] = None  # per-code syndrome-round time (us); None = chip's global cadence. Lets heterogeneous zones run different physical cycle times (e.g. ~0.5 us superconducting stabilization rounds, arXiv:2411.10406 Sec I.2.1, vs 1 us/cycle, arXiv:2510.21600)
-    commit_rounds_override: Optional[int] = None  # commit rounds per decode window; None = d
-    buffer_rounds_override: Optional[int] = None  # look-ahead buffer rounds per window; None = d
-    # Analytic memory-error model (arXiv:2511.10633 Eq. 2/5): Pmem(d, r) = mu*d*r*Lambda^(-(d+1)/2).
-    # Defaults are the paper's "as reported previously" fit (mu=0.019(4), Lambda=9.3(3)); set them
-    # to the surface lattice-surgery fit (mu=0.021, Lambda=10.7) for a surgery-consistent budget.
-    mu_mem: float = 0.019    # memory-error prefactor mu
-    lam_mem: float = 9.3     # error-suppression factor Lambda
+    round_us: Optional[float] = None
+    commit_rounds_override: Optional[int] = None
+    buffer_rounds_override: Optional[int] = None
+    mu_mem: float = 0.019
+    lam_mem: float = 9.3
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         """Reject non-positive commit/buffer overrides (None means 'use d')."""
-        for label, v in (("commit_rounds_override", self.commit_rounds_override),
-                         ("buffer_rounds_override", self.buffer_rounds_override)):
-            if v is not None and v < 1:
-                raise ValueError(f"{label} must be a positive number of rounds; got {v}")
+        for label, value in (("commit_rounds_override", self.commit_rounds_override),
+                             ("buffer_rounds_override", self.buffer_rounds_override)):
+            if value is not None and value < 1:
+                raise ValueError(f"{label} must be a positive number of rounds; got {value}")
 
     @property
     def name(self) -> str:
@@ -54,8 +40,7 @@ class SurfaceCodeModel:
         return self.d
 
     def rounds_per_op(self) -> int:
-        """Temporal length of one operation = the logical cycle (d rounds) by default.
-        Override to model a code that runs more or fewer rounds per operation."""
+        """Syndrome rounds run for one operation."""
         return self.rounds_per_logical_cycle()
 
     def commit_rounds(self) -> int:
@@ -67,41 +52,30 @@ class SurfaceCodeModel:
         return self.buffer_rounds_override if self.buffer_rounds_override is not None else self.d
 
     def memory_error(self, rounds: int) -> float:
-        """Analytic logical error from `rounds` idle (memory) syndrome rounds on this patch:
-        Pmem(d, r) = mu*d*r*Lambda^(-(d+1)/2) (arXiv:2511.10633 Eq. 5). LINEAR in r -- the
-        closed-form memory-error model the utility-scale and decoder-switching papers use for
-        their error budgets (they do not stim-sample the idle stretch). With the default
-        mu_mem/lam_mem, memory_error(d) reproduces their per-logical-cycle rate Pmem(d) =
-        mu*d^2*Lambda^(-(d+1)/2) (Eq. 2: Pmem(3)=1.98e-3, Pmem(5)=5.9e-4, ...)."""
+        """Analytic logical error for idle memory rounds."""
         return self.mu_mem * self.d * rounds * self.lam_mem ** (-(self.d + 1) / 2)
 
     def spatial_nodes(self, num_patches: int) -> int:
         """Decoding-graph node count for this many patches (drives decode latency)."""
-        npatch = max(1, num_patches)
-        return npatch * self.d * self.d + (self.d if npatch > 1 else 0)
+        patch_count = max(1, num_patches)
+        return patch_count * self.d * self.d + (self.d if patch_count > 1 else 0)
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Syndrome bits measured per round."""
-        return max(1, num_patches) * (self.d * self.d - 1)   # ~d^2-1 stabilizers per patch
+        return max(1, num_patches) * (self.d * self.d - 1)
 
 
-# TODO: STUB -- structurally correct, but the node/round numbers are placeholders, not validated physics.
 @dataclass(frozen=True)
 class BBCodeModel:
-    """Bivariate-bicycle "gross" code, [[144,12,12]]: 144 physical qubits encoding 12
-    logical qubits at distance 12 (arXiv:2510.21600; also the dense-memory zone code of the
-    heterogeneous architecture in arXiv:2411.03202 Sec 2.3). Decoded in W = d = 12-round
-    sliding windows with runtime-configurable commit width on FPGA (arXiv:2510.21600
-    Sec 4.1); pair with RelayBPDecoder for the matching latency model. The d-round
-    circuit-level decoding matrix is 936 detectors x 8784 fault mechanisms
-    (arXiv:2511.21660, verified)."""
-    n: int = 144      # physical qubits
-    k: int = 12       # logical qubits encoded in the block
-    d: int = 12       # code distance
-    num_checks: int = 132   # n - k independent stabilizer checks
-    n_detectors: int = 936  # detectors in the d-round circuit decoding matrix (arXiv:2511.21660)
-    n_faults: int = 8784    # fault-mechanism columns in the same matrix (arXiv:2511.21660)
-    round_us: Optional[float] = None  # per-code syndrome-round time (us); None = chip's global cadence (the gross-code memory runs 1 us cycles in arXiv:2510.21600)
+    """Bivariate-bicycle gross-code estimate model."""
+
+    n: int = 144
+    k: int = 12
+    d: int = 12
+    num_checks: int = 132
+    n_detectors: int = 936
+    n_faults: int = 8784
+    round_us: Optional[float] = None
 
     @property
     def name(self) -> str:
@@ -118,8 +92,7 @@ class BBCodeModel:
         return self.d
 
     def rounds_per_op(self) -> int:
-        """Temporal length of one operation = the logical cycle (d rounds) by default.
-        Override to model a code that runs more or fewer rounds per operation."""
+        """Syndrome rounds run for one operation."""
         return self.rounds_per_logical_cycle()
 
     def commit_rounds(self) -> int:
@@ -131,10 +104,7 @@ class BBCodeModel:
         return self.d
 
     def spatial_nodes(self, num_patches: int) -> int:
-        # Per-round decoding-graph nodes ~ detectors-per-round of the gross-code circuit matrix.
-        # Used for RESOURCE/RAM accounting and reporting; BB LATENCY comes from RelayBPDecoder,
-        # NOT from this number (see class docstring).
-        """Decoding-graph node count per round (detectors); does NOT set BP latency."""
+        """Per-round detector count used for accounting."""
         return max(1, num_patches) * (self.n_detectors // self.d)
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
@@ -142,18 +112,18 @@ class BBCodeModel:
         return max(1, num_patches) * (self.n_detectors // self.d)
 
 
-# TODO: STUB -- parameterized placeholder; numbers are not validated physics.
 @dataclass(frozen=True)
 class ColorCodeModel:
-    """Triangular color code """
+    """Triangular color-code estimate model."""
+
     d: int = 3
-    node_factor: float = 0.75   # ~3/4 d^2 data qubits for the triangular code
-    round_us: Optional[float] = None  # per-code syndrome-round time (us); None = chip's global cadence
+    node_factor: float = 0.75
+    round_us: Optional[float] = None
 
     @property
     def name(self) -> str:
         """The code's human-readable name."""
-        return f"triangular color code (d={self.d}) (STUB)"
+        return f"triangular color code estimate (d={self.d})"
 
     @property
     def distance(self) -> int:
@@ -165,8 +135,7 @@ class ColorCodeModel:
         return self.d
 
     def rounds_per_op(self) -> int:
-        """Temporal length of one operation = the logical cycle (d rounds) by default.
-        Override to model a code that runs more or fewer rounds per operation."""
+        """Syndrome rounds run for one operation."""
         return self.rounds_per_logical_cycle()
 
     def commit_rounds(self) -> int:
@@ -186,17 +155,17 @@ class ColorCodeModel:
         return self.spatial_nodes(num_patches)
 
 
-# TODO: STUB -- parameterized placeholder; numbers are not validated physics.
 @dataclass(frozen=True)
 class ToricCodeModel:
-    """Toric code """
+    """Toric-code estimate model."""
+
     d: int = 3
-    round_us: Optional[float] = None  # per-code syndrome-round time (us); None = chip's global cadence
+    round_us: Optional[float] = None
 
     @property
     def name(self) -> str:
         """The code's human-readable name."""
-        return f"toric code (d={self.d}) (STUB)"
+        return f"toric code estimate (d={self.d})"
 
     @property
     def distance(self) -> int:
@@ -208,8 +177,7 @@ class ToricCodeModel:
         return self.d
 
     def rounds_per_op(self) -> int:
-        """Temporal length of one operation = the logical cycle (d rounds) by default.
-        Override to model a code that runs more or fewer rounds per operation."""
+        """Syndrome rounds run for one operation."""
         return self.rounds_per_logical_cycle()
 
     def commit_rounds(self) -> int:

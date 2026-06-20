@@ -1,11 +1,10 @@
-"""The qubit -> patch mapping (how many logical qubits live in one patch).
+"""The qubit to patch mapping used by frontend wiring.
 
 A patch is the hardware region the decoder watches as one picture. The surface
 code puts ONE logical qubit in each patch; block codes like the gross code put
 12 in one patch, and a patch can only do one operation at a time. The frontends
 therefore accept `qubit_to_patch`, a dict saying which patch each logical qubit
-lives in. Leaving it out means every qubit is its own patch -- byte-identical to
-the old behavior."""
+lives in. Leaving it out means every qubit is its own patch."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -42,7 +41,6 @@ def test_two_qubits_in_one_patch_share_it():
         Operation(0, "A:CNOT(q0,q1)", (0, 1), clifford=True),
     ], qubit_to_patch=TWO_QUBITS_PER_PATCH).build()
     assert ops[0].patches == ("patch0",)
-    # and the decode job is sized for one patch, not two
     layout = UniformLayout(SurfaceCodeModel(d=3))
     assert layout.spatial_nodes_for(ops[0]) == SurfaceCodeModel(d=3).spatial_nodes(1)
 
@@ -56,7 +54,7 @@ def test_ops_on_same_patch_take_turns():
     ], qubit_to_patch=TWO_QUBITS_PER_PATCH).build()
     assert ops[1].predecessors == (0,)
     lines = _run(ops)
-    assert trace_time(lines, "START B:M(q1)") >= trace_time(lines, "A:M(q0) BODY DONE")
+    assert trace_time(lines, "START B:M(q1)") >= trace_time(lines, "A:M(q0) body done")
 
 
 def test_ops_on_different_patches_run_in_parallel():
@@ -77,7 +75,7 @@ def test_rewiring_without_mapping_keeps_block_patches():
         Operation(0, "A:M(q0)", (0,), clifford=True),
         Operation(1, "B:M(q1)", (1,), clifford=True),
     ], qubit_to_patch=TWO_QUBITS_PER_PATCH).build()
-    _wire_circuit(ops)                         # no mapping -- must keep the blocks
+    _wire_circuit(ops)
     assert ops[0].patches == ("patch0",)
     assert ops[1].predecessors == (0,)
 

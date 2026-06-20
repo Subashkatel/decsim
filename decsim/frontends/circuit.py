@@ -1,254 +1,238 @@
+"""Small operation-list and text-IR frontends."""
 
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 from ..message import Operation
 
 
-# ===========================================================================
-# CIRCUIT FRONTEND
-# this module defines the CircuitFrontend, which wraps a prebuilt 
-# list of Operations as an InputFrontend. It also defines some example 
-# circuits (three Clifford CNOTs, a mixed Clifford+T circuit, and a set of 
-# independent T gates) built from Operation objects. The shared gate list 
-# and classification logic is here too
-# ===========================================================================
-def _wire_circuit(ops: list[Operation],
-                  qubit_to_patch: Optional[dict] = None) -> list[Operation]:
-    """Fill in each operation's patches / predecessors / has_successor.
+def _validate_unique_qubits(operations: list[Operation]) -> None:
+    """Reject operations that list the same qubit twice."""
+    for operation in operations:
+        if len(set(operation.qubits)) != len(operation.qubits):
+            raise ValueError(
+                f"{operation.name} lists the same qubit more than once: "
+                f"{operation.qubits}")
 
-    A PATCH is the hardware region the decoder watches as one picture. By default every
-    logical qubit is its own patch (the surface-code picture); `qubit_to_patch` says
-    otherwise -- e.g. for a block code where qubits 0..11 all live in patch 0.
 
-    `ops` is in schedule order. A patch can only do one operation at a time, so two ops
-    touching the same patch must keep their program order: walking the list once, each
-    patch remembers the most recent op that touched it, and the next op on that patch
-    gains it as a predecessor (which is also marked as having a successor). With the
-    default one-qubit-per-patch mapping this is exactly the old shared-qubit wiring.
-    Mutates in place and returns. Re-running is safe: without a mapping, ops that
-    already have patches KEEP them, so a block assignment is never silently erased;
-    pass a mapping to re-assign."""
-    for op in ops:
-        if len(set(op.qubits)) != len(op.qubits):
-            raise ValueError(f"{op.name} lists the same qubit more than once: {op.qubits}")
+def _validate_patch_mapping(operations: list[Operation],
+                            qubit_to_patch: Optional[dict]) -> None:
+    """Reject patch maps that do not cover every qubit used by the operations."""
+    if qubit_to_patch is None:
+        return
+    missing = sorted({
+        qubit
+        for operation in operations
+        for qubit in operation.qubits
+        if qubit not in qubit_to_patch
+    })
+    if missing:
+        raise ValueError(f"qubit_to_patch has no patch for qubit(s) {missing}")
+
+
+def _operation_patches(operation: Operation, qubit_to_patch: Optional[dict]) -> tuple:
+    """Return the patches touched by an operation."""
     if qubit_to_patch is not None:
-        missing = sorted({q for op in ops for q in op.qubits if q not in qubit_to_patch})
-        if missing:
-            raise ValueError(f"qubit_to_patch has no patch for qubit(s) {missing}")
+        return tuple(dict.fromkeys(qubit_to_patch[qubit] for qubit in operation.qubits))
+    if operation.patches:
+        return operation.patches
+    return tuple(operation.qubits)
 
-    last_op_on_patch = {}                      # patch -> id of the most recent op that used it
-    has_succ = {op.id: False for op in ops}
-    preds = {op.id: set() for op in ops}
-    for op in ops:                             # ops are in schedule order
-        if qubit_to_patch is not None:
-            # dict.fromkeys keeps order and drops repeats (two qubits in one patch -> one patch)
-            op.patches = tuple(dict.fromkeys(qubit_to_patch[q] for q in op.qubits))
-        elif not op.patches:
-            op.patches = tuple(op.qubits)      # default: every qubit is its own patch
-        for patch in op.patches:
-            if patch in last_op_on_patch:
-                prev = last_op_on_patch[patch]
-                preds[op.id].add(prev)
-                has_succ[prev] = True
-            last_op_on_patch[patch] = op.id
-    for op in ops:
-        op.predecessors = tuple(sorted(preds[op.id]))
-        op.has_successor = has_succ[op.id]
-    return ops
+
+def _wire_patch_dependencies(operations: list[Operation],
+                             qubit_to_patch: Optional[dict]) -> tuple:
+    """Return predecessor and successor maps from patch program order."""
+    last_operation_on_patch = {}
+    has_successor = {operation.id: False for operation in operations}
+    predecessors = {operation.id: set() for operation in operations}
+
+    for operation in operations:
+        operation.patches = _operation_patches(operation, qubit_to_patch)
+        for patch in operation.patches:
+            if patch in last_operation_on_patch:
+                previous_op_id = last_operation_on_patch[patch]
+                predecessors[operation.id].add(previous_op_id)
+                has_successor[previous_op_id] = True
+            last_operation_on_patch[patch] = operation.id
+
+    return predecessors, has_successor
+
+
+def _wire_circuit(operations: list[Operation],
+                  qubit_to_patch: Optional[dict] = None) -> list[Operation]:
+    """Fill operation patches, predecessors, and successor flags in schedule order."""
+    _validate_unique_qubits(operations)
+    _validate_patch_mapping(operations, qubit_to_patch)
+    predecessors, has_successor = _wire_patch_dependencies(operations, qubit_to_patch)
+
+    for operation in operations:
+        operation.predecessors = tuple(sorted(predecessors[operation.id]))
+        operation.has_successor = has_successor[operation.id]
+    return operations
 
 
 def three_cnot_circuit() -> list[Operation]:
-    """The standard demo circuit -- three Clifford CNOTs:
-        Op0: CNOT q0,q1     Op1: CNOT q2,q3     Op2: CNOT q1,q3
-    Op0 and Op1 act on disjoint qubits, so they run in parallel; Op2 shares q1 (with Op0) and
-    q3 (with Op1), so it depends on both and runs after them."""
-    ops = [
+    """Three CNOTs where the first two can run before the third."""
+    operations = [
         Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
         Operation(1, "Op1:CNOT(q2,q3)", (2, 3), clifford=True),
         Operation(2, "Op2:CNOT(q1,q3)", (1, 3), clifford=True),
     ]
-    return _wire_circuit(ops)
+    return _wire_circuit(operations)
 
 
 def cnot_plus_two_t_circuit() -> list[Operation]:
-    """A mixed circuit that shows the non-Clifford stall:
-        Op0: CNOT q0,q1   (Clifford)
-        Op1: T q1         (non-Clifford, first in a chain)
-        Op2: T q1         (non-Clifford, GATED by Op1's decoded outcome)."""
-    ops = [
+    """A CNOT followed by two dependent T operations."""
+    operations = [
         Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
-        Operation(1, "Op1:T(q1)", (1,), clifford=False, gated_by=None),
-        Operation(2, "Op2:T(q1)", (1,), clifford=False, gated_by=1),
+        Operation(1, "Op1:T(q1)", (1,), clifford=False, blocked_by=None),
+        Operation(2, "Op2:T(q1)", (1,), clifford=False, blocked_by=1),
     ]
-    return _wire_circuit(ops)
+    return _wire_circuit(operations)
 
 
 def independent_t_circuit(n: int = 6) -> list[Operation]:
-    """n independent (commuting) T gates, one per qubit, none gated on another. Their ONLY
-    dependency is the supply of magic states -- this isolates the magic-state factory."""
-    ops = [Operation(i, f"T(q{i})", (i,), clifford=False, gated_by=None)
-           for i in range(n)]
-    return _wire_circuit(ops)
+    """Independent T operations that only wait for magic-state supply."""
+    operations = [
+        Operation(index, f"T(q{index})", (index,), clifford=False, blocked_by=None)
+        for index in range(n)
+    ]
+    return _wire_circuit(operations)
+
 
 def three_cnot_six_qubits_circuit() -> list[Operation]:
-    """The standard demo circuit -- three Clifford CNOTs:
-        Op0: CNOT q0,q1     Op1: CNOT q2,q3     Op2: CNOT q1,q3
-    all of them are disjoint, so they run in parallel."""
-
-    ops = [
+    """Three independent CNOTs on six qubits."""
+    operations = [
         Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
         Operation(1, "Op1:CNOT(q2,q3)", (3, 4), clifford=True),
         Operation(2, "Op2:CNOT(q1,q3)", (2, 5), clifford=True),
     ]
-    return _wire_circuit(ops)
+    return _wire_circuit(operations)
 
 
-# ===========================================================================
-# Input frontends (the InputFrontend seam). CircuitFrontend wraps a prebuilt op list;
-# SurgeryIRFrontend reads a small line-based text IR. Both return list[Operation] via build(),
-# so build_and_run(frontend=...) accepts either. To add a format, write a parser to the shared
-# gate list (below). To add a gate, extend the sets below -- the single source of truth.
-# OpenQASM input is deferred for now -- see the TODO at the bottom of this file.
-# ===========================================================================
 class CircuitFrontend:
-    """The simplest InputFrontend: a thin wrapper around a Python-built operation list (e.g.
-    three_cnot_circuit()), so the input is a swappable object rather than a hardcoded argument.
-    SurgeryIRFrontend implements the same build() contract (OpenQASM support is a TODO)."""
-    def __init__(self, ops: list[Operation], qubit_to_patch: Optional[dict] = None):
-        """Hold a prebuilt operation list, and optionally which patch each qubit lives in
-        (default: every qubit is its own patch -- see _wire_circuit)."""
-        self.ops = ops
+    """Frontend for a Python-built operation list."""
+
+    def __init__(self, operations: list[Operation], qubit_to_patch: Optional[dict] = None):
+        """Store operations and the optional qubit-to-patch map."""
+        self.operations = operations
         self.qubit_to_patch = qubit_to_patch
 
     def build(self) -> list[Operation]:
-        """Return the operations (already wired; _wire_circuit is idempotent)."""
-        return _wire_circuit(self.ops, self.qubit_to_patch)
+        """Return operations with patch-order dependencies filled in."""
+        return _wire_circuit(self.operations, self.qubit_to_patch)
 
 
-# The single source of truth for Clifford-ness. Extend a set to teach EVERY frontend a gate.
 CLIFFORD_GATES = {"cnot", "cx", "h", "x", "y", "z", "s", "sdg", "cz", "swap", "id"}
 NON_CLIFFORD_GATES = {"t", "tdg", "ccz", "ccx", "toffoli"}
-ROTATION_GATES = {"rz", "rx", "ry", "p", "u1"}      # single-angle: Clifford depends on the angle
-GENERAL_UNITARY_GATES = {"u2", "u3", "u"}           # multi-angle: treated as non-Clifford
+ROTATION_GATES = {"rz", "rx", "ry", "p", "u1"}
+GENERAL_UNITARY_GATES = {"u2", "u3", "u"}
 
 
-def _parse_angle(expr) -> Optional[float]:
-    """Parse a rotation angle into radians. Accepts a number directly (e.g. a qiskit gate
-    parameter, already in radians) or a string in the pi-fraction forms TopQAD documents
-    (n*pi, pi*n, n*pi/m, pi/n, f, f*pi, optional leading '-'). Returns None if it cannot be
-    parsed, so the caller treats it as a worst-case non-Clifford rotation. No eval()."""
-    import math
-    if expr is None:
+def _parse_angle(angle_expression) -> Optional[float]:
+    """Parse a numeric or pi-fraction rotation angle into radians."""
+    if angle_expression is None:
         return None
-    if isinstance(expr, (int, float)):              # qiskit params arrive as floats (radians)
-        return float(expr)
-    s = str(expr).strip().lower().replace(" ", "")
-    if not s:
+    if isinstance(angle_expression, (int, float)):
+        return float(angle_expression)
+
+    normalized_text = str(angle_expression).strip().lower().replace(" ", "")
+    if not normalized_text:
         return None
+
     try:
-        neg = s.startswith("-")
-        if neg:
-            s = s[1:]
-        den = 1.0
-        if "/" in s:                                # optional /denominator
-            left, right = s.split("/", 1)
-            den = math.pi if "pi" in right else float(right)
-            s = left
-        coeff = 1.0
-        for part in s.split("*"):                   # numerator: product of factors
-            coeff *= math.pi if part == "pi" else float(part)
-        val = coeff / den
-        return -val if neg else val
+        is_negative = normalized_text.startswith("-")
+        if is_negative:
+            normalized_text = normalized_text[1:]
+
+        denominator = 1.0
+        if "/" in normalized_text:
+            numerator_text, denominator_text = normalized_text.split("/", 1)
+            denominator = math.pi if "pi" in denominator_text else float(denominator_text)
+            normalized_text = numerator_text
+
+        coefficient = 1.0
+        for factor_text in normalized_text.split("*"):
+            coefficient *= math.pi if factor_text == "pi" else float(factor_text)
+
+        angle = coefficient / denominator
+        return -angle if is_negative else angle
     except (ValueError, ZeroDivisionError):
         return None
 
 
 def _rotation_is_clifford(angle_expr: Optional[str]) -> bool:
-    """A single-axis rotation is Clifford iff its angle is a multiple of pi/2 (so rz(pi/2)=S is
-    Clifford, rz(pi/4)=T is not). An unparseable angle is treated as non-Clifford (needs a T)."""
-    import math
-    a = _parse_angle(angle_expr)
-    if a is None:
+    """Return whether a single-axis rotation is a Clifford rotation."""
+    angle = _parse_angle(angle_expr)
+    if angle is None:
         return False
-    k = a / (math.pi / 2.0)
-    return abs(k - round(k)) < 1e-9
+
+    half_pi_units = angle / (math.pi / 2.0)
+    return abs(half_pi_units - round(half_pi_units)) < 1e-9
 
 
 def _gate_is_clifford(mnemonic: str, angle: Optional[str] = None) -> bool:
-    """Classify a gate. Raises on an unknown gate so unsupported input fails loudly rather than
-    silently mis-modelling it -- the message names the sets to extend (the modularity hook)."""
-    m = mnemonic.lower()
-    if m in CLIFFORD_GATES:
+    """Classify a gate and fail loudly for unsupported gates."""
+    mnemonic_lower = mnemonic.lower()
+    if mnemonic_lower in CLIFFORD_GATES:
         return True
-    if m in NON_CLIFFORD_GATES or m in GENERAL_UNITARY_GATES:
+    if mnemonic_lower in NON_CLIFFORD_GATES or mnemonic_lower in GENERAL_UNITARY_GATES:
         return False
-    if m in ROTATION_GATES:
+    if mnemonic_lower in ROTATION_GATES:
         return _rotation_is_clifford(angle)
-    raise ValueError(f"unsupported gate '{mnemonic}' -- add it to CLIFFORD_GATES / "
+    raise ValueError(f"unsupported gate '{mnemonic}'. Add it to CLIFFORD_GATES / "
                      f"NON_CLIFFORD_GATES / ROTATION_GATES / GENERAL_UNITARY_GATES")
 
 
-def _ops_from_gatelist(gatelist: list,
-                       qubit_to_patch: Optional[dict] = None) -> list[Operation]:
-    """Shared lowering used by every text frontend: turn a parsed gate list into a wired
-    operation DAG. Each entry is (mnemonic, qubit-tuple, is_clifford, gated_by). This is the
-    one place Operation objects are built and `_wire_circuit` is applied, so each format stays
-    a thin parser and they all behave identically downstream."""
-    ops = []
-    for i, (mnemonic, qubits, clifford, gated_by) in enumerate(gatelist):
-        qstr = ",".join("q" + str(q) for q in qubits)
-        ops.append(Operation(i, f"Op{i}:{mnemonic.upper()}({qstr})", tuple(qubits),
-                             clifford=clifford, gated_by=gated_by))
-    return _wire_circuit(ops, qubit_to_patch)
+def _operations_from_gate_list(gate_list: list,
+                               qubit_to_patch: Optional[dict] = None) -> list[Operation]:
+    """Lower parsed gates into wired operations."""
+    operations = []
+    for operation_index, gate in enumerate(gate_list):
+        mnemonic, qubits, is_clifford, blocked_by = gate
+        qubit_text = ",".join("q" + str(qubit) for qubit in qubits)
+        operation = Operation(
+            operation_index,
+            f"Op{operation_index}:{mnemonic.upper()}({qubit_text})",
+            tuple(qubits),
+            clifford=is_clifford,
+            blocked_by=blocked_by,
+        )
+        operations.append(operation)
+    return _wire_circuit(operations, qubit_to_patch)
 
 
 class SurgeryIRFrontend:
-    """InputFrontend for a small line-based LATTICE-SURGERY IR -- the paper's 'surgery IR' in
-    miniature (lattice surgeries on named patches; arXiv:2511.10633 Sec III). One operation per
-    line; '#' comments and blank lines are ignored. Grammar:
+    """Frontend for the small line-based operation IR."""
 
-        CNOT qA qB          two-qubit Clifford      (also CZ, SWAP)
-        H qA                single-qubit Clifford   (also X, Y, Z, S, SDG)
-        T qA                non-Clifford (consumes a magic state)
-        T qA gated_by N     non-Clifford gated by operation N's decoded outcome
-
-    Implements build() -> list[Operation]. Unlike OpenQASM, this IR can express `gated_by`
-    (the decode-feedback dependency)."""
     def __init__(self, text: str, qubit_to_patch: Optional[dict] = None):
-        """Hold the IR source text, and optionally which patch each qubit lives in
-        (default: every qubit is its own patch -- see _wire_circuit)."""
+        """Store source text and the optional qubit-to-patch map."""
         self.text = text
         self.qubit_to_patch = qubit_to_patch
 
     def build(self) -> list[Operation]:
-        """Parse the IR into the shared gate list, then lower it to the wired operation DAG."""
-        gatelist = []
-        for raw in self.text.splitlines():
-            line = raw.split("#", 1)[0].strip()
+        """Parse text gates and lower them into wired operations."""
+        gate_list = []
+        for raw_line in self.text.splitlines():
+            line = raw_line.split("#", 1)[0].strip()
             if not line:
                 continue
-            tok = line.split()
-            mnemonic = tok[0]
-            gated_by = None
-            if "gated_by" in tok:
-                gi = tok.index("gated_by")
-                gated_by = int(tok[gi + 1])
-                tok = tok[:gi]
-            qubits = tuple(int(t[1:]) for t in tok[1:] if t.lower().startswith("q"))
-            gatelist.append((mnemonic, qubits, _gate_is_clifford(mnemonic), gated_by))
-        return _ops_from_gatelist(gatelist, self.qubit_to_patch)
+            tokens = line.split()
+            mnemonic = tokens[0]
+            blocked_by = None
+            if "blocked_by" in tokens:
+                token_index = tokens.index("blocked_by")
+                blocked_by = int(tokens[token_index + 1])
+                tokens = tokens[:token_index]
 
+            qubits = tuple(
+                int(token[1:])
+                for token in tokens[1:]
+                if token.lower().startswith("q")
+            )
+            is_clifford = _gate_is_clifford(mnemonic)
+            gate_list.append((mnemonic, qubits, is_clifford, blocked_by))
 
-# ===========================================================================
-# TODO: implement support for OpenQASM in the code.
-# ===========================================================================
-# An OpenQASM reader slots in here as another InputFrontend with the same
-#   build() -> list[Operation]
-# contract: parse OpenQASM 2.0 (TopQAD's input format, the qelib1.inc gate set) into the shared
-# gate list and reuse _ops_from_gatelist + _gate_is_clifford above -- so it needs only a PARSER,
-# no new lowering or gate-classification logic. The reference implementation (using the real
-# qiskit qasm2 parser, plus a circuit=<QuantumCircuit> path for prebuilt/transpiled circuits)
-# lives in section 11 of qec_des.py and can be lifted in unchanged when this is picked up.
-# ===========================================================================
+        return _operations_from_gate_list(gate_list, self.qubit_to_patch)

@@ -42,7 +42,7 @@ GAMMA_BOUND = D / (3 * D * F_STRONG)
 
 
 def _memory_op():
-    """One Clifford memory operation -- a long, non-gated syndrome stream."""
+    """One Clifford memory operation, with a long syndrome stream and no feedback block."""
     return Operation(0, "memory", (0,), clifford=True)
 
 

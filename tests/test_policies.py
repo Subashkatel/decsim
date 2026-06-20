@@ -21,12 +21,12 @@ def test_deadline_policies():
 
 
 def _contended_circuit():
-    """Four background CNOTs registered BEFORE a gated T chain, so under FIFO the
+    """Four background CNOTs registered before a feedback-blocked T chain, so under FIFO the
     reaction-path windows queue behind the Clifford windows."""
     ops = [Operation(i, f"CNOT(q{2*i+2},q{2*i+3})", (2*i + 2, 2*i + 3), clifford=True)
            for i in range(4)]
     ops.append(Operation(4, "T(q0)", (0,), clifford=False))
-    ops.append(Operation(5, "T2(q0)", (0,), clifford=False, gated_by=4))
+    ops.append(Operation(5, "T2(q0)", (0,), clifford=False, blocked_by=4))
     return CircuitFrontend(ops).build()
 
 
@@ -35,7 +35,7 @@ def test_reaction_path_deadline_beats_fifo_under_contention():
         r = build_and_run(_contended_circuit(), num_units=1, d=3, rounds_per_op=11,
                           decoder=PresetLatencyDecoder(5.0), scheduler=scheduler,
                           deadline_policy=deadline_policy, verbose=False)
-        return r["chip_done"]                  # ends with the gated T's last round
+        return r["chip_done"]                  # ends with the blocked T's last round
 
     fifo = run()
     edf = run(scheduler=EarliestDeadlineScheduler(),

@@ -11,8 +11,8 @@ from decsim.metrics import MagicStateLatency
 
 
 class ImmediateService:
-    """A DecodeService stub: every correction decode completes instantly."""
-    def submit_decode(self, n_rounds, on_done, label="", deadline=None,
+    """DecodeService test helper: every correction decode completes instantly."""
+    def submit_decode(self, round_count, on_done, label="", deadline=None,
                       code=None, spatial_nodes=None):
         on_done()
 

@@ -46,7 +46,7 @@ def test_peak_payloads_matches_brute_force_recount():
     assert cluster.peak_payloads == cluster.brute_force_peak > 0
 
 
-def test_accounting_with_gated_ops_and_store_drains_to_zero():
+def test_accounting_with_blocked_ops_and_store_drains_to_zero():
     """Gated T gates exercise idle rounds and late window commits; afterwards every
     op's store has been freed, so an exact counter must read zero."""
     cluster = _run(cnot_plus_two_t_circuit())

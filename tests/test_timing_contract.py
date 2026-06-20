@@ -54,12 +54,12 @@ def test_wall_clock_decode_work_does_not_advance_simulated_service_time():
     assert row["service"] == us(1.0)
 
 
-def test_gated_operation_waits_for_modeled_decode_time_not_wall_clock_runtime():
-    """A feedback-gated op releases on simulated decode completion, not wall-clock."""
+def test_blocked_operation_waits_for_modeled_decode_time_not_wall_clock_runtime():
+    """A feedback-blocked op releases on simulated decode completion, not wall-clock."""
     decoder = BlockingDecoder(latency_us=1.0, sleep_s=1.0)
     ops = CircuitFrontend([
         Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
-        Operation(1, "T1", (0,), clifford=False, gated_by=0,
+        Operation(1, "T1", (0,), clifford=False, blocked_by=0,
                   consumes_magic_state=False),
     ]).build()
 
@@ -70,6 +70,6 @@ def test_gated_operation_waits_for_modeled_decode_time_not_wall_clock_runtime():
 
     first_window = res["cluster"].windows[(0, 0)]
     assert first_window.t_done - first_window.t_dispatch == us(1.0)
-    assert res["chip"].gate_release_time[1] == first_window.t_done
+    assert res["chip"].decode_release_time[1] == first_window.t_done
     assert trace_time(res["engine"].log_lines, "START T1") == (
         first_window.t_done / TICKS_PER_US)

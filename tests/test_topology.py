@@ -73,19 +73,19 @@ def test_forward_latency_is_additive_and_split_invariant():
     assert split_all_qc == fused + us(1.4)                    # exactly additive
 
 
-def _gate_release(t_do, t_oc, t_cq):
-    """A feedback-gated successor releases when op 0's correction returns through the
+def _decode_release(t_do, t_oc, t_cq):
+    """A feedback-blocked successor releases when op 0's correction returns through the
     feedback path (t_do + t_oc + t_cq). Returns (release_time, op0_decode_done)."""
     ops = CircuitFrontend([
         Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
-        Operation(1, "T1", (0,), clifford=False, gated_by=0,
+        Operation(1, "T1", (0,), clifford=False, blocked_by=0,
                   consumes_magic_state=False),
     ]).build()
     res = build_and_run(
         ops, num_units=1, d=3, rounds_per_op=3, round_us=1.0,
         decoder=_FixedLatency(1.0), scheme=NaiveOnlineScheme(),
         make_controller=_controller(t_do=t_do, t_oc=t_oc, t_cq=t_cq), verbose=False)
-    return res["chip"].gate_release_time[1], res["cluster"].windows[(0, 0)].t_done
+    return res["chip"].decode_release_time[1], res["cluster"].windows[(0, 0)].t_done
 
 
 def test_feedback_latency_is_additive_and_split_invariant():
@@ -94,12 +94,12 @@ def test_feedback_latency_is_additive_and_split_invariant():
     is exactly why collapsing do+oc+cq into one 'fused control-system feedback'
     number changes no timing. Zero feedback hops => release the instant decode is
     done (the fully-fused, no-separate-orchestrator case)."""
-    on_do, done_do = _gate_release(1.7, 0.0, 0.0)
-    on_oc, done_oc = _gate_release(0.0, 1.7, 0.0)
-    on_cq, done_cq = _gate_release(0.0, 0.0, 1.7)
+    on_do, done_do = _decode_release(1.7, 0.0, 0.0)
+    on_oc, done_oc = _decode_release(0.0, 1.7, 0.0)
+    on_cq, done_cq = _decode_release(0.0, 0.0, 1.7)
     assert on_do == on_oc == on_cq                           # split-invariant
     assert done_do == done_oc == done_cq                     # decode unaffected by feedback hops
     assert on_do == done_do + us(1.7)                        # released a feedback-budget after decode
 
-    fused_release, fused_done = _gate_release(0.0, 0.0, 0.0)  # everything in one box
+    fused_release, fused_done = _decode_release(0.0, 0.0, 0.0)  # everything in one box
     assert fused_release == fused_done                        # no feedback transmission time

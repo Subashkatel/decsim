@@ -1,18 +1,8 @@
-"""Real idle/memory-stretch decoding -- feature 5-real (core).
+"""Real idle-stream decoding tests.
 
-Today a stalling patch emits EMPTY idle payloads (chip._emit_idle_round, bits=None): the rounds a
-gated patch keeps measuring carry no real syndrome data, so errors during the stall are invisible
-to the decoder and only the analytic Pmem penalty (Step 4) accounts for them. The continuous-
-stream machinery (3b) lets an idle stretch be a REAL-syndrome segment of one continuous record:
-the idle rounds carry actual detection events and are decoded as part of the stream.
-
-Acceptance (same exact oracle as 3b): a continuous patch [op | idle | op] decodes equal to the
-GLOBAL decode of the whole circuit, per shot -- so errors that happen DURING the idle stretch are
-decoded correctly, not dropped. And the idle stretch genuinely fires real syndromes.
-
-Scope note: the idle length here is MODELLED (a known-length idle segment). Making the idle length
-emerge dynamically from a DES reaction-stall (runtime window insertion) is the remaining 5-real
-extension -- see docs/DESIGN-idle-stream-windows.md Phase 2. Requires stim + pymatching."""
+The idle length is modeled as a known segment. Dynamic idle insertion is listed
+in docs/ROADMAP.md.
+"""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 

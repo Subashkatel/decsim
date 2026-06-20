@@ -1,43 +1,49 @@
+"""Small discrete-event simulation engine."""
+
 import heapq
 import itertools
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+
 from .config import fmt
 
-#===============================================================================
-# THE DES ENGINE (generic event-driven simulator)
-#===============================================================================
 
 @dataclass(order=True)
 class Event:
-    """One scheduled thing to do at a future time. ordered by time, priority, insertion order so ties break deterministically."""
+    """One scheduled action in the discrete-event queue."""
+
     time: int
     priority: int
-    seq: int 
+    seq: int
     action: Callable[[], None] = field(compare=False)
     label: str = field(compare=False, default="")
 
+
 class Engine:
     """A minimal discrete event simulator: a clock plus a priority queue of events."""
+
     def __init__(self, verbose: bool = True):
-        """ Create an empty simulator with the clock at 0 and an empty event queue."""
-        self.now : int = 0
-        self._q : list[Event] = []
+        """Create an empty simulator with the clock at zero."""
+        self.now: int = 0
+        self._event_queue: list[Event] = []
         self._seq = itertools.count()
         self.verbose = verbose
         self.log_lines: list[str] = []
         self.metrics: list = []
-        self.log_sink = None 
+        self.log_sink = None
 
-    def schedule(self, delay: int, action: Callable[[], None], label: str = "", priority: int = 0) -> None:
-        """Push a future event onto the priority queue at (now + delay ticks) with some label and priority."""
+    def schedule(self, delay: int, action: Callable[[], None],
+                 label: str = "", priority: int = 0) -> None:
+        """Schedule an action `delay` ticks from the current time."""
         if delay < 0:
-            raise ValueError(f"Cannot schedule an event in the past delay={delay} (now={self.now})")
-        ev = Event(self.now + delay, priority, next(self._seq), action, label)
-        heapq.heappush(self._q, ev) # put the event on the priority queue
-        
+            raise ValueError(
+                f"Cannot schedule an event in the past delay={delay} "
+                f"(now={self.now})")
+        event = Event(self.now + delay, priority, next(self._seq), action, label)
+        heapq.heappush(self._event_queue, event)
+
     def log(self, who: str, msg: str) -> None:
-        """ Log one timestamped line (print it if verbose otherwise send it to the log sink)."""
+        """Store one timestamped log line and print it when verbose."""
         line = f"[{fmt(self.now)}] {who}: {msg}"
         self.log_lines.append(line)
         if self.log_sink is not None:
@@ -46,26 +52,27 @@ class Engine:
             print(line)
 
     def add_metric(self, metric):
-        """Add a metric to be observed at every event (used to track different performance metrics of what we are simulating)."""
+        """Observe this metric after every event."""
         self.metrics.append(metric)
         return metric
-    
+
     def metric_results(self) -> dict:
-        """Get the results of all the metrics as a dictionary, keyed by the metric name."""
+        """Return final metric values keyed by metric name."""
         return {metric.name: metric.result() for metric in self.metrics}
 
     def run(self, until: Optional[int] = None) -> None:
-        """Run the simulation until there are no more events or until the time reaches 'until'."""
-        while self._q:
-            # check if the next event is in the future 
-            if until is not None and self._q[0].time > until:
-                self.now = until # advance the clock to the 'until' time and end the simulation
+        """Run until the event queue is empty or the optional time limit is reached."""
+        while self._event_queue:
+            next_event_time = self._event_queue[0].time
+            if until is not None and next_event_time > until:
+                self.now = until
                 break
-            ev = heapq.heappop(self._q)
-            if ev.time < self.now:
-                raise ValueError(f"Event scheduled in the past: {ev} (now={self.now})")
-            self.now = ev.time
-            ev.action()
-            for m in self.metrics:
-                m.observe(self)
 
+            event = heapq.heappop(self._event_queue)
+            if event.time < self.now:
+                raise ValueError(f"Event scheduled in the past: {event} "
+                                 f"(now={self.now})")
+            self.now = event.time
+            event.action()
+            for metric in self.metrics:
+                metric.observe(self)

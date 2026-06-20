@@ -1,3 +1,5 @@
+"""Orchestrators integrate decoded results and return feedback instructions."""
+
 from __future__ import annotations
  
 from collections import deque
@@ -6,50 +8,24 @@ from typing import Callable, Optional, TYPE_CHECKING
 from .engine import Engine
 from .message import Operation, DecodeResult, Decision, WindowPlan
  
-if TYPE_CHECKING:                      # type-only; the controller is wired in at runtime via connect()
-    from .protocols import Controller
+if TYPE_CHECKING:
+    from .protocols import Controller, ExecutionPlanner, WorkloadManager
 
-# =====================================================================================
-# ORCHESTRATORS
-# The orchestrator of arXiv:2511.10633 Sec III. In the paper it: (1) parses the quantum
-# program (surgery IR) into physical stabilizer circuits; (2) determines the decoding
-# windows for each surgery and the sequence of all decoding jobs with their dependencies,
-# communicated to the decoder cluster AHEAD OF TIME (so planning is off the reaction
-# path); (3) stores the physical and logical Pauli frames, updates them with decoding
-# results, and determines logical measurement outcomes; (4) updates subsequent logical
-# operations that are CONDITIONAL on those outcomes before they are parsed/executed.
-#
-# In this simulator: (1) is the InputFrontend seam, (2) is the WindowPlanner (the
-# orchestrator announces the plan and the wiring hands it to the cluster), and (3)+(4)
-# are this module. Only non-Clifford outcomes trigger an instruction back to the QPU
-# (the t_oc + t_cq hops); Clifford results are pure Pauli-frame updates that stay here,
-# applied in classical software -- which is why a Clifford decode never pays the
-# return-path latency.
-# =====================================================================================
 
-class PauliFrameOrchestrator:
-    """The default orchestrator: integrates decode results, decides the conditional basis
-    for gated gates, and dispatches those decisions back to the chip via the controller.
-    NOTE: `pauli_frame` is a bookkeeping PLACEHOLDER (a per-op marker, garbage-collected by
-    _record_and_gc), not a real physical/logical Pauli frame -- real frame tracking needs
-    the real-data decode path (docs/README.md gap #7)."""
+class ExecutionOrchestrator:
+    """Prepare execution, integrate decode results, and return feedback."""
 
     def __init__(self, engine: Engine, history_size: int = 512, retain_all: bool = False):
-        """Hold the Pauli frame and the map of which gate each operation gates."""
+        """Hold result state and the feedback-blocking map."""
 
         self.engine = engine
         self.pauli_frame: dict = {}
         self.outcomes: dict[int, int] = {}
-        # which op (if any) is gated by op_id:
-        self.gated_by_index: dict[int, int] = {}
-        # --- retained-but-bounded debugging record (see class/ctor docstring) ---
-        self.history: deque = deque(maxlen=history_size)   # recent results, fixed memory
+        self.blocked_by_index: dict[int, list[int]] = {}
+        self.history: deque = deque(maxlen=history_size)
         self.stats: dict[str, int] = {"frame_updates": 0, "outcomes": 0, "decisions": 0}
         self.retain_all = retain_all
         self.archive: Optional[dict] = {} if retain_all else None
-        # Job-4 dispatch plumbing, filled by connect() at wiring time. Left None until then so
-        # the frame core stays usable standalone (e.g. tests / latency-only runs that call
-        # on_result directly and never dispatch).
         self.controller: Optional["Controller"] = None
         self.decision_sink: Optional[Callable] = None
 
@@ -60,19 +36,35 @@ class PauliFrameOrchestrator:
         self.controller = controller
         self.decision_sink = decision_sink
 
-    def register_gate(self, gated_op_id: int, gating_op_id: int) -> None:
-        """Record that operation `gated_op_id` waits on the decode result of `gating_op_id`.
-        ONE gating op may block MULTIPLE successors -- a single measurement outcome can
-        feed-forward to several conditional gates -- so successors accumulate in a list."""
-        self.gated_by_index.setdefault(gating_op_id, []).append(gated_op_id)
+    def register_blocked_operation(self, blocked_op_id: int, blocking_op_id: int) -> None:
+        """Record that one operation waits on another operation's decode result."""
+        self.blocked_by_index.setdefault(blocking_op_id, []).append(blocked_op_id)
  
-    def announce_plan(self, plan: "WindowPlan") -> None:
-        """handoff: the orchestrator has compiled the execution plan and now sends it to
-        the decoder cluster. This happens at COMPILE TIME -- 0 simulated ticks, off the reaction
-        path (arXiv:2511.10633 Sec III), so it never contributes to reaction time."""
+    def prepare_execution(self, *, operations: list[Operation],
+                          cluster: "WorkloadManager",
+                          planner: "ExecutionPlanner",
+                          decode_operations: Optional[list[Operation]] = None) -> WindowPlan:
+        """Prepare the decode workload before runtime starts.
+
+        The orchestrator owns this handoff in the DecLat execution model. It
+        delegates window construction to the supplied planner, then loads the
+        resulting job plan into the decoder cluster. This costs zero simulated
+        ticks because it happens before syndrome data is produced.
+        """
+        planned_operations = decode_operations if decode_operations is not None else operations
+        for operation in planned_operations:
+            cluster.register_op(operation)
+
+        plan = planner.plan(planned_operations)
+        self._log_prepared_execution(plan)
+        cluster.load_execution_plan(plan)
+        return plan
+
+    def _log_prepared_execution(self, plan: "WindowPlan") -> None:
+        """Log the off-path plan handoff to the decoder cluster."""
         self.engine.log("Orchestrator",
                         f"compiled execution plan off the reaction path (0 ticks); sending "
-                        f"{plan.total_windows} decode job(s) across {len(plan.nwin)} operation(s) "
+                        f"{plan.total_windows} decode job(s) across {len(plan.window_count)} operation(s) "
                         f"to the decoder cluster ahead of time")
  
     def _record_and_gc(self, op: Operation, kind: str, outcome: int,
@@ -93,50 +85,37 @@ class PauliFrameOrchestrator:
         self.pauli_frame.pop(op.id, None)
  
     def integrate(self, op: Operation, result: DecodeResult) -> None:
-        """Receive a decoded result and save it into the Pauli frame via on_result, then
-        Send every conditional decision it unblocks back to the chip THROUGH the controller
-        (orchestrator -> controller -> chip). on_result stays the pure, overridable frame core;
-        integrate is the owned dispatch wrapped around it. With no controller/sink connected (a
-        frame-only or latency-only run) it updates the frame and dispatches nothing."""
+        """Integrate a result and send any released feedback decisions."""
         for decision in self.on_result(op, result):
             if self.controller is None or self.decision_sink is None:
                 continue
-            # A conditional instruction must physically reach the chip. The orchestrator owns
-            # this: it relays the decision over the controller (which logs itself as a hop) to
-            # the chip, which has been blocking on it and now unblocks. A gating op may emit
-            # several decisions (fan-out); each is dispatched in turn.
             self.engine.log("Orchestrator",
                             f"DISPATCH conditional for op#{decision.gadget_id}: "
                             f"basis '{decision.basis}' -> controller -> chip")
             self.controller.relay_instruction(decision, self.decision_sink)
  
     def on_result(self, op: Operation, result: DecodeResult) -> list[Decision]:
-        """Save an outcome into the Pauli frame; return a Decision for EACH gated successor. A
-        single outcome can feed-forward to several conditional gates, so this returns a
-        LIST -- empty for a Clifford result or a non-Clifford op that gates nothing."""
+        """Save an outcome and return decisions for operations it unblocks."""
         
         outcome = result.logical_value if result.logical_value is not None else 1
         self.outcomes[op.id] = outcome
         if op.clifford:
-            # Just a frame update. It stays in the orchestrator; NOTHING is sent back
-            # to the QPU (a Pauli-frame correction is classical and applied lazily).
-            # Only the decoder->orchestrator hop (t_do) was paid; t_oc + t_cq are not.
             self.pauli_frame[op.id] = "frame-updated"
             self.engine.log("Orchestrator",
-                            f"result for {op.name}: Pauli-frame update (Clifford) -- "
+                            f"result for {op.name}: Pauli-frame update (Clifford); "
                             f"stays here, no instruction returns to the QPU")
             self._record_and_gc(op, "frame_update", outcome)
             return []
-        # Non-Clifford: later gadget(s) need this outcome to pick their basis.
+
         self.engine.log("Orchestrator",
                         f"result for {op.name}: non-Clifford outcome decoded")
-        gated_ops = self.gated_by_index.pop(op.id, [])     # ALL successors this op gates
-        if gated_ops:
-            basis = "X" if outcome else "Z"                # same outcome -> same basis for all
-            tgt = ", ".join(f"op#{g}" for g in gated_ops)
+        blocked_ops = self.blocked_by_index.pop(op.id, [])
+        if blocked_ops:
+            basis = "X" if outcome else "Z"
+            targets = ", ".join(f"op#{g}" for g in blocked_ops)
             self.engine.log("Orchestrator",
-                            f"  -> decides basis '{basis}' for {tgt} and UNBLOCKS the chip")
+                            f"decides basis '{basis}' for {targets} and releases the chip")
             self._record_and_gc(op, "decision", outcome, basis)
-            return [Decision(gadget_id=g, basis=basis) for g in gated_ops]
-        self._record_and_gc(op, "outcome", outcome)        # no gated successor reads this outcome
+            return [Decision(gadget_id=g, basis=basis) for g in blocked_ops]
+        self._record_and_gc(op, "outcome", outcome)
         return []

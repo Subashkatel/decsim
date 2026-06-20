@@ -60,12 +60,3 @@ def test_event_schedules_multiple_events():
     eng.schedule(delay=0, action=parent, label="Parent")
     eng.run()
     assert log == [(0, "parent"), (10, "child1"), (20, "child2")]
-
-
-
-# TODO: test_engine_determinism
-# TODO: test_engine_metrics
-# TODO: test_engine_until
-# TODO: test_engine_log_sink
-# TODO: test_engine_empty_run
-        

@@ -3,7 +3,7 @@
 Regression for a silent-distortion hazard: the emitter used to stop at a hard-coded
 100*d rounds with NO trace of having done so -- a long-reaction (backlog/divergence)
 study would read artificially stable numbers. The cap is now a constructor knob and
-the chip logs a loud WARNING when it fires while a gated successor is still waiting."""
+the chip logs a loud WARNING when it fires while a blocked successor is still waiting."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -13,19 +13,19 @@ from decsim.message import Operation
 from decsim.wiring import build_and_run
 
 
-def _t_then_gated_t():
-    """A non-Clifford op whose successor is gated on its decode -- the shape that makes
+def _t_then_blocked_t():
+    """A non-Clifford op whose successor is blocked on its decode, making
     the patch idle in storage and emit memory rounds until the correction returns."""
     return CircuitFrontend([
         Operation(0, "A:T(q0)", (0,), clifford=False),
-        Operation(1, "B:T(q0)", (0,), clifford=False, gated_by=0),
+        Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0),
     ]).build()
 
 
 def test_cap_fires_loudly_and_stops_emission():
     """With a reaction wait far longer than the cap: exactly `cap` memory rounds are
     emitted, the WARNING names the knob, and the workload still completes."""
-    r = build_and_run(_t_then_gated_t(), num_units=1, d=3, rounds_per_op=11,
+    r = build_and_run(_t_then_blocked_t(), num_units=1, d=3, rounds_per_op=11,
                       decoder=PresetLatencyDecoder(200.0),   # reaction >> cap rounds
                       max_idle_rounds=10, verbose=False)
     lines = r["engine"].log_lines
@@ -37,7 +37,7 @@ def test_cap_fires_loudly_and_stops_emission():
 
 def test_default_cap_is_unchanged_and_silent():
     """No knob: the cap stays 100*d and a normal run never logs the warning."""
-    r = build_and_run(_t_then_gated_t(), num_units=1, d=3, rounds_per_op=11,
+    r = build_and_run(_t_then_blocked_t(), num_units=1, d=3, rounds_per_op=11,
                       decoder=PresetLatencyDecoder(1.0), verbose=False)
     assert r["chip"].max_idle_rounds == 100 * 3
     assert not any("hit the idle-round cap" in l for l in r["engine"].log_lines)

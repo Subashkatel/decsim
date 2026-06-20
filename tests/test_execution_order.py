@@ -39,7 +39,7 @@ def test_t_gate_waits_for_earlier_cnot_on_same_qubit():
         Operation(2, "C:T(q0)", (0,), clifford=False),
     ]).build()
     lines = _run(ops, rounds_per_op=11)
-    b_done = trace_time(lines, "B:CNOT(q0,q1) BODY DONE")
+    b_done = trace_time(lines, "B:CNOT(q0,q1) body done")
     c_start = trace_time(lines, "START C:T(q0)")
     assert c_start >= b_done
 
@@ -54,7 +54,7 @@ def test_order_holds_under_heterogeneous_durations():
         Operation(2, "C:T(q0)", (0,), clifford=False),
     ]).build()
     lines = _run(ops, rounds_policy=GateRounds())
-    assert trace_time(lines, "START C:T(q0)") >= trace_time(lines, "B:CNOT(q0,q1) BODY DONE")
+    assert trace_time(lines, "START C:T(q0)") >= trace_time(lines, "B:CNOT(q0,q1) body done")
 
 
 def test_brickwork_with_t_keeps_program_order():
@@ -75,7 +75,7 @@ def test_brickwork_with_t_keeps_program_order():
     for op in ops:
         for p in op.predecessors:
             assert trace_time(lines, f"START {op.name}") >= \
-                   trace_time(lines, f"{opmap[p].name} BODY DONE"), \
+                   trace_time(lines, f"{opmap[p].name} body done"), \
                 f"{op.name} started before its predecessor {opmap[p].name} finished"
 
 

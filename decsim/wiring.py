@@ -1,35 +1,218 @@
+"""Build the standard simulator pipeline and run it."""
 
 from __future__ import annotations
 
 from typing import Callable, Optional, TYPE_CHECKING
 
-from .config import SimConfig, us, fmt
-from .engine import Engine
-from .codes import SurfaceCodeModel
-from .devices import TimingOnlyDevice
-from .orchestrators import PauliFrameOrchestrator
-from .schedulers import FifoScheduler
+from .chip import Chip
 from .cluster import DecoderCluster
+from .codes import SurfaceCodeModel
+from .config import SimConfig, fmt, us
+from .devices import TimingOnlyDevice
+from .engine import Engine
 from .factories import InfiniteFactory
 from .metrics import DecodeBacklog
-from .chip import Chip
+from .orchestrators import ExecutionOrchestrator
 from .planner import WindowPlanner
+from .schedulers import FifoScheduler
 
-if TYPE_CHECKING:                      # type-only; defaults are built from the concrete imports above
+if TYPE_CHECKING:
     from .message import Operation
-    from .protocols import (MagicStateFactory, Decoder, Controller, Orchestrator,
-                           Scheduler, DeviceModel, CodeModel, DecodingScheme,
-                           LayoutModel, InputFrontend, RoundsPolicy,
-                           DecoderRouter, DeadlinePolicy, ExecutionPlanner)
+    from .protocols import (CodeModel, Controller, DeadlinePolicy, Decoder,
+                            DecoderRouter, DecodingScheme, DeviceModel,
+                            ExecutionPlanner, InputFrontend, LayoutModel,
+                            MagicStateFactory, Orchestrator, RoundsPolicy,
+                            Scheduler)
     from .switching import Switching
 
-# ============================================================================================
-# WIRING
-# This module defines the default wiring of the decsim package: how the components are connected
-# together, and the default policies for the planner and the decoder. The build_and_run()
-# function is the main entry point: it assembles the standard pipeline (engine, components, chip),
-# runs it, and returns results 
-# ============================================================================================
+def _print_title(title: str) -> None:
+    """Print the optional run title."""
+    if not title:
+        return
+    print("=" * 78)
+    print(title)
+    print("=" * 78)
+
+
+def _apply_config_defaults(config: Optional[SimConfig], num_units: Optional[int],
+                           rounds_per_op: Optional[int], round_us: Optional[float],
+                           scheme, switching):
+    """Resolve scalar defaults from SimConfig while preserving explicit arguments."""
+    sim_config = config or SimConfig()
+    if num_units is None:
+        num_units = sim_config.num_units
+    if rounds_per_op is None:
+        rounds_per_op = sim_config.rounds_per_op
+    if round_us is None:
+        round_us = sim_config.round_us
+    if scheme is None:
+        scheme = sim_config.make_scheme()
+    if switching is None:
+        switching = sim_config.make_switching()
+    return sim_config, num_units, rounds_per_op, round_us, scheme, switching
+
+
+def _operation_list(ops, frontend):
+    """Return operations from a frontend or from the explicit operation list."""
+    if frontend is not None:
+        return frontend.build()
+    if ops is None:
+        raise ValueError("provide either ops=<list[Operation]> or frontend=<InputFrontend>")
+    return ops
+
+
+def _code_model(code, layout, distance: int):
+    """Return the code model used to size default components."""
+    if code is not None:
+        return code
+    if layout is not None:
+        return layout.codes()[0]
+    return SurfaceCodeModel(d=distance)
+
+
+def _build_controller(engine: Engine, sim_config: SimConfig, controller, make_controller):
+    """Build or reuse the controller."""
+    if make_controller is not None:
+        return make_controller(engine)
+    if controller is not None:
+        return controller
+    return sim_config.make_controller(engine)
+
+
+def _build_orchestrator(engine: Engine, orchestrator, make_orchestrator):
+    """Build or reuse the feedback orchestrator."""
+    if make_orchestrator is not None:
+        return make_orchestrator(engine)
+    if orchestrator is not None:
+        return orchestrator
+    return ExecutionOrchestrator(engine)
+
+
+def _link_model(controller, sim_config: SimConfig):
+    """Use the controller's link model, or the config default."""
+    links = getattr(controller, "links", None)
+    return links if links is not None else sim_config.make_links()
+
+
+def _build_cluster(*, engine: Engine, decoder, scheduler, controller, orchestrator,
+                   make_cluster, num_units: int, rounds_per_op: int, code,
+                   scheme, layout, decoders, rounds_policy, router,
+                   deadline_policy, links, unit_pools, switching):
+    """Build the decoder workload manager."""
+    if make_cluster is not None:
+        return make_cluster(engine, decoder, scheduler, controller, orchestrator)
+
+    return DecoderCluster(
+        engine, decoder, scheduler, controller, orchestrator,
+        num_units=num_units, rounds_per_op=rounds_per_op, code=code,
+        scheme=scheme, layout=layout, decoders=decoders,
+        rounds_policy=rounds_policy, router=router,
+        deadline_policy=deadline_policy, links=links,
+        unit_pools=unit_pools, switching=switching)
+
+
+def _build_factory(engine: Engine, cluster, factory, make_factory):
+    """Build or reuse the magic-state factory."""
+    if factory is not None:
+        return factory
+    if make_factory is not None:
+        return make_factory(engine, cluster)
+    return InfiniteFactory(engine)
+
+
+def _build_chip(*, engine: Engine, device, controller, cluster, factory,
+                round_us: float, code, make_chip, decode_idle_rounds: bool,
+                max_idle_rounds: Optional[int],
+                gates_start_on_round_boundaries: bool):
+    """Build the quantum processor."""
+    round_ticks = us(round_us)
+    if make_chip is not None:
+        return make_chip(engine, device, controller, cluster, factory, round_ticks, code)
+
+    return Chip(
+        engine, device, controller, cluster, factory,
+        round_ticks=round_ticks,
+        code_distance=code.distance,
+        decode_idle_rounds=decode_idle_rounds,
+        max_idle_rounds=max_idle_rounds,
+        gates_start_on_round_boundaries=gates_start_on_round_boundaries)
+
+
+def _add_metrics(engine: Engine, cluster, chip, factory, make_metrics, verbose: bool):
+    """Add optional metrics and return the verbose backlog metric."""
+    if make_metrics is not None:
+        for metric in make_metrics(engine, cluster, chip, factory):
+            engine.add_metric(metric)
+
+    backlog_metric = DecodeBacklog(cluster) if verbose else None
+    if backlog_metric is not None:
+        engine.add_metric(backlog_metric)
+    return backlog_metric
+
+
+def _register_feedback_blocks(ops, orchestrator) -> None:
+    """Tell the orchestrator which operations wait for earlier decode results."""
+    for op in ops:
+        if op.blocked_by is None:
+            continue
+        orchestrator.register_blocked_operation(
+            blocked_op_id=op.id,
+            blocking_op_id=op.blocked_by)
+
+
+def _execution_planner(planner, cluster):
+    """Return the supplied planner or the default planner for this cluster."""
+    if planner is not None:
+        return planner
+    return WindowPlanner(cluster.scheme, cluster.layout, cluster.rounds_policy)
+
+
+def _register_dynamic_streams(cluster, dynamic_streams, code) -> None:
+    """Register streams whose windows are built at runtime."""
+    for stream in (dynamic_streams or []):
+        cluster.register_dynamic_stream(stream, code)
+
+
+def _decode_plan_operations(ops, decode_ops, dynamic_streams):
+    """Return operations that should receive decode windows before runtime."""
+    if decode_ops is not None:
+        return decode_ops
+    if not dynamic_streams:
+        return None
+
+    dynamic_stream_ids = {stream.id for stream in dynamic_streams}
+    return [
+        operation
+        for operation in ops
+        if operation.stream_id not in dynamic_stream_ids
+    ]
+
+
+def _print_summary(*, num_units: int, chip_done: int, last_event: int,
+                   cluster, factory, backlog_metric) -> None:
+    """Print the verbose run summary."""
+    print("-" * 78)
+    print(f"SUMMARY ({num_units} decoder unit(s)):")
+    print(f"  chip finished all physical work : {fmt(chip_done)}")
+    print(f"  decoder fully finished          : {fmt(last_event)}")
+    print(f"  reaction tail (chip->fully done): {fmt(last_event - chip_done)}")
+
+    peak_queue = max((q for _, q in getattr(cluster, "queue_log", [])), default=0)
+    print(f"  peak ready-queue (contention)   : {peak_queue}")
+
+    if backlog_metric is not None:
+        backlog = backlog_metric.result()
+        print(f"  peak decode backlog (rounds)    : {backlog['peak_rounds']}")
+        print(f"  decode backlog, mean (rounds)   : {backlog['time_avg_rounds']:.1f}")
+
+    print(f"  peak syndrome RAM (payloads)    : {getattr(cluster, 'peak_payloads', 0)}")
+
+    if isinstance(getattr(factory, "produced", None), int):
+        print(f"  magic states produced           : {factory.produced}")
+        print(f"  peak magic states in storage    : {factory.peak_in_flight}")
+        print(f"  total magic-state supply stall  : {fmt(factory.total_stall)}")
+    print()
+
 
 def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int] = None,
                   d: int = 3, rounds_per_op: Optional[int] = None,
@@ -65,167 +248,63 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
                   decode_ops: Optional[list] = None,
                   dynamic_streams: Optional[list] = None,
                   verbose: bool = True, title: str = "") -> dict:
-    """Assemble the standard pipeline (engine, components, chip), run it, and return results plus any metrics. Every collaborator is optional and swappable."""
+    """Assemble the standard simulator pipeline, run it, and return the live objects."""
     engine = Engine(verbose=verbose)
-    if title:
-        print("=" * 78)
-        print(title)
-        print("=" * 78)
+    _print_title(title)
 
-    # CONFIG seam: scalar knobs come from SimConfig; an explicit argument still wins.
-    cfg = config or SimConfig()
-    if num_units is None:     num_units = cfg.num_units
-    if rounds_per_op is None: rounds_per_op = cfg.rounds_per_op
-    if round_us is None:      round_us = cfg.round_us
-    if scheme is None:        scheme = cfg.make_scheme()   # default 'sliding' == cluster default
-    if switching is None:     switching = cfg.make_switching()   # default None == no switching
+    sim_config, num_units, rounds_per_op, round_us, scheme, switching = \
+        _apply_config_defaults(
+            config, num_units, rounds_per_op, round_us, scheme, switching)
 
-    # INPUT seam: take a frontend (Circuit today; OpenQASM / Surgery IR later) or a
-    # ready-made operation list. The frontend is the place new input formats plug in.
-    if frontend is not None:
-        ops = frontend.build()
-    if ops is None:
-        raise ValueError("provide either ops=<list[Operation]> or frontend=<InputFrontend>")
+    ops = _operation_list(ops, frontend)
+    code = _code_model(code, layout, d)
 
-    # CODE seam: a CodeModel, or a surface code of distance d (back-compatible default).
-    # If a heterogeneous LAYOUT is given without an explicit code, the layout's first code is
-    # the representative used to size the default device/decoder.
-    if code is None:
-        code = layout.codes()[0] if layout is not None else SurfaceCodeModel(d=d)
+    device = device if device is not None else TimingOnlyDevice()
+    decoder = decoder if decoder is not None else sim_config.make_decoder(code)
+    controller = _build_controller(engine, sim_config, controller, make_controller)
+    orchestrator = _build_orchestrator(engine, orchestrator, make_orchestrator)
+    scheduler = scheduler if scheduler is not None else FifoScheduler()
+    links = _link_model(controller, sim_config)
 
-    # Every part is a swap point: pass your own, or get the config-built default.
-    if device is None:        device = TimingOnlyDevice()
-    if decoder is None:       decoder = cfg.make_decoder(code)
-    if make_controller is not None:    controller = make_controller(engine)   # engine-dependent swap
-    elif controller is None:           controller = cfg.make_controller(engine)
-    if make_orchestrator is not None:  orchestrator = make_orchestrator(engine)   # engine-dependent swap
-    elif orchestrator is None:         orchestrator = PauliFrameOrchestrator(engine)
-    if scheduler is None:     scheduler = FifoScheduler()
+    cluster = _build_cluster(
+        engine=engine, decoder=decoder, scheduler=scheduler,
+        controller=controller, orchestrator=orchestrator,
+        make_cluster=make_cluster, num_units=num_units,
+        rounds_per_op=rounds_per_op, code=code, scheme=scheme,
+        layout=layout, decoders=decoders, rounds_policy=rounds_policy,
+        router=router, deadline_policy=deadline_policy, links=links,
+        unit_pools=unit_pools, switching=switching)
 
-    # LINKS: one LinkModel (the fabric price list) is shared by the controller and the
-    # cluster, so the fabric cannot disagree with itself. A controller built above
-    # carries one; a custom controller without a .links attribute gets the config-built
-    # fabric for the cluster's two hops (dd, do).
-    links = getattr(controller, "links", None)
-    if links is None:
-        links = cfg.make_links()
+    factory = _build_factory(engine, cluster, factory, make_factory)
+    chip = _build_chip(
+        engine=engine, device=device, controller=controller, cluster=cluster,
+        factory=factory, round_us=round_us, code=code, make_chip=make_chip,
+        decode_idle_rounds=decode_idle_rounds, max_idle_rounds=max_idle_rounds,
+        gates_start_on_round_boundaries=gates_start_on_round_boundaries)
 
-    # WORKLOAD-MANAGER seam: the default DecoderCluster, or a custom manager via
-    # make_cluster(engine, decoder, scheduler, controller, orchestrator). A custom manager
-    # must satisfy the WorkloadManager protocol (protocols.py); if it does not expose the
-    # scheme/layout/rounds_policy attributes the default planner reads, pass planner= too.
-    if make_cluster is not None:
-        cluster = make_cluster(engine, decoder, scheduler, controller, orchestrator)
-    else:
-        cluster = DecoderCluster(engine, decoder, scheduler, controller, orchestrator,
-                                 num_units=num_units, rounds_per_op=rounds_per_op, code=code,
-                                 scheme=scheme, layout=layout, decoders=decoders,
-                                 rounds_policy=rounds_policy, router=router,
-                                 deadline_policy=deadline_policy, links=links,
-                                 unit_pools=unit_pools, switching=switching)
+    orchestrator.connect(controller, chip.on_decision)
+    cluster.on_workload_complete = factory.shutdown
 
-    # FACTORY seam: an explicit factory, or a make_factory(engine, cluster) hook for
-    # factories that must route their correction decodes through THIS cluster (the
-    # DistillationFactory / MultiLevelDistillationFactory need that reference), or the
-    # cluster-free InfiniteFactory default. The cluster is built first so the hook can
-    # see it -- that is the required information flow, not a hidden coupling.
-    if factory is None:
-        factory = make_factory(engine, cluster) if make_factory is not None \
-                  else InfiniteFactory(engine)
-
-    # QPU seam: a custom processor via make_chip(engine, device, controller, cluster, factory,
-    # round_ticks, code), or the default Chip. It must satisfy QuantumProcessor. Note the
-    # per-op round count is not passed: it belongs to the cluster's ROUNDS policy
-    # (cluster.rounds_for(op)), the single source of truth a chip should read.
-    if make_chip is not None:
-        chip = make_chip(engine, device, controller, cluster, factory,
-                         us(round_us), code)
-    else:
-        chip = Chip(engine, device, controller, cluster, factory,
-                    round_ticks=us(round_us),
-                    code_distance=code.distance, decode_idle_rounds=decode_idle_rounds,
-                    max_idle_rounds=max_idle_rounds,
-                    gates_start_on_round_boundaries=gates_start_on_round_boundaries)
-    # Dependency inversion: the cluster gets only the callbacks it needs, not the chip object.
-    orchestrator.connect(controller, chip.on_decision)  # orchestrator owns the conditional return path
-    cluster.on_workload_complete = factory.shutdown    # lifecycle: stop the factory when done
-
-    # optional metrics: make_metrics(engine, cluster, chip, factory) -> list[Metric]
-    if make_metrics is not None:
-        for m in make_metrics(engine, cluster, chip, factory):
-            engine.add_metric(m)
-    # Track how far the decoder falls behind (rounds of syndrome waiting to be decoded), for the
-    # summary below. Only set up when verbose, so normal high-volume runs pay nothing. We need
-    # this because the ready-queue length alone doesn't reveal backlog for windowed decoding
-    # (see the DecodeBacklog docstring).
-    backlog_metric = DecodeBacklog(cluster) if verbose else None
-    if backlog_metric is not None:
-        engine.add_metric(backlog_metric)
-
-    # register T-gate gating relationships with the orchestrator
-    for op in ops:
-        if op.gated_by is not None:
-            orchestrator.register_gate(gated_op_id=op.id, gating_op_id=op.gated_by)
-
-    # ORCHESTRATOR, offline phase (arXiv:2511.10633 Sec III, job 2): compile the operation DAG
-    # into an execution plan -- the decoding windows, job sequence, and dependency graph -- and
-    # hand it to the decoder cluster's workload manager AHEAD OF TIME (0 simulated ticks, off the
-    # reaction path). The cluster then only runs the queue against this plan at runtime.
-    # PLANNER seam: pass planner=<ExecutionPlanner> to swap the planning algorithm; the
-    # default WindowPlanner is built from the cluster's own scheme/layout/rounds policy.
-    if planner is None:
-        planner = WindowPlanner(cluster.scheme, cluster.layout, cluster.rounds_policy)
-    # DECODE UNITS vs SCHEDULING UNITS (3b/5-real): normally these are the same `ops`. For a
-    # CONTINUOUS STREAM, the decode unit is the synthetic stream op (windowed over the whole
-    # continuous circuit) while the chip schedules the segment ops (which emit rounds tagged --
-    # by the device -- to the stream). decode_ops names the decode units; the chip always loads
-    # the workload `ops`.
-    planning_ops = decode_ops if decode_ops is not None else ops
-    for op in planning_ops:
-        cluster.register_op(op)
-    plan = planner.plan(planning_ops)
-    orchestrator.announce_plan(plan)            # Orchestrator: "sending ... to the cluster"
-    cluster.load_execution_plan(plan)           # DecoderClstr: "received execution plan ..."
-
-    # DYNAMIC STREAMS (5-real): decode units whose windows are built at RUNTIME (round-driven), not
-    # in the compile-time plan above. Registered after the plan so the cluster knows its scheme/code.
-    for s in (dynamic_streams or []):
-        cluster.register_dynamic_stream(s, code)
+    backlog_metric = _add_metrics(
+        engine, cluster, chip, factory, make_metrics, verbose)
+    _register_feedback_blocks(ops, orchestrator)
+    planner = _execution_planner(planner, cluster)
+    decode_plan_operations = _decode_plan_operations(
+        ops, decode_ops, dynamic_streams)
+    orchestrator.prepare_execution(
+        operations=ops, cluster=cluster, planner=planner,
+        decode_operations=decode_plan_operations)
+    _register_dynamic_streams(cluster, dynamic_streams, code)
 
     chip.load(ops)
     engine.run()
 
-    # ---- summary (printed only when verbose, like the trace itself) ----
     chip_done = chip.last_finish_time
     last_event = engine.now
     if verbose:
-        print("-" * 78)
-        print(f"SUMMARY ({num_units} decoder unit(s)):")
-        print(f"  chip finished all physical work : {fmt(chip_done)}")
-        print(f"  decoder fully finished          : {fmt(last_event)}")
-        print(f"  reaction tail (chip->fully done): {fmt(last_event - chip_done)}")
-        peak_q = max((q for _, q in getattr(cluster, "queue_log", [])), default=0)
-        print(f"  peak ready-queue (contention)   : {peak_q}")
-        # How far the decoder fell behind, in rounds of syndrome waiting to be decoded. This is
-        # the real backlog signal: with sliding windows the ready-queue above stays at 0-1 even
-        # when the decoder is hopelessly behind, but this number climbs. It only grows without
-        # limit when the decoder is slower than the chip produces syndromes.
-        if backlog_metric is not None:
-            bl = backlog_metric.result()
-            print(f"  peak decode backlog (rounds)    : {bl['peak_rounds']}")
-            print(f"  decode backlog, mean (rounds)   : {bl['time_avg_rounds']:.1f}")
-        # The most syndrome data held in the decoder's memory at once. The cluster now frees each
-        # round as soon as the last window that needs it has decoded (paper: arXiv:2511.10633
-        # Sec VI.B), so for sliding-window decoding this stays about one window's worth no matter
-        # how long the computation runs -- the real amount of memory the decoder needs.
-        print(f"  peak syndrome RAM (payloads)    : {getattr(cluster, 'peak_payloads', 0)}")
-        # factory stats, duck-typed: any factory exposing the scalar counters gets the
-        # lines (a custom factory without them simply prints nothing extra).
-        if isinstance(getattr(factory, "produced", None), int):
-            print(f"  magic states produced           : {factory.produced}")
-            print(f"  peak magic states in storage    : {factory.peak_in_flight}")
-            print(f"  total magic-state supply stall  : {fmt(factory.total_stall)}")
-        print()
+        _print_summary(num_units=num_units, chip_done=chip_done,
+                       last_event=last_event, cluster=cluster,
+                       factory=factory, backlog_metric=backlog_metric)
     return {"engine": engine, "cluster": cluster, "factory": factory, "chip": chip,
             "orchestrator": orchestrator, "controller": controller,
             "chip_done": chip_done, "fully_done": last_event,

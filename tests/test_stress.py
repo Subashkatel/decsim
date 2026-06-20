@@ -55,7 +55,7 @@ class InvariantGuard:
         if cluster.payloads_held < 0:
             self.violations.append(f"t={now}: payloads_held={cluster.payloads_held} < 0")
         for op_id, committed in cluster._committed_per_op.items():
-            planned = cluster.nwin.get(op_id, 0)
+            planned = cluster.window_count.get(op_id, 0)
             if committed > planned:
                 self.violations.append(
                     f"t={now}: op {op_id} committed {committed} windows > planned {planned} "

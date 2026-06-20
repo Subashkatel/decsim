@@ -2,7 +2,7 @@
 
 SurfaceCodeModel.memory_error(r) = mu*d*r*Lambda^(-(d+1)/2) (arXiv:2511.10633 Eq. 5), and the
 MemoryErrorPenalty metric sums it over the idle (memory) rounds the simulator already tracks
-while a feedback-gated gate stalls. This is the closed-form model the papers use for their error
+while a feedback-blocked gate stalls. This is the closed-form model the papers use for their error
 budgets (no stim sampling of the idle stretch).
 
 Acceptance:
@@ -24,12 +24,12 @@ from decsim.message import Operation
 from decsim.wiring import build_and_run
 
 
-def _t_then_gated_t():
-    """A non-Clifford op whose successor is gated on its decode -- makes the patch idle and emit
+def _t_then_blocked_t():
+    """A non-Clifford op whose successor is blocked on its decode, making the patch idle and emit
     memory rounds until the correction returns."""
     return CircuitFrontend([
         Operation(0, "A:T(q0)", (0,), clifford=False),
-        Operation(1, "B:T(q0)", (0,), clifford=False, gated_by=0),
+        Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0),
     ]).build()
 
 
@@ -55,12 +55,12 @@ def test_constants_configurable_surgery_fit():
 
 
 def test_metric_sums_pmem_over_real_stalling_run():
-    res = build_and_run(_t_then_gated_t(), num_units=1, d=3, rounds_per_op=11,
+    res = build_and_run(_t_then_blocked_t(), num_units=1, d=3, rounds_per_op=11,
                         decoder=PresetLatencyDecoder(5.0),    # slow enough to emit idle rounds
                         verbose=False)
     cluster = res["cluster"]
     idle = {op: r for op, r in cluster.memory_rounds.items() if r > 0}
-    assert idle, "the gated chain emitted no idle rounds -- test would be vacuous"
+    assert idle, "the blocked chain emitted no idle rounds -- test would be vacuous"
 
     out = MemoryErrorPenalty(cluster).result()
     code = SurfaceCodeModel(d=3)
@@ -78,7 +78,7 @@ def test_metric_is_read_only_timing_unchanged():
     """Reading the penalty must not perturb the run: same finish time with and without it."""
     common = dict(num_units=1, d=3, rounds_per_op=11,
                   decoder=PresetLatencyDecoder(5.0), verbose=False)
-    a = build_and_run(_t_then_gated_t(), **common)
+    a = build_and_run(_t_then_blocked_t(), **common)
     MemoryErrorPenalty(a["cluster"]).result()
-    b = build_and_run(_t_then_gated_t(), **common)
+    b = build_and_run(_t_then_blocked_t(), **common)
     assert a["fully_done"] == b["fully_done"]

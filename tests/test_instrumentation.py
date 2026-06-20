@@ -39,8 +39,10 @@ def test_breakdown_separates_queue_wait_from_dep_block():
 
 # ---- per-gate backlog (the r_i of arXiv:2510.25222) -------------------------------------
 
-def test_backlog_trajectory_measures_the_gated_t_gate():
-    """cnot_plus_two_t has exactly ONE gated gate (the second T waits on the first T's
+def test_backlog_trajectory_measures_the_blocked_t_gate():
+    """cnot_plus_two_t has exactly one feedback-blocked gate.
+
+    The second T waits on the first T's
     decode): one row, a positive reaction wait, and a backlog of wait-in-rounds plus
     the gate's own rounds."""
     r = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
@@ -67,7 +69,8 @@ def test_backlog_trajectory_registration_changes_nothing():
 
 
 def test_backlog_grows_when_the_decoder_is_too_slow():
-    """A slower decoder must show a LARGER reaction wait for the same gated gate --
+    """A slower decoder must show a larger reaction wait for the same blocked gate.
+
     the signal every backlog/divergence study reads off this metric."""
     waits = {}
     for lat in (1.0, 50.0):
@@ -80,14 +83,16 @@ def test_backlog_grows_when_the_decoder_is_too_slow():
 
 
 def test_backlog_rows_cover_fan_out_gating():
-    """ONE decoded outcome can release SEVERAL gated gates: one row each, and they
-    share the same reaction wait (same gating decode, same dispatch event)."""
+    """One decoded outcome can release several blocked gates.
+
+    Each blocked gate gets one row, and they share the same reaction wait.
+    """
     from decsim.frontends.circuit import CircuitFrontend
     from decsim.message import Operation
     ops = CircuitFrontend([
         Operation(0, "A:T(q0)", (0,), clifford=False),
-        Operation(1, "B:T(q1)", (1,), clifford=False, gated_by=0),
-        Operation(2, "C:T(q2)", (2,), clifford=False, gated_by=0),
+        Operation(1, "B:T(q1)", (1,), clifford=False, blocked_by=0),
+        Operation(2, "C:T(q2)", (2,), clifford=False, blocked_by=0),
     ]).build()
     r = build_and_run(ops, num_units=2, d=3, rounds_per_op=11,
                       decoder=PresetLatencyDecoder(1.0),
@@ -107,7 +112,7 @@ def test_backlog_rounds_use_the_ops_own_cadence():
     fast = SurfaceCodeModel(d=3, round_us=0.5)             # != the global 1.1 us
     ops = CircuitFrontend([
         Operation(0, "A:T(q0)", (0,), clifford=False),
-        Operation(1, "B:T(q0)", (0,), clifford=False, gated_by=0),
+        Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0),
     ]).build()
     r = build_and_run(ops, num_units=2, d=3, rounds_per_op=11, code=fast,
                       decoder=PresetLatencyDecoder(1.0),

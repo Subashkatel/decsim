@@ -1,18 +1,8 @@
-"""Full-stack real decoding (gap #7, phase R3): real syndromes through the ENTIRE
-simulator -- StimDevice -> controller -> cluster windows -> PyMatchingDecoder ->
-orchestrator -- must reproduce the offline reference workbench exactly.
+"""Full-stack real decoding tests.
 
-The acceptance chain (docs/DESIGN-real-window-decoding.md):
-- engine prediction == decode_windowed() offline reference, per shot, EXACTLY
-  (same models, same matchings, so any deviation is a wiring bug);
-- engine prediction == global whole-history decoding, per shot (Skoric App C's
-  buffer-d anchor, here realized as exact agreement at these sizes);
-- artificial defects genuinely flow between windows (non-empty boundary_defects)
-  and are consumed (agreement could not hold otherwise);
-- the device's folded round convention: chip round r carries stim layer t = r-1,
-  closing layers fold into the last round (round = min(t+1, R)).
-
-Requires stim + pymatching (skipped where unavailable)."""
+Stim syndromes flow through the simulator and must match the offline window
+reference. Paper contract: docs/PAPER_MODEL_MAP.md.
+"""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -26,7 +16,7 @@ from decsim.message import Operation
 from decsim.wiring import build_and_run
 from decsim.controllers import ModularController
 from decsim.frontends.circuit import CircuitFrontend
-from decsim.orchestrators import PauliFrameOrchestrator
+from decsim.orchestrators import ExecutionOrchestrator
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
 from decsim.adapters.window_error_models import (build_window_error_models,
@@ -147,16 +137,16 @@ def test_engine_bposd_matches_offline_reference():
         assert pred_engine == pred_offline, f"shot {s}: engine != offline BP-OSD reference"
 
 
-def test_gated_successor_waits_for_real_pymatching_result():
-    """A feedback-gated successor is released only after the real PyMatching result
-    for the gating op has been computed and delivered through the orchestrator.
+def test_blocked_successor_waits_for_real_pymatching_result():
+    """A feedback-blocked successor is released only after the real PyMatching result
+    for the blocking op has been computed and delivered through the orchestrator.
 
     The operations are T-labelled to exercise feedback, but each carries a memory
     stim circuit so the decode path is the same real StimDevice -> PyMatchingDecoder
     path certified above.
     """
     circuit = _circuit()
-    nwin = len(SlidingWindowScheme().plan_windows(0, ROUNDS, SurfaceCodeModel(d=D)))
+    window_count = len(SlidingWindowScheme().plan_windows(0, ROUNDS, SurfaceCodeModel(d=D)))
 
     class RecordingDecoder(PyMatchingDecoder):
         def __init__(self):
@@ -174,17 +164,17 @@ def test_gated_successor_waits_for_real_pymatching_result():
 
     decoder = RecordingDecoder()
 
-    class AssertingOrchestrator(PauliFrameOrchestrator):
+    class AssertingOrchestrator(ExecutionOrchestrator):
         def integrate(self, op, result):
             if op.id == 0:
-                assert set(decoder.seen) >= {(0, k) for k in range(nwin)}
+                assert set(decoder.seen) >= {(0, k) for k in range(window_count)}
                 assert result.logical_value == decoder.accumulated[0]
             return super().integrate(op, result)
 
     ops = CircuitFrontend([
-        Operation(0, "T0(memory)", (0,), clifford=False, gated_by=None,
+        Operation(0, "T0(memory)", (0,), clifford=False, blocked_by=None,
                   consumes_magic_state=False, circuit=circuit),
-        Operation(1, "T1(memory)", (0,), clifford=False, gated_by=0,
+        Operation(1, "T1(memory)", (0,), clifford=False, blocked_by=0,
                   consumes_magic_state=False, circuit=circuit),
     ]).build()
     device = StimDevice(seed=23)
@@ -198,12 +188,13 @@ def test_gated_successor_waits_for_real_pymatching_result():
     global_m = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
     assert res["cluster"].op_results[0] == int(global_m.decode(device._dets[0])[0])
-    assert res["chip"].gate_release_time[1] == res["cluster"].windows[(0, nwin - 1)].t_done
-    assert res["chip"].gate_release_time[1] <= res["chip"].body_done_time[1]
+    assert res["chip"].decode_release_time[1] == res["cluster"].windows[(0, window_count - 1)].t_done
+    assert res["chip"].decode_release_time[1] <= res["chip"].body_done_time[1]
 
 
 def test_timing_only_ops_still_run():
-    """An op without a circuit keeps dem=None and decodes as a timing-only stub --
+    """An op without a circuit keeps dem=None and decodes as a timing-only job.
+
     the real-decoding wiring must not break the timing pipeline."""
     op = Operation(id=1, name="timing", qubits=(0,), clifford=True)
     res = build_and_run(ops=[op], num_units=4, d=D,

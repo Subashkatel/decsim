@@ -1,103 +1,75 @@
+"""Slice a global Stim detector error model into per-window decoder inputs.
+
+The measured bits change every shot. The sliced error models are compile-time
+data shared across shots. See docs/PAPER_MODEL_MAP.md for the paper contract.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional
 
-# =====================================================================================
-# PER-WINDOW DECODING PROBLEMS (gap #7)
-#
-# A decoder needs two inputs: the measured detector
-# bits (which arrive shot by shot) and the ERROR MODEL -- the catalog of everything
-# that can go wrong, listing for each fault which detectors it flips, how likely it
-# is, and whether it flips the logical answer. stim computes that catalog ONCE for
-# the whole circuit (the detector error model, DEM). Windowed decoding never builds
-# per-window circuits; it slices the one global catalog into per-window pieces.
-# A WindowErrorModel is one such piece: the prepared reference sheet a decoder needs
-# to solve window k. It is pure compile-time data -- built before any shot exists,
-# shared by every shot; only the detector bits change per shot.
-#
-# The slicing rules are multi-source verified (docs/DESIGN-real-window-decoding.md,
-# incl. the 8-source architecture cross-check in its section 2b):
-#   - row-slice the global DEM by detector rounds (Tan arXiv:2209.09219; QUITS
-#     spacetime(); Huang & Puri arXiv:2311.03307)
-#   - a fault is OWNED (committed) by the FIRST window whose commit region it touches
-#     (Skoric arXiv:2209.08552's commit-the-crossing-edges rule; QUITS's advancing
-#     column cursor; Bombin arXiv:2303.04846's disjoint commit-region partition);
-#     the last window owns everything left (the experiment's true closing boundary).
-#     Ownership is what guarantees every fault is decided exactly once.
-#   - interior window time boundaries are OPEN: a fault whose other detector was cut
-#     out of the slice becomes a single-detector column = a boundary edge (Tan's
-#     imaginary detectors, mechanically free here)
-#   - a committed fault's detector flips BEYOND the commit region are the artificial
-#     defects handed forward (Skoric; Huang & Puri's sigma' = sigma + H*xi; QUITS's
-#     window_update) -- the note telling the next window "already explained, ignore"
-#
-# The slice is CODE-AGNOSTIC: the same construction serves the surface code and
-# qLDPC / bivariate-bicycle codes (QUITS validates it for qLDPC). Only the inner
-# decoder differs: matching_window_decoder() (PyMatching) for matchable codes, built
-# with decompose_errors=True; bposd_window_decoder() (ldpc BP-OSD) for BB/qLDPC,
-# built with decompose_errors=False since their faults may flip >2 detectors.
-# =====================================================================================
-
 
 @dataclass(frozen=True)
 class WindowErrorModel:
-    """One window's decoding problem, sliced from the operation's global DEM.
+    """One window's detector rows, fault columns, and boundary handoff data."""
 
-    Rows are the window's detectors (sorted by global id, which stim orders by time);
-    columns are the candidate faults this window may select: every fault touching its
-    rows that no earlier window committed."""
-    detector_ids: tuple        # global detector ids of the rows, in row order
-    commit_hi: int             # last committed round (1-based; round = stim t + 1)
-    check: "object"            # uint8 (n_rows, n_cols): fault -> in-window detector flips
-    priors: "object"           # float (n_cols,): each fault's probability
-    obs: "object"              # uint8 (n_obs, n_cols): fault -> logical observable flips
-    owned: "object"            # bool (n_cols,): faults THIS window commits
-    future_flips: dict         # owned col -> tuple of GLOBAL detector ids it flips
-    #                            beyond commit_hi (the artificial defects handed on)
-    defect_positions: dict = None  # global det id -> (round, index within that round's
-    #                            detectors), for every id in future_flips: lets a decoder
-    #                            turn handed-forward defects into the per-round bit masks
-    #                            Window.boundary_in speaks (cluster XORs them into the
-    #                            dependent window's payloads)
-    # Belief-matching only (None unless build_window_error_models(belief_matching=True)):
-    # the UNDECOMPOSED hyperedge graph for the BP pass, plus the edge<-hyperedge map, so a
-    # belief-matching inner decoder can run BP on the hypergraph and reweight the matching
-    # (edge) graph -- the `check`/`owned`/`future_flips` above stay the edge model.
-    h_check: "object" = None       # uint8 (n_rows, n_hyperedges): hyperedge -> in-window detector flips
-    h_priors: "object" = None      # float (n_hyperedges,): each hyperedge's probability
-    h2e: "object" = None           # uint8 (n_edges, n_hyperedges): h2e[e,h]=1 iff edge e is a component of hyperedge h
+    detector_ids: tuple
+    commit_hi: int
+    check: "object"
+    priors: "object"
+    obs: "object"
+    owned: "object"
+    future_flips: dict
+    defect_positions: dict = None
+    h_check: "object" = None
+    h_priors: "object" = None
+    h2e: "object" = None
+
+
+def _merge_probability(current: float, incoming: float) -> float:
+    """Merge independent faults with p (+) q = p(1-q) + q(1-p)."""
+    return current * (1 - incoming) + incoming * (1 - current)
+
+
+def _error_components(inst) -> tuple:
+    """Parse one Stim error instruction into decomposed components and one hyperedge."""
+    probability = inst.args_copy()[0]
+    components = []
+    detectors = []
+    observables = []
+    all_detectors = []
+    all_observables = []
+
+    for target in inst.targets_copy():
+        if target.is_separator():
+            components.append((tuple(sorted(detectors)), tuple(sorted(observables))))
+            detectors = []
+            observables = []
+        elif target.is_relative_detector_id():
+            detectors.append(target.val)
+            all_detectors.append(target.val)
+        elif target.is_logical_observable_id():
+            observables.append(target.val)
+            all_observables.append(target.val)
+
+    components.append((tuple(sorted(detectors)), tuple(sorted(observables))))
+    hyperedge = (tuple(sorted(all_detectors)), tuple(sorted(all_observables)))
+    return probability, components, hyperedge
 
 
 def detector_error_model_to_faults(dem) -> tuple:
-    """The standard DEM -> fault-list conversion (BeliefMatching / QUITS lineage).
-
-    Composite errors (stim's `^`-separated suggested decompositions) are SPLIT into
-    their components, each carrying the parent's probability -- the convention
-    PyMatching itself applies, required for matchable (<= 2 detectors) columns.
-    Identical (detectors, observables) faults merge with p (+) q = p(1-q) + q(1-p).
-
-    Returns (det_sets, obs_sets, priors): parallel lists, one entry per fault."""
-    merged: dict = {}                              # (dets, obs) -> prior
+    """Convert a Stim detector error model into merged fault columns."""
+    merged: dict = {}
     for inst in dem.flattened():
         if inst.type != "error":
             continue
-        p = inst.args_copy()[0]
-        components, dets, obs = [], [], []
-        for t in inst.targets_copy():
-            if t.is_separator():
-                components.append((tuple(sorted(dets)), tuple(sorted(obs))))
-                dets, obs = [], []
-            elif t.is_relative_detector_id():
-                dets.append(t.val)
-            elif t.is_logical_observable_id():
-                obs.append(t.val)
-        components.append((tuple(sorted(dets)), tuple(sorted(obs))))
+        probability, components, _hyperedge = _error_components(inst)
         for key in components:
             if not key[0]:
-                continue                           # component with no detectors
-            q = merged.get(key, 0.0)
-            merged[key] = q * (1 - p) + p * (1 - q)
+                continue
+            current_probability = merged.get(key, 0.0)
+            merged[key] = _merge_probability(current_probability, probability)
     det_sets = [k[0] for k in merged]
     obs_sets = [k[1] for k in merged]
     priors = list(merged.values())
@@ -105,348 +77,403 @@ def detector_error_model_to_faults(dem) -> tuple:
 
 
 def detector_error_model_to_faults_bm(dem) -> tuple:
-    """Belief-matching variant of detector_error_model_to_faults: returns the SAME
-    decomposed edge list (det_sets, obs_sets, priors -- byte-identical to the function
-    above) PLUS the UNDECOMPOSED hyperedge list and the edge<-hyperedge map needed for the
-    BP pass (Higgott & Gidney, arXiv:2203.04948: BP runs on the hyperedge graph, then the
-    matching graph is reweighted by the BP posteriors).
-
-    Returns (det_sets, obs_sets, priors, h_det_sets, h_priors, H2E) where h_det_sets /
-    h_priors are the undecomposed mechanisms (a hyperedge = the union of an error's
-    components, before stim's `^` split) and H2E is a uint8 (n_edges x n_hyperedges) map:
-    H2E[e,h]=1 iff edge e is a decomposition component of hyperedge h. Identical-mechanism
-    merging uses the same p (+) q = p(1-q)+q(1-p) rule as the edge list, so the edge
-    columns come out in the same order as detector_error_model_to_faults."""
+    """Return decomposed edge faults plus belief-matching hyperedge data."""
     import numpy as np
-    edge_merged: dict = {}            # edge (dets,obs) -> prob  (same keying/order as above)
-    hyper_merged: dict = {}           # hyper (dets,obs) -> index
-    hyper_list: list = []             # [ [dets, obs, prob], ... ]
-    h2e_pairs: set = set()            # (hyper_index, edge_key)
+
+    edge_merged: dict = {}
+    hyper_merged: dict = {}
+    hyper_list: list = []
+    h2e_pairs: set = set()
+
     for inst in dem.flattened():
         if inst.type != "error":
             continue
-        p = inst.args_copy()[0]
-        comps, dets, obs, all_dets, all_obs = [], [], [], [], []
-        for t in inst.targets_copy():
-            if t.is_separator():
-                comps.append((tuple(sorted(dets)), tuple(sorted(obs))))
-                dets, obs = [], []
-            elif t.is_relative_detector_id():
-                dets.append(t.val); all_dets.append(t.val)
-            elif t.is_logical_observable_id():
-                obs.append(t.val); all_obs.append(t.val)
-        comps.append((tuple(sorted(dets)), tuple(sorted(obs))))
-        h_key = (tuple(sorted(all_dets)), tuple(sorted(all_obs)))
-        if not h_key[0]:
+        probability, components, hyperedge_key = _error_components(inst)
+        if not hyperedge_key[0]:
             continue
-        hi = hyper_merged.get(h_key)
-        if hi is None:
-            hi = len(hyper_list); hyper_merged[h_key] = hi
-            hyper_list.append([h_key[0], h_key[1], 0.0])
-        hyper_list[hi][2] = hyper_list[hi][2] * (1 - p) + p * (1 - hyper_list[hi][2])
-        for ck in comps:
-            if not ck[0]:
+
+        hyperedge_index = hyper_merged.get(hyperedge_key)
+        if hyperedge_index is None:
+            hyperedge_index = len(hyper_list)
+            hyper_merged[hyperedge_key] = hyperedge_index
+            hyper_list.append([hyperedge_key[0], hyperedge_key[1], 0.0])
+        hyper_list[hyperedge_index][2] = _merge_probability(
+            hyper_list[hyperedge_index][2], probability)
+
+        for component_key in components:
+            if not component_key[0]:
                 continue
-            q = edge_merged.get(ck, 0.0)
-            edge_merged[ck] = q * (1 - p) + p * (1 - q)
-            h2e_pairs.add((hi, ck))
+            current = edge_merged.get(component_key, 0.0)
+            edge_merged[component_key] = _merge_probability(current, probability)
+            h2e_pairs.add((hyperedge_index, component_key))
+
     edge_keys = list(edge_merged)
     edge_index = {k: i for i, k in enumerate(edge_keys)}
-    H2E = np.zeros((len(edge_keys), len(hyper_list)), dtype=np.uint8)
-    for hi, ck in h2e_pairs:
-        H2E[edge_index[ck], hi] = 1
+    hyperedge_to_edge = np.zeros((len(edge_keys), len(hyper_list)), dtype=np.uint8)
+    for hyperedge_index, component_key in h2e_pairs:
+        hyperedge_to_edge[edge_index[component_key], hyperedge_index] = 1
+
     return ([k[0] for k in edge_keys], [k[1] for k in edge_keys],
             [edge_merged[k] for k in edge_keys],
-            [h[0] for h in hyper_list], [h[2] for h in hyper_list], H2E)
+            [h[0] for h in hyper_list], [h[2] for h in hyper_list],
+            hyperedge_to_edge)
+
+
+def _detector_rounds_from_circuit(circuit, detector_rounds: Optional[dict]) -> dict:
+    """Return global detector id -> 1-based syndrome round."""
+    if detector_rounds is not None:
+        return dict(detector_rounds)
+
+    coords = circuit.get_detector_coordinates()
+    coordless = sum(1 for coord in coords.values() if not coord)
+    if coordless:
+        raise ValueError(
+            f"{coordless} detectors carry no coordinates; pass detector_rounds "
+            "(global detector id -> 1-based round) explicitly")
+    return {detector_id: int(coord[-1]) + 1
+            for detector_id, coord in coords.items()}
+
+
+def _detector_position_in_round(round_of: dict) -> dict:
+    """Return detector id -> index within its round, using Stim detector order."""
+    detectors_by_round: dict = {}
+    for detector_id in sorted(round_of):
+        round_index = round_of[detector_id]
+        detectors_by_round.setdefault(round_index, []).append(detector_id)
+    return {detector_id: index
+            for detectors in detectors_by_round.values()
+            for index, detector_id in enumerate(detectors)}
+
+
+def _parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
+    """Normalize a 3-value or 4-value window plan entry."""
+    if len(window_entry) == 4:
+        return window_entry
+
+    commit_lo, commit_hi, buffer_hi = window_entry
+    buffer_lo = commit_lo
+    return buffer_lo, commit_lo, commit_hi, buffer_hi
+
+
+def _detectors_in_window(round_of: dict, buffer_lo: int, buffer_hi: int,
+                         *, is_last: bool) -> list:
+    """Choose the detector rows for this window."""
+    if is_last:
+        return sorted(detector_id
+                      for detector_id, round_index in round_of.items()
+                      if round_index >= buffer_lo)
+
+    return sorted(detector_id
+                  for detector_id, round_index in round_of.items()
+                  if buffer_lo <= round_index <= buffer_hi)
+
+
+def _fault_columns_for_window(det_sets: list, row_index: dict, lead_rows: set,
+                              committed_elsewhere: set) -> list:
+    """Choose the fault columns this window can use."""
+    columns: list = []
+    for fault_index, detectors in enumerate(det_sets):
+        touches_window = any(detector_id in row_index for detector_id in detectors)
+        if not touches_window:
+            continue
+
+        if fault_index not in committed_elsewhere:
+            columns.append(fault_index)
+            continue
+
+        touches_leading_buffer = any(detector_id in lead_rows
+                                     for detector_id in detectors)
+        if touches_leading_buffer:
+            columns.append(fault_index)
+    return columns
+
+
+def _belief_matching_fields(columns: list, rows: list, row_index: dict,
+                            h_det_sets: list, h_priors: list,
+                            hyperedge_to_edge_map) -> dict:
+    """Build the optional hyperedge fields used by belief matching."""
+    import numpy as np
+
+    hyperedge_columns = sorted({
+        hyperedge_index
+        for fault_index in columns
+        for hyperedge_index in np.nonzero(hyperedge_to_edge_map[fault_index])[0]
+    })
+    hyperedge_index_by_id = {
+        hyperedge_index: column_index
+        for column_index, hyperedge_index in enumerate(hyperedge_columns)
+    }
+
+    hyperedge_check = np.zeros((len(rows), len(hyperedge_columns)), dtype=np.uint8)
+    for hyperedge_index in hyperedge_columns:
+        column_index = hyperedge_index_by_id[hyperedge_index]
+        for detector_id in h_det_sets[hyperedge_index]:
+            if detector_id in row_index:
+                hyperedge_check[row_index[detector_id], column_index] = 1
+
+    hyperedge_to_edge = np.zeros((len(columns), len(hyperedge_columns)),
+                                 dtype=np.uint8)
+    for edge_column, fault_index in enumerate(columns):
+        for hyperedge_index in np.nonzero(hyperedge_to_edge_map[fault_index])[0]:
+            hyperedge_to_edge[edge_column,
+                              hyperedge_index_by_id[hyperedge_index]] = 1
+
+    return {
+        "h_check": hyperedge_check,
+        "h_priors": np.array([h_priors[hyperedge_index]
+                              for hyperedge_index in hyperedge_columns]),
+        "h2e": hyperedge_to_edge,
+    }
+
+
+def _fault_owned_by_window(fault_index: int, fault_rounds: list,
+                           committed_elsewhere: set, commit_lo: int,
+                           commit_hi: int, *, is_last: bool) -> bool:
+    """True when this window is responsible for committing the fault."""
+    if fault_index in committed_elsewhere:
+        return False
+    if is_last:
+        return True
+    return any(commit_lo <= round_index <= commit_hi
+               for round_index in fault_rounds[fault_index])
+
+
+def _fill_detector_and_observable_columns(check, obs, *, column_index: int,
+                                          fault_index: int, det_sets: list,
+                                          obs_sets: list, row_index: dict) -> None:
+    """Fill the detector and observable entries for one fault column."""
+    for detector_id in det_sets[fault_index]:
+        if detector_id in row_index:
+            check[row_index[detector_id], column_index] = 1
+
+    for observable_id in obs_sets[fault_index]:
+        obs[observable_id, column_index] = 1
+
+
+def _future_flips_after_commit(det_sets: list, round_of: dict,
+                               fault_index: int, commit_hi: int,
+                               *, is_last: bool) -> tuple:
+    """Return detector flips that must be handed to a later window."""
+    if is_last:
+        return ()
+    return tuple(detector_id
+                 for detector_id in det_sets[fault_index]
+                 if round_of[detector_id] > commit_hi)
+
+
+def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
+                         det_sets: list, obs_sets: list, n_obs: int,
+                         round_of: dict, fault_rounds: list,
+                         committed_elsewhere: set, commit_lo: int,
+                         commit_hi: int, is_last: bool) -> tuple:
+    """Build check, observable, ownership, and future-defect arrays."""
+    import numpy as np
+
+    check = np.zeros((len(rows), len(columns)), dtype=np.uint8)
+    obs = np.zeros((n_obs, len(columns)), dtype=np.uint8)
+    owned = np.zeros(len(columns), dtype=bool)
+    future_flips: dict = {}
+
+    for column_index, fault_index in enumerate(columns):
+        _fill_detector_and_observable_columns(
+            check, obs, column_index=column_index, fault_index=fault_index,
+            det_sets=det_sets, obs_sets=obs_sets, row_index=row_index)
+
+        owns_fault = _fault_owned_by_window(
+            fault_index, fault_rounds, committed_elsewhere,
+            commit_lo, commit_hi, is_last=is_last)
+        if not owns_fault:
+            continue
+
+        owned[column_index] = True
+        committed_elsewhere.add(fault_index)
+        beyond_commit = _future_flips_after_commit(
+            det_sets, round_of, fault_index, commit_hi, is_last=is_last)
+        if beyond_commit:
+            future_flips[column_index] = beyond_commit
+
+    return check, obs, owned, future_flips
+
+
+def _defect_positions(future_flips: dict, round_of: dict, pos_of: dict) -> dict:
+    """Return detector positions for artificial defects handed forward."""
+    return {
+        detector_id: (round_of[detector_id], pos_of[detector_id])
+        for flips in future_flips.values()
+        for detector_id in flips
+    }
+
+
+def _window_geometry(round_of: dict, det_sets: list, committed_elsewhere: set,
+                     buffer_lo: int, commit_lo: int,
+                     buffer_hi: int, *, is_last: bool) -> tuple:
+    """Return rows, row index, and columns for one sliced window."""
+    rows = _detectors_in_window(round_of, buffer_lo, buffer_hi, is_last=is_last)
+    row_index = {
+        detector_id: row_number
+        for row_number, detector_id in enumerate(rows)
+    }
+    lead_rows = {
+        detector_id
+        for detector_id in rows
+        if round_of[detector_id] < commit_lo
+    }
+    columns = _fault_columns_for_window(
+        det_sets, row_index, lead_rows, committed_elsewhere)
+    return rows, row_index, columns
+
+
+def _build_one_window_model(*, det_sets: list, obs_sets: list, priors: list,
+                            n_obs: int, round_of: dict, fault_rounds: list,
+                            pos_of: dict, committed_elsewhere: set,
+                            buffer_lo: int, commit_lo: int, commit_hi: int,
+                            buffer_hi: int, is_last: bool,
+                            belief_matching: bool = False,
+                            h_det_sets: Optional[list] = None,
+                            h_priors: Optional[list] = None,
+                            hyperedge_to_edge_map=None) -> WindowErrorModel:
+    """Build one sliced window and update the fault ownership set."""
+    import numpy as np
+
+    rows, row_index, columns = _window_geometry(
+        round_of, det_sets, committed_elsewhere,
+        buffer_lo, commit_lo, buffer_hi, is_last=is_last)
+    check, obs, owned, future_flips = _build_window_arrays(
+        rows=rows, columns=columns, row_index=row_index,
+        det_sets=det_sets, obs_sets=obs_sets, n_obs=n_obs,
+        round_of=round_of, fault_rounds=fault_rounds,
+        committed_elsewhere=committed_elsewhere,
+        commit_lo=commit_lo, commit_hi=commit_hi, is_last=is_last)
+
+    hyperedge_fields: dict = {}
+    if belief_matching:
+        hyperedge_fields = _belief_matching_fields(
+            columns, rows, row_index, h_det_sets, h_priors,
+            hyperedge_to_edge_map)
+
+    return WindowErrorModel(
+        detector_ids=tuple(rows),
+        commit_hi=commit_hi,
+        check=check,
+        priors=np.array([priors[fault_index] for fault_index in columns]),
+        obs=obs,
+        owned=owned,
+        future_flips=future_flips,
+        defect_positions=_defect_positions(future_flips, round_of, pos_of),
+        **hyperedge_fields)
+
+
+def _fault_data_from_circuit(circuit, *, decompose_errors: bool,
+                             belief_matching: bool) -> tuple:
+    """Return fault lists and optional belief-matching hyperedge data."""
+    dem = circuit.detector_error_model(decompose_errors=decompose_errors)
+    if belief_matching:
+        return detector_error_model_to_faults_bm(dem)
+
+    det_sets, obs_sets, priors = detector_error_model_to_faults(dem)
+    return det_sets, obs_sets, priors, None, None, None
+
+
+def _build_models_from_plan(*, plan: list, det_sets: list, obs_sets: list,
+                            priors: list, n_obs: int, round_of: dict,
+                            fault_rounds: list, pos_of: dict,
+                            belief_matching: bool, h_det_sets, h_priors,
+                            hyperedge_to_edge_map) -> list:
+    """Build all window models for a normalized fault list and plan."""
+    models: list = []
+    committed_elsewhere: set = set()
+    last_window = len(plan) - 1
+
+    for window_index, window_entry in enumerate(plan):
+        buffer_lo, commit_lo, commit_hi, buffer_hi = _parse_window_entry(window_entry)
+        models.append(_build_one_window_model(
+            det_sets=det_sets, obs_sets=obs_sets, priors=priors,
+            n_obs=n_obs, round_of=round_of, fault_rounds=fault_rounds,
+            pos_of=pos_of, committed_elsewhere=committed_elsewhere,
+            buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
+            buffer_hi=buffer_hi, is_last=(window_index == last_window),
+            belief_matching=belief_matching, h_det_sets=h_det_sets,
+            h_priors=h_priors, hyperedge_to_edge_map=hyperedge_to_edge_map))
+    return models
 
 
 def build_window_error_models(circuit, plan: list, num_observables: Optional[int] = None,
                           *, decompose_errors: bool = True,
                           detector_rounds: Optional[dict] = None,
                           belief_matching: bool = False) -> list:
-    """Slice an operation's circuit into one WindowErrorModel per planned window.
-
-    `plan` is scheme-style: [(commit_lo, commit_hi, buffer_hi), ...] in 1-based rounds,
-    where round r covers the detectors with stim time coordinate t = r - 1. Detectors
-    past the last window's buffer (the final data-measurement layer) join the LAST
-    window -- the experiment's true closing time boundary (QUITS's special last
-    window; Tan's closed final boundary).
-
-    `decompose_errors` mirrors stim's flag: True (default) splits faults into the
-    <= 2-detector components matching decoders require (surface code); False keeps
-    whole faults for codes whose DEM is not graphlike (BB / qLDPC -- pair with
-    bposd_window_decoder, since matching does not apply).
-
-    `detector_rounds` maps global detector id -> 1-based round, for circuits whose
-    detectors carry no time coordinates (e.g. QUITS-built BB circuits, where
-    round = id // checks_per_round + 1). Default reads stim coordinates (t + 1).
-
-    `belief_matching` (default False): also fill each window's h_check / h_priors / h2e
-    (the undecomposed hyperedge graph + edge<-hyperedge map) so belief_matching_window_decoder
-    can run BP on the hypergraph. The decomposed edge model is byte-identical either way;
-    only the extra hyperedge fields are added, so default callers are unchanged."""
-    import numpy as np
-    dem = circuit.detector_error_model(decompose_errors=decompose_errors)
-    if belief_matching:
-        det_sets, obs_sets, priors, h_det_sets, h_priors, H2E = \
-            detector_error_model_to_faults_bm(dem)
-    else:
-        det_sets, obs_sets, priors = detector_error_model_to_faults(dem)
+    """Slice an operation circuit into one WindowErrorModel per planned window."""
+    det_sets, obs_sets, priors, h_det_sets, h_priors, hyperedge_to_edge_map = \
+        _fault_data_from_circuit(
+            circuit,
+            decompose_errors=decompose_errors,
+            belief_matching=belief_matching)
     n_obs = num_observables if num_observables is not None else circuit.num_observables
-    if detector_rounds is not None:
-        round_of = dict(detector_rounds)
-    else:
-        coords = circuit.get_detector_coordinates()
-        coordless = sum(1 for c in coords.values() if not c)
-        if coordless:
-            raise ValueError(
-                f"{coordless} detectors carry no coordinates; pass detector_rounds "
-                "(global detector id -> 1-based round) explicitly")
-        round_of = {det: int(c[-1]) + 1 for det, c in coords.items()}
+    round_of = _detector_rounds_from_circuit(circuit, detector_rounds)
     fault_rounds = [tuple(round_of[d] for d in dets) for dets in det_sets]
-    # position of each detector within its round (ascending id), for defect masks
-    by_round: dict = {}
-    for det in sorted(round_of):
-        by_round.setdefault(round_of[det], []).append(det)
-    pos_of = {det: i for dets in by_round.values() for i, det in enumerate(dets)}
-
-    models: list = []
-    committed_elsewhere: set = set()               # fault indices owned by past windows
-    last = len(plan) - 1
-    for k, win in enumerate(plan):
-        # A plan entry is (commit_lo, commit_hi, buffer_hi) for a TRAILING-buffer-only window,
-        # or (buffer_lo, commit_lo, commit_hi, buffer_hi) when the window ALSO has a LEADING
-        # buffer -- look-ahead rounds BEFORE the commit region (the parallel A/B / two-sided
-        # buffer scheme, Skoric arXiv:2209.08552 Sec I.C: an A window's past time boundary is
-        # rough). buffer_lo defaults to commit_lo, so 3-tuple callers and every trailing-only
-        # window are byte-identical to before.
-        if len(win) == 4:
-            buffer_lo, commit_lo, commit_hi, buffer_hi = win
-        else:
-            commit_lo, commit_hi, buffer_hi = win
-            buffer_lo = commit_lo
-        # rows: this window's detectors, from its first (leading-buffer or commit) round; the
-        # last window keeps everything to the end (the experiment's true closing boundary).
-        if k == last:
-            rows = sorted(d for d, r in round_of.items() if r >= buffer_lo)
-        else:
-            rows = sorted(d for d, r in round_of.items()
-                          if buffer_lo <= r <= buffer_hi)
-        row_index = {d: i for i, d in enumerate(rows)}
-        # leading-buffer rounds (strictly before the commit region): their detectors were
-        # already committed by earlier windows, but a handed-forward artificial defect can land
-        # on them, so they need an incident edge to match it to. Empty for a trailing-only window.
-        lead_rows = {d for d in rows if round_of[d] < commit_lo}
-        # columns: uncommitted faults touching the rows (as before), PLUS -- only for a window
-        # with a leading buffer -- already-committed faults reaching a leading-buffer row,
-        # included as UNOWNED boundary edges (the rough past boundary). No leading buffer => no
-        # extra columns => identical matrices to before.
-        cols: list = []
-        for f in range(len(det_sets)):
-            if not any(d in row_index for d in det_sets[f]):
-                continue
-            if f not in committed_elsewhere:
-                cols.append(f)
-            elif lead_rows and any(d in lead_rows for d in det_sets[f]):
-                cols.append(f)                     # rough past-boundary edge (not owned here)
-        check = np.zeros((len(rows), len(cols)), dtype=np.uint8)
-        obs = np.zeros((n_obs, len(cols)), dtype=np.uint8)
-        owned = np.zeros(len(cols), dtype=bool)
-        future_flips: dict = {}
-        for j, f in enumerate(cols):
-            for d in det_sets[f]:
-                if d in row_index:
-                    check[row_index[d], j] = 1
-            for o in obs_sets[f]:
-                obs[o, j] = 1
-            # ownership: a fault is committed by the FIRST window whose COMMIT REGION it
-            # touches (the range commit_lo..commit_hi -- a leading buffer must NOT claim faults
-            # belonging to an earlier commit), or by the last window (everything remaining).
-            # Already-committed faults (the boundary edges above) are never re-owned -- every
-            # fault is owned exactly once. For a trailing-only window this range test is
-            # equivalent to the old prefix test (commit regions tile, so an in-cols fault always
-            # has a detector at-or-after commit_lo).
-            if f not in committed_elsewhere and (
-                    k == last or any(commit_lo <= r <= commit_hi for r in fault_rounds[f])):
-                owned[j] = True
-                committed_elsewhere.add(f)
-                beyond = tuple(d for d in det_sets[f] if round_of[d] > commit_hi)
-                if beyond and k != last:
-                    future_flips[j] = beyond
-        defect_positions = {det: (round_of[det], pos_of[det])
-                            for flips in future_flips.values() for det in flips}
-        h_fields: dict = {}
-        if belief_matching:
-            # hyperedge slice aligned to this window's edge cols: every hyperedge that
-            # parents an in-window edge joins the BP graph (so BP and matching agree).
-            h_cols = sorted({h for f in cols for h in np.nonzero(H2E[f])[0]})
-            h_index = {h: i for i, h in enumerate(h_cols)}
-            h_check = np.zeros((len(rows), len(h_cols)), dtype=np.uint8)
-            for h in h_cols:
-                for d in h_det_sets[h]:
-                    if d in row_index:
-                        h_check[row_index[d], h_index[h]] = 1
-            h2e = np.zeros((len(cols), len(h_cols)), dtype=np.uint8)
-            for j, f in enumerate(cols):
-                for h in np.nonzero(H2E[f])[0]:
-                    h2e[j, h_index[h]] = 1
-            h_fields = dict(h_check=h_check,
-                            h_priors=np.array([h_priors[h] for h in h_cols]), h2e=h2e)
-        models.append(WindowErrorModel(
-            detector_ids=tuple(rows), commit_hi=commit_hi,
-            check=check, priors=np.array([priors[f] for f in cols]),
-            obs=obs, owned=owned, future_flips=future_flips,
-            defect_positions=defect_positions, **h_fields))
-    return models
+    pos_of = _detector_position_in_round(round_of)
+    return _build_models_from_plan(
+        plan=plan, det_sets=det_sets, obs_sets=obs_sets, priors=priors,
+        n_obs=n_obs, round_of=round_of, fault_rounds=fault_rounds,
+        pos_of=pos_of, belief_matching=belief_matching,
+        h_det_sets=h_det_sets, h_priors=h_priors,
+        hyperedge_to_edge_map=hyperedge_to_edge_map)
 
 
 class WindowSlicer:
-    """Per-window slicing of ONE circuit's detector error model, one window AT A TIME. Built once
-    from a circuit; slice_window() mints one WindowErrorModel per call, threading
-    committed_elsewhere so every fault is owned by exactly one window -- regardless of whether the
-    windows are sliced all at once (as build_window_error_models does) or INCREMENTALLY as a
-    continuous syndrome stream grows. The incremental mode is the runtime round-driven WindowBuilder
-    of SWIPER (arXiv:2412.05115 Sec 2.4 / Sec 5.1, Fig. 9): a window is cut and decoded as soon as
-    its commit+buffer rounds exist, so an idle stretch of any (runtime-determined) length is
-    absorbed by minting more windows -- no compile-time plan.
+    """Incremental slicer that owns each fault in exactly one window."""
 
-    slice_window's per-window math is byte-identical to the loop body of build_window_error_models
-    (tests/test_window_slicer.py pins this), so the static and runtime builders agree exactly. The
-    final, stream-closing window is sliced with is_last=True (Tan arXiv:2209.09219's closed final
-    time boundary: it keeps every remaining detector); every interior window uses is_last=False
-    (open boundary, defects handed forward)."""
     def __init__(self, circuit, num_observables: Optional[int] = None, *,
                  decompose_errors: bool = True, detector_rounds: Optional[dict] = None,
                  belief_matching: bool = False):
-        """Precompute the circuit's fault list, per-fault rounds, and detector positions (the
-        compile-time data shared by every window); start with no fault committed."""
-        import numpy as np
         self.belief_matching = belief_matching
         dem = circuit.detector_error_model(decompose_errors=decompose_errors)
         if belief_matching:
             (self.det_sets, self.obs_sets, self.priors,
-             self.h_det_sets, self.h_priors, self.H2E) = detector_error_model_to_faults_bm(dem)
+             self.h_det_sets, self.h_priors,
+             self.hyperedge_to_edge_map) = detector_error_model_to_faults_bm(dem)
         else:
             self.det_sets, self.obs_sets, self.priors = detector_error_model_to_faults(dem)
-            self.h_det_sets = self.h_priors = self.H2E = None
+            self.h_det_sets = self.h_priors = self.hyperedge_to_edge_map = None
         self.n_obs = num_observables if num_observables is not None else circuit.num_observables
-        if detector_rounds is not None:
-            round_of = dict(detector_rounds)
-        else:
-            coords = circuit.get_detector_coordinates()
-            coordless = sum(1 for c in coords.values() if not c)
-            if coordless:
-                raise ValueError(
-                    f"{coordless} detectors carry no coordinates; pass detector_rounds "
-                    "(global detector id -> 1-based round) explicitly")
-            round_of = {det: int(c[-1]) + 1 for det, c in coords.items()}
+        round_of = _detector_rounds_from_circuit(circuit, detector_rounds)
         self.round_of = round_of
         self.fault_rounds = [tuple(round_of[d] for d in dets) for dets in self.det_sets]
-        by_round: dict = {}
-        for det in sorted(round_of):
-            by_round.setdefault(round_of[det], []).append(det)
-        self.pos_of = {det: i for dets in by_round.values() for i, det in enumerate(dets)}
+        self.pos_of = _detector_position_in_round(round_of)
         self.committed_elsewhere: set = set()
 
     def slice_window(self, buffer_lo: int, commit_lo: int, commit_hi: int, buffer_hi: int,
                      *, is_last: bool) -> WindowErrorModel:
-        """Mint one WindowErrorModel with this geometry (rounds 1-based). is_last keeps every
-        remaining detector (the closed final boundary); otherwise rows span buffer_lo..buffer_hi
-        with open interior boundaries. Mutates committed_elsewhere so each fault is owned once."""
-        import numpy as np
-        det_sets, obs_sets, priors = self.det_sets, self.obs_sets, self.priors
-        round_of, fault_rounds, pos_of = self.round_of, self.fault_rounds, self.pos_of
-        committed_elsewhere = self.committed_elsewhere
-        if is_last:
-            rows = sorted(d for d, r in round_of.items() if r >= buffer_lo)
-        else:
-            rows = sorted(d for d, r in round_of.items() if buffer_lo <= r <= buffer_hi)
-        row_index = {d: i for i, d in enumerate(rows)}
-        lead_rows = {d for d in rows if round_of[d] < commit_lo}
-        cols: list = []
-        for f in range(len(det_sets)):
-            if not any(d in row_index for d in det_sets[f]):
-                continue
-            if f not in committed_elsewhere:
-                cols.append(f)
-            elif lead_rows and any(d in lead_rows for d in det_sets[f]):
-                cols.append(f)
-        check = np.zeros((len(rows), len(cols)), dtype=np.uint8)
-        obs = np.zeros((self.n_obs, len(cols)), dtype=np.uint8)
-        owned = np.zeros(len(cols), dtype=bool)
-        future_flips: dict = {}
-        for j, f in enumerate(cols):
-            for d in det_sets[f]:
-                if d in row_index:
-                    check[row_index[d], j] = 1
-            for o in obs_sets[f]:
-                obs[o, j] = 1
-            if f not in committed_elsewhere and (
-                    is_last or any(commit_lo <= r <= commit_hi for r in fault_rounds[f])):
-                owned[j] = True
-                committed_elsewhere.add(f)
-                beyond = tuple(d for d in det_sets[f] if round_of[d] > commit_hi)
-                if beyond and not is_last:
-                    future_flips[j] = beyond
-        defect_positions = {det: (round_of[det], pos_of[det])
-                            for flips in future_flips.values() for det in flips}
-        h_fields: dict = {}
-        if self.belief_matching:
-            H2E, h_det_sets, h_priors = self.H2E, self.h_det_sets, self.h_priors
-            h_cols = sorted({h for f in cols for h in np.nonzero(H2E[f])[0]})
-            h_index = {h: i for i, h in enumerate(h_cols)}
-            h_check = np.zeros((len(rows), len(h_cols)), dtype=np.uint8)
-            for h in h_cols:
-                for d in h_det_sets[h]:
-                    if d in row_index:
-                        h_check[row_index[d], h_index[h]] = 1
-            h2e = np.zeros((len(cols), len(h_cols)), dtype=np.uint8)
-            for j, f in enumerate(cols):
-                for h in np.nonzero(H2E[f])[0]:
-                    h2e[j, h_index[h]] = 1
-            h_fields = dict(h_check=h_check,
-                            h_priors=np.array([h_priors[h] for h in h_cols]), h2e=h2e)
-        return WindowErrorModel(
-            detector_ids=tuple(rows), commit_hi=commit_hi,
-            check=check, priors=np.array([priors[f] for f in cols]),
-            obs=obs, owned=owned, future_flips=future_flips,
-            defect_positions=defect_positions, **h_fields)
+        """Create one WindowErrorModel and update the fault ownership state."""
+        return _build_one_window_model(
+            det_sets=self.det_sets, obs_sets=self.obs_sets, priors=self.priors,
+            n_obs=self.n_obs, round_of=self.round_of,
+            fault_rounds=self.fault_rounds, pos_of=self.pos_of,
+            committed_elsewhere=self.committed_elsewhere,
+            buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
+            buffer_hi=buffer_hi, is_last=is_last,
+            belief_matching=self.belief_matching, h_det_sets=self.h_det_sets,
+            h_priors=self.h_priors,
+            hyperedge_to_edge_map=self.hyperedge_to_edge_map)
 
 
 def decode_windowed(window_models: list, detection_events, decode_window) -> "object":
-    """The committed-window decoding pass over one shot (the offline reference; the
-    cluster performs the same steps event-by-event at runtime).
-
-    For each window in order: take its detectors' bits, XOR in the artificial defects
-    handed forward by earlier commits, decode, keep only the OWNED faults, accumulate
-    their observable flips, and hand THEIR beyond-commit flips forward. Returns the
-    predicted observable flips (XOR over all windows -- the convention the cluster's
-    op_results already uses)."""
+    """Decode one shot by walking the committed windows in order."""
     import numpy as np
-    pending: set = set()                           # artificial defects, by global det id
+    pending: set = set()
     total = np.zeros(window_models[0].obs.shape[0], dtype=np.uint8)
     for model in window_models:
         syndrome = detection_events[list(model.detector_ids)].astype(np.uint8).copy()
-        for i, det in enumerate(model.detector_ids):
-            if det in pending:
-                syndrome[i] ^= 1
-                pending.discard(det)
+        for detector_index, detector_id in enumerate(model.detector_ids):
+            if detector_id in pending:
+                syndrome[detector_index] ^= 1
+                pending.discard(detector_id)
         selected = np.asarray(decode_window(model, syndrome), dtype=np.uint8)
         committed = selected.astype(bool) & model.owned
         total ^= (model.obs @ committed.astype(np.uint8)) % 2
-        for col in np.nonzero(committed)[0]:
-            for det in model.future_flips.get(int(col), ()):
-                pending.symmetric_difference_update({det})   # defects XOR (mod 2)
+        for column_index in np.nonzero(committed)[0]:
+            for detector_id in model.future_flips.get(int(column_index), ()):
+                pending.symmetric_difference_update({detector_id})
     if pending:
         raise RuntimeError(f"artificial defects were never consumed: {sorted(pending)}"
-                           " -- the plan does not cover the full detector stream")
+                           ". The plan does not cover the full detector stream.")
     return total
-
-
-# INNER DECODERS live in their own per-algorithm packages (each is library-specific), NOT here:
-#   * matching_window_decoder()        -> decsim.mwpm_decoder           (pymatching)
-#   * bposd_window_decoder()           -> decsim.bposd_decoder          (ldpc BP-OSD)
-#   * belief_matching_window_decoder() -> decsim.belief_matching_decoder (ldpc BP + pymatching)
-# Only the CODE-AGNOSTIC windowing engine stays in this module: WindowErrorModel (incl. the
-# belief-matching h_* fields), build_window_error_models (incl. its belief_matching flag),
-# decode_windowed, and detector_error_model_to_faults / _bm. It is shared by every inner decoder.

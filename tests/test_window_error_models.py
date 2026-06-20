@@ -1,21 +1,7 @@
-"""Per-window decoding problems (gap #7, phase R1): the slicing must be paper-exact.
+"""Tests for slicing global detector error models into window models.
 
-Pinned to the sources in docs/DESIGN-real-window-decoding.md:
-- ownership partition (Skoric's crossing-edge commit rule / QUITS's column cursor):
-  every fault committed by exactly ONE window;
-- open interior time boundaries (Tan): cut faults become single-detector columns;
-- artificial-defect handoff (all three papers, one mechanism): a committed fault's
-  beyond-commit flips cancel the defects the next window sees;
-- the certification anchor (Skoric App C): windowed decoding with buffer d matches
-  whole-history decoding accuracy;
-- code-agnosticism: the same slicing serves the bivariate-bicycle [[72,12,6]] code
-  (QUITS validates the construction for qLDPC), with BP-OSD as the inner decoder
-  since BB faults flip up to 6 detectors and matching does not apply. The fixture
-  tests/data/bb72_12_6_p003_r10.stim is a QUITS-built circuit-level memory circuit
-  (BbCode l=6 m=6, A=x^3+y+y^2, B=y^3+x+x^2, p=0.003, 10 noisy rounds, Z basis).
-
-Requires stim + pymatching (skipped where unavailable, like the other adapters);
-the BB tests additionally require ldpc + scipy."""
+Paper contract: docs/PAPER_MODEL_MAP.md.
+"""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 

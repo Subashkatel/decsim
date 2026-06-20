@@ -32,9 +32,9 @@ def _memory_circuit(d, rounds, p):
 
 
 def _sliding_plan(n_rounds, commit, buffer):
-    nwin = max(1, math.ceil(n_rounds / commit))
+    window_count = max(1, math.ceil(n_rounds / commit))
     plan = []
-    for k in range(nwin):
+    for k in range(window_count):
         hi = min((k + 1) * commit, n_rounds)
         plan.append((k * commit + 1, hi, min(hi + buffer, n_rounds)))
     return plan

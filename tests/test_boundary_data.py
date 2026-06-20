@@ -13,7 +13,7 @@ from decsim.devices import SyndromeBitDevice
 from decsim.engine import Engine
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation, SyndromePayload
-from decsim.orchestrators import PauliFrameOrchestrator
+from decsim.orchestrators import ExecutionOrchestrator
 from decsim.schedulers import FifoScheduler
 from decsim.wiring import build_and_run
 
@@ -98,7 +98,7 @@ def test_per_patch_fragments_gate_round_arrival():
     # a round with n_fragments=2 only counts as arrived once BOTH patches are in
     eng = Engine(verbose=False)
     cl = DecoderCluster(eng, PresetLatencyDecoder(1.0), FifoScheduler(),
-                        ModularController(eng), PauliFrameOrchestrator(eng),
+                        ModularController(eng), ExecutionOrchestrator(eng),
                         num_units=1, code_distance=3)
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     op.patches = (0, 1)

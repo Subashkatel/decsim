@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Vendored Stim-style surface-code circuit generator."""
+
 import stim
 from typing import Callable, Set, List, Dict, Tuple, Optional
 from dataclasses import dataclass
@@ -480,11 +482,9 @@ def generate_circuit(
         Returns:
             The generated circuit.
         """
-    if distance is not None:
-        pass
-    elif x_distance is not None and z_distance is not None:
-        pass
-    else:
+    has_square_distance = distance is not None
+    has_rectangular_distance = x_distance is not None and z_distance is not None
+    if not has_square_distance and not has_rectangular_distance:
         raise ValueError('Either the distance parameter or x_distance and '
                          'z_distance parameters must be specified')
     code_name, task = code_task.split(":")

@@ -1,3 +1,5 @@
+"""Central simulator configuration."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -8,42 +10,32 @@ if TYPE_CHECKING:
     from .links import LinkModel
     from .protocols import CodeModel, Controller, Decoder, DecodingScheme
 
-#===============================================================================
-# CONFIGURATION 
-#===============================================================================
-
-# Time Units : The simulator uses integer ticks (similar to the classical gem5 simulator)
-# 1 tick = 1 picosecond (global frequency)
 TICKS_PER_US = 1_000_000
 
-def us(microseconds : float) -> int:
+
+def us(microseconds: float) -> int:
     """Convert microseconds to ticks."""
     return int(round(microseconds * TICKS_PER_US))
 
-def fmt(ticks : int ) -> str:
+
+def fmt(ticks: int) -> str:
     """Format ticks as microseconds for readability in logs."""
     return f"{ticks / TICKS_PER_US:7.3f} us"
 
 
-# Named latency-model fits tau_d(N)=alpha*N^beta (arXiv:2511.10633 Table 3; PyMatching @ p=0.1%).
-# Select one with SimConfig(decoder_model="cc_asic"); leave decoder_model=None to use the raw
-# decoder_alpha/decoder_beta fields instead (their defaults ARE the cc_fpga fit, so behaviour
-# is unchanged by default).
 DECODER_FITS = {
-    "cc_fpga":    (2.85e-10, 1.2),    # Collision Cluster on FPGA (the paper's headline fit)
-    "cc_asic":    (5.53e-11, 1.34),   # Collision Cluster on ASIC
-    "alphaqubit": (4.8e-6,   0.503),  # AlphaQubit (ML decoder)
-    "pymatching": (5.91e-9,  1.17),   # PyMatching (MWPM) at p = 0.1%
+    "cc_fpga": (2.85e-10, 1.2),
+    "cc_asic": (5.53e-11, 1.34),
+    "alphaqubit": (4.8e-6, 0.503),
+    "pymatching": (5.91e-9, 1.17),
 }
 
-# Decoding schemes selectable by name from config (schemes.py). Decoder switching is NOT a
-# scheme -- it is a separate Switching object (switch_mode below; switching.py).
 SCHEME_NAMES = ("sliding", "naive", "parallel")
-SWITCH_MODES = ("none", "serial", "parallel")     # decoder switching (switching.py): off / serial / run-both-at-once
+SWITCH_MODES = ("none", "serial", "parallel")
 
 
 def _scheme_registry() -> dict:
-    """name -> scheme class (lazy import: schemes.py imports nothing from here at module load)."""
+    """Return scheme classes by config name."""
     from .schemes import SlidingWindowScheme, NaiveOnlineScheme, ParallelWindowScheme
     return {"sliding": SlidingWindowScheme, "naive": NaiveOnlineScheme,
             "parallel": ParallelWindowScheme}
@@ -51,59 +43,41 @@ def _scheme_registry() -> dict:
 
 @dataclass(frozen=True)
 class SimConfig:
-    """All the changable parameters in one place so its easy to modify.
+    """All main simulator knobs in one place."""
 
-    Defaults are grounded in Khalid et al., arXiv:2511.10633: the six link latencies are
-    Table 2; (decoder_alpha, decoder_beta) are the Table 3 monomial fit tau_d(N)=alpha*N^beta
-    for the Collision Cluster decoder on FPGA. Syndrome-round time is platform-dependent
-    (~1 us superconducting: 1 us/cycle in arXiv:2510.21600; ~0.5 us stabilization rounds in
-    arXiv:2411.10406 Sec I.2.1)."""
-    round_us: float = 1.1 # one syndrome round = one parity check cycle
-    rounds_per_op: int = 11 # number of rounds per logical operation (two_qubit op + bus)
-    num_units: int = 1             # decoder units in the cluster
+    round_us: float = 1.1                 # Syndrome round duration.
+    rounds_per_op: int = 11               # Default rounds for timing-only operations.
+    num_units: int = 1                    # Default number of decoder workers.
 
-    # link latencies: Table 2 of arXiv:2511.10633 (sum ~= t_com ~ 10 us)
-    t_qc_us: float = 0.15  # chip -> controller latency (microseconds)
-    t_cd_us: float = 2.0   # controller -> decoder cluster latency (microseconds)
-    t_dd_us: float = 0.5   # decoder -> decoder message passing latency (microseconds)
-    t_do_us: float = 1.0   # decoder -> orchestrator latency (microseconds)
-    t_oc_us: float = 4.0   # orchestrator -> controller latency (microseconds)
-    t_cq_us: float = 0.15  # controller -> chip latency (microseconds)
-    t_ws_us: Optional[float] = None  # weak<->strong decoder escalation latency; None = follow t_dd_us
-    t_pack_us: float = 0.0 # controller packaging cost per round packet (microseconds): the controller aggregates a round's fragments into one t_cd packet (arXiv:2511.10633 Sec III.1); this prices the serialization/compression step (0 = free, the paper folds it into t_cd)
+    t_qc_us: float = 0.15                 # QPU to controller syndrome latency.
+    t_cd_us: float = 2.0                  # Controller to decoder syndrome latency.
+    t_dd_us: float = 0.5                  # Decoder to decoder boundary latency.
+    t_do_us: float = 1.0                  # Decoder to orchestrator result latency.
+    t_oc_us: float = 4.0                  # Orchestrator to controller feedback latency.
+    t_cq_us: float = 0.15                 # Controller to QPU feedback latency.
+    t_ws_us: Optional[float] = None       # Weak to strong decoder handoff latency.
+    t_pack_us: float = 0.0                # Controller packet packing delay.
 
-    # Decoder speed model tau_d(N) = alpha * N^beta (arXiv:2511.10633 Eq. 12): time to decode
-    # one round of a decoding graph with N nodes (N ~ d^2 for a distance-d patch).
-    #   alpha = the hardware's raw speed, in seconds (smaller = faster decoder)
-    #   beta  = how decode time grows with patch size (>1 = superlinear: doubling the
-    #           graph more than doubles the decode time)
-    # Defaults: the paper's Table 3 fit for the Collision Cluster decoder on FPGA. Other
-    # Table 3 fits to swap in: ASIC (5.53e-11, 1.34), AlphaQubit (4.8e-6, 0.503),
-    # PyMatching at p=0.1% (5.91e-9, 1.17).
-    # Decoder selection: a named fit from DECODER_FITS, or None to use the raw alpha/beta below.
-    decoder_model: Optional[str] = None
-    decoder_alpha: float = 2.85e-10    # raw monomial fit, used when decoder_model is None
-    decoder_beta: float = 1.2
+    decoder_model: Optional[str] = None   # Named latency fit, or None for alpha and beta.
+    decoder_alpha: float = 2.85e-10       # Decoder latency scale when no named fit is used.
+    decoder_beta: float = 1.2             # Decoder latency exponent when no named fit is used.
 
-    # Switching decoder (arXiv:2510.25222): a fast weak decoder backed by a slow strong one.
-    switch_gamma: float = 0.0          # P(escalate to strong) per window; 0 = never switch
-    switch_handoff_us: float = 0.5     # decoder<->decoder handoff cost (default = the t_dd link)
-    switch_comm_weak_us: float = 0.0   # T_comm^weak paid on every decode (0 in a full-stack run)
-    switch_seed: int = 0               # RNG seed for the switch draw
-    switch_confidence_threshold: float = 0.0  # keep the weak answer when its confidence >= this; below it, use the strong decoder (0 = never switch, since confidence is >= 0)
-    switch_mode: str = "none"          # decoder switching (switching.py): "none" | "serial" | "parallel" (run both at once)
-    switch_weak_keepup_ratio: Optional[float] = None  # weak decode time / syndrome time per round; if set, checks the window is big enough (None = skip)
-    switch_bulk_strong: bool = False   # serial switching only: when the strong pool has backlog, batch-decode all currently outstanding strong work
+    switch_gamma: float = 0.0             # Probability scale for sampled decoder switching.
+    switch_handoff_us: float = 0.5        # Extra handoff latency around a strong redo.
+    switch_comm_weak_us: float = 0.0      # Communication cost paid on each weak decode.
+    switch_seed: int = 0                  # Random seed for sampled switching decisions.
+    switch_confidence_threshold: float = 0.0  # Minimum soft output to keep weak result.
+    switch_mode: str = "none"             # none, serial, or parallel strong-decoder mode.
+    switch_weak_keepup_ratio: Optional[float] = None  # Weak decoder time per syndrome round.
+    switch_bulk_strong: bool = False      # Batch queued strong redos in serial mode.
 
-    # Relay-BP decoder (arXiv:2510.21600) for qLDPC / bivariate-bicycle codes
-    relaybp_iterations: int = 40       # BP iteration budget (a worst-case cap, not the average)
-    relaybp_t_iter_ns: float = 24.0    # per-iteration FPGA time (ns)
+    relaybp_iterations: int = 40          # Relay-BP iteration count.
+    relaybp_t_iter_ns: float = 24.0       # Relay-BP time per iteration.
 
-    # Decoding scheme / windowing (schemes.py); default "sliding" == the cluster's own default
-    scheme_name: str = "sliding"
+    scheme_name: str = "sliding"          # Window scheme selected by config.
 
-    def __post_init__(self):
-        """ This method is called after the dataclass is initialized so it can perform validation."""
+    def __post_init__(self) -> None:
+        """Validate config values after dataclass initialization."""
         if self.round_us <= 0:
             raise ValueError(f"round_us must be > 0 (got {self.round_us})")
         if self.rounds_per_op < 1:
@@ -137,9 +111,7 @@ class SimConfig:
             raise ValueError("switch_bulk_strong requires switch_mode='serial'")
 
     def make_links(self) -> "LinkModel":
-        """Build the communication fabric (links.py) from these link-latency knobs --
-        flat constants, arXiv:2511.10633 Table 2. Imported lazily so this module has no
-        import-time dependency on links.py (which imports `us` from here)."""
+        """Build the communication fabric from the link latency knobs."""
         from .links import LinkModel
         return LinkModel(qc=us(self.t_qc_us), cd=us(self.t_cd_us),
                          dd=us(self.t_dd_us), do=us(self.t_do_us),
@@ -147,46 +119,41 @@ class SimConfig:
                          ws=us(self.t_dd_us if self.t_ws_us is None else self.t_ws_us))
 
     def make_controller(self, engine: "Engine") -> "Controller":
-        """Build the modular controller on a fabric from these knobs (lazy import, as above)."""
+        """Build the default controller."""
         from .controllers import ModularController
         return ModularController(engine, links=self.make_links(),
                                  t_pack=us(self.t_pack_us))
 
     def decoder_fit(self) -> tuple:
-        """Resolve (alpha, beta): the named DECODER_FITS entry if decoder_model is set, else the
-        raw decoder_alpha/decoder_beta. Default (decoder_model=None) -> (2.85e-10, 1.2) = cc_fpga."""
+        """Return the selected decoder latency fit."""
         if self.decoder_model is not None:
             return DECODER_FITS[self.decoder_model]
         return (self.decoder_alpha, self.decoder_beta)
 
     def make_decoder(self, code: "CodeModel") -> "Decoder":
-        """Build the default latency-model decoder for the given code (lazy import, as above)."""
+        """Build the default latency-model decoder for this code."""
         from .decoders import LatencyModelDecoder
         alpha, beta = self.decoder_fit()
         return LatencyModelDecoder(d=code.distance, alpha=alpha, beta=beta)
 
     def make_switching_decoder(self, weak: "Decoder", strong: "Decoder") -> "Decoder":
-        """Build a SwitchingDecoder (arXiv:2510.25222) from the switch_* knobs, wrapping the two
-        given sub-decoders (each carries its own latency model)."""
+        """Wrap weak and strong decoders in a sampled switching decoder."""
         from .decoders import SwitchingDecoder
         return SwitchingDecoder(weak, strong, gamma_switch=self.switch_gamma,
                                 handoff_us=self.switch_handoff_us, seed=self.switch_seed,
                                 t_comm_weak_us=self.switch_comm_weak_us)
 
     def make_relaybp_decoder(self) -> "Decoder":
-        """Build a Relay-BP latency decoder (arXiv:2510.21600) from the relaybp_* knobs."""
+        """Build a Relay-BP latency decoder."""
         from .decoders import RelayBPDecoder
         return RelayBPDecoder(iterations=self.relaybp_iterations, t_iter_ns=self.relaybp_t_iter_ns)
 
     def make_scheme(self) -> "DecodingScheme":
-        """Build the named decoding scheme (schemes.py); default 'sliding' == the cluster default."""
+        """Build the configured decoding scheme."""
         return _scheme_registry()[self.scheme_name]()
 
     def make_switching(self):
-        """Build the decoder-switching object (switching.py) from switch_mode: "none" -> None (no
-        switching), "serial" -> Switching, "parallel" -> Switching with run_both_at_once=True. It
-        gets the confidence threshold switch_confidence_threshold and the optional window-size guard
-        switch_weak_keepup_ratio. switch_bulk_strong enables serial strong-pool batch service."""
+        """Build the configured decoder-switching policy, or None."""
         if self.switch_mode == "none":
             return None
         from .switching import Switching

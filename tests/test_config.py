@@ -66,6 +66,17 @@ def test_raw_alpha_beta_override():
     assert (cfg.make_decoder(_CODE).alpha, cfg.make_decoder(_CODE).beta) == (1e-9, 1.5)
 
 
+def test_make_links_exposes_weak_strong_link():
+    """ws is the cluster-side weak<->strong escalation link: default follows dd, overrideable."""
+    links = SimConfig(t_dd_us=0.7).make_links()
+    assert links.dd.latency_ticks == us(0.7)
+    assert links.ws.latency_ticks == us(0.7)
+
+    links = SimConfig(t_dd_us=0.7, t_ws_us=0.2).make_links()
+    assert links.dd.latency_ticks == us(0.7)
+    assert links.ws.latency_ticks == us(0.2)
+
+
 def test_make_switching_decoder():
     cfg = SimConfig(switch_gamma=0.3, switch_handoff_us=0.5, switch_comm_weak_us=0.1, switch_seed=7)
     weak, strong = PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0)
@@ -107,12 +118,23 @@ def test_make_switching(mode, run_both):
     switching = SimConfig(switch_mode=mode, switch_confidence_threshold=0.5).make_switching()
     assert isinstance(switching, Switching)
     assert switching.run_both_at_once is run_both
+    assert switching.bulk_strong is False
+
+
+def test_make_switching_bulk_strong():
+    """bulk_strong is a serial-switching policy and must flow through from SimConfig."""
+    switching = SimConfig(switch_mode="serial", switch_confidence_threshold=0.5,
+                          switch_bulk_strong=True).make_switching()
+    assert isinstance(switching, Switching)
+    assert switching.run_both_at_once is False
+    assert switching.bulk_strong is True
 
 
 @pytest.mark.parametrize("kw", [
     {"decoder_model": "nope"}, {"switch_gamma": 1.5}, {"switch_gamma": -0.1},
     {"switch_handoff_us": -1}, {"relaybp_iterations": 0}, {"relaybp_t_iter_ns": -1},
-    {"scheme_name": "bogus"}, {"switch_mode": "bogus"},
+    {"scheme_name": "bogus"}, {"switch_mode": "bogus"}, {"t_ws_us": -1},
+    {"switch_bulk_strong": True}, {"switch_mode": "parallel", "switch_bulk_strong": True},
 ])
 def test_validation_rejects_bad_values(kw):
     with pytest.raises(ValueError):

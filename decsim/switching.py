@@ -33,18 +33,30 @@ class Switching:
     """
 
     def __init__(self, confidence_threshold: float, run_both_at_once: bool = False,
-                 weak_keepup_ratio: float = None):
+                 weak_keepup_ratio: float = None, bulk_strong: bool = False):
         """confidence_threshold -- keep the weak answer when its confidence is at least this.
         run_both_at_once       -- see the class docstring (serial vs parallel).
         weak_keepup_ratio      -- optional; the weak decoder's time per round divided by the
                                   syndrome-generation time per round. If given, check_window_size()
-                                  verifies the weak decoder is fast enough to keep up."""
+                                  verifies the weak decoder is fast enough to keep up.
+        bulk_strong            -- when True, the strong pool batch-decodes ALL its outstanding
+                                  re-decode jobs at once whenever a unit frees, instead of one job
+                                  at a time. This is the paper's "the strong decoder processes all
+                                  the assigned data at once" / bulk-decoding assumption (Sec. IV,
+                                  arXiv:2510.25222): a backed-up strong decoder reprocesses its
+                                  whole accumulated backlog in one shot, so the strong backlog
+                                  snowballs past the Eq. 8 boundary (Fig. 13) instead of growing
+                                  only linearly. Latency is proportional to the merged round count.
+                                  Use only in serial mode (run_both_at_once=False)."""
         if weak_keepup_ratio is not None and not 0 < weak_keepup_ratio < 1:
             raise ValueError("weak_keepup_ratio must be between 0 and 1 (the weak decoder has to "
                              f"be faster than one syndrome round); got {weak_keepup_ratio}")
+        if bulk_strong and run_both_at_once:
+            raise ValueError("bulk_strong is only meaningful in serial mode (run_both_at_once=False)")
         self.confidence_threshold = confidence_threshold
         self.run_both_at_once = run_both_at_once
         self.weak_keepup_ratio = weak_keepup_ratio
+        self.bulk_strong = bulk_strong
 
     def keep_weak_result(self, result: "DecodeResult") -> bool:
         """Should we keep the weak decoder's answer (True), or hand the window to the strong decoder

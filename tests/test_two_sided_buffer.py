@@ -34,8 +34,10 @@ from decsim.adapters.window_error_models import (build_window_error_models, deco
 from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
 from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
-from decsim.planner import FixedRounds
+from decsim.planner import FixedRounds, PerOpRounds
 from decsim.sampling import logical_error_rate
+from decsim.streams import continuous_stream
+from decsim.wiring import build_and_run
 
 D, R, P = 3, 30, 0.003
 
@@ -121,6 +123,31 @@ def test_ab_engine_tracks_global_no_crash():
     # no crash over every shot (the pre-fix failure mode), and the engine tracks global closely
     assert out["shots"] == shots
     assert g["agree"] / shots >= 0.94, g["agree"] / shots
+
+
+def test_ab_multi_op_stream_tracks_global_across_operation_seams():
+    """The real correctness bar for cross-op parallel windows: split one physical memory
+    record into several scheduled operations, decode the one continuous stream with A/B
+    windows, and compare the engine result to global MWPM on the same shot."""
+    circ = _circuit()
+    segments, stream_op, rounds_map = continuous_stream(circ, [6, 6, 6, 6, 6],
+                                                        patch=0, base_id=0)
+    global_m = pymatching.Matching.from_detector_error_model(
+        circ.detector_error_model(decompose_errors=True))
+    device = StimDevice(seed=13)
+    shots = 160
+    agree = 0
+
+    for _ in range(shots):
+        res = build_and_run(ops=segments, decode_ops=[stream_op], device=device,
+                            num_units=4, d=D, rounds_policy=PerOpRounds(rounds_map),
+                            code=SurfaceCodeModel(d=D), scheme=ParallelWindowScheme(),
+                            decoder=PyMatchingDecoder(_ZeroLatency()), verbose=False)
+        pe = int(res["cluster"].op_results.get(stream_op.id, 0))
+        pg = int(global_m.decode(device._dets[stream_op.id])[0])
+        agree += int(pe == pg)
+
+    assert agree / shots >= 0.94, agree / shots
 
 
 def test_sliding_still_bit_identical_to_global():

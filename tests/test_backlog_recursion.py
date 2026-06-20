@@ -38,10 +38,10 @@ T_COMM_US = 0.15 + 2.0 + 1.0 + 4.0 + 0.15   # qc+cd (in) + do + oc+cq (back): Ta
 
 
 def _t_gate_chain(n=NGATES):
-    """n teleported T gates on one patch, each gated on the previous decode."""
+    """n teleported T gates on one patch, each blocked on the previous decode."""
     return CircuitFrontend([
         Operation(i, f"T{i}", (0,), clifford=False,
-                  gated_by=(i - 1 if i > 0 else None))
+                  blocked_by=(i - 1 if i > 0 else None))
         for i in range(n)
     ]).build()
 

@@ -79,7 +79,7 @@ def _reference_finish_times(cluster, rounds, tau_us):
     """The recurrence, computed with the simulator's own tick arithmetic."""
     g = us(TAU_GEN_US)
     finish, out = 0, {}
-    for k in range(cluster.nwin[0]):
+    for k in range(cluster.window_count[0]):
         w = cluster.windows[(0, k)]
         data = g * min(w.buffer_hi, rounds)      # buffer past stream end: data = last round
         decode = us(w.n_rounds * tau_us)
@@ -105,7 +105,7 @@ def _lags(cluster, rounds):
     g = us(TAU_GEN_US)
     return [cluster.windows[(0, k)].t_done - g * min(cluster.windows[(0, k)].buffer_hi,
                                                      rounds)
-            for k in range(cluster.nwin[0])]
+            for k in range(cluster.window_count[0])]
 
 
 def test_eq7_boundary_with_d_d_windows():

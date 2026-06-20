@@ -52,7 +52,7 @@ def _timing_stream_plan(segment_rounds, d=3):
 
 def test_sequential_chain_deps_unchanged():
     plan = _plan(SlidingWindowScheme(), _memory_op(), rounds_per_op=11, d=3)
-    assert plan.nwin[0] == 4                      # ceil(11/3)
+    assert plan.window_count[0] == 4                      # ceil(11/3)
     assert plan.windows[(0, 0)].deps == []
     for k in range(1, 4):
         assert plan.windows[(0, k)].deps == [(0, k - 1)]
@@ -66,7 +66,7 @@ def test_cross_op_deps_use_entry_and_exit_defaults():
     a.patches, b.patches = (0,), (0,)
     b.predecessors, a.has_successor = (0,), True
     plan = _plan(SlidingWindowScheme(), [a, b], rounds_per_op=11, d=3)
-    assert plan.windows[(1, 0)].deps == [(0, plan.nwin[0] - 1)]
+    assert plan.windows[(1, 0)].deps == [(0, plan.window_count[0] - 1)]
 
 
 # ---- structural: parallel A/B layout per arXiv:2511.10633 Sec II.4 ------------------
@@ -75,7 +75,7 @@ def test_parallel_scheme_layout_and_deps():
     # d=3: C=B=3, period 2C+2B=12. R=15 -> A_0 [1..6] commit [1,3],
     # B_0 commit [4,12], A_1 [10..18] commit [13,15]; no tail (R = A_1.commit_hi).
     plan = _plan(ParallelWindowScheme(), _memory_op(), rounds_per_op=15, d=3)
-    assert plan.nwin[0] == 3
+    assert plan.window_count[0] == 3
     a0, b0, a1 = (plan.windows[(0, k)] for k in range(3))
     assert (a0.start_round, a0.commit_lo, a0.commit_hi, a0.buffer_hi) == (1, 1, 3, 6)
     assert (b0.commit_lo, b0.commit_hi, b0.buffer_hi) == (4, 12, 12)
@@ -90,7 +90,7 @@ def test_parallel_scheme_layout_and_deps():
 def test_parallel_scheme_tail_window():
     # R=23 leaves rounds 16..23 after A_1's commit -> a tail window depending on A_1 only.
     plan = _plan(ParallelWindowScheme(), _memory_op(), rounds_per_op=23, d=3)
-    assert plan.nwin[0] == 4
+    assert plan.window_count[0] == 4
     tail = plan.windows[(0, 3)]
     assert (tail.commit_lo, tail.commit_hi) == (16, 23)
     assert tail.deps == [(0, 2)]
@@ -109,13 +109,13 @@ def test_parallel_stream_bounds_depth_across_short_scheduled_ops():
     plan, _segments, stream_op, _rounds_map = _timing_stream_plan([d] * 32, d=d)
 
     assert _max_window_depth(plan) == 2
-    sid = stream_op.id
-    assert sorted(plan.windows[(sid, 1)].deps) == [(sid, 0), (sid, 2)]
-    assert plan.windows[(sid, 0)].deps == []
-    assert plan.windows[(sid, 2)].deps == []
-    assert plan.windows[(sid, 1)].n_rounds == 3 * d
-    assert plan.windows[(sid, 2)].n_rounds == 3 * d
-    assert plan.windows[(sid, 0)].n_rounds == 2 * d
+    stream_id = stream_op.id
+    assert sorted(plan.windows[(stream_id, 1)].deps) == [(stream_id, 0), (stream_id, 2)]
+    assert plan.windows[(stream_id, 0)].deps == []
+    assert plan.windows[(stream_id, 2)].deps == []
+    assert plan.windows[(stream_id, 1)].n_rounds == 3 * d
+    assert plan.windows[(stream_id, 2)].n_rounds == 3 * d
+    assert plan.windows[(stream_id, 0)].n_rounds == 2 * d
 
 
 def test_timing_only_stream_runs_through_normal_parallel_scheme():
@@ -129,8 +129,8 @@ def test_timing_only_stream_runs_through_normal_parallel_scheme():
                         code=SurfaceCodeModel(d=d), scheme=ParallelWindowScheme(),
                         decoder=PresetLatencyDecoder(0.1), verbose=False)
     cluster = res["cluster"]
-    assert cluster.nwin[stream_op.id] == plan.nwin[stream_op.id]
-    assert all(seg.id not in cluster.nwin for seg in segments)
+    assert cluster.window_count[stream_op.id] == plan.window_count[stream_op.id]
+    assert all(seg.id not in cluster.window_count for seg in segments)
     assert len(cluster.committed_windows) == cluster.total_windows
     # A real stream window spans the scheduled op seam at round 6/7.
     assert any(w.start_round <= 6 and w.buffer_hi >= 7
@@ -187,7 +187,7 @@ def test_backlog_sweep_parallel_vs_sequential():
 def test_naive_scheme_is_one_batch_window_per_op():
     from decsim.schemes import NaiveOnlineScheme
     plan = _plan(NaiveOnlineScheme(), _memory_op(), rounds_per_op=11, d=3)
-    assert plan.nwin[0] == 1
+    assert plan.window_count[0] == 1
     w = plan.windows[(0, 0)]
     assert (w.commit_lo, w.commit_hi, w.buffer_hi) == (1, 11, 11)
 

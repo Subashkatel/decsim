@@ -72,8 +72,8 @@ def test_stream_is_the_decode_unit_and_a_window_spans_the_seam():
     _, _, _, res, stream_op = _agreement([12, 12], shots=1)
     cluster = res["cluster"]
     # the STREAM (id 0) is windowed; the scheduling segments (ids 1, 2) are not
-    assert stream_op.id in cluster.nwin and cluster.nwin[stream_op.id] > 0
-    assert 1 not in cluster.nwin and 2 not in cluster.nwin
+    assert stream_op.id in cluster.window_count and cluster.window_count[stream_op.id] > 0
+    assert 1 not in cluster.window_count and 2 not in cluster.window_count
     # a window genuinely straddles the operation seam at round 12/13
     seam = 12
     spans = [w for (op, k), w in cluster.windows.items()

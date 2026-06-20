@@ -4,10 +4,12 @@
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
 from decsim.decoders import LatencyModelDecoder, PresetLatencyDecoder
+from decsim.devices import TimingOnlyDevice
 from decsim.layouts import UniformLayout
 from decsim.message import Operation
-from decsim.planner import WindowPlanner
+from decsim.planner import PerOpRounds, WindowPlanner
 from decsim.schemes import SlidingWindowScheme, ParallelWindowScheme
+from decsim.streams import continuous_stream
 from decsim.wiring import build_and_run
 
 
@@ -21,6 +23,29 @@ def _memory_op(rounds_unused=None):
 def _plan(scheme, ops, rounds_per_op, d=3):
     planner = WindowPlanner(scheme, UniformLayout(SurfaceCodeModel(d=d)), rounds_per_op)
     return planner.plan(ops)
+
+
+def _max_window_depth(plan):
+    memo = {}
+
+    def depth(key):
+        if key in memo:
+            return memo[key]
+        deps = plan.windows[key].deps
+        memo[key] = 1 + max((depth(dep) for dep in deps), default=0)
+        return memo[key]
+
+    return max(depth(key) for key in plan.windows)
+
+
+def _timing_stream_plan(segment_rounds, d=3):
+    """Plan one timing-only decode stream split into scheduled operation segments."""
+    code = SurfaceCodeModel(d=d)
+    segments, stream_op, rounds_map = continuous_stream(None, segment_rounds,
+                                                        patch=0, base_id=0)
+    planner = WindowPlanner(ParallelWindowScheme(), UniformLayout(code),
+                            PerOpRounds(rounds_map))
+    return planner.plan([stream_op]), segments, stream_op, rounds_map
 
 
 # ---- structural: the default chain is unchanged by the seam refactor ----------------
@@ -74,6 +99,43 @@ def test_parallel_scheme_tail_window():
     for w in plan.windows.values():
         committed += list(range(w.commit_lo, w.commit_hi + 1))
     assert sorted(committed) == list(range(1, 24))
+
+
+def test_parallel_stream_bounds_depth_across_short_scheduled_ops():
+    """DecLat/Skoric parallel windows are global over a decode stream, not reset at every
+    short scheduled operation. The clean path is therefore to plan one stream op whose rounds are
+    emitted by several segment ops; the ordinary WindowPlanner then gives O(1) A/B depth."""
+    d = 3
+    plan, _segments, stream_op, _rounds_map = _timing_stream_plan([d] * 32, d=d)
+
+    assert _max_window_depth(plan) == 2
+    sid = stream_op.id
+    assert sorted(plan.windows[(sid, 1)].deps) == [(sid, 0), (sid, 2)]
+    assert plan.windows[(sid, 0)].deps == []
+    assert plan.windows[(sid, 2)].deps == []
+    assert plan.windows[(sid, 1)].n_rounds == 3 * d
+    assert plan.windows[(sid, 2)].n_rounds == 3 * d
+    assert plan.windows[(sid, 0)].n_rounds == 2 * d
+
+
+def test_timing_only_stream_runs_through_normal_parallel_scheme():
+    """Timing-only and real-syndrome streams use the same runtime path. The device emits empty
+    payloads, but they are tagged to the stream id/global round and decoded by the normal
+    WindowPlanner + ParallelWindowScheme path."""
+    d = 3
+    plan, segments, stream_op, rounds_map = _timing_stream_plan([6, 6, 6], d=d)
+    res = build_and_run(ops=segments, decode_ops=[stream_op], device=TimingOnlyDevice(),
+                        num_units=4, d=d, rounds_policy=PerOpRounds(rounds_map),
+                        code=SurfaceCodeModel(d=d), scheme=ParallelWindowScheme(),
+                        decoder=PresetLatencyDecoder(0.1), verbose=False)
+    cluster = res["cluster"]
+    assert cluster.nwin[stream_op.id] == plan.nwin[stream_op.id]
+    assert all(seg.id not in cluster.nwin for seg in segments)
+    assert len(cluster.committed_windows) == cluster.total_windows
+    # A real stream window spans the scheduled op seam at round 6/7.
+    assert any(w.start_round <= 6 and w.buffer_hi >= 7
+               for (op_id, _k), w in cluster.windows.items()
+               if op_id == stream_op.id)
 
 
 # ---- ACCEPTANCE: reaction tail reproduces gamma_mem = 6d*tau_d(d^2) + hops (Eq. 13) --

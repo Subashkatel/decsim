@@ -31,9 +31,10 @@ class BeliefMatchingDecoder:
     job.dem has no h_check and this decoder cannot run).
 
     Scope, same as PyMatchingDecoder: single-patch ops, one logical observable per op. Real
-    DEMs reach this decoder under sliding/naive schemes; the parallel A/B scheme's leading-
-    buffer windows are still timing-only at runtime FOR EVERY decoder
-    (cluster._build_window_error_models) -- a pre-existing limit, not belief-matching-specific."""
+    DEMs reach this decoder under the same window models the cluster builds for PyMatching,
+    including sliding/naive windows and the current two-sided-buffer A/B windows. Multi-patch
+    lattice-surgery DEMs still depend on the circuit source providing those real detector
+    models."""
 
     needs_hyperedges = True
 

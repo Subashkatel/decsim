@@ -47,9 +47,9 @@ def test_default_implementations_satisfy_their_protocols():
     pairs = [
         (P.InputFrontend, CircuitFrontend([])),
         (P.InputFrontend, SurgeryIRFrontend("")),
-        (P.DeviceModel, TimingOnlyDevice()),
-        (P.DeviceModel, SyndromeBitDevice(code)),
-        (P.DeviceModel, StimDevice()),
+        (P.SyndromeSource, TimingOnlyDevice()),
+        (P.SyndromeSource, SyndromeBitDevice(code)),
+        (P.SyndromeSource, StimDevice()),
         (P.CodeModel, code),
         (P.CodeModel, BBCodeModel()),
         (P.CodeModel, ColorCodeModel()),
@@ -97,8 +97,24 @@ class MyDevice:
     def begin_operation(self, op):
         return None
 
-    def round_payload(self, op, r):
-        return SyndromePayload(op.id, op.patches[0], r)
+    def round_payloads(self, op, r):
+        return [SyndromePayload(op.id, op.patches[0], r)]
+
+    def idle_round_payloads(self, op, stream_id, global_round, patch):
+        return [SyndromePayload(stream_id, patch, global_round)]
+
+    def register_dynamic_stream(self, stream_op, round_count, *, belief_matching=False):
+        return None
+
+    def validate_stream_length(self, stream_op, stream_round_count):
+        return None
+
+    def window_models_for_operation(self, op, windows, round_count,
+                                    *, belief_matching=False):
+        return []
+
+    def window_model_for_stream(self, stream_id, window, *, is_last):
+        return None
 
 class MyCode:
     name = "my-code"

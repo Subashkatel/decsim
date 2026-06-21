@@ -7,7 +7,7 @@ from typing import Callable, Optional, TYPE_CHECKING
 from .chip import Chip
 from .cluster import DecoderCluster
 from .codes import SurfaceCodeModel
-from .config import SimConfig, fmt, us
+from .config import IDLE_ROUND_MODES, SimConfig, fmt, us
 from .devices import TimingOnlyDevice
 from .engine import Engine
 from .factories import InfiniteFactory
@@ -19,10 +19,10 @@ from .schedulers import FifoScheduler
 if TYPE_CHECKING:
     from .message import Operation
     from .protocols import (CodeModel, Controller, DeadlinePolicy, Decoder,
-                            DecoderRouter, DecodingScheme, DeviceModel,
+                            DecoderRouter, DecodingScheme,
                             ExecutionPlanner, InputFrontend, LayoutModel,
                             MagicStateFactory, Orchestrator, RoundsPolicy,
-                            Scheduler)
+                            Scheduler, SyndromeSource)
     from .switching import Switching
 
 def _print_title(title: str) -> None:
@@ -97,7 +97,8 @@ def _link_model(controller, sim_config: SimConfig):
 def _build_cluster(*, engine: Engine, decoder, scheduler, controller, orchestrator,
                    make_cluster, num_units: int, rounds_per_op: int, code,
                    scheme, layout, decoders, rounds_policy, router,
-                   deadline_policy, links, unit_pools, switching):
+                   deadline_policy, links, unit_pools, switching,
+                   syndrome_source):
     """Build the decoder workload manager."""
     if make_cluster is not None:
         return make_cluster(engine, decoder, scheduler, controller, orchestrator)
@@ -108,7 +109,8 @@ def _build_cluster(*, engine: Engine, decoder, scheduler, controller, orchestrat
         scheme=scheme, layout=layout, decoders=decoders,
         rounds_policy=rounds_policy, router=router,
         deadline_policy=deadline_policy, links=links,
-        unit_pools=unit_pools, switching=switching)
+        unit_pools=unit_pools, switching=switching,
+        syndrome_source=syndrome_source)
 
 
 def _build_factory(engine: Engine, cluster, factory, make_factory):
@@ -121,7 +123,7 @@ def _build_factory(engine: Engine, cluster, factory, make_factory):
 
 
 def _build_chip(*, engine: Engine, device, controller, cluster, factory,
-                round_us: float, code, make_chip, decode_idle_rounds: bool,
+                round_us: float, code, make_chip, idle_round_mode: str,
                 max_idle_rounds: Optional[int],
                 gates_start_on_round_boundaries: bool):
     """Build the quantum processor."""
@@ -133,7 +135,7 @@ def _build_chip(*, engine: Engine, device, controller, cluster, factory,
         engine, device, controller, cluster, factory,
         round_ticks=round_ticks,
         code_distance=code.distance,
-        decode_idle_rounds=decode_idle_rounds,
+        idle_round_mode=idle_round_mode,
         max_idle_rounds=max_idle_rounds,
         gates_start_on_round_boundaries=gates_start_on_round_boundaries)
 
@@ -171,6 +173,18 @@ def _register_dynamic_streams(cluster, dynamic_streams, code) -> None:
     """Register streams whose windows are built at runtime."""
     for stream in (dynamic_streams or []):
         cluster.register_dynamic_stream(stream, code)
+
+
+def _resolve_idle_round_mode(sim_config: SimConfig,
+                             idle_round_mode: Optional[str]) -> str:
+    """Return the explicit idle-round mode used by the chip."""
+    if idle_round_mode is None:
+        return sim_config.idle_round_mode
+    if idle_round_mode not in IDLE_ROUND_MODES:
+        raise ValueError(
+            f"idle_round_mode must be one of {IDLE_ROUND_MODES} "
+            f"(got {idle_round_mode!r})")
+    return idle_round_mode
 
 
 def _decode_plan_operations(ops, decode_ops, dynamic_streams):
@@ -230,11 +244,11 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
                   scheduler: Optional[Scheduler] = None,
                   router: Optional["DecoderRouter"] = None,
                   deadline_policy: Optional["DeadlinePolicy"] = None,
-                  decode_idle_rounds: bool = False,
+                  idle_round_mode: Optional[str] = None,
                   max_idle_rounds: Optional[int] = None,
                   gates_start_on_round_boundaries: bool = False,
                   unit_pools: Optional[dict] = None,
-                  device: Optional[DeviceModel] = None,
+                  device: Optional["SyndromeSource"] = None,
                   make_cluster: Optional[Callable] = None,
                   planner: Optional["ExecutionPlanner"] = None,
                   make_chip: Optional[Callable] = None,
@@ -255,6 +269,7 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
     sim_config, num_units, rounds_per_op, round_us, scheme, switching = \
         _apply_config_defaults(
             config, num_units, rounds_per_op, round_us, scheme, switching)
+    idle_round_mode = _resolve_idle_round_mode(sim_config, idle_round_mode)
 
     ops = _operation_list(ops, frontend)
     code = _code_model(code, layout, d)
@@ -273,13 +288,14 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
         rounds_per_op=rounds_per_op, code=code, scheme=scheme,
         layout=layout, decoders=decoders, rounds_policy=rounds_policy,
         router=router, deadline_policy=deadline_policy, links=links,
-        unit_pools=unit_pools, switching=switching)
+        unit_pools=unit_pools, switching=switching,
+        syndrome_source=device)
 
     factory = _build_factory(engine, cluster, factory, make_factory)
     chip = _build_chip(
         engine=engine, device=device, controller=controller, cluster=cluster,
         factory=factory, round_us=round_us, code=code, make_chip=make_chip,
-        decode_idle_rounds=decode_idle_rounds, max_idle_rounds=max_idle_rounds,
+        idle_round_mode=idle_round_mode, max_idle_rounds=max_idle_rounds,
         gates_start_on_round_boundaries=gates_start_on_round_boundaries)
 
     orchestrator.connect(controller, chip.on_decision)

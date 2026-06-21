@@ -22,7 +22,8 @@ from .window_manager import WindowManager
 if TYPE_CHECKING:
     from .protocols import (CodeModel, Controller, DeadlinePolicy, Decoder,
                             DecoderRouter, DecodingScheme, LayoutModel,
-                            Orchestrator, RoundsPolicy, Scheduler)
+                            Orchestrator, RoundsPolicy, Scheduler,
+                            SyndromeSource)
     from .switching import Switching
 
 
@@ -41,7 +42,8 @@ class DecoderCluster:
                  deadline_policy: Optional["DeadlinePolicy"] = None,
                  links: Optional[LinkModel] = None,
                  unit_pools: Optional[dict] = None,
-                 switching: Optional["Switching"] = None):
+                 switching: Optional["Switching"] = None,
+                 syndrome_source: Optional["SyndromeSource"] = None):
         self.engine = engine
         self.decoder = decoder
         self.decoders = dict(decoders) if decoders else {}
@@ -55,6 +57,7 @@ class DecoderCluster:
         self.deadline_policy = deadline_policy if deadline_policy is not None \
             else EnqueueTimeDeadline()
         self.switching = switching
+        self.syndrome_source = syndrome_source
 
         self.decoder_manager = self._build_decoder_manager(
             num_units, unit_pools, router, switching)
@@ -92,7 +95,8 @@ class DecoderCluster:
             rounds_policy=self.rounds_policy, code=self.code,
             decoder_manager=self.decoder_manager,
             deadline_policy=self.deadline_policy,
-            links=self.links, orchestrator=orchestrator)
+            links=self.links, orchestrator=orchestrator,
+            syndrome_source=self.syndrome_source)
 
     @property
     def on_workload_complete(self):
@@ -180,11 +184,17 @@ class DecoderCluster:
     def register_dynamic_stream(self, stream_op: Operation, code) -> None:
         self.window_manager.register_dynamic_stream(stream_op, code)
 
+    def has_dynamic_stream(self, stream_id) -> bool:
+        return self.window_manager.has_dynamic_stream(stream_id)
+
     def grow_stream(self, stream_id) -> None:
         self.window_manager.grow_stream(stream_id)
 
-    def seal_stream(self, stream_id, total_rounds: int) -> None:
-        self.window_manager.seal_stream(stream_id, total_rounds)
+    def seal_stream(self, stream_id, stream_round_count: int) -> None:
+        self.window_manager.seal_stream(stream_id, stream_round_count)
+
+    def committed_stream_round_count(self, stream_id) -> int:
+        return self.window_manager.committed_stream_round_count(stream_id)
 
     def rounds_for(self, op: Operation) -> int:
         return self.window_manager.rounds_for(op)

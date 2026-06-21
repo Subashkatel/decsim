@@ -311,6 +311,111 @@ class BacklogTrajectory:
                 "max_backlog_rounds": max(backlog)}
 
 
+class ConditionalReactionTime:
+    """SWIPER-style wait time for feedback-blocked operations.
+
+    The reported average divides by every conditional operation, not only the ones
+    that finished. That matches SWIPER's reaction-time denominator.
+    """
+
+    name = "conditional_reaction_time"
+
+    def __init__(self, chip, divergence_threshold_rounds: float | None = None,
+                 require_all_released: bool = True):
+        self.chip = chip
+        self.divergence_threshold_rounds = divergence_threshold_rounds
+        self.require_all_released = require_all_released
+
+    def observe(self, engine: "Engine") -> None:
+        """Nothing to sample. The chip stamps body-done and release times."""
+        return None
+
+    def conditional_operation_ids(self) -> list[int]:
+        """Operation ids that wait for an earlier decode result."""
+        return [
+            operation_id
+            for operation_id, operation in sorted(self.chip.ops.items())
+            if operation.blocked_by is not None
+        ]
+
+    def rows(self) -> list[dict]:
+        """One released conditional operation with wait in ticks and rounds."""
+        rows = []
+        for operation_id in self.conditional_operation_ids():
+            operation = self.chip.ops[operation_id]
+            release_time = self.chip.decode_release_time.get(operation_id)
+            blocking_done_time = self.chip.body_done_time.get(operation.blocked_by)
+            if release_time is None or blocking_done_time is None:
+                continue
+            wait_ticks = release_time - blocking_done_time
+            wait_rounds = wait_ticks / self.chip._round_ticks_for(operation)
+            rows.append({
+                "op": operation_id,
+                "name": operation.name,
+                "blocked_by": operation.blocked_by,
+                "blocking_done_at": blocking_done_time,
+                "released_at": release_time,
+                "wait_ticks": wait_ticks,
+                "wait_rounds": wait_rounds,
+            })
+        return rows
+
+    def pending_operation_ids(self) -> list[int]:
+        """Conditional operations that never received a decode release."""
+        released = {row["op"] for row in self.rows()}
+        return [
+            operation_id
+            for operation_id in self.conditional_operation_ids()
+            if operation_id not in released
+        ]
+
+    def _threshold_failure(self, max_wait_rounds: float) -> str:
+        threshold = self.divergence_threshold_rounds
+        if threshold is None or threshold <= 0:
+            return ""
+        if max_wait_rounds <= threshold:
+            return ""
+        return f"conditioned wait exceeded {threshold} rounds"
+
+    def _failure_reason(self, released_count: int, total_count: int,
+                        max_wait_rounds: float) -> str:
+        threshold_reason = self._threshold_failure(max_wait_rounds)
+        if threshold_reason:
+            return threshold_reason
+        if getattr(self.chip, "idle_cap_hits", []):
+            return "idle-round cap reached"
+        if self.require_all_released and released_count < total_count:
+            return "not all conditionals released"
+        return ""
+
+    def result(self) -> dict:
+        """SWIPER-style reaction-time summary for feedback-blocked operations."""
+        total_count = len(self.conditional_operation_ids())
+        rows = self.rows()
+        released_count = len(rows)
+        wait_sum = sum(row["wait_rounds"] for row in rows)
+        max_wait = max((row["wait_rounds"] for row in rows), default=0.0)
+        mean_released = wait_sum / released_count if released_count else 0.0
+        average = wait_sum / total_count if total_count else 0.0
+        failure_reason = self._failure_reason(released_count, total_count, max_wait)
+        return {
+            "success": failure_reason == "",
+            "failed": failure_reason != "",
+            "diverged": bool(self._threshold_failure(max_wait)),
+            "failure_reason": failure_reason,
+            "total_conditionals": total_count,
+            "released_conditionals": released_count,
+            "pending_conditionals": self.pending_operation_ids(),
+            "conditioned_decode_wait_times": {
+                row["op"]: row["wait_rounds"]
+                for row in rows
+            },
+            "avg_conditioned_decode_wait_time": average,
+            "mean_released_wait_rounds": mean_released,
+            "max_wait_rounds": max_wait,
+        }
+
+
 class MagicStateLatency:
     """Magic-state distillation, correction-decode, delivery, and total latency."""
 

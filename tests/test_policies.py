@@ -126,14 +126,14 @@ def test_global_cadence_is_default():
     assert r["chip_done"] == 5 * us(1.1)
 
 
-# ---- idle-round decoding flag (arXiv:2511.10633: memory rounds need decoding) -----------
+# ---- idle-round decoding mode (arXiv:2511.10633: memory rounds need decoding) -----------
 
 def test_idle_rounds_decoded_only_when_enabled():
-    def run(flag):
+    def run(mode):
         r = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
                           decoder=PresetLatencyDecoder(3.0),
-                          decode_idle_rounds=flag, verbose=False)
+                          idle_round_mode=mode, verbose=False)
         return [l for l in r["engine"].log_lines if "mem(" in l]
 
-    assert run(False) == []                    # default: byte-identical, no memory jobs
-    assert len(run(True)) > 0                  # flag on: idle rounds load the cluster
+    assert run("ignore") == []                 # ignored idle rounds do not load the decoder
+    assert len(run("separate_decode_jobs")) > 0

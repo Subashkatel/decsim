@@ -22,6 +22,12 @@ R1, R2 = 12, 12
 R = R1 + R2
 
 
+def _single_payload(device, operation, round_index):
+    payloads = device.round_payloads(operation, round_index)
+    assert len(payloads) == 1
+    return payloads[0]
+
+
 def _continuous_circuit():
     return NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R)
 
@@ -36,9 +42,9 @@ def test_stream_segments_cover_the_whole_record_once():
     # concatenate every segment's per-round bits in global order == the full detection record
     bits = []
     for r in range(1, R1 + 1):
-        bits += list(dev.round_payload(segA, r).bits)
+        bits += list(_single_payload(dev, segA, r).bits)
     for r in range(1, R2 + 1):
-        bits += list(dev.round_payload(segB, r).bits)
+        bits += list(_single_payload(dev, segB, r).bits)
     full = dev._dets["s"]
     assert len(bits) == len(full)
     assert np.array_equal(np.asarray(bits, np.uint8), np.asarray(full, np.uint8))
@@ -58,8 +64,8 @@ def test_stream_segment_serves_its_global_rounds():
     whole = Operation(9, "whole", (0,), circuit=circ)     # standalone: local==global
     ref.begin_operation(whole)
     for r in range(1, R2 + 1):
-        got = np.asarray(dev.round_payload(segB, r).bits, np.uint8)
-        want = np.asarray(ref.round_payload(whole, R1 + r).bits, np.uint8)
+        got = np.asarray(_single_payload(dev, segB, r).bits, np.uint8)
+        want = np.asarray(_single_payload(ref, whole, R1 + r).bits, np.uint8)
         assert np.array_equal(got, want), r
 
 
@@ -68,5 +74,5 @@ def test_standalone_op_unchanged():
     op = Operation(3, "mem", (0,), circuit=circ)          # no stream_id
     dev = StimDevice(seed=2)
     dev.begin_operation(op)
-    total = sum(len(dev.round_payload(op, r).bits) for r in range(1, R1 + 1))
+    total = sum(len(_single_payload(dev, op, r).bits) for r in range(1, R1 + 1))
     assert total == circ.num_detectors                   # every detector emitted exactly once

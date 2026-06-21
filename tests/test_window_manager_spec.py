@@ -27,6 +27,12 @@ def _memory_op(op_id=0):
     return Operation(op_id, "mem", (0,), clifford=True, patches=(0,))
 
 
+def _single_payload(device, operation, round_index):
+    payloads = device.round_payloads(operation, round_index)
+    assert len(payloads) == 1
+    return payloads[0]
+
+
 class _LogicalDecoder:
     """Timing-only decoder that, unlike PresetLatencyDecoder, returns a real (fixed) logical
     value per window. Lets us exercise op_results = XOR of per-window logical_values without a
@@ -413,7 +419,7 @@ def test_B6_dynamic_stream_grows_windows_and_not_complete_until_sealed():
     dev.begin_operation(stream_op)
     growth = []
     for r in range(1, FEED + 1):
-        cluster.on_syndrome_arrival(dev.round_payload(stream_op, r))
+        cluster.on_syndrome_arrival(_single_payload(dev, stream_op, r))
         engine.run()
         growth.append(cluster.window_count.get(stream_op.id, 0))
 

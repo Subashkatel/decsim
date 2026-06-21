@@ -16,7 +16,8 @@ if TYPE_CHECKING:
     from .decoder_manager import DecoderManager
     from .engine import Engine
     from .links import LinkModel
-    from .protocols import CodeModel, DeadlinePolicy, DecodingScheme, LayoutModel, Orchestrator
+    from .protocols import (CodeModel, DeadlinePolicy, DecodingScheme, LayoutModel,
+                            Orchestrator, SyndromeSource)
 
 
 class WindowManager:
@@ -25,7 +26,8 @@ class WindowManager:
     def __init__(self, engine: "Engine", *, scheme: "DecodingScheme",
                  layout: "LayoutModel", rounds_policy, code: "CodeModel",
                  decoder_manager: "DecoderManager", deadline_policy: "DeadlinePolicy",
-                 links: "LinkModel", orchestrator: "Orchestrator"):
+                 links: "LinkModel", orchestrator: "Orchestrator",
+                 syndrome_source: Optional["SyndromeSource"] = None):
         self.engine = engine
         self.scheme = scheme
         self.layout = layout
@@ -35,6 +37,7 @@ class WindowManager:
         self.deadline_policy = deadline_policy
         self.links = links
         self.orchestrator = orchestrator
+        self.syndrome_source = syndrome_source
 
         self.d = code.distance
         self.commit = code.commit_rounds()
@@ -62,6 +65,8 @@ class WindowManager:
         self._windows_built = False
         self._dynamic_streams: dict = {}
         self._unsealed_streams: set = set()
+        self._committed_stream_round_counts: dict = {}
+        self._stream_segment_results_sent: set[int] = set()
         self._plan_spatial = None
         self.on_workload_complete: Optional[Callable[[], None]] = None
 
@@ -77,8 +82,6 @@ class WindowManager:
 
     def register_dynamic_stream(self, stream_op: Operation, code) -> None:
         """Register a stream whose windows are created from arriving rounds at runtime."""
-        from .adapters.window_error_models import WindowSlicer
-
         stream_id = stream_op.id
         self.ops[stream_id] = stream_op
         self.rounds_arrived.setdefault(stream_id, 0)
@@ -87,45 +90,109 @@ class WindowManager:
         self.window_count[stream_id] = 0
         self.op_windows[stream_id] = []
         self.successors.setdefault(stream_id, [])
-        total_rounds = self.rounds_for(stream_op)
-        coords = stream_op.circuit.get_detector_coordinates()
-        folded = {det: min(int(c[-1]) + 1, total_rounds)
-                  for det, c in coords.items()}
+        source_round_limit = None
+        if self.syndrome_source is not None:
+            source_round_limit = self.syndrome_source.register_dynamic_stream(
+                stream_op,
+                self.rounds_for(stream_op),
+                belief_matching=self._wants_belief_matching())
         self._dynamic_streams[stream_id] = {
-            "slicer": WindowSlicer(stream_op.circuit, detector_rounds=folded),
-            "commit": code.commit_rounds(),
-            "buffer": code.buffer_rounds(),
+            "commit_rounds": code.commit_rounds(),
+            "buffer_rounds": code.buffer_rounds(),
             "next_window": 0,
             "sealed": False,
-            "round_cap": total_rounds,
+            "source_round_limit": source_round_limit,
+            "sealed_round_count": None,
         }
         self._unsealed_streams.add(stream_id)
 
-    def grow_stream(self, stream_id) -> None:
+    def has_dynamic_stream(self, stream_id) -> bool:
+        """Return True when stream_id is registered for runtime window growth."""
+        return stream_id in self._dynamic_streams
+
+    def committed_stream_round_count(self, stream_id) -> int:
+        """Number of initial stream rounds whose commit regions have decoded."""
+        return self._committed_stream_round_counts.get(stream_id, 0)
+
+    def grow_stream(self, stream_id, rounds_to_plan: Optional[int] = None) -> None:
         """Create every dynamic-stream window whose commit region has begun."""
         stream_state = self._dynamic_streams[stream_id]
         if stream_state["sealed"]:
             return
-        commit_rounds = stream_state["commit"]
-        buffer_rounds = stream_state["buffer"]
-        arrived_rounds = self.rounds_arrived[stream_id]
-        while stream_state["next_window"] * commit_rounds + 1 <= arrived_rounds:
+        commit_rounds = stream_state["commit_rounds"]
+        buffer_rounds = stream_state["buffer_rounds"]
+        highest_known_round = self.rounds_arrived[stream_id] \
+            if rounds_to_plan is None else rounds_to_plan
+        while stream_state["next_window"] * commit_rounds + 1 <= highest_known_round:
             window_index = stream_state["next_window"]
             commit_lo = window_index * commit_rounds + 1
-            commit_hi = (window_index + 1) * commit_rounds
+            commit_hi = self._dynamic_commit_hi(stream_state, window_index)
             buffer_hi = commit_hi + buffer_rounds
             self._create_window(stream_id, window_index, commit_lo,
                                 commit_hi, buffer_hi, is_last=False)
             stream_state["next_window"] += 1
 
-    def seal_stream(self, stream_id, total_rounds: int) -> None:
+    @staticmethod
+    def _dynamic_commit_hi(stream_state: dict, window_index: int) -> int:
+        """Commit end for one dynamic window, clipped when a cap is known."""
+        commit_rounds = stream_state["commit_rounds"]
+        commit_hi = (window_index + 1) * commit_rounds
+        known_round_count = stream_state["sealed_round_count"]
+        if known_round_count is None:
+            known_round_count = stream_state["source_round_limit"]
+        if known_round_count is None:
+            return commit_hi
+        return min(commit_hi, known_round_count)
+
+    def seal_stream(self, stream_id, stream_round_count: int) -> None:
         """Close a dynamic stream once its full length has arrived."""
         stream_state = self._dynamic_streams[stream_id]
         if stream_state["sealed"]:
             return
-        self.grow_stream(stream_id)
+        self._check_stream_source_length(stream_id, stream_round_count)
+        stream_state["sealed_round_count"] = stream_round_count
+        self.grow_stream(stream_id, rounds_to_plan=stream_round_count)
+        self._trim_sealed_stream_tail(stream_id, stream_round_count)
         stream_state["sealed"] = True
         self._unsealed_streams.discard(stream_id)
+        self._check_windows_for_operation(stream_id)
+        self._finish_workload_if_ready()
+
+    def _check_stream_source_length(self, stream_id, stream_round_count: int) -> None:
+        """Let the syndrome source validate fixed-length stream models."""
+        if self.syndrome_source is None:
+            return
+        self.syndrome_source.validate_stream_length(
+            self.ops[stream_id], stream_round_count)
+
+    def _trim_sealed_stream_tail(self, stream_id, stream_round_count: int) -> None:
+        """Clip the final open-stream commit region to the actual sealed length."""
+        stream_state = self._dynamic_streams[stream_id]
+        for window_index in self.op_windows.get(stream_id, []):
+            window = self.windows[(stream_id, window_index)]
+            if window.commit_lo <= stream_round_count <= window.commit_hi:
+                window.commit_hi = stream_round_count
+                window.buffer_hi = stream_round_count + stream_state["buffer_rounds"]
+                window.n_rounds = window.buffer_hi - window.start_round + 1
+                self._reset_dynamic_window_reads(stream_id, window_index, window)
+                return
+
+    def _reset_dynamic_window_reads(self, stream_id, window_index: int,
+                                    window: Window) -> None:
+        """Refresh read references after a live stream tail is clipped."""
+        key = (stream_id, window_index)
+        old_reads = set(self._read_sets.get(key, ()))
+        new_reads = {
+            (stream_id, round_index)
+            for round_index in range(window.start_round, window.commit_hi + 1)
+        }
+        for round_key in old_reads - new_reads:
+            self._round_refs[round_key] = self._round_refs.get(round_key, 0) - 1
+            if self._round_refs[round_key] <= 0:
+                self._round_refs.pop(round_key, None)
+        for round_key in new_reads - old_reads:
+            self._round_refs[round_key] = self._round_refs.get(round_key, 0) + 1
+        self._read_sets[key] = sorted(new_reads)
 
     def _create_window(self, stream_id, window_index, commit_lo, commit_hi,
                        buffer_hi, *, is_last) -> None:
@@ -144,12 +211,10 @@ class WindowManager:
         self.op_windows[stream_id].append(window_index)
         self.window_count[stream_id] += 1
         self.total_windows += 1
-        stream_state = self._dynamic_streams[stream_id]
-        self.window_models[(stream_id, window_index)] = (
-            stream_state["slicer"].slice_window(
-                buffer_lo, commit_lo, commit_hi, buffer_hi, is_last=is_last)
-        )
-        operation_rounds = self.rounds_for(self.ops[stream_id])
+        model = self._dynamic_window_model(stream_id, window, is_last=is_last)
+        if model is not None:
+            self.window_models[(stream_id, window_index)] = model
+        operation_rounds = self._round_count_for_window(stream_id, window)
         read_keys = [
             (stream_id, round_index)
             for round_index in range(
@@ -160,9 +225,30 @@ class WindowManager:
             self._round_refs[round_key] = self._round_refs.get(round_key, 0) + 1
         self._check_window((stream_id, window_index))
 
+    def _dynamic_window_model(self, stream_id, window: Window, *, is_last: bool):
+        """Ask the syndrome source for this runtime-built window's model."""
+        if self.syndrome_source is None:
+            return None
+        return self.syndrome_source.window_model_for_stream(
+            stream_id, window, is_last=is_last)
+
     def _stream_sealed(self, op_id) -> bool:
         stream_state = self._dynamic_streams.get(op_id)
         return stream_state is None or stream_state["sealed"]
+
+    def _round_count_for_window(self, op_id, window: Optional[Window] = None) -> int:
+        """Round count to use when checking or reading one window."""
+        stream_state = self._dynamic_streams.get(op_id)
+        if stream_state is None:
+            return self.rounds_for(self.ops[op_id])
+
+        if stream_state["sealed"]:
+            return stream_state["sealed_round_count"]
+        if stream_state["source_round_limit"] is not None:
+            return stream_state["source_round_limit"]
+        if window is not None:
+            return window.buffer_hi
+        return self.rounds_arrived.get(op_id, 0)
 
     def rounds_for(self, op: Operation) -> int:
         """Rounds this operation runs for under its code/layout."""
@@ -227,35 +313,32 @@ class WindowManager:
                 f"+ {buffer_size} buffer ({total_size} rounds each)")
 
     def _build_window_error_models(self) -> None:
-        """Slice operation circuits into per-window decoder error models."""
-        want_bm = getattr(self.decoder_manager.decoder, "needs_hyperedges", False) or any(
-            getattr(d, "needs_hyperedges", False)
-            for d in self.decoder_manager.decoders.values())
+        """Ask the syndrome source for per-window detector error models."""
+        if self.syndrome_source is None:
+            return
+        want_bm = self._wants_belief_matching()
         for op_id, op in self.ops.items():
-            if op.circuit is None:
-                continue
             keys = [(op_id, k) for k in self.op_windows.get(op_id, [])]
             wins = [self.windows[key] for key in keys]
             if not wins:
                 continue
-            from .adapters.window_error_models import build_window_error_models
             operation_rounds = self.rounds_for(op)
-            coords = op.circuit.get_detector_coordinates()
-            folded = {det: min(int(c[-1]) + 1, operation_rounds)
-                      for det, c in coords.items()}
-            model_plan = [
-                (w.start_round, w.commit_lo, w.commit_hi,
-                 min(w.buffer_hi, operation_rounds))
-                for w in wins
-            ]
-            models = build_window_error_models(
-                op.circuit, model_plan, detector_rounds=folded,
+            models = self.syndrome_source.window_models_for_operation(
+                op, wins, operation_rounds,
                 belief_matching=want_bm)
+            if not models:
+                continue
             for key, model in zip(keys, models):
                 self.window_models[key] = model
             self.engine.log("DecoderCluster",
                             f"{op.name}: built {len(models)} decode error model(s) "
                             f"({sum(m.check.shape[1] for m in models)} fault columns)")
+
+    def _wants_belief_matching(self) -> bool:
+        """Return True when any configured decoder needs hyperedge model fields."""
+        return getattr(self.decoder_manager.decoder, "needs_hyperedges", False) or any(
+            getattr(decoder, "needs_hyperedges", False)
+            for decoder in self.decoder_manager.decoders.values())
 
     def _build_round_refcounts(self) -> None:
         """Count how many unfinished windows still need each retained round."""
@@ -321,8 +404,9 @@ class WindowManager:
             self.grow_stream(op_id)
             stream_state = self._dynamic_streams[op_id]
             if (not stream_state["sealed"]
-                    and self.rounds_arrived[op_id] >= stream_state["round_cap"]):
-                self.seal_stream(op_id, stream_state["round_cap"])
+                    and stream_state["source_round_limit"] is not None
+                    and self.rounds_arrived[op_id] >= stream_state["source_round_limit"]):
+                self.seal_stream(op_id, stream_state["source_round_limit"])
 
     def _check_windows_for_operation(self, op_id: int) -> None:
         """Re-check every window owned by one operation."""
@@ -380,7 +464,7 @@ class WindowManager:
     def _assemble_payloads(self, w: Window) -> list:
         """Collect this window's payloads, including successor overflow rounds."""
         op_store = self.payload_store.get(w.op_id, {})
-        operation_rounds = self.rounds_for(self.ops[w.op_id])
+        operation_rounds = self._round_count_for_window(w.op_id, w)
         end_round = min(w.buffer_hi, operation_rounds)
         payloads = []
         for round_index in range(w.start_round, end_round + 1):
@@ -405,13 +489,27 @@ class WindowManager:
 
     def _window_data_complete(self, w: Window) -> bool:
         op = self.ops[w.op_id]
-        succ_rounds = max((self.rounds_arrived[s] for s in self.successors[w.op_id]),
-                          default=0)
+        succ_rounds = self._successor_rounds_available(w)
         return self.scheme.data_complete(
             w, rounds_arrived=self.rounds_arrived[w.op_id],
             successor_rounds=succ_rounds, memory_rounds=self.memory_rounds[w.op_id],
-            round_count=self.rounds_for(op), has_successor=op.has_successor,
+            round_count=self._round_count_for_window(w.op_id, w),
+            has_successor=op.has_successor,
             op=op, layout=self.layout)
+
+    def _successor_rounds_available(self, window: Window) -> int:
+        """Successor rounds available for a buffer that crosses an operation seam."""
+        successor_ids = self.successors[window.op_id]
+        successor_rounds = max((self.rounds_arrived[successor_id]
+                                for successor_id in successor_ids), default=0)
+        overflow = window.buffer_hi - self._round_count_for_window(window.op_id, window)
+        if overflow <= 0 or not successor_ids or successor_rounds >= overflow:
+            return successor_rounds
+        successors_exhausted = all(
+            self.rounds_arrived[successor_id] >= self._round_count_for_window(successor_id)
+            for successor_id in successor_ids
+        )
+        return overflow if successors_exhausted else successor_rounds
 
     @property
     def _windowed(self) -> bool:
@@ -483,6 +581,7 @@ class WindowManager:
         window = self.windows[key]
         op = self.ops[job.op_id]
         self._commit_window(job, res, key, window, op)
+        self._update_committed_stream_round_count(op.id)
         defects = res.boundary_defects if res is not None else None
         self._send_boundary_defects(window, op, defects)
         self._release_window_reads(key)
@@ -503,6 +602,61 @@ class WindowManager:
                         f"{self.decoder_manager.pool_free[job.pool]})")
         if res is not None and res.logical_value is not None:
             self.op_results[op.id] = self.op_results.get(op.id, 0) ^ int(res.logical_value)
+
+    def _update_committed_stream_round_count(self, stream_id) -> None:
+        """Update how many initial rounds of a live stream are committed."""
+        committed_round_count = self._committed_prefix_round_count(stream_id)
+        if committed_round_count <= self._committed_stream_round_counts.get(stream_id, 0):
+            return
+
+        self._committed_stream_round_counts[stream_id] = committed_round_count
+        self._release_stream_segments_at_commit(stream_id, committed_round_count)
+
+    def _committed_prefix_round_count(self, stream_id) -> int:
+        """Return how many initial rounds are covered by committed windows."""
+        committed_ranges = sorted(
+            (self.windows[key].commit_lo, self.windows[key].commit_hi)
+            for key in self.committed_windows
+            if key[0] == stream_id
+        )
+        committed_round_count = 0
+        for start_round, end_round in committed_ranges:
+            if start_round > committed_round_count + 1:
+                break
+            committed_round_count = max(committed_round_count, end_round)
+        return committed_round_count
+
+    def _release_stream_segments_at_commit(self, stream_id,
+                                           committed_round_count: int) -> None:
+        """Deliver segment results whose full round range has committed."""
+        for operation in list(self.ops.values()):
+            if operation.stream_id != stream_id:
+                continue
+            if operation.id not in self._blocking_ops:
+                continue
+            if operation.id in self._stream_segment_results_sent:
+                continue
+
+            segment_end = self._stream_segment_end(operation)
+            if segment_end is None or segment_end > committed_round_count:
+                continue
+
+            self._stream_segment_results_sent.add(operation.id)
+            self.engine.schedule(
+                self.links.do.cost(),
+                lambda op=operation: self._deliver_stream_segment_to_orchestrator(op),
+                label=f"result->orch({operation.name})")
+
+    def _stream_segment_end(self, operation: Operation) -> Optional[int]:
+        """Last global stream round covered by one scheduled segment."""
+        if operation.stream_offset is None:
+            return None
+        return operation.stream_offset + self.rounds_for(operation)
+
+    def _deliver_stream_segment_to_orchestrator(self, operation: Operation) -> None:
+        """Deliver a frontier-backed result for a stream segment."""
+        result = DecodeResult(operation.id, -1, logical_value=None)
+        self.orchestrator.integrate(operation, result)
 
     def _send_boundary_defects(self, window: Window, op: Operation,
                                defects: Optional[dict]) -> None:

@@ -34,6 +34,12 @@ class _ZeroLatency:
         return 1
 
 
+def _single_payload(device, operation, round_index):
+    payloads = device.round_payloads(operation, round_index)
+    assert len(payloads) == 1
+    return payloads[0]
+
+
 def _zero_link_controller(engine):
     return ModularController(engine, t_qc=0, t_cd=0, t_dd=0, t_do=0,
                              t_oc=0, t_cq=0, log_syndromes=False)
@@ -66,15 +72,16 @@ def test_stim_device_round_alignment():
     layer = {}
     for det, c in coords.items():
         layer.setdefault(int(c[-1]), []).append(det)
-    r1 = device.round_payload(op, 1)
+    r1 = _single_payload(device, op, 1)
     assert len(r1.bits) == len(layer[0])
-    last = device.round_payload(op, ROUNDS)
+    last = _single_payload(device, op, ROUNDS)
     assert len(last.bits) == len(layer[ROUNDS - 1]) + len(layer[ROUNDS])
     # nothing beyond the chip's rounds, nothing at round 0
-    assert len(device.round_payload(op, ROUNDS + 1).bits) == 0
-    assert len(device.round_payload(op, 0).bits) == 0
+    assert len(_single_payload(device, op, ROUNDS + 1).bits) == 0
+    assert len(_single_payload(device, op, 0).bits) == 0
     # every detector bit is emitted exactly once across rounds 1..R
-    total = sum(len(device.round_payload(op, r).bits) for r in range(1, ROUNDS + 1))
+    total = sum(len(_single_payload(device, op, r).bits)
+                for r in range(1, ROUNDS + 1))
     assert total == circuit.num_detectors
 
 

@@ -15,7 +15,7 @@ from .switching import Switching
 from .schedulers import EarliestDeadlineScheduler, ReactionPathDeadline
 from .metrics import (DecoderUtilization, ReadyQueueStats,
                       WindowLatencyBreakdown, MagicStateLatency,
-                      StrongDecoderBacklog)
+                      StrongDecoderBacklog, ConditionalReactionTime)
 
 __all__ = [
     "SimConfig", "us", "fmt",
@@ -31,4 +31,5 @@ __all__ = [
     "EarliestDeadlineScheduler", "ReactionPathDeadline",
     "DecoderUtilization", "ReadyQueueStats",
     "WindowLatencyBreakdown", "MagicStateLatency", "StrongDecoderBacklog",
+    "ConditionalReactionTime",
 ]

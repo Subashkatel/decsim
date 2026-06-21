@@ -5,22 +5,22 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-from .config import us
+from .config import IDLE_ROUND_MODES, us
 from .engine import Engine
 from .message import Decision, Operation, SyndromePayload
 
 if TYPE_CHECKING:
-    from .protocols import (Controller, DeviceModel, MagicStateFactory,
+    from .protocols import (Controller, MagicStateFactory, SyndromeSource,
                             WorkloadManager)
 
 
 class Chip:
     """Run operations, emit syndrome rounds, and unblock feedback-dependent work."""
 
-    def __init__(self, engine: Engine, device: DeviceModel, controller: Controller,
+    def __init__(self, engine: Engine, device: "SyndromeSource", controller: Controller,
                  cluster: WorkloadManager, factory: MagicStateFactory,
                  round_ticks: int, code_distance: int,
-                 decode_idle_rounds: bool = False,
+                 idle_round_mode: str = "ignore",
                  max_idle_rounds: Optional[int] = None,
                  gates_start_on_round_boundaries: bool = False):
         """Wire the chip to the device, controller, decoder manager, and factory.
@@ -35,9 +35,11 @@ class Chip:
         self.factory = factory
         self.round_ticks = round_ticks
         self.code_distance = code_distance
-        # DecLat counts idle stabilization rounds during feedback waits. This flag
-        # decides whether those rounds also create decoder jobs.
-        self.decode_idle_rounds = decode_idle_rounds
+        if idle_round_mode not in IDLE_ROUND_MODES:
+            raise ValueError(
+                f"idle_round_mode must be one of {IDLE_ROUND_MODES} "
+                f"(got {idle_round_mode!r})")
+        self.idle_round_mode = idle_round_mode
  
         self.ops: dict[int, Operation] = {}
         self._deps_remaining: dict[int, int] = {}
@@ -51,8 +53,10 @@ class Chip:
         self.body_done_time: dict[int, int] = {}
         self.decode_release_time: dict[int, int] = {}
         self.idle_rounds_by_patch: dict = {}
+        self.idle_cap_hits: list[dict] = []
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
         self._patches_emitting: set = set()
+        self._stream_next_round: dict = {}
         self.last_finish_time = 0
         self.max_idle_rounds = max_idle_rounds if max_idle_rounds is not None \
             else 100 * code_distance
@@ -168,6 +172,7 @@ class Chip:
         prepend = getattr(self.cluster, "prepend_idle_rounds", None)
         if idle_rounds and prepend is not None:
             prepend(operation.id, idle_rounds)
+        self._reserve_stream_rounds(operation)
         self.device.begin_operation(operation)
         kind = "Clifford" if operation.clifford else "non-Clifford"
         release_note = "" if operation.blocked_by is None \
@@ -188,6 +193,23 @@ class Chip:
         return sum(self.idle_rounds_by_patch.pop(patch, 0)
                    for patch in patch_ids)
 
+    def _reserve_stream_rounds(self, operation: Operation) -> None:
+        """Assign this operation's range in its live syndrome stream."""
+        if operation.stream_id is None:
+            return
+
+        stream_id = operation.stream_id
+        next_round = self._stream_next_round.get(stream_id, 0)
+        if operation.stream_offset is None:
+            operation.stream_offset = next_round
+        elif operation.stream_offset < next_round:
+            raise RuntimeError(
+                f"{operation.name} starts at stream round {operation.stream_offset + 1}, "
+                f"but stream {stream_id!r} has already reserved through round {next_round}")
+
+        operation_end = operation.stream_offset + self.cluster.rounds_for(operation)
+        self._stream_next_round[stream_id] = max(next_round, operation_end)
+
     def _patch_for_operation(self, operation: Operation):
         """Return the patch used for idle emission."""
         if operation.patches:
@@ -199,16 +221,10 @@ class Chip:
     def _round(self, operation: Operation, round_index: int) -> None:
         """Emit one syndrome round through the controller to the decoder cluster."""
         total_rounds = self.cluster.rounds_for(operation)
-        emit = getattr(self.device, "round_payloads", None)
-        if emit is not None:
-            payloads = emit(operation, round_index)
-        else:
-            payloads = [self.device.round_payload(operation, round_index)]
+        payloads = self.device.round_payloads(operation, round_index)
 
         self.engine.log("Chip", f"{operation.name} fires round {round_index}/{total_rounds}")
-        for payload in payloads:
-            payload.n_fragments = len(payloads)
-            self.controller.relay_syndrome(payload, self.cluster.on_syndrome_arrival)
+        self._relay_syndrome_payloads(payloads)
         if round_index < total_rounds:
             self.engine.schedule(
                 self._round_ticks_for(operation),
@@ -225,6 +241,7 @@ class Chip:
         self._release_successors(operation)
         self._log_qpu_finished_if_needed()
         self._start_idle_stream_if_needed(operation)
+        self._seal_finished_streams_if_needed()
 
     def _record_body_done(self, operation: Operation) -> None:
         """Record physical completion for this operation body."""
@@ -300,6 +317,13 @@ class Chip:
             return False
 
         self._stop_idle_stream(patch)
+        self.idle_cap_hits.append({
+            "time": self.engine.now,
+            "op_id": op_id,
+            "patch": patch,
+            "round_index": round_index,
+            "max_idle_rounds": self.max_idle_rounds,
+        })
         self.engine.log("Chip",
                         f"WARNING: {self.ops[op_id].name} hit the idle-round cap "
                         f"(max_idle_rounds={self.max_idle_rounds}) with its blocked "
@@ -310,10 +334,40 @@ class Chip:
 
     def _relay_idle_round(self, op_id: int, patch, round_index: int) -> None:
         """Send one idle syndrome round through the same controller path."""
+        if self._relay_idle_round_to_live_stream(op_id, patch):
+            return
+
         payload = SyndromePayload(op_id, patch, round_index)
         self.controller.relay_syndrome(
             payload,
             lambda p, source_op_id=op_id: self.cluster.on_memory_round(source_op_id))
+
+    def _relay_idle_round_to_live_stream(self, op_id: int, patch) -> bool:
+        """Send an idle round into the source operation's live stream when enabled."""
+        if self.idle_round_mode != "extend_stream":
+            return False
+
+        operation = self.ops[op_id]
+        stream_id = operation.stream_id
+        if stream_id is None:
+            return False
+
+        has_dynamic_stream = getattr(self.cluster, "has_dynamic_stream", None)
+        if has_dynamic_stream is None or not has_dynamic_stream(stream_id):
+            return False
+
+        global_round = self._stream_next_round.get(stream_id, 0) + 1
+        self._stream_next_round[stream_id] = global_round
+        payloads = self.device.idle_round_payloads(
+            operation, stream_id, global_round, patch)
+        self._relay_syndrome_payloads(payloads)
+        return True
+
+    def _relay_syndrome_payloads(self, payloads: list[SyndromePayload]) -> None:
+        """Send all fragments from one syndrome round through the controller."""
+        for payload in payloads:
+            payload.n_fragments = len(payloads)
+            self.controller.relay_syndrome(payload, self.cluster.on_syndrome_arrival)
 
     def _record_idle_round(self, patch) -> None:
         """Count one measured idle round on the patch."""
@@ -332,14 +386,16 @@ class Chip:
 
     def _submit_idle_decode_if_due(self, op_id: int, patch, round_index: int) -> None:
         """Submit one memory-window decode after each commit region of idle rounds."""
-        if self.decode_idle_rounds:
-            code = self.cluster.layout.code_for_patch(patch)
-            if round_index % code.commit_rounds() == 0:
-                self.cluster.submit_decode(
-                    code.commit_rounds() + code.buffer_rounds(),
-                    on_done=lambda: None, code=code.name,
-                    spatial_nodes=code.spatial_nodes(1),
-                    label=f"mem({self.ops[op_id].name},r{round_index})")
+        if self.idle_round_mode != "separate_decode_jobs":
+            return
+
+        code = self.cluster.layout.code_for_patch(patch)
+        if round_index % code.commit_rounds() == 0:
+            self.cluster.submit_decode(
+                code.commit_rounds() + code.buffer_rounds(),
+                on_done=lambda: None, code=code.name,
+                spatial_nodes=code.spatial_nodes(1),
+                label=f"mem({self.ops[op_id].name},r{round_index})")
 
     def _schedule_next_idle_round(self, op_id: int, patch, round_index: int) -> None:
         """Schedule the next idle tick."""
@@ -349,6 +405,23 @@ class Chip:
             self._emit_idle_round(operation_id, patch_id, completed_round + 1),
             label=f"idle-tick({self.ops[op_id].name},{round_index + 1})",
         )
+
+    def _seal_finished_streams_if_needed(self) -> None:
+        """Seal live dynamic streams once all scheduled bodies have finished."""
+        if len(self.done_bodies) != len(self.ops):
+            return
+
+        seal_stream = getattr(self.cluster, "seal_stream", None)
+        if seal_stream is None:
+            return
+
+        has_dynamic_stream = getattr(self.cluster, "has_dynamic_stream", None)
+        if has_dynamic_stream is None:
+            return
+        for stream_id, total_rounds in list(self._stream_next_round.items()):
+            if not has_dynamic_stream(stream_id):
+                continue
+            seal_stream(stream_id, total_rounds)
 
     def on_decision(self, decision: Decision) -> None:
         """A correction came back: release the blocked gate. It begins immediately if its magic

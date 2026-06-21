@@ -32,6 +32,7 @@ DECODER_FITS = {
 
 SCHEME_NAMES = ("sliding", "naive", "parallel")
 SWITCH_MODES = ("none", "serial", "parallel")
+IDLE_ROUND_MODES = ("ignore", "separate_decode_jobs", "extend_stream")
 
 
 def _scheme_registry() -> dict:
@@ -75,6 +76,7 @@ class SimConfig:
     relaybp_t_iter_ns: float = 24.0       # Relay-BP time per iteration.
 
     scheme_name: str = "sliding"          # Window scheme selected by config.
+    idle_round_mode: str = "ignore"       # ignore, separate_decode_jobs, or extend_stream.
 
     def __post_init__(self) -> None:
         """Validate config values after dataclass initialization."""
@@ -109,6 +111,10 @@ class SimConfig:
             raise ValueError(f"switch_mode must be one of {SWITCH_MODES} (got {self.switch_mode!r})")
         if self.switch_bulk_strong and self.switch_mode != "serial":
             raise ValueError("switch_bulk_strong requires switch_mode='serial'")
+        if self.idle_round_mode not in IDLE_ROUND_MODES:
+            raise ValueError(
+                f"idle_round_mode must be one of {IDLE_ROUND_MODES} "
+                f"(got {self.idle_round_mode!r})")
 
     def make_links(self) -> "LinkModel":
         """Build the communication fabric from the link latency knobs."""

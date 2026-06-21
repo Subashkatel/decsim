@@ -138,6 +138,34 @@ def test_timing_only_stream_runs_through_normal_parallel_scheme():
                if op_id == stream_op.id)
 
 
+def test_short_successor_closes_cross_operation_buffer():
+    """A predecessor window can finish when a shorter successor is exhausted.
+
+    This is the operation-boundary version of flushing a dangling stream: if a
+    successor physically has fewer rounds than the predecessor's full buffer,
+    the predecessor must not wait forever for rounds that cannot arrive.
+    """
+    first = Operation(0, "long", (0,), clifford=True, patches=(0,))
+    second = Operation(1, "short", (0,), clifford=True, patches=(0,),
+                       predecessors=(0,))
+    first.has_successor = True
+    rounds_map = {0: 3, 1: 1}
+    result = build_and_run(
+        [first, second],
+        num_units=2,
+        d=3,
+        rounds_policy=PerOpRounds(rounds_map),
+        code=SurfaceCodeModel(d=3),
+        scheme=SlidingWindowScheme(),
+        decoder=PresetLatencyDecoder(0.1),
+        verbose=False,
+    )
+    cluster = result["cluster"]
+
+    assert len(cluster.committed_windows) == cluster.total_windows
+    assert cluster.payloads_held == 0
+
+
 # ---- ACCEPTANCE: reaction tail reproduces gamma_mem = 6d*tau_d(d^2) + hops (Eq. 13) --
 
 def test_parallel_scheme_reaction_matches_eq13():

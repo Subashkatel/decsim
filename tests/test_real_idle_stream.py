@@ -31,6 +31,12 @@ class _ZeroLatency:
         return 1
 
 
+def _single_payload(device, operation, round_index):
+    payloads = device.round_payloads(operation, round_index)
+    assert len(payloads) == 1
+    return payloads[0]
+
+
 def _setup():
     circ = NoiseModel.circuit_level(P).circuit(distance=D, rounds=R)
     segments, stream_op, rounds_map = continuous_stream(
@@ -49,7 +55,7 @@ def test_idle_stretch_carries_real_firing_syndromes():
     fired = 0
     nbits = 0
     for r in range(1, IDLE + 1):
-        bits = np.asarray(dev.round_payload(idle_seg, r).bits, np.uint8)
+        bits = np.asarray(_single_payload(dev, idle_seg, r).bits, np.uint8)
         nbits += bits.size
         fired += int(bits.sum())
     assert nbits > 0                           # the idle rounds carry real syndrome bits

@@ -24,11 +24,36 @@ class TimingOnlyDevice:
         """Nothing to set up for this device."""
         return None
 
-    def round_payload(self, op: Operation, round_index: int) -> SyndromePayload:
-        """Emit a payload with no syndrome bits."""
+    def round_payloads(self, op: Operation, round_index: int) -> list[SyndromePayload]:
+        """Emit this operation round as one timing-only payload."""
         target, global_round = _stream_payload_target(op, round_index)
-        return SyndromePayload(target, op.patches[0] if op.patches else op.qubits[0],
-                               global_round)
+        return [SyndromePayload(target, op.patches[0] if op.patches else op.qubits[0],
+                                global_round)]
+
+    def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
+                            patch) -> list[SyndromePayload]:
+        """Emit one timing-only payload for a feedback-idle stream round."""
+        return [SyndromePayload(stream_id, patch, global_round)]
+
+    def register_dynamic_stream(self, stream_op: Operation, round_count: int,
+                                *, belief_matching: bool = False):
+        """Timing-only streams have no fixed detector-model length."""
+        return None
+
+    def validate_stream_length(self, stream_op: Operation,
+                               stream_round_count: int) -> None:
+        """Timing-only streams can seal at any runtime length."""
+        return None
+
+    def window_models_for_operation(self, op: Operation, windows: list,
+                                    round_count: int,
+                                    *, belief_matching: bool = False) -> list:
+        """Timing-only decode jobs carry no detector error model."""
+        return []
+
+    def window_model_for_stream(self, stream_id, window, *, is_last: bool):
+        """Timing-only dynamic stream windows carry no detector error model."""
+        return None
 
 
 class SyndromeBitDevice:
@@ -51,19 +76,43 @@ class SyndromeBitDevice:
         bit_count = min(self.code.syndrome_bits_per_round(num_patches), self.max_bits)
         return [self.rng.randint(0, 1) for _ in range(bit_count)]
 
-    def round_payload(self, op: Operation, round_index: int) -> SyndromePayload:
-        """Emit fake pseudo-random bits for one round."""
-        target, global_round = _stream_payload_target(op, round_index)
-        return SyndromePayload(target, op.patches[0] if op.patches else op.qubits[0],
-                               global_round, bits=self._bits(len(op.qubits)),
-                               code=self.code.name)
-
     def round_payloads(self, op: Operation, round_index: int) -> list[SyndromePayload]:
         """One payload per patch when per_patch=True; else the single aggregated payload."""
-        if not self.per_patch:
-            return [self.round_payload(op, round_index)]
-        patches = op.patches if op.patches else op.qubits
         target, global_round = _stream_payload_target(op, round_index)
+        if not self.per_patch:
+            return [SyndromePayload(
+                target,
+                op.patches[0] if op.patches else op.qubits[0],
+                global_round,
+                bits=self._bits(len(op.qubits)),
+                code=self.code.name)]
+        patches = op.patches if op.patches else op.qubits
         return [SyndromePayload(target, p, global_round, bits=self._bits(1),
                                 code=self.code.name)
                 for p in patches]
+
+    def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
+                            patch) -> list[SyndromePayload]:
+        """Emit one fake-bit payload for a feedback-idle stream round."""
+        return [SyndromePayload(stream_id, patch, global_round,
+                                bits=self._bits(1), code=self.code.name)]
+
+    def register_dynamic_stream(self, stream_op: Operation, round_count: int,
+                                *, belief_matching: bool = False):
+        """Fake-bit streams have no fixed detector-model length."""
+        return None
+
+    def validate_stream_length(self, stream_op: Operation,
+                               stream_round_count: int) -> None:
+        """Fake-bit streams can seal at any runtime length."""
+        return None
+
+    def window_models_for_operation(self, op: Operation, windows: list,
+                                    round_count: int,
+                                    *, belief_matching: bool = False) -> list:
+        """Fake-bit decode jobs carry no detector error model."""
+        return []
+
+    def window_model_for_stream(self, stream_id, window, *, is_last: bool):
+        """Fake-bit dynamic stream windows carry no detector error model."""
+        return None

@@ -69,39 +69,27 @@ class NaiveOnlineScheme(SlidingWindowScheme):
 class ParallelWindowScheme(SlidingWindowScheme):
     """Two-layer parallel windows with layer-B boundary dependencies."""
 
-    scheme_label = "parallel A/B two-layer window (arXiv:2511.10633 Sec II.4)"
+    scheme_label = "parallel A/B two-layer window (Skoric 2209.08552, Tan 2209.09219)"
 
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple[int, int, int, int]]:
-        """Lay out interleaved layer-A windows, layer-B gaps, and a tail if needed."""
+        """Lay out alternating A/B commit blocks with two-sided context."""
         commit_rounds = code.commit_rounds()
         buffer_rounds = code.buffer_rounds()
         total_rounds = round_count
-        period = 2 * commit_rounds + 2 * buffer_rounds
-        layer_a_windows = []
-        layer_index = 0
-        while 1 + layer_index * period <= total_rounds:
-            commit_lo = 1 + layer_index * period
+
+        plan = []
+        commit_lo = 1
+        while commit_lo <= total_rounds:
             commit_hi = min(commit_lo + commit_rounds - 1, total_rounds)
             buffer_lo = max(1, commit_lo - buffer_rounds)
-            layer_a_windows.append(
-                (buffer_lo, commit_lo, commit_hi, commit_hi + buffer_rounds))
-            layer_index += 1
-        plan = []
-        for layer_index, layer_a_window in enumerate(layer_a_windows):
-            plan.append(layer_a_window)
-            if layer_index + 1 < len(layer_a_windows):
-                start_round = layer_a_window[2] + 1
-                end_round = layer_a_windows[layer_index + 1][1] - 1
-                plan.append((start_round, start_round, end_round, end_round))
-            elif layer_a_window[2] < total_rounds:
-                start_round = layer_a_window[2] + 1
-                plan.append((start_round, start_round, total_rounds,
-                             total_rounds + buffer_rounds))
+            buffer_hi = commit_hi + buffer_rounds
+            plan.append((buffer_lo, commit_lo, commit_hi, buffer_hi))
+            commit_lo = commit_hi + 1
         return plan
 
     def wire_deps(self, windows: list) -> None:
-        """Layer-B windows depend on neighboring layer-A windows."""
+        """Layer-B windows wait for neighboring layer-A boundary data."""
         for window_index in range(1, len(windows), 2):
             window = windows[window_index]
             window.deps.append((window.op_id, window_index - 1))

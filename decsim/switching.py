@@ -59,8 +59,9 @@ class Switching:
         if self.weak_keepup_ratio is None:
             return
         ratio = self.weak_keepup_ratio
-        needed = math.ceil(ratio / (1 - ratio) * buffer_rounds)
-        if commit_rounds < needed:
+        weak_decode_rounds = ratio * (commit_rounds + buffer_rounds)
+        if weak_decode_rounds > commit_rounds + 1e-9:
+            needed = math.ceil(ratio / (1 - ratio) * buffer_rounds - 1e-9)
             raise ValueError(
                 f"Switching: a {commit_rounds}-round commit region is too short for a weak decoder "
                 f"running at {ratio} of a syndrome round. It needs at least {needed} rounds (for a "

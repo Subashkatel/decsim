@@ -23,7 +23,7 @@ import pytest
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import (PerRoundDecoder, SampledSoftOutputDecoder, SwitchingDecoder,
                              SwitchingRouter, switch_probability_per_round)
-from decsim.message import DecodeJob, Operation, Window
+from decsim.message import DecodeJob, DecodeResult, Operation, Window
 from decsim.metrics import DecodeBacklog, StrongDecoderBacklog
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
@@ -63,6 +63,37 @@ def _strong_backlog_peak(low_confidence_probability, rounds, seed=1):
     return res["metrics"]["strong_backlog"]["peak_jobs"]
 
 
+class FixedLogicalDecoder:
+    """Small test decoder with fixed timing and fixed logical output."""
+
+    def __init__(self, logical_value: int, tau_us: float = 0.01):
+        self.logical_value = logical_value
+        self.tau_us = tau_us
+
+    def latency(self, job: DecodeJob) -> int:
+        """Scale latency with the submitted round count."""
+        from decsim.config import us
+
+        return us(job.n_rounds * self.tau_us)
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        """Return the configured logical value."""
+        return DecodeResult(job.op_id, job.window_id, logical_value=self.logical_value)
+
+
+class RecordingLogicalDecoder(FixedLogicalDecoder):
+    """Fixed decoder that records every job it decodes."""
+
+    def __init__(self, logical_value: int, tau_us: float = 0.01):
+        super().__init__(logical_value, tau_us)
+        self.jobs = []
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        """Record the job before returning the configured logical value."""
+        self.jobs.append(job)
+        return super().decode(job)
+
+
 # ---- window-size check: the weak decoder must keep pace (Eq. 7 of the paper) ---------
 
 @pytest.mark.parametrize("ratio, raises", [(0.7, True), (0.4, False), (None, False)])
@@ -82,6 +113,16 @@ def test_window_size_check_fires_through_the_engine():
     """The window-size check runs when the plan loads, so a bad configuration fails the run."""
     with pytest.raises(ValueError):
         _switch_run(Switching(confidence_threshold=0.5, weak_keepup_ratio=0.7), 0.0, 30)
+
+
+def test_window_size_check_accepts_exact_paper_boundary():
+    """Eq. 7 accepts equality. The guard must not reject it because of float roundoff."""
+    switching = Switching(confidence_threshold=0.5, weak_keepup_ratio=0.9)
+    for buffer_rounds in (3, 5, 7):
+        switching.check_window_size(9 * buffer_rounds, buffer_rounds)
+
+    with pytest.raises(ValueError):
+        switching.check_window_size(26, 3)
 
 
 def test_weak_keepup_ratio_must_be_below_one():
@@ -108,6 +149,100 @@ def test_custom_decision_rule_can_replace_the_threshold():
 
     res = _switch_run(AlwaysUseStrong(confidence_threshold=0.5), 0.0, 60)
     assert res["cluster"].strong_needed == res["cluster"].total_windows
+
+
+def test_escalated_window_uses_strong_logical_result():
+    """A low-confidence window advances with the weak boundary but finalizes with strong logic."""
+    weak = SampledSoftOutputDecoder(FixedLogicalDecoder(logical_value=0),
+                                    escalation_probability=1.0, seed=1)
+    strong = FixedLogicalDecoder(logical_value=1)
+    res = build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=27,
+                        round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
+                        switching=Switching(confidence_threshold=0.5),
+                        decoder=weak, router=SwitchingRouter(weak, strong),
+                        unit_pools={"default": 1, "strong": 1}, verbose=False)
+    cluster = res["cluster"]
+    assert cluster.total_windows % 2 == 1
+    assert cluster.strong_needed == cluster.total_windows
+    assert cluster.op_results[0] == 1
+
+
+def test_parallel_strong_result_can_finish_before_weak_decision():
+    """Run-both mode can store an early strong result until the weak decoder decides to switch."""
+    weak = SampledSoftOutputDecoder(FixedLogicalDecoder(logical_value=0, tau_us=0.05),
+                                    escalation_probability=1.0, seed=1)
+    strong = FixedLogicalDecoder(logical_value=1, tau_us=0.0)
+    res = build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=27,
+                        round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
+                        switching=Switching(confidence_threshold=0.5, run_both_at_once=True),
+                        decoder=weak, router=SwitchingRouter(weak, strong),
+                        unit_pools={"default": 1, "strong": 1}, verbose=False)
+    assert res["cluster"].op_results[0] == 1
+
+
+def test_switching_requires_a_router_to_reach_the_strong_decoder():
+    """Switching must not silently route strong jobs back to the weak decoder."""
+    weak = SampledSoftOutputDecoder(FixedLogicalDecoder(logical_value=0),
+                                    escalation_probability=1.0, seed=1)
+    with pytest.raises(RuntimeError, match="SwitchingRouter"):
+        build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=9,
+                      round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
+                      switching=Switching(confidence_threshold=0.5),
+                      decoder=weak, unit_pools={"default": 1, "strong": 1},
+                      verbose=False)
+
+
+def test_strong_redecode_receives_two_sided_context_payloads():
+    """The strong job is charged and fed commit + leading buffer + trailing buffer."""
+    weak = SampledSoftOutputDecoder(RecordingLogicalDecoder(logical_value=0),
+                                    escalation_probability=1.0, seed=1)
+    strong = RecordingLogicalDecoder(logical_value=1)
+    build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=9,
+                  round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
+                  switching=Switching(confidence_threshold=0.5),
+                  decoder=weak, router=SwitchingRouter(weak, strong),
+                  unit_pools={"default": 1, "strong": 1}, verbose=False)
+
+    middle_job = next(job for job in strong.jobs if job.window_id == 1)
+    assert middle_job.n_rounds == 3 * D
+    assert middle_job.window.start_round == 1
+    assert middle_job.window.commit_lo == 4
+    assert middle_job.window.commit_hi == 6
+    assert middle_job.window.buffer_hi == 9
+    assert [payload.round_index for payload in middle_job.payloads] == list(range(1, 10))
+
+
+def test_stim_strong_redecode_receives_two_sided_window_model():
+    """Stim-backed strong re-decodes get an enlarged detector model, not the weak slice."""
+    stim = pytest.importorskip("stim")
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.planner import FixedRounds
+
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", distance=D, rounds=9,
+        after_clifford_depolarization=0.001,
+        after_reset_flip_probability=0.001,
+        before_measure_flip_probability=0.001,
+        before_round_data_depolarization=0.001)
+    op = Operation(0, "memory", (0,), clifford=True, circuit=circuit)
+    weak_inner = RecordingLogicalDecoder(logical_value=0)
+    weak = SampledSoftOutputDecoder(weak_inner, escalation_probability=1.0, seed=1)
+    strong = RecordingLogicalDecoder(logical_value=1)
+
+    build_and_run([op], num_units=1, d=D, rounds_policy=FixedRounds(9),
+                  round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
+                  switching=Switching(confidence_threshold=0.5),
+                  device=StimDevice(seed=3),
+                  decoder=weak, router=SwitchingRouter(weak, strong),
+                  unit_pools={"default": 1, "strong": 1}, verbose=False)
+
+    weak_middle = next(job for job in weak_inner.jobs if job.window_id == 1)
+    strong_middle = next(job for job in strong.jobs if job.window_id == 1)
+    assert strong_middle.dem is not None
+    assert weak_middle.dem is not None
+    assert strong_middle.window.start_round == 1
+    assert strong_middle.window.buffer_hi == 9
+    assert len(strong_middle.dem.detector_ids) > len(weak_middle.dem.detector_ids)
 
 
 # ---- the weak stream never stalls; with no switching it IS plain sliding -------------
@@ -261,7 +396,7 @@ def test_commit_buffer_override_defaults_to_d_and_rejects_nonpositive():
         SurfaceCodeModel(d=3, commit_rounds_override=0)
 
 
-# ---- size-dependent switch probability (paper Sec III.C / Fig 10) --------------------
+# ---- configurable switch probability helper ------------------------------------------
 
 def test_switch_probability_per_round_scales_with_commit_rounds():
     """switch_probability_per_round gives gamma * commit_rounds / d: equal to gamma at commit = d,

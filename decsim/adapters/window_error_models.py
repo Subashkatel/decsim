@@ -397,11 +397,11 @@ def _build_models_from_plan(*, plan: list, det_sets: list, obs_sets: list,
     return models
 
 
-def build_window_error_models(circuit, plan: list, num_observables: Optional[int] = None,
-                          *, decompose_errors: bool = True,
-                          detector_rounds: Optional[dict] = None,
-                          belief_matching: bool = False) -> list:
-    """Slice an operation circuit into one WindowErrorModel per planned window."""
+def _prepare_model_inputs(circuit, num_observables: Optional[int],
+                          decompose_errors: bool,
+                          detector_rounds: Optional[dict],
+                          belief_matching: bool) -> tuple:
+    """Parse the circuit once into the data needed by window builders."""
     det_sets, obs_sets, priors, h_det_sets, h_priors, hyperedge_to_edge_map = \
         _fault_data_from_circuit(
             circuit,
@@ -411,12 +411,44 @@ def build_window_error_models(circuit, plan: list, num_observables: Optional[int
     round_of = _detector_rounds_from_circuit(circuit, detector_rounds)
     fault_rounds = [tuple(round_of[d] for d in dets) for dets in det_sets]
     pos_of = _detector_position_in_round(round_of)
+    return (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
+            h_det_sets, h_priors, hyperedge_to_edge_map)
+
+
+def build_window_error_models(circuit, plan: list, num_observables: Optional[int] = None,
+                          *, decompose_errors: bool = True,
+                          detector_rounds: Optional[dict] = None,
+                          belief_matching: bool = False) -> list:
+    """Slice an operation circuit into one WindowErrorModel per planned window."""
+    (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
+     h_det_sets, h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
+         circuit, num_observables, decompose_errors, detector_rounds, belief_matching)
     return _build_models_from_plan(
         plan=plan, det_sets=det_sets, obs_sets=obs_sets, priors=priors,
         n_obs=n_obs, round_of=round_of, fault_rounds=fault_rounds,
         pos_of=pos_of, belief_matching=belief_matching,
         h_det_sets=h_det_sets, h_priors=h_priors,
         hyperedge_to_edge_map=hyperedge_to_edge_map)
+
+
+def build_single_window_error_model(circuit, window_entry: tuple,
+                                    num_observables: Optional[int] = None,
+                                    *, decompose_errors: bool = True,
+                                    detector_rounds: Optional[dict] = None,
+                                    belief_matching: bool = False) -> WindowErrorModel:
+    """Build one independent window model without changing a stream ownership cursor."""
+    (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
+     h_det_sets, h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
+         circuit, num_observables, decompose_errors, detector_rounds, belief_matching)
+    buffer_lo, commit_lo, commit_hi, buffer_hi = _parse_window_entry(window_entry)
+    return _build_one_window_model(
+        det_sets=det_sets, obs_sets=obs_sets, priors=priors,
+        n_obs=n_obs, round_of=round_of, fault_rounds=fault_rounds,
+        pos_of=pos_of, committed_elsewhere=set(),
+        buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
+        buffer_hi=buffer_hi, is_last=False,
+        belief_matching=belief_matching, h_det_sets=h_det_sets,
+        h_priors=h_priors, hyperedge_to_edge_map=hyperedge_to_edge_map)
 
 
 class WindowSlicer:

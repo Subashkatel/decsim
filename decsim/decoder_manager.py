@@ -30,6 +30,9 @@ class DecoderManager:
                  unit_pools: Optional[dict] = None,
                  switching: Optional["Switching"] = None,
                  on_window_decoded: Optional[Callable[[DecodeJob, DecodeResult], None]] = None,
+                 on_strong_window_decoded: Optional[Callable[[tuple, DecodeResult], None]] = None,
+                 make_strong_decode_job: Optional[Callable[[DecodeJob, int, str],
+                                                            DecodeJob]] = None,
                  log_name: str = "DecoderCluster"):
         self.engine = engine
         self.decoder = decoder
@@ -40,6 +43,8 @@ class DecoderManager:
         self.links = links if links is not None else LinkModel()
         self.switching = switching
         self.on_window_decoded = on_window_decoded
+        self.on_strong_window_decoded = on_strong_window_decoded
+        self.make_strong_decode_job = make_strong_decode_job
         self.log_name = log_name
 
         if unit_pools is None:
@@ -63,6 +68,8 @@ class DecoderManager:
         self.strong_cancelled = 0
         self.strong_running_rounds = 0
         self._running_strong_decodes: dict[tuple, DecodeJob] = {}
+        self._windows_waiting_for_strong_result: set[tuple] = set()
+        self._completed_strong_results: dict[tuple, DecodeResult] = {}
 
     @property
     def free_units(self) -> int:
@@ -125,12 +132,12 @@ class DecoderManager:
         window_key = (job.op_id, job.window_id)
         round_count = self.switching.calculate_strong_redo_rounds(job.window)
         strong_label = getattr(job, "strong_label", f"strong({job.label})")
+        strong = self._make_strong_decode_job(job, round_count, strong_label)
+        self._check_strong_route(job, strong)
 
         def queue_strong_decode():
-            strong = DecodeJob(op_id=-1, window_id=0, n_rounds=round_count,
-                               ready_time=self.engine.now, deadline=self.engine.now,
-                               on_done=lambda: None, label=strong_label, hint="strong",
-                               spatial_nodes=job.spatial_nodes, strong_decode_for=window_key)
+            strong.ready_time = self.engine.now
+            strong.deadline = self.engine.now
             self._running_strong_decodes[window_key] = strong
             self.scheduler.insert(self.queue_for(self.pool_for(strong)), strong)
             self.queue_log.append((self.engine.now, self.queued_total()))
@@ -146,8 +153,33 @@ class DecoderManager:
             self.engine.schedule(self.links.ws.cost(), queue_strong_decode,
                                  label=f"weak->strong handoff {strong_label}")
 
+    def _make_strong_decode_job(self, weak_job: DecodeJob, round_count: int,
+                                label: str) -> DecodeJob:
+        """Build the strong re-decode job through the window manager when available."""
+        if self.make_strong_decode_job is not None:
+            return self.make_strong_decode_job(weak_job, round_count, label)
+        return DecodeJob(op_id=weak_job.op_id, window_id=weak_job.window_id,
+                         n_rounds=round_count,
+                         ready_time=self.engine.now, deadline=self.engine.now,
+                         label=label, hint="strong", spatial_nodes=weak_job.spatial_nodes,
+                         code=weak_job.code, dem=weak_job.dem,
+                         payloads=list(weak_job.payloads), attempt=1,
+                         strong_decode_for=(weak_job.op_id, weak_job.window_id))
+
+    def _check_strong_route(self, weak_job: DecodeJob, strong_job: DecodeJob) -> None:
+        """Fail early when a strong job would route back to the weak decoder."""
+        weak_decoder = self.decoder_for(weak_job)
+        strong_decoder = self.decoder_for(strong_job)
+        if strong_decoder is weak_decoder:
+            raise RuntimeError(
+                "Decoder switching escalated a window, but the strong job routes to "
+                "the same decoder as the weak job. Pass router=SwitchingRouter(weak, "
+                "strong), or provide a router that sends hint='strong' jobs to a "
+                "distinct strong decoder.")
+
     def _cancel_strong_decode(self, key: tuple) -> None:
         """Cancel an unneeded strong re-decode if it is queued or running."""
+        self._completed_strong_results.pop(key, None)
         job = self._running_strong_decodes.pop(key, None)
         if job is None:
             return
@@ -164,6 +196,14 @@ class DecoderManager:
     def _merge_strong_batch(self, queue: list) -> DecodeJob:
         """Batch queued strong jobs when bulk strong decoding is enabled."""
         jobs = [self.scheduler.pop(queue) for _ in range(len(queue))]
+        if len(jobs) > 1:
+            for job in jobs:
+                has_model = job.dem is not None
+                has_syndrome_bits = any(payload.bits is not None for payload in job.payloads)
+                if has_model or has_syndrome_bits:
+                    raise RuntimeError(
+                        "bulk_strong can only merge timing-only strong re-decodes. "
+                        "Disable bulk_strong for accuracy-coupled switching.")
         window_keys = [j.strong_decode_for for j in jobs
                        if j.strong_decode_for is not None]
         if len(jobs) == 1:
@@ -228,14 +268,22 @@ class DecoderManager:
             return
         self._release_job_unit(job)
         self._finish_strong_bookkeeping(job)
+        if job.strong_decode_for is not None:
+            result = self.decoder_for(job).decode(job)
+            self._handle_strong_decode_result(job, result)
+            self.try_dispatch()
+            return
         if self._finish_external_job(job):
             return
 
         result = self.decoder_for(job).decode(job)
-        self._handle_switching_result(job, result)
+        needs_strong_result = self._handle_switching_result(job, result)
+        job.awaiting_strong_result = needs_strong_result
         if self.on_window_decoded is None:
             raise RuntimeError("DecoderManager has no window completion callback")
         self.on_window_decoded(job, result)
+        if needs_strong_result:
+            self._wait_for_strong_result((job.op_id, job.window_id))
         self.try_dispatch()
 
     def _release_job_unit(self, job: DecodeJob) -> None:
@@ -261,13 +309,45 @@ class DecoderManager:
             return True
         return False
 
-    def _handle_switching_result(self, job: DecodeJob, result: DecodeResult) -> None:
-        """Apply the weak result to the switching policy, if one is configured."""
-        if self.switching is not None and job.attempt == 0:
-            window_key = (job.op_id, job.window_id)
-            if self.switching.keep_weak_result(result):
-                self._cancel_strong_decode(window_key)
-            else:
-                self.strong_needed += 1
-                if not self.switching.run_both_at_once:
-                    self._start_strong_decode(job)
+    def _handle_switching_result(self, job: DecodeJob, result: DecodeResult) -> bool:
+        """Return true when a weak result must be finalized by the strong decoder."""
+        if self.switching is None or job.attempt != 0:
+            return False
+        window_key = (job.op_id, job.window_id)
+        if self.switching.keep_weak_result(result):
+            self._cancel_strong_decode(window_key)
+            return False
+
+        self.strong_needed += 1
+        if not self.switching.run_both_at_once:
+            self._start_strong_decode(job)
+        return True
+
+    def _handle_strong_decode_result(self, job: DecodeJob, result: DecodeResult) -> None:
+        """Store or apply a strong result for its original weak window."""
+        keys = getattr(job, "merged_keys", None) or [job.strong_decode_for]
+        if len(keys) > 1 and (result.logical_value is not None
+                              or result.boundary_defects is not None):
+            raise RuntimeError(
+                "A merged strong decode cannot provide one logical result for several "
+                "windows. Disable bulk_strong for accuracy-coupled switching.")
+        for key in keys:
+            self._complete_strong_result(key, result)
+
+    def _complete_strong_result(self, key: tuple, result: DecodeResult) -> None:
+        """Apply a strong result if the weak window already committed, else hold it."""
+        if key not in self._windows_waiting_for_strong_result:
+            self._completed_strong_results[key] = result
+            return
+
+        self._windows_waiting_for_strong_result.remove(key)
+        if self.on_strong_window_decoded is None:
+            raise RuntimeError("DecoderManager has no strong window completion callback")
+        self.on_strong_window_decoded(key, result)
+
+    def _wait_for_strong_result(self, key: tuple) -> None:
+        """Mark a weak-committed window as waiting for its strong final result."""
+        self._windows_waiting_for_strong_result.add(key)
+        if key in self._completed_strong_results:
+            result = self._completed_strong_results.pop(key)
+            self._complete_strong_result(key, result)

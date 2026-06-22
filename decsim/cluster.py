@@ -86,7 +86,11 @@ class DecoderCluster:
             router=router, links=self.links, num_units=num_units,
             unit_pools=unit_pools, switching=switching,
             on_window_decoded=lambda job, result:
-            self.window_manager.on_decode_done(job, result))
+            self.window_manager.on_decode_done(job, result),
+            on_strong_window_decoded=lambda key, result:
+            self.window_manager.on_strong_decode_done(key, result),
+            make_strong_decode_job=lambda job, round_count, label:
+            self.window_manager.make_strong_decode_job(job, round_count, label))
 
     def _build_window_manager(self, orchestrator):
         """Create the syndrome-window runtime manager."""

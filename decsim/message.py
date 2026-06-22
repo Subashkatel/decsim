@@ -50,6 +50,7 @@ class DecodeJob:
     pool: Optional[str] = None
     window: Optional["Window"] = None
     strong_decode_for: Optional[tuple] = None
+    awaiting_strong_result: bool = False
     cancelled: bool = False
 
 

@@ -69,31 +69,33 @@ def test_cross_op_deps_use_entry_and_exit_defaults():
     assert plan.windows[(1, 0)].deps == [(0, plan.window_count[0] - 1)]
 
 
-# ---- structural: parallel A/B layout per arXiv:2511.10633 Sec II.4 ------------------
+# ---- structural: parallel A/B layout per Skoric 2209.08552 / Tan 2209.09219 ---------
 
 def test_parallel_scheme_layout_and_deps():
-    # d=3: C=B=3, period 2C+2B=12. R=15 -> A_0 [1..6] commit [1,3],
-    # B_0 commit [4,12], A_1 [10..18] commit [13,15]; no tail (R = A_1.commit_hi).
+    # d=3: commit and buffer are both 3 rounds. Commit regions tile the stream as
+    # alternating A/B blocks, each of size d except a short final tail.
     plan = _plan(ParallelWindowScheme(), _memory_op(), rounds_per_op=15, d=3)
-    assert plan.window_count[0] == 3
-    a0, b0, a1 = (plan.windows[(0, k)] for k in range(3))
+    assert plan.window_count[0] == 5
+    a0, b0, a1, b1, a2 = (plan.windows[(0, k)] for k in range(5))
     assert (a0.start_round, a0.commit_lo, a0.commit_hi, a0.buffer_hi) == (1, 1, 3, 6)
-    assert (b0.commit_lo, b0.commit_hi, b0.buffer_hi) == (4, 12, 12)
-    assert (a1.start_round, a1.commit_lo, a1.commit_hi, a1.buffer_hi) == (10, 13, 15, 18)
-    # layer-A windows are independent; the layer-B window waits on BOTH neighbours
-    assert a0.deps == [] and a1.deps == []
+    assert (b0.start_round, b0.commit_lo, b0.commit_hi, b0.buffer_hi) == (1, 4, 6, 9)
+    assert (a1.start_round, a1.commit_lo, a1.commit_hi, a1.buffer_hi) == (4, 7, 9, 12)
+    assert (b1.start_round, b1.commit_lo, b1.commit_hi, b1.buffer_hi) == (7, 10, 12, 15)
+    assert (a2.start_round, a2.commit_lo, a2.commit_hi, a2.buffer_hi) == (10, 13, 15, 18)
+    # layer-A windows are independent; layer-B waits on its neighboring A windows.
+    assert a0.deps == [] and a1.deps == [] and a2.deps == []
     assert sorted(b0.deps) == [(0, 0), (0, 2)]
-    # interior windows have the paper's 3d temporal size
-    assert b0.n_rounds == 9 and a1.n_rounds == 9
+    assert sorted(b1.deps) == [(0, 2), (0, 4)]
+    assert b0.n_rounds == 9 and a1.n_rounds == 9 and b1.n_rounds == 9
 
 
 def test_parallel_scheme_tail_window():
-    # R=23 leaves rounds 16..23 after A_1's commit -> a tail window depending on A_1 only.
+    # R=23 leaves a short layer-B tail after A_3.
     plan = _plan(ParallelWindowScheme(), _memory_op(), rounds_per_op=23, d=3)
-    assert plan.window_count[0] == 4
-    tail = plan.windows[(0, 3)]
-    assert (tail.commit_lo, tail.commit_hi) == (16, 23)
-    assert tail.deps == [(0, 2)]
+    assert plan.window_count[0] == 8
+    tail = plan.windows[(0, 7)]
+    assert (tail.start_round, tail.commit_lo, tail.commit_hi, tail.buffer_hi) == (19, 22, 23, 26)
+    assert tail.deps == [(0, 6)]
     # every round 1..R is committed by exactly one window
     committed = []
     for w in plan.windows.values():

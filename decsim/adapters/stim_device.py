@@ -148,3 +148,19 @@ class StimDevice:
         return stream_model["slicer"].slice_window(
             buffer_lo, window.commit_lo, window.commit_hi, window.buffer_hi,
             is_last=is_last)
+
+    def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
+                                          *, belief_matching: bool = False):
+        """Build an independent two-sided context model for a strong re-decode."""
+        if op.circuit is None:
+            return None
+
+        from .window_error_models import build_single_window_error_model
+
+        detector_rounds = self._detector_rounds(op.circuit, round_count)
+        return build_single_window_error_model(
+            op.circuit,
+            (window.start_round, window.commit_lo,
+             window.commit_hi, min(window.buffer_hi, round_count)),
+            detector_rounds=detector_rounds,
+            belief_matching=belief_matching)

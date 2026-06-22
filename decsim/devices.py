@@ -55,6 +55,11 @@ class TimingOnlyDevice:
         """Timing-only dynamic stream windows carry no detector error model."""
         return None
 
+    def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
+                                          *, belief_matching: bool = False):
+        """Timing-only strong re-decodes carry no detector error model."""
+        return None
+
 
 class SyndromeBitDevice:
     """Emit deterministic fake bits to exercise the payload path."""
@@ -115,4 +120,9 @@ class SyndromeBitDevice:
 
     def window_model_for_stream(self, stream_id, window, *, is_last: bool):
         """Fake-bit dynamic stream windows carry no detector error model."""
+        return None
+
+    def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
+                                          *, belief_matching: bool = False):
+        """Fake-bit strong re-decodes carry no detector error model."""
         return None

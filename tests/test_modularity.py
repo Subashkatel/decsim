@@ -116,6 +116,10 @@ class MyDevice:
     def window_model_for_stream(self, stream_id, window, *, is_last):
         return None
 
+    def strong_window_model_for_operation(self, op, window, round_count,
+                                          *, belief_matching=False):
+        return None
+
 class MyCode:
     name = "my-code"
     distance = 3

@@ -249,7 +249,7 @@ class SampledSoftOutputDecoder:
 
 
 def switch_probability_per_round(gamma_switch: float, d: int):
-    """Build the paper's size-dependent per-window switch probability."""
+    """Build a configurable per-window switch probability from a d-round rate."""
 
     def probability(job: DecodeJob) -> float:
         w = job.window

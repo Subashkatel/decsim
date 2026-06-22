@@ -51,6 +51,7 @@ class WindowManager:
         self.peak_payloads = 0
         self._round_refs: dict[tuple, int] = {}
         self._read_sets: dict[tuple, list] = {}
+        self._strong_read_sets: dict[tuple, list] = {}
 
         self.windows: dict[tuple, Window] = {}
         self.op_windows: dict[int, list] = {}
@@ -60,6 +61,11 @@ class WindowManager:
         self._committed_per_op: dict[int, int] = {}
         self._blocking_ops: set[int] = set()
         self.op_results: dict[int, int] = {}
+        self._window_logical_values: dict[tuple, int] = {}
+        self._pending_strong_windows: set[tuple] = set()
+        self._pending_strong_per_op: dict[int, int] = {}
+        self._finished_ops: set[int] = set()
+        self._workload_complete_sent = False
         self.window_models: dict = {}
         self.total_windows = 0
         self._windows_built = False
@@ -214,15 +220,7 @@ class WindowManager:
         model = self._dynamic_window_model(stream_id, window, is_last=is_last)
         if model is not None:
             self.window_models[(stream_id, window_index)] = model
-        operation_rounds = self._round_count_for_window(stream_id, window)
-        read_keys = [
-            (stream_id, round_index)
-            for round_index in range(
-                window.start_round, min(window.buffer_hi, operation_rounds) + 1)
-        ]
-        self._read_sets[(stream_id, window_index)] = read_keys
-        for round_key in read_keys:
-            self._round_refs[round_key] = self._round_refs.get(round_key, 0) + 1
+        self._add_window_read_refs((stream_id, window_index), window)
         self._check_window((stream_id, window_index))
 
     def _dynamic_window_model(self, stream_id, window: Window, *, is_last: bool):
@@ -344,23 +342,45 @@ class WindowManager:
         """Count how many unfinished windows still need each retained round."""
         self._round_refs = {}
         self._read_sets = {}
-        for key, w in self.windows.items():
-            operation_rounds = self.rounds_for(self.ops[w.op_id])
-            reads = [
-                (w.op_id, round_index)
-                for round_index in range(
-                    w.start_round, min(w.buffer_hi, operation_rounds) + 1)
+        self._strong_read_sets = {}
+        for key, window in self.windows.items():
+            self._add_window_read_refs(key, window)
+
+    def _add_window_read_refs(self, key: tuple, window: Window) -> None:
+        """Retain rounds needed by the weak window and possible strong re-decode."""
+        self._read_sets[key] = self._read_keys_for_bounds(
+            window.op_id, window.start_round, window.buffer_hi, window)
+        self._strong_read_sets[key] = self._strong_context_read_keys(window)
+        for round_key in self._read_sets[key] + self._strong_read_sets[key]:
+            self._round_refs[round_key] = self._round_refs.get(round_key, 0) + 1
+
+    def _read_keys_for_bounds(self, op_id, start_round: int, buffer_hi: int,
+                              window: Optional[Window] = None) -> list:
+        """Return retained payload round keys for a possibly cross-operation range."""
+        operation_rounds = self._round_count_for_window(op_id, window)
+        reads = [
+            (op_id, round_index)
+            for round_index in range(start_round, min(buffer_hi, operation_rounds) + 1)
+        ]
+        overflow = buffer_hi - operation_rounds
+        if overflow <= 0:
+            return reads
+        for successor_id in self.successors.get(op_id, []):
+            reads += [
+                (successor_id, round_index)
+                for round_index in range(1, overflow + 1)
             ]
-            overflow = w.buffer_hi - operation_rounds
-            if overflow > 0:
-                for successor_id in self.successors.get(w.op_id, []):
-                    reads += [
-                        (successor_id, round_index)
-                        for round_index in range(1, overflow + 1)
-                    ]
-            self._read_sets[key] = reads
-            for round_key in reads:
-                self._round_refs[round_key] = self._round_refs.get(round_key, 0) + 1
+        return reads
+
+    def _strong_context_read_keys(self, window: Window) -> list:
+        """Rounds retained until we know whether the strong decoder needs them."""
+        if self.decoder_manager.switching is None:
+            return []
+        buffer_lo, _commit_lo, _commit_hi, buffer_hi = self._strong_context_bounds(window)
+        weak_reads = set(self._read_sets.get((window.op_id, window.k), ()))
+        strong_reads = self._read_keys_for_bounds(
+            window.op_id, buffer_lo, buffer_hi, window)
+        return [round_key for round_key in strong_reads if round_key not in weak_reads]
 
     def build_windows(self) -> None:
         """Compatibility entry: build and install a plan if none has been loaded."""
@@ -575,6 +595,59 @@ class WindowManager:
         window.queued = True
         self.decoder_manager.submit_window(job)
 
+    def make_strong_decode_job(self, weak_job: DecodeJob, round_count: int,
+                               label: str) -> DecodeJob:
+        """Build a paper-style two-sided strong re-decode job for an escalated window."""
+        key = (weak_job.op_id, weak_job.window_id)
+        weak_window = self.windows[key]
+        op = self.ops[weak_job.op_id]
+        strong_window = self._strong_context_window(weak_window)
+        return DecodeJob(
+            op_id=weak_job.op_id,
+            window_id=weak_job.window_id,
+            n_rounds=round_count,
+            ready_time=self.engine.now,
+            deadline=self.engine.now,
+            label=label,
+            hint="strong",
+            spatial_nodes=weak_job.spatial_nodes,
+            code=weak_job.code,
+            dem=self._strong_window_model(op, strong_window),
+            payloads=self._assemble_payloads(strong_window),
+            attempt=1,
+            window=strong_window,
+            strong_decode_for=key)
+
+    def _strong_context_window(self, weak_window: Window) -> Window:
+        """Strong context uses one buffer before and one buffer after the weak commit."""
+        buffer_lo, commit_lo, commit_hi, buffer_hi = self._strong_context_bounds(weak_window)
+        strong_window = Window(
+            op_id=weak_window.op_id,
+            k=weak_window.k,
+            commit_lo=commit_lo,
+            commit_hi=commit_hi,
+            buffer_hi=buffer_hi,
+            buffer_lo=buffer_lo,
+            n_rounds=buffer_hi - buffer_lo + 1)
+        strong_window.boundary_in = dict(weak_window.boundary_in)
+        return strong_window
+
+    @staticmethod
+    def _strong_context_bounds(window: Window) -> tuple[int, int, int, int]:
+        """Return buffer_lo, commit_lo, commit_hi, buffer_hi for a strong re-decode."""
+        buffer_rounds = max(0, window.buffer_hi - window.commit_hi)
+        buffer_lo = max(1, window.commit_lo - buffer_rounds)
+        buffer_hi = window.commit_hi + buffer_rounds
+        return buffer_lo, window.commit_lo, window.commit_hi, buffer_hi
+
+    def _strong_window_model(self, op: Operation, window: Window):
+        """Ask the syndrome source for a strong re-decode model when one exists."""
+        if self.syndrome_source is None:
+            return None
+        return self.syndrome_source.strong_window_model_for_operation(
+            op, window, self._round_count_for_window(op.id, window),
+            belief_matching=self._wants_belief_matching())
+
     def on_decode_done(self, job: DecodeJob, res: DecodeResult) -> None:
         """Commit a finished operation-window decode."""
         key = (job.op_id, job.window_id)
@@ -601,7 +674,60 @@ class WindowManager:
                         f"({self.decoder_manager.pool_tag(job.pool)}units free now "
                         f"{self.decoder_manager.pool_free[job.pool]})")
         if res is not None and res.logical_value is not None:
-            self.op_results[op.id] = self.op_results.get(op.id, 0) ^ int(res.logical_value)
+            self._replace_window_logical_value(key, op.id, int(res.logical_value))
+        if job.awaiting_strong_result:
+            self._mark_window_waiting_for_strong(key, op.id)
+        self._release_strong_context_reads(key)
+
+    def _replace_window_logical_value(self, key: tuple, op_id: int, value: int) -> None:
+        """Replace one window's logical contribution in the operation result."""
+        previous = self._window_logical_values.get(key)
+        if previous is not None:
+            self.op_results[op_id] = self.op_results.get(op_id, 0) ^ previous
+        self._window_logical_values[key] = value
+        self.op_results[op_id] = self.op_results.get(op_id, 0) ^ value
+
+    def _mark_window_waiting_for_strong(self, key: tuple, op_id: int) -> None:
+        """Delay operation-level output until this strong result arrives."""
+        if key in self._pending_strong_windows:
+            return
+        self._pending_strong_windows.add(key)
+        self._pending_strong_per_op[op_id] = self._pending_strong_per_op.get(op_id, 0) + 1
+
+    def on_strong_decode_done(self, key: tuple, result: DecodeResult) -> None:
+        """Finalize a weak-committed window with the strong decoder's logical result."""
+        window = self.windows[key]
+        op = self.ops[window.op_id]
+        if result is not None and result.logical_value is not None:
+            self._replace_window_logical_value(key, op.id, int(result.logical_value))
+        self._resolve_strong_wait(key, op.id)
+        self._release_stream_segments_at_commit(
+            op.id,
+            self._committed_stream_round_counts.get(op.id, 0))
+        self._finish_operation_if_ready(op)
+        self._finish_workload_if_ready()
+
+    def _resolve_strong_wait(self, key: tuple, op_id: int) -> None:
+        """Clear one pending strong finalization."""
+        if key not in self._pending_strong_windows:
+            return
+        self._pending_strong_windows.remove(key)
+        remaining = self._pending_strong_per_op.get(op_id, 0) - 1
+        if remaining > 0:
+            self._pending_strong_per_op[op_id] = remaining
+        else:
+            self._pending_strong_per_op.pop(op_id, None)
+
+    def _release_strong_context_reads(self, key: tuple) -> None:
+        """Free rounds retained only for a possible strong re-decode."""
+        for round_key in self._strong_read_sets.pop(key, ()):
+            self._round_refs[round_key] = self._round_refs.get(round_key, 0) - 1
+            if self._round_refs[round_key] <= 0:
+                round_op, round_no = round_key
+                fragments = self.payload_store.get(round_op, {}).pop(round_no, None)
+                if fragments is not None:
+                    self.payloads_held -= len(fragments)
+                self._round_refs.pop(round_key, None)
 
     def _update_committed_stream_round_count(self, stream_id) -> None:
         """Update how many initial rounds of a live stream are committed."""
@@ -640,12 +766,23 @@ class WindowManager:
             segment_end = self._stream_segment_end(operation)
             if segment_end is None or segment_end > committed_round_count:
                 continue
+            if self._stream_segment_waits_for_strong(stream_id, segment_end):
+                continue
 
             self._stream_segment_results_sent.add(operation.id)
             self.engine.schedule(
                 self.links.do.cost(),
                 lambda op=operation: self._deliver_stream_segment_to_orchestrator(op),
                 label=f"result->orch({operation.name})")
+
+    def _stream_segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
+        """Return true when a pending strong result can still change this segment."""
+        for key in self._pending_strong_windows:
+            if key[0] != stream_id:
+                continue
+            if self.windows[key].commit_lo <= segment_end:
+                return True
+        return False
 
     def _stream_segment_end(self, operation: Operation) -> Optional[int]:
         """Last global stream round covered by one scheduled segment."""
@@ -684,7 +821,12 @@ class WindowManager:
 
     def _finish_operation_if_ready(self, op: Operation) -> None:
         """Deliver an operation result once all of its windows committed."""
+        if op.id in self._finished_ops:
+            return
+        if self._pending_strong_per_op.get(op.id, 0) > 0:
+            return
         if self._committed_per_op[op.id] == self.window_count[op.id] and self._stream_sealed(op.id):
+            self._finished_ops.add(op.id)
             self.engine.schedule(self.links.do.cost(),
                                  lambda: self._deliver_to_orchestrator(op),
                                  label=f"result->orch({op.name})")
@@ -694,8 +836,13 @@ class WindowManager:
 
     def _finish_workload_if_ready(self) -> None:
         """Run the workload completion callback once the full window set drains."""
-        if (len(self.committed_windows) == self.total_windows and not self._unsealed_streams
+        if self._workload_complete_sent:
+            return
+        if (len(self.committed_windows) == self.total_windows
+                and not self._pending_strong_windows
+                and not self._unsealed_streams
                 and self.on_workload_complete is not None):
+            self._workload_complete_sent = True
             self.on_workload_complete()
 
     def _store_boundary(self, w: Window, src_op_id: int, defects: Optional[dict]) -> None:

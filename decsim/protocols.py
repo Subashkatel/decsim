@@ -42,6 +42,9 @@ class SyndromeSource(Protocol):
                                     *, belief_matching: bool = False) -> list: ...
     def window_model_for_stream(self, stream_id: Any, window: Window,
                                 *, is_last: bool): ...
+    def strong_window_model_for_operation(self, op: Operation, window: Window,
+                                          round_count: int,
+                                          *, belief_matching: bool = False): ...
 
 @runtime_checkable
 class CodeModel(Protocol):

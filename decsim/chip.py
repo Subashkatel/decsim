@@ -240,6 +240,7 @@ class Chip:
         self._free_qubits(operation)
         self._release_successors(operation)
         self._log_qpu_finished_if_needed()
+        self._close_feedback_boundary_if_needed(operation)
         self._start_idle_stream_if_needed(operation)
         self._seal_finished_streams_if_needed()
 
@@ -261,6 +262,22 @@ class Chip:
             self.engine.log("Chip",
                             f"QPU finished. All {len(self.ops)} operations are physically "
                             f"complete; decoder may still be draining.")
+
+    def _close_feedback_boundary_if_needed(self, operation: Operation) -> None:
+        """Close a live stream boundary when the operation's final measurement does it."""
+        if operation.feedback_boundary_mode != "measurement_closed":
+            return
+        if not self._has_waiting_blocked_successor(operation.id):
+            return
+        if operation.stream_id is None:
+            return
+
+        close_stream_boundary = getattr(self.cluster, "close_stream_boundary", None)
+        if close_stream_boundary is None:
+            return
+
+        stream_round_count = operation.stream_offset + self.cluster.rounds_for(operation)
+        close_stream_boundary(operation.stream_id, stream_round_count)
 
     def _start_idle_stream_if_needed(self, operation: Operation) -> None:
         """Start memory rounds while a feedback-blocked successor waits."""

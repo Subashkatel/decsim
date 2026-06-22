@@ -191,6 +191,9 @@ class DecoderCluster:
     def has_dynamic_stream(self, stream_id) -> bool:
         return self.window_manager.has_dynamic_stream(stream_id)
 
+    def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
+        self.window_manager.close_stream_boundary(stream_id, stream_round_count)
+
     def grow_stream(self, stream_id) -> None:
         self.window_manager.grow_stream(stream_id)
 

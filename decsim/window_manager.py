@@ -62,6 +62,7 @@ class WindowManager:
         self._blocking_ops: set[int] = set()
         self.op_results: dict[int, int] = {}
         self._window_logical_values: dict[tuple, int] = {}
+        self._committed_boundary_defects: dict[tuple, Optional[dict]] = {}
         self._pending_strong_windows: set[tuple] = set()
         self._pending_strong_per_op: dict[int, int] = {}
         self._finished_ops: set[int] = set()
@@ -71,6 +72,7 @@ class WindowManager:
         self._windows_built = False
         self._dynamic_streams: dict = {}
         self._unsealed_streams: set = set()
+        self._closed_stream_boundaries: dict = {}
         self._committed_stream_round_counts: dict = {}
         self._stream_segment_results_sent: set[int] = set()
         self._plan_spatial = None
@@ -111,10 +113,52 @@ class WindowManager:
             "sealed_round_count": None,
         }
         self._unsealed_streams.add(stream_id)
+        self._closed_stream_boundaries.setdefault(stream_id, set())
 
     def has_dynamic_stream(self, stream_id) -> bool:
         """Return True when stream_id is registered for runtime window growth."""
         return stream_id in self._dynamic_streams
+
+    def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
+        """Mark a live stream round as a measurement-closed feedback boundary."""
+        if stream_id not in self._dynamic_streams:
+            return
+        if stream_round_count < 1:
+            raise ValueError(
+                f"stream_round_count must be >= 1 (got {stream_round_count})")
+
+        self._reject_unsupported_internal_real_stream_boundary(
+            stream_id, stream_round_count)
+        self._closed_stream_boundaries.setdefault(stream_id, set()).add(stream_round_count)
+        self.grow_stream(stream_id, rounds_to_plan=stream_round_count)
+        self._refresh_unqueued_stream_windows(stream_id)
+        self._check_windows_for_operation(stream_id)
+
+    def _reject_unsupported_internal_real_stream_boundary(
+            self, stream_id, stream_round_count: int) -> None:
+        """Reject internal closed boundaries in finite real-syndrome streams."""
+        stream_state = self._dynamic_streams[stream_id]
+        source_round_limit = stream_state["source_round_limit"]
+        if source_round_limit is None:
+            return
+        if stream_round_count >= source_round_limit:
+            return
+        raise RuntimeError(
+            "measurement_closed live-stream boundaries inside a finite real-syndrome "
+            "stream need a source circuit with that destructive boundary. A continuous "
+            f"stream model was registered for {source_round_limit} rounds, but the "
+            f"feedback boundary closes at round {stream_round_count}. Use timing-only "
+            "payloads for this timing study, split the workload into finite operation "
+            "circuits, or provide a boundary-aware syndrome source.")
+
+    def _refresh_unqueued_stream_windows(self, stream_id) -> None:
+        """Refresh retained reads after a stream boundary closes future context."""
+        for window_index in self.op_windows.get(stream_id, []):
+            key = (stream_id, window_index)
+            window = self.windows[key]
+            if window.queued or window.committed:
+                continue
+            self._replace_window_read_refs(key, window)
 
     def committed_stream_round_count(self, stream_id) -> int:
         """Number of initial stream rounds whose commit regions have decoded."""
@@ -210,9 +254,14 @@ class WindowManager:
                         buffer_lo=buffer_lo)
         if window_index > 0:
             previous_key = (stream_id, window_index - 1)
-            window.deps.append(previous_key)
-            window.deps_remaining = 1
-            self.windows[previous_key].dependents.append((stream_id, window_index))
+            if previous_key in self.committed_windows:
+                self._store_boundary(
+                    window, stream_id,
+                    self._committed_boundary_defects.get(previous_key))
+            else:
+                window.deps.append(previous_key)
+                window.deps_remaining = 1
+                self.windows[previous_key].dependents.append((stream_id, window_index))
         self.windows[(stream_id, window_index)] = window
         self.op_windows[stream_id].append(window_index)
         self.window_count[stream_id] += 1
@@ -357,7 +406,7 @@ class WindowManager:
     def _read_keys_for_bounds(self, op_id, start_round: int, buffer_hi: int,
                               window: Optional[Window] = None) -> list:
         """Return retained payload round keys for a possibly cross-operation range."""
-        operation_rounds = self._round_count_for_window(op_id, window)
+        operation_rounds = self._effective_round_count_for_window(op_id, window)
         reads = [
             (op_id, round_index)
             for round_index in range(start_round, min(buffer_hi, operation_rounds) + 1)
@@ -381,6 +430,47 @@ class WindowManager:
         strong_reads = self._read_keys_for_bounds(
             window.op_id, buffer_lo, buffer_hi, window)
         return [round_key for round_key in strong_reads if round_key not in weak_reads]
+
+    def _replace_window_read_refs(self, key: tuple, window: Window) -> None:
+        """Replace retained-round references for an unqueued window."""
+        old_reads = set(self._read_sets.get(key, ()))
+        old_strong_reads = set(self._strong_read_sets.get(key, ()))
+        old_round_keys = old_reads | old_strong_reads
+
+        new_reads = self._read_keys_for_bounds(
+            window.op_id, window.start_round, window.buffer_hi, window)
+        if self.decoder_manager.switching is None:
+            new_strong_reads = []
+        else:
+            buffer_lo, _commit_lo, _commit_hi, buffer_hi = \
+                self._strong_context_bounds(window)
+            strong_candidates = self._read_keys_for_bounds(
+                window.op_id, buffer_lo, buffer_hi, window)
+            new_strong_reads = [
+                round_key
+                for round_key in strong_candidates
+                if round_key not in set(new_reads)
+            ]
+        new_round_keys = set(new_reads) | set(new_strong_reads)
+
+        for round_key in old_round_keys - new_round_keys:
+            self._drop_round_ref(round_key)
+        for round_key in new_round_keys - old_round_keys:
+            self._round_refs[round_key] = self._round_refs.get(round_key, 0) + 1
+
+        self._read_sets[key] = list(new_reads)
+        self._strong_read_sets[key] = list(new_strong_reads)
+
+    def _drop_round_ref(self, round_key: tuple) -> None:
+        """Drop one retained-round reference and free the payload if it was the last."""
+        self._round_refs[round_key] = self._round_refs.get(round_key, 0) - 1
+        if self._round_refs[round_key] > 0:
+            return
+        round_op, round_no = round_key
+        fragments = self.payload_store.get(round_op, {}).pop(round_no, None)
+        if fragments is not None:
+            self.payloads_held -= len(fragments)
+        self._round_refs.pop(round_key, None)
 
     def build_windows(self) -> None:
         """Compatibility entry: build and install a plan if none has been loaded."""
@@ -484,7 +574,7 @@ class WindowManager:
     def _assemble_payloads(self, w: Window) -> list:
         """Collect this window's payloads, including successor overflow rounds."""
         op_store = self.payload_store.get(w.op_id, {})
-        operation_rounds = self._round_count_for_window(w.op_id, w)
+        operation_rounds = self._effective_round_count_for_window(w.op_id, w)
         end_round = min(w.buffer_hi, operation_rounds)
         payloads = []
         for round_index in range(w.start_round, end_round + 1):
@@ -510,12 +600,56 @@ class WindowManager:
     def _window_data_complete(self, w: Window) -> bool:
         op = self.ops[w.op_id]
         succ_rounds = self._successor_rounds_available(w)
+        round_count = self._effective_round_count_for_window(w.op_id, w)
+        has_successor = op.has_successor and not self._window_has_closed_boundary(w)
         return self.scheme.data_complete(
             w, rounds_arrived=self.rounds_arrived[w.op_id],
             successor_rounds=succ_rounds, memory_rounds=self.memory_rounds[w.op_id],
-            round_count=self._round_count_for_window(w.op_id, w),
-            has_successor=op.has_successor,
+            round_count=round_count,
+            has_successor=has_successor,
             op=op, layout=self.layout)
+
+    def _effective_round_count_for_window(self, op_id, window: Optional[Window]) -> int:
+        """Round count seen by a window after applying measurement-closed boundaries."""
+        round_count = self._round_count_for_window(op_id, window)
+        if window is None:
+            return round_count
+
+        closed_boundary = self._closed_boundary_round_for_window(window)
+        if closed_boundary is None:
+            return round_count
+        return min(round_count, closed_boundary)
+
+    def _window_has_closed_boundary(self, window: Window) -> bool:
+        """Return True when a measurement closes this window's future buffer."""
+        return self._closed_boundary_round_for_window(window) is not None
+
+    def _closed_boundary_round_for_window(self, window: Window) -> Optional[int]:
+        """Boundary round that closes the window's trailing context, if any."""
+        stream_boundary = self._closed_stream_boundary_for_window(window)
+        if stream_boundary is not None:
+            return stream_boundary
+
+        op = self.ops[window.op_id]
+        if op.feedback_boundary_mode != "measurement_closed":
+            return None
+        if op.id not in self._blocking_ops:
+            return None
+
+        round_count = self._round_count_for_window(window.op_id, window)
+        if window.commit_hi <= round_count < window.buffer_hi:
+            return round_count
+        return None
+
+    def _closed_stream_boundary_for_window(self, window: Window) -> Optional[int]:
+        """Return a closed live-stream boundary covered by this window."""
+        boundaries = self._closed_stream_boundaries.get(window.op_id, ())
+        covered = [
+            boundary
+            for boundary in boundaries
+            if window.commit_hi <= boundary < window.buffer_hi
+        ]
+        return min(covered) if covered else None
 
     def _successor_rounds_available(self, window: Window) -> int:
         """Successor rounds available for a buffer that crosses an operation seam."""
@@ -721,13 +855,7 @@ class WindowManager:
     def _release_strong_context_reads(self, key: tuple) -> None:
         """Free rounds retained only for a possible strong re-decode."""
         for round_key in self._strong_read_sets.pop(key, ()):
-            self._round_refs[round_key] = self._round_refs.get(round_key, 0) - 1
-            if self._round_refs[round_key] <= 0:
-                round_op, round_no = round_key
-                fragments = self.payload_store.get(round_op, {}).pop(round_no, None)
-                if fragments is not None:
-                    self.payloads_held -= len(fragments)
-                self._round_refs.pop(round_key, None)
+            self._drop_round_ref(round_key)
 
     def _update_committed_stream_round_count(self, stream_id) -> None:
         """Update how many initial rounds of a live stream are committed."""
@@ -798,6 +926,7 @@ class WindowManager:
     def _send_boundary_defects(self, window: Window, op: Operation,
                                defects: Optional[dict]) -> None:
         """Send this window's artificial defects to dependent windows."""
+        self._committed_boundary_defects[(window.op_id, window.k)] = defects
         for dep_key in window.dependents:
             dst = self.ops[dep_key[0]]
             self.engine.log("DecoderCluster",
@@ -812,12 +941,7 @@ class WindowManager:
     def _release_window_reads(self, key: tuple) -> None:
         """Free payload rounds that no unfinished window still reads."""
         for round_key in self._read_sets.get(key, ()):
-            self._round_refs[round_key] = self._round_refs.get(round_key, 0) - 1
-            if self._round_refs[round_key] <= 0:
-                round_op, round_no = round_key
-                frags = self.payload_store.get(round_op, {}).pop(round_no, None)
-                if frags is not None:
-                    self.payloads_held -= len(frags)
+            self._drop_round_ref(round_key)
 
     def _finish_operation_if_ready(self, op: Operation) -> None:
         """Deliver an operation result once all of its windows committed."""

@@ -33,6 +33,7 @@ DECODER_FITS = {
 SCHEME_NAMES = ("sliding", "naive", "parallel")
 SWITCH_MODES = ("none", "serial", "parallel")
 IDLE_ROUND_MODES = ("ignore", "separate_decode_jobs", "extend_stream")
+FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
 
 
 def _scheme_registry() -> dict:
@@ -77,6 +78,7 @@ class SimConfig:
 
     scheme_name: str = "sliding"          # Window scheme selected by config.
     idle_round_mode: str = "ignore"       # ignore, separate_decode_jobs, or extend_stream.
+    feedback_boundary_mode: str = "trailing_buffer"  # How final feedback windows close.
 
     def __post_init__(self) -> None:
         """Validate config values after dataclass initialization."""
@@ -115,6 +117,10 @@ class SimConfig:
             raise ValueError(
                 f"idle_round_mode must be one of {IDLE_ROUND_MODES} "
                 f"(got {self.idle_round_mode!r})")
+        if self.feedback_boundary_mode not in FEEDBACK_BOUNDARY_MODES:
+            raise ValueError(
+                f"feedback_boundary_mode must be one of {FEEDBACK_BOUNDARY_MODES} "
+                f"(got {self.feedback_boundary_mode!r})")
 
     def make_links(self) -> "LinkModel":
         """Build the communication fabric from the link latency knobs."""

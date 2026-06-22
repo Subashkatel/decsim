@@ -7,7 +7,7 @@ from typing import Callable, Optional, TYPE_CHECKING
 from .chip import Chip
 from .cluster import DecoderCluster
 from .codes import SurfaceCodeModel
-from .config import IDLE_ROUND_MODES, SimConfig, fmt, us
+from .config import FEEDBACK_BOUNDARY_MODES, IDLE_ROUND_MODES, SimConfig, fmt, us
 from .devices import TimingOnlyDevice
 from .engine import Engine
 from .factories import InfiniteFactory
@@ -187,6 +187,27 @@ def _resolve_idle_round_mode(sim_config: SimConfig,
     return idle_round_mode
 
 
+def _resolve_feedback_boundary_mode(sim_config: SimConfig,
+                                    feedback_boundary_mode: Optional[str]) -> str:
+    """Return the default feedback-boundary mode for operations without an override."""
+    if feedback_boundary_mode is None:
+        return sim_config.feedback_boundary_mode
+    if feedback_boundary_mode not in FEEDBACK_BOUNDARY_MODES:
+        raise ValueError(
+            f"feedback_boundary_mode must be one of {FEEDBACK_BOUNDARY_MODES} "
+            f"(got {feedback_boundary_mode!r})")
+    return feedback_boundary_mode
+
+
+def _apply_feedback_boundary_default(ops, decode_ops, dynamic_streams,
+                                     feedback_boundary_mode: str) -> None:
+    """Fill the boundary mode on operations that did not choose one explicitly."""
+    operations = list(ops) + list(decode_ops or []) + list(dynamic_streams or [])
+    for operation in operations:
+        if operation.feedback_boundary_mode is None:
+            operation.feedback_boundary_mode = feedback_boundary_mode
+
+
 def _decode_plan_operations(ops, decode_ops, dynamic_streams):
     """Return operations that should receive decode windows before runtime."""
     if decode_ops is not None:
@@ -259,6 +280,7 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
                   layout: Optional["LayoutModel"] = None,
                   frontend: Optional["InputFrontend"] = None,
                   config: Optional[SimConfig] = None,
+                  feedback_boundary_mode: Optional[str] = None,
                   decode_ops: Optional[list] = None,
                   dynamic_streams: Optional[list] = None,
                   verbose: bool = True, title: str = "") -> dict:
@@ -270,8 +292,12 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
         _apply_config_defaults(
             config, num_units, rounds_per_op, round_us, scheme, switching)
     idle_round_mode = _resolve_idle_round_mode(sim_config, idle_round_mode)
+    feedback_boundary_mode = _resolve_feedback_boundary_mode(
+        sim_config, feedback_boundary_mode)
 
     ops = _operation_list(ops, frontend)
+    _apply_feedback_boundary_default(
+        ops, decode_ops, dynamic_streams, feedback_boundary_mode)
     code = _code_model(code, layout, d)
 
     device = device if device is not None else TimingOnlyDevice()

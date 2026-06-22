@@ -133,6 +133,7 @@ class Operation:
     stream_id: Optional[Any] = None
     stream_offset: Optional[int] = None
     blocked_by: Optional[int] = None
+    feedback_boundary_mode: Optional[str] = None
 
     @property
     def needs_magic_state(self) -> bool:

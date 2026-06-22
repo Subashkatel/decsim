@@ -25,7 +25,8 @@ def test_fmt_output():
 # Covers backward compat (default unchanged), resolution, validation, flow-through.
 #==================================================================
 import pytest
-from decsim.config import SimConfig, DECODER_FITS, SCHEME_NAMES
+from decsim.config import (DECODER_FITS, FEEDBACK_BOUNDARY_MODES, SCHEME_NAMES,
+                           SimConfig)
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import (LatencyModelDecoder, SwitchingDecoder, RelayBPDecoder,
                              PresetLatencyDecoder)
@@ -49,6 +50,11 @@ def test_default_decoder_unchanged():
 def test_default_scheme_is_sliding():
     assert SimConfig().scheme_name == "sliding"
     assert isinstance(SimConfig().make_scheme(), SlidingWindowScheme)
+
+
+def test_default_feedback_boundary_is_trailing_buffer():
+    assert SimConfig().feedback_boundary_mode == "trailing_buffer"
+    assert "measurement_closed" in FEEDBACK_BOUNDARY_MODES
 
 
 @pytest.mark.parametrize("name,fit", list(DECODER_FITS.items()))
@@ -135,6 +141,7 @@ def test_make_switching_bulk_strong():
     {"switch_handoff_us": -1}, {"relaybp_iterations": 0}, {"relaybp_t_iter_ns": -1},
     {"scheme_name": "bogus"}, {"switch_mode": "bogus"}, {"t_ws_us": -1},
     {"switch_bulk_strong": True}, {"switch_mode": "parallel", "switch_bulk_strong": True},
+    {"feedback_boundary_mode": "bogus"},
 ])
 def test_validation_rejects_bad_values(kw):
     with pytest.raises(ValueError):

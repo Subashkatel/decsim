@@ -101,8 +101,11 @@ class ModularController:
                           deliver: Callable[["Decision"], None]) -> None:
         """Send a correction orchestrator->controller->chip, delivering after the hop delays."""
         def at_controller():
+            instruction = "release instruction" if decision.releases_operation \
+                else "result return instruction"
             self.engine.log("Controller",
-                            f"received instruction for op#{decision.gadget_id} from "
+                            f"received {instruction} for "
+                            f"op#{decision.target_operation_id} from "
                             f"orchestrator (t_oc); forwarding to chip (t_cq)")
             self.engine.schedule(self.links.cq.cost(), lambda: deliver(decision),
                                  label="controller->chip")

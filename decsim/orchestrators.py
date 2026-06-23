@@ -23,7 +23,12 @@ class ExecutionOrchestrator:
         self.outcomes: dict[int, int] = {}
         self.blocked_by_index: dict[int, list[int]] = {}
         self.history: deque = deque(maxlen=history_size)
-        self.stats: dict[str, int] = {"frame_updates": 0, "outcomes": 0, "decisions": 0}
+        self.stats: dict[str, int] = {
+            "frame_updates": 0,
+            "outcomes": 0,
+            "decisions": 0,
+            "result_returns": 0,
+        }
         self.retain_all = retain_all
         self.archive: Optional[dict] = {} if retain_all else None
         self.controller: Optional["Controller"] = None
@@ -79,8 +84,13 @@ class ExecutionOrchestrator:
         self.history.append(rec)
         if self.archive is not None:
             self.archive[op.id] = rec
-        self.stats["frame_updates" if kind == "frame_update"
-                   else "decisions" if kind == "decision" else "outcomes"] += 1
+        stat_key = {
+            "frame_update": "frame_updates",
+            "decision": "decisions",
+            "result_return": "result_returns",
+            "outcome": "outcomes",
+        }[kind]
+        self.stats[stat_key] += 1
         self.outcomes.pop(op.id, None)
         self.pauli_frame.pop(op.id, None)
  
@@ -89,8 +99,11 @@ class ExecutionOrchestrator:
         for decision in self.on_result(op, result):
             if self.controller is None or self.decision_sink is None:
                 continue
+            instruction = "conditional release" if decision.releases_operation \
+                else "result return"
             self.engine.log("Orchestrator",
-                            f"DISPATCH conditional for op#{decision.gadget_id}: "
+                            f"DISPATCH {instruction} for "
+                            f"op#{decision.target_operation_id}: "
                             f"basis '{decision.basis}' -> controller -> chip")
             self.controller.relay_instruction(decision, self.decision_sink)
  
@@ -116,6 +129,18 @@ class ExecutionOrchestrator:
             self.engine.log("Orchestrator",
                             f"decides basis '{basis}' for {targets} and releases the chip")
             self._record_and_gc(op, "decision", outcome, basis)
-            return [Decision(gadget_id=g, basis=basis) for g in blocked_ops]
+            return [Decision(target_operation_id=g, basis=basis)
+                    for g in blocked_ops]
+        if op.requires_result_return_to_chip:
+            basis = "X" if outcome else "Z"
+            self.engine.log("Orchestrator",
+                            f"result for {op.name} must return to the chip; "
+                            f"sending basis '{basis}'")
+            self._record_and_gc(op, "result_return", outcome, basis)
+            return [Decision(
+                target_operation_id=op.id,
+                basis=basis,
+                releases_operation=False,
+            )]
         self._record_and_gc(op, "outcome", outcome)
         return []

@@ -52,6 +52,7 @@ class Chip:
         self.decode_released: set[int] = set()
         self.body_done_time: dict[int, int] = {}
         self.decode_release_time: dict[int, int] = {}
+        self.result_return_time_by_operation: dict[int, int] = {}
         self.idle_rounds_by_patch: dict = {}
         self.idle_cap_hits: list[dict] = []
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
@@ -441,12 +442,27 @@ class Chip:
             seal_stream(stream_id, total_rounds)
 
     def on_decision(self, decision: Decision) -> None:
-        """A correction came back: release the blocked gate. It begins immediately if its magic
-        state has already arrived (fetched in parallel during the reaction); otherwise it begins
-        when the state lands. _maybe_begin enforces the AND of the two conditions."""
-        self.decode_released.add(decision.gadget_id)
-        self.decode_release_time[decision.gadget_id] = self.engine.now
-        target = self.ops[decision.gadget_id]
+        """Receive feedback from the controller."""
+        if decision.releases_operation:
+            self._release_blocked_operation(decision)
+            return
+        self._record_result_return(decision)
+
+    def _release_blocked_operation(self, decision: Decision) -> None:
+        """A correction came back and can release a blocked operation."""
+        operation_id = decision.target_operation_id
+        self.decode_released.add(operation_id)
+        self.decode_release_time[operation_id] = self.engine.now
+        target = self.ops[operation_id]
         self.engine.log("Chip",
                         f"received basis '{decision.basis}' for {target.name}; trying to start")
         self._maybe_begin(target)
+
+    def _record_result_return(self, decision: Decision) -> None:
+        """Record a decoded result that returns to the chip without starting another op."""
+        operation_id = decision.target_operation_id
+        self.result_return_time_by_operation[operation_id] = self.engine.now
+        target = self.ops[operation_id]
+        self.engine.log("Chip",
+                        f"received result return for {target.name}: "
+                        f"basis '{decision.basis}'")

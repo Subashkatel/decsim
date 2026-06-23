@@ -132,3 +132,92 @@ def test_reaction_time_marks_idle_cap_failure():
     assert reaction["success"] is False
     assert reaction["failed"] is True
     assert reaction["failure_reason"] == "idle-round cap reached"
+
+
+def test_final_non_clifford_decode_does_not_return_to_chip_by_default():
+    """A final T result can stay in the orchestrator unless the caller asks otherwise."""
+    ops = CircuitFrontend([
+        Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
+    ]).build()
+    result = build_and_run(
+        ops,
+        num_units=1,
+        d=3,
+        rounds_per_op=5,
+        round_us=1.0,
+        decoder=PresetLatencyDecoder(2.0),
+        verbose=False,
+    )
+
+    assert result["cluster"].windows[(0, 0)].t_done is not None
+    assert result["chip"].result_return_time_by_operation == {}
+    assert not any("DISPATCH result return" in line
+                   for line in result["engine"].log_lines)
+
+
+def test_explicit_result_return_to_chip_uses_feedback_links():
+    """A marked final result returns through decoder->orchestrator->controller->chip."""
+    ops = CircuitFrontend([
+        Operation(
+            0,
+            "T0",
+            (0,),
+            clifford=False,
+            consumes_magic_state=False,
+            requires_result_return_to_chip=True,
+        ),
+    ]).build()
+    result = build_and_run(
+        ops,
+        num_units=1,
+        d=3,
+        rounds_per_op=5,
+        round_us=1.0,
+        decoder=PresetLatencyDecoder(2.0),
+        verbose=False,
+    )
+
+    controller = result["controller"]
+    window_done = max(
+        window.t_done
+        for key, window in result["cluster"].windows.items()
+        if key[0] == 0
+    )
+    expected_return = (
+        window_done
+        + controller.links.do.cost()
+        + controller.links.oc.cost()
+        + controller.links.cq.cost()
+    )
+
+    assert result["chip"].decode_release_time == {}
+    assert result["chip"].result_return_time_by_operation[0] == expected_return
+    assert result["fully_done"] == expected_return
+    assert any("DISPATCH result return for op#0" in line
+               for line in result["engine"].log_lines)
+    assert any("received result return for T0" in line
+               for line in result["engine"].log_lines)
+
+
+def test_naive_batch_decode_label_shows_absorbed_idle_rounds():
+    """The decode label reports the enlarged feedback-to-feedback batch."""
+    ops = CircuitFrontend([
+        Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
+        Operation(1, "T1", (0,), clifford=False, blocked_by=0,
+                  consumes_magic_state=False),
+    ]).build()
+    result = build_and_run(
+        ops,
+        num_units=1,
+        d=3,
+        rounds_per_op=27,
+        round_us=1.0,
+        scheme=NaiveOnlineScheme(),
+        decoder=_FixedLatency(20.0),
+        max_idle_rounds=1000,
+        verbose=False,
+    )
+
+    assert result["cluster"].windows[(1, 0)].n_rounds > 27
+    assert any("T1 [whole op," in line and "idle + 27 body" in line
+               for line in result["engine"].log_lines)

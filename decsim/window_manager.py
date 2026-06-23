@@ -672,7 +672,12 @@ class WindowManager:
     def _job_desc(self, w: Window, op: Operation) -> str:
         if self._windowed:
             return f"{op.name} W{w.k} [commit {w.commit_lo}-{w.commit_hi}]"
-        return f"{op.name} [whole op, rounds {w.commit_lo}-{w.commit_hi}]"
+        body_rounds = self._round_count_for_window(op.id, w)
+        idle_rounds = max(0, w.n_rounds - body_rounds)
+        if idle_rounds:
+            return (f"{op.name} [whole op, {w.n_rounds} rounds: "
+                    f"{idle_rounds} idle + {body_rounds} body]")
+        return f"{op.name} [whole op, {w.n_rounds} rounds]"
 
     def _check_window(self, key: tuple) -> None:
         """If a window has its data and dependencies, submit its decode job."""

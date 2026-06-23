@@ -113,8 +113,9 @@ class DecodeResult:
 class Decision:
     """Feedback decision sent from the orchestrator back to the chip."""
 
-    gadget_id: int
+    target_operation_id: int
     basis: str
+    releases_operation: bool = True
 
 
 @dataclass
@@ -134,6 +135,7 @@ class Operation:
     stream_offset: Optional[int] = None
     blocked_by: Optional[int] = None
     feedback_boundary_mode: Optional[str] = None
+    requires_result_return_to_chip: bool = False
 
     @property
     def needs_magic_state(self) -> bool:

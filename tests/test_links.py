@@ -6,10 +6,10 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from qecsim.config import us
-from qecsim.links import Link, LinkModel
-from qecsim.message import Operation
-from qecsim.wiring import build_and_run
+from decsim.config import us
+from decsim.links import Link, LinkModel
+from decsim.message import Operation
+from decsim.wiring import build_and_run
 
 
 def test_default_link_model_matches_table_2():

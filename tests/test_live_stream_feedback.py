@@ -1,0 +1,238 @@
+"""Live stream feedback tests.
+
+These tests cover the SWIPER-style timing case where feedback waits stretch the
+same syndrome stream that produced the blocking operation.
+"""
+
+import pytest
+
+from decsim.codes import SurfaceCodeModel
+from decsim.decoders import PresetLatencyDecoder
+from decsim.devices import TimingOnlyDevice
+from decsim.message import Operation
+from decsim.planner import PerOpRounds
+from decsim.schemes import SlidingWindowScheme
+from decsim.wiring import build_and_run
+
+
+def _live_stream_pair():
+    stream = Operation(0, "live-stream", (0,), clifford=True, patches=(0,))
+    first = Operation(
+        1,
+        "A:T(q0)",
+        (0,),
+        clifford=False,
+        consumes_magic_state=False,
+        patches=(0,),
+        stream_id=stream.id,
+        has_successor=True,
+    )
+    second = Operation(
+        2,
+        "B:T(q0)",
+        (0,),
+        clifford=False,
+        consumes_magic_state=False,
+        patches=(0,),
+        predecessors=(first.id,),
+        stream_id=stream.id,
+        blocked_by=first.id,
+    )
+    return stream, [first, second]
+
+
+def _live_stream_pair_with_circuit(circuit):
+    stream, operations = _live_stream_pair()
+    stream.circuit = circuit
+    for operation in operations:
+        operation.circuit = circuit
+    return stream, operations
+
+
+class _RecordingDecoder:
+    """Wrap a real decoder and record the syndrome sizes it decoded."""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.rows_seen: list[tuple[int, int]] = []
+
+    def latency(self, job):
+        return self.inner.latency(job)
+
+    def decode(self, job):
+        payload_bits = sum(
+            len(payload.bits)
+            for payload in job.payloads
+            if payload.bits is not None
+        )
+        model_rows = job.dem.check.shape[0] if job.dem is not None else 0
+        self.rows_seen.append((payload_bits, model_rows))
+        return self.inner.decode(job)
+
+
+def test_feedback_idle_rounds_extend_the_live_stream():
+    """Feedback idle rounds become real stream rounds in extend_stream mode."""
+    stream, operations = _live_stream_pair()
+    code = SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1)
+    rounds = {operations[0].id: 2, operations[1].id: 2}
+
+    result = build_and_run(
+        operations,
+        dynamic_streams=[stream],
+        idle_round_mode="extend_stream",
+        device=TimingOnlyDevice(),
+        code=code,
+        rounds_policy=PerOpRounds(rounds),
+        scheme=SlidingWindowScheme(),
+        decoder=PresetLatencyDecoder(2.0),
+        num_units=1,
+        round_us=1.0,
+        verbose=False,
+    )
+
+    cluster = result["cluster"]
+    chip = result["chip"]
+    first, second = operations
+
+    assert chip.done_bodies == {first.id, second.id}
+    assert first.stream_offset == 0
+    assert second.stream_offset is not None
+    assert second.stream_offset > rounds[first.id]
+    assert cluster.rounds_arrived[stream.id] == second.stream_offset + rounds[second.id]
+    assert cluster.committed_stream_round_count(stream.id) == cluster.rounds_arrived[stream.id]
+    assert cluster.window_count[stream.id] > 1
+    assert len(cluster.committed_windows) == cluster.total_windows
+
+
+def test_committed_stream_round_count_releases_blocked_operation_before_stream_result():
+    """The blocked operation is released once its stream segment has committed."""
+    stream, operations = _live_stream_pair()
+    code = SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1)
+    rounds = {operations[0].id: 2, operations[1].id: 2}
+
+    result = build_and_run(
+        operations,
+        dynamic_streams=[stream],
+        idle_round_mode="extend_stream",
+        device=TimingOnlyDevice(),
+        code=code,
+        rounds_policy=PerOpRounds(rounds),
+        scheme=SlidingWindowScheme(),
+        decoder=PresetLatencyDecoder(2.0),
+        num_units=1,
+        round_us=1.0,
+        verbose=False,
+    )
+
+    chip = result["chip"]
+    first, second = operations
+
+    assert second.id in chip.decode_release_time
+    assert chip.decode_release_time[second.id] >= chip.body_done_time[first.id]
+    assert chip.decode_release_time[second.id] < chip.body_done_time[second.id]
+
+
+def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
+    """Stim payloads also work when feedback idle rounds extend a live stream."""
+    pytest.importorskip("stim")
+    pytest.importorskip("pymatching")
+
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.mwpm_decoder import PyMatchingDecoder
+    from decsim.stimcircuits import NoiseModel
+
+    code = SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1)
+    timing_stream, timing_operations = _live_stream_pair()
+    operation_rounds = {
+        timing_operations[0].id: 2,
+        timing_operations[1].id: 2,
+    }
+    timing_result = build_and_run(
+        timing_operations,
+        dynamic_streams=[timing_stream],
+        idle_round_mode="extend_stream",
+        device=TimingOnlyDevice(),
+        code=code,
+        rounds_policy=PerOpRounds(operation_rounds),
+        scheme=SlidingWindowScheme(),
+        decoder=PresetLatencyDecoder(2.0),
+        num_units=1,
+        round_us=1.0,
+        verbose=False,
+    )
+    stream_round_count = timing_result["cluster"].rounds_arrived[timing_stream.id]
+
+    circuit = NoiseModel.circuit_level(0.003).circuit(
+        distance=code.distance,
+        rounds=stream_round_count,
+    )
+    stream, operations = _live_stream_pair_with_circuit(circuit)
+    rounds = {
+        stream.id: stream_round_count,
+        operations[0].id: operation_rounds[operations[0].id],
+        operations[1].id: operation_rounds[operations[1].id],
+    }
+    decoder = _RecordingDecoder(PyMatchingDecoder(PresetLatencyDecoder(2.0)))
+
+    result = build_and_run(
+        operations,
+        dynamic_streams=[stream],
+        idle_round_mode="extend_stream",
+        device=StimDevice(seed=13),
+        code=code,
+        rounds_policy=PerOpRounds(rounds),
+        scheme=SlidingWindowScheme(),
+        decoder=decoder,
+        num_units=1,
+        round_us=1.0,
+        verbose=False,
+    )
+
+    cluster = result["cluster"]
+    chip = result["chip"]
+    first, second = operations
+
+    assert chip.done_bodies == {first.id, second.id}
+    assert second.stream_offset is not None
+    assert second.stream_offset > rounds[first.id]
+    assert cluster.rounds_arrived[stream.id] == second.stream_offset + rounds[second.id]
+    assert cluster.rounds_arrived[stream.id] == stream_round_count
+    assert cluster.committed_stream_round_count(stream.id) == cluster.rounds_arrived[stream.id]
+    assert stream.id in cluster.op_results
+    assert decoder.rows_seen
+    assert all(payload_bits == model_rows for payload_bits, model_rows in decoder.rows_seen)
+    assert any(payload_bits > 0 for payload_bits, _model_rows in decoder.rows_seen)
+
+
+def test_real_syndrome_live_stream_rejects_inexact_circuit_length():
+    """Real-syndrome streams fail clearly when the Stim circuit is longer than the run."""
+    pytest.importorskip("stim")
+    pytest.importorskip("pymatching")
+
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.mwpm_decoder import PyMatchingDecoder
+    from decsim.stimcircuits import NoiseModel
+
+    code = SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1)
+    circuit = NoiseModel.circuit_level(0.003).circuit(distance=code.distance, rounds=20)
+    stream, operations = _live_stream_pair_with_circuit(circuit)
+    rounds = {
+        stream.id: 20,
+        operations[0].id: 2,
+        operations[1].id: 2,
+    }
+
+    with pytest.raises(RuntimeError, match="exact finite circuit"):
+        build_and_run(
+            operations,
+            dynamic_streams=[stream],
+            idle_round_mode="extend_stream",
+            device=StimDevice(seed=17),
+            code=code,
+            rounds_policy=PerOpRounds(rounds),
+            scheme=SlidingWindowScheme(),
+            decoder=PyMatchingDecoder(PresetLatencyDecoder(2.0)),
+            num_units=1,
+            round_us=1.0,
+            verbose=False,
+        )

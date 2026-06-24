@@ -1,0 +1,100 @@
+"""Syndrome-RAM accounting (cluster.payloads_held / peak_payloads).
+
+The high-water mark used to be recomputed by re-summing the WHOLE payload store on
+every arriving round -- O(ops) per round, the dominant cost in large runs. It is now
+a running counter: +1 when a payload is stored, minus an op's payloads when its store
+is freed. These tests prove the counter agrees with a brute-force recount after every
+single arrival, and that the store drains back to zero when the workload completes."""
+import sys, pathlib
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+
+from decsim.cluster import DecoderCluster
+from decsim.decoders import PresetLatencyDecoder
+from decsim.frontends.circuit import cnot_plus_two_t_circuit, three_cnot_circuit
+from decsim.wiring import build_and_run
+
+
+class RecountingCluster(DecoderCluster):
+    """Recounts the whole store after every arrival (the old, slow way) and keeps its
+    own maximum, so the running counter can be checked against ground truth."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.brute_force_peak = 0
+
+    def on_syndrome_arrival(self, payload):
+        super().on_syndrome_arrival(payload)
+        held = sum(len(frags) for per_op in self.payload_store.values()
+                   for frags in per_op.values())
+        assert self.payloads_held == held, "running counter drifted from the store"
+        self.brute_force_peak = max(self.brute_force_peak, held)
+
+
+def _run(ops):
+    built = {}
+    def make_cluster(engine, decoder, scheduler, controller, orchestrator):
+        c = RecountingCluster(engine, decoder, scheduler, controller, orchestrator,
+                              num_units=2, code_distance=3)
+        built["cluster"] = c
+        return c
+    build_and_run(ops, make_cluster=make_cluster, d=3, rounds_per_op=11,
+                  decoder=PresetLatencyDecoder(1.0), verbose=False)
+    return built["cluster"]
+
+
+def test_peak_payloads_matches_brute_force_recount():
+    cluster = _run(three_cnot_circuit())
+    assert cluster.peak_payloads == cluster.brute_force_peak > 0
+
+
+def test_accounting_with_blocked_ops_and_store_drains_to_zero():
+    """Gated T gates exercise idle rounds and late window commits; afterwards every
+    op's store has been freed, so an exact counter must read zero."""
+    cluster = _run(cnot_plus_two_t_circuit())
+    assert cluster.peak_payloads == cluster.brute_force_peak > 0
+    assert cluster.payloads_held == 0
+
+
+def test_per_window_release_holds_only_the_live_set():
+    """arXiv:2511.10633 Sec VI.B: syndromes are discarded "as soon as the associated decoding
+    tasks are complete". With per-window release the syndrome-RAM high-water is the LIVE set --
+    ~one sliding window (commit+buffer) -- so it stays bounded as the computation grows, instead
+    of scaling with the operation length (the per-op resident upper bound)."""
+    from decsim.config import us
+    from decsim.codes import SurfaceCodeModel
+    from decsim.controllers import ModularController
+    from decsim.message import DecodeResult, Operation
+    from decsim.schemes import SlidingWindowScheme
+
+    class _Dec:
+        def latency(self, job):
+            return us(1.0)
+        def decode(self, job):
+            return DecodeResult(job.op_id, job.window_id, logical_value=0)
+
+    def _links(engine):
+        return ModularController(engine, t_qc=0, t_cd=0, t_dd=0, t_do=0, t_oc=0, t_cq=0,
+                                 log_syndromes=False)
+
+    def peak_for(rounds):
+        op = Operation(0, "mem", (0,), clifford=True, patches=(0,))
+        res = build_and_run([op], num_units=4, d=3, rounds_per_op=rounds, round_us=1.0,
+                            decoder=_Dec(), scheme=SlidingWindowScheme(),
+                            code=SurfaceCodeModel(d=3), make_controller=_links, verbose=False)
+        c = res["cluster"]
+        assert c.payloads_held == 0            # drains fully
+        return c.peak_payloads
+
+    short, long = peak_for(15), peak_for(120)
+    assert short == long                       # live set is independent of computation length
+    assert long <= 4 * 3                       # bounded by ~one window (commit+buffer = 2d), not R
+
+
+def test_round_arriving_after_op_completed_fails_loudly():
+    """A payload for an op whose syndrome RAM was already freed (its last window
+    committed) means the device emitted more rounds than planned -- the cluster must
+    say so, not die on a KeyError or corrupt the running counter."""
+    import pytest
+    from decsim.message import SyndromePayload
+    cluster = _run(three_cnot_circuit())                  # run to completion
+    with pytest.raises(RuntimeError, match="syndrome RAM was freed"):
+        cluster.on_syndrome_arrival(SyndromePayload(0, 0, 99))

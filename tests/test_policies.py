@@ -1,14 +1,14 @@
 #==================================================================
 # TESTS FOR POLICY SEAMS (deadlines, routing, switching, round time, idle decode)
 #==================================================================
-from qecsim.codes import SurfaceCodeModel
-from qecsim.config import us
-from qecsim.decoders import (CodeRouter, PresetLatencyDecoder, SwitchingDecoder)
-from qecsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
-from qecsim.message import DecodeJob, Operation
-from qecsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
+from decsim.codes import SurfaceCodeModel
+from decsim.config import us
+from decsim.decoders import (CodeRouter, PresetLatencyDecoder, SwitchingDecoder)
+from decsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
+from decsim.message import DecodeJob, Operation
+from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
                                ReactionPathDeadline)
-from qecsim.wiring import build_and_run
+from decsim.wiring import build_and_run
 
 
 # ---- deadline policies ----------------------------------------------------------------
@@ -21,12 +21,12 @@ def test_deadline_policies():
 
 
 def _contended_circuit():
-    """Four background CNOTs registered BEFORE a gated T chain, so under FIFO the
+    """Four background CNOTs registered before a feedback-blocked T chain, so under FIFO the
     reaction-path windows queue behind the Clifford windows."""
     ops = [Operation(i, f"CNOT(q{2*i+2},q{2*i+3})", (2*i + 2, 2*i + 3), clifford=True)
            for i in range(4)]
     ops.append(Operation(4, "T(q0)", (0,), clifford=False))
-    ops.append(Operation(5, "T2(q0)", (0,), clifford=False, gated_by=4))
+    ops.append(Operation(5, "T2(q0)", (0,), clifford=False, blocked_by=4))
     return CircuitFrontend(ops).build()
 
 
@@ -35,7 +35,7 @@ def test_reaction_path_deadline_beats_fifo_under_contention():
         r = build_and_run(_contended_circuit(), num_units=1, d=3, rounds_per_op=11,
                           decoder=PresetLatencyDecoder(5.0), scheduler=scheduler,
                           deadline_policy=deadline_policy, verbose=False)
-        return r["chip_done"]                  # ends with the gated T's last round
+        return r["chip_done"]                  # ends with the blocked T's last round
 
     fifo = run()
     edf = run(scheduler=EarliestDeadlineScheduler(),
@@ -87,6 +87,17 @@ def test_switching_decoder_latency_mix():
     assert always.decode(job2).soft_output == 0.0
 
 
+def test_switching_decoder_charges_t_comm_weak_on_every_path():
+    """The paper's T_comm^weak is paid on EVERY decode (weak path included, its backlog
+    recursion has both T_comm terms); default 0 keeps the old latencies exactly."""
+    weak, strong = PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0)
+    never = SwitchingDecoder(weak, strong, gamma_switch=0.0, t_comm_weak_us=1.1)
+    assert never.latency(DecodeJob(0, 0, 6)) == us(1.1) + us(1.0)
+    always = SwitchingDecoder(weak, strong, gamma_switch=1.0, handoff_us=0.5,
+                              t_comm_weak_us=1.1)
+    assert always.latency(DecodeJob(0, 0, 6)) == us(1.1) + us(1.0) + 2 * us(0.5) + us(10.0)
+
+
 def test_switching_decoder_end_to_end():
     sw = SwitchingDecoder(PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0),
                           gamma_switch=0.5, seed=7)
@@ -115,14 +126,14 @@ def test_global_cadence_is_default():
     assert r["chip_done"] == 5 * us(1.1)
 
 
-# ---- idle-round decoding flag (arXiv:2511.10633: memory rounds need decoding) -----------
+# ---- idle-round decoding mode (arXiv:2511.10633: memory rounds need decoding) -----------
 
 def test_idle_rounds_decoded_only_when_enabled():
-    def run(flag):
+    def run(mode):
         r = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
                           decoder=PresetLatencyDecoder(3.0),
-                          decode_idle_rounds=flag, verbose=False)
+                          idle_round_mode=mode, verbose=False)
         return [l for l in r["engine"].log_lines if "mem(" in l]
 
-    assert run(False) == []                    # default: byte-identical, no memory jobs
-    assert len(run(True)) > 0                  # flag on: idle rounds load the cluster
+    assert run("ignore") == []                 # ignored idle rounds do not load the decoder
+    assert len(run("separate_decode_jobs")) > 0

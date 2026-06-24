@@ -3,16 +3,16 @@
 #==================================================================
 import pytest
 
-from qecsim.config import us
-from qecsim.engine import Engine
-from qecsim.factories import (DistillationFactory, DistillLevel,
+from decsim.config import us
+from decsim.engine import Engine
+from decsim.factories import (DistillationFactory, DistillLevel,
                               MultiLevelDistillationFactory)
-from qecsim.metrics import MagicStateLatency
+from decsim.metrics import MagicStateLatency
 
 
 class ImmediateService:
-    """A DecodeService stub: every correction decode completes instantly."""
-    def submit_decode(self, n_rounds, on_done, label="", deadline=None,
+    """DecodeService test helper: every correction decode completes instantly."""
+    def submit_decode(self, round_count, on_done, label="", deadline=None,
                       code=None, spatial_nodes=None):
         on_done()
 

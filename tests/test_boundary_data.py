@@ -4,18 +4,18 @@
 # correction chains that cross out of the commit region creates artificial
 # defects just outside it; the dependent window must include them.
 #==================================================================
-from qecsim.cluster import DecoderCluster
-from qecsim.codes import SurfaceCodeModel
-from qecsim.config import us
-from qecsim.controllers import ModularController
-from qecsim.decoders import PresetLatencyDecoder
-from qecsim.devices import SyndromeBitDevice
-from qecsim.engine import Engine
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import DecodeResult, Operation, SyndromePayload
-from qecsim.orchestrators import PauliFrameOrchestrator
-from qecsim.schedulers import FifoScheduler
-from qecsim.wiring import build_and_run
+from decsim.cluster import DecoderCluster
+from decsim.codes import SurfaceCodeModel
+from decsim.config import us
+from decsim.controllers import ModularController
+from decsim.decoders import PresetLatencyDecoder
+from decsim.devices import SyndromeBitDevice
+from decsim.engine import Engine
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import DecodeResult, Operation, SyndromePayload
+from decsim.orchestrators import ExecutionOrchestrator
+from decsim.schedulers import FifoScheduler
+from decsim.wiring import build_and_run
 
 
 MASK = (1, 0, 1, 0, 1, 0, 1, 0)
@@ -98,7 +98,7 @@ def test_per_patch_fragments_gate_round_arrival():
     # a round with n_fragments=2 only counts as arrived once BOTH patches are in
     eng = Engine(verbose=False)
     cl = DecoderCluster(eng, PresetLatencyDecoder(1.0), FifoScheduler(),
-                        ModularController(eng), PauliFrameOrchestrator(eng),
+                        ModularController(eng), ExecutionOrchestrator(eng),
                         num_units=1, code_distance=3)
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     op.patches = (0, 1)

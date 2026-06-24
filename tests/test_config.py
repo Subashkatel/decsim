@@ -2,7 +2,7 @@
 # TESTS FOR CONFIG
 #==================================================================
 
-from qecsim.config import TICKS_PER_US, us , fmt
+from decsim.config import TICKS_PER_US, us , fmt
 
 def test_ticks_per_us():
     assert TICKS_PER_US == 1_000_000
@@ -17,3 +17,145 @@ def test_fmt():
 
 def test_fmt_output():
     print(repr(fmt(1_100_000)))
+
+
+#==================================================================
+# TESTS FOR THE CONSOLIDATED SimConfig KNOBS
+# decoder fits / switching / relay-BP / scheme -- all in one place.
+# Covers backward compat (default unchanged), resolution, validation, flow-through.
+#==================================================================
+import pytest
+from decsim.config import (DECODER_FITS, FEEDBACK_BOUNDARY_MODES, SCHEME_NAMES,
+                           SimConfig)
+from decsim.codes import SurfaceCodeModel
+from decsim.decoders import (LatencyModelDecoder, SwitchingDecoder, RelayBPDecoder,
+                             PresetLatencyDecoder)
+from decsim.schemes import (SlidingWindowScheme, NaiveOnlineScheme,
+                            ParallelWindowScheme)
+from decsim.switching import Switching
+
+_CODE = SurfaceCodeModel(d=3)
+
+
+def test_default_decoder_unchanged():
+    """The DEFAULT config must build the exact pre-refactor cc_fpga decoder (back compat)."""
+    cfg = SimConfig()
+    assert cfg.decoder_model is None
+    assert cfg.decoder_fit() == (2.85e-10, 1.2)
+    dec = cfg.make_decoder(_CODE)
+    assert isinstance(dec, LatencyModelDecoder)
+    assert (dec.alpha, dec.beta) == (2.85e-10, 1.2)
+
+
+def test_default_scheme_is_sliding():
+    assert SimConfig().scheme_name == "sliding"
+    assert isinstance(SimConfig().make_scheme(), SlidingWindowScheme)
+
+
+def test_default_feedback_boundary_is_trailing_buffer():
+    assert SimConfig().feedback_boundary_mode == "trailing_buffer"
+    assert "measurement_closed" in FEEDBACK_BOUNDARY_MODES
+
+
+@pytest.mark.parametrize("name,fit", list(DECODER_FITS.items()))
+def test_named_decoder_fits(name, fit):
+    cfg = SimConfig(decoder_model=name)
+    assert cfg.decoder_fit() == fit
+    dec = cfg.make_decoder(_CODE)
+    assert (dec.alpha, dec.beta) == fit
+
+
+def test_raw_alpha_beta_override():
+    """decoder_model=None uses the raw alpha/beta fields (explicit override path)."""
+    cfg = SimConfig(decoder_alpha=1e-9, decoder_beta=1.5)
+    assert cfg.decoder_fit() == (1e-9, 1.5)
+    assert (cfg.make_decoder(_CODE).alpha, cfg.make_decoder(_CODE).beta) == (1e-9, 1.5)
+
+
+def test_make_links_exposes_weak_strong_link():
+    """ws is the cluster-side weak<->strong escalation link: default follows dd, overrideable."""
+    links = SimConfig(t_dd_us=0.7).make_links()
+    assert links.dd.latency_ticks == us(0.7)
+    assert links.ws.latency_ticks == us(0.7)
+
+    links = SimConfig(t_dd_us=0.7, t_ws_us=0.2).make_links()
+    assert links.dd.latency_ticks == us(0.7)
+    assert links.ws.latency_ticks == us(0.2)
+
+
+def test_make_switching_decoder():
+    cfg = SimConfig(switch_gamma=0.3, switch_handoff_us=0.5, switch_comm_weak_us=0.1, switch_seed=7)
+    weak, strong = PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0)
+    sw = cfg.make_switching_decoder(weak, strong)
+    assert isinstance(sw, SwitchingDecoder)
+    assert sw.gamma_switch == 0.3
+    assert sw.handoff == us(0.5) and sw.t_comm_weak == us(0.1)
+    assert sw.weak is weak and sw.strong is strong
+
+
+def test_switching_never_switches_at_gamma_zero():
+    sw = SimConfig(switch_gamma=0.0).make_switching_decoder(
+        PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0))
+
+    class _Job:
+        spatial_nodes = 9; n_rounds = 1; hint = None
+    assert sw.latency(_Job()) == us(1.0)        # weak path only
+    assert sw.switches == 0
+
+
+def test_make_relaybp_decoder():
+    rb = SimConfig(relaybp_iterations=10, relaybp_t_iter_ns=24.0).make_relaybp_decoder()
+    assert isinstance(rb, RelayBPDecoder)
+    assert rb.iterations == 10 and rb.t_iter_ns == 24.0
+
+
+@pytest.mark.parametrize("name,cls", [("sliding", SlidingWindowScheme),
+                                       ("naive", NaiveOnlineScheme),
+                                       ("parallel", ParallelWindowScheme)])
+def test_make_scheme(name, cls):
+    assert isinstance(SimConfig(scheme_name=name).make_scheme(), cls)
+
+
+@pytest.mark.parametrize("mode,run_both", [("serial", False), ("parallel", True)])
+def test_make_switching(mode, run_both):
+    """switch_mode builds the Switching object; "none" (default) means no switching, "parallel"
+    sets run_both_at_once."""
+    assert SimConfig().make_switching() is None
+    switching = SimConfig(switch_mode=mode, switch_confidence_threshold=0.5).make_switching()
+    assert isinstance(switching, Switching)
+    assert switching.run_both_at_once is run_both
+    assert switching.bulk_strong is False
+
+
+def test_make_switching_bulk_strong():
+    """bulk_strong is a serial-switching policy and must flow through from SimConfig."""
+    switching = SimConfig(switch_mode="serial", switch_confidence_threshold=0.5,
+                          switch_bulk_strong=True).make_switching()
+    assert isinstance(switching, Switching)
+    assert switching.run_both_at_once is False
+    assert switching.bulk_strong is True
+
+
+@pytest.mark.parametrize("kw", [
+    {"decoder_model": "nope"}, {"switch_gamma": 1.5}, {"switch_gamma": -0.1},
+    {"switch_handoff_us": -1}, {"relaybp_iterations": 0}, {"relaybp_t_iter_ns": -1},
+    {"scheme_name": "bogus"}, {"switch_mode": "bogus"}, {"t_ws_us": -1},
+    {"switch_bulk_strong": True}, {"switch_mode": "parallel", "switch_bulk_strong": True},
+    {"feedback_boundary_mode": "bogus"},
+])
+def test_validation_rejects_bad_values(kw):
+    with pytest.raises(ValueError):
+        SimConfig(**kw)
+
+
+def test_config_flows_through_build_and_run():
+    """decoder_model + scheme_name + num_units all take effect via build_and_run."""
+    from decsim.message import Operation
+    from decsim.wiring import build_and_run
+    from decsim.planner import FixedRounds
+    op = Operation(id=1, name="memory", qubits=(0,), clifford=True)
+    cfg = SimConfig(decoder_model="cc_asic", scheme_name="naive", num_units=2)
+    res = build_and_run(ops=[op], d=3, rounds_policy=FixedRounds(6),
+                        code=SurfaceCodeModel(d=3), config=cfg, verbose=False)
+    assert isinstance(res["cluster"].scheme, NaiveOnlineScheme)
+    assert res["cluster"].decoder.alpha == DECODER_FITS["cc_asic"][0]

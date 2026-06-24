@@ -4,10 +4,10 @@
 # forwards batched packets to the decoders -- so a round arriving in fragments
 # (possibly at different times) must ship as ONE packet after its last fragment.
 #==================================================================
-from qecsim.config import us
-from qecsim.controllers import ModularController
-from qecsim.engine import Engine
-from qecsim.message import SyndromePayload
+from decsim.config import us
+from decsim.controllers import ModularController
+from decsim.engine import Engine
+from decsim.message import SyndromePayload
 
 
 def _frag(patch, n=2):

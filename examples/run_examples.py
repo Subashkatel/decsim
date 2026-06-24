@@ -1,4 +1,4 @@
-"""Runnable examples for qecsim.
+"""Runnable examples for decsim.
 
 Run all of them:
     python examples/run_examples.py
@@ -10,13 +10,13 @@ Run just one (by number), or a few:
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from qecsim import (build_and_run, three_cnot_circuit, cnot_plus_two_t_circuit,
+from decsim import (build_and_run, three_cnot_circuit, cnot_plus_two_t_circuit,
                     independent_t_circuit, three_cnot_six_qubits_circuit, PresetLatencyDecoder, RelayBPDecoder,
                     DistillationFactory, DecoderUtilization, ReadyQueueStats, us,
                     ParallelWindowScheme, WindowLatencyBreakdown)
-from qecsim.frontends.circuit import CircuitFrontend
-from qecsim.message import Operation
-from qecsim.planner import GateRounds
+from decsim.frontends.circuit import CircuitFrontend
+from decsim.message import Operation
+from decsim.planner import GateRounds
 
 D, RPO = 3, 11
 

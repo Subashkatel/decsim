@@ -28,3 +28,10 @@ env/
 .ruff_cache/
 .DS_Store
 Thumbs.db
+
+# Local research notes and experiment scripts
+docs/
+tools/
+
+# Experiments: local until ready to publish
+experiments/

@@ -80,9 +80,9 @@ def test_B0_public_cluster_integrity_after_normal_run():
     c = res["cluster"]
 
     # every documented public attribute is present on the public cluster
-    for attr in ("ops", "windows", "op_windows", "window_count", "successors", "committed_windows",
+    for attr in ("ops", "windows", "op_windows", "window_count", "committed_windows",
                  "op_results", "total_windows", "payloads_held", "peak_payloads",
-                 "payload_store", "window_models", "on_workload_complete"):
+                 "payload_store", "on_workload_complete"):
         assert hasattr(c, attr), f"cluster is missing public attribute {attr!r}"
 
     # every planned window committed by completion

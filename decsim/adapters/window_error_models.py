@@ -25,6 +25,14 @@ class WindowErrorModel:
     h_check: "object" = None
     h_priors: "object" = None
     h2e: "object" = None
+    commit_lo: int = 0
+    buffer_lo: int = 0
+
+    @property
+    def has_leading_buffer(self) -> bool:
+        """True when ``buffer_lo < commit_lo`` (two-sided parallel A/B window with lookback)."""
+        # ref: Skoric 2209.08552 sec. III.C, Tan 2209.09219 Eq. S10 (w = s + 2b)
+        return self.buffer_lo < self.commit_lo
 
 
 def _merge_probability(current: float, incoming: float) -> float:
@@ -360,6 +368,8 @@ def _build_one_window_model(*, det_sets: list, obs_sets: list, priors: list,
         owned=owned,
         future_flips=future_flips,
         defect_positions=_defect_positions(future_flips, round_of, pos_of),
+        commit_lo=commit_lo,
+        buffer_lo=buffer_lo,
         **hyperedge_fields)
 
 
@@ -489,7 +499,32 @@ class WindowSlicer:
 
 
 def decode_windowed(window_models: list, detection_events, decode_window) -> "object":
-    """Decode one shot by walking the committed windows in order."""
+    """Decode one shot by walking the committed windows in order.
+
+    Two-sided/parallel A/B windows (any window with a leading buffer) decode
+    independently and must NOT forward artificial defects -- that would double-count
+    the boundary error; forward-only sliding windows push them forward instead.
+    """
+    # ref: Skoric 2209.08552, Tan 2209.09219
+    if any(model.has_leading_buffer for model in window_models):
+        return _decode_two_sided(window_models, detection_events, decode_window)
+    return _decode_forward_only(window_models, detection_events, decode_window)
+
+
+def _decode_two_sided(window_models: list, detection_events, decode_window) -> "object":
+    """Independent core decode for two-sided (parallel A/B) windows."""
+    import numpy as np
+    total = np.zeros(window_models[0].obs.shape[0], dtype=np.uint8)
+    for model in window_models:
+        syndrome = detection_events[list(model.detector_ids)].astype(np.uint8)
+        selected = np.asarray(decode_window(model, syndrome), dtype=np.uint8)
+        committed = selected.astype(bool) & model.owned
+        total ^= (model.obs @ committed.astype(np.uint8)) % 2
+    return total
+
+
+def _decode_forward_only(window_models: list, detection_events, decode_window) -> "object":
+    """Sliding-window decode: commit each core and push artificial defects forward."""
     import numpy as np
     pending: set = set()
     total = np.zeros(window_models[0].obs.shape[0], dtype=np.uint8)

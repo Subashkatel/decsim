@@ -10,11 +10,7 @@ from .config import us
 
 @dataclass
 class Link:
-    """One classical channel.
-
-    By default the cost is a constant latency. A bandwidth adds a size-dependent
-    serialization cost. `serialize=True` makes messages queue on a shared bus.
-    """
+    """One classical channel: constant latency, plus size-dependent cost if bandwidth set; serialize=True queues on a shared bus."""
     latency_ticks: int
     bandwidth_bits_per_us: Optional[float] = None  # None = infinite (size ignored)
     serialize: bool = False                        # True = shared bus, queues messages
@@ -44,18 +40,7 @@ def _as_link(value: Union[int, Link]) -> Link:
 
 
 class LinkModel:
-    """Named links in the classical stack.
-
-    The default six timing links follow DecLat Table 2. The `ws` link is the
-    weak-to-strong decoder handoff used in decoder switching studies.
-
-        qc  chip -> controller            cd  controller -> decoder cluster
-        dd  decoder -> decoder            do  decoders -> orchestrator
-        oc  orchestrator -> controller    cq  controller -> chip
-        ws  weak -> strong decoder handoff
-
-    Each argument can be a flat latency in ticks or a `Link` object.
-    """
+    """Named classical-stack links (qc/cd/dd/do/oc/cq + ws weak->strong handoff); each arg is a latency or Link."""  # ref: DecLat Table 2
     def __init__(self, qc: Union[int, Link] = us(0.15), cd: Union[int, Link] = us(2.0),
                  dd: Union[int, Link] = us(0.5), do: Union[int, Link] = us(1.0),
                  oc: Union[int, Link] = us(4.0), cq: Union[int, Link] = us(0.15),

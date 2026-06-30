@@ -15,7 +15,7 @@ from decsim.adapters.window_error_models import (build_window_error_models,
                                              detector_error_model_to_faults)
 from decsim.mwpm_decoder import matching_window_decoder
 from decsim.codes import SurfaceCodeModel
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingWindowScheme, ParallelWindowScheme
 
 
 def _memory_circuit(d=3, rounds=12, p=0.003):
@@ -135,6 +135,38 @@ def test_windowed_accuracy_matches_global_decoding():
     ler_windowed = float((windowed_pred != obs).any(axis=1).mean())
     assert agree > 0.97, f"windowed disagrees with global too often: {agree}"
     # 'no noticeable increase': allow binomial wiggle on 2000 shots, nothing more
+    assert ler_windowed <= ler_global + 2 * (ler_global / shots) ** 0.5 + 0.005, \
+        f"windowed LER {ler_windowed} vs global {ler_global}"
+
+
+def test_parallel_two_sided_windows_match_global_decoding():
+    """Two-sided parallel A/B windows (Skoric sec. III.C / Tan Eq. S10, w = s + 2b)
+    carry a lookback buffer, so each window must decode its raw syndrome independently
+    and commit only its core -- forward-passing artificial defects (the sliding-window
+    technique) double-counts the boundary error and inflates the LER. This pins the
+    two-sided path against global decoding for d=5, where the bug was glaring (windowed
+    LER ~0.10 vs global ~0.06 before the fix). Fixed seed -> deterministic counts."""
+    pymatching = pytest.importorskip("pymatching")
+    d, rounds = 5, 20
+    circuit = _memory_circuit(d=d, rounds=rounds, p=0.005)
+    n_layers = 1 + max(int(c[-1]) for c in circuit.get_detector_coordinates().values())
+    plan = ParallelWindowScheme().plan_windows(0, n_layers, SurfaceCodeModel(d=d))
+    assert any(len(w) == 4 and w[0] < w[1] for w in plan), "expected two-sided windows"
+    models = build_window_error_models(circuit, plan)
+    assert any(m.has_leading_buffer for m in models)
+    shots = 2000
+    dets, obs = circuit.compile_detector_sampler(seed=11).sample(
+        shots, separate_observables=True)
+    global_m = pymatching.Matching.from_detector_error_model(
+        circuit.detector_error_model(decompose_errors=True))
+    global_pred = global_m.decode_batch(dets)
+    decode = matching_window_decoder()
+    windowed_pred = np.array([decode_windowed(models, dets[i], decode)
+                              for i in range(shots)])
+    agree = float((windowed_pred == global_pred).all(axis=1).mean())
+    ler_global = float((global_pred != obs).any(axis=1).mean())
+    ler_windowed = float((windowed_pred != obs).any(axis=1).mean())
+    assert agree > 0.99, f"two-sided windowed disagrees with global too often: {agree}"
     assert ler_windowed <= ler_global + 2 * (ler_global / shots) ** 0.5 + 0.005, \
         f"windowed LER {ler_windowed} vs global {ler_global}"
 

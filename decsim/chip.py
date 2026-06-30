@@ -8,6 +8,7 @@ from typing import Optional, TYPE_CHECKING
 from .config import IDLE_ROUND_MODES, us
 from .engine import Engine
 from .message import Decision, Operation, SyndromePayload
+from .pauli_frame import PauliFrame
 
 if TYPE_CHECKING:
     from .protocols import (Controller, MagicStateFactory, SyndromeSource,
@@ -53,6 +54,16 @@ class Chip:
         self.body_done_time: dict[int, int] = {}
         self.decode_release_time: dict[int, int] = {}
         self.result_return_time_by_operation: dict[int, int] = {}
+        # Pauli frame for feed-forward corrections; shared with the orchestrator by
+        # the wiring (private one when the chip is built standalone).
+        self.frame = PauliFrame()
+        self.applied_basis: dict[int, str] = {}      # op_id -> steered meas. basis
+        self.applied_pauli: dict[int, str] = {}      # op_id -> corrective byproduct
+        self.applied_s: dict[int, bool] = {}         # op_id -> corrective Clifford S
+        # per-successor frame delta the decision applied (x, z), for audit / fold
+        self.applied_frame_delta: dict[int, tuple] = {}
+        self.frame_applied_time: dict[int, int] = {}
+        self.op_start_time: dict[int, int] = {}
         self.idle_rounds_by_patch: dict = {}
         self.idle_cap_hits: list[dict] = []
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
@@ -101,10 +112,7 @@ class Chip:
                 self._attempt_start(operation)
 
     def _release_successors(self, operation: Operation) -> None:
-        """This operation's body finished, so successors wait on one fewer body.
-
-        Only data dependencies live here. Magic-state waits and feedback waits are handled later
-        in _maybe_begin, so those waits overlap rather than stack (arXiv:2411.04270)."""
+        """Decrement successors' body-dependency counters; magic-state/feedback waits overlap in _maybe_begin."""  # ref: arXiv:2411.04270
         for successor_id in self._op_successors[operation.id]:
             self._deps_remaining[successor_id] -= 1
             if self._deps_remaining[successor_id] == 0:
@@ -158,9 +166,7 @@ class Chip:
         self._begin(operation)
 
     def _must_wait_for_round_boundary(self, operation: Operation) -> bool:
-        """Under gates_start_on_round_boundaries, a gate whose patch is mid-round (its
-        idle emitter still ticking) begins at the next round boundary, so the patch's
-        syndrome stream stays on one grid."""
+        """True if the gate must defer to the next round boundary because its patch is mid-round."""
         if not self.gates_start_on_round_boundaries:
             return False
         patch = self._patch_for_operation(operation)
@@ -169,6 +175,7 @@ class Chip:
     def _begin(self, operation: Operation) -> None:
         """Run an operation's syndrome rounds, then mark its body done."""
         self.started.add(operation.id)
+        self.op_start_time[operation.id] = self.engine.now
         idle_rounds = self._consume_idle_rounds(operation)
         prepend = getattr(self.cluster, "prepend_idle_rounds", None)
         if idle_rounds and prepend is not None:
@@ -449,14 +456,39 @@ class Chip:
         self._record_result_return(decision)
 
     def _release_blocked_operation(self, decision: Decision) -> None:
-        """A correction came back and can release a blocked operation."""
+        """Consume a feedback decision (steer basis + fold correction), then release."""
         operation_id = decision.target_operation_id
+        target = self.ops[operation_id]
+        self._consume_decision(target, decision)
         self.decode_released.add(operation_id)
         self.decode_release_time[operation_id] = self.engine.now
-        target = self.ops[operation_id]
-        self.engine.log("Chip",
-                        f"received basis '{decision.basis}' for {target.name}; trying to start")
+        self.engine.log(
+            "Chip",
+            f"CONSUMED decision for {target.name}: measure basis "
+            f"'{decision.basis}', frame byproduct '{decision.pauli}'"
+            f"{' + S' if decision.apply_s else ''} on qubits {target.qubits}"
+            f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
+            f"successor steered, now trying to start")
         self._maybe_begin(target)
+
+    def _consume_decision(self, target: Operation, decision: Decision) -> None:
+        """Steer the successor and fold the correction into its Pauli frame."""
+        op_id = target.id
+        self.applied_basis[op_id] = decision.basis
+        self.applied_pauli[op_id] = decision.pauli
+        self.applied_s[op_id] = bool(decision.apply_s)
+        primary = target.qubits[0] if target.qubits else None
+        x_before = self.frame.x_of(primary) if primary is not None else 0
+        z_before = self.frame.z_of(primary) if primary is not None else 0
+        for qubit in target.qubits:
+            self.frame.apply_pauli(qubit, decision.pauli)
+            if decision.apply_s:
+                self.frame.apply_s(qubit)
+        delta = (0, 0) if primary is None else (
+            self.frame.x_of(primary) ^ x_before,
+            self.frame.z_of(primary) ^ z_before)
+        self.applied_frame_delta[op_id] = delta
+        self.frame_applied_time[op_id] = self.engine.now
 
     def _record_result_return(self, decision: Decision) -> None:
         """Record a decoded result that returns to the chip without starting another op."""

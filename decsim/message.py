@@ -110,12 +110,29 @@ class DecodeResult:
 
 
 @dataclass
+class SoftOutput:
+    """Soft-output confidence g for one window (paper Sec. II.B); smaller = less
+    confident. Carries the weak prediction and the two matching weights."""
+
+    logical_value: int
+    gap: float
+    w_min: float = 0.0
+    w_comp: float = 0.0
+
+
+@dataclass
 class Decision:
-    """Feedback decision sent from the orchestrator back to the chip."""
+    """Feedback decision from the orchestrator to the chip: steer ``basis``, fold
+    ``pauli`` (+ ``apply_s`` for a magic-state S) into the successor's frame. Leading
+    two fields stay positional so ``Decision(op_id, basis)`` keeps working."""
 
     target_operation_id: int
     basis: str
     releases_operation: bool = True
+    pauli: str = "I"
+    apply_s: bool = False
+    correction_value: int = 0
+    strong_committed: bool = False
 
 
 @dataclass
@@ -136,6 +153,9 @@ class Operation:
     blocked_by: Optional[int] = None
     feedback_boundary_mode: Optional[str] = None
     requires_result_return_to_chip: bool = False
+    requires_strong_commit: bool = False  # marker only; not enforced as a fence yet
+    byproduct_pauli: str = "X"
+    measurement_basis: str = "Z"
 
     @property
     def needs_magic_state(self) -> bool:

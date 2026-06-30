@@ -39,11 +39,7 @@ class EnqueueTimeDeadline:
 
 
 class ReactionPathDeadline:
-    """Reaction-path-first deadline policy.
-
-    A window whose result unblocks a waiting non-Clifford operation gets a tight
-    deadline. Other windows get now + slack, so waiting non-reaction jobs still run.
-    """
+    """Reaction-path windows get a tight deadline; others get now + slack."""
 
     def __init__(self, slack_ticks: int):
         self.slack_ticks = int(slack_ticks)

@@ -254,7 +254,7 @@ def test_A5_parallel_mixed_one_strong_job_per_window():
 
 def _strong_running_samples(switching, low_conf_prob, *, rounds, tau_strong, seed=1):
     """Sample cluster.strong_running_rounds after every engine event (the batch size on the
-    strong unit, set at bulk dispatch -- StrongBacklogRounds reads exactly this counter)."""
+    strong unit, set at bulk dispatch)."""
     captured = {}
 
     class _Sampler:

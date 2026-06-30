@@ -325,6 +325,13 @@ def build_and_run(ops: Optional[list[Operation]] = None, num_units: Optional[int
         gates_start_on_round_boundaries=gates_start_on_round_boundaries)
 
     orchestrator.connect(controller, chip.on_decision)
+    # One software Pauli frame across the loop: the orchestrator accumulates decoded
+    # Clifford corrections into it and the chip folds feed-forward byproducts into
+    # the same object when it consumes a decision (no-op for custom orchestrators
+    # without a real frame).
+    orchestrator_frame = getattr(orchestrator, "frame", None)
+    if orchestrator_frame is not None and hasattr(chip, "frame"):
+        chip.frame = orchestrator_frame
     cluster.on_workload_complete = factory.shutdown
 
     backlog_metric = _add_metrics(

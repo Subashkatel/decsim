@@ -10,6 +10,7 @@ from .decoders import (PresetLatencyDecoder, PerRoundDecoder, RelayBPDecoder,
                       SwitchingDecoder, SwitchingRouter, SampledSoftOutputDecoder,
                       switch_probability_per_round)
 from .factories import InfiniteFactory, DistillationFactory
+from .pauli_frame import PauliFrame
 from .schemes import ParallelWindowScheme
 from .switching import Switching
 from .schedulers import EarliestDeadlineScheduler, ReactionPathDeadline
@@ -26,6 +27,7 @@ __all__ = [
     "PresetLatencyDecoder", "PerRoundDecoder", "RelayBPDecoder", "SwitchingDecoder",
     "SwitchingRouter", "SampledSoftOutputDecoder", "switch_probability_per_round",
     "InfiniteFactory", "DistillationFactory",
+    "PauliFrame",
     "ParallelWindowScheme",
     "Switching",
     "EarliestDeadlineScheduler", "ReactionPathDeadline",

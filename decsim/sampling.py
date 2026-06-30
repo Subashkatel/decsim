@@ -34,9 +34,8 @@ def _shot_verdicts(ops, device, build_kwargs: dict) -> tuple:
     verdicts = LogicalErrorRate(cluster, device).verdicts()
     if not verdicts:
         raise ValueError(
-            "no operation produced a logical value. The device must be a StimDevice "
-            "(real syndromes) and the decoder a failure-reporting decoder (e.g. "
-            "PyMatchingDecoder), not a timing-only decoder")
+            "no operation produced a logical value; use a StimDevice with a "
+            "failure-reporting decoder (e.g. PyMatchingDecoder), not timing-only")
     return cluster, verdicts
 
 

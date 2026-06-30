@@ -7,6 +7,7 @@ from typing import Callable, Optional, TYPE_CHECKING
  
 from .engine import Engine
 from .message import Operation, DecodeResult, Decision, WindowPlan
+from .pauli_frame import PauliFrame
  
 if TYPE_CHECKING:
     from .protocols import Controller, ExecutionPlanner, WorkloadManager
@@ -19,7 +20,11 @@ class ExecutionOrchestrator:
         """Hold result state and the feedback-blocking map."""
 
         self.engine = engine
-        self.pauli_frame: dict = {}
+        # Per-qubit Pauli frame: decoded corrections accumulate here and the chip
+        # folds feed-forward byproducts in.
+        self.frame = PauliFrame()
+        #: op_id -> intrinsic destructive magic-state measurement bit (0/1); empty => 0.
+        self.magic_measurements: dict[int, int] = {}
         self.outcomes: dict[int, int] = {}
         self.blocked_by_index: dict[int, list[int]] = {}
         self.history: deque = deque(maxlen=history_size)
@@ -92,7 +97,6 @@ class ExecutionOrchestrator:
         }[kind]
         self.stats[stat_key] += 1
         self.outcomes.pop(op.id, None)
-        self.pauli_frame.pop(op.id, None)
  
     def integrate(self, op: Operation, result: DecodeResult) -> None:
         """Integrate a result and send any released feedback decisions."""
@@ -107,32 +111,53 @@ class ExecutionOrchestrator:
                             f"basis '{decision.basis}' -> controller -> chip")
             self.controller.relay_instruction(decision, self.decision_sink)
  
+    @staticmethod
+    def _byproduct(op: Operation, outcome: int) -> tuple[str, bool]:
+        """The (Pauli byproduct, apply_s) a teleported gate feeds forward: a decoded
+        measurement of 1 leaves ``op.byproduct_pauli`` + corrective S, a 0 the identity
+        (gate-teleportation algebra, Litinski arXiv:1808.02892)."""
+        if outcome:
+            return op.byproduct_pauli, True
+        return "I", False
+
     def on_result(self, op: Operation, result: DecodeResult) -> list[Decision]:
         """Save an outcome and return decisions for operations it unblocks."""
-        
+
         outcome = result.logical_value if result.logical_value is not None else 1
         self.outcomes[op.id] = outcome
+        qubit = op.qubits[0] if op.qubits else 0
         if op.clifford:
-            self.pauli_frame[op.id] = "frame-updated"
+            # Per-qubit frame update: XOR the decoded correction in.
+            self.frame.accumulate(qubit, x=outcome)
             self.engine.log("Orchestrator",
                             f"result for {op.name}: Pauli-frame update (Clifford); "
-                            f"stays here, no instruction returns to the QPU")
+                            f"frame[q{qubit}] X^={outcome}, no instruction to the QPU")
             self._record_and_gc(op, "frame_update", outcome)
             return []
 
+        # Feed-forward on the believed measurement: decoded value XOR the intrinsic
+        # magic-state bit (no intrinsic bit -> just the decoded value).
+        m_raw = self.magic_measurements.get(op.id, 0) if op.needs_magic_state else 0
+        measurement = (outcome ^ m_raw) & 1
         self.engine.log("Orchestrator",
-                        f"result for {op.name}: non-Clifford outcome decoded")
+                        f"result for {op.name}: non-Clifford measurement decoded "
+                        f"(decoded={outcome}, intrinsic={m_raw}, believed={measurement})")
+        pauli, apply_s = self._byproduct(op, measurement)
         blocked_ops = self.blocked_by_index.pop(op.id, [])
         if blocked_ops:
-            basis = "X" if outcome else "Z"
+            basis = "X" if measurement else "Z"
             targets = ", ".join(f"op#{g}" for g in blocked_ops)
             self.engine.log("Orchestrator",
-                            f"decides basis '{basis}' for {targets} and releases the chip")
+                            f"decides basis '{basis}', byproduct '{pauli}'"
+                            f"{' + S' if apply_s else ''} for {targets} and "
+                            f"releases the chip")
             self._record_and_gc(op, "decision", outcome, basis)
-            return [Decision(target_operation_id=g, basis=basis)
+            return [Decision(target_operation_id=g, basis=basis, pauli=pauli,
+                             apply_s=apply_s, correction_value=measurement,
+                             strong_committed=bool(op.requires_strong_commit))
                     for g in blocked_ops]
         if op.requires_result_return_to_chip:
-            basis = "X" if outcome else "Z"
+            basis = "X" if measurement else "Z"
             self.engine.log("Orchestrator",
                             f"result for {op.name} must return to the chip; "
                             f"sending basis '{basis}'")
@@ -141,6 +166,9 @@ class ExecutionOrchestrator:
                 target_operation_id=op.id,
                 basis=basis,
                 releases_operation=False,
+                pauli=pauli,
+                apply_s=apply_s,
+                correction_value=measurement,
             )]
         self._record_and_gc(op, "outcome", outcome)
         return []

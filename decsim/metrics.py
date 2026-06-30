@@ -67,7 +67,7 @@ class ReadyQueueStats:
         self._t = engine.now
         self._last_len = self._queued()
         self.peak = max(self.peak, self._last_len)
- 
+
     def result(self) -> dict:
         """Peak and time-average ready-queue length."""
         return {"peak": self.peak, "time_avg": (self._area / self._t if self._t else 0.0)}
@@ -174,7 +174,7 @@ class DecodeBacklog:
                 for time_ticks, backlog_rounds in self.trace]
 
     def result(self) -> dict:
-        """The largest backlog seen and the time-average, both in rounds waiting to be decoded."""
+        """Peak and time-average backlog, in rounds waiting to be decoded."""
         return {"peak_rounds": self.peak,
                 "time_avg_rounds": (self._area / self._t if self._t else 0.0)}
 
@@ -219,44 +219,6 @@ class StrongDecoderBacklog:
         """Peak and time-average outstanding strong jobs."""
         return {"peak_jobs": self.peak_jobs,
                 "time_avg_jobs": (self._area / self._t if self._t else 0.0),
-                "strong_needed": getattr(self.cluster, "strong_needed", 0)}
-
-
-class StrongBacklogRounds:
-    """Outstanding strong-decoder work measured in rounds."""
-
-    name = "strong_backlog_rounds"
-
-    def __init__(self, cluster, pool: str = "strong"):
-        self.cluster = cluster
-        self.pool = pool
-        self.peak_rounds = 0
-        self._t = 0
-        self._area = 0.0
-        self._last = 0
-        self.trace = []
-
-    def _rounds(self) -> int:
-        """Strong rounds waiting or running."""
-        queued = sum(job.n_rounds for job in self.cluster.pool_ready.get(self.pool, []))
-        return queued + getattr(self.cluster, "strong_running_rounds", 0)
-
-    def observe(self, engine: "Engine") -> None:
-        self._area += self._last * (engine.now - self._t)
-        self._t = engine.now
-        self._last = self._rounds()
-        self.peak_rounds = max(self.peak_rounds, self._last)
-        if not self.trace or self.trace[-1][1] != self._last:
-            self.trace.append((engine.now, self._last))
-
-    def rows(self) -> list:
-        """Strong-round backlog time series, one record per value change."""
-        return [{"t": time_ticks, "rounds": rounds}
-                for time_ticks, rounds in self.trace]
-
-    def result(self) -> dict:
-        return {"peak_rounds": self.peak_rounds,
-                "time_avg_rounds": (self._area / self._t if self._t else 0.0),
                 "strong_needed": getattr(self.cluster, "strong_needed", 0)}
 
 
@@ -312,11 +274,9 @@ class BacklogTrajectory:
 
 
 class ConditionalReactionTime:
-    """SWIPER-style wait time for feedback-blocked operations.
+    """Reaction-time wait for feedback-blocked operations."""
 
-    The reported average divides by every conditional operation, not only the ones
-    that finished. That matches SWIPER's reaction-time denominator.
-    """
+    # ref: SWIPER; average divides by every conditional op, not only finished ones.
 
     name = "conditional_reaction_time"
 
@@ -389,7 +349,7 @@ class ConditionalReactionTime:
         return ""
 
     def result(self) -> dict:
-        """SWIPER-style reaction-time summary for feedback-blocked operations."""
+        """Reaction-time summary for feedback-blocked operations."""
         total_count = len(self.conditional_operation_ids())
         rows = self.rows()
         released_count = len(rows)

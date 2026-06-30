@@ -19,8 +19,7 @@ def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -
         raise ValueError(
             f"production must be 'demand' or 'continuous' (got {production!r})")
     if production == "continuous" and (buffer_capacity is None or buffer_capacity < 1):
-        raise ValueError("continuous production needs buffer_capacity >= 1 "
-                         "(the paper's buffer registers are finite)")
+        raise ValueError("continuous production needs buffer_capacity >= 1")
 
 
 @dataclass
@@ -28,12 +27,12 @@ class StateTrace:
     """Per-magic-state production and delivery timestamps."""
 
     state_id: int
-    t_distill_start: int            # the successful attempt began distilling
-    t_phys_done: int                # physical distillation time elapsed
-    t_corr_submit: int              # correction-qubit decode jobs entered the cluster
+    t_distill_start: int            # distillation began
+    t_phys_done: int                # physical distillation done
+    t_corr_submit: int              # correction decodes submitted
     t_corr_done: Optional[int] = None   # last correction decode returned
-    t_released: Optional[int] = None    # state entered the store (after return trip)
-    t_delivered: Optional[int] = None   # handed to a consumer
+    t_released: Optional[int] = None    # entered store (after return trip)
+    t_delivered: Optional[int] = None   # handed to consumer
 
 
 class InfiniteFactory:
@@ -98,9 +97,7 @@ class DistillationFactory:
         self._shutdown = True
 
     def _maybe_start(self) -> None:
-        """Launch distillation attempts while there is unmet demand (a waiting request not
-        already covered by a state being distilled or decoded), or in continuous mode,
-        while the store (counting everything in the pipeline) is below buffer_capacity."""
+        """Launch attempts while demand is unmet, or (continuous) while the pipeline is below buffer_capacity."""
         while not self._shutdown and self.busy_units < self.num_units:
             demand = len(self.waiting) > self.busy_units + self.in_flight
             stocking = (self.production == "continuous"
@@ -155,7 +152,7 @@ class DistillationFactory:
         self.engine.log("Factory", f"magic state ready (store now {self.store})")
         self._fulfil()
         self._maybe_start()
- 
+
     def request(self, op_id: int, callback: Callable[[], None]) -> None:
         """A gate asks for a state: deliver now if in stock, else deliver when ready."""
         self.waiting.append((op_id, callback))
@@ -165,7 +162,7 @@ class DistillationFactory:
                         f"(store {self.store}, waiting {len(self.waiting)})")
         self._fulfil()
         self._maybe_start()
- 
+
     def _fulfil(self) -> None:
         """Deliver a state to a waiting request and log it."""
         while self.store > 0 and self.waiting:
@@ -243,7 +240,7 @@ class MultiLevelDistillationFactory:
     def shutdown(self) -> None:
         """Stop the production loop."""
         self._shutdown = True
- 
+
     def request(self, op_id: int, callback: Callable[[], None]) -> None:
         """A gate asks for a final state; record demand and start producing."""
         self.waiting.append((op_id, callback))
@@ -252,7 +249,7 @@ class MultiLevelDistillationFactory:
                         f"op#{op_id} requests a magic state "
                         f"(top-level store {self.buffer[self.L]}, waiting {len(self.waiting)})")
         self._drive()
- 
+
     def _fulfil_core(self) -> None:
         """Deliver a finished final state to a waiting request."""
         while self.buffer[self.L] > 0 and self.waiting:
@@ -263,9 +260,9 @@ class MultiLevelDistillationFactory:
             tag = "" if waited == 0 else f"  (supply stall {fmt(waited).strip()})"
             self.engine.log("Factory", f"  -> delivered final state to op#{op_id}{tag}")
             callback()
- 
+
     def _drive(self) -> None:
-        """Pull engine: recompute demand top-down each tick and start the work each level can do."""
+        """Pull engine: recompute demand top-down and start work each level can do."""
         if self._shutdown:
             return
 
@@ -335,7 +332,7 @@ class MultiLevelDistillationFactory:
             rounds_wanted -= 1
             progress = True
         return progress
- 
+
     def _start_round(self, level: int) -> None:
         """Begin one distillation round at a level."""
         round_state = {"level": level, "phys": False, "decodes_left": 0, "done": False}
@@ -394,4 +391,4 @@ class MultiLevelDistillationFactory:
         else:
             self.failures[0] += 1
         self._drive()
-  
+

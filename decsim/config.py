@@ -23,6 +23,9 @@ def fmt(ticks: int) -> str:
     return f"{ticks / TICKS_PER_US:7.3f} us"
 
 
+# Simple (alpha, beta) latency fits for the default LatencyModelDecoder
+# (per-round time = alpha * nodes**beta). NOTE: a simple model for now; TODO swap
+# in measured/cited latencies when the latency model is built out.
 DECODER_FITS = {
     "cc_fpga": (2.85e-10, 1.2),
     "cc_asic": (5.53e-11, 1.34),

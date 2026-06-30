@@ -172,10 +172,8 @@ class DecoderManager:
         strong_decoder = self.decoder_for(strong_job)
         if strong_decoder is weak_decoder:
             raise RuntimeError(
-                "Decoder switching escalated a window, but the strong job routes to "
-                "the same decoder as the weak job. Pass router=SwitchingRouter(weak, "
-                "strong), or provide a router that sends hint='strong' jobs to a "
-                "distinct strong decoder.")
+                "Strong job routes to the same decoder as the weak job; pass a router "
+                "(e.g. SwitchingRouter) that sends hint='strong' to a distinct decoder.")
 
     def _cancel_strong_decode(self, key: tuple) -> None:
         """Cancel an unneeded strong re-decode if it is queued or running."""
@@ -202,8 +200,8 @@ class DecoderManager:
                 has_syndrome_bits = any(payload.bits is not None for payload in job.payloads)
                 if has_model or has_syndrome_bits:
                     raise RuntimeError(
-                        "bulk_strong can only merge timing-only strong re-decodes. "
-                        "Disable bulk_strong for accuracy-coupled switching.")
+                        "bulk_strong only merges timing-only strong re-decodes; "
+                        "disable it for accuracy-coupled switching.")
         window_keys = [j.strong_decode_for for j in jobs
                        if j.strong_decode_for is not None]
         if len(jobs) == 1:
@@ -329,8 +327,8 @@ class DecoderManager:
         if len(keys) > 1 and (result.logical_value is not None
                               or result.boundary_defects is not None):
             raise RuntimeError(
-                "A merged strong decode cannot provide one logical result for several "
-                "windows. Disable bulk_strong for accuracy-coupled switching.")
+                "A merged strong decode cannot give one logical result for several "
+                "windows; disable bulk_strong for accuracy-coupled switching.")
         for key in keys:
             self._complete_strong_result(key, result)
 

@@ -1,9 +1,4 @@
-"""Decoder switching policy.
-
-The decoder-switching paper combines a fast weak decoder with a slower, more
-accurate strong decoder. The weak decoder supplies `DecodeResult.soft_output`;
-low confidence sends the window to the strong decoder.
-"""
+"""Decoder switching policy: a fast weak decoder supplies DecodeResult.soft_output; low confidence escalates to the strong decoder."""
 
 from __future__ import annotations
 
@@ -15,27 +10,14 @@ if TYPE_CHECKING:
 
 
 class Switching:
-    """How to combine a fast "weak" decoder with a slow, accurate "strong" decoder.
-
-    Each window is decoded by the weak decoder first. If its confidence is high
-    enough, that answer is kept. Otherwise the strong decoder re-decodes it.
-
-    `run_both_at_once` decides when the strong decoder starts:
-
-    - `False`: start the strong decoder only after the weak result is unsure.
-    - `True`: start weak and strong together, then cancel strong work when the
-      weak result is confident.
-
-    Override `keep_weak_result` to replace the fixed threshold rule.
-    """
+    """Combine weak+strong decoders; run_both_at_once=True starts both and cancels strong on confidence, else escalates only when unsure."""
 
     def __init__(self, confidence_threshold: float, run_both_at_once: bool = False,
                  weak_keepup_ratio: Optional[float] = None,
                  bulk_strong: bool = False):
         """Store the switching policy knobs."""
         if weak_keepup_ratio is not None and not 0 < weak_keepup_ratio < 1:
-            raise ValueError("weak_keepup_ratio must be between 0 and 1 (the weak decoder has to "
-                             f"be faster than one syndrome round); got {weak_keepup_ratio}")
+            raise ValueError(f"weak_keepup_ratio must be between 0 and 1 (got {weak_keepup_ratio})")
         if bulk_strong and run_both_at_once:
             raise ValueError("bulk_strong is only meaningful in serial mode (run_both_at_once=False)")
         self.confidence_threshold = confidence_threshold
@@ -63,7 +45,5 @@ class Switching:
         if weak_decode_rounds > commit_rounds + 1e-9:
             needed = math.ceil(ratio / (1 - ratio) * buffer_rounds - 1e-9)
             raise ValueError(
-                f"Switching: a {commit_rounds}-round commit region is too short for a weak decoder "
-                f"running at {ratio} of a syndrome round. It needs at least {needed} rounds (for a "
-                f"{buffer_rounds}-round buffer) to keep up. Use a bigger commit region or a faster "
-                f"weak decoder (lower weak_keepup_ratio).")
+                f"commit region of {commit_rounds} rounds too short for weak_keepup_ratio={ratio} "
+                f"(needs >= {needed}); use a bigger commit region or lower weak_keepup_ratio.")

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional, Protocol, runtime_checkable, TYPE_CHECKING
 
 from .message import (Operation, SyndromePayload, DecodeJob, Window, WindowPlan,
-                      DecodeResult, Decision)
+                      DecodeResult, Decision, SoftOutput)
 
 if TYPE_CHECKING:
     from .engine import Engine
@@ -19,13 +19,7 @@ class InputFrontend(Protocol):
 
 @runtime_checkable
 class SyndromeSource(Protocol):
-    """Produces syndrome payloads and matching window error models.
-
-    This is the boundary between physical syndrome generation and decoder
-    windowing. Timing-only sources return no detector error models.
-    Stim-backed sources return models built from the same circuit that produced
-    the payload bits.
-    """
+    """Produces syndrome payloads and matching window error models (timing-only sources return none)."""
 
     def begin_operation(self, op: Operation) -> None: ...
     def round_payloads(self, op: Operation,
@@ -79,11 +73,7 @@ class LayoutModel(Protocol):
 
 @runtime_checkable
 class DecodingScheme(Protocol):
-    """Defines decode windows and readiness.
-
-    Optional hooks let a scheme define window dependencies:
-    `wire_deps`, `entry_windows`, and `exit_windows`.
-    """
+    """Defines decode windows and readiness; optional hooks wire_deps/entry_windows/exit_windows set dependencies."""
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple]: ...
     def data_complete(self, window: Window, rounds_arrived: int, successor_rounds: int,
@@ -109,6 +99,15 @@ class Decoder(Protocol):
 
     def latency(self, job: DecodeJob) -> int: ...
     def decode(self, job: DecodeJob) -> DecodeResult: ...
+
+@runtime_checkable
+class SoftOutputMetric(Protocol):
+    """Computes a soft output g per window (smaller g = lower confidence); swappable across metrics."""  # ref: paper Sec. II.B
+
+    @property
+    def name(self) -> str: ...
+
+    def evaluate(self, syndrome) -> SoftOutput: ...
 
 @runtime_checkable
 class Scheduler(Protocol):

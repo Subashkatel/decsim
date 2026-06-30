@@ -65,6 +65,8 @@ class WindowManager:
         self._committed_boundary_defects: dict[tuple, Optional[dict]] = {}
         self._pending_strong_windows: set[tuple] = set()
         self._pending_strong_per_op: dict[int, int] = {}
+        #: op_id -> latest strong-commit tick across its windows.
+        self.op_strong_commit_time: dict[int, int] = {}
         self._finished_ops: set[int] = set()
         self._workload_complete_sent = False
         self.window_models: dict = {}
@@ -839,6 +841,9 @@ class WindowManager:
         op = self.ops[window.op_id]
         if result is not None and result.logical_value is not None:
             self._replace_window_logical_value(key, op.id, int(result.logical_value))
+        # Stamp the op-level strong-commit tick (closed_loop's fence reads it).
+        self.op_strong_commit_time[op.id] = max(
+            self.op_strong_commit_time.get(op.id, 0), self.engine.now)
         self._resolve_strong_wait(key, op.id)
         self._release_stream_segments_at_commit(
             op.id,

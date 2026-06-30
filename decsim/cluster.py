@@ -147,10 +147,6 @@ class DecoderCluster:
         return self.window_manager.window_count
 
     @property
-    def successors(self) -> dict:
-        return self.window_manager.successors
-
-    @property
     def committed_windows(self) -> set:
         return self.window_manager.committed_windows
 
@@ -163,24 +159,12 @@ class DecoderCluster:
         return self.window_manager.op_results
 
     @property
-    def window_models(self) -> dict:
-        return self.window_manager.window_models
+    def op_strong_commit_time(self) -> dict:
+        return self.window_manager.op_strong_commit_time
 
     @property
     def total_windows(self) -> int:
         return self.window_manager.total_windows
-
-    @property
-    def _windows_built(self) -> bool:
-        return self.window_manager._windows_built
-
-    @property
-    def _round_refs(self) -> dict:
-        return self.window_manager._round_refs
-
-    @property
-    def _read_sets(self) -> dict:
-        return self.window_manager._read_sets
 
     def register_op(self, op: Operation) -> None:
         self.window_manager.register_op(op)
@@ -193,9 +177,6 @@ class DecoderCluster:
 
     def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
         self.window_manager.close_stream_boundary(stream_id, stream_round_count)
-
-    def grow_stream(self, stream_id) -> None:
-        self.window_manager.grow_stream(stream_id)
 
     def seal_stream(self, stream_id, stream_round_count: int) -> None:
         self.window_manager.seal_stream(stream_id, stream_round_count)
@@ -260,9 +241,6 @@ class DecoderCluster:
     @property
     def strong_running_rounds(self) -> int:
         return self.decoder_manager.strong_running_rounds
-
-    def _pool_tag(self, pool: str) -> str:
-        return self.decoder_manager.pool_tag(pool)
 
     def submit_decode(self, round_count: int, on_done: Callable[[], None],
                       label: str = "external", deadline: Optional[int] = None,

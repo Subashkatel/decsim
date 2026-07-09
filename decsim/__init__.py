@@ -1,32 +1,38 @@
-"""Public import surface for the decsim package."""
+"""Public import surface for the decsim package.
 
-from .config import SimConfig, us, fmt
-from .wiring import build_and_run
+Compose a RunSpec (decsim.run_spec) and drive it with simulate().
+"""
+
+from .decoders import (PresetLatencyDecoder, PerRoundDecoder,
+                       FunctionLatencyDecoder,
+                       SwitchingDecoder, SwitchingRouter, SampledConfidenceDecoder,
+                       switch_probability_per_round)
+from .factories import (InfiniteFactory, DistillationFactory,
+                        MultiLevelDistillationFactory)
 from .frontends.circuit import (CircuitFrontend, SurgeryIRFrontend,
                                 three_cnot_circuit, cnot_plus_two_t_circuit,
                                 independent_t_circuit,
                                 three_cnot_six_qubits_circuit)
-from .decoders import (PresetLatencyDecoder, PerRoundDecoder, RelayBPDecoder,
-                      SwitchingDecoder, SwitchingRouter, SampledSoftOutputDecoder,
-                      switch_probability_per_round)
-from .factories import InfiniteFactory, DistillationFactory
-from .pauli_frame import PauliFrame
-from .schemes import ParallelWindowScheme
-from .switching import Switching
-from .schedulers import EarliestDeadlineScheduler, ReactionPathDeadline
 from .metrics import (DecoderUtilization, ReadyQueueStats,
                       WindowLatencyBreakdown, MagicStateLatency,
                       StrongDecoderBacklog, ConditionalReactionTime)
+from .pauli_frame import PauliFrame
+from .schedulers import EarliestDeadlineScheduler, ReactionPathDeadline
+from .schemes import ParallelWindowScheme
+from .run_spec import RunSpec, simulate
+from .switching import Switching
+from .config import TimingConfig, fmt, us
 
 __all__ = [
-    "SimConfig", "us", "fmt",
-    "build_and_run",
+    "RunSpec", "TimingConfig", "simulate",
+    "us", "fmt",
     "CircuitFrontend", "SurgeryIRFrontend",
     "three_cnot_circuit", "cnot_plus_two_t_circuit", "independent_t_circuit",
     "three_cnot_six_qubits_circuit",
-    "PresetLatencyDecoder", "PerRoundDecoder", "RelayBPDecoder", "SwitchingDecoder",
-    "SwitchingRouter", "SampledSoftOutputDecoder", "switch_probability_per_round",
-    "InfiniteFactory", "DistillationFactory",
+    "PresetLatencyDecoder", "PerRoundDecoder", "FunctionLatencyDecoder",
+    "SwitchingDecoder",
+    "SwitchingRouter", "SampledConfidenceDecoder", "switch_probability_per_round",
+    "InfiniteFactory", "DistillationFactory", "MultiLevelDistillationFactory",
     "PauliFrame",
     "ParallelWindowScheme",
     "Switching",

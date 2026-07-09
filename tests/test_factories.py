@@ -6,7 +6,7 @@ import pytest
 from decsim.config import us
 from decsim.engine import Engine
 from decsim.factories import (DistillationFactory, DistillLevel,
-                              MultiLevelDistillationFactory)
+                              InfiniteFactory, MultiLevelDistillationFactory)
 from decsim.metrics import MagicStateLatency
 
 
@@ -15,6 +15,19 @@ class ImmediateService:
     def submit_decode(self, round_count, on_done, label="", deadline=None,
                       code=None, spatial_nodes=None):
         on_done()
+
+
+class DelayedService:
+    """DecodeService test helper: fixed decode latency, records submit times."""
+    def __init__(self, engine, latency_ticks):
+        self.engine = engine
+        self.latency_ticks = latency_ticks
+        self.submit_times = []
+
+    def submit_decode(self, round_count, on_done, label="", deadline=None,
+                      code=None, spatial_nodes=None):
+        self.submit_times.append(self.engine.now)
+        self.engine.schedule(self.latency_ticks, on_done, label=label)
 
 
 def test_continuous_requires_capacity():
@@ -83,3 +96,87 @@ def test_multilevel_continuous_fills_top_buffer():
         prep_units=4, production="continuous", buffer_capacity=2)
     eng.run()
     assert f.buffer[1] == 2 and f.produced[1] == 2         # filled to capacity, halted
+
+
+#==================================================================
+# TICKET API (spec 5.21 port 19): cancel never delivers, FIFO holds
+#==================================================================
+
+def test_ticket_cancel_never_delivers_and_preserves_fifo():
+    eng = Engine(verbose=False)
+    f = DistillationFactory(eng, num_units=1, cycle_ticks=us(10),
+                            decode_service=ImmediateService(),
+                            corr_rounds=1, n_corr=1)
+    delivered = []
+    t1 = f.request(1, lambda: delivered.append(1))
+    t2 = f.request(2, lambda: delivered.append(2))
+    t3 = f.request(3, lambda: delivered.append(3))
+    assert t2.cancel() is True                 # withdrawn before any delivery
+    assert t2.cancel() is False                # idempotent: already gone
+    eng.run()
+    assert delivered == [1, 3]                 # op2 never delivered; FIFO kept
+    assert 2 not in f._stall_start             # no stall accounting leak
+    assert t1.cancel() is False and t3.cancel() is False   # already delivered
+
+
+def test_multilevel_ticket_cancel_never_delivers_and_preserves_fifo():
+    eng = Engine(verbose=False)
+    f = MultiLevelDistillationFactory(
+        eng, [DistillLevel(units=1, d=1, O=10)], W_ticks=us(1.0), M=1, N=1,
+        prep_units=1, prep_O=0)
+    delivered = []
+    f.request(1, lambda: delivered.append(1))
+    t2 = f.request(2, lambda: delivered.append(2))
+    f.request(3, lambda: delivered.append(3))
+    assert t2.cancel() is True
+    eng.run()
+    assert delivered == [1, 3]
+
+
+def test_infinite_factory_ticket_is_dead():
+    eng = Engine(verbose=False)
+    delivered = []
+    ticket = InfiniteFactory(eng).request(0, lambda: delivered.append(True))
+    assert delivered == [True]                 # delivery was instant
+    assert ticket.cancel() is False            # nothing pending to cancel
+
+
+#==================================================================
+# ONE OVERLAP RULE (spec 5.21): correction decodes are submitted at
+# the END of the physical attempt in every factory, so single- and
+# multi-level factories stall identically at equal parameters.
+#==================================================================
+
+def test_multilevel_corrections_submitted_at_end_of_physical_attempt():
+    eng = Engine(verbose=False)
+    svc = DelayedService(eng, us(2.0))
+    f = MultiLevelDistillationFactory(
+        eng, [DistillLevel(units=1, d=1, O=10)], W_ticks=us(1.0), M=1, N=1,
+        prep_units=1, prep_O=0, decode_service=svc, corr_rounds=3, n_corr=2)
+    f.request(0, lambda: None)
+    eng.run()
+    assert svc.submit_times == [us(10), us(10)]   # at phys end, not round start
+    assert f.produced[1] == 1
+
+
+def test_single_and_multi_level_stall_identically_at_equal_params():
+    # single level: one unit, 10us physical cycle, 2 corrections at 2us each
+    eng1 = Engine(verbose=False)
+    svc1 = DelayedService(eng1, us(2.0))
+    single = DistillationFactory(eng1, num_units=1, cycle_ticks=us(10),
+                                 decode_service=svc1, corr_rounds=3, n_corr=2,
+                                 return_ticks=0)
+    single.request(0, lambda: None)
+    eng1.run()
+
+    # multi level, ONE level with the same physical time (O*d*W = 10us),
+    # free input preparation (prep_O=0), same correction decode load
+    eng2 = Engine(verbose=False)
+    svc2 = DelayedService(eng2, us(2.0))
+    multi = MultiLevelDistillationFactory(
+        eng2, [DistillLevel(units=1, d=1, O=10)], W_ticks=us(1.0), M=1, N=1,
+        prep_units=1, prep_O=0, decode_service=svc2, corr_rounds=3, n_corr=2)
+    multi.request(0, lambda: None)
+    eng2.run()
+
+    assert single.total_stall == multi.total_stall == us(12)   # 10 phys + 2 corr

@@ -7,7 +7,7 @@ from ..message import SoftOutput
 
 if TYPE_CHECKING:
     import stim
-    from ..adapters.window_error_models import WindowErrorModel
+    from ..detector_error_model import WindowErrorModel
 
 _CITATION = "Toshio et al. 2510.25222 Sec. II.C"
 

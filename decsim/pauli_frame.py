@@ -1,16 +1,20 @@
-"""Per-qubit X/Z Pauli frame for the feedback loop; corrections accumulate in software (not on the QPU).
+"""Software Pauli frame: the X/Z correction bits owed to each qubit.
 
-Caveat: the pipeline accumulates corrections but does not yet fold them into reported outcomes.
+Instead of applying physical corrections, the simulator XORs decoder
+corrections into this frame and folds the frame into measurement outcomes
+(``fold``). Pure state — it only receives final values and imports nothing
+from the rest of decsim.
 """
 
 from __future__ import annotations
+
 
 _X_PART = {"I": 0, "X": 1, "Y": 1, "Z": 0}
 _Z_PART = {"I": 0, "X": 0, "Y": 1, "Z": 1}
 
 
 class PauliFrame:
-    """Per-qubit X/Z Pauli frame; ``fold`` corrects a raw measurement against it."""
+    """Per-qubit X/Z Pauli frame; pure state, receives only final values."""
 
     def __init__(self) -> None:
         self.x: dict = {}
@@ -36,11 +40,9 @@ class PauliFrame:
             self.z[qubit] = self.z.get(qubit, 0) ^ 1
 
     def x_of(self, qubit) -> int:
-        """The X (bit-flip) component of one qubit's frame."""
         return self.x.get(qubit, 0)
 
     def z_of(self, qubit) -> int:
-        """The Z (phase-flip) component of one qubit's frame."""
         return self.z.get(qubit, 0)
 
     def measurement_flip(self, qubit, basis: str) -> int:
@@ -71,3 +73,4 @@ class PauliFrame:
 
     def __repr__(self) -> str:
         return f"PauliFrame({self.snapshot()})"
+

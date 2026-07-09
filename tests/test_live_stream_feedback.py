@@ -12,7 +12,8 @@ from decsim.devices import TimingOnlyDevice
 from decsim.message import Operation
 from decsim.planner import PerOpRounds
 from decsim.schemes import SlidingWindowScheme
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.policies import from_mode
 
 
 def _live_stream_pair():
@@ -76,19 +77,18 @@ def test_feedback_idle_rounds_extend_the_live_stream():
     code = SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1)
     rounds = {operations[0].id: 2, operations[1].id: 2}
 
-    result = build_and_run(
-        operations,
-        dynamic_streams=[stream],
-        idle_round_mode="extend_stream",
-        device=TimingOnlyDevice(),
-        code=code,
-        rounds_policy=PerOpRounds(rounds),
-        scheme=SlidingWindowScheme(),
-        decoder=PresetLatencyDecoder(2.0),
-        num_units=1,
-        round_us=1.0,
-        verbose=False,
-    )
+    result = simulate(RunSpec(
+                 ops=operations,
+                 dynamic_streams=[stream],
+                 idle_policy=from_mode("extend_stream"),
+                 device=TimingOnlyDevice(),
+                 code=code,
+                 rounds_policy=PerOpRounds(rounds),
+                 scheme=SlidingWindowScheme(),
+                 decoder=PresetLatencyDecoder(2.0),
+                 num_units=1,
+                 round_us=1.0,
+             ), verbose=False)
 
     cluster = result["cluster"]
     chip = result["chip"]
@@ -110,19 +110,18 @@ def test_committed_stream_round_count_releases_blocked_operation_before_stream_r
     code = SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1)
     rounds = {operations[0].id: 2, operations[1].id: 2}
 
-    result = build_and_run(
-        operations,
-        dynamic_streams=[stream],
-        idle_round_mode="extend_stream",
-        device=TimingOnlyDevice(),
-        code=code,
-        rounds_policy=PerOpRounds(rounds),
-        scheme=SlidingWindowScheme(),
-        decoder=PresetLatencyDecoder(2.0),
-        num_units=1,
-        round_us=1.0,
-        verbose=False,
-    )
+    result = simulate(RunSpec(
+                 ops=operations,
+                 dynamic_streams=[stream],
+                 idle_policy=from_mode("extend_stream"),
+                 device=TimingOnlyDevice(),
+                 code=code,
+                 rounds_policy=PerOpRounds(rounds),
+                 scheme=SlidingWindowScheme(),
+                 decoder=PresetLatencyDecoder(2.0),
+                 num_units=1,
+                 round_us=1.0,
+             ), verbose=False)
 
     chip = result["chip"]
     first, second = operations
@@ -147,19 +146,18 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
         timing_operations[0].id: 2,
         timing_operations[1].id: 2,
     }
-    timing_result = build_and_run(
-        timing_operations,
-        dynamic_streams=[timing_stream],
-        idle_round_mode="extend_stream",
-        device=TimingOnlyDevice(),
-        code=code,
-        rounds_policy=PerOpRounds(operation_rounds),
-        scheme=SlidingWindowScheme(),
-        decoder=PresetLatencyDecoder(2.0),
-        num_units=1,
-        round_us=1.0,
-        verbose=False,
-    )
+    timing_result = simulate(RunSpec(
+                        ops=timing_operations,
+                        dynamic_streams=[timing_stream],
+                        idle_policy=from_mode("extend_stream"),
+                        device=TimingOnlyDevice(),
+                        code=code,
+                        rounds_policy=PerOpRounds(operation_rounds),
+                        scheme=SlidingWindowScheme(),
+                        decoder=PresetLatencyDecoder(2.0),
+                        num_units=1,
+                        round_us=1.0,
+                    ), verbose=False)
     stream_round_count = timing_result["cluster"].rounds_arrived[timing_stream.id]
 
     circuit = NoiseModel.circuit_level(0.003).circuit(
@@ -174,19 +172,18 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
     }
     decoder = _RecordingDecoder(PyMatchingDecoder(PresetLatencyDecoder(2.0)))
 
-    result = build_and_run(
-        operations,
-        dynamic_streams=[stream],
-        idle_round_mode="extend_stream",
-        device=StimDevice(seed=13),
-        code=code,
-        rounds_policy=PerOpRounds(rounds),
-        scheme=SlidingWindowScheme(),
-        decoder=decoder,
-        num_units=1,
-        round_us=1.0,
-        verbose=False,
-    )
+    result = simulate(RunSpec(
+                 ops=operations,
+                 dynamic_streams=[stream],
+                 idle_policy=from_mode("extend_stream"),
+                 device=StimDevice(seed=13),
+                 code=code,
+                 rounds_policy=PerOpRounds(rounds),
+                 scheme=SlidingWindowScheme(),
+                 decoder=decoder,
+                 num_units=1,
+                 round_us=1.0,
+             ), verbose=False)
 
     cluster = result["cluster"]
     chip = result["chip"]
@@ -223,10 +220,10 @@ def test_real_syndrome_live_stream_rejects_inexact_circuit_length():
     }
 
     with pytest.raises(RuntimeError, match="exact finite circuit"):
-        build_and_run(
-            operations,
+        simulate(RunSpec(
+            ops=operations,
             dynamic_streams=[stream],
-            idle_round_mode="extend_stream",
+            idle_policy=from_mode("extend_stream"),
             device=StimDevice(seed=17),
             code=code,
             rounds_policy=PerOpRounds(rounds),
@@ -234,5 +231,4 @@ def test_real_syndrome_live_stream_rejects_inexact_circuit_length():
             decoder=PyMatchingDecoder(PresetLatencyDecoder(2.0)),
             num_units=1,
             round_us=1.0,
-            verbose=False,
-        )
+        ), verbose=False)

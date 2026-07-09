@@ -40,13 +40,28 @@ class PyMatchingDecoder:
     def _matching_for_model(self, model):
         """Return a cached matching graph for this window model."""
         import weakref
-        import numpy as np
         import pymatching
 
         entry = self._matchings.get(id(model))
         matching = entry[1] if entry is not None and entry[0]() is model else None
         if matching is None:
-            weights = np.log((1 - model.priors) / model.priors)
-            matching = pymatching.Matching.from_check_matrix(model.check, weights=weights)
+            matching = pymatching.Matching.from_check_matrix(
+                model.check, weights=self._weights_for(model))
             self._matchings[id(model)] = (weakref.ref(model), matching)
         return matching
+
+    def _weights_for(self, model):
+        from .weights import matching_weights
+        return matching_weights(model.priors)
+
+
+class UnweightedPyMatchingDecoder(PyMatchingDecoder):
+    """Weight-oblivious MWPM: same matching graph, every edge at weight 1.
+
+    A deliberately COARSE weak tier (a hardware matcher without weighted-edge
+    support): at circuit-level noise it decodes measurably worse than
+    weighted MWPM because hook-error paths are no longer penalized."""
+
+    def _weights_for(self, model):
+        import numpy as np
+        return np.ones(len(model.priors))

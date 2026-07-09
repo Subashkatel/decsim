@@ -19,9 +19,10 @@ stim = pytest.importorskip("stim")
 pytest.importorskip("pymatching")
 pytest.importorskip("ldpc")
 
-from decsim.adapters.window_error_models import (  # noqa: E402
+from decsim.detector_error_model import (  # noqa: E402
     build_window_error_models, decode_windowed)
 from decsim.belief_matching_decoder import belief_matching_window_decoder  # noqa: E402
+from decsim.run_spec import RunSpec, simulate
 
 
 def _memory_circuit(d, rounds, p):
@@ -100,10 +101,9 @@ def test_engine_belief_matching_matches_offline():
     runtime decoder drops into the scheme machinery: pick a scheme, route to belief-matching,
     end to end -- the cluster auto-builds hyperedge DEMs via needs_hyperedges."""
     from decsim.message import Operation
-    from decsim.wiring import build_and_run
-    from decsim.controllers import ModularController
+    from decsim.controllers import ModularController, LinkModel
     from decsim.adapters.stim_device import StimDevice
-    from decsim.adapters.window_error_models import build_window_error_models
+    from decsim.detector_error_model import build_window_error_models
     from decsim.belief_matching_decoder import (BeliefMatchingDecoder,
                                                 belief_matching_window_decoder)
     from decsim.schemes import SlidingWindowScheme
@@ -118,8 +118,7 @@ def test_engine_belief_matching_matches_offline():
             return 1
 
     def _zero_links(engine):
-        return ModularController(engine, t_qc=0, t_cd=0, t_dd=0, t_do=0, t_oc=0, t_cq=0,
-                                 log_syndromes=False)
+        return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
 
     coords = circuit.get_detector_coordinates()
     folded = {det: min(int(c[-1]) + 1, R) for det, c in coords.items()}
@@ -132,10 +131,17 @@ def test_engine_belief_matching_matches_offline():
     device = StimDevice(seed=17)
     for s in range(30):
         op = Operation(id=1, name="memory", qubits=(0,), clifford=True, circuit=circuit)
-        res = build_and_run(ops=[op], num_units=4, d=D, rounds_policy=FixedRounds(R),
-                            code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                            device=device, decoder=BeliefMatchingDecoder(_ZeroLat()),
-                            make_controller=_zero_links, verbose=False)
+        res = simulate(RunSpec(
+                  ops=[op],
+                  num_units=4,
+                  d=D,
+                  rounds_policy=FixedRounds(R),
+                  code=SurfaceCodeModel(d=D),
+                  scheme=SlidingWindowScheme(),
+                  device=device,
+                  decoder=BeliefMatchingDecoder(_ZeroLat()),
+                  make_controller=_zero_links,
+              ), verbose=False)
         pred_engine = res["cluster"].op_results[1]
         pred_offline = int(decode_windowed(ref_models, device._dets[1], ref_inner)[0])
         assert pred_engine == pred_offline, \

@@ -3,8 +3,22 @@
 Interchangeable behind one interface: ComplementaryGapMetric (MWPM) and ClusterGapMetric (UF).
 """
 # ref: Toshio et al. 2510.25222 Sec. II.B
+from typing import Protocol, runtime_checkable
+
 from ..message import SoftOutput
-from ..protocols import SoftOutputMetric
+
+
+@runtime_checkable
+class SoftOutputMetric(Protocol):
+    """Computes a soft output g per window (smaller g = lower confidence);
+    swappable across metrics."""  # ref: paper Sec. II.B
+
+    @property
+    def name(self) -> str: ...
+
+    def evaluate(self, syndrome) -> SoftOutput: ...
+
+
 from .cluster import ClusterGapMetric
 from .complementary import ComplementaryGapMetric, dem_to_matrices
 from .decoder import SoftOutputDecoder

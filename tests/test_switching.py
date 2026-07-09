@@ -10,7 +10,7 @@ turns out confident. The windowing stays plain SlidingWindowScheme.
 
 Setup: a single timing-only memory operation streaming many rounds, so the weak decoder produces a
 long stream of sliding windows. The weak decoder reports low confidence with a fixed probability
-(SampledSoftOutputDecoder), which sets the switching rate; the strong decoder runs on its own unit
+(SampledConfidenceDecoder), which sets the switching rate; the strong decoder runs on its own unit
 pool, so StrongDecoderBacklog reads the strong backlog directly.
 """
 import sys
@@ -21,13 +21,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import pytest
 
 from decsim.codes import SurfaceCodeModel
-from decsim.decoders import (PerRoundDecoder, SampledSoftOutputDecoder, SwitchingDecoder,
+from decsim.decoders import (PerRoundDecoder, SampledConfidenceDecoder, SwitchingDecoder,
                              SwitchingRouter, switch_probability_per_round)
 from decsim.message import DecodeJob, DecodeResult, Operation, Window
 from decsim.metrics import DecodeBacklog, StrongDecoderBacklog
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 TAU_GEN_US = 1.0          # syndrome round time
 D = 3
@@ -47,14 +48,22 @@ def _memory_op():
 
 
 def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=None, metrics=None):
-    weak = SampledSoftOutputDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
+    weak = SampledConfidenceDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
                                     low_confidence_probability, seed=seed)
     strong = PerRoundDecoder(F_STRONG * TAU_GEN_US)
-    return build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=rounds,
-                         round_us=TAU_GEN_US, scheme=SlidingWindowScheme(), switching=switching,
-                         decoder=weak, router=SwitchingRouter(weak, strong),
-                         unit_pools=pools or {"default": 1, "strong": 1}, make_metrics=metrics,
-                         verbose=False)
+    return simulate(RunSpec(
+               ops=[_memory_op()],
+               num_units=1,
+               d=D,
+               rounds_policy=FixedRounds(rounds),
+               round_us=TAU_GEN_US,
+               scheme=SlidingWindowScheme(),
+               strategy=switching,
+               decoder=weak,
+               router=SwitchingRouter(weak, strong),
+               unit_pools=pools or {"default": 1, "strong": 1},
+               make_metrics=metrics,
+           ), verbose=False)
 
 
 def _strong_backlog_peak(low_confidence_probability, rounds, seed=1):
@@ -137,7 +146,7 @@ def test_strong_reprocess_region_is_commit_plus_two_buffers():
         0, 4 * D, SurfaceCodeModel(d=D))[0]
     w = Window(op_id=0, k=0, commit_lo=commit_lo, commit_hi=commit_hi,
                buffer_hi=buffer_hi, n_rounds=buffer_hi - commit_lo + 1)
-    assert Switching(confidence_threshold=0.5).calculate_strong_redo_rounds(w) == 3 * D
+    assert Switching(confidence_threshold=0.5).strong_redo_rounds(w) == 3 * D
 
 
 def test_custom_decision_rule_can_replace_the_threshold():
@@ -153,14 +162,21 @@ def test_custom_decision_rule_can_replace_the_threshold():
 
 def test_escalated_window_uses_strong_logical_result():
     """A low-confidence window advances with the weak boundary but finalizes with strong logic."""
-    weak = SampledSoftOutputDecoder(FixedLogicalDecoder(logical_value=0),
+    weak = SampledConfidenceDecoder(FixedLogicalDecoder(logical_value=0),
                                     escalation_probability=1.0, seed=1)
     strong = FixedLogicalDecoder(logical_value=1)
-    res = build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=27,
-                        round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
-                        switching=Switching(confidence_threshold=0.5),
-                        decoder=weak, router=SwitchingRouter(weak, strong),
-                        unit_pools={"default": 1, "strong": 1}, verbose=False)
+    res = simulate(RunSpec(
+              ops=[_memory_op()],
+              num_units=1,
+              d=D,
+              rounds_policy=FixedRounds(27),
+              round_us=TAU_GEN_US,
+              scheme=SlidingWindowScheme(),
+              strategy=Switching(confidence_threshold=0.5),
+              decoder=weak,
+              router=SwitchingRouter(weak, strong),
+              unit_pools={"default": 1, "strong": 1},
+          ), verbose=False)
     cluster = res["cluster"]
     assert cluster.total_windows % 2 == 1
     assert cluster.strong_needed == cluster.total_windows
@@ -169,39 +185,59 @@ def test_escalated_window_uses_strong_logical_result():
 
 def test_parallel_strong_result_can_finish_before_weak_decision():
     """Run-both mode can store an early strong result until the weak decoder decides to switch."""
-    weak = SampledSoftOutputDecoder(FixedLogicalDecoder(logical_value=0, tau_us=0.05),
+    weak = SampledConfidenceDecoder(FixedLogicalDecoder(logical_value=0, tau_us=0.05),
                                     escalation_probability=1.0, seed=1)
     strong = FixedLogicalDecoder(logical_value=1, tau_us=0.0)
-    res = build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=27,
-                        round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
-                        switching=Switching(confidence_threshold=0.5, run_both_at_once=True),
-                        decoder=weak, router=SwitchingRouter(weak, strong),
-                        unit_pools={"default": 1, "strong": 1}, verbose=False)
+    res = simulate(RunSpec(
+              ops=[_memory_op()],
+              num_units=1,
+              d=D,
+              rounds_policy=FixedRounds(27),
+              round_us=TAU_GEN_US,
+              scheme=SlidingWindowScheme(),
+              strategy=Switching(confidence_threshold=0.5, run_both_at_once=True),
+              decoder=weak,
+              router=SwitchingRouter(weak, strong),
+              unit_pools={"default": 1, "strong": 1},
+          ), verbose=False)
     assert res["cluster"].op_results[0] == 1
 
 
 def test_switching_requires_a_router_to_reach_the_strong_decoder():
     """Switching must not silently route strong jobs back to the weak decoder."""
-    weak = SampledSoftOutputDecoder(FixedLogicalDecoder(logical_value=0),
+    weak = SampledConfidenceDecoder(FixedLogicalDecoder(logical_value=0),
                                     escalation_probability=1.0, seed=1)
     with pytest.raises(RuntimeError, match="SwitchingRouter"):
-        build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=9,
-                      round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
-                      switching=Switching(confidence_threshold=0.5),
-                      decoder=weak, unit_pools={"default": 1, "strong": 1},
-                      verbose=False)
+        simulate(RunSpec(
+            ops=[_memory_op()],
+            num_units=1,
+            d=D,
+            rounds_policy=FixedRounds(9),
+            round_us=TAU_GEN_US,
+            scheme=SlidingWindowScheme(),
+            strategy=Switching(confidence_threshold=0.5),
+            decoder=weak,
+            unit_pools={"default": 1, "strong": 1},
+        ), verbose=False)
 
 
 def test_strong_redecode_receives_two_sided_context_payloads():
     """The strong job is charged and fed commit + leading buffer + trailing buffer."""
-    weak = SampledSoftOutputDecoder(RecordingLogicalDecoder(logical_value=0),
+    weak = SampledConfidenceDecoder(RecordingLogicalDecoder(logical_value=0),
                                     escalation_probability=1.0, seed=1)
     strong = RecordingLogicalDecoder(logical_value=1)
-    build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=9,
-                  round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
-                  switching=Switching(confidence_threshold=0.5),
-                  decoder=weak, router=SwitchingRouter(weak, strong),
-                  unit_pools={"default": 1, "strong": 1}, verbose=False)
+    simulate(RunSpec(
+        ops=[_memory_op()],
+        num_units=1,
+        d=D,
+        rounds_policy=FixedRounds(9),
+        round_us=TAU_GEN_US,
+        scheme=SlidingWindowScheme(),
+        strategy=Switching(confidence_threshold=0.5),
+        decoder=weak,
+        router=SwitchingRouter(weak, strong),
+        unit_pools={"default": 1, "strong": 1},
+    ), verbose=False)
 
     middle_job = next(job for job in strong.jobs if job.window_id == 1)
     assert middle_job.n_rounds == 3 * D
@@ -226,15 +262,22 @@ def test_stim_strong_redecode_receives_two_sided_window_model():
         before_round_data_depolarization=0.001)
     op = Operation(0, "memory", (0,), clifford=True, circuit=circuit)
     weak_inner = RecordingLogicalDecoder(logical_value=0)
-    weak = SampledSoftOutputDecoder(weak_inner, escalation_probability=1.0, seed=1)
+    weak = SampledConfidenceDecoder(weak_inner, escalation_probability=1.0, seed=1)
     strong = RecordingLogicalDecoder(logical_value=1)
 
-    build_and_run([op], num_units=1, d=D, rounds_policy=FixedRounds(9),
-                  round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
-                  switching=Switching(confidence_threshold=0.5),
-                  device=StimDevice(seed=3),
-                  decoder=weak, router=SwitchingRouter(weak, strong),
-                  unit_pools={"default": 1, "strong": 1}, verbose=False)
+    simulate(RunSpec(
+        ops=[op],
+        num_units=1,
+        d=D,
+        rounds_policy=FixedRounds(9),
+        round_us=TAU_GEN_US,
+        scheme=SlidingWindowScheme(),
+        strategy=Switching(confidence_threshold=0.5),
+        device=StimDevice(seed=3),
+        decoder=weak,
+        router=SwitchingRouter(weak, strong),
+        unit_pools={"default": 1, "strong": 1},
+    ), verbose=False)
 
     weak_middle = next(job for job in weak_inner.jobs if job.window_id == 1)
     strong_middle = next(job for job in strong.jobs if job.window_id == 1)
@@ -252,9 +295,15 @@ def test_no_switching_matches_plain_sliding():
     plain sliding-window scheme: same finish time, same committed windows, nothing sent to strong."""
     rounds = 120
     switched = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds)
-    plain = build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=rounds,
-                          round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
-                          decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US), verbose=False)
+    plain = simulate(RunSpec(
+                ops=[_memory_op()],
+                num_units=1,
+                d=D,
+                rounds_policy=FixedRounds(rounds),
+                round_us=TAU_GEN_US,
+                scheme=SlidingWindowScheme(),
+                decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US),
+            ), verbose=False)
     assert switched["cluster"].strong_needed == 0
     assert switched["cluster"].strong_cancelled == 0
     assert switched["engine"].now == plain["engine"].now
@@ -290,9 +339,16 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
     naive_decoder = SwitchingDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
                                      PerRoundDecoder(F_STRONG * TAU_GEN_US),
                                      gamma_switch=rate, seed=1)
-    naive = build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=rounds,
-                          round_us=TAU_GEN_US, scheme=SlidingWindowScheme(), decoder=naive_decoder,
-                          make_metrics=lambda e, c, ch, fa: [DecodeBacklog(c)], verbose=False)
+    naive = simulate(RunSpec(
+                ops=[_memory_op()],
+                num_units=1,
+                d=D,
+                rounds_policy=FixedRounds(rounds),
+                round_us=TAU_GEN_US,
+                scheme=SlidingWindowScheme(),
+                decoder=naive_decoder,
+                make_metrics=lambda e, c, ch, fa: [DecodeBacklog(c)],
+            ), verbose=False)
     double = _switch_run(Switching(confidence_threshold=0.5), rate, rounds,
                          metrics=lambda e, c, ch, fa: [DecodeBacklog(c)])
     assert naive["metrics"]["decode_backlog"]["peak_rounds"] > 100
@@ -324,9 +380,15 @@ def test_run_both_at_once_keeps_the_weak_stream_byte_identical_to_plain_sliding(
     rounds = 90
     parallel = _switch_run(Switching(confidence_threshold=0.5, run_both_at_once=True), 1.0, rounds,
                            pools={"default": 1, "strong": 1})
-    plain = build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=rounds,
-                          round_us=TAU_GEN_US, scheme=SlidingWindowScheme(),
-                          decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US), verbose=False)
+    plain = simulate(RunSpec(
+                ops=[_memory_op()],
+                num_units=1,
+                d=D,
+                rounds_policy=FixedRounds(rounds),
+                round_us=TAU_GEN_US,
+                scheme=SlidingWindowScheme(),
+                decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US),
+            ), verbose=False)
     weak_done = lambda r: [w.t_done for _, w in sorted(r["cluster"].windows.items())]
     assert weak_done(parallel) == weak_done(plain)
     assert len(parallel["cluster"].committed_windows) == parallel["cluster"].total_windows
@@ -363,9 +425,16 @@ def test_decode_backlog_trace_tracks_the_rising_backlog():
     naive_decoder = SwitchingDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
                                      PerRoundDecoder(F_STRONG * TAU_GEN_US),
                                      gamma_switch=0.05, seed=1)
-    build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=400, round_us=TAU_GEN_US,
-                  scheme=SlidingWindowScheme(), decoder=naive_decoder, make_metrics=metrics,
-                  verbose=False)
+    simulate(RunSpec(
+        ops=[_memory_op()],
+        num_units=1,
+        d=D,
+        rounds_policy=FixedRounds(400),
+        round_us=TAU_GEN_US,
+        scheme=SlidingWindowScheme(),
+        decoder=naive_decoder,
+        make_metrics=metrics,
+    ), verbose=False)
     m = captured["m"]
     rows = m.rows()
     assert rows
@@ -386,7 +455,7 @@ def test_commit_buffer_override_sizes_the_window_and_strong_redo():
     assert (commit_lo, commit_hi, buffer_hi) == (1, 5, 7)
     w = Window(op_id=0, k=0, commit_lo=commit_lo, commit_hi=commit_hi,
                buffer_hi=buffer_hi, n_rounds=buffer_hi - commit_lo + 1)
-    assert Switching(confidence_threshold=0.5).calculate_strong_redo_rounds(w) == 5 + 2 * 2
+    assert Switching(confidence_threshold=0.5).strong_redo_rounds(w) == 5 + 2 * 2
 
 
 def test_commit_buffer_override_defaults_to_d_and_rejects_nonpositive():
@@ -410,13 +479,21 @@ def test_switch_probability_per_round_scales_with_commit_rounds():
 
 
 def test_sampled_soft_output_uses_the_probability_for_callback():
-    """SampledSoftOutputDecoder consults probability_for per job: a rule returning 1.0 escalates
+    """SampledConfidenceDecoder consults probability_for per job: a rule returning 1.0 escalates
     every window, overriding the flat escalation_probability of 0.0."""
-    weak = SampledSoftOutputDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US), 0.0,
+    weak = SampledConfidenceDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US), 0.0,
                                     probability_for=lambda job: 1.0)
     strong = PerRoundDecoder(F_STRONG * TAU_GEN_US)
-    res = build_and_run([_memory_op()], num_units=1, d=D, rounds_per_op=60, round_us=TAU_GEN_US,
-                        scheme=SlidingWindowScheme(), switching=Switching(confidence_threshold=0.5),
-                        decoder=weak, router=SwitchingRouter(weak, strong),
-                        unit_pools={"default": 1, "strong": 1}, verbose=False)
+    res = simulate(RunSpec(
+              ops=[_memory_op()],
+              num_units=1,
+              d=D,
+              rounds_policy=FixedRounds(60),
+              round_us=TAU_GEN_US,
+              scheme=SlidingWindowScheme(),
+              strategy=Switching(confidence_threshold=0.5),
+              decoder=weak,
+              router=SwitchingRouter(weak, strong),
+              unit_pools={"default": 1, "strong": 1},
+          ), verbose=False)
     assert res["cluster"].strong_needed == res["cluster"].total_windows

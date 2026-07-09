@@ -1,0 +1,304 @@
+{
+  "backend": "event",
+  "decoder_config": {
+    "decoder": "mwpm",
+    "weights": "uniform"
+  },
+  "dispatch": {
+    "nvqlink": "artifact-only",
+    "opx_rdma": "artifact-only"
+  },
+  "execution_model": {
+    "conditional_feedback": false,
+    "corrections": "frame-aware",
+    "decoder": "async-ticket",
+    "streams": "patch-local"
+  },
+  "idle_policy": {
+    "idle_rounds_for_decoder_wait": 0,
+    "mode": "patch-local-before-feedback"
+  },
+  "kind": "qlx.realtime_artifact",
+  "lowering_targets": {
+    "hardware": [
+      "cudaq-realtime:nvqlink",
+      "opx:rdma"
+    ],
+    "simulation": [
+      "xstab",
+      "cusv"
+    ]
+  },
+  "runtime_ops": [
+    {
+      "decoder": "@decoder",
+      "op_name": "fabric.decode_bit"
+    }
+  ],
+  "schedule": {
+    "active_volume": 0.0,
+    "bottleneck_per_round": [
+      "compute_limited",
+      "compute_limited",
+      "compute_limited",
+      "compute_limited",
+      "compute_limited",
+      "compute_limited",
+      "compute_limited",
+      "compute_limited"
+    ],
+    "entries": [
+      {
+        "consumes": null,
+        "dependencies": [],
+        "duration": 0,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "alloc_0",
+        "op_name": "fabric.alloc",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 0
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "alloc_0"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_syndrome_0",
+        "op_name": "fabric.measure_syndrome",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 0
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_syndrome_0"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_syndrome_1",
+        "op_name": "fabric.measure_syndrome",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 1
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_syndrome_1"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_syndrome_2",
+        "op_name": "fabric.measure_syndrome",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 2
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_syndrome_2"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_syndrome_3",
+        "op_name": "fabric.measure_syndrome",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 3
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_syndrome_3"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_syndrome_4",
+        "op_name": "fabric.measure_syndrome",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 4
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_syndrome_4"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_syndrome_5",
+        "op_name": "fabric.measure_syndrome",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 5
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_syndrome_5"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_syndrome_6",
+        "op_name": "fabric.measure_syndrome",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 6
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_syndrome_6"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_syndrome_7",
+        "op_name": "fabric.measure_syndrome",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 7
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_syndrome_7"
+        ],
+        "duration": 0,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "mz_0",
+        "op_name": "fabric.mz",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 8
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "mz_0"
+        ],
+        "duration": 0,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "dealloc_0",
+        "op_name": "fabric.dealloc",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 8
+      }
+    ],
+    "minimize": "active_volume",
+    "solver": "list",
+    "total_rounds": 8
+  },
+  "streams": [
+    {
+      "entries": [
+        "alloc_0",
+        "measure_syndrome_0",
+        "measure_syndrome_1",
+        "measure_syndrome_2",
+        "measure_syndrome_3",
+        "measure_syndrome_4",
+        "measure_syndrome_5",
+        "measure_syndrome_6",
+        "measure_syndrome_7",
+        "mz_0",
+        "dealloc_0"
+      ],
+      "id": "C0:0",
+      "region": "C0",
+      "slot": 0
+    }
+  ],
+  "timing": {
+    "cycle_time_ns": 1000.0,
+    "decoder_latency_ns": 1000.0,
+    "decoder_latency_rounds": 1
+  },
+  "validation": {
+    "notes": "",
+    "static_upper_bound": false
+  },
+  "version": 1
+}

@@ -8,20 +8,50 @@ A discrete-event simulator for quantum error correction.
 - Optional, only for the real-decoder adapters in `decsim/adapters/`:
   `stim` and `pymatching` (`pip install stim pymatching`).
 
-## Running the examples
+## Quickstart
 
-The examples live in [`examples/run_examples.py`](examples/run_examples.py) and
-run straight from the source tree (no install needed).
+Compose a `RunSpec` and hand it to `simulate` — both live in
+[`decsim/run_spec.py`](decsim/run_spec.py):
 
-Run **all** of them:
+```python
+from decsim.run_spec import RunSpec, simulate
+from decsim.decoders import PerRoundDecoder
+from decsim.frontends.circuit import cnot_plus_two_t_circuit
 
-```bash
-python examples/run_examples.py
+result = simulate(RunSpec(
+    ops=cnot_plus_two_t_circuit(),
+    decoder=PerRoundDecoder(tau_us=1.0),
+))
+print(result["chip_done"], result["fully_done"])
 ```
 
-To build your own circuit instead of using a preset, create `Operation`s (or
-use a frontend in [`decsim/frontends/`](decsim/frontends/)) and pass the list as
-the first argument to `build_and_run`.
+To build your own workload, create `Operation`s (or use a frontend in
+[`decsim/frontends/`](decsim/frontends/)) and pass them as `ops=`.
+
+## Module map
+
+The one entry point is `simulate(RunSpec(...))`: `RunSpec` (in `run_spec.py`)
+is the typed run configuration, its `build()` wires the world in a fixed
+order, and `simulate` drives it until no events remain. Internally the
+simulator is a stable core — the runtime mechanics — plus swappable **parts**
+that `RunSpec` wires in; the core never depends on the parts, so any part can
+be swapped without touching it.
+
+- `run_spec.py` — the composition root and driver (`RunSpec`, `build()`, `simulate`).
+- `message.py` — the typed objects that flow between components.
+- `protocols.py` — the numbered port catalog: the seams parts plug into.
+- `window_manager.py` — the windowing runtime hub; `dynamic_windows.py`
+  (runtime window layout for unknown-length streams) and `payload_store.py`
+  (syndrome retention) own adjacent runtime state.
+- `chip.py` — the reaction gate; `devices.py` — the syndrome round clock.
+- `planner.py` — compile-time window layout and rounds policies.
+- Pluggable parts: `decoders.py`, `schedulers.py`, `schemes.py`,
+  `policies.py`, `switching.py`, `factories.py`, `controllers.py`.
+
+Real-decoder adapters (needing `stim`/`pymatching`) live in
+`decsim/adapters/`, `decsim/mwpm_decoder/`, `decsim/bposd_decoder/`, and
+`decsim/belief_matching_decoder/`; `detector_error_model.py` slices the
+whole-circuit DEM into per-window models for them.
 
 ## Running the tests
 

@@ -10,7 +10,7 @@ from .config import fmt
 from .engine import Engine
 
 if TYPE_CHECKING:
-    from .protocols import DecodeService
+    from .protocols import ResourcePool as DecodeService
 
 
 def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -> None:
@@ -35,15 +35,33 @@ class StateTrace:
     t_delivered: Optional[int] = None   # handed to consumer
 
 
+
+@dataclass
+class Ticket:
+    """Cancellable handle for one factory request (spec §5.21 port 19)."""
+
+    op_id: int
+    entry: tuple
+    factory: object
+
+    def cancel(self) -> bool:
+        return self.factory.cancel(self)
+
+
 class InfiniteFactory:
     """Idealized factory with unlimited magic states."""
 
     def __init__(self, engine: Engine):
         self.engine = engine
 
-    def request(self, op_id: int, callback: Callable[[], None]) -> None:
+    def request(self, op_id: int, callback: Callable[[], None]) -> "Ticket":
         """Deliver instantly."""
         callback()
+        return Ticket(op_id, (), self)
+
+    def cancel(self, ticket: "Ticket") -> bool:
+        """Nothing pending to cancel (delivery was instant)."""
+        return False
 
     def shutdown(self) -> None:
         """Nothing to stop."""
@@ -97,7 +115,8 @@ class DistillationFactory:
         self._shutdown = True
 
     def _maybe_start(self) -> None:
-        """Launch attempts while demand is unmet, or (continuous) while the pipeline is below buffer_capacity."""
+        """Launch attempts while demand is unmet, or (continuous) while
+        the pipeline is below buffer_capacity."""
         while not self._shutdown and self.busy_units < self.num_units:
             demand = len(self.waiting) > self.busy_units + self.in_flight
             stocking = (self.production == "continuous"
@@ -153,15 +172,25 @@ class DistillationFactory:
         self._fulfil()
         self._maybe_start()
 
-    def request(self, op_id: int, callback: Callable[[], None]) -> None:
+    def request(self, op_id: int, callback: Callable[[], None]) -> "Ticket":
         """A gate asks for a state: deliver now if in stock, else deliver when ready."""
-        self.waiting.append((op_id, callback))
+        entry = (op_id, callback)
+        self.waiting.append(entry)
         self._stall_start[op_id] = self.engine.now
         self.engine.log("Factory",
                         f"op#{op_id} requests a magic state "
                         f"(store {self.store}, waiting {len(self.waiting)})")
         self._fulfil()
         self._maybe_start()
+        return Ticket(op_id, entry, self)
+
+    def cancel(self, ticket: "Ticket") -> bool:
+        """Withdraw an undelivered request; FIFO order of the rest is preserved."""
+        if ticket.entry in self.waiting:
+            self.waiting.remove(ticket.entry)
+            self._stall_start.pop(ticket.op_id, None)
+            return True
+        return False
 
     def _fulfil(self) -> None:
         """Deliver a state to a waiting request and log it."""
@@ -241,14 +270,24 @@ class MultiLevelDistillationFactory:
         """Stop the production loop."""
         self._shutdown = True
 
-    def request(self, op_id: int, callback: Callable[[], None]) -> None:
+    def request(self, op_id: int, callback: Callable[[], None]) -> "Ticket":
         """A gate asks for a final state; record demand and start producing."""
-        self.waiting.append((op_id, callback))
+        entry = (op_id, callback)
+        self.waiting.append(entry)
         self._stall_start[op_id] = self.engine.now
         self.engine.log("Factory",
                         f"op#{op_id} requests a magic state "
                         f"(top-level store {self.buffer[self.L]}, waiting {len(self.waiting)})")
         self._drive()
+        return Ticket(op_id, entry, self)
+
+    def cancel(self, ticket: "Ticket") -> bool:
+        """Withdraw an undelivered request; FIFO order of the rest is preserved."""
+        if ticket.entry in self.waiting:
+            self.waiting.remove(ticket.entry)
+            self._stall_start.pop(ticket.op_id, None)
+            return True
+        return False
 
     def _fulfil_core(self) -> None:
         """Deliver a finished final state to a waiting request."""
@@ -336,13 +375,6 @@ class MultiLevelDistillationFactory:
     def _start_round(self, level: int) -> None:
         """Begin one distillation round at a level."""
         round_state = {"level": level, "phys": False, "decodes_left": 0, "done": False}
-        if self.decode_service is not None and self.n_corr:
-            round_state["decodes_left"] = self.n_corr
-            for _ in range(self.n_corr):
-                self.decode_service.submit_decode(
-                    self.corr_rounds,
-                    on_done=lambda state=round_state: self._corr_done(state),
-                    label=f"MSF-corr-L{level}")
         self.engine.schedule(
             self.round_time[level],
             lambda state=round_state: self._phys_done(state),
@@ -350,8 +382,18 @@ class MultiLevelDistillationFactory:
         )
 
     def _phys_done(self, round_state: dict) -> None:
-        """The physical distillation time elapsed; finish the round if decoding is also done."""
+        """Physical time elapsed; submit correction decodes NOW (one overlap
+        rule, spec §5.21: corrections start at the end of the physical
+        attempt in every factory — measurement data exists only then)."""
         round_state["phys"] = True
+        if self.decode_service is not None and self.n_corr:
+            round_state["decodes_left"] = self.n_corr
+            level = round_state["level"]
+            for _ in range(self.n_corr):
+                self.decode_service.submit_decode(
+                    self.corr_rounds,
+                    on_done=lambda state=round_state: self._corr_done(state),
+                    label=f"MSF-corr-L{level}")
         self._finish_round(round_state)
 
     def _corr_done(self, round_state: dict) -> None:

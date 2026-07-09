@@ -21,12 +21,13 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from decsim.decoders import PerRoundDecoder, SampledSoftOutputDecoder, SwitchingRouter
+from decsim.decoders import PerRoundDecoder, SampledConfidenceDecoder, SwitchingRouter
 from decsim.message import Operation
 from decsim.schedulers import EarliestDeadlineScheduler
 from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
 from decsim.switching import Switching
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 TAU = 1.0
 
@@ -54,7 +55,7 @@ class InvariantGuard:
             self.peak_busy[pool] = max(self.peak_busy.get(pool, 0), busy)
         if cluster.payloads_held < 0:
             self.violations.append(f"t={now}: payloads_held={cluster.payloads_held} < 0")
-        for op_id, committed in cluster._committed_per_op.items():
+        for op_id, committed in cluster.window_manager._committed_per_op.items():
             planned = cluster.window_count.get(op_id, 0)
             if committed > planned:
                 self.violations.append(
@@ -74,9 +75,9 @@ def _assert_clean(result, guard):
     assert guard.checks > 50, "the guard barely ran -- scenario was not a real stress"
     assert cluster.pool_free == cluster.unit_totals, "a unit was leaked or double-freed"
     assert len(cluster.committed_windows) == cluster.total_windows, "not every window committed"
-    assert sum(cluster._committed_per_op.values()) == cluster.total_windows, "double commit"
+    assert sum(cluster.window_manager._committed_per_op.values()) == cluster.total_windows, "double commit"
     assert cluster.payloads_held == 0, "syndrome RAM not fully freed"
-    assert all(not frags for frags in cluster.payload_store.values()), "syndrome RAM leaked"
+    assert all(not rounds for rounds in cluster.store._payloads.values()), "syndrome RAM leaked"
 
 
 def _independent_patches(n):
@@ -88,11 +89,16 @@ def test_many_patches_few_units_stays_consistent():
     """Twelve independent patches contend for four units under a slow decoder: the units
     saturate (peak busy hits 4) and every window still commits exactly once."""
     guard_box = {}
-    result = build_and_run(
-        _independent_patches(12), num_units=4, d=3, rounds_per_op=40, round_us=TAU,
-        scheme=SlidingWindowScheme(), decoder=PerRoundDecoder(3.0),
-        make_metrics=lambda e, c, ch, fa: [guard_box.setdefault("g", InvariantGuard(c))],
-        verbose=False)
+    result = simulate(RunSpec(
+                 ops=_independent_patches(12),
+                 num_units=4,
+                 d=3,
+                 rounds_policy=FixedRounds(40),
+                 round_us=TAU,
+                 scheme=SlidingWindowScheme(),
+                 decoder=PerRoundDecoder(3.0),
+                 make_metrics=lambda e, c, ch, fa: [guard_box.setdefault("g", InvariantGuard(c))],
+             ), verbose=False)
     guard = guard_box["g"]
     _assert_clean(result, guard)
     assert guard.peak_busy["default"] == 4, "four patches should saturate four units"
@@ -102,11 +108,16 @@ def test_parallel_scheme_under_load_stays_consistent():
     """The parallel A/B scheme exposes concurrent windows: with a slow decoder several units
     run at once, and the commit/RAM bookkeeping survives the out-of-order commits."""
     guard_box = {}
-    result = build_and_run(
-        _independent_patches(3), num_units=4, d=3, rounds_per_op=90, round_us=TAU,
-        scheme=ParallelWindowScheme(), decoder=PerRoundDecoder(12.0),
-        make_metrics=lambda e, c, ch, fa: [guard_box.setdefault("g", InvariantGuard(c))],
-        verbose=False)
+    result = simulate(RunSpec(
+                 ops=_independent_patches(3),
+                 num_units=4,
+                 d=3,
+                 rounds_policy=FixedRounds(90),
+                 round_us=TAU,
+                 scheme=ParallelWindowScheme(),
+                 decoder=PerRoundDecoder(12.0),
+                 make_metrics=lambda e, c, ch, fa: [guard_box.setdefault("g", InvariantGuard(c))],
+             ), verbose=False)
     guard = guard_box["g"]
     _assert_clean(result, guard)
     assert guard.peak_busy["default"] >= 2, "the parallel scheme should run windows concurrently"
@@ -114,15 +125,22 @@ def test_parallel_scheme_under_load_stays_consistent():
 
 def _switching_run(low_confidence_probability, rounds, patches, pools, seed=3,
                    scheduler=None, metrics_box=None, switching=None):
-    weak = SampledSoftOutputDecoder(PerRoundDecoder(0.2 * TAU), low_confidence_probability, seed=seed)
+    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2 * TAU), low_confidence_probability, seed=seed)
     strong = PerRoundDecoder(5.0 * TAU)
-    return build_and_run(
-        _independent_patches(patches), d=3, rounds_per_op=rounds, round_us=TAU,
-        scheme=SlidingWindowScheme(), switching=switching or Switching(confidence_threshold=0.5),
-        decoder=weak, router=SwitchingRouter(weak, strong), unit_pools=pools, scheduler=scheduler,
-        make_metrics=lambda e, c, ch, fa: [metrics_box.setdefault("g", InvariantGuard(c))]
+    return simulate(RunSpec(
+               ops=_independent_patches(patches),
+               d=3,
+               rounds_policy=FixedRounds(rounds),
+               round_us=TAU,
+               scheme=SlidingWindowScheme(),
+               strategy=switching or Switching(confidence_threshold=0.5),
+               decoder=weak,
+               router=SwitchingRouter(weak, strong),
+               unit_pools=pools,
+               scheduler=scheduler,
+               make_metrics=lambda e, c, ch, fa: [metrics_box.setdefault("g", InvariantGuard(c))]
                      if metrics_box is not None else [],
-        verbose=False)
+           ), verbose=False)
 
 
 def test_high_switch_rate_stays_consistent():

@@ -1,97 +1,21 @@
 #==================================================================
-# MODULARITY CONFORMANCE TESTS
-# Two guarantees a researcher extending decsim relies on:
-#   1. every default implementation satisfies its protocol seam, and
-#   2. the standard wiring runs with the seams replaced by minimal
-#      from-scratch implementations that know nothing about the defaults.
-# If a future change breaks an extension point, these tests fail first.
+# MODULARITY CONFORMANCE: the standard wiring runs end to end with the
+# seams replaced by minimal from-scratch implementations that know nothing
+# about the defaults. If a future change breaks an extension point, this
+# fails first. (Per-port protocol conformance of the SHIPPED defaults lives
+# in test_port_conformance.py.)
 #==================================================================
-from decsim import protocols as P
-from decsim.mwpm_decoder import PyMatchingDecoder
-from decsim.adapters.stim_device import StimDevice
-from decsim.chip import Chip
-from decsim.cluster import DecoderCluster
-from decsim.codes import (BBCodeModel, ColorCodeModel, SurfaceCodeModel,
-                          ToricCodeModel)
 from decsim.config import us
-from decsim.controllers import ModularController
-from decsim.decoders import (CodeRouter, LatencyModelDecoder, ParityDecoder,
-                             PresetLatencyDecoder, RelayBPDecoder, SwitchingDecoder)
-from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
-from decsim.engine import Engine
-from decsim.factories import (DistillationFactory, DistillLevel, InfiniteFactory,
-                              MultiLevelDistillationFactory)
-from decsim.frontends.circuit import CircuitFrontend, SurgeryIRFrontend
-from decsim.layouts import UniformLayout, ZonedLayout
 from decsim.message import DecodeResult, Decision, Operation, SyndromePayload
-from decsim.metrics import (DecoderUtilization, MagicStateLatency, ReadyQueueStats,
-                            WindowLatencyBreakdown)
-from decsim.orchestrators import ExecutionOrchestrator
-from decsim.planner import CodeRounds, FixedRounds, WindowPlanner
-from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
-                               FifoScheduler, ReactionPathDeadline)
-from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
-from decsim.wiring import build_and_run
+from decsim.planner import WindowPlanner, FixedRounds
+from decsim.schemes import SlidingWindowScheme
+from decsim.layouts import UniformLayout
+from decsim.codes import SurfaceCodeModel
+from decsim.run_spec import RunSpec, simulate
+from decsim.decoders import PerRoundDecoder
 
 
-def test_default_implementations_satisfy_their_protocols():
-    """Every shipped implementation conforms to the seam it plugs into."""
-    eng = Engine(verbose=False)
-    code = SurfaceCodeModel(d=3)
-    ctrl = ModularController(eng)
-    orch = ExecutionOrchestrator(eng)
-    cluster = DecoderCluster(eng, PresetLatencyDecoder(1.0), FifoScheduler(),
-                             ctrl, orch, num_units=1, code_distance=3)
-    chip = Chip(eng, TimingOnlyDevice(), ctrl, cluster, InfiniteFactory(eng),
-                round_ticks=us(1.0), code_distance=3)
-    pairs = [
-        (P.InputFrontend, CircuitFrontend([])),
-        (P.InputFrontend, SurgeryIRFrontend("")),
-        (P.SyndromeSource, TimingOnlyDevice()),
-        (P.SyndromeSource, SyndromeBitDevice(code)),
-        (P.SyndromeSource, StimDevice()),
-        (P.CodeModel, code),
-        (P.CodeModel, BBCodeModel()),
-        (P.CodeModel, ColorCodeModel()),
-        (P.CodeModel, ToricCodeModel()),
-        (P.LayoutModel, UniformLayout(code)),
-        (P.LayoutModel, ZonedLayout({}, code)),
-        (P.DecodingScheme, SlidingWindowScheme()),
-        (P.DecodingScheme, ParallelWindowScheme()),
-        (P.ExecutionPlanner, WindowPlanner(SlidingWindowScheme(), UniformLayout(code), 11)),
-        (P.RoundsPolicy, FixedRounds(11)),
-        (P.RoundsPolicy, CodeRounds()),
-        (P.Decoder, LatencyModelDecoder(3)),
-        (P.Decoder, PresetLatencyDecoder(1.0)),
-        (P.Decoder, ParityDecoder()),
-        (P.Decoder, RelayBPDecoder()),
-        (P.Decoder, SwitchingDecoder(PresetLatencyDecoder(1.0),
-                                     PresetLatencyDecoder(2.0), 0.5)),
-        (P.Decoder, PyMatchingDecoder(PresetLatencyDecoder(1.0))),
-        (P.Scheduler, FifoScheduler()),
-        (P.Scheduler, EarliestDeadlineScheduler()),
-        (P.DeadlinePolicy, EnqueueTimeDeadline()),
-        (P.DeadlinePolicy, ReactionPathDeadline(0)),
-        (P.DecoderRouter, CodeRouter(PresetLatencyDecoder(1.0))),
-        (P.Controller, ModularController(eng)),
-        (P.Orchestrator, ExecutionOrchestrator(eng)),
-        (P.MagicStateFactory, InfiniteFactory(eng)),
-        (P.MagicStateFactory, DistillationFactory(eng, 1, us(1.0), cluster, 1)),
-        (P.MagicStateFactory, MultiLevelDistillationFactory(
-            eng, [DistillLevel(units=1, d=3)], W_ticks=us(1.0))),
-        (P.DecoderService, cluster),
-        (P.WorkloadManager, cluster),
-        (P.QuantumProcessor, chip),
-        (P.Metric, DecoderUtilization(cluster)),
-        (P.Metric, ReadyQueueStats(cluster)),
-        (P.Metric, WindowLatencyBreakdown(cluster)),
-        (P.Metric, MagicStateLatency(InfiniteFactory(eng))),
-    ]
-    for proto, impl in pairs:
-        assert isinstance(impl, proto), f"{type(impl).__name__} fails {proto.__name__}"
-
-
-# ---- a researcher's from-scratch stack: no defaults, protocol surface only -----------
+# ---- a researcher's from-scratch stack: no defaults, port surface only ----
 
 class MyDevice:
     def begin_operation(self, op):
@@ -137,6 +61,7 @@ class MyLayout:
     def code_for_op(self, op): return self.code
     def spatial_nodes_for(self, op): return self.code.spatial_nodes(len(op.qubits))
     def codes(self): return [self.code]
+    def resources_for(self, op): return []
 
 class MyScheme:
     """One window per op committing everything.
@@ -150,6 +75,9 @@ class MyScheme:
     def data_complete(self, window, rounds_arrived, successor_rounds, memory_rounds,
                       round_count, has_successor, op=None, layout=None):
         return rounds_arrived >= window.commit_hi
+
+    def validate_buffer(self, code):
+        return None
 
 class MyRounds:
     def rounds_for(self, op, code): return 7
@@ -183,22 +111,16 @@ class MyController:
         self.engine.schedule(us(0.1), lambda: deliver(decision))
 
 class MyOrchestrator:
-    def __init__(self, engine):
-        self.engine = engine; self.blocked = {}; self.controller = None; self.sink = None
-        self.prepared = 0
+    """From-scratch Orchestrator: releases blocked ops on basis 'Z'."""
+    def __init__(self):
+        self.blocked = {}; self.controller = None; self.sink = None
+        self.integrated = 0
     def connect(self, controller, decision_sink):
         self.controller = controller; self.sink = decision_sink
     def register_blocked_operation(self, blocked_op_id, blocking_op_id):
         self.blocked.setdefault(blocking_op_id, []).append(blocked_op_id)
-    def prepare_execution(self, *, operations, cluster, planner, decode_operations=None):
-        planning_operations = decode_operations if decode_operations is not None else operations
-        for operation in planning_operations:
-            cluster.register_op(operation)
-        plan = planner.plan(planning_operations)
-        cluster.load_execution_plan(plan)
-        self.prepared += 1
-        return plan
     def integrate(self, op, result):
+        self.integrated += 1
         for decision in self.on_result(op, result):
             self.controller.relay_instruction(decision, self.sink)
     def on_result(self, op, result):
@@ -231,55 +153,56 @@ def _blocked_ops():
 
 
 def test_every_seam_accepts_a_from_scratch_implementation():
-    """The standard wiring runs end to end with the seams replaced by the from-scratch
-    stack above (device, code, layout, scheme, rounds, decoder, router, scheduler,
-    deadline policy, controller, orchestrator, factory, metric -- all at once), with
-    assertions that each custom piece actually participated."""
+    """The standard wiring runs end to end with the seams replaced by the
+    from-scratch stack above (device, code, layout, scheme, rounds, decoder,
+    router, scheduler, deadline policy, controller, orchestrator, factory, metric
+    -- all at once), with assertions that each custom piece participated."""
     decoder, factory, metric = MyDecoder(), MyFactory(), MyMetric()
+    orchestrator = MyOrchestrator()
     router = MyRouter(decoder)
-    r = build_and_run(_blocked_ops(), num_units=2,
-                      device=MyDevice(), code=MyCode(), layout=MyLayout(MyCode()),
-                      scheme=MyScheme(), rounds_policy=MyRounds(),
-                      decoder=decoder, router=router, scheduler=MyScheduler(),
-                      deadline_policy=MyDeadline(),
-                      make_controller=MyController,
-                      make_orchestrator=MyOrchestrator,
-                      factory=factory,
-                      make_metrics=lambda e, cl, ch, f: [metric],
-                      verbose=False)
+    r = simulate(RunSpec(
+            ops=_blocked_ops(),
+            num_units=2,
+            device=MyDevice(),
+            code=MyCode(),
+            layout=MyLayout(MyCode()),
+            scheme=MyScheme(),
+            rounds_policy=MyRounds(),
+            decoder=decoder,
+            router=router,
+            scheduler=MyScheduler(),
+            deadline_policy=MyDeadline(),
+            make_controller=MyController,
+            orchestrator=orchestrator,
+            factory=factory,
+            make_metrics=lambda e, cl, ch, f: [metric],
+        ), verbose=False)
     chip = r["chip"]
     assert len(chip.done_bodies) == 3          # all ops ran, including the blocked T
     assert decoder.decodes >= 3                # the custom decoder decoded every window
     assert router.calls >= 3                   # routed per job
     assert factory.requests == 2               # both T gates drew a state
     assert metric.count > 0                    # the custom metric observed events
-    assert r["orchestrator"].prepared == 1     # the custom orchestrator prepared the plan
+    assert orchestrator.integrated == 3        # the custom orchestrator saw every result
     assert r["fully_done"] > r["chip_done"] >= 0
 
 
-def test_make_cluster_and_workload_manager_protocol():
-    """make_cluster swaps the workload manager; the default satisfies the protocol."""
-    built = {}
-    def make_cluster(engine, decoder, scheduler, controller, orchestrator):
-        c = DecoderCluster(engine, decoder, scheduler, controller, orchestrator,
-                           num_units=4, code_distance=3)
-        built["cluster"] = c
-        return c
-    r = build_and_run(_blocked_ops(), make_cluster=make_cluster, verbose=False)
-    assert r["cluster"] is built["cluster"]
-    assert isinstance(built["cluster"], P.WorkloadManager)
-    assert built["cluster"].num_units == 4     # OUR cluster ran, not a default one
-
-
 def test_planner_parameter_swaps_the_planning_algorithm():
-    """planner= replaces the ExecutionPlanner in the standard wiring."""
+    """planner= replaces the WindowPlanner in the standard wiring."""
     class CountingPlanner:
         def __init__(self, inner): self.inner = inner; self.calls = 0
         def plan(self, ops):
             self.calls += 1
             return self.inner.plan(ops)
     code = SurfaceCodeModel(d=3)
-    planner = CountingPlanner(WindowPlanner(SlidingWindowScheme(), UniformLayout(code), 11))
-    r = build_and_run(_blocked_ops(), d=3, rounds_per_op=11, planner=planner, verbose=False)
+    planner = CountingPlanner(WindowPlanner(
+        SlidingWindowScheme(), UniformLayout(code), FixedRounds(11)))
+    r = simulate(RunSpec(
+            ops=_blocked_ops(),
+            d=3,
+            rounds_policy=FixedRounds(11),
+            planner=planner,
+            decoder=PerRoundDecoder(tau_us=1.0),
+        ), verbose=False)
     assert planner.calls == 1                  # OUR planner produced the plan
     assert r["fully_done"] > 0

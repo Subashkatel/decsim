@@ -19,7 +19,7 @@ pymatching = pytest.importorskip("pymatching")
 from decsim.stimcircuits import NoiseModel
 from decsim.schemes import SlidingWindowScheme, ParallelWindowScheme
 from decsim.codes import SurfaceCodeModel
-from decsim.adapters.window_error_models import (build_window_error_models, WindowSlicer,
+from decsim.detector_error_model import (build_window_error_models, WindowSlicer,
                                                  decode_windowed)
 from decsim.mwpm_decoder import matching_window_decoder
 
@@ -77,3 +77,39 @@ def test_incremental_sliding_decode_equals_global_per_shot():
         pg = int(gm.decode(dets[s])[0])
         agree += (pw == pg)
     assert agree == shots                          # incremental == global, exactly, every shot
+
+
+def test_matching_window_decoder_cache_survives_id_reuse():
+    """Replication-run finding: the matching cache was keyed by id() with no
+    eviction, so a model allocated at a dead model's address received the
+    dead model's matching (shape errors or silently wrong corrections)."""
+    import gc
+    import numpy as np
+    from decsim.detector_error_model import build_window_error_models
+    from decsim.mwpm_decoder import matching_window_decoder
+
+    import pathlib
+    data = pathlib.Path(__file__).resolve().parent / "data"
+    circ = stim.Circuit.from_file(str(data / "rsc-d3-r6-p0.005.stim"))
+    inner = matching_window_decoder()
+
+    def one_model(buffer_rounds):
+        plan = [(1, 3, min(3 + buffer_rounds, 6))]
+        return build_window_error_models(circ, plan)[0]
+
+    a = one_model(0)
+    n_dets_a = a.check.shape[0]
+    inner(a, np.zeros(n_dets_a, dtype=np.uint8))
+    target = id(a)
+    del a
+    gc.collect()
+    for _ in range(500):                       # try to force an id() collision
+        b = one_model(3)                       # DIFFERENT window shape
+        if id(b) == target:
+            break
+        del b
+        gc.collect()
+    else:
+        pytest.skip("could not provoke an id() reuse on this platform")
+    # with the stale cache this raised ValueError (wrong matching graph)
+    inner(b, np.zeros(b.check.shape[0], dtype=np.uint8))

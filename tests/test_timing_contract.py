@@ -3,12 +3,13 @@ import time
 from conftest import trace_time
 
 from decsim.config import TICKS_PER_US, us
-from decsim.controllers import ModularController
+from decsim.controllers import ModularController, LinkModel
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import WindowLatencyBreakdown
 from decsim.schemes import NaiveOnlineScheme
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 
 class BlockingDecoder:
@@ -30,9 +31,7 @@ class BlockingDecoder:
 
 
 def _zero_link_controller(engine):
-    return ModularController(
-        engine, t_qc=0, t_cd=0, t_dd=0, t_do=0, t_oc=0, t_cq=0,
-        log_syndromes=False)
+    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
 
 
 def test_wall_clock_decode_work_does_not_advance_simulated_service_time():
@@ -41,11 +40,16 @@ def test_wall_clock_decode_work_does_not_advance_simulated_service_time():
     op = Operation(0, "M(q0)", (0,), clifford=True, patches=(0,))
 
     t0 = time.perf_counter()
-    res = build_and_run(
-        [op], num_units=1, d=3, rounds_per_op=3, round_us=1.0,
-        decoder=decoder, make_controller=_zero_link_controller,
-        make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
-        verbose=False)
+    res = simulate(RunSpec(
+              ops=[op],
+              num_units=1,
+              d=3,
+              rounds_policy=FixedRounds(3),
+              round_us=1.0,
+              decoder=decoder,
+              make_controller=_zero_link_controller,
+              make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
+          ), verbose=False)
     elapsed = time.perf_counter() - t0
 
     row = WindowLatencyBreakdown(res["cluster"]).rows()[0]
@@ -63,10 +67,16 @@ def test_blocked_operation_waits_for_modeled_decode_time_not_wall_clock_runtime(
                   consumes_magic_state=False),
     ]).build()
 
-    res = build_and_run(
-        ops, num_units=1, d=3, rounds_per_op=3, round_us=1.0,
-        decoder=decoder, scheme=NaiveOnlineScheme(),
-        make_controller=_zero_link_controller, verbose=False)
+    res = simulate(RunSpec(
+              ops=ops,
+              num_units=1,
+              d=3,
+              rounds_policy=FixedRounds(3),
+              round_us=1.0,
+              decoder=decoder,
+              scheme=NaiveOnlineScheme(),
+              make_controller=_zero_link_controller,
+          ), verbose=False)
 
     first_window = res["cluster"].windows[(0, 0)]
     assert first_window.t_done - first_window.t_dispatch == us(1.0)

@@ -6,7 +6,8 @@ from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import BacklogTrajectory, ConditionalReactionTime
 from decsim.schemes import NaiveOnlineScheme
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 
 class _FixedLatency:
@@ -36,18 +37,17 @@ def test_reaction_time_is_pure_wait_in_rounds():
         Operation(0, "A:T(q0)", (0,), clifford=False),
         Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0),
     ]).build()
-    result = build_and_run(
-        ops,
-        num_units=2,
-        d=3,
-        rounds_per_op=11,
-        decoder=PresetLatencyDecoder(1.0),
-        make_metrics=lambda _engine, _cluster, chip, _factory: [
+    result = simulate(RunSpec(
+                 ops=ops,
+                 num_units=2,
+                 d=3,
+                 rounds_policy=FixedRounds(11),
+                 decoder=PresetLatencyDecoder(1.0),
+                 make_metrics=lambda _engine, _cluster, chip, _factory: [
             ConditionalReactionTime(chip),
             BacklogTrajectory(chip),
         ],
-        verbose=False,
-    )
+             ), verbose=False)
 
     reaction = result["metrics"]["conditional_reaction_time"]
     backlog_row = BacklogTrajectory(result["chip"]).rows()[0]
@@ -61,17 +61,16 @@ def test_reaction_time_is_pure_wait_in_rounds():
 
 def test_reaction_time_uses_all_conditionals_as_denominator():
     """SWIPER averages over the number of conditional operations."""
-    result = build_and_run(
-        _two_conditional_ops(),
-        num_units=2,
-        d=3,
-        rounds_per_op=11,
-        decoder=PresetLatencyDecoder(1.0),
-        make_metrics=lambda _engine, _cluster, chip, _factory: [
+    result = simulate(RunSpec(
+                 ops=_two_conditional_ops(),
+                 num_units=2,
+                 d=3,
+                 rounds_policy=FixedRounds(11),
+                 decoder=PresetLatencyDecoder(1.0),
+                 make_metrics=lambda _engine, _cluster, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
-        verbose=False,
-    )
+             ), verbose=False)
 
     reaction = result["metrics"]["conditional_reaction_time"]
     waits = reaction["conditioned_decode_wait_times"]
@@ -84,17 +83,16 @@ def test_reaction_time_uses_all_conditionals_as_denominator():
 
 def test_reaction_time_marks_threshold_divergence():
     """A configured threshold marks off-scale reaction waits as divergent."""
-    result = build_and_run(
-        _two_conditional_ops(),
-        num_units=2,
-        d=3,
-        rounds_per_op=11,
-        decoder=PresetLatencyDecoder(1.0),
-        make_metrics=lambda _engine, _cluster, chip, _factory: [
+    result = simulate(RunSpec(
+                 ops=_two_conditional_ops(),
+                 num_units=2,
+                 d=3,
+                 rounds_policy=FixedRounds(11),
+                 decoder=PresetLatencyDecoder(1.0),
+                 make_metrics=lambda _engine, _cluster, chip, _factory: [
             ConditionalReactionTime(chip, divergence_threshold_rounds=0.5)
         ],
-        verbose=False,
-    )
+             ), verbose=False)
 
     reaction = result["metrics"]["conditional_reaction_time"]
 
@@ -111,20 +109,19 @@ def test_reaction_time_marks_idle_cap_failure():
         Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0,
                   consumes_magic_state=False),
     ]).build()
-    result = build_and_run(
-        ops,
-        num_units=1,
-        d=3,
-        rounds_per_op=3,
-        round_us=1.0,
-        scheme=NaiveOnlineScheme(),
-        decoder=_FixedLatency(50.0),
-        max_idle_rounds=1,
-        make_metrics=lambda _engine, _cluster, chip, _factory: [
+    result = simulate(RunSpec(
+                 ops=ops,
+                 num_units=1,
+                 d=3,
+                 rounds_policy=FixedRounds(3),
+                 round_us=1.0,
+                 scheme=NaiveOnlineScheme(),
+                 decoder=_FixedLatency(50.0),
+                 max_idle_rounds=1,
+                 make_metrics=lambda _engine, _cluster, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
-        verbose=False,
-    )
+             ), verbose=False)
 
     reaction = result["metrics"]["conditional_reaction_time"]
 
@@ -139,15 +136,14 @@ def test_final_non_clifford_decode_does_not_return_to_chip_by_default():
     ops = CircuitFrontend([
         Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
     ]).build()
-    result = build_and_run(
-        ops,
-        num_units=1,
-        d=3,
-        rounds_per_op=5,
-        round_us=1.0,
-        decoder=PresetLatencyDecoder(2.0),
-        verbose=False,
-    )
+    result = simulate(RunSpec(
+                 ops=ops,
+                 num_units=1,
+                 d=3,
+                 rounds_policy=FixedRounds(5),
+                 round_us=1.0,
+                 decoder=PresetLatencyDecoder(2.0),
+             ), verbose=False)
 
     assert result["cluster"].windows[(0, 0)].t_done is not None
     assert result["chip"].result_return_time_by_operation == {}
@@ -167,15 +163,14 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
             requires_result_return_to_chip=True,
         ),
     ]).build()
-    result = build_and_run(
-        ops,
-        num_units=1,
-        d=3,
-        rounds_per_op=5,
-        round_us=1.0,
-        decoder=PresetLatencyDecoder(2.0),
-        verbose=False,
-    )
+    result = simulate(RunSpec(
+                 ops=ops,
+                 num_units=1,
+                 d=3,
+                 rounds_policy=FixedRounds(5),
+                 round_us=1.0,
+                 decoder=PresetLatencyDecoder(2.0),
+             ), verbose=False)
 
     controller = result["controller"]
     window_done = max(
@@ -206,17 +201,16 @@ def test_naive_batch_decode_label_shows_absorbed_idle_rounds():
         Operation(1, "T1", (0,), clifford=False, blocked_by=0,
                   consumes_magic_state=False),
     ]).build()
-    result = build_and_run(
-        ops,
-        num_units=1,
-        d=3,
-        rounds_per_op=27,
-        round_us=1.0,
-        scheme=NaiveOnlineScheme(),
-        decoder=_FixedLatency(20.0),
-        max_idle_rounds=1000,
-        verbose=False,
-    )
+    result = simulate(RunSpec(
+                 ops=ops,
+                 num_units=1,
+                 d=3,
+                 rounds_policy=FixedRounds(27),
+                 round_us=1.0,
+                 scheme=NaiveOnlineScheme(),
+                 decoder=_FixedLatency(20.0),
+                 max_idle_rounds=1000,
+             ), verbose=False)
 
     assert result["cluster"].windows[(1, 0)].n_rounds > 27
     assert any("T1 [whole op," in line and "idle + 27 body" in line

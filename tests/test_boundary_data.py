@@ -4,18 +4,17 @@
 # correction chains that cross out of the commit region creates artificial
 # defects just outside it; the dependent window must include them.
 #==================================================================
-from decsim.cluster import DecoderCluster
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.controllers import ModularController, LinkModel
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import SyndromeBitDevice
 from decsim.engine import Engine
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation, SyndromePayload
-from decsim.orchestrators import ExecutionOrchestrator
-from decsim.schedulers import FifoScheduler
-from decsim.wiring import build_and_run
+from decsim.planner import FixedRounds
+from decsim.run_spec import RunSpec
+from decsim.run_spec import RunSpec, simulate
 
 
 MASK = (1, 0, 1, 0, 1, 0, 1, 0)
@@ -48,8 +47,14 @@ def _memory_ops(n=1):
 
 def _run(ops, emit, device=None):
     dec = DefectEmittingDecoder(emit)
-    build_and_run(ops, num_units=2, d=3, rounds_per_op=11, decoder=dec,
-                  device=device, verbose=False)
+    simulate(RunSpec(
+        ops=ops,
+        num_units=2,
+        d=3,
+        rounds_policy=FixedRounds(11),
+        decoder=dec,
+        device=device,
+    ), verbose=False)
     return dec.seen
 
 
@@ -96,14 +101,11 @@ def test_timing_only_payload_becomes_defect_mask():
 
 def test_per_patch_fragments_gate_round_arrival():
     # a round with n_fragments=2 only counts as arrived once BOTH patches are in
-    eng = Engine(verbose=False)
-    cl = DecoderCluster(eng, PresetLatencyDecoder(1.0), FifoScheduler(),
-                        ModularController(eng), ExecutionOrchestrator(eng),
-                        num_units=1, code_distance=3)
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     op.patches = (0, 1)
-    cl.register_op(op)
-    cl.build_windows()
+    cl = RunSpec(ops=[op], d=3, rounds_policy=FixedRounds(11),
+                 decoder=PresetLatencyDecoder(1.0),
+                 num_units=1).build().cluster    # ops registered, windows built
     cl.on_syndrome_arrival(SyndromePayload(0, 0, 1, n_fragments=2))
     assert cl.rounds_arrived[0] == 0             # half the round is not the round
     cl.on_syndrome_arrival(SyndromePayload(0, 1, 1, n_fragments=2))
@@ -114,9 +116,13 @@ def test_per_patch_device_end_to_end():
     # a 2-patch op with a per-patch device: every decoded round carries BOTH fragments
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     dec = DefectEmittingDecoder(emit=False)
-    build_and_run(CircuitFrontend([op]).build(), num_units=1, d=3, rounds_per_op=11,
-                  decoder=dec,
-                  device=SyndromeBitDevice(SurfaceCodeModel(d=3), seed=3, per_patch=True),
-                  verbose=False)
+    simulate(RunSpec(
+        ops=CircuitFrontend([op]).build(),
+        num_units=1,
+        d=3,
+        rounds_policy=FixedRounds(11),
+        decoder=dec,
+        device=SyndromeBitDevice(SurfaceCodeModel(d=3), seed=3, per_patch=True),
+    ), verbose=False)
     w0_rounds = {(r, p) for (_, k, _, r, p) in dec.seen if k == 0}
     assert {(r, p) for r in range(1, 7) for p in (0, 1)} <= w0_rounds

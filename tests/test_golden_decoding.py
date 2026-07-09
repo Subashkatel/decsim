@@ -20,7 +20,7 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 pytest.importorskip("ldpc")
 
-from decsim.adapters.window_error_models import (build_window_error_models,  # noqa: E402
+from decsim.detector_error_model import (build_window_error_models,  # noqa: E402
                                                  decode_windowed)
 from decsim.belief_matching_decoder import belief_matching_window_decoder    # noqa: E402
 from decsim.mwpm_decoder import matching_window_decoder                       # noqa: E402
@@ -79,7 +79,7 @@ def test_golden_bposd(name):
     sp = pytest.importorskip("scipy.sparse")
     from ldpc import BpOsdDecoder
 
-    from decsim.adapters.window_error_models import detector_error_model_to_faults
+    from decsim.detector_error_model import detector_error_model_to_faults
     from decsim.bposd_decoder import bposd_window_decoder
 
     g = GOLDEN["scenarios"][name]

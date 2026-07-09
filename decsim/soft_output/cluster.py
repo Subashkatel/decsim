@@ -9,7 +9,7 @@ from ..message import SoftOutput
 
 if TYPE_CHECKING:
     import stim
-    from ..adapters.window_error_models import WindowErrorModel
+    from ..detector_error_model import WindowErrorModel
 
 _CITATION = "Meister/Pattison/Preskill arXiv:2405.07433 Def. 9, Alg. 2; Thm. 13"
 
@@ -203,7 +203,8 @@ def union_find_clusters(edges, syndrome_set, n_det, mode="simultaneous"):
 
 
 def quotient_weight(edges, cluster_of, fill):
-    """Grown-ball quotient weights: 0 inside a cluster, else uncovered remainder ``w_e - fill[e]``."""
+    """Grown-ball quotient weights: 0 inside a cluster, else uncovered
+    remainder ``w_e - fill[e]``."""
     qw = []
     for idx, (u, v, w, _o) in enumerate(edges):
         if cluster_of[u] == cluster_of[v]:
@@ -296,7 +297,8 @@ class ClusterGapMetric:
         return gap, cluster_of, fill, qw, dual_mass
 
     def evaluate(self, syndrome, robust: bool = False) -> SoftOutput:
-        """Soft output for one syndrome; ``robust=True`` subtracts the UF duality gap ``max(0, w_min - D_UF)``."""
+        """Soft output for one syndrome; ``robust=True`` subtracts the
+        UF duality gap ``max(0, w_min - D_UF)``."""
         import numpy as np
 
         bits = np.asarray(syndrome, dtype=np.uint8).ravel()

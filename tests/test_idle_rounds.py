@@ -10,7 +10,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from decsim.decoders import PresetLatencyDecoder
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import Operation
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 
 def _t_then_blocked_t():
@@ -25,9 +26,14 @@ def _t_then_blocked_t():
 def test_cap_fires_loudly_and_stops_emission():
     """With a reaction wait far longer than the cap: exactly `cap` memory rounds are
     emitted, the WARNING names the knob, and the workload still completes."""
-    r = build_and_run(_t_then_blocked_t(), num_units=1, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(200.0),   # reaction >> cap rounds
-                      max_idle_rounds=10, verbose=False)
+    r = simulate(RunSpec(
+            ops=_t_then_blocked_t(),
+            num_units=1,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PresetLatencyDecoder(200.0),
+            max_idle_rounds=10,
+        ), verbose=False)
     lines = r["engine"].log_lines
     assert sum("memory round for A:T(q0)" in l for l in lines) == 10
     assert any("hit the idle-round cap" in l and "max_idle_rounds=10" in l
@@ -37,7 +43,12 @@ def test_cap_fires_loudly_and_stops_emission():
 
 def test_default_cap_is_unchanged_and_silent():
     """No knob: the cap stays 100*d and a normal run never logs the warning."""
-    r = build_and_run(_t_then_blocked_t(), num_units=1, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(1.0), verbose=False)
+    r = simulate(RunSpec(
+            ops=_t_then_blocked_t(),
+            num_units=1,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PresetLatencyDecoder(1.0),
+        ), verbose=False)
     assert r["chip"].max_idle_rounds == 100 * 3
     assert not any("hit the idle-round cap" in l for l in r["engine"].log_lines)

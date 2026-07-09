@@ -17,6 +17,7 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
 from decsim.stimcircuits import NoiseModel
+from decsim.run_spec import RunSpec, simulate
 
 
 def _ler_offline(circuit, shots=20000, seed=0):
@@ -62,6 +63,50 @@ def test_logical_error_rate_monotonic_in_p():
     assert lers[0] < lers[-1]                   # genuinely grows across the range
 
 
+def test_high_p_saturates_at_coin_flip_and_windows_survive_dense_syndromes():
+    """Far above threshold the decoder must be no better than a coin flip --
+    LER saturates at 1/2 (a scale/sign bug would show up as e.g. 0.9 or 0.3).
+    The same shots are also the dense-syndrome case (detection density ~0.5,
+    merged DEM priors approaching the p=0.5 weight boundary): the windowed
+    slicer must decode them and saturate identically, not crash or diverge."""
+    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    from decsim.mwpm_decoder import matching_window_decoder
+    from decsim.codes import SurfaceCodeModel
+    from decsim.schemes import SlidingWindowScheme
+
+    c = NoiseModel.circuit_level(0.15).circuit(distance=3, rounds=9)
+    dets, obs = c.compile_detector_sampler(seed=5).sample(
+        4000, separate_observables=True)
+    assert float(dets.mean()) > 0.4               # genuinely dense
+    matcher = pymatching.Matching.from_detector_error_model(
+        c.detector_error_model(decompose_errors=True))
+    ler = float((matcher.decode_batch(dets)[:, 0] != obs[:, 0]).mean())
+    assert 0.45 < ler < 0.55, f"saturation broken: global LER {ler}"
+
+    n_layers = 1 + max(int(cc[-1])
+                       for cc in c.get_detector_coordinates().values())
+    plan = SlidingWindowScheme().plan_windows(0, n_layers, SurfaceCodeModel(d=3))
+    models = build_window_error_models(c, plan)
+    decode = matching_window_decoder()
+    global_pred = matcher.decode_batch(dets)[:500, 0]
+    windowed_pred = np.array([
+        int(decode_windowed(models, dets[k], decode)[0]) for k in range(500)])
+    w_fail = windowed_pred != obs[:500, 0]
+    w_ler = float(w_fail.mean())
+    assert 0.4 < w_ler < 0.6, f"windowed saturation broken: {w_ler}"
+    # windowed must still TRACK global at ~50% density, not merely also
+    # saturate (fixed seed; measured 13/500 disagreements, only_w/only_g
+    # = 7/6 -- balanced, no systematic windowed bias)
+    disagree = int((windowed_pred != global_pred).sum())
+    assert disagree <= 40, \
+        f"windowed drifted from global in dense regime: {disagree}/500"
+    g_fail = global_pred != obs[:500, 0]
+    only_w = int((w_fail & ~g_fail).sum())
+    only_g = int((g_fail & ~w_fail).sum())
+    assert abs(only_w - only_g) <= 10, \
+        f"systematic windowed bias at saturation: {only_w} vs {only_g}"
+
+
 def test_phenomenological_1p5x_is_applied_not_just_stored():
     """The 1.5x is the whole point of phenomenological(): with data depolarization at 1.5p
     the circuit must be measurably NOISIER than the bare-p footgun (data p, meas p) it
@@ -79,7 +124,6 @@ def test_phenomenological_1p5x_is_applied_not_just_stored():
 def test_runs_through_full_engine():
     """A NoiseModel circuit decodes through the real StimDevice -> cluster -> PyMatching path."""
     from decsim.message import Operation
-    from decsim.wiring import build_and_run
     from decsim.adapters.stim_device import StimDevice
     from decsim.mwpm_decoder import PyMatchingDecoder
     from decsim.schemes import SlidingWindowScheme
@@ -93,8 +137,14 @@ def test_runs_through_full_engine():
     D, R = 3, 12
     circ = NoiseModel.circuit_level(0.003).circuit(distance=D, rounds=R)
     op = Operation(id=1, name="mem", qubits=(0,), clifford=True, circuit=circ)
-    res = build_and_run(ops=[op], num_units=4, d=D, rounds_policy=FixedRounds(R),
-                        code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                        device=StimDevice(seed=1),
-                        decoder=PyMatchingDecoder(_ZeroLatency()), verbose=False)
+    res = simulate(RunSpec(
+              ops=[op],
+              num_units=4,
+              d=D,
+              rounds_policy=FixedRounds(R),
+              code=SurfaceCodeModel(d=D),
+              scheme=SlidingWindowScheme(),
+              device=StimDevice(seed=1),
+              decoder=PyMatchingDecoder(_ZeroLatency()),
+          ), verbose=False)
     assert 1 in res["cluster"].op_results        # produced a real logical value

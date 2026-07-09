@@ -3,7 +3,7 @@
 import pytest
 
 from decsim.codes import SurfaceCodeModel
-from decsim.controllers import ModularController
+from decsim.controllers import ModularController, LinkModel
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.frontends.circuit import CircuitFrontend
@@ -11,14 +11,14 @@ from decsim.message import Operation
 from decsim.metrics import ConditionalReactionTime
 from decsim.planner import PerOpRounds
 from decsim.schemes import SlidingWindowScheme
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
+from decsim.policies import from_mode
 
 
 def _zero_link_controller(engine):
     """Controller whose fabric links take no simulated time."""
-    return ModularController(
-        engine, t_qc=0, t_cd=0, t_dd=0, t_do=0, t_oc=0, t_cq=0,
-        log_syndromes=False)
+    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
 
 
 def _feedback_chain():
@@ -37,21 +37,20 @@ def _reaction_rows(result):
 
 def test_trailing_buffer_boundary_keeps_existing_static_wait():
     """The default SWIPER-baseline mode waits for the final look-ahead buffer."""
-    result = build_and_run(
-        _feedback_chain(),
-        num_units=1,
-        d=3,
-        rounds_per_op=3,
-        round_us=1.0,
-        code=SurfaceCodeModel(d=3),
-        scheme=SlidingWindowScheme(),
-        decoder=PresetLatencyDecoder(2.0),
-        make_controller=_zero_link_controller,
-        make_metrics=lambda _engine, _cluster, chip, _factory: [
+    result = simulate(RunSpec(
+                 ops=_feedback_chain(),
+                 num_units=1,
+                 d=3,
+                 rounds_policy=FixedRounds(3),
+                 round_us=1.0,
+                 code=SurfaceCodeModel(d=3),
+                 scheme=SlidingWindowScheme(),
+                 decoder=PresetLatencyDecoder(2.0),
+                 make_controller=_zero_link_controller,
+                 make_metrics=lambda _engine, _cluster, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
-        verbose=False,
-    )
+             ), verbose=False)
 
     rows = _reaction_rows(result)
     assert len(rows) == 1
@@ -61,22 +60,21 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
 
 def test_measurement_closed_boundary_removes_only_static_buffer_wait():
     """DecLat-style closed boundaries submit the final window without the +d buffer wait."""
-    result = build_and_run(
-        _feedback_chain(),
-        num_units=1,
-        d=3,
-        rounds_per_op=3,
-        round_us=1.0,
-        code=SurfaceCodeModel(d=3),
-        scheme=SlidingWindowScheme(),
-        decoder=PresetLatencyDecoder(2.0),
-        make_controller=_zero_link_controller,
-        make_metrics=lambda _engine, _cluster, chip, _factory: [
+    result = simulate(RunSpec(
+                 ops=_feedback_chain(),
+                 num_units=1,
+                 d=3,
+                 rounds_policy=FixedRounds(3),
+                 round_us=1.0,
+                 code=SurfaceCodeModel(d=3),
+                 scheme=SlidingWindowScheme(),
+                 decoder=PresetLatencyDecoder(2.0),
+                 make_controller=_zero_link_controller,
+                 make_metrics=lambda _engine, _cluster, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
-        feedback_boundary_mode="measurement_closed",
-        verbose=False,
-    )
+                 feedback_boundary_mode="measurement_closed",
+             ), verbose=False)
 
     rows = _reaction_rows(result)
     assert len(rows) == 1
@@ -118,21 +116,20 @@ def _run_live_stream_pair(mode: str):
         operations[0].id: 2,
         operations[1].id: 2,
     }
-    return build_and_run(
-        operations,
-        dynamic_streams=[stream],
-        idle_round_mode="extend_stream",
-        device=TimingOnlyDevice(),
-        code=SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1),
-        rounds_policy=PerOpRounds(rounds),
-        scheme=SlidingWindowScheme(),
-        decoder=PresetLatencyDecoder(0.0),
-        num_units=1,
-        round_us=1.0,
-        make_controller=_zero_link_controller,
-        feedback_boundary_mode=mode,
-        verbose=False,
-    )
+    return simulate(RunSpec(
+               ops=operations,
+               dynamic_streams=[stream],
+               idle_policy=from_mode("extend_stream"),
+               device=TimingOnlyDevice(),
+               code=SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1),
+               rounds_policy=PerOpRounds(rounds),
+               scheme=SlidingWindowScheme(),
+               decoder=PresetLatencyDecoder(0.0),
+               num_units=1,
+               round_us=1.0,
+               make_controller=_zero_link_controller,
+               feedback_boundary_mode=mode,
+           ), verbose=False)
 
 
 def test_measurement_closed_boundary_closes_live_stream_without_idle_buffer():
@@ -168,19 +165,18 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
     for operation in operations:
         operation.circuit = circuit
 
-    result = build_and_run(
-        operations,
-        device=StimDevice(seed=19),
-        code=code,
-        scheme=SlidingWindowScheme(),
-        decoder=PyMatchingDecoder(PresetLatencyDecoder(0.0)),
-        num_units=1,
-        rounds_per_op=code.commit_rounds(),
-        round_us=1.0,
-        make_controller=_zero_link_controller,
-        feedback_boundary_mode="measurement_closed",
-        verbose=False,
-    )
+    result = simulate(RunSpec(
+                 ops=operations,
+                 device=StimDevice(seed=19),
+                 code=code,
+                 scheme=SlidingWindowScheme(),
+                 decoder=PyMatchingDecoder(PresetLatencyDecoder(0.0)),
+                 num_units=1,
+                 rounds_policy=FixedRounds(code.commit_rounds()),
+                 round_us=1.0,
+                 make_controller=_zero_link_controller,
+                 feedback_boundary_mode="measurement_closed",
+             ), verbose=False)
 
     assert result["cluster"].rounds_arrived[operations[0].id] == code.commit_rounds()
     assert operations[0].id in result["cluster"].op_results
@@ -209,10 +205,10 @@ def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
         operations[1].id: 2,
     }
     with pytest.raises(RuntimeError, match="destructive boundary"):
-        build_and_run(
-            operations,
+        simulate(RunSpec(
+            ops=operations,
             dynamic_streams=[stream],
-            idle_round_mode="extend_stream",
+            idle_policy=from_mode("extend_stream"),
             device=StimDevice(seed=19),
             code=code,
             rounds_policy=PerOpRounds(rounds),
@@ -222,5 +218,4 @@ def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
             round_us=1.0,
             make_controller=_zero_link_controller,
             feedback_boundary_mode="measurement_closed",
-            verbose=False,
-        )
+        ), verbose=False)

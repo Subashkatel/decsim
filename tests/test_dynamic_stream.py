@@ -19,13 +19,13 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
 from decsim.stimcircuits import NoiseModel
-from decsim.streams import continuous_stream
+from conftest import continuous_stream
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder
 from decsim.schemes import SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import PerOpRounds
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
 
 D, P = 3, 0.003
 
@@ -36,10 +36,17 @@ class _ZeroLatency:
 
 
 def _run(circ, segments, stream_op, rounds_map, device):
-    return build_and_run(ops=segments, dynamic_streams=[stream_op], device=device,
-                         num_units=4, d=D, rounds_policy=PerOpRounds(rounds_map),
-                         code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                         decoder=PyMatchingDecoder(_ZeroLatency()), verbose=False)
+    return simulate(RunSpec(
+               ops=segments,
+               dynamic_streams=[stream_op],
+               device=device,
+               num_units=4,
+               d=D,
+               rounds_policy=PerOpRounds(rounds_map),
+               code=SurfaceCodeModel(d=D),
+               scheme=SlidingWindowScheme(),
+               decoder=PyMatchingDecoder(_ZeroLatency()),
+           ), verbose=False)
 
 
 def test_runtime_built_windows_equal_global_per_shot():
@@ -86,9 +93,16 @@ def test_dynamic_matches_static_decode_unit_per_shot():
     dyn_dev, stat_dev = StimDevice(seed=9), StimDevice(seed=9)        # same seed -> same shots
     for _ in range(120):
         rd = _run(circ, segs_d, stream_d, rmap, dyn_dev)
-        rs = build_and_run(ops=segs_s, decode_ops=[stream_s], device=stat_dev, num_units=4, d=D,
-                           rounds_policy=PerOpRounds(rmap), code=SurfaceCodeModel(d=D),
-                           scheme=SlidingWindowScheme(), decoder=PyMatchingDecoder(_ZeroLatency()),
-                           verbose=False)
+        rs = simulate(RunSpec(
+                 ops=segs_s,
+                 decode_ops=[stream_s],
+                 device=stat_dev,
+                 num_units=4,
+                 d=D,
+                 rounds_policy=PerOpRounds(rmap),
+                 code=SurfaceCodeModel(d=D),
+                 scheme=SlidingWindowScheme(),
+                 decoder=PyMatchingDecoder(_ZeroLatency()),
+             ), verbose=False)
         assert int(rd["cluster"].op_results.get(stream_d.id, 0)) == \
                int(rs["cluster"].op_results.get(stream_s.id, 0))

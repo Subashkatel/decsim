@@ -19,13 +19,13 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
 from decsim.stimcircuits import NoiseModel
-from decsim.streams import continuous_stream
+from conftest import continuous_stream
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder
 from decsim.schemes import SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import PerOpRounds
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
 
 D, P = 3, 0.003
 
@@ -45,10 +45,17 @@ def _agreement(segment_rounds, shots, seed=11):
     agree = eng_err = glob_err = 0
     last = None
     for _ in range(shots):
-        res = build_and_run(ops=segments, decode_ops=[stream_op], device=device,
-                            num_units=4, d=D, rounds_policy=PerOpRounds(rounds_map),
-                            code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                            decoder=PyMatchingDecoder(_ZeroLatency()), verbose=False)
+        res = simulate(RunSpec(
+                  ops=segments,
+                  decode_ops=[stream_op],
+                  device=device,
+                  num_units=4,
+                  d=D,
+                  rounds_policy=PerOpRounds(rounds_map),
+                  code=SurfaceCodeModel(d=D),
+                  scheme=SlidingWindowScheme(),
+                  decoder=PyMatchingDecoder(_ZeroLatency()),
+              ), verbose=False)
         pe = int(res["cluster"].op_results.get(stream_op.id, 0))
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         t = int(device._truth[stream_op.id][0])

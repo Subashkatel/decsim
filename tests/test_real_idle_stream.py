@@ -13,13 +13,13 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
 from decsim.stimcircuits import NoiseModel
-from decsim.streams import continuous_stream
+from conftest import continuous_stream
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder
 from decsim.schemes import SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import PerOpRounds
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
 
 D, P = 3, 0.005
 OP_A, IDLE, OP_B = 8, 8, 8                     # [op | idle | op] on one continuous patch
@@ -70,10 +70,17 @@ def test_continuous_idle_decode_equals_global_per_shot():
     agree = eng_err = glob_err = 0
     shots = 250
     for _ in range(shots):
-        res = build_and_run(ops=segments, decode_ops=[stream_op], device=device,
-                            num_units=4, d=D, rounds_policy=PerOpRounds(rounds_map),
-                            code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                            decoder=PyMatchingDecoder(_ZeroLatency()), verbose=False)
+        res = simulate(RunSpec(
+                  ops=segments,
+                  decode_ops=[stream_op],
+                  device=device,
+                  num_units=4,
+                  d=D,
+                  rounds_policy=PerOpRounds(rounds_map),
+                  code=SurfaceCodeModel(d=D),
+                  scheme=SlidingWindowScheme(),
+                  decoder=PyMatchingDecoder(_ZeroLatency()),
+              ), verbose=False)
         pe = int(res["cluster"].op_results.get(stream_op.id, 0))
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         t = int(device._truth[stream_op.id][0])
@@ -100,10 +107,17 @@ def test_idle_stretch_decoded_by_runtime_builder_equals_global():
     agree = 0
     shots = 200
     for _ in range(shots):
-        res = build_and_run(ops=segments, dynamic_streams=[stream_op], device=device,  # RUNTIME windows
-                            num_units=4, d=D, rounds_policy=PerOpRounds(rounds_map),
-                            code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                            decoder=PyMatchingDecoder(_ZeroLatency()), verbose=False)
+        res = simulate(RunSpec(
+                  ops=segments,
+                  dynamic_streams=[stream_op],
+                  device=device,
+                  num_units=4,
+                  d=D,
+                  rounds_policy=PerOpRounds(rounds_map),
+                  code=SurfaceCodeModel(d=D),
+                  scheme=SlidingWindowScheme(),
+                  decoder=PyMatchingDecoder(_ZeroLatency()),
+              ), verbose=False)
         pe = int(res["cluster"].op_results.get(stream_op.id, 0))
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         agree += (pe == pg)
@@ -114,10 +128,17 @@ def test_a_window_commits_inside_the_idle_stretch():
     """The idle rounds are genuinely decoded: at least one window commits rounds that lie wholly
     within the idle segment (global rounds OP_A+1 .. OP_A+IDLE)."""
     circ, segments, stream_op, rounds_map = _setup()
-    res = build_and_run(ops=segments, decode_ops=[stream_op], device=StimDevice(seed=3),
-                        num_units=4, d=D, rounds_policy=PerOpRounds(rounds_map),
-                        code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                        decoder=PyMatchingDecoder(_ZeroLatency()), verbose=False)
+    res = simulate(RunSpec(
+              ops=segments,
+              decode_ops=[stream_op],
+              device=StimDevice(seed=3),
+              num_units=4,
+              d=D,
+              rounds_policy=PerOpRounds(rounds_map),
+              code=SurfaceCodeModel(d=D),
+              scheme=SlidingWindowScheme(),
+              decoder=PyMatchingDecoder(_ZeroLatency()),
+          ), verbose=False)
     cluster = res["cluster"]
     lo, hi = OP_A + 1, OP_A + IDLE
     inside = [w for (op, k), w in cluster.windows.items()

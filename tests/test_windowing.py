@@ -3,14 +3,16 @@
 #==================================================================
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
-from decsim.decoders import LatencyModelDecoder, PresetLatencyDecoder
+from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.layouts import UniformLayout
 from decsim.message import Operation
-from decsim.planner import PerOpRounds, WindowPlanner
+from decsim.planner import WindowPlanner
+from decsim.planner import PerOpRounds
 from decsim.schemes import SlidingWindowScheme, ParallelWindowScheme
-from decsim.streams import continuous_stream
-from decsim.wiring import build_and_run
+from conftest import continuous_stream
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 
 def _memory_op(rounds_unused=None):
@@ -126,10 +128,17 @@ def test_timing_only_stream_runs_through_normal_parallel_scheme():
     WindowPlanner + ParallelWindowScheme path."""
     d = 3
     plan, segments, stream_op, rounds_map = _timing_stream_plan([6, 6, 6], d=d)
-    res = build_and_run(ops=segments, decode_ops=[stream_op], device=TimingOnlyDevice(),
-                        num_units=4, d=d, rounds_policy=PerOpRounds(rounds_map),
-                        code=SurfaceCodeModel(d=d), scheme=ParallelWindowScheme(),
-                        decoder=PresetLatencyDecoder(0.1), verbose=False)
+    res = simulate(RunSpec(
+              ops=segments,
+              decode_ops=[stream_op],
+              device=TimingOnlyDevice(),
+              num_units=4,
+              d=d,
+              rounds_policy=PerOpRounds(rounds_map),
+              code=SurfaceCodeModel(d=d),
+              scheme=ParallelWindowScheme(),
+              decoder=PresetLatencyDecoder(0.1),
+          ), verbose=False)
     cluster = res["cluster"]
     assert cluster.window_count[stream_op.id] == plan.window_count[stream_op.id]
     assert all(seg.id not in cluster.window_count for seg in segments)
@@ -152,16 +161,15 @@ def test_short_successor_closes_cross_operation_buffer():
                        predecessors=(0,))
     first.has_successor = True
     rounds_map = {0: 3, 1: 1}
-    result = build_and_run(
-        [first, second],
-        num_units=2,
-        d=3,
-        rounds_policy=PerOpRounds(rounds_map),
-        code=SurfaceCodeModel(d=3),
-        scheme=SlidingWindowScheme(),
-        decoder=PresetLatencyDecoder(0.1),
-        verbose=False,
-    )
+    result = simulate(RunSpec(
+                 ops=[first, second],
+                 num_units=2,
+                 d=3,
+                 rounds_policy=PerOpRounds(rounds_map),
+                 code=SurfaceCodeModel(d=3),
+                 scheme=SlidingWindowScheme(),
+                 decoder=PresetLatencyDecoder(0.1),
+             ), verbose=False)
     cluster = result["cluster"]
 
     assert len(cluster.committed_windows) == cluster.total_windows
@@ -172,11 +180,16 @@ def test_short_successor_closes_cross_operation_buffer():
 
 def test_parallel_scheme_reaction_matches_eq13():
     d = 3
-    beta = 1.2
-    alpha = 1e-6 / (d * d) ** beta      # tau_d(d^2) = 1 us per round, Eq. 12 shape
-    r = build_and_run(_memory_op(), num_units=4, d=d, rounds_per_op=15, round_us=1.1,
-                      decoder=LatencyModelDecoder(d=d, alpha=alpha, beta=beta),
-                      scheme=ParallelWindowScheme(), verbose=False)
+    # tau_d = 1 us per round (Eq. 12 shape at this operating point)
+    r = simulate(RunSpec(
+            ops=_memory_op(),
+            num_units=4,
+            d=d,
+            rounds_policy=FixedRounds(15),
+            round_us=1.1,
+            decoder=PerRoundDecoder(tau_us=1.0),
+            scheme=ParallelWindowScheme(),
+        ), verbose=False)
     tail = r["fully_done"] - r["chip_done"]
     # after the last round: chip->controller->decoders hops, the last layer-A window
     # (3d rounds), the t_dd boundary, the layer-B window (3d rounds), then t_do.
@@ -195,9 +208,15 @@ def test_backlog_sweep_parallel_vs_sequential():
     # per commit stride = 3.3 us; parallel: ~2 windows per 12-round period = ~6.6 us), so
     # ONE unit backlogs in both cases -- the question is whether extra units help.
     def run(scheme, units):
-        r = build_and_run(_memory_op(), num_units=units, d=3, rounds_per_op=63,
-                          round_us=1.1, decoder=PresetLatencyDecoder(10.0),
-                          scheme=scheme, verbose=False)
+        r = simulate(RunSpec(
+                ops=_memory_op(),
+                num_units=units,
+                d=3,
+                rounds_policy=FixedRounds(63),
+                round_us=1.1,
+                decoder=PresetLatencyDecoder(10.0),
+                scheme=scheme,
+            ), verbose=False)
         peak_q = max((q for _, q in r["cluster"].queue_log), default=0)
         return r["fully_done"], peak_q
 
@@ -228,9 +247,14 @@ def test_naive_scheme_decodes_only_after_the_last_round():
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
     from conftest import trace_time
     from decsim.schemes import NaiveOnlineScheme
-    r = build_and_run(_memory_op(), num_units=1, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(1.0), scheme=NaiveOnlineScheme(),
-                      verbose=False)
+    r = simulate(RunSpec(
+            ops=_memory_op(),
+            num_units=1,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PresetLatencyDecoder(1.0),
+            scheme=NaiveOnlineScheme(),
+        ), verbose=False)
     lines = r["engine"].log_lines
     # naive = one batch decode of the whole op (no "Wk"/commit vocabulary); match the
     # decode-start independent of that wording.

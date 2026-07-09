@@ -21,11 +21,12 @@ These tests assert the two consequences that make the fused model honest:
 from conftest import trace_time  # noqa: F401  (kept for parity with sibling tests)
 
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.controllers import ModularController, LinkModel
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
 from decsim.schemes import NaiveOnlineScheme
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 
 class _FixedLatency:
@@ -44,9 +45,7 @@ def _controller(t_qc=0.0, t_cd=0.0, t_dd=0.0, t_do=0.0, t_oc=0.0, t_cq=0.0):
     """A controller whose six hops we set explicitly (microseconds). The cluster
     reads dd/do from this same shared LinkModel, so this fixes the WHOLE topology."""
     def make(engine):
-        return ModularController(
-            engine, t_qc=us(t_qc), t_cd=us(t_cd), t_dd=us(t_dd),
-            t_do=us(t_do), t_oc=us(t_oc), t_cq=us(t_cq), log_syndromes=False)
+        return ModularController(engine, links=LinkModel(qc=us(t_qc), cd=us(t_cd), dd=us(t_dd), do=us(t_do), oc=us(t_oc), cq=us(t_cq)), log_syndromes=False)
     return make
 
 
@@ -54,10 +53,15 @@ def _first_round_arrival(t_qc, t_cd):
     """When round 1 of a memory op reaches the decoder cluster = production time
     + the forward budget (t_qc + t_cd). Everything else on the fabric is zero."""
     op = Operation(0, "M(q0)", (0,), clifford=True, patches=(0,))
-    res = build_and_run(
-        [op], num_units=1, d=3, rounds_per_op=3, round_us=1.0,
-        decoder=_FixedLatency(1.0), make_controller=_controller(t_qc=t_qc, t_cd=t_cd),
-        verbose=False)
+    res = simulate(RunSpec(
+              ops=[op],
+              num_units=1,
+              d=3,
+              rounds_policy=FixedRounds(3),
+              round_us=1.0,
+              decoder=_FixedLatency(1.0),
+              make_controller=_controller(t_qc=t_qc, t_cd=t_cd),
+          ), verbose=False)
     return res["cluster"].windows[(0, 0)].t_first_round
 
 
@@ -81,10 +85,16 @@ def _decode_release(t_do, t_oc, t_cq):
         Operation(1, "T1", (0,), clifford=False, blocked_by=0,
                   consumes_magic_state=False),
     ]).build()
-    res = build_and_run(
-        ops, num_units=1, d=3, rounds_per_op=3, round_us=1.0,
-        decoder=_FixedLatency(1.0), scheme=NaiveOnlineScheme(),
-        make_controller=_controller(t_do=t_do, t_oc=t_oc, t_cq=t_cq), verbose=False)
+    res = simulate(RunSpec(
+              ops=ops,
+              num_units=1,
+              d=3,
+              rounds_policy=FixedRounds(3),
+              round_us=1.0,
+              decoder=_FixedLatency(1.0),
+              scheme=NaiveOnlineScheme(),
+              make_controller=_controller(t_do=t_do, t_oc=t_oc, t_cq=t_cq),
+          ), verbose=False)
     return res["chip"].decode_release_time[1], res["cluster"].windows[(0, 0)].t_done
 
 

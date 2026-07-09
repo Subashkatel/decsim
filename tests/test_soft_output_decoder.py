@@ -15,13 +15,13 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
 from decsim.message import Operation
-from decsim.wiring import build_and_run
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder
 from decsim.schemes import NaiveOnlineScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import FixedRounds
 from decsim.soft_output import SoftOutputDecoder, ComplementaryGapMetric
+from decsim.run_spec import RunSpec, simulate
 
 
 class _ZeroLatency:
@@ -38,9 +38,16 @@ def _circuit(d, rounds, p):
 
 def _naive_shot(circuit, device, decoder, d, rounds):
     op = Operation(id=1, name="memory", qubits=(0,), clifford=True, circuit=circuit)
-    res = build_and_run(ops=[op], num_units=4, d=d, rounds_policy=FixedRounds(rounds),
-                        code=SurfaceCodeModel(d=d), scheme=NaiveOnlineScheme(),
-                        device=device, decoder=decoder, verbose=False)
+    res = simulate(RunSpec(
+              ops=[op],
+              num_units=4,
+              d=d,
+              rounds_policy=FixedRounds(rounds),
+              code=SurfaceCodeModel(d=d),
+              scheme=NaiveOnlineScheme(),
+              device=device,
+              decoder=decoder,
+          ), verbose=False)
     return res["cluster"].op_results[1]
 
 

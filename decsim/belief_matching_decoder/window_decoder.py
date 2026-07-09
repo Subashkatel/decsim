@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..adapters.window_error_models import WindowErrorModel
+    from ..detector_error_model import WindowErrorModel
 
 
 def _require_belief_matching_model(model: "WindowErrorModel") -> None:

@@ -60,3 +60,13 @@ def test_event_schedules_multiple_events():
     eng.schedule(delay=0, action=parent, label="Parent")
     eng.run()
     assert log == [(0, "parent"), (10, "child1"), (20, "child2")]
+
+
+def test_same_tick_fifo_order():
+    eng = Engine(verbose=False)
+    fired = []
+    eng.schedule(3, lambda: fired.append(1))
+    eng.schedule(3, lambda: fired.append(2))
+    eng.schedule(3, lambda: fired.append(3))
+    eng.run()
+    assert fired == [1, 2, 3]        # same tick fires in insertion order

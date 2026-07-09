@@ -34,7 +34,10 @@ class Engine:
 
     def schedule(self, delay: int, action: Callable[[], None],
                  label: str = "", priority: int = 0) -> None:
-        """Schedule an action `delay` ticks from the current time."""
+        """Schedule an action `delay` ticks from now.
+
+        Same-tick events fire lowest priority first, then in insertion
+        order (the seq counter breaks ties)."""
         if delay < 0:
             raise ValueError(
                 f"Cannot schedule an event in the past delay={delay} "
@@ -61,7 +64,10 @@ class Engine:
         return {metric.name: metric.result() for metric in self.metrics}
 
     def run(self, until: Optional[int] = None) -> None:
-        """Run until the event queue is empty or the optional time limit is reached."""
+        """Run until the event queue is empty or the optional time limit is reached.
+
+        Events at exactly ``until`` still fire; if later events remain, the
+        clock is left at ``until`` so a follow-up run() resumes from there."""
         while self._event_queue:
             next_event_time = self._event_queue[0].time
             if until is not None and next_event_time > until:

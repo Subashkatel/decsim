@@ -16,15 +16,15 @@ from conftest import trace_time
 from decsim.decoders import PresetLatencyDecoder
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import Operation
-from decsim.planner import GateRounds
-from decsim.wiring import build_and_run
+from decsim.planner import GateRounds, FixedRounds
+from decsim.run_spec import RunSpec, simulate
 
 
 def _run(ops, **kw):
     kw.setdefault("num_units", 2)
     kw.setdefault("d", 3)
     kw.setdefault("decoder", PresetLatencyDecoder(1.0))
-    r = build_and_run(ops, verbose=False, **kw)
+    r = simulate(RunSpec(ops=ops, **kw), verbose=False)
     return r["engine"].log_lines
 
 
@@ -38,7 +38,7 @@ def test_t_gate_waits_for_earlier_cnot_on_same_qubit():
         Operation(1, "B:CNOT(q0,q1)", (0, 1), clifford=True),
         Operation(2, "C:T(q0)", (0,), clifford=False),
     ]).build()
-    lines = _run(ops, rounds_per_op=11)
+    lines = _run(ops, rounds_policy=FixedRounds(11))
     b_done = trace_time(lines, "B:CNOT(q0,q1) body done")
     c_start = trace_time(lines, "START C:T(q0)")
     assert c_start >= b_done
@@ -70,7 +70,7 @@ def test_brickwork_with_t_keeps_program_order():
             oid += 1
     ops.append(Operation(oid, "T(q0)", (0,), clifford=False))
     ops = CircuitFrontend(ops).build()
-    lines = _run(ops, rounds_per_op=11, num_units=8)
+    lines = _run(ops, rounds_policy=FixedRounds(11), num_units=8)
     opmap = {op.id: op for op in ops}
     for op in ops:
         for p in op.predecessors:
@@ -85,8 +85,8 @@ def test_unwired_conflicting_ops_fail_loudly():
     ops = [Operation(0, "A:X(q0)", (0,), clifford=True),
            Operation(1, "B:X(q0)", (0,), clifford=True)]   # deliberately NOT wired
     with pytest.raises(RuntimeError, match="share"):
-        build_and_run(ops, num_units=1, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(1.0), verbose=False)
+        simulate(RunSpec(ops=ops, num_units=1, d=3, rounds_policy=FixedRounds(11),
+                         decoder=PresetLatencyDecoder(1.0)), verbose=False)
 
 
 def test_raw_op_listing_same_qubit_twice_names_the_real_problem():
@@ -94,8 +94,8 @@ def test_raw_op_listing_same_qubit_twice_names_the_real_problem():
     malformed op, not blamed on missing wiring."""
     ops = [Operation(0, "X(q0,q0)", (0, 0), clifford=True)]   # bypasses the frontends
     with pytest.raises(RuntimeError, match="more than once"):
-        build_and_run(ops, num_units=1, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(1.0), verbose=False)
+        simulate(RunSpec(ops=ops, num_units=1, d=3, rounds_policy=FixedRounds(11),
+                         decoder=PresetLatencyDecoder(1.0)), verbose=False)
 
 
 def test_parallel_ops_still_run_in_parallel():
@@ -105,5 +105,5 @@ def test_parallel_ops_still_run_in_parallel():
         Operation(0, "A:CNOT(q0,q1)", (0, 1), clifford=True),
         Operation(1, "B:CNOT(q2,q3)", (2, 3), clifford=True),
     ]).build()
-    lines = _run(ops, rounds_per_op=11)
+    lines = _run(ops, rounds_policy=FixedRounds(11))
     assert trace_time(lines, "START A:CNOT(q0,q1)") == trace_time(lines, "START B:CNOT(q2,q3)")

@@ -17,11 +17,12 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.controllers import ModularController, LinkModel
 from decsim.decoders import PerRoundDecoder
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import Operation
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 TAU_GEN_US = 1.1
 
@@ -65,13 +66,15 @@ def _run_memory(tau_us, commit, buffer, n_windows=20):
     rounds = n_windows * commit                  # R a multiple of C: uniform windows
     op = Operation(0, "M(q0)", (0,), clifford=True)
     ops = CircuitFrontend([op]).build()
-    r = build_and_run(ops, num_units=1, code=WindowedCode(3, commit, buffer),
-                      rounds_per_op=rounds, round_us=TAU_GEN_US,
-                      decoder=PerRoundDecoder(tau_us),
-                      make_controller=lambda e: ModularController(
-                          e, t_qc=0, t_cd=0, t_dd=0, t_do=0, t_oc=0, t_cq=0,
-                          log_syndromes=False),
-                      verbose=False)
+    r = simulate(RunSpec(
+            ops=ops,
+            num_units=1,
+            code=WindowedCode(3, commit, buffer),
+            rounds_policy=FixedRounds(rounds),
+            round_us=TAU_GEN_US,
+            decoder=PerRoundDecoder(tau_us),
+            make_controller=lambda e: ModularController(e, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False),
+        ), verbose=False)
     return r["cluster"], rounds
 
 

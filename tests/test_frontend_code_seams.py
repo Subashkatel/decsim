@@ -3,13 +3,13 @@
 from decsim import protocols as P
 from decsim.codes import BBCodeModel, SurfaceCodeModel
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.controllers import ModularController, LinkModel
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.layouts import UniformLayout
 from decsim.message import DecodeResult, Operation
 from decsim.planner import FixedRounds
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
 
 
 class PhysicalPatchIRFrontend:
@@ -173,9 +173,7 @@ class RecordingDecoder:
 
 
 def _zero_link_controller(engine):
-    return ModularController(
-        engine, t_qc=0, t_cd=0, t_dd=0, t_do=0, t_oc=0, t_cq=0,
-        log_syndromes=False)
+    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
 
 
 def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():
@@ -190,10 +188,15 @@ def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():
     ])
     code = SurfaceCodeModel(d=3)
 
-    result = build_and_run(
-        frontend=frontend, code=code, num_units=2, rounds_policy=FixedRounds(3),
-        device=TimingOnlyDevice(), decoder=PresetLatencyDecoder(0.1),
-        make_controller=_zero_link_controller, verbose=False)
+    result = simulate(RunSpec(
+                 frontend=frontend,
+                 code=code,
+                 num_units=2,
+                 rounds_policy=FixedRounds(3),
+                 device=TimingOnlyDevice(),
+                 decoder=PresetLatencyDecoder(0.1),
+                 make_controller=_zero_link_controller,
+             ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
     assert frontend.operations[1].predecessors == (10,)
@@ -215,11 +218,15 @@ def test_lattice_surgery_ir_can_lower_to_physical_ir_then_run():
          "consumes_magic_state": False},
     ])
 
-    result = build_and_run(
-        frontend=frontend, code=SurfaceCodeModel(d=3), num_units=2,
-        rounds_policy=FixedRounds(3), device=TimingOnlyDevice(),
-        decoder=PresetLatencyDecoder(0.1), make_controller=_zero_link_controller,
-        verbose=False)
+    result = simulate(RunSpec(
+                 frontend=frontend,
+                 code=SurfaceCodeModel(d=3),
+                 num_units=2,
+                 rounds_policy=FixedRounds(3),
+                 device=TimingOnlyDevice(),
+                 decoder=PresetLatencyDecoder(0.1),
+                 make_controller=_zero_link_controller,
+             ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
     assert frontend.physical_ir[1]["patches"] == ("patch_a", "patch_b")
@@ -241,10 +248,16 @@ def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
     layout = UniformLayout(code)
     decoder = RecordingDecoder()
 
-    result = build_and_run(
-        frontend=frontend, code=code, layout=layout, num_units=2,
-        rounds_policy=FixedRounds(4), device=SyndromeBitDevice(code, per_patch=True),
-        decoder=decoder, make_controller=_zero_link_controller, verbose=False)
+    result = simulate(RunSpec(
+                 frontend=frontend,
+                 code=code,
+                 layout=layout,
+                 num_units=2,
+                 rounds_policy=FixedRounds(4),
+                 device=SyndromeBitDevice(code, per_patch=True),
+                 decoder=decoder,
+                 make_controller=_zero_link_controller,
+             ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
     assert isinstance(code, P.CodeModel)
@@ -268,10 +281,16 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
     layout = UniformLayout(code)
     decoder = RecordingDecoder()
 
-    result = build_and_run(
-        frontend=frontend, code=code, layout=layout, num_units=2,
-        rounds_policy=FixedRounds(4), device=SyndromeBitDevice(code, per_patch=True),
-        decoder=decoder, make_controller=_zero_link_controller, verbose=False)
+    result = simulate(RunSpec(
+                 frontend=frontend,
+                 code=code,
+                 layout=layout,
+                 num_units=2,
+                 rounds_policy=FixedRounds(4),
+                 device=SyndromeBitDevice(code, per_patch=True),
+                 decoder=decoder,
+                 make_controller=_zero_link_controller,
+             ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
     assert frontend.physical_ir[0]["patches"] == ("gross_0",)

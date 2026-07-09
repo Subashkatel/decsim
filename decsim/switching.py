@@ -1,37 +1,159 @@
-"""Decoder switching policy: a fast weak decoder supplies DecodeResult.soft_output; low confidence escalates to the strong decoder."""
+"""Decoder switching strategies (port 10): Baseline and Switching.
+
+Part module: the strategy seam implementations (Contract 2c). Baseline is the
+default. Switching escalates weak decodes to strong; the weak/strong
+routing itself stays in the router (SwitchingRouter), and the pool owns unit
+bookkeeping, hold-or-deliver, and cancellation mechanics.
+"""
 
 from __future__ import annotations
 
+import inspect
 import math
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
-if TYPE_CHECKING:
-    from .message import Window, DecodeResult
+from .protocols import Directive, OutcomeDirective, Submission
+
+
+class ThresholdRegister:
+    """Per-code confidence thresholds, updatable at runtime (P17).
+
+    The actuator half of a calibration loop: get(code) serves the
+    router (falling back to `default`), set(code, g) updates a lane
+    and records (seq, code, old, new) in `history` for audit. The
+    loop that COMPUTES new thresholds is out of scope (row 11's
+    remaining open item)."""
+
+    def __init__(self, default: float, per_code: dict = None):
+        self.default = float(default)
+        self.per_code = dict(per_code or {})
+        self.history: list = []
+        self._seq = 0
+
+    def get(self, code) -> float:
+        return self.per_code.get(code, self.default)
+
+    def set(self, code, threshold: float) -> None:
+        old = self.get(code)
+        self.per_code[code] = float(threshold)
+        self._seq += 1
+        self.history.append((self._seq, code, old, float(threshold)))
+
+
+class Baseline:
+    """Plain windowed decoding: submit the weak job, accept every outcome."""
+
+    def on_window_ready(self, window, weak_job, services) -> list:
+        return [Submission(weak_job)]
+
+    def on_decode_outcome(self, outcome, services) -> OutcomeDirective:
+        if outcome.job.strong_decode_for is not None:
+            return OutcomeDirective(Directive.FINALIZE_STRONG)
+        return OutcomeDirective(Directive.FINALIZE)
+
+    def metrics(self) -> dict:
+        return {}
 
 
 class Switching:
-    """Combine weak+strong decoders; run_both_at_once=True starts both and cancels strong on confidence, else escalates only when unsure."""
+    """Weak decoder first; escalate to a strong decoder on low confidence.
 
-    def __init__(self, confidence_threshold: float, run_both_at_once: bool = False,
+    Port of switching.py: confidence_threshold gates keep-weak (soft_output >=
+    threshold); serial mode escalates after the ws hop; run_both_at_once starts
+    the strong sibling with the weak and cancels it on confidence; bulk_strong
+    batches queued serial redos (timing-only). Redo covers commit + 2*buffer
+    rounds (the paper's two-sided context)."""
+
+    def __init__(self, confidence_threshold: float,
+                 run_both_at_once: bool = False,
                  weak_keepup_ratio: Optional[float] = None,
-                 bulk_strong: bool = False):
-        """Store the switching policy knobs."""
+                 bulk_strong: bool = False,
+                 threshold_register: Optional["ThresholdRegister"] = None):
         if weak_keepup_ratio is not None and not 0 < weak_keepup_ratio < 1:
-            raise ValueError(f"weak_keepup_ratio must be between 0 and 1 (got {weak_keepup_ratio})")
+            raise ValueError(f"weak_keepup_ratio must be between 0 and 1 "
+                             f"(got {weak_keepup_ratio})")
         if bulk_strong and run_both_at_once:
-            raise ValueError("bulk_strong is only meaningful in serial mode (run_both_at_once=False)")
+            raise ValueError("bulk_strong is only meaningful in serial mode "
+                             "(run_both_at_once=False)")
         self.confidence_threshold = confidence_threshold
+        self.threshold_register = threshold_register   # P17 (None = scalar)
         self.run_both_at_once = run_both_at_once
         self.weak_keepup_ratio = weak_keepup_ratio
         self.bulk_strong = bulk_strong
 
-    def keep_weak_result(self, result: "DecodeResult") -> bool:
-        """Return true when the weak decoder result should be committed."""
-        return (result is not None and result.soft_output is not None
-                and result.soft_output >= self.confidence_threshold)
+    # ------------------------------------------------------------ the hooks
 
-    def calculate_strong_redo_rounds(self, window: "Window") -> int:
-        """Rounds reprocessed by the strong decoder for one weak window."""
+    def on_window_ready(self, window, weak_job, services) -> list:
+        submissions = [Submission(weak_job)]
+        if self.run_both_at_once:              # parallel: no ws delay (dm:109-110)
+            strong = services.make_strong_job(
+                weak_job, self.strong_redo_rounds(window),
+                getattr(weak_job, "strong_label", f"strong({weak_job.label})"))
+            submissions.append(Submission(strong, delay_ticks=0))
+        return submissions
+
+    def on_decode_outcome(self, outcome, services) -> OutcomeDirective:
+        job = outcome.job
+        if job.strong_decode_for is not None:
+            return OutcomeDirective(Directive.FINALIZE_STRONG)
+        if job.attempt != 0 or self._keep_weak(outcome.result, job):
+            return OutcomeDirective(Directive.FINALIZE)   # pool cancels sibling
+        extra = None
+        if not self.run_both_at_once:          # serial: redo after ws (dm:153-154)
+            strong = services.make_strong_job(
+                job, self.strong_redo_rounds(job.window),
+                getattr(job, "strong_label", f"strong({job.label})"))
+            extra = Submission(strong, delay_ticks=services.ws_delay())
+        return OutcomeDirective(Directive.AWAIT_STRONG, extra=extra)
+
+    def metrics(self) -> dict:
+        return {"confidence_threshold": self.confidence_threshold,
+                "run_both_at_once": self.run_both_at_once}
+
+    # ---------------------------------------------------------- policy knobs
+
+    def _keep_weak(self, result, job) -> bool:
+        """Dispatch honoring LEGACY keep_weak_result overrides: a
+        subclass overriding the old single-arg signature keeps
+        working. Probed once via signature.bind (not a param count,
+        which misreads *args / keyword-only / **kwargs overrides)
+        and cached."""
+        style = getattr(self, "_keep_call_style", None)
+        if style is None:
+            sig = inspect.signature(self.keep_weak_result)
+            try:
+                sig.bind(result, job)
+                style = "positional"
+            except TypeError:
+                try:
+                    sig.bind(result, job=job)
+                    style = "keyword"
+                except TypeError:
+                    style = "legacy"
+            self._keep_call_style = style
+        if style == "positional":
+            return self.keep_weak_result(result, job)
+        if style == "keyword":
+            return self.keep_weak_result(result, job=job)
+        return self.keep_weak_result(result)
+
+    def keep_weak_result(self, result, job=None) -> bool:
+        """True when the weak result should be committed (switching.py:28-31).
+
+        With a threshold_register configured and a job carrying a
+        code, the register's per-code value replaces the scalar
+        (P17); job=None or register=None preserves the original
+        scalar semantics bit-identically."""
+        threshold = self.confidence_threshold
+        if (self.threshold_register is not None and job is not None
+                and getattr(job, "code", None) is not None):
+            threshold = self.threshold_register.get(job.code)
+        return (result is not None and result.soft_output is not None
+                and result.soft_output >= threshold)
+
+    @staticmethod
+    def strong_redo_rounds(window) -> int:
+        """Rounds the strong decoder reprocesses: commit + 2*buffer."""
         commit = window.commit_hi - window.commit_lo + 1
         buffer = window.buffer_hi - window.commit_hi
         return commit + 2 * buffer
@@ -45,5 +167,6 @@ class Switching:
         if weak_decode_rounds > commit_rounds + 1e-9:
             needed = math.ceil(ratio / (1 - ratio) * buffer_rounds - 1e-9)
             raise ValueError(
-                f"commit region of {commit_rounds} rounds too short for weak_keepup_ratio={ratio} "
-                f"(needs >= {needed}); use a bigger commit region or lower weak_keepup_ratio.")
+                f"commit region of {commit_rounds} rounds too short for "
+                f"weak_keepup_ratio={ratio} (needs >= {needed}); use a bigger "
+                f"commit region or lower weak_keepup_ratio.")

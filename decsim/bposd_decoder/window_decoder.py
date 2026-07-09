@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..adapters.window_error_models import WindowErrorModel
+    from ..detector_error_model import WindowErrorModel
 
 
 def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,

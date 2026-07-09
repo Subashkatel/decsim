@@ -13,17 +13,16 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
 from decsim.message import Operation
-from decsim.wiring import build_and_run
-from decsim.controllers import ModularController
+from decsim.controllers import ModularController, LinkModel
 from decsim.frontends.circuit import CircuitFrontend
-from decsim.orchestrators import ExecutionOrchestrator
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
-from decsim.adapters.window_error_models import (build_window_error_models,
+from decsim.detector_error_model import (build_window_error_models,
                                              decode_windowed)
 from decsim.schemes import SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import FixedRounds
+from decsim.run_spec import RunSpec, simulate
 
 
 D, ROUNDS, P = 3, 12, 0.003
@@ -41,8 +40,7 @@ def _single_payload(device, operation, round_index):
 
 
 def _zero_link_controller(engine):
-    return ModularController(engine, t_qc=0, t_cd=0, t_dd=0, t_do=0,
-                             t_oc=0, t_cq=0, log_syndromes=False)
+    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
 
 
 def _circuit():
@@ -54,10 +52,16 @@ def _circuit():
 
 def _run_engine_shot(circuit, device, decoder):
     op = Operation(id=1, name="memory", qubits=(0,), clifford=True, circuit=circuit)
-    res = build_and_run(ops=[op], num_units=4, d=D,
-                        rounds_policy=FixedRounds(ROUNDS),
-                        code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                        device=device, decoder=decoder, verbose=False)
+    res = simulate(RunSpec(
+              ops=[op],
+              num_units=4,
+              d=D,
+              rounds_policy=FixedRounds(ROUNDS),
+              code=SurfaceCodeModel(d=D),
+              scheme=SlidingWindowScheme(),
+              device=device,
+              decoder=decoder,
+          ), verbose=False)
     return res["cluster"].op_results[1]
 
 
@@ -83,6 +87,39 @@ def test_stim_device_round_alignment():
     total = sum(len(_single_payload(device, op, r).bits)
                 for r in range(1, ROUNDS + 1))
     assert total == circuit.num_detectors
+
+
+def test_same_seed_double_run_is_bit_identical():
+    """Seed reproducibility on the FULL physics path (validation-matrix row
+    3): two complete engine runs with the same StimDevice seed must produce
+    identical per-shot syndromes, identical decoded logical values, and
+    identical completion times -- not just the same aggregate LER. A hidden
+    ordering/caching nondeterminism anywhere chip -> controller -> windows ->
+    decoder -> orchestrator would break the exact match."""
+    circuit = _circuit()
+
+    def one_run():
+        results = []
+        for shot in range(8):
+            device = StimDevice(seed=100 + shot)
+            op = Operation(id=1, name="memory", qubits=(0,), clifford=True,
+                           circuit=circuit)
+            res = simulate(RunSpec(
+                      ops=[op],
+                      num_units=4,
+                      d=D,
+                      rounds_policy=FixedRounds(ROUNDS),
+                      code=SurfaceCodeModel(d=D),
+                      scheme=SlidingWindowScheme(),
+                      device=device,
+                      decoder=PyMatchingDecoder(_ZeroLatency()),
+                  ), verbose=False)
+            results.append((int(res["cluster"].op_results[1]),
+                            res["chip_done"], res["fully_done"],
+                            device._dets[1].tobytes()))
+        return results
+
+    assert one_run() == one_run()
 
 
 def test_engine_matches_offline_reference_and_global_exactly():
@@ -171,13 +208,6 @@ def test_blocked_successor_waits_for_real_pymatching_result():
 
     decoder = RecordingDecoder()
 
-    class AssertingOrchestrator(ExecutionOrchestrator):
-        def integrate(self, op, result):
-            if op.id == 0:
-                assert set(decoder.seen) >= {(0, k) for k in range(window_count)}
-                assert result.logical_value == decoder.accumulated[0]
-            return super().integrate(op, result)
-
     ops = CircuitFrontend([
         Operation(0, "T0(memory)", (0,), clifford=False, blocked_by=None,
                   consumes_magic_state=False, circuit=circuit),
@@ -185,12 +215,22 @@ def test_blocked_successor_waits_for_real_pymatching_result():
                   consumes_magic_state=False, circuit=circuit),
     ]).build()
     device = StimDevice(seed=23)
-    res = build_and_run(
-        ops=ops, num_units=4, d=D, rounds_policy=FixedRounds(ROUNDS),
-        code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(), device=device,
-        decoder=decoder, make_controller=_zero_link_controller,
-        make_orchestrator=lambda e: AssertingOrchestrator(e),
-        verbose=False)
+    res = simulate(RunSpec(
+              ops=ops,
+              num_units=4,
+              d=D,
+              rounds_policy=FixedRounds(ROUNDS),
+              code=SurfaceCodeModel(d=D),
+              scheme=SlidingWindowScheme(),
+              device=device,
+              decoder=decoder,
+              make_controller=_zero_link_controller,
+          ), verbose=False)
+
+    # every window was decoded before op0's result integrated, and the
+    # integrated value is the XOR-accumulated per-window logical value
+    assert set(decoder.seen) >= {(0, k) for k in range(window_count)}
+    assert res["cluster"].op_results[0] == decoder.accumulated[0]
 
     global_m = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
@@ -204,9 +244,14 @@ def test_timing_only_ops_still_run():
 
     the real-decoding wiring must not break the timing pipeline."""
     op = Operation(id=1, name="timing", qubits=(0,), clifford=True)
-    res = build_and_run(ops=[op], num_units=4, d=D,
-                        rounds_policy=FixedRounds(ROUNDS),
-                        code=SurfaceCodeModel(d=D), scheme=SlidingWindowScheme(),
-                        decoder=PyMatchingDecoder(_ZeroLatency()), verbose=False)
+    res = simulate(RunSpec(
+              ops=[op],
+              num_units=4,
+              d=D,
+              rounds_policy=FixedRounds(ROUNDS),
+              code=SurfaceCodeModel(d=D),
+              scheme=SlidingWindowScheme(),
+              decoder=PyMatchingDecoder(_ZeroLatency()),
+          ), verbose=False)
     assert res["cluster"].op_results == {}        # no logical value, but it completed
     assert len(res["cluster"].committed_windows) == res["cluster"].total_windows

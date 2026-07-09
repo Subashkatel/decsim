@@ -1,64 +1,109 @@
-"""Device-side syndrome sources."""
+"""Clocked syndrome source (port 2): per-op round emission on the round clock.
 
+Part module: the round-emission half of the QPU seam (the control half is
+chip.py's Chip). The Chip drives it via start(op, ...) and receives
+on_body_done(op) at the final round — in the SAME event (Contract 3 rule 1).
+"""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Callable
 
 from .message import Operation, SyndromePayload
 
-if TYPE_CHECKING:
-    from .protocols import CodeModel
-
 
 def _stream_payload_target(op: Operation, round_index: int) -> tuple:
-    """Return (decode_op_id, global_round) for standalone ops or stream segments."""
+    """(decode_op_id, global_round) for standalone ops or stream segments."""
     return (op.stream_id if op.stream_id is not None else op.id,
             round_index + (op.stream_offset or 0))
 
 
 class TimingOnlyDevice:
-    """Emit payloads with no syndrome bits for timing-only studies."""
+    """Emit payloads with no syndrome bits for timing-only studies
+    (the default RunSpec device)."""
 
     def begin_operation(self, op: Operation) -> None:
-        """Nothing to set up for this device."""
         return None
 
-    def round_payloads(self, op: Operation, round_index: int) -> list[SyndromePayload]:
-        """Emit this operation round as one timing-only payload."""
+    def round_payloads(self, op: Operation, round_index: int) -> list:
         target, global_round = _stream_payload_target(op, round_index)
-        return [SyndromePayload(target, op.patches[0] if op.patches else op.qubits[0],
-                                global_round)]
+        return [SyndromePayload(target,
+                              op.patches[0] if op.patches else op.qubits[0],
+                              global_round)]
 
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
-                            patch) -> list[SyndromePayload]:
-        """Emit one timing-only payload for a feedback-idle stream round."""
+                            patch) -> list:
         return [SyndromePayload(stream_id, patch, global_round)]
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
                                 *, belief_matching: bool = False):
-        """Timing-only streams have no fixed detector-model length."""
         return None
 
     def validate_stream_length(self, stream_op: Operation,
                                stream_round_count: int) -> None:
-        """Timing-only streams can seal at any runtime length."""
         return None
 
     def window_models_for_operation(self, op: Operation, windows: list,
                                     round_count: int,
                                     *, belief_matching: bool = False) -> list:
-        """Timing-only decode jobs carry no detector error model."""
         return []
 
     def window_model_for_stream(self, stream_id, window, *, is_last: bool):
-        """Timing-only dynamic stream windows carry no detector error model."""
         return None
 
-    def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
+    def strong_window_model_for_operation(self, op: Operation, window,
+                                          round_count: int,
                                           *, belief_matching: bool = False):
-        """Timing-only strong re-decodes carry no detector error model."""
         return None
+
+
+class ClockedDevice:
+    """Emit one syndrome round per round-tick per running operation."""
+
+    def __init__(self, engine, device, controller, cluster, rounds_for):
+        self.engine = engine
+        self.device = device            # round_payloads / begin_operation / ...
+        self.controller = controller    # relay path (t_qc + t_cd)
+        self.cluster = cluster          # on_syndrome_arrival sink
+        self.rounds_for = rounds_for    # op -> total rounds (shared with planner)
+
+    def start(self, operation, round_ticks: int,
+              on_body_done: Callable) -> None:
+        """Begin an operation's stream: round 1 fires one round-tick from now."""
+        self.device.begin_operation(operation)
+        self.engine.schedule(
+            round_ticks,
+            lambda: self._round(operation, 1, round_ticks, on_body_done),
+            label=f"round1({operation.name})")
+
+    def _round(self, operation, round_index: int, round_ticks: int,
+               on_body_done: Callable) -> None:
+        """Emit one round; the final round triggers body-done in this event."""
+        total_rounds = self.rounds_for(operation)
+        payloads = self.device.round_payloads(operation, round_index)
+        self.engine.log("Chip", f"{operation.name} fires round "
+                                f"{round_index}/{total_rounds}")
+        self.relay_payloads(payloads)
+        if round_index < total_rounds:
+            self.engine.schedule(
+                round_ticks,
+                lambda: self._round(operation, round_index + 1, round_ticks,
+                                    on_body_done),
+                label=f"round{round_index + 1}({operation.name})")
+        else:
+            on_body_done(operation)
+
+    def relay_payloads(self, payloads) -> None:
+        """Send all fragments from one syndrome round through the controller."""
+        for payload in payloads:
+            payload.n_fragments = len(payloads)
+            self.controller.relay_syndrome(payload,
+                                           self.cluster.on_syndrome_arrival)
+
+    def idle_round_payloads(self, operation, stream_id, global_round, patch):
+        """Idle-round payloads for extend_stream mode (delegates to the device)."""
+        return self.device.idle_round_payloads(operation, stream_id,
+                                               global_round, patch)
 
 
 class SyndromeBitDevice:

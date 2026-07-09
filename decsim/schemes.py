@@ -23,7 +23,14 @@ class SlidingWindowScheme:
 
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple[int, int, int]]:
-        """Lay out commit windows with a look-ahead buffer."""
+        """Lay out commit windows with a look-ahead buffer.
+
+        NB when round_count % commit_rounds != 0 the last window commits a
+        SHORT tail (< d rounds). Timing-wise this layout is frozen (the
+        goldens pin the window count); accuracy-wise a short tail window
+        decodes with reduced history — full-decode studies should pick
+        round counts that divide evenly or absorb the tail in their plan
+        (see benchmarks/replicate_skoric_fig6a.py)."""
         commit_rounds = code.commit_rounds()
         buffer_rounds = code.buffer_rounds()
         total_rounds = round_count
@@ -35,6 +42,18 @@ class SlidingWindowScheme:
             buffer_hi = commit_hi + buffer_rounds
             plan.append((commit_lo, commit_hi, buffer_hi))
         return plan
+
+    def validate_buffer(self, code) -> None:
+        """Reject buffers below the literature floor (lead, trail) ~ (d, d)."""
+        floor = getattr(code, "buffering_floor",
+                        lambda scheme=None: (code.distance, code.distance))
+        lead, trail = floor(self)
+        if code.buffer_rounds() < trail:
+            raise ValueError(
+                f"buffer_rounds={code.buffer_rounds()} is below the buffering "
+                f"floor {trail} (~d) for {getattr(code, 'name', code)}; "
+                f"windowed accuracy degrades (Skoric 2209.08552, Bombin "
+                f"2303.04846). Raise buffer_rounds_override or use d.")
 
     def data_complete(self, window: "Window", rounds_arrived: int, successor_rounds: int,
                       memory_rounds: int, round_count: int, has_successor: bool,

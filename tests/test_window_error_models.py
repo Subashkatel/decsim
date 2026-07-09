@@ -10,7 +10,7 @@ import pytest
 stim = pytest.importorskip("stim")
 np = pytest.importorskip("numpy")
 
-from decsim.adapters.window_error_models import (build_window_error_models,
+from decsim.detector_error_model import (build_window_error_models,
                                              decode_windowed,
                                              detector_error_model_to_faults)
 from decsim.mwpm_decoder import matching_window_decoder
@@ -139,6 +139,140 @@ def test_windowed_accuracy_matches_global_decoding():
         f"windowed LER {ler_windowed} vs global {ler_global}"
 
 
+def test_empty_syndrome_decodes_to_no_correction_and_no_flip():
+    """Validation-matrix row 6, made explicit: an all-zero detection-event
+    vector must produce a zero correction in every window, a zero observable
+    from the windowed pipeline, and a zero prediction from global MWPM."""
+    pymatching = pytest.importorskip("pymatching")
+    circuit = _memory_circuit(d=3, rounds=9, p=0.003)
+    models = build_window_error_models(circuit, _plan(circuit))
+    decode = matching_window_decoder()
+    empty = np.zeros(circuit.num_detectors, dtype=np.uint8)
+    assert int(decode_windowed(models, empty, decode).sum()) == 0
+    for m in models:
+        assert int(decode(m, np.zeros(len(m.detector_ids), dtype=np.uint8))
+                   .sum()) == 0
+    global_m = pymatching.Matching.from_detector_error_model(
+        circuit.detector_error_model(decompose_errors=True))
+    assert int(global_m.decode(empty).sum()) == 0
+
+
+def test_boundary_priors_are_clipped_not_infinite():
+    """Regression (found 2026-07-02, validation-matrix row 24): a prior of
+    exactly 1.0 -- which any deterministic injected fault produces -- made the
+    edge weight -inf and crashed pymatching with 'maximum absolute edge weight
+    exceeded'; p=0 silently produced +inf edges. The decoders now clip priors
+    to [1e-12, 1-1e-12]. A p=1 fault must decode as 'always there': its own
+    syndrome yields exactly its observable effect."""
+    import dataclasses
+    circuit = _memory_circuit(d=3, rounds=6, p=0.003)
+    models = build_window_error_models(circuit, [(1, 3, 6), (4, 6, 6)])
+    m0 = models[0]
+    empty = np.zeros(len(m0.detector_ids), dtype=np.uint8)
+    # p=0: an impossible fault is never selected
+    priors = np.array(m0.priors, dtype=float)
+    priors[0] = 0.0
+    selected = matching_window_decoder()(
+        dataclasses.replace(m0, priors=priors), empty)
+    assert selected[0] == 0 and int(selected.sum()) == 0
+    # p=1: negative weight -- on an EMPTY syndrome MWPM correctly infers the
+    # fault happened anyway, compensated by partner faults (this used to be
+    # the -inf crash; now it is well-defined negative-weight matching)
+    priors = np.array(m0.priors, dtype=float)
+    priors[0] = 1.0
+    selected = matching_window_decoder()(
+        dataclasses.replace(m0, priors=priors), empty)
+    assert selected[0] == 1
+    # the p=1 fault's own syndrome must select exactly that fault
+    priors = np.array(m0.priors, dtype=float)
+    priors[0] = 1.0
+    m2 = dataclasses.replace(m0, priors=priors)
+    syndrome = np.zeros(len(m2.detector_ids), dtype=np.uint8)
+    syndrome[np.flatnonzero(m2.check[:, 0])] = 1
+    selected = matching_window_decoder()(m2, syndrome)
+    assert selected[0] == 1 and int(selected.sum()) == 1, \
+        "the clipped p=1 fault must be selected to explain its own syndrome"
+    # the runtime adapter's graph-construction site is protected identically
+    from decsim.mwpm_decoder import PyMatchingDecoder
+
+    class _NullLatency:
+        def latency(self, job):
+            return 1
+
+    assert PyMatchingDecoder(_NullLatency())._matching_for_model(m2) is not None
+    # malformed priors are BUGS, not degenerate inputs: they must raise, not
+    # be silently coerced into probabilities
+    for bad in (-0.1, 1.5, float("nan")):
+        priors = np.array(m0.priors, dtype=float)
+        priors[0] = bad
+        broken = dataclasses.replace(m0, priors=priors)
+        with pytest.raises(ValueError, match="priors"):
+            matching_window_decoder()(broken, empty)
+        with pytest.raises(ValueError, match="priors"):
+            PyMatchingDecoder(_NullLatency())._matching_for_model(broken)
+
+
+def test_sub_d_tail_window_measurably_degrades_accuracy():
+    """Characterization pin for the 2026-07-02 finding (validation-matrix rows
+    11/19): a final commit window shorter than d decodes with too little
+    history and measurably degrades windowed accuracy, while absorbing the
+    tail into the last full window tracks global decoding almost exactly.
+
+    This is NOT the desired end state -- it documents a real, currently
+    shipped behavior (SlidingWindowScheme docstring carries the caveat; the
+    timing goldens pin its layout). If a change makes the tail plan match
+    global, this test should fail and be UPDATED, loudly, not silently.
+
+    Fixed seed -> deterministic counts; margins allow pymatching tie-breaking
+    drift, not behavioral change."""
+    pymatching = pytest.importorskip("pymatching")
+    d, rounds, p, shots = 3, 10, 0.008, 4000
+    circuit = _memory_circuit(d=d, rounds=rounds, p=p)
+
+    def _plan(absorb):
+        plan, lo = [], 1
+        while (rounds - lo + 1 >= 2 * d) if absorb else (lo + d - 1 <= rounds):
+            plan.append((lo, lo + d - 1, min(lo + d - 1 + d, rounds)))
+            lo += d
+        if lo <= rounds:
+            plan.append((lo, rounds, rounds))   # absorbed tail / short tail
+        return plan
+
+    assert _plan(True)[-1] == (7, 10, 10)       # 4-round absorbed final commit
+    assert _plan(False)[-1] == (10, 10, 10)     # 1-round sub-d tail window
+    # and the SHIPPED scheme really does produce a sub-d tail here: for these
+    # 11 detector layers its final window commits only 2 (< d) layers. If
+    # this assertion fails, the shipped plan changed -- re-evaluate the whole
+    # caveat, not just this test.
+    shipped = SlidingWindowScheme().plan_windows(0, 11, SurfaceCodeModel(d=d))
+    assert shipped[-1] == (10, 11, 14)
+    assert shipped[-1][1] - shipped[-1][0] + 1 < d
+
+    dets, obs = circuit.compile_detector_sampler(seed=3).sample(
+        shots, separate_observables=True)
+    matcher = pymatching.Matching.from_detector_error_model(
+        circuit.detector_error_model(decompose_errors=True))
+    g_fail = matcher.decode_batch(dets)[:, 0] != obs[:, 0]
+
+    fails = {}
+    for absorb in (True, False):
+        models = build_window_error_models(circuit, _plan(absorb))
+        decode = matching_window_decoder()
+        fails[absorb] = np.array([
+            decode_windowed(models, dets[k], decode)[0] != obs[k, 0]
+            for k in range(shots)])
+
+    # absorbed plan ~= global (measured 2 vs 1 discordant shots at this seed)
+    assert int((fails[True] & ~g_fail).sum()) <= 5
+    # sub-d tail is MEASURABLY worse than the absorbed plan on paired shots
+    # (measured 16 vs 4); if this stops holding, the tail behavior changed
+    worse = int((fails[False] & ~fails[True]).sum())
+    better = int((fails[True] & ~fails[False]).sum())
+    assert worse >= 2 * better + 4, (
+        f"sub-d tail no longer degrades accuracy (worse={worse}, "
+        f"better={better}) -- shipped-scheme caveat and docs need updating")
+
+
 def test_parallel_two_sided_windows_match_global_decoding():
     """Two-sided parallel A/B windows (Skoric sec. III.C / Tan Eq. S10, w = s + 2b)
     carry a lookback buffer, so each window must decode its raw syndrome independently
@@ -163,12 +297,17 @@ def test_parallel_two_sided_windows_match_global_decoding():
     decode = matching_window_decoder()
     windowed_pred = np.array([decode_windowed(models, dets[i], decode)
                               for i in range(shots)])
-    agree = float((windowed_pred == global_pred).all(axis=1).mean())
-    ler_global = float((global_pred != obs).any(axis=1).mean())
-    ler_windowed = float((windowed_pred != obs).any(axis=1).mean())
-    assert agree > 0.99, f"two-sided windowed disagrees with global too often: {agree}"
-    assert ler_windowed <= ler_global + 2 * (ler_global / shots) ** 0.5 + 0.005, \
-        f"windowed LER {ler_windowed} vs global {ler_global}"
+    disagree = int((windowed_pred != global_pred).any(axis=1).sum())
+    g_fail = (global_pred != obs).any(axis=1)
+    w_fail = (windowed_pred != obs).any(axis=1)
+    only_w = int((w_fail & ~g_fail).sum())
+    only_g = int((g_fail & ~w_fail).sum())
+    # paired-shot pins (fixed seed; measured 1 disagreement, only_w=1,
+    # only_g=0 -- margins allow pymatching tie-break drift, not regression)
+    assert disagree <= 5, \
+        f"two-sided windowed drifted from global: {disagree}/{shots} shots differ"
+    assert only_w - only_g <= 4, \
+        f"windowed strictly worse on paired shots: only_w={only_w} only_g={only_g}"
 
 
 # ---------------------------------------------------------------------------------

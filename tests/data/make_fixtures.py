@@ -26,7 +26,7 @@ import stim
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-from decsim.adapters.window_error_models import (build_window_error_models,  # noqa: E402
+from decsim.detector_error_model import (build_window_error_models,  # noqa: E402
                                                  decode_windowed)
 from decsim.belief_matching_decoder import belief_matching_window_decoder    # noqa: E402
 from decsim.mwpm_decoder import matching_window_decoder                       # noqa: E402
@@ -105,7 +105,7 @@ def _bb_fixture(golden):
     import scipy.sparse as sp
     from ldpc import BpOsdDecoder
 
-    from decsim.adapters.window_error_models import detector_error_model_to_faults
+    from decsim.detector_error_model import detector_error_model_to_faults
     from decsim.bposd_decoder import bposd_window_decoder
 
     circ = stim.Circuit.from_file(str(HERE / f"{BB['name']}.stim"))

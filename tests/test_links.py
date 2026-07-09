@@ -9,7 +9,9 @@ import pytest
 from decsim.config import us
 from decsim.links import Link, LinkModel
 from decsim.message import Operation
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
+from decsim.decoders import PerRoundDecoder
 
 
 def test_default_link_model_matches_table_2():
@@ -69,5 +71,11 @@ def test_wiring_threads_one_link_model_to_controller_and_cluster():
     """Single source of truth: the controller and the cluster share the SAME LinkModel
     object, so the fabric cannot disagree with itself."""
     ops = [Operation(0, "M(q0)", (0,), clifford=True)]
-    r = build_and_run(ops, num_units=1, d=3, rounds_per_op=11, verbose=False)
+    r = simulate(RunSpec(
+            ops=ops,
+            num_units=1,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PerRoundDecoder(tau_us=1.0),
+        ), verbose=False)
     assert r["controller"].links is r["cluster"].links

@@ -5,14 +5,19 @@ from decsim.config import us
 from decsim.decoders import PresetLatencyDecoder
 from decsim.frontends.circuit import cnot_plus_two_t_circuit, three_cnot_circuit
 from decsim.metrics import BacklogTrajectory, WindowLatencyBreakdown
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 
 def test_window_latency_breakdown_stages():
-    r = build_and_run(three_cnot_circuit(), num_units=1, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(1.0),
-                      make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
-                      verbose=False)
+    r = simulate(RunSpec(
+            ops=three_cnot_circuit(),
+            num_units=1,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PresetLatencyDecoder(1.0),
+            make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
+        ), verbose=False)
     breakdown = r["metrics"]["window_latency"]
     rows = WindowLatencyBreakdown(r["cluster"]).rows()
     # every window decoded: 3 ops x ceil(11/3) = 12 windows
@@ -30,10 +35,14 @@ def test_window_latency_breakdown_stages():
 
 def test_breakdown_separates_queue_wait_from_dep_block():
     # one decoder unit + slow service: later windows wait IN QUEUE, not just on deps
-    r = build_and_run(three_cnot_circuit(), num_units=1, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(5.0),
-                      make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
-                      verbose=False)
+    r = simulate(RunSpec(
+            ops=three_cnot_circuit(),
+            num_units=1,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PresetLatencyDecoder(5.0),
+            make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
+        ), verbose=False)
     assert r["metrics"]["window_latency"]["queue_wait"]["max"] > 0
 
 
@@ -45,10 +54,14 @@ def test_backlog_trajectory_measures_the_blocked_t_gate():
     The second T waits on the first T's
     decode): one row, a positive reaction wait, and a backlog of wait-in-rounds plus
     the gate's own rounds."""
-    r = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(1.0),
-                      make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
-                      verbose=False)
+    r = simulate(RunSpec(
+            ops=cnot_plus_two_t_circuit(),
+            num_units=2,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PresetLatencyDecoder(1.0),
+            make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+        ), verbose=False)
     res = r["metrics"]["backlog_trajectory"]
     rows = BacklogTrajectory(r["chip"]).rows()
     assert res["n"] == 1 and len(rows) == 1
@@ -59,12 +72,21 @@ def test_backlog_trajectory_measures_the_blocked_t_gate():
 def test_backlog_trajectory_registration_changes_nothing():
     """The metric only reads chip timestamps: a run with it registered produces the
     byte-identical trace of a run without it."""
-    bare = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
-                         decoder=PresetLatencyDecoder(1.0), verbose=False)
-    metered = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
-                            decoder=PresetLatencyDecoder(1.0),
-                            make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
-                            verbose=False)
+    bare = simulate(RunSpec(
+               ops=cnot_plus_two_t_circuit(),
+               num_units=2,
+               d=3,
+               rounds_policy=FixedRounds(11),
+               decoder=PresetLatencyDecoder(1.0),
+           ), verbose=False)
+    metered = simulate(RunSpec(
+                  ops=cnot_plus_two_t_circuit(),
+                  num_units=2,
+                  d=3,
+                  rounds_policy=FixedRounds(11),
+                  decoder=PresetLatencyDecoder(1.0),
+                  make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+              ), verbose=False)
     assert bare["engine"].log_lines == metered["engine"].log_lines
 
 
@@ -74,10 +96,14 @@ def test_backlog_grows_when_the_decoder_is_too_slow():
     the signal every backlog/divergence study reads off this metric."""
     waits = {}
     for lat in (1.0, 50.0):
-        r = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
-                          decoder=PresetLatencyDecoder(lat),
-                          make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
-                          verbose=False)
+        r = simulate(RunSpec(
+                ops=cnot_plus_two_t_circuit(),
+                num_units=2,
+                d=3,
+                rounds_policy=FixedRounds(11),
+                decoder=PresetLatencyDecoder(lat),
+                make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+            ), verbose=False)
         waits[lat] = r["metrics"]["backlog_trajectory"]["max_wait"]
     assert waits[50.0] > waits[1.0]
 
@@ -94,10 +120,14 @@ def test_backlog_rows_cover_fan_out_gating():
         Operation(1, "B:T(q1)", (1,), clifford=False, blocked_by=0),
         Operation(2, "C:T(q2)", (2,), clifford=False, blocked_by=0),
     ]).build()
-    r = build_and_run(ops, num_units=2, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(1.0),
-                      make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
-                      verbose=False)
+    r = simulate(RunSpec(
+            ops=ops,
+            num_units=2,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PresetLatencyDecoder(1.0),
+            make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+        ), verbose=False)
     rows = BacklogTrajectory(r["chip"]).rows()
     assert len(rows) == 2
     assert rows[0]["wait"] == rows[1]["wait"] > 0
@@ -114,9 +144,14 @@ def test_backlog_rounds_use_the_ops_own_cadence():
         Operation(0, "A:T(q0)", (0,), clifford=False),
         Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0),
     ]).build()
-    r = build_and_run(ops, num_units=2, d=3, rounds_per_op=11, code=fast,
-                      decoder=PresetLatencyDecoder(1.0),
-                      make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
-                      verbose=False)
+    r = simulate(RunSpec(
+            ops=ops,
+            num_units=2,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            code=fast,
+            decoder=PresetLatencyDecoder(1.0),
+            make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+        ), verbose=False)
     row = BacklogTrajectory(r["chip"]).rows()[0]
     assert row["backlog_rounds"] == row["wait"] / us(0.5) + 11

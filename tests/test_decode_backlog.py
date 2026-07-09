@@ -19,11 +19,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.controllers import ModularController, LinkModel
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import DecodeBacklog, ReadyQueueStats
 from decsim.schemes import SlidingWindowScheme
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 D = 3                       # commit = buffer = d = 3 rounds; window = 2d = 6 rounds
 GEN_US = D * 1.0            # one commit region generated every 3 us (round = 1 us)
@@ -43,19 +44,24 @@ class _FixedLatencyDecoder:
 
 
 def _zero_link_controller(engine):
-    return ModularController(engine, t_qc=0, t_cd=0, t_dd=0, t_do=0, t_oc=0, t_cq=0,
-                             log_syndromes=False)
+    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
 
 
 def _run(latency_us, rounds):
     """Return (peak_backlog_rounds, peak_ready_queue) for a memory op of `rounds` rounds."""
     op = Operation(0, "mem", (0,), clifford=True, patches=(0,))
-    res = build_and_run(
-        [op], num_units=4, d=D, rounds_per_op=rounds, round_us=1.0,
-        decoder=_FixedLatencyDecoder(latency_us), scheme=SlidingWindowScheme(),
-        code=SurfaceCodeModel(d=D), make_controller=_zero_link_controller,
-        make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl), ReadyQueueStats(cl)],
-        verbose=False)
+    res = simulate(RunSpec(
+              ops=[op],
+              num_units=4,
+              d=D,
+              rounds_policy=FixedRounds(rounds),
+              round_us=1.0,
+              decoder=_FixedLatencyDecoder(latency_us),
+              scheme=SlidingWindowScheme(),
+              code=SurfaceCodeModel(d=D),
+              make_controller=_zero_link_controller,
+              make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl), ReadyQueueStats(cl)],
+          ), verbose=False)
     m = res["metrics"]
     return m["decode_backlog"]["peak_rounds"], m["ready_queue"]["peak"]
 

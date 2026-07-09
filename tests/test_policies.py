@@ -3,12 +3,15 @@
 #==================================================================
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
-from decsim.decoders import (CodeRouter, PresetLatencyDecoder, SwitchingDecoder)
+from decsim.decoders import (CodeRouter, FunctionLatencyDecoder,
+                             PresetLatencyDecoder, SwitchingDecoder)
 from decsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
 from decsim.message import DecodeJob, Operation
 from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
                                ReactionPathDeadline)
-from decsim.wiring import build_and_run
+from decsim.policies import from_mode
+from decsim.planner import FixedRounds
+from decsim.run_spec import RunSpec, simulate
 
 
 # ---- deadline policies ----------------------------------------------------------------
@@ -32,9 +35,10 @@ def _contended_circuit():
 
 def test_reaction_path_deadline_beats_fifo_under_contention():
     def run(scheduler=None, deadline_policy=None):
-        r = build_and_run(_contended_circuit(), num_units=1, d=3, rounds_per_op=11,
-                          decoder=PresetLatencyDecoder(5.0), scheduler=scheduler,
-                          deadline_policy=deadline_policy, verbose=False)
+        r = simulate(RunSpec(ops=_contended_circuit(), num_units=1, d=3,
+                             rounds_policy=FixedRounds(11),
+                             decoder=PresetLatencyDecoder(5.0), scheduler=scheduler,
+                             deadline_policy=deadline_policy), verbose=False)
         return r["chip_done"]                  # ends with the blocked T's last round
 
     fifo = run()
@@ -64,9 +68,11 @@ def test_custom_router_by_hint():
     router = HintRouter(weak, strong)
     assert router.route(DecodeJob(0, 0, 6)) is weak
     assert router.route(DecodeJob(0, 0, 6, hint="strong")) is strong
-    # the router seam accepts it end to end
-    r = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
-                      router=router, verbose=False)
+    # the router seam accepts it end to end (decoder= is the placeholder the
+    # router overrides; the custom router dispatches every job to weak/strong)
+    r = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), num_units=2, d=3,
+                         rounds_policy=FixedRounds(11), router=router,
+                         decoder=weak), verbose=False)
     assert r["fully_done"] > 0
 
 
@@ -101,8 +107,8 @@ def test_switching_decoder_charges_t_comm_weak_on_every_path():
 def test_switching_decoder_end_to_end():
     sw = SwitchingDecoder(PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0),
                           gamma_switch=0.5, seed=7)
-    r = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
-                      decoder=sw, verbose=False)
+    r = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), num_units=2, d=3,
+                         rounds_policy=FixedRounds(11), decoder=sw), verbose=False)
     assert r["fully_done"] > 0                 # runs to completion with mixed latencies
 
 
@@ -115,14 +121,16 @@ def _memory_op():
 
 def test_code_round_time_overrides_global_cadence():
     slow = SurfaceCodeModel(d=3, round_us=2.0)
-    r = build_and_run(_memory_op(), num_units=1, code=slow, rounds_per_op=5,
-                      round_us=1.1, decoder=PresetLatencyDecoder(0.5), verbose=False)
+    r = simulate(RunSpec(ops=_memory_op(), num_units=1, code=slow,
+                         rounds_policy=FixedRounds(5), round_us=1.1,
+                         decoder=PresetLatencyDecoder(0.5)), verbose=False)
     assert r["chip_done"] == 5 * us(2.0)       # the CODE's cadence, not the global
 
 
 def test_global_cadence_is_default():
-    r = build_and_run(_memory_op(), num_units=1, d=3, rounds_per_op=5,
-                      round_us=1.1, decoder=PresetLatencyDecoder(0.5), verbose=False)
+    r = simulate(RunSpec(ops=_memory_op(), num_units=1, d=3,
+                         rounds_policy=FixedRounds(5), round_us=1.1,
+                         decoder=PresetLatencyDecoder(0.5)), verbose=False)
     assert r["chip_done"] == 5 * us(1.1)
 
 
@@ -130,10 +138,28 @@ def test_global_cadence_is_default():
 
 def test_idle_rounds_decoded_only_when_enabled():
     def run(mode):
-        r = build_and_run(cnot_plus_two_t_circuit(), num_units=2, d=3, rounds_per_op=11,
-                          decoder=PresetLatencyDecoder(3.0),
-                          idle_round_mode=mode, verbose=False)
+        r = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), num_units=2, d=3,
+                             rounds_policy=FixedRounds(11),
+                             decoder=PresetLatencyDecoder(3.0),
+                             idle_policy=from_mode(mode)), verbose=False)
         return [l for l in r["engine"].log_lines if "mem(" in l]
 
     assert run("ignore") == []                 # ignored idle rounds do not load the decoder
     assert len(run("separate_decode_jobs")) > 0
+
+
+# ---- caller-supplied latency functions ------------------------------------------------
+
+def test_function_latency_decoder_prices_jobs_from_the_supplied_function():
+    """The service time is whatever the caller's job->microseconds function
+    says (e.g. a GPU model: fixed overhead + throughput terms); decode()
+    stays a timing-only empty result."""
+    decoder = FunctionLatencyDecoder(
+        lambda job: 2.0 + 0.5 * job.n_rounds + 0.01 * job.spatial_nodes)
+    short_wide = DecodeJob(op_id=0, window_id=0, n_rounds=4, spatial_nodes=100)
+    long_narrow = DecodeJob(op_id=0, window_id=1, n_rounds=12, spatial_nodes=25)
+    assert decoder.latency(short_wide) == us(2.0 + 2.0 + 1.0)
+    assert decoder.latency(long_narrow) == us(2.0 + 6.0 + 0.25)
+    result = decoder.decode(short_wide)
+    assert (result.op_id, result.window_id) == (0, 0)
+    assert result.correction is None and result.logical_value is None

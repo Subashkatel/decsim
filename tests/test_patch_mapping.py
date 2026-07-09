@@ -16,15 +16,21 @@ from decsim.frontends.circuit import CircuitFrontend, _wire_circuit
 from decsim.layouts import UniformLayout
 from decsim.codes import SurfaceCodeModel
 from decsim.message import Operation
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 
 TWO_QUBITS_PER_PATCH = {0: "patch0", 1: "patch0", 2: "patch1", 3: "patch1"}
 
 
 def _run(ops):
-    r = build_and_run(ops, num_units=2, d=3, rounds_per_op=11,
-                      decoder=PresetLatencyDecoder(1.0), verbose=False)
+    r = simulate(RunSpec(
+            ops=ops,
+            num_units=2,
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=PresetLatencyDecoder(1.0),
+        ), verbose=False)
     return r["engine"].log_lines
 
 

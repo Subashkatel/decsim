@@ -23,3 +23,8 @@ include = ["decsim*"]
 # (decsim.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
 [tool.setuptools.package-data]
 "decsim.stimcircuits" = ["LICENSE", "NOTICE.md"]
+
+# docs/ holds cloned third-party artifacts (e.g. the SWIPER repo) whose own
+# test suites must not be collected by our `python -m pytest -q` entry point.
+[tool.pytest.ini_options]
+testpaths = ["tests"]

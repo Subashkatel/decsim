@@ -11,9 +11,17 @@ class StimDevice:
     """Sample Stim circuits and stream detection events by syndrome round."""
 
     def __init__(self, seed: Optional[int] = None,
-                 rounds_for: Optional[Callable[[Operation], int]] = None):
+                 rounds_for: Optional[Callable[[Operation], int]] = None,
+                 detector_rounds: Optional[dict] = None):
+        """detector_rounds: optional {op_or_stream_key: {detector: 1-based
+        round}} override for circuits whose DETECTORs carry no coordinates
+        (e.g. QLX-emitted circuits; the map comes from
+        emit_decoder_params()['dem_detector_locs'] packet indices)."""
         self._seed = seed
         self._rounds_for = rounds_for
+        self._detector_rounds_override = {
+            key: dict(rounds_map)
+            for key, rounds_map in (detector_rounds or {}).items()}
         self._samplers: dict = {}
         self._dets: dict = {}
         self._truth: dict = {}
@@ -40,15 +48,25 @@ class StimDevice:
         dets, obs = sampler.sample(shots=1, separate_observables=True)
         self._dets[key] = dets[0]
         self._truth[key] = obs[0]
-        coords = op.circuit.get_detector_coordinates()
-        max_time_coordinate = max((int(c[-1]) for c in coords.values()), default=0)
-        round_count = self._rounds_for(op) if self._rounds_for is not None \
-            else max_time_coordinate
+        override = self._detector_rounds_override.get(key)
         buckets: dict[int, list[int]] = {}
-        for detector_index, coordinate in coords.items():
-            detector_round = int(coordinate[-1]) + 1
-            buckets.setdefault(
-                min(detector_round, round_count), []).append(detector_index)
+        if override is not None:
+            max_round = max(override.values(), default=0)
+            round_count = self._rounds_for(op) if self._rounds_for is not None \
+                else max_round
+            for detector_index, detector_round in override.items():
+                buckets.setdefault(
+                    min(detector_round, round_count), []).append(detector_index)
+        else:
+            coords = op.circuit.get_detector_coordinates()
+            max_time_coordinate = max(
+                (int(c[-1]) for c in coords.values()), default=0)
+            round_count = self._rounds_for(op) if self._rounds_for is not None \
+                else max_time_coordinate
+            for detector_index, coordinate in coords.items():
+                detector_round = int(coordinate[-1]) + 1
+                buckets.setdefault(
+                    min(detector_round, round_count), []).append(detector_index)
         for detector_ids in buckets.values():
             detector_ids.sort()
         self._by_round[key] = buckets
@@ -81,15 +99,25 @@ class StimDevice:
             for detector_id, coordinate in coords.items()
         }
 
+    def _detector_rounds_for_key(self, key, circuit, round_count: int) -> dict:
+        """The detector->round map for one op/stream: explicit override when
+        registered (coordinate-less circuits), else circuit coordinates."""
+        override = self._detector_rounds_override.get(key)
+        if override is not None:
+            return {detector_id: min(detector_round, round_count)
+                    for detector_id, detector_round in override.items()}
+        return self._detector_rounds(circuit, round_count)
+
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
                                 *, belief_matching: bool = False):
         """Prepare the window model source for one finite Stim-backed stream."""
         if stream_op.circuit is None:
             return None
 
-        from .window_error_models import WindowSlicer
+        from ..detector_error_model import WindowSlicer
 
-        detector_rounds = self._detector_rounds(stream_op.circuit, round_count)
+        detector_rounds = self._detector_rounds_for_key(
+            stream_op.id, stream_op.circuit, round_count)
         self._stream_models[stream_op.id] = {
             "round_count": round_count,
             "slicer": WindowSlicer(
@@ -124,9 +152,10 @@ class StimDevice:
         if op.circuit is None or not windows:
             return []
 
-        from .window_error_models import build_window_error_models
+        from ..detector_error_model import build_window_error_models
 
-        detector_rounds = self._detector_rounds(op.circuit, round_count)
+        detector_rounds = self._detector_rounds_for_key(
+            self._key(op), op.circuit, round_count)
         model_plan = [
             (window.start_round, window.commit_lo, window.commit_hi,
              min(window.buffer_hi, round_count))
@@ -155,9 +184,10 @@ class StimDevice:
         if op.circuit is None:
             return None
 
-        from .window_error_models import build_single_window_error_model
+        from ..detector_error_model import build_single_window_error_model
 
-        detector_rounds = self._detector_rounds(op.circuit, round_count)
+        detector_rounds = self._detector_rounds_for_key(
+            self._key(op), op.circuit, round_count)
         return build_single_window_error_model(
             op.circuit,
             (window.start_round, window.commit_lo,

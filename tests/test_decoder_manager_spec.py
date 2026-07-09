@@ -9,16 +9,18 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import pytest
 
-from decsim.cluster import DecoderCluster
+from decsim.decoders import CodeRouter
+from decsim.decoder_manager import DecoderManager
 from decsim.config import us
 from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
-                             SampledSoftOutputDecoder, SwitchingRouter)
+                             SampledConfidenceDecoder, SwitchingRouter)
 from decsim.engine import Engine
 from decsim.message import Operation
 from decsim.schedulers import FifoScheduler
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
-from decsim.wiring import build_and_run
+from decsim.run_spec import RunSpec, simulate
+from decsim.planner import FixedRounds
 
 TAU = 1.0          # syndrome-round time (microseconds)
 D = 3              # code distance; commit = buffer = d for the default sliding scheme
@@ -32,18 +34,25 @@ def _memory_op(op_id=0):
 def _switch_run(switching, low_confidence_probability, *, rounds=60, tau_weak=0.1,
                 tau_strong=10.0, pools=None, seed=1, make_metrics=None):
     """A single-patch sliding-window run with decoder switching, built exactly the way
-    tests/test_switching.py builds one: a SampledSoftOutputDecoder weak (its soft_output is
+    tests/test_switching.py builds one: a SampledConfidenceDecoder weak (its soft_output is
     deterministically 0.0 with probability `low_confidence_probability`, else 1.0, so
     keep_weak_result is controllable) routed against a slow PerRoundDecoder strong by a
     SwitchingRouter, with separate "default"/"strong" unit pools."""
-    weak = SampledSoftOutputDecoder(PerRoundDecoder(tau_weak * TAU),
+    weak = SampledConfidenceDecoder(PerRoundDecoder(tau_weak * TAU),
                                     low_confidence_probability, seed=seed)
     strong = PerRoundDecoder(tau_strong * TAU)
-    return build_and_run([_memory_op()], d=D, rounds_per_op=rounds, round_us=TAU,
-                         scheme=SlidingWindowScheme(), switching=switching,
-                         decoder=weak, router=SwitchingRouter(weak, strong),
-                         unit_pools=pools or {"default": 1, "strong": 1},
-                         make_metrics=make_metrics, verbose=False)
+    return simulate(RunSpec(
+               ops=[_memory_op()],
+               d=D,
+               rounds_policy=FixedRounds(rounds),
+               round_us=TAU,
+               scheme=SlidingWindowScheme(),
+               strategy=switching,
+               decoder=weak,
+               router=SwitchingRouter(weak, strong),
+               unit_pools=pools or {"default": 1, "strong": 1},
+               make_metrics=make_metrics,
+           ), verbose=False)
 
 
 # =====================================================================================
@@ -58,8 +67,8 @@ def test_A1_dispatch_is_bounded_by_free_units_and_queue_drains():
     and falls back to 0."""
     N = 2
     engine = Engine(verbose=False)
-    cluster = DecoderCluster(engine, PresetLatencyDecoder(10.0), FifoScheduler(),
-                             None, None, num_units=N, code_distance=D)
+    cluster = DecoderManager(engine, router=CodeRouter(PresetLatencyDecoder(10.0)),
+                       scheduler=FifoScheduler(), num_units=N)
     start_free = cluster.free_units
     assert start_free == N == cluster.num_units
 
@@ -98,8 +107,8 @@ def test_A2_external_submit_runs_once_and_skips_the_window_commit_path():
     competes for the same units and calls on_done EXACTLY ONCE; an external job never enters the
     window-commit path -- it adds nothing to committed_windows, op_results, or total_windows."""
     engine = Engine(verbose=False)
-    cluster = DecoderCluster(engine, PresetLatencyDecoder(5.0), FifoScheduler(),
-                             None, None, num_units=2, code_distance=D)
+    cluster = DecoderManager(engine, router=CodeRouter(PresetLatencyDecoder(5.0)),
+                       scheduler=FifoScheduler(), num_units=2)
     calls = []
     cluster.submit_decode(6, lambda: calls.append(engine.now), label="external")
     engine.run()
@@ -107,10 +116,9 @@ def test_A2_external_submit_runs_once_and_skips_the_window_commit_path():
     assert len(calls) == 1                            # on_done fired exactly once
     assert calls[0] == us(5.0)                        # ran on a unit (the preset 5 us latency)
     assert cluster.free_units == cluster.num_units    # the unit it occupied came back
-    # never touched the window-commit bookkeeping:
-    assert len(cluster.committed_windows) == 0
-    assert cluster.op_results == {}
-    assert cluster.total_windows == 0
+    # the window-commit path is structurally unreachable from the pool: the
+    # restructure split it into WindowManager, which this job never touched
+    assert cluster.on_window_decoded is None
 
 
 def test_A2_external_job_shares_the_unit_pool_with_window_decodes():
@@ -118,8 +126,8 @@ def test_A2_external_job_shares_the_unit_pool_with_window_decodes():
     jobs of 10 us each both finish at 10 us (ran concurrently); a third waits for one to free
     (finishes at 20 us)."""
     engine = Engine(verbose=False)
-    cluster = DecoderCluster(engine, PresetLatencyDecoder(10.0), FifoScheduler(),
-                             None, None, num_units=2, code_distance=D)
+    cluster = DecoderManager(engine, router=CodeRouter(PresetLatencyDecoder(10.0)),
+                       scheduler=FifoScheduler(), num_units=2)
     done = {}
     cluster.submit_decode(6, lambda: done.update(a=engine.now), label="a")
     cluster.submit_decode(6, lambda: done.update(b=engine.now), label="b")
@@ -139,9 +147,9 @@ def test_A3_hint_routes_a_job_to_its_named_pool():
     pool's unit while a default job runs on the default pool's unit -- so both 10 us jobs start at
     t=0 and finish together. free_units reflects ONLY the default pool."""
     engine = Engine(verbose=False)
-    cluster = DecoderCluster(engine, PresetLatencyDecoder(10.0), FifoScheduler(),
-                             None, None, num_units=1, code_distance=D,
-                             unit_pools={"default": 1, "strong": 1})
+    cluster = DecoderManager(engine, router=CodeRouter(PresetLatencyDecoder(10.0)),
+                       scheduler=FifoScheduler(),
+                       unit_pools={"default": 1, "strong": 1})
     # free_units is the default pool's free count only, not the cluster-wide total.
     assert cluster.free_units == cluster.unit_totals["default"] == 1
     assert cluster.unit_totals == {"default": 1, "strong": 1}
@@ -161,12 +169,13 @@ def test_A3_hint_routes_a_job_to_its_named_pool():
 def test_A3_construction_rejects_missing_default_and_empty_pool():
     """A3: a unit_pools dict without a "default" key, or any pool with < 1 unit, is rejected at
     construction (ValueError)."""
-    args = (Engine(verbose=False), PresetLatencyDecoder(1.0), FifoScheduler(), None, None)
+    kwargs = dict(router=CodeRouter(PresetLatencyDecoder(1.0)),
+                  scheduler=FifoScheduler())
     with pytest.raises(ValueError):
-        DecoderCluster(*args, num_units=1, code_distance=D, unit_pools={"strong": 1})
+        DecoderManager(Engine(verbose=False), unit_pools={"strong": 1}, **kwargs)
     with pytest.raises(ValueError):
-        DecoderCluster(*args, num_units=1, code_distance=D,
-                       unit_pools={"default": 1, "strong": 0})
+        DecoderManager(Engine(verbose=False),
+                 unit_pools={"default": 1, "strong": 0}, **kwargs)
 
 
 # =====================================================================================
@@ -199,7 +208,7 @@ def test_A4_confident_weak_never_escalates():
 
 
 def test_A4_strong_redo_size_is_commit_plus_two_buffers():
-    """A4: the strong re-decode covers Switching.calculate_strong_redo_rounds(window) =
+    """A4: the strong re-decode covers Switching.strong_redo_rounds(window) =
     commit + 2*buffer (= 3d when commit=buffer=d). Cross-check the policy's own formula against
     the public cluster geometry (commit / buffer) the run used."""
     res = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=60)
@@ -209,7 +218,7 @@ def test_A4_strong_redo_size_is_commit_plus_two_buffers():
     from decsim.message import Window
     w = Window(op_id=0, k=0, commit_lo=1, commit_hi=c.commit,
                buffer_hi=c.commit + c.buffer, n_rounds=c.commit + c.buffer)
-    redo = Switching(confidence_threshold=0.5).calculate_strong_redo_rounds(w)
+    redo = Switching(confidence_threshold=0.5).strong_redo_rounds(w)
     assert redo == c.commit + 2 * c.buffer == 3 * D
 
 

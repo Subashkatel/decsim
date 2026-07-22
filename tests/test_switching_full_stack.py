@@ -209,7 +209,7 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
         assert job.window.commit_lo == weak_window.commit_lo
         assert job.window.commit_hi == min(
             weak_window.commit_hi + 2 * buffer_rounds, rounds)
-        assert job.window.boundary_in == weak_window.boundary_in
+        assert job.window.boundary_in == {}   # raw context, no folded defects
         restart = next(
             (cluster.windows[(key[0], j)]
              for j in sorted(k for o, k in cluster.windows if o == key[0])
@@ -244,7 +244,27 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
         if job.window.buffer_hi > job.window.commit_hi:
             assert context_rounds, "slab missing its far-side context data"
             assert all(payload.bits is not None for payload in context_rounds)
-    truth = int(device._truth[0][0])   # truth from Stim observables, not strong
+    # physical truth comes from the SAME shot's Stim observable, never the
+    # strong decoder; both the switched verdict and an independent global
+    # decode are labeled against it, and flipping the truth bit must flip
+    # exactly those error labels
+    import pymatching
+    truth = int(device._truth[0][0])
+    verdict = int(cluster.op_results[0])
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", distance=3, rounds=rounds,
+        after_clifford_depolarization=0.008,
+        after_reset_flip_probability=0.008,
+        before_measure_flip_probability=0.008,
+        before_round_data_depolarization=0.008)
+    global_prediction = int(pymatching.Matching.from_detector_error_model(
+        circuit.detector_error_model(decompose_errors=True)).decode(
+            device._dets[0])[0])
+    switched_error = verdict ^ truth
+    global_error = global_prediction ^ truth
+    assert {switched_error, global_error} <= {0, 1}
+    assert verdict ^ (1 - truth) == 1 - switched_error
+    assert global_prediction ^ (1 - truth) == 1 - global_error
 
     res_calm, _, strong_calm = _run(threshold=0.0, rounds=rounds,
                                     double_window=True)

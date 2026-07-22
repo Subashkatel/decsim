@@ -253,3 +253,76 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
     assert not strong_serial.jobs
     assert res_calm["cluster"].op_results[0] \
         == res_serial["cluster"].op_results[0]
+
+
+def test_double_window_seam_models_partition_fault_ownership():
+    """The slab-end seam is decoded as two B-side windows: the re-sliced
+    restart window reads a leading buffer back into the slab tail and OWNS
+    no fault touching the slab, while the slab owns the seam-crossing
+    faults and nothing before its own rounds. Without the re-slice the
+    restart window keeps its plan-time forward-chain model whose
+    cancellation contract absorption broke: a seam fault then fires a
+    defect it can neither own nor represent, and its matching commits a
+    spurious logical flip (adjudicated validator finding, demonstrated on
+    crafted seam-fault shots)."""
+    import numpy as np
+    from decsim.decoders import SampledConfidenceDecoder
+
+    rounds = 21
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", distance=3, rounds=rounds,
+        after_clifford_depolarization=0.008,
+        after_reset_flip_probability=0.008,
+        before_measure_flip_probability=0.008,
+        before_round_data_depolarization=0.008)
+    op = Operation(0, "memory", (0,), clifford=True, circuit=circuit)
+    weak = _Recording(SampledConfidenceDecoder(
+        UnweightedPyMatchingDecoder(_Latency()), 0.0,
+        probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0))
+    strong = _Recording(PyMatchingDecoder(_Latency()))
+    simulate(RunSpec(
+        ops=[op],
+        num_units=1,
+        d=3,
+        rounds_policy=FixedRounds(rounds),
+        code=SurfaceCodeModel(d=3),
+        scheme=SlidingWindowScheme(),
+        strategy=Switching(confidence_threshold=0.5, double_window=True),
+        device=StimDevice(seed=5),
+        decoder=weak,
+        router=SwitchingRouter(weak, strong),
+        unit_pools={"default": 1, "strong": 1},
+    ), verbose=False)
+
+    (slab_job,) = strong.jobs
+    assert slab_job.strong_decode_for == (0, 2)
+    slab_lo, slab_hi = slab_job.window.commit_lo, slab_job.window.commit_hi
+    assert (slab_lo, slab_hi) == (7, 15)
+    restart_job = next(j for j in weak.jobs if j.window_id == 5)
+    assert restart_job.payloads[0].round_index == 13   # leading buffer read
+
+    coords = circuit.get_detector_coordinates()
+
+    def column_rounds(dem, column):
+        rows = np.nonzero(dem.check[:, column])[0]
+        return {int(coords[dem.detector_ids[row]][-1]) + 1 for row in rows}
+
+    restart_dem, slab_dem = restart_job.dem, slab_job.dem
+    restart_owned = np.nonzero(restart_dem.owned)[0]
+    assert restart_owned.size
+    for column in restart_owned:
+        assert min(column_rounds(restart_dem, column)) > slab_hi
+
+    seam_context = [
+        column for column in range(restart_dem.check.shape[1])
+        if not restart_dem.owned[column]
+        and {slab_hi, slab_hi + 1} <= column_rounds(restart_dem, column)]
+    assert seam_context, "seam faults must be visible restart context"
+
+    seam_owned = False
+    for column in np.nonzero(slab_dem.owned)[0]:
+        fault_rounds = column_rounds(slab_dem, column)
+        assert min(fault_rounds) >= slab_lo      # owns nothing pre-slab
+        if {slab_hi, slab_hi + 1} <= fault_rounds:
+            seam_owned = True
+    assert seam_owned, "the slab must own the seam-crossing faults"

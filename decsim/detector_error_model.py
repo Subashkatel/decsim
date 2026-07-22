@@ -446,16 +446,31 @@ def build_single_window_error_model(circuit, window_entry: tuple,
                                     num_observables: Optional[int] = None,
                                     *, decompose_errors: bool = True,
                                     detector_rounds: Optional[dict] = None,
-                                    belief_matching: bool = False) -> WindowErrorModel:
-    """Build one independent window model without changing a stream ownership cursor."""
+                                    belief_matching: bool = False,
+                                    exclude_faults_touching: Optional[tuple] = None
+                                    ) -> WindowErrorModel:
+    """Build one independent window model without changing a stream ownership cursor.
+
+    exclude_faults_touching=(lo, hi) marks every fault with a detector in
+    rounds [lo, hi] as committed elsewhere: this window may still SEE such a
+    fault as a context column through its leading buffer, but never owns it.
+    Used to make a window the B-side of a seam whose other side (e.g. a
+    double-window strong slab) owns the crossing faults."""
     (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
      h_det_sets, h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
          circuit, num_observables, decompose_errors, detector_rounds, belief_matching)
     buffer_lo, commit_lo, commit_hi, buffer_hi = _parse_window_entry(window_entry)
+    committed_elsewhere: set = set()
+    if exclude_faults_touching is not None:
+        exclude_lo, exclude_hi = exclude_faults_touching
+        committed_elsewhere = {
+            fault_index for fault_index, rounds in enumerate(fault_rounds)
+            if any(exclude_lo <= round_index <= exclude_hi
+                   for round_index in rounds)}
     return _build_one_window_model(
         det_sets=det_sets, obs_sets=obs_sets, priors=priors,
         n_obs=n_obs, round_of=round_of, fault_rounds=fault_rounds,
-        pos_of=pos_of, committed_elsewhere=set(),
+        pos_of=pos_of, committed_elsewhere=committed_elsewhere,
         buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
         buffer_hi=buffer_hi, is_last=False,
         belief_matching=belief_matching, h_det_sets=h_det_sets,

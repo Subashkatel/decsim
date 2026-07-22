@@ -502,11 +502,14 @@ def test_sampled_soft_output_uses_the_probability_for_callback():
 
 # ---- faithful double window (paper Sec. III C, Fig. 12) --------------------
 #
-# In double_window mode the strong slab may start only after the weak decoder
-# has determined the boundary conditions at BOTH slab ends: the near side came
-# with the previous window's commit, the far side is the NEXT window's weak
-# commit (or the terminal time boundary at the stream end). The weak pipeline
-# itself never waits on strong work.
+# On a switching event the slab of commit + 2*buffer rounds starts AT the
+# suspicious commit and extends FORWARD (Fig. 12 panel 4); the weak chain
+# SKIPS the windows whose commit regions the slab absorbs and restarts on the
+# first window past the slab (panel 5); the strong decoder commits the whole
+# slab, and it starts only once the weak decoder has determined the boundary
+# conditions at both slab ends: the escalated window's own entry defects on
+# the left, the restart window's weak commit on the right (panel 6), or the
+# terminal boundary at the stream end. The weak pipeline never waits.
 
 class _DispatchRecorder:
     """Record the tick a decoder unit STARTS each job: the pool calls
@@ -525,7 +528,7 @@ class _DispatchRecorder:
         return self.inner.decode(job)
 
 
-def _double_window_run(escalate_window, rounds=30, strategy=None):
+def _double_window_run(escalate_window, rounds=30, strong_tau=F_STRONG):
     """One memory op on sliding d/d windows; exactly the window with index
     escalate_window reports low confidence (deterministic, no sampling)."""
     env = {}
@@ -533,7 +536,7 @@ def _double_window_run(escalate_window, rounds=30, strategy=None):
         PerRoundDecoder(F_WEAK * TAU_GEN_US), 0.0,
         probability_for=lambda job: 1.0 if job.window_id == escalate_window
         else 0.0), env)
-    strong = _DispatchRecorder(PerRoundDecoder(F_STRONG * TAU_GEN_US), env)
+    strong = _DispatchRecorder(PerRoundDecoder(strong_tau * TAU_GEN_US), env)
     res = simulate(RunSpec(
               ops=[_memory_op()],
               num_units=1,
@@ -541,8 +544,8 @@ def _double_window_run(escalate_window, rounds=30, strategy=None):
               rounds_policy=FixedRounds(rounds),
               round_us=TAU_GEN_US,
               scheme=SlidingWindowScheme(),
-              strategy=strategy or Switching(confidence_threshold=0.5,
-                                             double_window=True),
+              strategy=Switching(confidence_threshold=0.5,
+                                 double_window=True),
               decoder=weak,
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
@@ -551,39 +554,73 @@ def _double_window_run(escalate_window, rounds=30, strategy=None):
     return res, weak, strong
 
 
-def test_double_window_strong_waits_for_the_far_weak_boundary():
-    """W2 escalates: its slab starts only after W3's weak decode commits (the
-    far-side boundary), plus the weak->strong hop. Without the deferral the
-    strong job would start right after W2's weak outcome, 2.5 us earlier."""
+def test_double_window_slab_extends_forward_and_absorbs_the_weak_chain():
+    """Fig. 12 panels 4-5: W2 (commit 7-9) escalates; the slab is rounds
+    7-15 (commit + two buffers FORWARD), the windows committing 10-12 and
+    13-15 are never weak-decoded, and the weak chain restarts at W5."""
     res, weak, strong = _double_window_run(escalate_window=2)
-    cluster = res["cluster"]
-    w3 = cluster.windows[(0, 3)]
+    runtime = res["cluster"].window_manager
     (start_tick, job), = strong.starts
     assert job.strong_decode_for == (0, 2)
-    assert w3.t_done is not None
-    assert start_tick == w3.t_done + us(0.5)      # far boundary commit + t_ws
-    assert cluster.window_manager.pending_escalations == {}   # none dangling
+    assert (job.window.commit_lo, job.window.commit_hi) == (7, 15)
+    assert job.n_rounds == 3 * D                    # the paper's r_strong
+    assert runtime.absorbed_windows == {(0, 3), (0, 4)}
+    weak_windows_decoded = [j.window_id for _, j in weak.starts]
+    assert weak_windows_decoded == [0, 1, 2, 5, 6, 7, 8, 9]
+    for absorbed_key in runtime.absorbed_windows:
+        window = runtime.windows[absorbed_key]
+        assert window.committed and window.t_done is None
 
 
-def test_double_window_weak_pipeline_never_stalls():
-    """The weak stream is tick-identical with and without an escalation: the
-    deferral holds back only the strong slab, never the weak chain."""
-    escalated, _, _ = _double_window_run(escalate_window=2)
-    plain, _, _ = _double_window_run(escalate_window=-1)   # never escalates
-    assert {k: w.t_done for k, w in escalated["cluster"].windows.items()} \
-        == {k: w.t_done for k, w in plain["cluster"].windows.items()}
+def test_double_window_strong_waits_for_the_restart_windows_weak_commit():
+    """Fig. 12 panel 6: the slab starts only after the restart window's
+    (W5's) weak decode commits the far-side boundary, plus the weak->strong
+    hop. Without the gate the slab would start right after W2's outcome."""
+    res, weak, strong = _double_window_run(escalate_window=2)
+    cluster = res["cluster"]
+    w5 = cluster.windows[(0, 5)]
+    (start_tick, job), = strong.starts
+    assert w5.t_done is not None
+    assert start_tick == w5.t_done + us(0.5)
+    assert cluster.window_manager.pending_escalations == {}
+
+
+def test_double_window_weak_pipeline_never_stalls_on_strong_work():
+    """The weak chain's schedule is independent of the strong decoder: a
+    10x slower strong decoder changes no weak window's decode time."""
+    fast, _, _ = _double_window_run(escalate_window=2, strong_tau=F_STRONG)
+    slow, _, _ = _double_window_run(escalate_window=2,
+                                    strong_tau=10 * F_STRONG)
+    assert {k: w.t_done for k, w in fast["cluster"].windows.items()} \
+        == {k: w.t_done for k, w in slow["cluster"].windows.items()}
 
 
 def test_double_window_last_window_uses_the_terminal_boundary():
-    """The final window has no next window: its far side is the terminal time
-    boundary, already fixed when its own data completed, so the slab is
+    """The final window's slab clamps at the stream end and has no restart
+    window: the terminal time boundary already exists, so the slab is
     submitted at escalation without any extra wait."""
     res, weak, strong = _double_window_run(escalate_window=9)  # last of 10
     cluster = res["cluster"]
     w9 = cluster.windows[(0, 9)]
     (start_tick, job), = strong.starts
-    assert job.strong_decode_for == (0, 9)
+    assert (job.window.commit_lo, job.window.commit_hi) == (28, 30)
+    assert job.n_rounds == 3                        # clamped r_strong
     assert start_tick == w9.t_done + us(0.5)
+    assert cluster.window_manager.absorbed_windows == set()
+
+
+def test_double_window_end_clamped_slab_absorbs_the_tail():
+    """W8 (commit 25-27) escalates: the slab clamps to rounds 25-30,
+    absorbs the final window, and needs no restart gate."""
+    res, weak, strong = _double_window_run(escalate_window=8)
+    runtime = res["cluster"].window_manager
+    (start_tick, job), = strong.starts
+    assert (job.window.commit_lo, job.window.commit_hi) == (25, 30)
+    assert job.n_rounds == 6
+    assert runtime.absorbed_windows == {(0, 9)}
+    assert [j.window_id for _, j in weak.starts] == [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    w8 = res["cluster"].windows[(0, 8)]
+    assert start_tick == w8.t_done + us(0.5)
 
 
 def test_double_window_exactly_one_strong_job_per_escalation():
@@ -591,8 +628,7 @@ def test_double_window_exactly_one_strong_job_per_escalation():
     registration for the same window is an illegal transition."""
     res, weak, strong = _double_window_run(escalate_window=2)
     assert len(strong.starts) == 1
-    cluster = res["cluster"]
-    runtime = cluster.window_manager
+    runtime = res["cluster"].window_manager
     runtime._deferred_strong[(0, 2)] = {"state": "waiting_far_boundary"}
     with pytest.raises(RuntimeError, match="duplicate strong escalation"):
         runtime.defer_strong_escalation(
@@ -600,10 +636,11 @@ def test_double_window_exactly_one_strong_job_per_escalation():
                       deadline=0), 9, "dup")
 
 
-def test_double_window_revises_logic_with_the_strong_result():
-    """The escalated window's weak logical value is discarded in the final
-    accounting (paper Sec. III A step 4): ten weak windows at logical 1 XOR
-    to 0; the strong 0 replaces W2's 1, leaving nine ones -> 1."""
+def test_double_window_strong_result_owns_the_whole_slab():
+    """Fig. 12 panels 6-8: the slab's logical value replaces the escalated
+    window's weak value, and the absorbed windows contribute nothing. Eight
+    weak windows at logical 1 XOR to 0; replacing W2's 1 with the strong 0
+    leaves seven ones -> 1."""
     weak = SampledConfidenceDecoder(
         FixedLogicalDecoder(logical_value=1), 0.0,
         probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0)
@@ -624,36 +661,16 @@ def test_double_window_revises_logic_with_the_strong_result():
     assert res["cluster"].strong_needed == 1
 
 
-def test_double_window_slab_carries_the_previous_windows_entry_boundary():
-    """The slab re-decodes the previous commit region raw, so its entry
-    defects are the ones the PREVIOUS window received (they sit at the slab's
-    left face); the escalated window's own entry defects sit inside rounds the
-    slab re-solves and must not be folded in. The legacy (immediate) path
-    keeps its historical behavior."""
-    res, weak, strong = _double_window_run(escalate_window=2)
-    cluster = res["cluster"]
-    cluster.windows[(0, 1)].boundary_in = {4: [1, 0, 1]}
-    cluster.windows[(0, 2)].boundary_in = {7: [1, 1]}
-    weak_job = DecodeJob(op_id=0, window_id=2, n_rounds=9, ready_time=0,
-                         deadline=0)
-    runtime = cluster.window_manager
-    faithful = runtime.make_strong_decode_job(weak_job, 9, "slab",
-                                              faithful_boundaries=True)
-    assert faithful.window.boundary_in == {4: [1, 0, 1]}
-    legacy = runtime.make_strong_decode_job(weak_job, 9, "slab")
-    assert legacy.window.boundary_in == {7: [1, 1]}
-
-
-def test_double_window_slab_payloads_assembled_at_submission():
-    """Slab payloads are assembled when the far boundary exists and still
-    cover the full two-sided range, so the retained rounds must outlive the
-    escalated window's weak commit."""
+def test_double_window_slab_payloads_cover_slab_plus_trailing_context():
+    """Slab payloads are assembled at submission: the committed slab rounds
+    7-15 plus one trailing buffer of read-only context (16-18), the same
+    role a buffer plays for every weak window; the timing charge stays the
+    paper's r_strong (asserted above via n_rounds)."""
     res, weak, strong = _double_window_run(escalate_window=2)
     (start_tick, job), = strong.starts
-    assert job.n_rounds == 3 * D
-    assert job.window.start_round == 4 and job.window.buffer_hi == 12
+    assert job.window.buffer_hi == 18
     assert [payload.round_index for payload in job.payloads] \
-        == list(range(4, 13))
+        == list(range(7, 19))
 
 
 def test_double_window_rejects_contradictory_switch_flags():
@@ -665,18 +682,26 @@ def test_double_window_rejects_contradictory_switch_flags():
                   bulk_strong=True)
 
 
-def test_double_window_rejects_held_boundary_and_parallel_windows():
-    """Held would deadlock the slab (the far boundary IS the next weak
-    commit); two-layer parallel windows are outside the paper's linear
-    sliding chain."""
+def test_double_window_rejects_unsupported_runspec_shapes():
+    """Held would deadlock the far-boundary wait; parallel two-layer windows,
+    runtime streams, frontends, and cross-op window chains need skip
+    semantics the runtime does not model yet."""
     from decsim.policies import Held
     from decsim.schemes import ParallelWindowScheme
-    base = dict(ops=[_memory_op()], num_units=1, d=D,
-                rounds_policy=FixedRounds(30), round_us=TAU_GEN_US,
-                strategy=Switching(confidence_threshold=0.5,
-                                   double_window=True))
+    strategy = Switching(confidence_threshold=0.5, double_window=True)
+    base = dict(num_units=1, d=D, rounds_policy=FixedRounds(30),
+                round_us=TAU_GEN_US, strategy=strategy)
     with pytest.raises(ValueError, match="Held"):
-        RunSpec(scheme=SlidingWindowScheme(), boundary_policy=Held(),
-                **base).validate()
+        RunSpec(ops=[_memory_op()], scheme=SlidingWindowScheme(),
+                boundary_policy=Held(), **base).validate()
     with pytest.raises(ValueError, match="parallel"):
-        RunSpec(scheme=ParallelWindowScheme(), **base).validate()
+        RunSpec(ops=[_memory_op()], scheme=ParallelWindowScheme(),
+                **base).validate()
+    with pytest.raises(ValueError, match="dynamic_streams"):
+        RunSpec(ops=[_memory_op()],
+                dynamic_streams=[Operation(7, "stream", (1,))],
+                **base).validate()
+    chained = [Operation(0, "a", (0,), has_successor=True),
+               Operation(1, "b", (1,), predecessors=(0,))]
+    with pytest.raises(ValueError, match="single-patch"):
+        RunSpec(ops=chained, **base).validate()

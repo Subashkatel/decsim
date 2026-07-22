@@ -86,8 +86,10 @@ class WindowManager:
         self._pending_strong_windows: set[tuple] = set()
         self._pending_strong_per_op: dict[int, int] = {}
         #: faithful double-window escalations waiting for their far-side weak
-        #: boundary; key -> {"weak_job", "n_rounds", "label", "state"}
+        #: boundary; slab key -> pending record (see defer_strong_escalation)
         self._deferred_strong: dict[tuple, dict] = {}
+        self._deferred_by_far: dict[tuple, tuple] = {}   # restart key -> slab key
+        self.absorbed_windows: set[tuple] = set()        # skipped by the weak chain
         self.op_strong_commit_time: dict[int, int] = {}
         self._finalize_gates: dict[int, Callable] = {}    # gate_finalize seam
         self._finished_ops: set[int] = set()
@@ -496,31 +498,12 @@ class WindowManager:
     # ------------------------------------------------------------ strong jobs
 
     def make_strong_decode_job(self, weak_job: DecodeJob, round_count: int,
-                               label: str, *,
-                               faithful_boundaries: bool = False) -> DecodeJob:
-        """Build the two-sided strong re-decode job for an escalated window.
-
-        faithful_boundaries=True conditions the slab at its TRUE left face:
-        the slab re-decodes the previous window's commit region raw, so the
-        entry defects are the ones the previous window itself received (they
-        land at the slab's buffer_lo seam), not the escalated window's own
-        (which would double-condition rounds the slab re-solves)."""
+                               label: str) -> DecodeJob:
+        """Build the two-sided strong re-decode job for an escalated window."""
         key = (weak_job.op_id, weak_job.window_id)
         weak_window = self.windows[key]
         op = self.ops[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
-        if faithful_boundaries:
-            previous = self.windows.get((weak_job.op_id, weak_job.window_id - 1))
-            if (previous is not None
-                    and previous.commit_lo == strong_window.start_round):
-                # Slab left face aligns with the previous commit start (the
-                # standard commit == buffer layout): its entry condition is
-                # what the PREVIOUS window received.
-                strong_window.boundary_in = dict(previous.boundary_in)
-            # else keep the weak window's own entry defects: for the first
-            # window the slab is clamped to the weak window's own start (its
-            # face IS the op entry), and for non-aligned layouts there is no
-            # window whose entry sits exactly on the slab face.
         dem = None
         if self.syndrome_source is not None:
             dem = self.syndrome_source.strong_window_model_for_operation(
@@ -553,62 +536,132 @@ class WindowManager:
         return buffer_lo, window.commit_lo, window.commit_hi, buffer_hi
 
     # ------------------------------------------- faithful double window (III C)
+    #
+    # arXiv:2510.25222 Fig. 12: on a switching event the slab of
+    # r_strong = r_com + 2*r_buf rounds starts AT the suspicious commit and
+    # extends FORWARD; the weak chain skips the windows whose commit regions
+    # the slab absorbs and restarts on the first window past the slab; the
+    # strong decoder commits the entire slab, and it may start only once the
+    # weak decoder has determined the boundary conditions at both slab ends
+    # (left: the escalated window's own entry defects; right: the restart
+    # window's weak commit, or the terminal boundary at the stream end).
 
     def defer_strong_escalation(self, weak_job: DecodeJob, n_rounds: int,
                                 label: str) -> None:
-        """Register an escalation whose strong job may only start once the
-        weak decoder has determined the slab's boundary at BOTH ends
-        (arXiv:2510.25222 Sec. III C, Fig. 12). The near side came with the
-        previous window's commit; the far side is the NEXT window's weak
-        commit, or the terminal time boundary when no next window exists.
-        States: waiting_far_boundary -> submitted (exactly one strong job)."""
+        """Register a switching event: lay out the forward slab, absorb the
+        weak windows it covers (they are never weak-decoded), and hold the
+        strong job until the restart window's weak commit fixes the far-side
+        boundary. State: waiting_far_boundary until submission; exactly one
+        strong job per escalation (duplicates raise)."""
         key = (weak_job.op_id, weak_job.window_id)
         if key in self._deferred_strong:
             raise RuntimeError(
                 f"duplicate strong escalation for window {key}: one switching "
                 f"event creates exactly one strong job")
-        self._deferred_strong[key] = {"weak_job": weak_job,
-                                      "n_rounds": n_rounds, "label": label,
-                                      "state": "waiting_far_boundary"}
-        # The standing strong lease holds only the rounds the weak lease does
-        # not (the slab used to be assembled before the weak commit). A
-        # deferred slab is assembled after later commits release those
-        # leases, so widen it to every slab round until submission.
         weak_window = self.windows[key]
-        buffer_lo, _, _, buffer_hi = self._strong_context_bounds(weak_window)
-        self.store.replace(
-            (key, "strong"),
-            self._read_keys_for_bounds(key[0], buffer_lo, buffer_hi,
-                                       weak_window))
-        self.engine.log("DecoderCluster",
-                        f"{label}: strong start deferred until the far-side "
-                        f"weak boundary is determined (double window)")
-        if self._far_boundary_determined(key):
-            self._submit_deferred_strong(key)
+        op_id, escalated_index = key
+        round_count = self._round_count_for_window(op_id, weak_window)
+        slab_lo = weak_window.commit_lo
+        slab_hi = min(slab_lo + n_rounds - 1, round_count)
+        trailing_rounds = max(0, weak_window.buffer_hi - weak_window.commit_hi)
+        context_hi = min(slab_hi + trailing_rounds, round_count)
 
-    def _far_boundary_determined(self, key: tuple) -> bool:
-        """True when the weak pipeline has fixed the slab's far-side context:
-        the next window's weak decode committed, or the stream ends at this
-        window (terminal boundary; the escalated window was data-complete)."""
-        op_id, window_index = key
-        next_key = (op_id, window_index + 1)
-        if next_key in self.windows:
-            return next_key in self.committed_windows
-        if self.lifecycle.has(op_id):
-            # dynamic stream: a later window may still be created
-            return self.lifecycle.sealed(op_id)
-        return True                       # static plan: this is the last window
+        absorbed, restart_key = [], None
+        for window_index in self.op_windows[op_id]:
+            if window_index <= escalated_index:
+                continue
+            later = self.windows[(op_id, window_index)]
+            if later.commit_hi <= slab_hi:
+                absorbed.append((op_id, window_index))
+                continue
+            if later.commit_lo <= slab_hi:
+                raise RuntimeError(
+                    f"window ({op_id},{window_index}) commits "
+                    f"{later.commit_lo}-{later.commit_hi} across the slab "
+                    f"edge {slab_hi}; double_window needs commit regions "
+                    f"that tile the slab (commit == buffer layouts do)")
+            restart_key = (op_id, window_index)
+            break
+
+        self._deferred_strong[key] = {
+            "weak_job": weak_job, "label": label, "slab_lo": slab_lo,
+            "slab_hi": slab_hi, "context_hi": context_hi,
+            "restart_key": restart_key, "state": "waiting_far_boundary"}
+        # The standing strong lease held only the legacy side-context rounds;
+        # the deferred slab is assembled after later weak commits release
+        # their leases, so it must hold every slab + context round until then.
+        self.store.replace((key, "strong"),
+                           [(op_id, r) for r in range(slab_lo, context_hi + 1)])
+        for absorbed_key in absorbed:
+            self._absorb_window(absorbed_key, restart_key)
+        self.engine.log("DecoderCluster",
+                        f"{label}: slab rounds {slab_lo}-{slab_hi} assigned; "
+                        f"weak chain skips {len(absorbed)} window(s); strong "
+                        f"start deferred until the far-side weak boundary")
+        if restart_key is None:
+            self._submit_deferred_strong(key)   # terminal boundary exists now
+        else:
+            self._deferred_by_far[restart_key] = key
+            self.check_window(restart_key)      # its absorbed dep is gone
+
+    def _absorb_window(self, key: tuple, restart_key: Optional[tuple]) -> None:
+        """A window whose commit region the slab covers is never decoded by
+        the weak chain (Fig. 12 panel 5): it counts as committed with no
+        logical contribution, and the restart window stops waiting for it."""
+        window = self.windows[key]
+        if window.queued or window.committed:
+            raise RuntimeError(f"cannot absorb window {key}: already "
+                               f"{'queued' if window.queued else 'committed'}")
+        window.queued = True                  # keeps check_window() away
+        window.committed = True
+        self.committed_windows.add(key)
+        self._committed_per_op[key[0]] = self._committed_per_op.get(key[0], 0) + 1
+        self.absorbed_windows.add(key)
+        if restart_key is not None:
+            restart = self.windows[restart_key]
+            if key in restart.deps:
+                restart.deps.remove(key)
+                restart.deps_remaining -= 1
+            if restart_key in window.dependents:
+                window.dependents.remove(restart_key)
+        self.store.release(key)
+        self.store.release((key, "strong"))
+        self.engine.log("DecoderCluster",
+                        f"window {key} absorbed into the strong slab "
+                        f"(weak chain skips it)")
 
     def _submit_deferred_strong(self, key: tuple) -> None:
-        """Both boundaries exist: assemble the slab NOW (payloads and entry
-        defects reflect the weak stream's decoded context) and submit it."""
-        pending = self._deferred_strong[key]
-        pending["state"] = "submitted"
-        strong_job = self.make_strong_decode_job(
-            pending["weak_job"], pending["n_rounds"], pending["label"],
-            faithful_boundaries=True)
-        self.services.check_strong_route(pending["weak_job"], strong_job)
-        del self._deferred_strong[key]
+        """Both slab boundaries are now weak-determined: build the slab job
+        and submit it. The slab owns (commits) all r_strong rounds; the
+        trailing rounds up to context_hi are read-only context, the same
+        role a buffer plays for every weak window."""
+        pending = self._deferred_strong.pop(key)
+        weak_job = pending["weak_job"]
+        weak_window = self.windows[key]
+        op = self.ops[key[0]]
+        slab = Window(op_id=key[0], k=key[1],
+                      commit_lo=pending["slab_lo"],
+                      commit_hi=pending["slab_hi"],
+                      buffer_hi=pending["context_hi"],
+                      buffer_lo=pending["slab_lo"],
+                      n_rounds=pending["context_hi"] - pending["slab_lo"] + 1)
+        # Left face: the slab starts at the escalated commit, so its entry
+        # condition is exactly what the escalated window received.
+        slab.boundary_in = dict(weak_window.boundary_in)
+        dem = None
+        if self.syndrome_source is not None:
+            dem = self.syndrome_source.strong_window_model_for_operation(
+                op, slab, self._round_count_for_window(op.id, weak_window),
+                belief_matching=self.needs_hyperedges)
+        strong_job = DecodeJob(
+            op_id=key[0], window_id=key[1],
+            n_rounds=pending["slab_hi"] - pending["slab_lo"] + 1,
+            ready_time=self.engine.now, deadline=self.engine.now,
+            label=pending["label"], hint="strong",
+            spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
+            dem=dem, payloads=self._assemble_payloads(slab),
+            attempt=1, window=slab, strong_decode_for=key)
+        self.services.check_strong_route(weak_job, strong_job)
         self.store.release((key, "strong"))   # slab captured into the job
         self.engine.log("DecoderCluster",
                         f"{pending['label']}: far-side weak boundary "
@@ -616,22 +669,15 @@ class WindowManager:
         self.submit_fn(strong_job, self.services.ws_delay())
 
     def _check_deferred_strong_after_commit(self, committed_key: tuple) -> None:
-        """A weak commit can be the far boundary of the PREVIOUS window's slab."""
-        op_id, window_index = committed_key
-        key = (op_id, window_index - 1)
-        if (window_index > 0 and key in self._deferred_strong
-                and self._far_boundary_determined(key)):
-            self._submit_deferred_strong(key)
-
-    def _check_deferred_strong_after_seal(self, stream_id) -> None:
-        """Sealing fixes the terminal boundary for a deferred final window."""
-        for key in [k for k in self._deferred_strong if k[0] == stream_id]:
-            if self._far_boundary_determined(key):
-                self._submit_deferred_strong(key)
+        """The restart window's weak commit is the far boundary of a slab."""
+        slab_key = self._deferred_by_far.pop(committed_key, None)
+        if slab_key is not None:
+            self._submit_deferred_strong(slab_key)
 
     @property
     def pending_escalations(self) -> dict:
-        """Inspectable deferral states, for tests and metrics."""
+        """Deferral state per escalated window key, for tests and metrics
+        (entries exist only while waiting for the far boundary)."""
         return {key: record["state"]
                 for key, record in self._deferred_strong.items()}
 
@@ -853,7 +899,6 @@ class WindowManager:
 
     def seal_stream(self, stream_id, stream_round_count: int) -> None:
         self.lifecycle.seal(stream_id, stream_round_count)
-        self._check_deferred_strong_after_seal(stream_id)
 
     def has_dynamic_stream(self, stream_id) -> bool:
         return self.lifecycle.has(stream_id)

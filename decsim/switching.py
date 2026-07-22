@@ -64,38 +64,23 @@ class Switching:
     batches queued serial redos (timing-only). Redo covers commit + 2*buffer
     rounds (the paper's two-sided context).
 
-    double_window=True is the faithful double-window protocol of
-    arXiv:2510.25222 Sec. III C (Fig. 12): on a switching event the slab of
-    commit + 2*buffer rounds starts AT the suspicious commit and extends
-    FORWARD; the weak chain skips the windows the slab absorbs and restarts
-    on the first window past the slab; the strong decoder commits the whole
-    slab (its result replaces the escalated window's weak value, and the
-    absorbed windows contribute nothing); the strong job is submitted only
-    once the weak decoder has determined the boundary conditions at both
-    slab ends (left: the pre-slab weak commits, already in place when the
-    escalation fires; right: the restart window's weak commit, or the
-    terminal boundary at the stream end; both are established temporally
-    and represented as raw context plus ownership exclusion, never as
-    folded decoded defects). The weak pipeline itself never waits on
-    strong work.
+    double_window=True is the faithful double-window protocol (arXiv:
+    2510.25222 Sec. III C, Fig. 12): the slab of commit + 2*buffer rounds
+    starts at the suspicious commit and extends forward; the weak chain
+    skips the windows the slab absorbs and restarts past the slab; the
+    strong result owns the whole slab; the strong job starts only after
+    both slab boundaries are weak-determined (left: pre-slab commits,
+    right: the restart window's commit, or the terminal boundary). The
+    weak pipeline never waits on strong work.
 
-    Recorded modelling choice for the slab's seams: every seam is read as
-    raw two-sided context with single fault ownership, this repository's
-    validated formalism (injecting decoded defects at an already-read face
-    double-counts the boundary error; see
-    test_parallel_two_sided_windows_match_global_decoding). Concretely, the
-    slab is a full B-side window: it reads one buffer of raw context on
-    each face, owns every fault touching its r_strong rounds except those
-    touching pre-slab rounds (owned by whichever window or slab committed
-    them), and folds in no decoded defects; the restart window is re-sliced
-    at escalation as the far seam's other B-side (leading buffer back into
-    the slab tail, seam faults visible but slab-owned). No decoder faces an
-    orphaned defect and no fault is committed twice. The paper's strong
-    decoder instead reads exactly r_strong rounds with faces pinned by weak
-    results; here the seam windows read one extra buffer per face while
-    their timing charges stay at the paper's sizes, so seam-edge accuracy
-    is slightly optimistic and the extra reads are uncharged (the transfer
-    cost belongs to the open strong-data-path backlog item)."""
+    Seam modelling: both slab faces are decoded as two-sided B-windows:
+    one buffer of raw context per face, exact fault-ownership partition,
+    no folded decoded defects (folding at a raw-read face double-counts;
+    see test_parallel_two_sided_windows_match_global_decoding). Unlike the
+    paper's exactly-r_strong read with weak-pinned faces, the context
+    reads are extra and uncharged: seam-edge accuracy is slightly
+    optimistic, and the transfer cost belongs to the strong-data-path
+    backlog item."""
 
     def __init__(self, confidence_threshold: float,
                  run_both_at_once: bool = False,

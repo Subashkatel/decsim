@@ -586,15 +586,17 @@ class WindowManager:
             restart_key = (op_id, window_index)
             break
 
+        context_lo = max(1, slab_lo - trailing_rounds)
         self._deferred_strong[key] = {
             "weak_job": weak_job, "label": label, "slab_lo": slab_lo,
-            "slab_hi": slab_hi, "context_hi": context_hi,
-            "restart_key": restart_key, "state": "waiting_far_boundary"}
+            "slab_hi": slab_hi, "context_lo": context_lo,
+            "context_hi": context_hi, "restart_key": restart_key,
+            "state": "waiting_far_boundary"}
         # The standing strong lease held only the legacy side-context rounds;
         # the deferred slab is assembled after later weak commits release
         # their leases, so it must hold every slab + context round until then.
         self.store.replace((key, "strong"),
-                           [(op_id, r) for r in range(slab_lo, context_hi + 1)])
+                           [(op_id, r) for r in range(context_lo, context_hi + 1)])
         for absorbed_key in absorbed:
             self._absorb_window(absorbed_key, restart_key)
         self.engine.log("DecoderCluster",
@@ -612,7 +614,32 @@ class WindowManager:
                 self._deferred_terminal[op_id] = key
         else:
             self._deferred_by_far[restart_key] = key
+            self._reslice_restart_window(restart_key, slab_lo, slab_hi)
             self.check_window(restart_key)      # its absorbed dep is gone
+
+    def _reslice_restart_window(self, restart_key: tuple, slab_lo: int,
+                                slab_hi: int) -> None:
+        """Absorption breaks the restart window's forward-chain contract: its
+        predecessor never decodes, so no cancellation defects arrive and its
+        plan-time model excludes the seam faults it would then face as
+        orphaned defects. Re-slice it as the B-side of the slab seam: read a
+        leading buffer back into the slab tail, keep seam-crossing faults as
+        visible context columns, and leave their ownership with the slab."""
+        restart = self.windows[restart_key]
+        restart.buffer_lo = max(slab_lo, slab_hi - self.buffer + 1)
+        if self.syndrome_source is None:
+            return
+        op = self.ops[restart_key[0]]
+        model = self.syndrome_source.strong_window_model_for_operation(
+            op, restart, self._round_count_for_window(op.id, restart),
+            belief_matching=self.needs_hyperedges,
+            exclude_faults_touching=(1, slab_hi))
+        if model is not None:
+            self.window_models[restart_key] = model
+        self.engine.log("DecoderCluster",
+                        f"restart window {restart_key} re-sliced as the slab "
+                        f"seam B-side (reads rounds {restart.buffer_lo}-"
+                        f"{restart.buffer_hi}, owns none before {slab_hi + 1})")
 
     def _absorb_window(self, key: tuple, restart_key: Optional[tuple]) -> None:
         """A window whose commit region the slab covers is never decoded by
@@ -642,9 +669,12 @@ class WindowManager:
 
     def _submit_deferred_strong(self, key: tuple) -> None:
         """Both slab boundaries are now weak-determined: build the slab job
-        and submit it. The slab owns (commits) all r_strong rounds; the
-        trailing rounds up to context_hi are read-only context, the same
-        role a buffer plays for every weak window."""
+        and submit it. The slab owns (commits) all r_strong rounds and is a
+        full B-side window: it reads one buffer of raw context on EACH face
+        and owns no fault that touches pre-slab rounds (those belong to the
+        windows or slabs that committed them; folding their decoded defects
+        into raw re-read context would double-count the boundary, see
+        test_parallel_two_sided_windows_match_global_decoding)."""
         pending = self._deferred_strong.pop(key)
         weak_job = pending["weak_job"]
         weak_window = self.windows[key]
@@ -653,24 +683,24 @@ class WindowManager:
                       commit_lo=pending["slab_lo"],
                       commit_hi=pending["slab_hi"],
                       buffer_hi=pending["context_hi"],
-                      buffer_lo=pending["slab_lo"],
-                      n_rounds=pending["context_hi"] - pending["slab_lo"] + 1)
-        # Left face: the slab starts at the escalated commit, so its entry
-        # condition is exactly what the escalated window received.
-        slab.boundary_in = dict(weak_window.boundary_in)
+                      buffer_lo=pending["context_lo"],
+                      n_rounds=pending["context_hi"] - pending["context_lo"] + 1)
         dem = None
         if self.syndrome_source is not None:
+            exclude = (1, pending["slab_lo"] - 1) \
+                if pending["slab_lo"] > 1 else None
             dem = self.syndrome_source.strong_window_model_for_operation(
                 op, slab, self._round_count_for_window(op.id, weak_window),
-                belief_matching=self.needs_hyperedges)
+                belief_matching=self.needs_hyperedges,
+                exclude_faults_touching=exclude)
         payloads = self._assemble_payloads(slab)
         covered = {payload.round_index for payload in payloads}
-        needed = set(range(pending["slab_lo"], pending["context_hi"] + 1))
+        needed = set(range(pending["context_lo"], pending["context_hi"] + 1))
         if covered != needed:
             raise RuntimeError(
                 f"{pending['label']}: slab submitted with rounds "
                 f"{sorted(covered)} but it needs "
-                f"{pending['slab_lo']}-{pending['context_hi']}; a slab may "
+                f"{pending['context_lo']}-{pending['context_hi']}; a slab may "
                 f"only start once every stored block exists (Fig. 12)")
         strong_job = DecodeJob(
             op_id=key[0], window_id=key[1],

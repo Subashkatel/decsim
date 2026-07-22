@@ -181,8 +181,10 @@ class StimDevice:
             is_last=is_last)
 
     def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
-                                          *, belief_matching: bool = False):
-        """Build an independent two-sided context model for a strong re-decode."""
+                                          *, belief_matching: bool = False,
+                                          exclude_faults_touching=None):
+        """Build an independent two-sided context model for a strong re-decode
+        (or, with exclude_faults_touching, the B-side of a slab seam)."""
         if op.circuit is None:
             return None
 
@@ -195,4 +197,5 @@ class StimDevice:
             (window.start_round, window.commit_lo,
              window.commit_hi, min(window.buffer_hi, round_count)),
             detector_rounds=detector_rounds,
-            belief_matching=belief_matching)
+            belief_matching=belief_matching,
+            exclude_faults_touching=exclude_faults_touching)

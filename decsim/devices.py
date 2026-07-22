@@ -53,7 +53,8 @@ class TimingOnlyDevice:
 
     def strong_window_model_for_operation(self, op: Operation, window,
                                           round_count: int,
-                                          *, belief_matching: bool = False):
+                                          *, belief_matching: bool = False,
+                                          exclude_faults_touching=None):
         return None
 
 
@@ -176,6 +177,7 @@ class SyndromeBitDevice:
         return None
 
     def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
-                                          *, belief_matching: bool = False):
+                                          *, belief_matching: bool = False,
+                                          exclude_faults_touching=None):
         """Fake-bit strong re-decodes carry no detector error model."""
         return None

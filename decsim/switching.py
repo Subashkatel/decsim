@@ -76,17 +76,23 @@ class Switching:
     restart window's weak commit, or the terminal boundary at the stream
     end). The weak pipeline itself never waits on strong work.
 
-    Recorded modelling choice for the far-side boundary condition: the slab
-    READS one trailing buffer of raw context rounds and decides seam faults
-    itself via fault ownership, which is this repository's validated
-    two-sided formalism (injecting the restart window's decoded defects
-    instead would double-count the boundary error; see
-    test_parallel_two_sided_windows_match_global_decoding). The paper's
-    strong decoder instead reads exactly r_strong rounds with the far face
-    pinned by the weak result; here the strong reads r_strong + r_buf rounds
-    while the timing charge stays the paper's r_strong, so slab-edge
-    accuracy is slightly optimistic and the extra read is uncharged (the
-    transfer cost belongs to the open strong-data-path backlog item)."""
+    Recorded modelling choice for the slab's seams: every seam is read as
+    raw two-sided context with single fault ownership, this repository's
+    validated formalism (injecting decoded defects at an already-read face
+    double-counts the boundary error; see
+    test_parallel_two_sided_windows_match_global_decoding). Concretely, the
+    slab is a full B-side window: it reads one buffer of raw context on
+    each face, owns every fault touching its r_strong rounds except those
+    touching pre-slab rounds (owned by whichever window or slab committed
+    them), and folds in no decoded defects; the restart window is re-sliced
+    at escalation as the far seam's other B-side (leading buffer back into
+    the slab tail, seam faults visible but slab-owned). No decoder faces an
+    orphaned defect and no fault is committed twice. The paper's strong
+    decoder instead reads exactly r_strong rounds with faces pinned by weak
+    results; here the seam windows read one extra buffer per face while
+    their timing charges stay at the paper's sizes, so seam-edge accuracy
+    is slightly optimistic and the extra reads are uncharged (the transfer
+    cost belongs to the open strong-data-path backlog item)."""
 
     def __init__(self, confidence_threshold: float,
                  run_both_at_once: bool = False,

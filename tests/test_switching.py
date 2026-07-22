@@ -661,16 +661,18 @@ def test_double_window_strong_result_owns_the_whole_slab():
     assert res["cluster"].strong_needed == 1
 
 
-def test_double_window_slab_payloads_cover_slab_plus_trailing_context():
+def test_double_window_slab_payloads_cover_slab_plus_two_sided_context():
     """Slab payloads are assembled at submission: the committed slab rounds
-    7-15 plus one trailing buffer of read-only context (16-18), the same
-    role a buffer plays for every weak window; the timing charge stays the
-    paper's r_strong (asserted above via n_rounds)."""
+    7-15 plus one buffer of read-only raw context on EACH face (4-6 and
+    16-18), the same role a buffer plays for every weak window (B-side
+    formalism; no decoded defects are folded in). The timing charge stays
+    the paper's r_strong (asserted above via n_rounds)."""
     res, weak, strong = _double_window_run(escalate_window=2)
     (start_tick, job), = strong.starts
-    assert job.window.buffer_hi == 18
+    assert (job.window.start_round, job.window.buffer_hi) == (4, 18)
+    assert job.window.boundary_in == {}
     assert [payload.round_index for payload in job.payloads] \
-        == list(range(7, 19))
+        == list(range(4, 19))
 
 
 def test_double_window_rejects_contradictory_switch_flags():
@@ -717,7 +719,7 @@ def test_double_window_terminal_slab_waits_for_its_final_rounds():
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (7, 14)
     assert [payload.round_index for payload in job.payloads] \
-        == list(range(7, 15))
+        == list(range(4, 15))
     w2 = res["cluster"].windows[(0, 2)]
     assert start_tick > w2.t_done + us(0.5)   # NOT submitted at escalation
     # round 14 reaches the cluster at 14.0 (generation) + 2.15 (t_qc + t_cd);

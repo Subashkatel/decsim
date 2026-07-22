@@ -25,6 +25,66 @@ def _validated(value: int, source: str) -> int:
     return int(value)
 
 
+def _validate_operation_graph(ops: list[Operation], *,
+                              validate_blockers: bool = False,
+                              external_blocker_ids=()) -> None:
+    """Reject dependency graphs that dictionaries or an empty event queue
+    would otherwise hide. Operation IDs are the graph's stable keys."""
+    by_id = {}
+    for operation in ops:
+        if operation.id in by_id:
+            raise ValueError(
+                f"duplicate operation id {operation.id}: "
+                f"{by_id[operation.id].name!r} and {operation.name!r}")
+        by_id[operation.id] = operation
+
+    valid_blocker_ids = set(by_id) | set(external_blocker_ids)
+    successors = {operation_id: [] for operation_id in by_id}
+    indegree = {operation_id: 0 for operation_id in by_id}
+    for operation in ops:
+        seen_predecessors = set()
+        for predecessor_id in operation.predecessors:
+            if predecessor_id in seen_predecessors:
+                raise ValueError(
+                    f"operation {operation.id} lists predecessor "
+                    f"{predecessor_id} more than once")
+            seen_predecessors.add(predecessor_id)
+            if predecessor_id == operation.id:
+                raise ValueError(f"operation {operation.id} depends on itself")
+            if predecessor_id not in by_id:
+                raise ValueError(
+                    f"operation {operation.id} has unknown predecessor "
+                    f"{predecessor_id}")
+            successors[predecessor_id].append(operation.id)
+            indegree[operation.id] += 1
+
+        blocker = operation.blocked_by
+        if validate_blockers and blocker is not None:
+            if blocker == operation.id:
+                raise ValueError(
+                    f"operation {operation.id} is blocked by itself")
+            if blocker not in valid_blocker_ids:
+                raise ValueError(
+                    f"operation {operation.id} has unknown blocking operation "
+                    f"{blocker}")
+
+    ready = [operation_id for operation_id, degree in indegree.items()
+             if degree == 0]
+    visited = 0
+    while ready:
+        operation_id = ready.pop()
+        visited += 1
+        for successor_id in successors[operation_id]:
+            indegree[successor_id] -= 1
+            if indegree[successor_id] == 0:
+                ready.append(successor_id)
+
+    if visited != len(by_id):
+        cycle_ids = sorted(operation_id for operation_id, degree in indegree.items()
+                           if degree > 0)
+        raise ValueError(f"operation dependency cycle involving IDs {cycle_ids}")
+
+
 class FixedRounds:
     """Every operation runs the same number of rounds."""
 
@@ -113,6 +173,7 @@ class WindowPlanner:
 
     def plan(self, ops: list[Operation]) -> WindowPlan:
         """Compute windows, dependencies, and job sizes for these operations."""
+        _validate_operation_graph(ops)
         operations = {operation.id: operation for operation in ops}
         rounds_by_operation = {
             op_id: _validated(

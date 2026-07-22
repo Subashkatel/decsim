@@ -2,16 +2,11 @@
 
 Each benchmark reproduces a published quantitative result with a config-only
 setup: pick RunSpec parts, state the paper's observable and tolerance, run.
-The recipe for adding a new paper is benchmarks/README.md; these three are
-its worked examples.
 
   1. Skoric et al., arXiv:2209.08552 — streaming backlog: bounded at ρ<1,
      grows at rate λ−μ (±10%) at ρ>1; windowed == global decode accuracy.
   2. Gidney–Ekerå, arXiv:1905.09749 — reaction-limited serial chain: runtime
      matches the analytic per-layer period within ±15% (QLX's own tolerance).
-  3. Terhal-style feed-forward statistics (Terhal RMP 87, 030501 (2015);
-     Litinski arXiv:1808.02892): each non-Clifford layer draws its corrective
-     basis with the published f = 1/2, so clean chains occur at rate f^k.
 """
 import pytest
 

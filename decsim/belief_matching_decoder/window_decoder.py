@@ -18,6 +18,8 @@ def _require_belief_matching_model(model: "WindowErrorModel") -> None:
 def _cache_entry(model: "WindowErrorModel", cache: dict,
                  max_iter: int, bp_method: str):
     """Return cached BP decoder and sparse hyperedge-to-edge map."""
+    import weakref
+
     import numpy as np
     from ldpc import BpDecoder
     from scipy.sparse import csr_matrix
@@ -34,6 +36,9 @@ def _cache_entry(model: "WindowErrorModel", cache: dict,
     edge_from_hyperedge = csr_matrix(model.h2e.astype(np.float64))
     entry = (bp, edge_from_hyperedge)
     cache[id(model)] = entry
+    # id() values are recycled by CPython; evict on GC so a fresh model cannot
+    # alias a dead one's key and receive a stale decoder (mirrors MWPM's guard).
+    weakref.finalize(model, cache.pop, id(model), None)
     return entry
 
 

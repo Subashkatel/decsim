@@ -207,19 +207,21 @@ def test_timing_cross_validation_against_real_qlx_schedules(path):
 
     doc = json.loads(path.read_text())
     prog = qlx_frontend(doc)
-    # QLX may schedule fabric.produce_resource CONCURRENTLY with other
-    # ops on the same slot (local-produces regions: mem_surface_t);
-    # decsim's chip requires program-order wiring for patch-sharing
-    # ops, so add the zero-cost serialization edge before running
-    # (G7P4 bring-up amendment 2; both the engine and the reference
-    # critical path see the same edge)
-    for prod in prog.operations:
-        if "produce_resource" not in prod.name or prod.predecessors:
-            continue
-        for other in prog.operations:
-            if other.id < prod.id and set(other.patches) & set(prod.patches):
-                prod.predecessors = tuple(prod.predecessors) + (other.id,)
-                other.has_successor = True
+    # QLX may schedule ops CONCURRENTLY on the same slot (produce_resource
+    # in mem_surface_t; mz/dealloc siblings in ls_cx); decsim's chip
+    # requires program-order wiring for patch-sharing ops, so chain each
+    # op to the LAST op on its patch — the same rule as
+    # frontends.circuit._wire_patch_dependencies — before running (G7P4
+    # bring-up amendment 2, generalized for the ls_cx corpus program;
+    # both the engine and the reference critical path see the same edges)
+    last_on_patch: dict = {}
+    for op in prog.operations:
+        for patch in op.patches:
+            prev = last_on_patch.get(patch)
+            if prev is not None and prev not in op.predecessors:
+                op.predecessors = tuple(op.predecessors) + (prev,)
+                prog.operations[prev].has_successor = True
+            last_on_patch[patch] = op.id
     res = simulate(RunSpec(
               ops=prog.operations,
               num_units=4,

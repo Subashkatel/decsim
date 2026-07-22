@@ -78,6 +78,20 @@ class RunSpec:
         """Cross-part validation before any build."""
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
+        auxiliary_ops = list(self.decode_ops or []) + list(self.dynamic_streams or [])
+        if self.ops is not None:
+            from .planner import _validate_operation_graph
+            _validate_operation_graph(
+                self.ops, validate_blockers=True,
+                external_blocker_ids=(operation.id for operation in auxiliary_ops))
+        for label, operations in (("decode_ops", self.decode_ops),
+                                  ("dynamic_streams", self.dynamic_streams)):
+            seen_ids = set()
+            for operation in operations or []:
+                if operation.id in seen_ids:
+                    raise ValueError(
+                        f"duplicate operation id {operation.id} in {label}")
+                seen_ids.add(operation.id)
         if self.feedback_boundary_mode not in FEEDBACK_BOUNDARY_MODES:
             raise ValueError(
                 f"feedback_boundary_mode must be one of "
@@ -140,10 +154,19 @@ class RunSpec:
 
         engine = Engine(verbose=verbose)
         ops = self.frontend.build() if self.frontend is not None else self.ops
+        if self.frontend is not None:
+            from .planner import _validate_operation_graph
+            auxiliary_ids = (operation.id for operation in
+                             list(self.decode_ops or [])
+                             + list(self.dynamic_streams or []))
+            _validate_operation_graph(
+                ops, validate_blockers=True,
+                external_blocker_ids=auxiliary_ids)
         self._apply_feedback_boundary_default(ops)
 
         code = self._resolve_code()
         layout = self.layout if self.layout is not None else UniformLayout(code)
+        _validate_program_order(ops, layout)
         scheme = self.scheme if self.scheme is not None else SlidingWindowScheme()
         rounds_policy = self.rounds_policy if self.rounds_policy is not None \
             else GateRounds()
@@ -253,6 +276,55 @@ class RunSpec:
             return None
         dynamic_ids = {stream.id for stream in self.dynamic_streams}
         return [op for op in ops if op.stream_id not in dynamic_ids]
+
+
+def _validate_program_order(ops, layout) -> None:
+    """Static twin of Chip._claim_resources' conflict guard.
+
+    The chip raises when two operations hold a shared resource concurrently,
+    which makes that check schedule-dependent: a missing ordering edge can
+    hide for as long as the timing happens to separate the two holders.
+    This walks each resource's holders in list order and requires every
+    consecutive pair to be ordered by the dependency DAG (a path of
+    predecessor edges, not necessarily a direct edge), so a malformed
+    operation list fails at build time, deterministically.
+    """
+    operation_by_id = {operation.id: operation for operation in ops}
+    ancestor_cache: dict = {}
+
+    def ancestors_of(op_id):
+        """All op ids reachable from op_id via predecessor edges."""
+        cached = ancestor_cache.get(op_id)
+        if cached is not None:
+            return cached
+        ancestors: set = set()
+        stack = [op_id]
+        while stack:
+            operation = operation_by_id.get(stack.pop())
+            if operation is None:
+                continue
+            for predecessor_id in operation.predecessors:
+                if predecessor_id not in ancestors:
+                    ancestors.add(predecessor_id)
+                    stack.append(predecessor_id)
+        ancestor_cache[op_id] = ancestors
+        return ancestors
+
+    last_holder: dict = {}
+    for operation in ops:
+        for claim in layout.resources_for(operation):
+            for resource_id in sorted(claim.ids, key=repr):
+                key = (claim.kind, resource_id)
+                previous_id = last_holder.get(key)
+                if (previous_id is not None and previous_id != operation.id
+                        and previous_id not in ancestors_of(operation.id)):
+                    previous = operation_by_id[previous_id]
+                    raise ValueError(
+                        f"{operation.name} and {previous.name} share qubit "
+                        f"{resource_id} but no dependency path orders them. "
+                        f"The operation list is missing program-order wiring "
+                        f"(run it through _wire_circuit / a frontend)")
+                last_holder[key] = operation.id
 
 
 def _make_infinite(engine):

@@ -140,14 +140,24 @@ class DistillationFactory:
                                t_corr_submit=self.engine.now)
             self._next_state_id += 1
             remaining = {"n": self.n_corr, "trace": trace}
-            self.engine.log("Factory",
-                            f"a unit distilled a state; submitting {self.n_corr} "
-                            f"correction-qubit decode jobs to the cluster (parallel)")
-            for _ in range(self.n_corr):
-                self.decode_service.submit_decode(
-                    self.corr_rounds,
-                    on_done=lambda rem=remaining: self._corr_done(rem),
-                    label="MSF-corr")
+            if self.n_corr:
+                self.engine.log("Factory",
+                                f"a unit distilled a state; submitting {self.n_corr} "
+                                f"correction-qubit decode jobs to the cluster (parallel)")
+                for _ in range(self.n_corr):
+                    self.decode_service.submit_decode(
+                        self.corr_rounds,
+                        on_done=lambda rem=remaining: self._corr_done(rem),
+                        label="MSF-corr")
+            else:
+                # No correction decodes to wait on: release after physical
+                # distillation instead of hanging forever (parity with the
+                # multi-level factory's `and self.n_corr` guard).
+                trace.t_corr_done = self.engine.now
+                self.engine.schedule(
+                    self.return_ticks,
+                    lambda t=trace: self._release(t),
+                    label="distill_release")
         else:
             self.engine.log("Factory", "a unit's distillation DISCARDED, retrying")
         self._maybe_start()                    # keep going only if demand remains

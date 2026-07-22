@@ -81,14 +81,16 @@ class StimDevice:
         bits = self._dets[key][detector_indices]
         patch = op.patches[0] if op.patches else (op.qubits[0] if op.qubits else 0)
         target = op.stream_id if op.stream_id is not None else op.id
-        return [SyndromePayload(target, patch, global_round, bits=bits)]
+        return [SyndromePayload(target, patch, global_round, bits=bits,
+                                size_bits=len(bits))]
 
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
                             patch) -> list[SyndromePayload]:
         """Emit this feedback-idle stream round as one Stim-backed payload."""
         detector_indices = self._by_round.get(stream_id, {}).get(global_round, [])
         bits = self._dets[stream_id][detector_indices]
-        return [SyndromePayload(stream_id, patch, global_round, bits=bits)]
+        return [SyndromePayload(stream_id, patch, global_round, bits=bits,
+                                size_bits=len(bits))]
 
     @staticmethod
     def _detector_rounds(circuit, round_count: int) -> dict:

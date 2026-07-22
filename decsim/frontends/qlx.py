@@ -54,6 +54,11 @@ _KIND_BY_NAME = {"mz": OpKind.MEASURE, "mx": OpKind.MEASURE,
                  "measure": OpKind.MEASURE, "inject": OpKind.INJECT,
                  "merge": OpKind.MERGE, "measure_product": OpKind.MERGE}
 
+# Op names that produce a classical bit usable for measurement feedback.
+# measure_product is a bit producer even though its round-count KIND is MERGE,
+# so the implicit-feedback heuristic must key off names, not OpKind.MEASURE.
+_BIT_PRODUCER_NAMES = ("mz", "mx", "measure", "measure_product")
+
 
 @dataclass
 class QLXProgram:
@@ -206,13 +211,11 @@ def qlx_frontend(diagram: Any, *,
             # measure_product). This is authoritative, unlike the
             # measurement heuristic below.
             bit_deps = [d for d in p["deps"]
-                        if parsed[d]["name"] in ("mz", "mx", "measure",
-                                                 "measure_product")]
+                        if parsed[d]["name"] in _BIT_PRODUCER_NAMES]
             if bit_deps:
                 explicit_if_candidates.append((p["pos"], bit_deps[0]))
         measure_deps = [d for d in p["deps"]
-                        if _KIND_BY_NAME.get(parsed[d]["name"]) is
-                        OpKind.MEASURE]
+                        if parsed[d]["name"] in _BIT_PRODUCER_NAMES]
         if measure_deps and not has_explicit_if:
             feedback_candidates.append((p["pos"], measure_deps[0]))
         if has_explicit_if:

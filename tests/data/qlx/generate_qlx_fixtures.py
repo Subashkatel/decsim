@@ -165,6 +165,110 @@ def main():
     except Exception:
         results["failed"]["mem_surface"] = traceback.format_exc()
 
+    # ---- program D: lattice-surgery CX, both representations ------------
+    # (a) fabric-gadget form -> qlx.estimate.schedule (structural tier).
+    # (b) qlx-dialect MLIR form -> StimViaTQEC (physical tier). QLX's alpha
+    #     cannot feed one form through both paths: QLXToBlockGraph rewrites
+    #     qlx.entry ops (absent from a traced fabric gadget), and
+    #     qlx-to-fabric needs a gate_map the textual fabric.code lacks.
+    #     Same logical circuit: prep |0>,|0>; CX q0,q1; MZ q0.
+    try:
+        from qlx.fabric.codes.surface import Surface as SurfaceLS
+
+        Surf3 = SurfaceLS[3]
+
+        @fq.device
+        class CxDev:
+            A = fq.region(code=Surf3, role="compute",
+                          floorplan=("checkerboard", [1, 2]))
+            B = fq.region(code=Surf3, role="compute",
+                          floorplan=("checkerboard", [1, 2]))
+            decoder = fq.decoder_config(decoder="mwpm", weights="uniform")
+
+        @fq.gadget(entry=True, device=CxDev)
+        def ls_cx() -> bool:
+            a = fq.alloc(Surf3, region=CxDev.A)
+            b = fq.alloc(Surf3, region=CxDev.B)
+            a, b = fq.cx(a.data, b.data, pairs="0:0")
+            a, data = fq.mz(a.data)
+            fq.observable(fq.Z(a[0]), data, idx=0)
+            lz = fq.decode_bit(data, decoder=CxDev.decoder)
+            fq.dealloc(a)
+            fq.dealloc(b)
+            return lz
+
+        dump_schedule("ls_cx", ls_cx)
+        results["ok"].append("ls_cx")
+    except Exception:
+        results["failed"]["ls_cx"] = traceback.format_exc()
+
+    try:
+        import hashlib
+
+        from qlx import ir as mlir_ir
+
+        ls_entry = """
+.version 1.0
+.target qlx-c
+.region %Cs0, code="surface_demo", role=compute;
+.entry surface_demo_entry() {
+    lqbit %q0 : %Cs0;
+    lqbit %q1 : %Cs0;
+    lbit %m;
+    pz %q0;
+    pz %q1;
+    cx %q0, %q1;
+    mz %m, %q0;
+    ret;
+}
+""".strip()
+        fabric_code_decl = """fabric.code @surface_demo {
+  distance = 3 : i64,
+  partitions = {data = 9 : i64, sx = 4 : i64, sz = 4 : i64},
+  stabilize_rounds = 3 : i64
+}
+"""
+        base = qlx.parse(ls_entry)
+        inner = str(base).strip().removeprefix(
+            "module {").removesuffix("}").strip()
+        module = mlir_ir.Module.parse(
+            "module {\n" + fabric_code_decl + "\n" + inner + "\n}",
+            base.context)
+        emitted = qlx.Assembler(module).emit(qlx.StimViaTQEC(k=1))
+        (OUT / "ls_cx_tqec.stim").write_text(emitted.text)
+
+        # decsim runs on the host without tqec, so the noisy grading
+        # circuit is materialized here (uniform depolarizing, p=1e-3)
+        import stim as stim_mod
+        from tqec import NoiseModel
+        import tqec as tqec_mod
+        noiseless = stim_mod.Circuit(emitted.text)
+        noisy = NoiseModel.uniform_depolarizing(1e-3).noisy_circuit(noiseless)
+        (OUT / "ls_cx_tqec_p001.stim").write_text(str(noisy))
+
+        meta = {
+            "program": "ls_cx (qlx dialect): pz q0; pz q1; cx q0,q1; mz q0",
+            "emission": "StimViaTQEC(k=1)",
+            "noise": "tqec.NoiseModel.uniform_depolarizing(1e-3)",
+            "qlx_entry": ls_entry,
+            "sha256_noiseless": hashlib.sha256(
+                emitted.text.encode()).hexdigest(),
+            "sha256_noisy": hashlib.sha256(
+                str(noisy).encode()).hexdigest(),
+            "num_qubits": noiseless.num_qubits,
+            "num_detectors": noiseless.num_detectors,
+            "num_observables": noiseless.num_observables,
+            "versions": {"stim": stim_mod.__version__,
+                         "tqec": tqec_mod.__version__},
+        }
+        (OUT / "ls_cx_tqec_meta.json").write_text(json.dumps(meta, indent=1))
+        print(f"[ok] ls_cx_tqec.stim: {noiseless.num_qubits} qubits, "
+              f"{noiseless.num_detectors} detectors, "
+              f"{noiseless.num_observables} observables")
+        results["ok"].append("ls_cx_tqec")
+    except Exception:
+        results["failed"]["ls_cx_tqec"] = traceback.format_exc()
+
     (OUT / "run_summary.json").write_text(json.dumps(results, indent=1))
     print("summary:", json.dumps({k: (v if k == 'ok' else list(v))
                                   for k, v in results.items()}))

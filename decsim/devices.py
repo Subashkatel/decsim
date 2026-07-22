@@ -130,22 +130,30 @@ class SyndromeBitDevice:
         """One payload per patch when per_patch=True; else the single aggregated payload."""
         target, global_round = _stream_payload_target(op, round_index)
         if not self.per_patch:
+            num_patches = len(op.patches) if op.patches else len(op.qubits)
+            bits = self._bits(num_patches)
             return [SyndromePayload(
                 target,
                 op.patches[0] if op.patches else op.qubits[0],
                 global_round,
-                bits=self._bits(len(op.qubits)),
-                code=self.code.name)]
+                bits=bits,
+                code=self.code.name,
+                size_bits=len(bits))]
         patches = op.patches if op.patches else op.qubits
-        return [SyndromePayload(target, p, global_round, bits=self._bits(1),
-                                code=self.code.name)
-                for p in patches]
+        payloads = []
+        for patch in patches:
+            bits = self._bits(1)
+            payloads.append(SyndromePayload(
+                target, patch, global_round, bits=bits, code=self.code.name,
+                size_bits=len(bits)))
+        return payloads
 
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
                             patch) -> list[SyndromePayload]:
         """Emit one fake-bit payload for a feedback-idle stream round."""
-        return [SyndromePayload(stream_id, patch, global_round,
-                                bits=self._bits(1), code=self.code.name)]
+        bits = self._bits(1)
+        return [SyndromePayload(stream_id, patch, global_round, bits=bits,
+                                code=self.code.name, size_bits=len(bits))]
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
                                 *, belief_matching: bool = False):

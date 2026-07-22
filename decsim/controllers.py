@@ -29,11 +29,11 @@ class ModularController:
         """Chip -> controller (t_qc) -> decoder (t_cd), buffering fragments."""
         if payload.n_fragments == 1:
             self.engine.schedule(
-                self.links.qc.cost(),
+                self._cost("qc", bits=payload.size_bits),
                 lambda: self._forward_whole_round(payload, deliver),
                 label="chip->controller")
             return
-        self.engine.schedule(self.links.qc.cost(),
+        self.engine.schedule(self._cost("qc", bits=payload.size_bits),
                              lambda: self._receive_fragment(payload, deliver),
                              label="chip->controller")
 
@@ -43,7 +43,8 @@ class ModularController:
                             f"received round {payload.round_index} of "
                             f"op#{payload.operation_id} from chip (t_qc); "
                             f"forwarding to decoder (t_cd)")
-        self.engine.schedule(self.links.cd.cost(), lambda: deliver(payload),
+        self.engine.schedule(self._cost("cd", bits=payload.size_bits),
+                             lambda: deliver(payload),
                              label="controller->decoder")
 
     def _receive_fragment(self, payload, deliver: Callable) -> None:
@@ -66,10 +67,27 @@ class ModularController:
                             f"({payload.n_fragments} fragments); packaging and "
                             f"forwarding one packet to decoder (t_pack + t_cd)")
         packet = tuple(fragments)
-        self.engine.schedule(
-            self.t_pack + self.links.cd.cost(),
-            lambda: self._deliver_fragment_packet(packet),
-            label="controller->decoder packet")
+        fragment_sizes = [fragment.size_bits for fragment, _ in packet]
+        packet_bits = sum(fragment_sizes) \
+            if all(size is not None for size in fragment_sizes) else None
+        if self.t_pack:
+            # Packing happens off the wire: elapse t_pack as its own event, then
+            # arbitrate the cd bus at the real transmit time. Pricing the wire at
+            # now+t_pack while a single next_free_tick tracks the bus cannot model
+            # a future reservation -- it wrongly blocks (and reorders) traffic
+            # that is ready during the [now, now+t_pack] packing gap.
+            self.engine.schedule(
+                self.t_pack,
+                lambda: self._transmit_fragment_packet(packet, packet_bits),
+                label="controller pack")
+        else:
+            self._transmit_fragment_packet(packet, packet_bits)
+
+    def _transmit_fragment_packet(self, packet: tuple, packet_bits) -> None:
+        """Send a packed round over the cd wire, arbitrating the bus at now."""
+        self.engine.schedule(self._cost("cd", bits=packet_bits),
+                             lambda: self._deliver_fragment_packet(packet),
+                             label="controller->decoder packet")
 
     @staticmethod
     def _deliver_fragment_packet(fragments: tuple) -> None:
@@ -87,15 +105,22 @@ class ModularController:
                             f"received {instruction} for "
                             f"op#{decision.target_operation_id} from "
                             f"orchestrator (t_oc); forwarding to chip (t_cq)")
-            self.engine.schedule(self.links.cq.cost(),
+            self.engine.schedule(self._cost("cq"),
                                  lambda: deliver(decision),
                                  label="controller->chip")
-        self.engine.schedule(self.links.oc.cost(), at_controller,
+        self.engine.schedule(self._cost("oc"), at_controller,
                              label="orchestrator->controller")
 
     # -------------------------------------------------- generic port surface
 
     def send(self, edge: str, payload, deliver: Callable, now: int) -> None:
         """Generic Transport.send over a named edge (port 14)."""
-        self.engine.schedule(getattr(self.links, edge).cost(),
+        self.engine.schedule(self._cost(
+                                 edge, bits=getattr(payload, "size_bits", None),
+                                 now=now),
                              lambda: deliver(payload), label=f"send:{edge}")
+
+    def _cost(self, edge: str, *, bits=None, now=None) -> int:
+        """Price one transmission without dropping bandwidth/queueing inputs."""
+        link = getattr(self.links, edge)
+        return link.cost(bits=bits, now=self.engine.now if now is None else now)

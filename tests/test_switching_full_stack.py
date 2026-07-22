@@ -44,13 +44,16 @@ class _Recording:
     def __init__(self, inner):
         self.inner = inner
         self.jobs = []
+        self.results = []
 
     def latency(self, job):
         return self.inner.latency(job)
 
     def decode(self, job):
         self.jobs.append(job)
-        return self.inner.decode(job)
+        result = self.inner.decode(job)
+        self.results.append(result)
+        return result
 
 
 def _run(threshold, d=3, rounds=9, seed=7):
@@ -82,8 +85,16 @@ def _run(threshold, d=3, rounds=9, seed=7):
 
 def test_real_soft_output_escalation_reaches_the_strong_path():
     """Mid threshold: some (not all) windows escalate; strong jobs carry the
-    enlarged two-sided context model, not the weak slice."""
-    res, weak, strong = _run(threshold=3.0)
+    enlarged two-sided context model, not the weak slice. The threshold is
+    chosen INSIDE the range of gaps this workload actually produces (a
+    calibration run on the same seed), so decoder updates that shift the
+    absolute gap values cannot silently turn the test into all-or-nothing."""
+    _, calibration, _ = _run(threshold=0.0)
+    gaps = sorted({result.soft_output for result in calibration.results})
+    assert len(gaps) >= 2, f"soft output did not distinguish windows: {gaps}"
+    threshold = (gaps[0] + gaps[-1]) / 2
+
+    res, weak, strong = _run(threshold=threshold)
     assert strong.jobs, "no window escalated at a mid threshold"
     assert len(strong.jobs) < len(weak.jobs), "everything escalated"
     weak_by_win = {j.window_id: j for j in weak.jobs}

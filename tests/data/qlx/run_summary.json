@@ -2,7 +2,9 @@
  "ok": [
   "h_then_t",
   "h_then_2t",
-  "mem_surface"
+  "mem_surface",
+  "ls_cx",
+  "ls_cx_tqec"
  ],
  "failed": {}
 }

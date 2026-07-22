@@ -17,6 +17,8 @@ def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,
     def decode(model: "WindowErrorModel", syndrome):
         decoder = cache.get(id(model))
         if decoder is None:
+            import weakref
+
             from ldpc import BpOsdDecoder
             from scipy.sparse import csr_matrix
             decoder = BpOsdDecoder(csr_matrix(model.check),
@@ -25,6 +27,10 @@ def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,
                                    schedule=schedule, osd_method=osd_method,
                                    osd_order=osd_order)
             cache[id(model)] = decoder
+            # id() values are recycled by CPython; evict on GC so a fresh model
+            # cannot alias a dead one's key and receive a stale decoder (mirrors
+            # the MWPM inner decoder's guard).
+            weakref.finalize(model, cache.pop, id(model), None)
         return decoder.decode(syndrome)
 
     return decode

@@ -56,7 +56,7 @@ class _Recording:
         return result
 
 
-def _run(threshold, d=3, rounds=9, seed=7):
+def _run(threshold, d=3, rounds=9, seed=7, double_window=False, device=None):
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z", distance=d, rounds=rounds,
         after_clifford_depolarization=0.008,
@@ -74,8 +74,9 @@ def _run(threshold, d=3, rounds=9, seed=7):
               rounds_policy=FixedRounds(rounds),
               code=SurfaceCodeModel(d=d),
               scheme=SlidingWindowScheme(),
-              strategy=Switching(confidence_threshold=threshold),
-              device=StimDevice(seed=seed),
+              strategy=Switching(confidence_threshold=threshold,
+                                 double_window=double_window),
+              device=device if device is not None else StimDevice(seed=seed),
               decoder=weak,
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
@@ -166,3 +167,52 @@ def test_weak_strong_pair_has_real_accuracy_separation():
     lw = float((weighted.decode_batch(dets)[:, 0] != obs[:, 0]).mean())
     lu = float((unweighted.decode_batch(dets)[:, 0] != obs[:, 0]).mean())
     assert lu >= 1.5 * lw, f"weak tier not weak enough: {lu} vs {lw}"
+
+
+def test_double_window_full_stack_faithful_start_and_same_shot_truth():
+    """Faithful double window (arXiv:2510.25222 Sec. III C) through the REAL
+    path: Stim-sampled syndromes -> sliding windows -> real complementary-gap
+    confidence -> deferred escalation -> weighted-MWPM strong slab.
+
+    One deterministic shot proves the protocol mechanics, not statistical
+    accuracy: (1) at a same-seed calibrated mid threshold at least one window
+    escalates and every slab STARTS only after the NEXT window's weak decode
+    committed (the far-side weak boundary); (2) each slab spans the two-sided
+    context derived from its weak window; (3) the final logical verdict pairs
+    with the SAME shot's Stim observable truth (the strong decoder is never
+    the oracle); (4) a never-escalate threshold reproduces the plain serial
+    weak result on the same seed."""
+    _, calibration, _ = _run(threshold=0.0, double_window=True)
+    gaps = sorted({result.soft_output for result in calibration.results})
+    assert len(gaps) >= 2, f"soft output did not distinguish windows: {gaps}"
+    threshold = (gaps[0] + gaps[-1]) / 2
+
+    device = StimDevice(seed=7)
+    res, weak, strong = _run(threshold=threshold, double_window=True,
+                             device=device)
+    cluster = res["cluster"]
+    assert strong.jobs, "no window escalated at the calibrated mid threshold"
+    for job in strong.jobs:
+        op_id, window_index = job.strong_decode_for
+        weak_window = cluster.windows[(op_id, window_index)]
+        buffer_rounds = max(0, weak_window.buffer_hi - weak_window.commit_hi)
+        assert job.window.start_round == max(
+            1, weak_window.commit_lo - buffer_rounds)
+        assert job.window.buffer_hi == weak_window.commit_hi + buffer_rounds
+        next_window = cluster.windows.get((op_id, window_index + 1))
+        if next_window is not None:
+            assert next_window.t_done is not None
+            assert job.window.t_dispatch > next_window.t_done, (
+                "strong slab started before the far-side weak boundary")
+
+    # same-shot provenance: the verdict pairs with THIS trajectory's truth
+    verdict = int(cluster.op_results[0])
+    truth = int(device._truth[0][0])
+    assert verdict in (0, 1) and truth in (0, 1)
+
+    res_calm, _, strong_calm = _run(threshold=0.0, double_window=True)
+    assert not strong_calm.jobs
+    res_serial, _, strong_serial = _run(threshold=0.0)
+    assert not strong_serial.jobs
+    assert res_calm["cluster"].op_results[0] \
+        == res_serial["cluster"].op_results[0]

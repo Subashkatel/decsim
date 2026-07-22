@@ -62,24 +62,43 @@ class Switching:
     threshold); serial mode escalates after the ws hop; run_both_at_once starts
     the strong sibling with the weak and cancels it on confidence; bulk_strong
     batches queued serial redos (timing-only). Redo covers commit + 2*buffer
-    rounds (the paper's two-sided context)."""
+    rounds (the paper's two-sided context).
+
+    double_window=True is the FAITHFUL double-window protocol of
+    arXiv:2510.25222 Sec. III C (Fig. 12): the strong job is not submitted
+    at escalation time; the window manager holds it until the weak decoder
+    has determined the slab's boundary condition at BOTH ends — the near
+    side from the previous window's commit, the far side from the NEXT
+    window's weak commit (or the terminal boundary at the stream's end).
+    The weak pipeline itself never waits."""
 
     def __init__(self, confidence_threshold: float,
                  run_both_at_once: bool = False,
                  weak_keepup_ratio: Optional[float] = None,
                  bulk_strong: bool = False,
-                 threshold_register: Optional["ThresholdRegister"] = None):
+                 threshold_register: Optional["ThresholdRegister"] = None,
+                 double_window: bool = False):
         if weak_keepup_ratio is not None and not 0 < weak_keepup_ratio < 1:
             raise ValueError(f"weak_keepup_ratio must be between 0 and 1 "
                              f"(got {weak_keepup_ratio})")
         if bulk_strong and run_both_at_once:
             raise ValueError("bulk_strong is only meaningful in serial mode "
                              "(run_both_at_once=False)")
+        if double_window and run_both_at_once:
+            raise ValueError(
+                "double_window defers the strong start until the far weak "
+                "boundary exists; run_both_at_once starts it immediately "
+                "(the two policies contradict — pick one)")
+        if double_window and bulk_strong:
+            raise ValueError(
+                "double_window + bulk_strong is not supported: deferred "
+                "slabs are submitted one per escalation")
         self.confidence_threshold = confidence_threshold
         self.threshold_register = threshold_register   # P17 (None = scalar)
         self.run_both_at_once = run_both_at_once
         self.weak_keepup_ratio = weak_keepup_ratio
         self.bulk_strong = bulk_strong
+        self.double_window = double_window
 
     # ------------------------------------------------------------ the hooks
 
@@ -99,7 +118,14 @@ class Switching:
         if job.attempt != 0 or self._keep_weak(outcome.result, job):
             return OutcomeDirective(Directive.FINALIZE)   # pool cancels sibling
         extra = None
-        if not self.run_both_at_once:          # serial: redo after ws (dm:153-154)
+        if self.double_window:
+            # Faithful protocol: register the escalation only. The window
+            # manager builds and submits the slab once the far-side weak
+            # boundary is determined (paper Fig. 12 start condition).
+            services.defer_strong_escalation(
+                job, self.strong_redo_rounds(job.window),
+                getattr(job, "strong_label", f"strong({job.label})"))
+        elif not self.run_both_at_once:        # serial: redo after ws (dm:153-154)
             strong = services.make_strong_job(
                 job, self.strong_redo_rounds(job.window),
                 getattr(job, "strong_label", f"strong({job.label})"))
@@ -108,7 +134,28 @@ class Switching:
 
     def metrics(self) -> dict:
         return {"confidence_threshold": self.confidence_threshold,
-                "run_both_at_once": self.run_both_at_once}
+                "run_both_at_once": self.run_both_at_once,
+                "double_window": self.double_window}
+
+    # ------------------------------------------------------------ validation
+
+    def validate(self, spec) -> None:
+        """Reject RunSpec combinations that would deadlock or bypass the
+        faithful double-window start condition."""
+        if not self.double_window:
+            return
+        from .policies import Held
+        if isinstance(spec.boundary_policy, Held):
+            raise ValueError(
+                "double_window requires the weak chain to keep committing "
+                "(the far boundary IS the next weak commit); the Held "
+                "boundary policy would make the next window wait for the "
+                "strong result and deadlock the slab")
+        if spec.scheme is not None and hasattr(spec.scheme, "wire_deps"):
+            raise ValueError(
+                "double_window is defined for linearly-chained sliding "
+                "windows (arXiv:2510.25222 Fig. 12); two-layer parallel "
+                "window schemes are not supported")
 
     # ---------------------------------------------------------- policy knobs
 

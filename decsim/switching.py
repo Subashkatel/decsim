@@ -72,9 +72,12 @@ class Switching:
     slab (its result replaces the escalated window's weak value, and the
     absorbed windows contribute nothing); the strong job is submitted only
     once the weak decoder has determined the boundary conditions at both
-    slab ends (left: the escalated window's own entry defects; right: the
-    restart window's weak commit, or the terminal boundary at the stream
-    end). The weak pipeline itself never waits on strong work.
+    slab ends (left: the pre-slab weak commits, already in place when the
+    escalation fires; right: the restart window's weak commit, or the
+    terminal boundary at the stream end; both are established temporally
+    and represented as raw context plus ownership exclusion, never as
+    folded decoded defects). The weak pipeline itself never waits on
+    strong work.
 
     Recorded modelling choice for the slab's seams: every seam is read as
     raw two-sided context with single fault ownership, this repository's

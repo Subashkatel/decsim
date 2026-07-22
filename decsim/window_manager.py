@@ -538,24 +538,17 @@ class WindowManager:
         return buffer_lo, window.commit_lo, window.commit_hi, buffer_hi
 
     # ------------------------------------------- faithful double window (III C)
-    #
-    # arXiv:2510.25222 Fig. 12: on a switching event the slab of
-    # r_strong = r_com + 2*r_buf rounds starts AT the suspicious commit and
-    # extends FORWARD; the weak chain skips the windows whose commit regions
-    # the slab absorbs and restarts on the first window past the slab; the
-    # strong decoder commits the entire slab, and it may start only once the
-    # weak decoder has determined the boundary conditions at both slab ends
-    # (left: the escalated window's own entry defects; right: the restart
-    # window's weak commit, or the terminal boundary at the stream end).
+    # arXiv:2510.25222 Fig. 12: forward slab, weak-chain skip, strong owns
+    # the slab, start gated on both weak-determined boundaries. Protocol and
+    # seam formalism are documented on Switching (switching.py).
 
     def defer_strong_escalation(self, weak_job: DecodeJob, n_rounds: int,
                                 label: str) -> None:
-        """Register a switching event: lay out the forward slab, absorb the
-        weak windows it covers (they are never weak-decoded), and hold the
-        strong job until the restart window's weak commit fixes the far-side
-        boundary (state waiting_far_boundary), or, for a terminal slab, until
-        every clamped slab round has been stored (waiting_terminal_data).
-        Exactly one strong job per escalation (duplicates raise)."""
+        """Lay out the forward slab, absorb the windows it covers, and hold
+        the strong job until the restart window's weak commit
+        (waiting_far_boundary) or, terminally, until every clamped slab
+        round is stored (waiting_terminal_data). One strong job per
+        escalation; duplicates raise."""
         key = (weak_job.op_id, weak_job.window_id)
         if key in self._deferred_strong:
             raise RuntimeError(
@@ -592,9 +585,8 @@ class WindowManager:
             "slab_hi": slab_hi, "context_lo": context_lo,
             "context_hi": context_hi, "restart_key": restart_key,
             "state": "waiting_far_boundary"}
-        # The standing strong lease held only the legacy side-context rounds;
         # the deferred slab is assembled after later weak commits release
-        # their leases, so it must hold every slab + context round until then.
+        # their leases, so its lease must span every slab + context round
         self.store.replace((key, "strong"),
                            [(op_id, r) for r in range(context_lo, context_hi + 1)])
         for absorbed_key in absorbed:
@@ -604,9 +596,7 @@ class WindowManager:
                         f"weak chain skips {len(absorbed)} window(s); strong "
                         f"start deferred until the far-side weak boundary")
         if restart_key is None:
-            # Terminal slab: the far side is the stream end, but Fig. 12's
-            # blocks are STORED data; a clamped slab may still be waiting
-            # for its final rounds to be generated.
+            # terminal slab: clamped tail rounds may not be generated yet
             if self.rounds_arrived[op_id] >= context_hi:
                 self._submit_deferred_strong(key)
             else:
@@ -619,12 +609,11 @@ class WindowManager:
 
     def _reslice_restart_window(self, restart_key: tuple, slab_lo: int,
                                 slab_hi: int) -> None:
-        """Absorption breaks the restart window's forward-chain contract: its
-        predecessor never decodes, so no cancellation defects arrive and its
-        plan-time model excludes the seam faults it would then face as
-        orphaned defects. Re-slice it as the B-side of the slab seam: read a
-        leading buffer back into the slab tail, keep seam-crossing faults as
-        visible context columns, and leave their ownership with the slab."""
+        """Re-slice the restart window as the slab seam's B-side: its
+        plan-time model expected cancellation defects from a predecessor
+        that now never decodes, leaving seam faults orphaned. Give it a
+        leading buffer into the slab tail; seam faults become visible
+        context columns, owned by the slab."""
         restart = self.windows[restart_key]
         restart.buffer_lo = max(slab_lo, slab_hi - self.buffer + 1)
         if self.syndrome_source is None:
@@ -642,9 +631,8 @@ class WindowManager:
                         f"{restart.buffer_hi}, owns none before {slab_hi + 1})")
 
     def _absorb_window(self, key: tuple, restart_key: Optional[tuple]) -> None:
-        """A window whose commit region the slab covers is never decoded by
-        the weak chain (Fig. 12 panel 5): it counts as committed with no
-        logical contribution, and the restart window stops waiting for it."""
+        """A slab-covered window is never weak-decoded: count it committed
+        with no logical contribution and unhook the restart window."""
         window = self.windows[key]
         if window.queued or window.committed:
             raise RuntimeError(f"cannot absorb window {key}: already "
@@ -668,13 +656,10 @@ class WindowManager:
                         f"(weak chain skips it)")
 
     def _submit_deferred_strong(self, key: tuple) -> None:
-        """Both slab boundaries are now weak-determined: build the slab job
-        and submit it. The slab owns (commits) all r_strong rounds and is a
-        full B-side window: it reads one buffer of raw context on EACH face
-        and owns no fault that touches pre-slab rounds (those belong to the
-        windows or slabs that committed them; folding their decoded defects
-        into raw re-read context would double-count the boundary, see
-        test_parallel_two_sided_windows_match_global_decoding)."""
+        """Both boundaries are weak-determined: build and submit the slab
+        job. The slab commits all r_strong rounds and reads one buffer of
+        raw context per face, owning nothing that touches pre-slab rounds
+        (see the seam formalism on Switching)."""
         pending = self._deferred_strong.pop(key)
         weak_job = pending["weak_job"]
         weak_window = self.windows[key]

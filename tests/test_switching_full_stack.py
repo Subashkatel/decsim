@@ -170,23 +170,14 @@ def test_weak_strong_pair_has_real_accuracy_separation():
 
 
 def test_double_window_full_stack_faithful_start_and_same_shot_truth():
-    """Faithful double window (arXiv:2510.25222 Sec. III C, Fig. 12) through
-    the REAL path: Stim-sampled syndromes -> sliding windows -> real
-    complementary-gap confidence -> forward slab with weak-chain skip ->
-    weighted-MWPM strong slab decode.
-
-    One deterministic shot (seed 7, 15 rounds so mid-stream slabs have a
-    restart window) proves the protocol mechanics, not statistical accuracy:
-    (1) at a same-seed calibrated mid threshold at least one window
-    escalates; every slab starts at the suspicious commit, extends forward
-    by two buffers (clamped at the stream end), and its dispatch happens
-    only after the restart window's weak commit; (2) the slab carries the
-    escalated window's own entry defects at its left face; (3) the final
-    logical verdict is recomputed from the per-window weak results (skipping
-    absorbed windows) XOR the slab results, all from the SAME shot, and the
-    error indicator is taken against that shot's Stim observable truth (the
-    strong decoder is never the oracle); (4) a never-escalate threshold
-    reproduces the plain serial weak result on the same seed."""
+    """Double window through the real path: Stim syndromes, real
+    complementary-gap confidence, forward slab with weak-chain skip,
+    weighted-MWPM slab decode. One deterministic shot proves mechanics,
+    not statistics: slabs start at the suspicious commit, extend forward,
+    and dispatch only after the restart window's weak commit; the verdict
+    is recomputed from the same shot's per-window results; error labels
+    come from the Stim observable, never the strong decoder; a
+    never-escalate threshold matches the plain serial weak result."""
     rounds = 15
     _, calibration, _ = _run(threshold=0.0, rounds=rounds, double_window=True)
     gaps = sorted({result.soft_output for result in calibration.results})
@@ -276,15 +267,12 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
 
 
 def test_double_window_seam_models_partition_fault_ownership():
-    """The slab-end seam is decoded as two B-side windows: the re-sliced
-    restart window reads a leading buffer back into the slab tail and OWNS
-    no fault touching the slab, while the slab owns the seam-crossing
-    faults and nothing before its own rounds. Without the re-slice the
-    restart window keeps its plan-time forward-chain model whose
-    cancellation contract absorption broke: a seam fault then fires a
-    defect it can neither own nor represent, and its matching commits a
-    spurious logical flip (adjudicated validator finding, demonstrated on
-    crafted seam-fault shots)."""
+    """The slab-end seam is two B-side windows: the re-sliced restart
+    window reads a leading buffer into the slab tail and owns no fault
+    touching the slab; the slab owns the seam-crossing faults and nothing
+    pre-slab. Without the re-slice a seam fault fires a defect the restart
+    window cannot represent and its matching commits a spurious logical
+    flip."""
     import numpy as np
     from decsim.decoders import SampledConfidenceDecoder
 

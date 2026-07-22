@@ -89,6 +89,7 @@ class WindowManager:
         #: boundary; slab key -> pending record (see defer_strong_escalation)
         self._deferred_strong: dict[tuple, dict] = {}
         self._deferred_by_far: dict[tuple, tuple] = {}   # restart key -> slab key
+        self._deferred_terminal: dict[int, tuple] = {}   # op id -> slab key
         self.absorbed_windows: set[tuple] = set()        # skipped by the weak chain
         self.op_strong_commit_time: dict[int, int] = {}
         self._finalize_gates: dict[int, Callable] = {}    # gate_finalize seam
@@ -290,6 +291,7 @@ class WindowManager:
         op = self.ops[payload.operation_id]
         self._store_payload(payload, op)
         self.lifecycle.maybe_update(op.id)
+        self._check_deferred_strong_after_arrival(op.id)
         self.check_windows_for_operation(op.id)
         for predecessor_id in op.predecessors:
             self.check_windows_for_operation(predecessor_id)
@@ -551,8 +553,9 @@ class WindowManager:
         """Register a switching event: lay out the forward slab, absorb the
         weak windows it covers (they are never weak-decoded), and hold the
         strong job until the restart window's weak commit fixes the far-side
-        boundary. State: waiting_far_boundary until submission; exactly one
-        strong job per escalation (duplicates raise)."""
+        boundary (state waiting_far_boundary), or, for a terminal slab, until
+        every clamped slab round has been stored (waiting_terminal_data).
+        Exactly one strong job per escalation (duplicates raise)."""
         key = (weak_job.op_id, weak_job.window_id)
         if key in self._deferred_strong:
             raise RuntimeError(
@@ -599,7 +602,14 @@ class WindowManager:
                         f"weak chain skips {len(absorbed)} window(s); strong "
                         f"start deferred until the far-side weak boundary")
         if restart_key is None:
-            self._submit_deferred_strong(key)   # terminal boundary exists now
+            # Terminal slab: the far side is the stream end, but Fig. 12's
+            # blocks are STORED data; a clamped slab may still be waiting
+            # for its final rounds to be generated.
+            if self.rounds_arrived[op_id] >= context_hi:
+                self._submit_deferred_strong(key)
+            else:
+                self._deferred_strong[key]["state"] = "waiting_terminal_data"
+                self._deferred_terminal[op_id] = key
         else:
             self._deferred_by_far[restart_key] = key
             self.check_window(restart_key)      # its absorbed dep is gone
@@ -653,13 +663,22 @@ class WindowManager:
             dem = self.syndrome_source.strong_window_model_for_operation(
                 op, slab, self._round_count_for_window(op.id, weak_window),
                 belief_matching=self.needs_hyperedges)
+        payloads = self._assemble_payloads(slab)
+        covered = {payload.round_index for payload in payloads}
+        needed = set(range(pending["slab_lo"], pending["context_hi"] + 1))
+        if covered != needed:
+            raise RuntimeError(
+                f"{pending['label']}: slab submitted with rounds "
+                f"{sorted(covered)} but it needs "
+                f"{pending['slab_lo']}-{pending['context_hi']}; a slab may "
+                f"only start once every stored block exists (Fig. 12)")
         strong_job = DecodeJob(
             op_id=key[0], window_id=key[1],
             n_rounds=pending["slab_hi"] - pending["slab_lo"] + 1,
             ready_time=self.engine.now, deadline=self.engine.now,
             label=pending["label"], hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
-            dem=dem, payloads=self._assemble_payloads(slab),
+            dem=dem, payloads=payloads,
             attempt=1, window=slab, strong_decode_for=key)
         self.services.check_strong_route(weak_job, strong_job)
         self.store.release((key, "strong"))   # slab captured into the job
@@ -672,6 +691,15 @@ class WindowManager:
         """The restart window's weak commit is the far boundary of a slab."""
         slab_key = self._deferred_by_far.pop(committed_key, None)
         if slab_key is not None:
+            self._submit_deferred_strong(slab_key)
+
+    def _check_deferred_strong_after_arrival(self, op_id) -> None:
+        """A terminal slab waits for its clamped tail rounds to be stored."""
+        slab_key = self._deferred_terminal.get(op_id)
+        if slab_key is None:
+            return
+        if self.rounds_arrived[op_id] >= self._deferred_strong[slab_key]["context_hi"]:
+            del self._deferred_terminal[op_id]
             self._submit_deferred_strong(slab_key)
 
     @property

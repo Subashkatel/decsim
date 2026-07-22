@@ -705,3 +705,23 @@ def test_double_window_rejects_unsupported_runspec_shapes():
                Operation(1, "b", (1,), predecessors=(0,))]
     with pytest.raises(ValueError, match="single-patch"):
         RunSpec(ops=chained, **base).validate()
+
+
+def test_double_window_terminal_slab_waits_for_its_final_rounds():
+    """A clamped terminal slab has no restart window, but Fig. 12's blocks
+    are STORED syndrome data: with 14 rounds, W2's slab is rounds 7-14 while
+    W2's own weak decode finishes before rounds 13-14 are even generated.
+    The slab must wait for them and then carry every slab round."""
+    res, weak, strong = _double_window_run(escalate_window=2, rounds=14)
+    runtime = res["cluster"].window_manager
+    (start_tick, job), = strong.starts
+    assert (job.window.commit_lo, job.window.commit_hi) == (7, 14)
+    assert [payload.round_index for payload in job.payloads] \
+        == list(range(7, 15))
+    w2 = res["cluster"].windows[(0, 2)]
+    assert start_tick > w2.t_done + us(0.5)   # NOT submitted at escalation
+    # round 14 reaches the cluster at 14.0 (generation) + 2.15 (t_qc + t_cd);
+    # the slab then crosses the weak->strong hop
+    assert start_tick == us(14.0 + 2.15 + 0.5)
+    assert runtime.absorbed_windows == {(0, 3), (0, 4)}
+    assert runtime.pending_escalations == {}

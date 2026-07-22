@@ -170,49 +170,78 @@ def test_weak_strong_pair_has_real_accuracy_separation():
 
 
 def test_double_window_full_stack_faithful_start_and_same_shot_truth():
-    """Faithful double window (arXiv:2510.25222 Sec. III C) through the REAL
-    path: Stim-sampled syndromes -> sliding windows -> real complementary-gap
-    confidence -> deferred escalation -> weighted-MWPM strong slab.
+    """Faithful double window (arXiv:2510.25222 Sec. III C, Fig. 12) through
+    the REAL path: Stim-sampled syndromes -> sliding windows -> real
+    complementary-gap confidence -> forward slab with weak-chain skip ->
+    weighted-MWPM strong slab decode.
 
-    One deterministic shot proves the protocol mechanics, not statistical
-    accuracy: (1) at a same-seed calibrated mid threshold at least one window
-    escalates and every slab STARTS only after the NEXT window's weak decode
-    committed (the far-side weak boundary); (2) each slab spans the two-sided
-    context derived from its weak window; (3) the final logical verdict pairs
-    with the SAME shot's Stim observable truth (the strong decoder is never
-    the oracle); (4) a never-escalate threshold reproduces the plain serial
-    weak result on the same seed."""
-    _, calibration, _ = _run(threshold=0.0, double_window=True)
+    One deterministic shot (seed 7, 15 rounds so mid-stream slabs have a
+    restart window) proves the protocol mechanics, not statistical accuracy:
+    (1) at a same-seed calibrated mid threshold at least one window
+    escalates; every slab starts at the suspicious commit, extends forward
+    by two buffers (clamped at the stream end), and its dispatch happens
+    only after the restart window's weak commit; (2) the slab carries the
+    escalated window's own entry defects at its left face; (3) the final
+    logical verdict is recomputed from the per-window weak results (skipping
+    absorbed windows) XOR the slab results, all from the SAME shot, and the
+    error indicator is taken against that shot's Stim observable truth (the
+    strong decoder is never the oracle); (4) a never-escalate threshold
+    reproduces the plain serial weak result on the same seed."""
+    rounds = 15
+    _, calibration, _ = _run(threshold=0.0, rounds=rounds, double_window=True)
     gaps = sorted({result.soft_output for result in calibration.results})
     assert len(gaps) >= 2, f"soft output did not distinguish windows: {gaps}"
     threshold = (gaps[0] + gaps[-1]) / 2
 
     device = StimDevice(seed=7)
-    res, weak, strong = _run(threshold=threshold, double_window=True,
-                             device=device)
+    res, weak, strong = _run(threshold=threshold, rounds=rounds,
+                             double_window=True, device=device)
     cluster = res["cluster"]
+    runtime = cluster.window_manager
     assert strong.jobs, "no window escalated at the calibrated mid threshold"
+
+    escalated = set()
     for job in strong.jobs:
-        op_id, window_index = job.strong_decode_for
-        weak_window = cluster.windows[(op_id, window_index)]
+        key = job.strong_decode_for
+        escalated.add(key)
+        weak_window = cluster.windows[key]
         buffer_rounds = max(0, weak_window.buffer_hi - weak_window.commit_hi)
-        assert job.window.start_round == max(
-            1, weak_window.commit_lo - buffer_rounds)
-        assert job.window.buffer_hi == weak_window.commit_hi + buffer_rounds
-        next_window = cluster.windows.get((op_id, window_index + 1))
-        if next_window is not None:
-            assert next_window.t_done is not None
-            assert job.window.t_dispatch > next_window.t_done, (
-                "strong slab started before the far-side weak boundary")
+        assert job.window.commit_lo == weak_window.commit_lo
+        assert job.window.commit_hi == min(
+            weak_window.commit_lo + weak_window.commit_hi
+            - weak_window.commit_lo + 2 * buffer_rounds, rounds)
+        assert job.window.boundary_in == weak_window.boundary_in
+        restart = next(
+            (cluster.windows[(key[0], j)]
+             for j in sorted(k for o, k in cluster.windows if o == key[0])
+             if cluster.windows[(key[0], j)].commit_lo > job.window.commit_hi),
+            None)
+        if restart is not None:
+            assert restart.t_done is not None
+            assert job.window.t_dispatch > restart.t_done, (
+                "strong slab started before the restart window's weak commit")
 
-    # same-shot provenance: the verdict pairs with THIS trajectory's truth
-    verdict = int(cluster.op_results[0])
+    # same-shot provenance: recompute the op verdict from this shot's
+    # per-window results; absorbed windows contribute nothing
+    weak_values = {(j.op_id, j.window_id): int(r.logical_value)
+                   for j, r in zip(weak.jobs, weak.results)}
+    strong_values = {j.strong_decode_for: int(r.logical_value)
+                     for j, r in zip(strong.jobs, strong.results)}
+    expected = 0
+    for key, value in weak_values.items():
+        if key not in escalated and key not in runtime.absorbed_windows:
+            expected ^= value
+    for value in strong_values.values():
+        expected ^= value
+    assert int(cluster.op_results[0]) == expected
     truth = int(device._truth[0][0])
-    assert verdict in (0, 1) and truth in (0, 1)
+    logical_error = int(cluster.op_results[0]) ^ truth
+    assert logical_error in (0, 1)   # truth from Stim observables, not strong
 
-    res_calm, _, strong_calm = _run(threshold=0.0, double_window=True)
+    res_calm, _, strong_calm = _run(threshold=0.0, rounds=rounds,
+                                    double_window=True)
     assert not strong_calm.jobs
-    res_serial, _, strong_serial = _run(threshold=0.0)
+    res_serial, _, strong_serial = _run(threshold=0.0, rounds=rounds)
     assert not strong_serial.jobs
     assert res_calm["cluster"].op_results[0] \
         == res_serial["cluster"].op_results[0]

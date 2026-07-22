@@ -64,13 +64,20 @@ class Switching:
     batches queued serial redos (timing-only). Redo covers commit + 2*buffer
     rounds (the paper's two-sided context).
 
-    double_window=True is the FAITHFUL double-window protocol of
-    arXiv:2510.25222 Sec. III C (Fig. 12): the strong job is not submitted
-    at escalation time; the window manager holds it until the weak decoder
-    has determined the slab's boundary condition at BOTH ends — the near
-    side from the previous window's commit, the far side from the NEXT
-    window's weak commit (or the terminal boundary at the stream's end).
-    The weak pipeline itself never waits."""
+    double_window=True is the faithful double-window protocol of
+    arXiv:2510.25222 Sec. III C (Fig. 12): on a switching event the slab of
+    commit + 2*buffer rounds starts AT the suspicious commit and extends
+    FORWARD; the weak chain skips the windows the slab absorbs and restarts
+    on the first window past the slab; the strong decoder commits the whole
+    slab (its result replaces the escalated window's weak value, and the
+    absorbed windows contribute nothing); the strong job is submitted only
+    once the weak decoder has determined the boundary conditions at both
+    slab ends (left: the escalated window's own entry defects; right: the
+    restart window's weak commit, or the terminal boundary at the stream
+    end). The weak pipeline itself never waits on strong work. Modelling
+    choice, recorded in the tests: the slab additionally READS one trailing
+    buffer of context rounds (the same role a buffer plays for every weak
+    window) while its timing charge stays the paper's r_strong."""
 
     def __init__(self, confidence_threshold: float,
                  run_both_at_once: bool = False,
@@ -88,7 +95,7 @@ class Switching:
             raise ValueError(
                 "double_window defers the strong start until the far weak "
                 "boundary exists; run_both_at_once starts it immediately "
-                "(the two policies contradict — pick one)")
+                "(the two policies contradict; pick one)")
         if double_window and bulk_strong:
             raise ValueError(
                 "double_window + bulk_strong is not supported: deferred "
@@ -140,22 +147,38 @@ class Switching:
     # ------------------------------------------------------------ validation
 
     def validate(self, spec) -> None:
-        """Reject RunSpec combinations that would deadlock or bypass the
-        faithful double-window start condition."""
+        """Reject RunSpec combinations that would deadlock, bypass the
+        faithful start condition, or need skip semantics the runtime does
+        not model yet."""
         if not self.double_window:
             return
         from .policies import Held
         if isinstance(spec.boundary_policy, Held):
             raise ValueError(
                 "double_window requires the weak chain to keep committing "
-                "(the far boundary IS the next weak commit); the Held "
-                "boundary policy would make the next window wait for the "
-                "strong result and deadlock the slab")
+                "(the far boundary IS the restart window's weak commit); "
+                "the Held boundary policy would make later windows wait for "
+                "the strong result and deadlock the slab")
         if spec.scheme is not None and hasattr(spec.scheme, "wire_deps"):
             raise ValueError(
                 "double_window is defined for linearly-chained sliding "
                 "windows (arXiv:2510.25222 Fig. 12); two-layer parallel "
                 "window schemes are not supported")
+        if spec.dynamic_streams or spec.decode_ops:
+            raise ValueError(
+                "double_window skips statically planned windows when a slab "
+                "is assigned; stream windows created or folded at runtime "
+                "(dynamic_streams/decode_ops) are not supported yet")
+        if spec.frontend is not None:
+            raise ValueError(
+                "double_window is validated for explicit ops= workloads; "
+                "frontend-built operation chains are not supported yet")
+        if any(op.predecessors or op.has_successor for op in spec.ops or ()):
+            raise ValueError(
+                "double_window models one single-patch stream per operation "
+                "(arXiv:2510.25222 Fig. 12); operation chains with "
+                "predecessors/successors would let a slab cross an op seam "
+                "where no far-boundary gate exists yet")
 
     # ---------------------------------------------------------- policy knobs
 

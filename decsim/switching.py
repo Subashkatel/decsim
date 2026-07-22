@@ -74,10 +74,19 @@ class Switching:
     once the weak decoder has determined the boundary conditions at both
     slab ends (left: the escalated window's own entry defects; right: the
     restart window's weak commit, or the terminal boundary at the stream
-    end). The weak pipeline itself never waits on strong work. Modelling
-    choice, recorded in the tests: the slab additionally READS one trailing
-    buffer of context rounds (the same role a buffer plays for every weak
-    window) while its timing charge stays the paper's r_strong."""
+    end). The weak pipeline itself never waits on strong work.
+
+    Recorded modelling choice for the far-side boundary condition: the slab
+    READS one trailing buffer of raw context rounds and decides seam faults
+    itself via fault ownership, which is this repository's validated
+    two-sided formalism (injecting the restart window's decoded defects
+    instead would double-count the boundary error; see
+    test_parallel_two_sided_windows_match_global_decoding). The paper's
+    strong decoder instead reads exactly r_strong rounds with the far face
+    pinned by the weak result; here the strong reads r_strong + r_buf rounds
+    while the timing charge stays the paper's r_strong, so slab-edge
+    accuracy is slightly optimistic and the extra read is uncharged (the
+    transfer cost belongs to the open strong-data-path backlog item)."""
 
     def __init__(self, confidence_threshold: float,
                  run_both_at_once: bool = False,

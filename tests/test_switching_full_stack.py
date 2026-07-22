@@ -208,8 +208,7 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
         buffer_rounds = max(0, weak_window.buffer_hi - weak_window.commit_hi)
         assert job.window.commit_lo == weak_window.commit_lo
         assert job.window.commit_hi == min(
-            weak_window.commit_lo + weak_window.commit_hi
-            - weak_window.commit_lo + 2 * buffer_rounds, rounds)
+            weak_window.commit_hi + 2 * buffer_rounds, rounds)
         assert job.window.boundary_in == weak_window.boundary_in
         restart = next(
             (cluster.windows[(key[0], j)]
@@ -234,9 +233,18 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
     for value in strong_values.values():
         expected ^= value
     assert int(cluster.op_results[0]) == expected
-    truth = int(device._truth[0][0])
-    logical_error = int(cluster.op_results[0]) ^ truth
-    assert logical_error in (0, 1)   # truth from Stim observables, not strong
+    # the far side feeds the slab through its raw trailing context: every
+    # context round past the slab must arrive with real sampled bits (the
+    # repo's validated two-sided formalism; decoded defects from the restart
+    # window would double-count the boundary, see
+    # test_parallel_two_sided_windows_match_global_decoding)
+    for job in strong.jobs:
+        context_rounds = [payload for payload in job.payloads
+                          if payload.round_index > job.window.commit_hi]
+        if job.window.buffer_hi > job.window.commit_hi:
+            assert context_rounds, "slab missing its far-side context data"
+            assert all(payload.bits is not None for payload in context_rounds)
+    truth = int(device._truth[0][0])   # truth from Stim observables, not strong
 
     res_calm, _, strong_calm = _run(threshold=0.0, rounds=rounds,
                                     double_window=True)

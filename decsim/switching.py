@@ -154,6 +154,15 @@ class Switching:
         faithful start condition, or need skip semantics the runtime does
         not model yet."""
         if not self.double_window:
+            from .policies import Eager
+            boundary_policy = spec.boundary_policy
+            if (spec.dynamic_streams
+                    and (boundary_policy is None
+                         or isinstance(boundary_policy, Eager))):
+                raise ValueError(
+                    "Eager speculative recovery needs a statically planned replay "
+                    "cone; dynamic streams create future windows at runtime. Use "
+                    "Held boundaries for dynamic streams.")
             return
         from .policies import Held
         if isinstance(spec.boundary_policy, Held):

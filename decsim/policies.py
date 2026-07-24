@@ -14,7 +14,9 @@ from __future__ import annotations
 # ---- boundary handoff (port 16) --------------------------------------------
 
 class Eager:
-    """Faithful default: always ship at commit (Contract 1 rule 2)."""
+    """Speculative default: ship at weak commit and replay if strong disagrees."""
+
+    speculative = True
 
     def on_commit(self, window, final: bool) -> bool:
         return True
@@ -22,6 +24,8 @@ class Eager:
 
 class Held:
     """Opt-in: ship only when the committing result is final."""
+
+    speculative = False
 
     def on_commit(self, window, final: bool) -> bool:
         return final

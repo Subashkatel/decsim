@@ -1,15 +1,17 @@
 """AST firewall: the frozen core never imports or names parts/experiments.
 
-CORE = {engine, message, pauli_frame, window_manager, chip, payload_store,
-dynamic_windows, protocols, run_spec, config}. Only run_spec.py may import parts
-(never experiments); experiments reach run_spec.py only as pre-built objects.
+CORE = {engine, message, pauli_frame, window_manager, speculative_recovery,
+chip, payload_store, dynamic_windows, protocols, run_spec, config}. Only
+run_spec.py may import parts (never experiments); experiments reach run_spec.py
+only as pre-built objects.
 """
 import ast
 import pathlib
 
 PKG = pathlib.Path(__file__).resolve().parent.parent / "decsim"
-CORE = {"engine", "message", "pauli_frame", "window_manager", "chip", "payload_store",
-        "dynamic_windows", "protocols", "run_spec", "config"}
+CORE = {"engine", "message", "pauli_frame", "window_manager",
+        "speculative_recovery", "chip", "payload_store", "dynamic_windows",
+        "protocols", "run_spec", "config"}
 PARTS_ALLOWED_IN = {"run_spec"}
 # Experiment-flavored identifiers the core must never name (fabric/speculation
 # are v1.1/v1.2; strategy/policy impls are parts wired via run_spec only).

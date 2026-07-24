@@ -8,6 +8,8 @@ from decsim.protocols import (BoundaryPolicy, DecodingStrategy, Directive,
 class _FakeServices:
     now = 0
     def make_strong_job(self, weak_job, n_rounds, label): return weak_job
+    def defer_strong_escalation(self, weak_job, n_rounds, label): pass
+    def check_strong_route(self, weak_job, strong_job): pass
     def cancel_strong(self, key): pass
     def ws_delay(self): return 500_000
 
@@ -21,6 +23,7 @@ class _FakeStrategy:
 
 
 class _FakeBoundary:
+    speculative = False
     def on_commit(self, window, final): return True
 
 

@@ -10,6 +10,7 @@ from decsim.message import (DecodeJob, DecodeResult, Operation, SyndromePayload,
                           Window, WindowPlan)
 from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.window_manager import WindowManager
+from decsim.window_interactions import DefaultWindowInteraction
 
 T_DD = 500_000
 T_DO = 1_000_000
@@ -87,7 +88,8 @@ def _runtime(boundary=None, strategy=None, ops=(0,), deps=(), blocking=()):
     rt = WindowManager(eng, scheme=_Scheme(), layout=_Layout(),
                        rounds_policy=_Rounds(), code=_Code(),
                        deadline_policy=_Deadline(), links=_Links(),
-                       orchestrator=fb, boundary_policy=boundary or _Eager())
+                       orchestrator=fb, boundary_policy=boundary or _Eager(),
+                       window_interaction=DefaultWindowInteraction())
     rt.strategy = strategy or _RecordingStrategy()
     rt.services = object()
     submitted = []
@@ -163,6 +165,31 @@ def test_boundary_shift_rule_contract_1_3():
     eng.run(until=T_DD)
     dep = rt.windows[(1, 0)]
     assert set(dep.boundary_in) == {1, 2}
+
+
+def test_default_boundary_revisions_replace_one_sources_contribution():
+    eng, rt, _, _ = _runtime(
+        deps=[((0, 0), (1, 0))],
+        ops=(0, 1),
+    )
+    source = rt.windows[(0, 0)]
+    operation = rt.ops[0]
+
+    # The first scheduled message is stale before it arrives. Only the newer
+    # revision releases the dependency and contributes a mask.
+    rt._send_boundary(source, operation, {7: [1, 0]})
+    rt._send_boundary(source, operation, {7: [0, 1]})
+    eng.run(until=T_DD)
+    destination = rt.windows[(1, 0)]
+    assert destination.deps_remaining == 0
+    assert destination.boundary_in == {1: [0, 1]}
+
+    # A later accepted revision replaces this source rather than decrementing
+    # the dependency twice or XORing old and new versions together.
+    rt._send_boundary(source, operation, {7: [1, 1, 1]})
+    eng.run(until=eng.now + T_DD)
+    assert destination.deps_remaining == 0
+    assert destination.boundary_in == {1: [1, 1, 1]}
 
 
 def test_strong_revises_logical_only_contract_1_4():

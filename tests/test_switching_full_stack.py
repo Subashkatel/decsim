@@ -9,6 +9,7 @@ end to end through build_and_run. Until this file is green, E1 does not
 run (docs/validation/2026-07-02-gate3-decision-and-gate4-readiness.md,
 design v2 item 2).
 """
+from dataclasses import replace
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -21,13 +22,14 @@ pytest.importorskip("pymatching")
 from decsim.adapters.stim_device import StimDevice
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import SwitchingRouter
-from decsim.message import Operation
+from decsim.message import Operation, SeamFaultOwner
 from decsim.mwpm_decoder import PyMatchingDecoder, UnweightedPyMatchingDecoder
 from decsim.planner import FixedRounds
 from decsim.schemes import SlidingWindowScheme
 from decsim.soft_output import ComplementaryGapMetric, SoftOutputDecoder
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
+from decsim.window_interactions import DefaultWindowInteraction
 
 
 class _Latency:
@@ -266,29 +268,37 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
         == res_serial["cluster"].op_results[0]
 
 
-def test_double_window_seam_models_partition_fault_ownership():
-    """The slab-end seam is two B-side windows: the re-sliced restart
-    window reads a leading buffer into the slab tail and owns no fault
-    touching the slab; the slab owns the seam-crossing faults and nothing
-    pre-slab. Without the re-slice a seam fault fires a defect the restart
-    window cannot represent and its matching commits a spurious logical
-    flip."""
+@pytest.mark.parametrize(
+    "seam_owner",
+    [SeamFaultOwner.STRONG_REGION, SeamFaultOwner.RESTART_WINDOW],
+)
+@pytest.mark.parametrize("seed", [0, 5, 31, 127])
+def test_double_window_seam_models_are_decodable_and_partition_ownership(
+    seam_owner, seed,
+):
+    """Both seam choices decode while the selected side owns crossing faults."""
     import numpy as np
     from decsim.decoders import SampledConfidenceDecoder
 
     rounds = 21
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z", distance=3, rounds=rounds,
-        after_clifford_depolarization=0.008,
-        after_reset_flip_probability=0.008,
-        before_measure_flip_probability=0.008,
-        before_round_data_depolarization=0.008)
+        after_clifford_depolarization=0.006,
+        after_reset_flip_probability=0.006,
+        before_measure_flip_probability=0.006,
+        before_round_data_depolarization=0.006)
     op = Operation(0, "memory", (0,), clifford=True, circuit=circuit)
     weak = _Recording(SampledConfidenceDecoder(
         UnweightedPyMatchingDecoder(_Latency()), 0.0,
         probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0))
     strong = _Recording(PyMatchingDecoder(_Latency()))
-    simulate(RunSpec(
+
+    class SelectedSeamOwner(DefaultWindowInteraction):
+        def plan_strong_region(self, *args, **kwargs):
+            plan = super().plan_strong_region(*args, **kwargs)
+            return replace(plan, restart_seam_fault_owner=seam_owner)
+
+    result = simulate(RunSpec(
         ops=[op],
         num_units=1,
         d=3,
@@ -296,9 +306,10 @@ def test_double_window_seam_models_partition_fault_ownership():
         code=SurfaceCodeModel(d=3),
         scheme=SlidingWindowScheme(),
         strategy=Switching(confidence_threshold=0.5, double_window=True),
-        device=StimDevice(seed=5),
+        device=StimDevice(seed=seed),
         decoder=weak,
         router=SwitchingRouter(weak, strong),
+        window_interaction=SelectedSeamOwner(),
         unit_pools={"default": 1, "strong": 1},
     ), verbose=False)
 
@@ -318,19 +329,30 @@ def test_double_window_seam_models_partition_fault_ownership():
     restart_dem, slab_dem = restart_job.dem, slab_job.dem
     restart_owned = np.nonzero(restart_dem.owned)[0]
     assert restart_owned.size
-    for column in restart_owned:
-        assert min(column_rounds(restart_dem, column)) > slab_hi
+    restart_seam_owned = any(
+        {slab_hi, slab_hi + 1} <= column_rounds(restart_dem, column)
+        for column in restart_owned
+    )
 
-    seam_context = [
-        column for column in range(restart_dem.check.shape[1])
-        if not restart_dem.owned[column]
-        and {slab_hi, slab_hi + 1} <= column_rounds(restart_dem, column)]
-    assert seam_context, "seam faults must be visible restart context"
-
-    seam_owned = False
+    slab_seam_owned = False
     for column in np.nonzero(slab_dem.owned)[0]:
         fault_rounds = column_rounds(slab_dem, column)
         assert min(fault_rounds) >= slab_lo      # owns nothing pre-slab
         if {slab_hi, slab_hi + 1} <= fault_rounds:
-            seam_owned = True
-    assert seam_owned, "the slab must own the seam-crossing faults"
+            slab_seam_owned = True
+
+    assert restart_seam_owned != slab_seam_owned
+    assert slab_seam_owned == (
+        seam_owner is SeamFaultOwner.STRONG_REGION)
+
+    weak_values = {
+        (job.op_id, job.window_id): int(decode_result.logical_value)
+        for job, decode_result in zip(weak.jobs, weak.results)
+    }
+    expected = int(strong.results[0].logical_value)
+    for key, value in weak_values.items():
+        if key not in {(0, 2), (0, 3), (0, 4)}:
+            expected ^= value
+    runtime = result["cluster"].window_manager
+    assert runtime.op_results[0] == expected
+    assert runtime.payloads_held == 0

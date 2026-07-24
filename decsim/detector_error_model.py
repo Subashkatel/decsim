@@ -236,10 +236,12 @@ def _belief_matching_fields(columns: list, rows: list, row_index: dict,
 
 
 def _fault_owned_by_window(fault_index: int, fault_rounds: list,
-                           committed_elsewhere: set, commit_lo: int,
+                           committed_elsewhere: set, unowned_faults: set,
+                           commit_lo: int,
                            commit_hi: int, *, is_last: bool) -> bool:
     """True when this window is responsible for committing the fault."""
-    if fault_index in committed_elsewhere:
+    if (fault_index in committed_elsewhere
+            or fault_index in unowned_faults):
         return False
     if is_last:
         return True
@@ -273,7 +275,8 @@ def _future_flips_after_commit(det_sets: list, round_of: dict,
 def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
                          det_sets: list, obs_sets: list, n_obs: int,
                          round_of: dict, fault_rounds: list,
-                         committed_elsewhere: set, commit_lo: int,
+                         committed_elsewhere: set, unowned_faults: set,
+                         commit_lo: int,
                          commit_hi: int, is_last: bool) -> tuple:
     """Build check, observable, ownership, and future-defect arrays."""
     import numpy as np
@@ -289,7 +292,7 @@ def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
             det_sets=det_sets, obs_sets=obs_sets, row_index=row_index)
 
         owns_fault = _fault_owned_by_window(
-            fault_index, fault_rounds, committed_elsewhere,
+            fault_index, fault_rounds, committed_elsewhere, unowned_faults,
             commit_lo, commit_hi, is_last=is_last)
         if not owns_fault:
             continue
@@ -337,6 +340,7 @@ def _build_one_window_model(*, det_sets: list, obs_sets: list, priors: list,
                             pos_of: dict, committed_elsewhere: set,
                             buffer_lo: int, commit_lo: int, commit_hi: int,
                             buffer_hi: int, is_last: bool,
+                            unowned_faults: Optional[set] = None,
                             belief_matching: bool = False,
                             h_det_sets: Optional[list] = None,
                             h_priors: Optional[list] = None,
@@ -352,6 +356,7 @@ def _build_one_window_model(*, det_sets: list, obs_sets: list, priors: list,
         det_sets=det_sets, obs_sets=obs_sets, n_obs=n_obs,
         round_of=round_of, fault_rounds=fault_rounds,
         committed_elsewhere=committed_elsewhere,
+        unowned_faults=unowned_faults or set(),
         commit_lo=commit_lo, commit_hi=commit_hi, is_last=is_last)
 
     hyperedge_fields: dict = {}
@@ -442,6 +447,51 @@ def build_window_error_models(circuit, plan: list, num_observables: Optional[int
         hyperedge_to_edge_map=hyperedge_to_edge_map)
 
 
+def _build_single_window_error_model(
+    circuit, window_entry: tuple, num_observables: Optional[int], *,
+    decompose_errors: bool, detector_rounds: Optional[dict],
+    belief_matching: bool, fault_exclusion_ranges: tuple,
+) -> WindowErrorModel:
+    """Build an independent model with explicit non-owned fault ranges."""
+    (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
+     h_det_sets, h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
+         circuit, num_observables, decompose_errors, detector_rounds, belief_matching)
+    buffer_lo, commit_lo, commit_hi, buffer_hi = _parse_window_entry(window_entry)
+    for exclusion in fault_exclusion_ranges:
+        try:
+            exclude_lo, exclude_hi = exclusion
+        except (TypeError, ValueError) as error:
+            raise TypeError(
+                "each fault-exclusion range must be an integer "
+                f"(lo, hi) pair, got {exclusion!r}") from error
+        if not all(isinstance(endpoint, int)
+                   for endpoint in (exclude_lo, exclude_hi)):
+            raise TypeError(
+                "each fault-exclusion range must be an integer "
+                f"(lo, hi) pair, got {exclusion!r}")
+        if exclude_lo > exclude_hi:
+            raise ValueError(
+                f"fault-exclusion range {exclude_lo}-{exclude_hi} "
+                f"is inverted")
+    unowned_faults = {
+        fault_index for fault_index, rounds in enumerate(fault_rounds)
+        if any(
+            exclude_lo <= round_index <= exclude_hi
+            for exclude_lo, exclude_hi in fault_exclusion_ranges
+            for round_index in rounds
+        )
+    }
+    return _build_one_window_model(
+        det_sets=det_sets, obs_sets=obs_sets, priors=priors,
+        n_obs=n_obs, round_of=round_of, fault_rounds=fault_rounds,
+        pos_of=pos_of, committed_elsewhere=set(),
+        unowned_faults=unowned_faults,
+        buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
+        buffer_hi=buffer_hi, is_last=False,
+        belief_matching=belief_matching, h_det_sets=h_det_sets,
+        h_priors=h_priors, hyperedge_to_edge_map=hyperedge_to_edge_map)
+
+
 def build_single_window_error_model(circuit, window_entry: tuple,
                                     num_observables: Optional[int] = None,
                                     *, decompose_errors: bool = True,
@@ -449,32 +499,38 @@ def build_single_window_error_model(circuit, window_entry: tuple,
                                     belief_matching: bool = False,
                                     exclude_faults_touching: Optional[tuple] = None
                                     ) -> WindowErrorModel:
-    """Build one independent window model without changing a stream ownership cursor.
+    """Build one independent window model.
 
-    exclude_faults_touching=(lo, hi) marks every fault with a detector in
-    rounds [lo, hi] as committed elsewhere: this window may still SEE such a
-    fault as a context column through its leading buffer, but never owns it.
-    Used to make a window the B-side of a seam whose other side (e.g. a
-    double-window strong slab) owns the crossing faults."""
-    (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
-     h_det_sets, h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
-         circuit, num_observables, decompose_errors, detector_rounds, belief_matching)
-    buffer_lo, commit_lo, commit_hi, buffer_hi = _parse_window_entry(window_entry)
-    committed_elsewhere: set = set()
-    if exclude_faults_touching is not None:
-        exclude_lo, exclude_hi = exclude_faults_touching
-        committed_elsewhere = {
-            fault_index for fault_index, rounds in enumerate(fault_rounds)
-            if any(exclude_lo <= round_index <= exclude_hi
-                   for round_index in rounds)}
-    return _build_one_window_model(
-        det_sets=det_sets, obs_sets=obs_sets, priors=priors,
-        n_obs=n_obs, round_of=round_of, fault_rounds=fault_rounds,
-        pos_of=pos_of, committed_elsewhere=committed_elsewhere,
-        buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
-        buffer_hi=buffer_hi, is_last=False,
-        belief_matching=belief_matching, h_det_sets=h_det_sets,
-        h_priors=h_priors, hyperedge_to_edge_map=hyperedge_to_edge_map)
+    ``exclude_faults_touching=(lo, hi)`` keeps faults touching that inclusive
+    range available to explain the syndrome but prevents this window from
+    committing them.
+    """
+    fault_exclusion_ranges = (
+        () if exclude_faults_touching is None
+        else (exclude_faults_touching,)
+    )
+    return _build_single_window_error_model(
+        circuit, window_entry, num_observables,
+        decompose_errors=decompose_errors,
+        detector_rounds=detector_rounds,
+        belief_matching=belief_matching,
+        fault_exclusion_ranges=fault_exclusion_ranges,
+    )
+
+
+def build_single_window_error_model_with_exclusions(
+    circuit, window_entry: tuple, num_observables: Optional[int] = None, *,
+    decompose_errors: bool = True, detector_rounds: Optional[dict] = None,
+    belief_matching: bool = False, fault_exclusion_ranges: tuple,
+) -> WindowErrorModel:
+    """Build one independent model with multiple non-owned inclusive ranges."""
+    return _build_single_window_error_model(
+        circuit, window_entry, num_observables,
+        decompose_errors=decompose_errors,
+        detector_rounds=detector_rounds,
+        belief_matching=belief_matching,
+        fault_exclusion_ranges=fault_exclusion_ranges,
+    )
 
 
 class WindowSlicer:

@@ -16,21 +16,25 @@ frozen timing goldens pin the engine.schedule call order inside every
 handler. Invariants to know before editing:
   - on_decode_done runs after the decode layer has set
     job.awaiting_strong_result, so the escalation check sees it.
-  - a strong (redo) result only revises the op's logical accumulator;
-    committed windows are never rolled back.
+  - a strong (redo) result revises the op's logical accumulator; under Eager,
+    a changed boundary also rolls back and replays its static dependent cone.
   - op delivery waits on the per-op pending-strong count and the stream
     seal; requires_strong_commit marks the op but never gates delivery.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace as dc_replace
+from copy import deepcopy
+from types import MappingProxyType
 from typing import Callable, Optional
 
-from .message import (DecodeJob, DecodeResult, Operation, SyndromePayload, Window,
-                    WindowPlan)
+from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecodeResult,
+                      Operation, SeamFaultOwner, StrongRegionPlan, Window,
+                      WindowInfo, WindowPlan)
 from .payload_store import PayloadStore
 from .dynamic_windows import DynamicWindows
+from .protocols import MultiFaultExclusionSyndromeDevice
+from .speculative_recovery import SpeculativeRecovery
 
 
 class WindowManager:
@@ -38,6 +42,7 @@ class WindowManager:
 
     def __init__(self, engine, *, scheme, layout, rounds_policy, code,
                  deadline_policy, links, orchestrator, boundary_policy,
+                 window_interaction,
                  syndrome_source=None, switching_active: bool = False,
                  store: Optional[PayloadStore] = None):
         self.engine = engine
@@ -49,6 +54,7 @@ class WindowManager:
         self.links = links
         self.orchestrator = orchestrator
         self.boundary_policy = boundary_policy
+        self.window_interaction = window_interaction
         self.syndrome_source = syndrome_source
         #: retains rounds for possible strong re-decodes (today: switching set).
         self.switching_active = switching_active
@@ -81,7 +87,10 @@ class WindowManager:
         self.blocking_ops: set[int] = set()
         self.op_results: dict[int, int] = {}
         self._window_logical_values: dict[tuple, int] = {}
-        self._committed_boundary_defects: dict[tuple, Optional[dict]] = {}
+        self._committed_boundaries: dict[tuple, object] = {}
+        self._boundary_versions: dict[tuple, int] = {}
+        self._boundary_delivery_versions: dict[tuple, int] = {}
+        self._released_boundary_dependencies: set[tuple] = set()
         self._held_boundary: dict[tuple, tuple] = {}      # Held policy deferrals
         self._pending_strong_windows: set[tuple] = set()
         self._pending_strong_per_op: dict[int, int] = {}
@@ -95,6 +104,7 @@ class WindowManager:
         self._finalize_gates: dict[int, Callable] = {}    # gate_finalize seam
         self._finished_ops: set[int] = set()
         self._workload_complete_sent = False
+        self.speculative_recovery = SpeculativeRecovery(self)
         self.window_models: dict = {}
         self.total_windows = 0
         self._windows_built = False
@@ -146,6 +156,10 @@ class WindowManager:
             return
         self._windows_built = True
         self.windows = plan.windows
+        for window in self.windows.values():
+            window.boundary_in = \
+                self.window_interaction.initial_boundary_state(
+                    WindowInfo.from_window(window))
         self.window_count = plan.window_count
         self.op_windows = plan.op_windows
         self.successors = plan.successors
@@ -223,6 +237,21 @@ class WindowManager:
         self.store.replace((key, "strong"), strong)
         self.store.release((key, "replace-guard"))
 
+    def _require_retained_payloads(
+        self, round_keys: list, purpose: str,
+    ) -> None:
+        """Reject a new consumer if any already-arrived input was released."""
+        missing = [
+            round_key for round_key in round_keys
+            if (not self.store.has_op(round_key[0])
+                or (round_key[1] <= self.rounds_arrived.get(round_key[0], 0)
+                    and self.store.fragments(*round_key) is None))
+        ]
+        if missing:
+            raise RuntimeError(
+                f"{purpose} requires retained payload rounds that are no "
+                f"longer available: {missing}")
+
     def refresh_unqueued_stream_windows(self, stream_id) -> None:
         """Refresh retained reads after a stream boundary closes future context."""
         for window_index in self.op_windows.get(stream_id, []):
@@ -253,14 +282,18 @@ class WindowManager:
         window = Window(op_id=stream_id, k=window_index, commit_lo=commit_lo,
                         commit_hi=commit_hi, buffer_hi=buffer_hi,
                         n_rounds=buffer_hi - buffer_lo + 1, buffer_lo=buffer_lo)
+        window.boundary_in = self.window_interaction.initial_boundary_state(
+            WindowInfo.from_window(window))
         if window_index > 0:
             previous_key = (stream_id, window_index - 1)
             if (previous_key in self.committed_windows
                     and previous_key not in self._held_boundary):
                 # boundary already shipped (a held one is NOT available yet)
-                self._store_boundary(
-                    window, stream_id,
-                    self._committed_boundary_defects.get(previous_key))
+                self._merge_available_boundary(
+                    previous_key,
+                    window,
+                    self._committed_boundaries.get(previous_key),
+                )
             else:
                 window.deps.append(previous_key)
                 window.deps_remaining = 1
@@ -452,38 +485,21 @@ class WindowManager:
 
     # ------------------------------------------------------- payload assembly
 
-    @staticmethod
-    def _xor_mask(previous_mask, incoming_mask) -> list:
-        previous_bits = [int(b) for b in previous_mask] \
-            if previous_mask is not None else []
-        incoming_bits = [int(b) for b in incoming_mask]
-        if len(previous_bits) < len(incoming_bits):
-            previous_bits += [0] * (len(incoming_bits) - len(previous_bits))
-        for i, bit in enumerate(incoming_bits):
-            previous_bits[i] ^= bit
-        return previous_bits
-
-    def _apply_boundary(self, w: Window, payload: SyndromePayload,
-                        round_key: Optional[int] = None) -> SyndromePayload:
-        """Return a payload copy with received artificial defects XORed in."""
-        r = payload.round_index if round_key is None else round_key
-        mask = w.boundary_in.get((r, payload.patch_id), w.boundary_in.get(r))
-        if mask is None:
-            return payload
-        bits = [int(m) for m in mask] if payload.bits is None \
-            else self._xor_mask(payload.bits, mask)
-        return dc_replace(payload, bits=bits)
-
     def _assemble_payloads(self, w: Window) -> list:
         """Collect this window's payloads, including successor overflow rounds."""
         operation_rounds = self._effective_round_count_for_window(w.op_id, w)
         end_round = min(w.buffer_hi, operation_rounds)
         payloads = []
+        window_info = WindowInfo.from_window(w)
         for round_index in range(w.start_round, end_round + 1):
             frags = self.store.fragments(w.op_id, round_index)
             if frags is not None:
-                payloads += [self._apply_boundary(w, frags[patch_id])
-                             for patch_id in sorted(frags)]
+                payloads += [
+                    self.window_interaction.apply_boundary(
+                        w.boundary_in, window_info, frags[patch_id],
+                        round_index)
+                    for patch_id in sorted(frags)
+                ]
         overflow = w.buffer_hi - operation_rounds
         if overflow > 0:
             for successor_id in self.successors.get(w.op_id, []):
@@ -491,9 +507,9 @@ class WindowManager:
                     frags = self.store.fragments(successor_id, round_index)
                     if frags is not None:
                         payloads += [
-                            self._apply_boundary(
-                                w, frags[patch_id],
-                                round_key=operation_rounds + round_index)
+                            self.window_interaction.apply_boundary(
+                                w.boundary_in, window_info, frags[patch_id],
+                                operation_rounds + round_index)
                             for patch_id in sorted(frags)]
         return payloads
 
@@ -527,7 +543,7 @@ class WindowManager:
             op_id=weak_window.op_id, k=weak_window.k, commit_lo=commit_lo,
             commit_hi=commit_hi, buffer_hi=buffer_hi, buffer_lo=buffer_lo,
             n_rounds=buffer_hi - buffer_lo + 1)
-        strong_window.boundary_in = dict(weak_window.boundary_in)
+        strong_window.boundary_in = weak_window.boundary_in
         return strong_window
 
     @staticmethod
@@ -557,78 +573,248 @@ class WindowManager:
         weak_window = self.windows[key]
         op_id, escalated_index = key
         round_count = self._round_count_for_window(op_id, weak_window)
-        slab_lo = weak_window.commit_lo
-        slab_hi = min(slab_lo + n_rounds - 1, round_count)
-        trailing_rounds = max(0, weak_window.buffer_hi - weak_window.commit_hi)
-        context_hi = min(slab_hi + trailing_rounds, round_count)
-
-        absorbed, restart_key = [], None
-        for window_index in self.op_windows[op_id]:
-            if window_index <= escalated_index:
-                continue
-            later = self.windows[(op_id, window_index)]
-            if later.commit_hi <= slab_hi:
-                absorbed.append((op_id, window_index))
-                continue
-            if later.commit_lo <= slab_hi:
-                raise RuntimeError(
-                    f"window ({op_id},{window_index}) commits "
-                    f"{later.commit_lo}-{later.commit_hi} across the slab "
-                    f"edge {slab_hi}; double_window needs commit regions "
-                    f"that tile the slab (commit == buffer layouts do)")
-            restart_key = (op_id, window_index)
-            break
-
-        context_lo = max(1, slab_lo - trailing_rounds)
-        self._deferred_strong[key] = {
-            "weak_job": weak_job, "label": label, "slab_lo": slab_lo,
-            "slab_hi": slab_hi, "context_lo": context_lo,
-            "context_hi": context_hi, "restart_key": restart_key,
-            "state": "waiting_far_boundary"}
-        # the deferred slab is assembled after later weak commits release
-        # their leases, so its lease must span every slab + context round
-        self.store.replace((key, "strong"),
-                           [(op_id, r) for r in range(context_lo, context_hi + 1)])
-        for absorbed_key in absorbed:
-            self._absorb_window(absorbed_key, restart_key)
-        self.engine.log("DecoderCluster",
-                        f"{label}: slab rounds {slab_lo}-{slab_hi} assigned; "
-                        f"weak chain skips {len(absorbed)} window(s); strong "
-                        f"start deferred until the far-side weak boundary")
-        if restart_key is None:
-            # terminal slab: clamped tail rounds may not be generated yet
-            if self.rounds_arrived[op_id] >= context_hi:
-                self._submit_deferred_strong(key)
+        later_windows = [
+            self.windows[(op_id, window_index)]
+            for window_index in self.op_windows[op_id]
+            if window_index > escalated_index
+        ]
+        plan = self.window_interaction.plan_strong_region(
+            WindowInfo.from_window(weak_window),
+            [WindowInfo.from_window(window) for window in later_windows],
+            n_rounds,
+            round_count,
+            self.buffer,
+        )
+        restart_reads, strong_exclusions, restart_exclusions = \
+            self._validate_strong_region_plan(
+                key, weak_window, later_windows, round_count, plan)
+        restart_key = plan.restart_window_key
+        restart_model = None
+        if restart_key is not None:
+            proposed_restart = deepcopy(self.windows[restart_key])
+            proposed_restart.buffer_lo = plan.restart_buffer_lo
+            restart_model = self._build_strong_window_model(
+                self.ops[op_id],
+                proposed_restart,
+                round_count,
+                restart_exclusions,
+            )
+        slab = Window(
+            op_id=key[0], k=key[1],
+            commit_lo=plan.commit_lo,
+            commit_hi=plan.commit_hi,
+            buffer_hi=plan.context_hi,
+            buffer_lo=plan.context_lo,
+            n_rounds=plan.context_hi - plan.context_lo + 1,
+        )
+        strong_model = self._build_strong_window_model(
+            self.ops[op_id], slab, round_count, strong_exclusions)
+        guard_lease = None
+        if restart_key is not None:
+            guard_lease = (key, "restart-plan-guard")
+            self.store.lease(guard_lease, restart_reads)
+        try:
+            self._deferred_strong[key] = {
+                "weak_job": weak_job, "label": label,
+                "slab_lo": plan.commit_lo, "slab_hi": plan.commit_hi,
+                "context_lo": plan.context_lo, "context_hi": plan.context_hi,
+                "strong_window": slab, "strong_model": strong_model,
+                "restart_key": restart_key,
+                "state": "waiting_far_boundary"}
+            # The deferred slab is assembled after later weak commits release
+            # their leases, so retain every context round until submission.
+            self.store.replace((key, "strong"),
+                               [(op_id, r) for r in
+                                range(plan.context_lo, plan.context_hi + 1)])
+            for absorbed_key in plan.absorbed_window_keys:
+                self._absorb_window(absorbed_key, restart_key)
+            self.engine.log("DecoderCluster",
+                            f"{label}: slab rounds {plan.commit_lo}-"
+                            f"{plan.commit_hi} assigned; weak chain skips "
+                            f"{len(plan.absorbed_window_keys)} window(s); strong "
+                            f"start deferred until the far-side weak boundary")
+            if restart_key is None:
+                # terminal slab: clamped tail rounds may not be generated yet
+                if self.rounds_arrived[op_id] >= plan.context_hi:
+                    self._submit_deferred_strong(key)
+                else:
+                    self._deferred_strong[key]["state"] = \
+                        "waiting_terminal_data"
+                    self._deferred_terminal[op_id] = key
             else:
-                self._deferred_strong[key]["state"] = "waiting_terminal_data"
-                self._deferred_terminal[op_id] = key
-        else:
-            self._deferred_by_far[restart_key] = key
-            self._reslice_restart_window(restart_key, slab_lo, slab_hi)
-            self.check_window(restart_key)      # its absorbed dep is gone
+                self._deferred_by_far[restart_key] = key
+                self._reslice_restart_window(
+                    restart_key,
+                    plan.restart_buffer_lo,
+                    restart_model,
+                    plan.commit_hi,
+                    plan.restart_seam_fault_owner,
+                )
+                self.check_window(restart_key)  # its absorbed dep is gone
+        finally:
+            if guard_lease is not None:
+                self.store.release(guard_lease)
 
-    def _reslice_restart_window(self, restart_key: tuple, slab_lo: int,
-                                slab_hi: int) -> None:
-        """Re-slice the restart window as the slab seam's B-side: its
-        plan-time model expected cancellation defects from a predecessor
-        that now never decodes, leaving seam faults orphaned. Give it a
-        leading buffer into the slab tail; seam faults become visible
-        context columns, owned by the slab."""
-        restart = self.windows[restart_key]
-        restart.buffer_lo = max(slab_lo, slab_hi - self.buffer + 1)
+    def _validate_strong_region_plan(
+        self, key: tuple, weak_window: Window, later_windows: list,
+        round_count: int, plan,
+    ) -> tuple[list, tuple, Optional[tuple]]:
+        if not isinstance(plan, StrongRegionPlan):
+            raise TypeError(
+                f"window interaction must return StrongRegionPlan for "
+                f"double-window escalation {key}, got "
+                f"{type(plan).__name__}")
+        if not (
+            1 <= plan.context_lo <= plan.commit_lo
+            <= weak_window.commit_lo
+            <= weak_window.commit_hi
+            <= plan.commit_hi <= plan.context_hi <= round_count
+        ):
+            raise RuntimeError(
+                f"invalid strong-region bounds for {key}: context "
+                f"{plan.context_lo}-{plan.context_hi}, commit "
+                f"{plan.commit_lo}-{plan.commit_hi}, operation 1-{round_count}")
+        if plan.commit_lo < weak_window.commit_lo:
+            raise RuntimeError(
+                f"strong-region commit for {key} cannot precede the "
+                f"escalated window's commit start {weak_window.commit_lo}")
+        if plan.commit_lo != weak_window.commit_lo:
+            raise RuntimeError(
+                f"strong-region commit for {key} must start at the "
+                f"escalated window's commit start {weak_window.commit_lo}")
+        absorbed = tuple(plan.absorbed_window_keys)
+        if len(set(absorbed)) != len(absorbed):
+            raise RuntimeError(
+                f"strong-region plan for {key} contains duplicate absorbed "
+                f"windows")
+        expected_absorbed = tuple(
+            window.key for window in later_windows
+            if window.commit_hi <= plan.commit_hi
+        )
+        crossing = [
+            window for window in later_windows
+            if window.commit_lo <= plan.commit_hi < window.commit_hi
+        ]
+        if crossing:
+            window = crossing[0]
+            raise RuntimeError(
+                f"window {window.key} commits {window.commit_lo}-"
+                f"{window.commit_hi} across the strong-region edge "
+                f"{plan.commit_hi}")
+        if absorbed != expected_absorbed:
+            raise RuntimeError(
+                f"strong-region plan for {key} must absorb "
+                f"{expected_absorbed}, got {absorbed}")
+        for absorbed_key in absorbed:
+            absorbed_window = self.windows[absorbed_key]
+            if absorbed_window.queued or absorbed_window.committed:
+                raise RuntimeError(
+                    f"cannot absorb window {absorbed_key}: already "
+                    f"{'queued' if absorbed_window.queued else 'committed'}")
+        expected_restart = next(
+            (window.key for window in later_windows
+             if window.commit_lo > plan.commit_hi),
+            None,
+        )
+        if plan.restart_window_key != expected_restart:
+            raise RuntimeError(
+                f"strong-region plan for {key} must restart at "
+                f"{expected_restart}, got {plan.restart_window_key}")
+        if expected_restart is None:
+            restart_reads = []
+            if (plan.restart_buffer_lo is not None
+                    or plan.restart_seam_fault_owner is not None):
+                raise RuntimeError(
+                    f"terminal strong-region plan for {key} cannot define "
+                    f"restart seam data")
+        else:
+            restart = self.windows[expected_restart]
+            if (plan.restart_buffer_lo is None
+                    or not 1 <= plan.restart_buffer_lo <= restart.commit_lo):
+                raise RuntimeError(
+                    f"strong-region restart {expected_restart} needs a "
+                    f"buffer start in 1-{restart.commit_lo}")
+            restart_reads = self._read_keys_for_bounds(
+                restart.op_id, plan.restart_buffer_lo, restart.buffer_hi,
+                restart)
+            if not isinstance(
+                    plan.restart_seam_fault_owner, SeamFaultOwner):
+                raise RuntimeError(
+                    f"strong-region plan for {key} must select a valid "
+                    f"restart seam fault owner")
+
+        left_exclusions = (
+            ((1, plan.commit_lo - 1),) if plan.commit_lo > 1 else ()
+        )
+        strong_exclusions = left_exclusions
+        restart_exclusions = None
+        if expected_restart is not None:
+            if (plan.restart_seam_fault_owner
+                    is SeamFaultOwner.STRONG_REGION):
+                restart_exclusions = ((1, plan.commit_hi),)
+            else:
+                strong_exclusions = left_exclusions + (
+                    (plan.commit_hi + 1, round_count),
+                )
+                restart_exclusions = left_exclusions
+
+        required_reads = [
+            (weak_window.op_id, round_index)
+            for round_index in range(plan.context_lo, plan.context_hi + 1)
+        ]
+        required_reads.extend(restart_reads)
+        self._require_retained_payloads(
+            required_reads, f"strong-region plan for {key}")
+        return restart_reads, strong_exclusions, restart_exclusions
+
+    def _build_strong_window_model(
+        self, operation: Operation, window: Window, round_count: int,
+        fault_exclusions: tuple,
+    ):
+        """Build through the historical or explicit multi-range device port."""
         if self.syndrome_source is None:
-            return
-        op = self.ops[restart_key[0]]
-        model = self.syndrome_source.strong_window_model_for_operation(
-            op, restart, self._round_count_for_window(op.id, restart),
+            return None
+        if len(fault_exclusions) <= 1:
+            exclusion = fault_exclusions[0] if fault_exclusions else None
+            return self.syndrome_source.strong_window_model_for_operation(
+                operation, window, round_count,
+                belief_matching=self.needs_hyperedges,
+                exclude_faults_touching=exclusion,
+            )
+        if not isinstance(
+            self.syndrome_source, MultiFaultExclusionSyndromeDevice,
+        ):
+            raise TypeError(
+                f"device {type(self.syndrome_source).__name__} cannot build "
+                "a strong window with multiple fault-exclusion ranges; "
+                "implement "
+                "strong_window_model_for_operation_with_exclusions"
+            )
+        builder = (
+            self.syndrome_source
+            .strong_window_model_for_operation_with_exclusions
+        )
+        return builder(
+            operation, window, round_count,
             belief_matching=self.needs_hyperedges,
-            exclude_faults_touching=(1, slab_hi))
+            fault_exclusion_ranges=fault_exclusions,
+        )
+
+    def _reslice_restart_window(
+        self, restart_key: tuple, buffer_lo: int, model,
+        slab_hi: int, seam_owner: SeamFaultOwner,
+    ) -> None:
+        """Install a restart model prepared before plan mutation."""
+        restart = self.windows[restart_key]
+        restart.buffer_lo = buffer_lo
+        self._replace_window_read_refs(restart_key, restart)
         if model is not None:
             self.window_models[restart_key] = model
         self.engine.log("DecoderCluster",
-                        f"restart window {restart_key} re-sliced as the slab "
-                        f"seam B-side (reads rounds {restart.buffer_lo}-"
-                        f"{restart.buffer_hi}, owns none before {slab_hi + 1})")
+                        f"restart window {restart_key} re-sliced across slab "
+                        f"edge {slab_hi} (reads rounds {restart.buffer_lo}-"
+                        f"{restart.buffer_hi}; crossing faults owned by "
+                        f"{seam_owner.name.lower()})")
 
     def _absorb_window(self, key: tuple, restart_key: Optional[tuple]) -> None:
         """A slab-covered window is never weak-decoded: count it committed
@@ -660,24 +846,10 @@ class WindowManager:
         job. The slab commits all r_strong rounds and reads one buffer of
         raw context per face, owning nothing that touches pre-slab rounds
         (see the seam formalism on Switching)."""
-        pending = self._deferred_strong.pop(key)
+        pending = self._deferred_strong[key]
         weak_job = pending["weak_job"]
-        weak_window = self.windows[key]
-        op = self.ops[key[0]]
-        slab = Window(op_id=key[0], k=key[1],
-                      commit_lo=pending["slab_lo"],
-                      commit_hi=pending["slab_hi"],
-                      buffer_hi=pending["context_hi"],
-                      buffer_lo=pending["context_lo"],
-                      n_rounds=pending["context_hi"] - pending["context_lo"] + 1)
-        dem = None
-        if self.syndrome_source is not None:
-            exclude = (1, pending["slab_lo"] - 1) \
-                if pending["slab_lo"] > 1 else None
-            dem = self.syndrome_source.strong_window_model_for_operation(
-                op, slab, self._round_count_for_window(op.id, weak_window),
-                belief_matching=self.needs_hyperedges,
-                exclude_faults_touching=exclude)
+        slab = pending["strong_window"]
+        dem = pending["strong_model"]
         payloads = self._assemble_payloads(slab)
         covered = {payload.round_index for payload in payloads}
         needed = set(range(pending["context_lo"], pending["context_hi"] + 1))
@@ -696,17 +868,19 @@ class WindowManager:
             dem=dem, payloads=payloads,
             attempt=1, window=slab, strong_decode_for=key)
         self.services.check_strong_route(weak_job, strong_job)
+        self.submit_fn(strong_job, self.services.ws_delay())
+        self._deferred_strong.pop(key)
         self.store.release((key, "strong"))   # slab captured into the job
         self.engine.log("DecoderCluster",
                         f"{pending['label']}: far-side weak boundary "
                         f"determined -> strong slab submitted")
-        self.submit_fn(strong_job, self.services.ws_delay())
 
     def _check_deferred_strong_after_commit(self, committed_key: tuple) -> None:
         """The restart window's weak commit is the far boundary of a slab."""
-        slab_key = self._deferred_by_far.pop(committed_key, None)
+        slab_key = self._deferred_by_far.get(committed_key)
         if slab_key is not None:
             self._submit_deferred_strong(slab_key)
+            self._deferred_by_far.pop(committed_key)
 
     def _check_deferred_strong_after_arrival(self, op_id) -> None:
         """A terminal slab waits for its clamped tail rounds to be stored."""
@@ -714,8 +888,8 @@ class WindowManager:
         if slab_key is None:
             return
         if self.rounds_arrived[op_id] >= self._deferred_strong[slab_key]["context_hi"]:
-            del self._deferred_terminal[op_id]
             self._submit_deferred_strong(slab_key)
+            del self._deferred_terminal[op_id]
 
     @property
     def pending_escalations(self) -> dict:
@@ -734,14 +908,17 @@ class WindowManager:
         op = self.ops[job.op_id]
         self._commit_window(job, res, key, window, op)
         self.lifecycle.update_committed_round_count(op.id)
-        defects = res.boundary_defects if res is not None else None
+        boundary = self.window_interaction.boundary_from_result(res, None)
+        if job.awaiting_strong_result:
+            self.speculative_recovery.begin(job, boundary)
         final = not job.awaiting_strong_result
         if self.boundary_policy.on_commit(window, final=final):
-            self._send_boundary_defects(window, op, defects)
+            self._send_boundary(window, op, boundary)
         else:
-            self._held_boundary[key] = (op.id, defects)      # Held: ship at final
+            self._held_boundary[key] = (op.id, boundary)    # Held: ship at final
         self.store.release(key)
         self._check_deferred_strong_after_commit(key)
+        self.speculative_recovery.after_commit()
         self._finish_operation_if_ready(op)
         self.finish_workload_if_ready()
 
@@ -778,22 +955,27 @@ class WindowManager:
             self._pending_strong_per_op.get(op_id, 0) + 1
 
     def on_strong_decode_done(self, key: tuple, result: DecodeResult) -> None:
-        """Finalize a weak-committed window with the strong logical result:
-        only the logical value is revised; dependents are never touched."""
+        """Finalize a weak-committed window with the strong result.
+
+        Held ships the strong boundary now. Eager delegates a boundary change
+        to SpeculativeRecovery, which replays the affected static descendants.
+        """
         window = self.windows[key]
         op = self.ops[window.op_id]
+        self.op_strong_commit_time[op.id] = max(
+            self.op_strong_commit_time.get(op.id, 0), self.engine.now)
+        if self.speculative_recovery.complete(key, result):
+            return
         if result is not None and result.logical_value is not None:
             self._replace_window_logical_value(key, op.id,
                                                int(result.logical_value))
-        self.op_strong_commit_time[op.id] = max(
-            self.op_strong_commit_time.get(op.id, 0), self.engine.now)
         self._resolve_strong_wait(key, op.id)
         if key in self._held_boundary:                        # Held: ship now
-            src_op_id, defects = self._held_boundary.pop(key)
-            strong_defects = result.boundary_defects if result is not None else None
-            self._send_boundary_defects(
+            src_op_id, boundary = self._held_boundary.pop(key)
+            self._send_boundary(
                 window, self.ops[src_op_id],
-                strong_defects if strong_defects is not None else defects)
+                self.window_interaction.boundary_from_result(result, boundary))
+        self.speculative_recovery.after_commit()
         self.release_stream_segments_at_commit(
             op.id, self.lifecycle.committed_round_counts.get(op.id, 0))
         self._finish_operation_if_ready(op)
@@ -809,43 +991,167 @@ class WindowManager:
         else:
             self._pending_strong_per_op.pop(op_id, None)
 
+    @property
+    def speculative_replays(self) -> int:
+        return self.speculative_recovery.replay_count
+
     # -------------------------------------------------------------- handoff
 
-    def _send_boundary_defects(self, window: Window, op: Operation,
-                               defects: Optional[dict]) -> None:
-        """Send this window's artificial defects to dependent windows (+t_dd)."""
-        self._committed_boundary_defects[(window.op_id, window.k)] = defects
-        for dep_key in window.dependents:
+    def _send_boundary(self, window: Window, op: Operation, boundary) -> None:
+        """Schedule policy-selected boundary deliveries over the dd link."""
+        source_key = (window.op_id, window.k)
+        selected_targets = tuple(self.window_interaction.boundary_targets(
+            WindowInfo.from_window(window), self._window_infos()))
+        if len(set(selected_targets)) != len(selected_targets):
+            raise RuntimeError(
+                f"window interaction selected duplicate boundary targets "
+                f"for source {source_key}: {selected_targets}")
+        targets = tuple(
+            key for key in selected_targets
+            if key not in self.absorbed_windows
+        )
+        for dep_key in targets:
+            if dep_key not in self.windows:
+                raise RuntimeError(
+                    f"window interaction selected unknown boundary target "
+                    f"{dep_key} for source {source_key}")
+            target = self.windows[dep_key]
+            if source_key not in target.deps:
+                raise RuntimeError(
+                    f"window interaction selected boundary target {dep_key} "
+                    f"for source {source_key}, but it is not a live "
+                    f"dependency declared by the window scheme")
+            if target.queued or target.committed:
+                raise RuntimeError(
+                    f"window interaction selected boundary target {dep_key} "
+                    f"for source {source_key} after its decode lifecycle "
+                    f"started")
+
+        version = self._boundary_versions.get(source_key, 0) + 1
+        deliveries = []
+        for dep_key in targets:
+            delivery_key = (source_key, dep_key)
+            delivery_version = \
+                self._boundary_delivery_versions.get(delivery_key, 0) + 1
+            deliveries.append((dep_key, delivery_key, delivery_version))
+
+        self._boundary_versions[source_key] = version
+        self._committed_boundaries[source_key] = boundary
+        for dep_key, delivery_key, delivery_version in deliveries:
+            self._boundary_delivery_versions[delivery_key] = delivery_version
             self.engine.schedule(
                 self.links.dd.cost(),
-                lambda dk=dep_key, so=op.id, bd=defects:
-                    self._receive_boundary(dk, so, bd),
-                label=f"defects {op.name}W{window.k}->W{dep_key}")
+                lambda dk=dep_key, so=op.id, bd=boundary,
+                       sk=source_key, v=version, dv=delivery_version:
+                    self._receive_boundary(dk, so, bd, sk, v, dv),
+                label=f"boundary {op.name}W{window.k}->W{dep_key}")
 
-    def _store_boundary(self, w: Window, src_op_id: int,
-                        defects: Optional[dict]) -> None:
-        """Fold artificial defects into a dependent window's round numbering:
-        rounds shift into the dependent's frame, and defects that land below
-        round 1 are dropped."""
-        if not defects:
-            return
-        shift = 0 if src_op_id == w.op_id \
-            else -self.rounds_for(self.ops[src_op_id])
-        for key, mask in defects.items():
-            r, patch = key if isinstance(key, tuple) else (key, None)
-            r += shift
-            if r < 1:
-                continue
-            dst_key = (r, patch) if patch is not None else r
-            w.boundary_in[dst_key] = self._xor_mask(w.boundary_in.get(dst_key),
-                                                    mask)
+    def _merge_available_boundary(
+        self, source_key: tuple, destination: Window, boundary,
+    ) -> None:
+        """Merge an already-delivered predecessor into a newly built window."""
+        delivery_key = (source_key, destination.key)
+        delivery = BoundaryDelivery(
+            source_key=source_key,
+            destination_key=destination.key,
+            source_revision=self._boundary_versions.get(source_key, 0),
+            delivery_revision=self._boundary_delivery_versions.get(
+                delivery_key, 0),
+            latest_source_revision=self._boundary_versions.get(source_key, 0),
+            latest_delivery_revision=self._boundary_delivery_versions.get(
+                delivery_key, 0),
+            source_operation_round_count=self.rounds_for(
+                self.ops[source_key[0]]),
+            dependency_released=True,
+            payload=boundary,
+        )
+        update = self._propose_boundary_update(delivery, destination)
+        if update.release_dependency:
+            raise RuntimeError(
+                f"window interaction released boundary dependency "
+                f"{delivery_key} more than once")
+        if update.accepted:
+            destination.boundary_in = update.state
 
     def _receive_boundary(self, key: tuple, src_op_id: int,
-                          defects: Optional[dict] = None) -> None:
+                          defects: Optional[dict] = None,
+                          source_key: Optional[tuple] = None,
+                          version: Optional[int] = None,
+                          delivery_version: Optional[int] = None) -> None:
+        if source_key is None or version is None or delivery_version is None:
+            raise RuntimeError("boundary delivery is missing source provenance")
+        delivery_key = (source_key, key)
         w = self.windows[key]
-        self._store_boundary(w, src_op_id, defects)
-        w.deps_remaining -= 1
+        dependency_released = \
+            delivery_key in self._released_boundary_dependencies
+        delivery = BoundaryDelivery(
+            source_key=source_key,
+            destination_key=key,
+            source_revision=version,
+            delivery_revision=delivery_version,
+            latest_source_revision=self._boundary_versions.get(source_key, 0),
+            latest_delivery_revision=self._boundary_delivery_versions.get(
+                delivery_key, 0),
+            source_operation_round_count=self.rounds_for(self.ops[src_op_id]),
+            dependency_released=dependency_released,
+            payload=defects,
+        )
+        update = self._propose_boundary_update(delivery, w)
+        if update.accepted and (w.queued or w.committed):
+            raise RuntimeError(
+                f"accepted boundary delivery {delivery_key} reached window "
+                f"{key} after its decode lifecycle started")
+        if update.release_dependency:
+            if dependency_released:
+                raise RuntimeError(
+                    f"window interaction released boundary dependency "
+                    f"{delivery_key} more than once")
+            if source_key not in w.deps or w.deps_remaining <= 0:
+                raise RuntimeError(
+                    f"window interaction released unresolved edge "
+                    f"{delivery_key}, but it is not a live dependency")
+        if update.accepted:
+            w.boundary_in = update.state
+            if update.release_dependency:
+                self._released_boundary_dependencies.add(delivery_key)
+                w.deps_remaining -= 1
         self.check_window(key)
+
+    def _propose_boundary_update(
+        self, delivery: BoundaryDelivery, destination: Window,
+    ) -> BoundaryUpdate:
+        """Let the interaction modify an isolated candidate boundary state."""
+        try:
+            candidate_state = deepcopy(destination.boundary_in)
+        except Exception as error:
+            raise TypeError(
+                f"boundary state for {delivery.destination_key} must support "
+                "deep copying before merge_boundary"
+            ) from error
+        update = self.window_interaction.merge_boundary(
+            delivery, WindowInfo.from_window(destination), candidate_state)
+        self._validate_boundary_update(delivery, update)
+        return update
+
+    @staticmethod
+    def _validate_boundary_update(
+        delivery: BoundaryDelivery, update,
+    ) -> None:
+        if not isinstance(update, BoundaryUpdate):
+            raise TypeError(
+                f"window interaction merge_boundary for "
+                f"{delivery.source_key}->{delivery.destination_key} must "
+                f"return BoundaryUpdate, got {type(update).__name__}")
+        if not update.accepted and update.release_dependency:
+            raise RuntimeError(
+                f"rejected boundary {delivery.source_key}->"
+                f"{delivery.destination_key} cannot release a dependency")
+
+    def _window_infos(self):
+        return MappingProxyType({
+            key: WindowInfo.from_window(window)
+            for key, window in self.windows.items()
+        })
 
     # --------------------------------------------------------------- finish
 
@@ -865,10 +1171,13 @@ class WindowManager:
 
     def _finish_operation_if_ready(self, op: Operation) -> None:
         """Deliver an op result once every window is committed, no strong
-        redo is pending, and the stream is sealed; delivery costs t_do."""
+        redo or speculative ancestor is pending, and the stream is sealed;
+        delivery costs t_do."""
         if op.id in self._finished_ops:
             return
         if self._pending_strong_per_op.get(op.id, 0) > 0:
+            return
+        if self.speculative_recovery.blocks_finality(op.id):
             return
         predicate = self._finalize_gates.get(op.id)
         if predicate is not None and not predicate(op):
@@ -886,6 +1195,7 @@ class WindowManager:
             return
         if (len(self.committed_windows) == self.total_windows
                 and not self._pending_strong_windows
+                and not self.speculative_recovery.has_finality_blockers
                 and not self.lifecycle.unsealed
                 and self.on_workload_complete is not None):
             self._workload_complete_sent = True
@@ -911,6 +1221,10 @@ class WindowManager:
                 continue
             segment_end = self._stream_segment_end(operation)
             if segment_end is None or segment_end > committed_round_count:
+                continue
+            if (self.speculative_recovery.blocks_finality(operation.id)
+                    or self.speculative_recovery.blocks_stream_segment(
+                        stream_id, segment_end)):
                 continue
             if self._segment_waits_for_strong(stream_id, segment_end):
                 continue

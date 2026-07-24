@@ -14,6 +14,7 @@ GateRounds + InfiniteFactory.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import inspect
 from typing import Any, Callable, Optional
 
 from .message import Operation
@@ -54,7 +55,8 @@ class RunSpec:
     planner: Optional[Any] = None
 
     # control loop
-    boundary_policy: Optional[Any] = None     # default Eager (faithful)
+    boundary_policy: Optional[Any] = None     # default Eager (speculative)
+    window_interaction: Optional[Any] = None  # default defect-mask interaction
     idle_policy: Optional[Any] = None         # default Ignore
     max_idle_rounds: Optional[int] = None
     gates_start_on_round_boundaries: bool = False
@@ -78,6 +80,7 @@ class RunSpec:
         """Cross-part validation before any build."""
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
+        self._validate_supplied_parts()
         auxiliary_ops = list(self.decode_ops or []) + list(self.dynamic_streams or [])
         if self.ops is not None:
             from .planner import _validate_operation_graph
@@ -121,6 +124,62 @@ class RunSpec:
             if part is not None and hasattr(part, "validate"):
                 part.validate(self)
 
+    def _validate_supplied_parts(self) -> None:
+        """Validate every externally supplied part against its public port."""
+        from . import protocols
+
+        parts = (
+            ("frontend", self.frontend, protocols.InputFrontend),
+            ("code", self.code, protocols.CodeModel),
+            ("layout", self.layout, protocols.LayoutModel),
+            ("decoder", self.decoder, protocols.Decoder),
+            ("router", self.router, protocols.DecoderRouter),
+            ("strategy", self.strategy, protocols.DecodingStrategy),
+            ("scheduler", self.scheduler, protocols.Scheduler),
+            ("deadline_policy", self.deadline_policy, protocols.DeadlinePolicy),
+            ("scheme", self.scheme, protocols.DecodingScheme),
+            ("rounds_policy", self.rounds_policy, protocols.RoundsPolicy),
+            ("planner", self.planner, protocols.ExecutionPlanner),
+            ("boundary_policy", self.boundary_policy,
+             protocols.BoundaryPolicy),
+            ("window_interaction", self.window_interaction,
+             protocols.WindowInteraction),
+            ("idle_policy", self.idle_policy, protocols.IdlePolicy),
+            ("orchestrator", self.orchestrator, protocols.Orchestrator),
+            ("memory_model", self.memory_model, protocols.MemoryModel),
+            ("factory", self.factory, protocols.MagicStateFactory),
+        )
+        for name, part, protocol in parts:
+            _validate_protocol_part(name, part, protocol)
+        self._validate_device_capabilities(protocols.SyndromeDevice)
+        for name, decoder in self.decoders.items():
+            _validate_protocol_part(
+                f"decoders[{name!r}]", decoder, protocols.Decoder)
+        _validate_callable_arity("make_controller", self.make_controller, 1)
+        _validate_callable_arity("make_factory", self.make_factory, 2)
+        _validate_callable_arity("make_metrics", self.make_metrics, 4)
+
+    def _validate_device_capabilities(self, device_protocol) -> None:
+        """Check only device methods reachable in this run configuration."""
+        methods = [
+            "begin_operation",
+            "round_payloads",
+            "window_models_for_operation",
+        ]
+        if self.dynamic_streams:
+            methods.extend([
+                "register_dynamic_stream",
+                "validate_stream_length",
+                "window_model_for_stream",
+            ])
+            if getattr(self.idle_policy, "mode", "ignore") == "extend_stream":
+                methods.append("idle_round_payloads")
+        if (self.strategy is not None
+                and hasattr(self.strategy, "keep_weak_result")):
+            methods.append("strong_window_model_for_operation")
+        _validate_protocol_methods(
+            "device", self.device, device_protocol, methods)
+
     def _resolve_code(self):
         if self.code is not None:
             return self.code
@@ -151,6 +210,7 @@ class RunSpec:
         from .switching import Baseline
         from .controllers import ModularController, LinkModel
         from .window_manager import WindowManager
+        from .window_interactions import DefaultWindowInteraction
 
         engine = Engine(verbose=verbose)
         ops = self.frontend.build() if self.frontend is not None else self.ops
@@ -177,6 +237,11 @@ class RunSpec:
             else EnqueueTimeDeadline()
         boundary_policy = self.boundary_policy if self.boundary_policy is not None \
             else Eager()
+        window_interaction = (
+            self.window_interaction
+            if self.window_interaction is not None
+            else DefaultWindowInteraction()
+        )
         idle_policy = self.idle_policy if self.idle_policy is not None else Ignore()
         device = self.device if self.device is not None else TimingOnlyDevice()
         decoder = self.decoder
@@ -192,6 +257,8 @@ class RunSpec:
             if self.make_controller is not None \
             else ModularController(engine, links=LinkModel.from_timing(self.timing),
                               t_pack=self.timing.ticks("t_pack"))
+        from .protocols import Controller, MagicStateFactory, Metric
+        _validate_protocol_part("controller", controller, Controller)
         # the whole fabric shares the controller's LinkModel: the window
         # manager's dd/do hops ride the same links a custom controller set
         links = getattr(controller, "links", None) or LinkModel.from_timing(self.timing)
@@ -202,6 +269,7 @@ class RunSpec:
             engine, scheme=scheme, layout=layout, rounds_policy=rounds_policy,
             code=code, deadline_policy=deadline_policy, links=links,
             orchestrator=orchestrator, boundary_policy=boundary_policy,
+            window_interaction=window_interaction,
             syndrome_source=device, store=store,
             switching_active=hasattr(strategy, "keep_weak_result"))
         pool = DecoderManager(
@@ -231,6 +299,7 @@ class RunSpec:
         if factory is None:
             factory = self.make_factory(engine, cluster) \
                 if self.make_factory is not None else _make_infinite(engine)
+        _validate_protocol_part("factory", factory, MagicStateFactory)
         source = ClockedDevice(engine, device, controller, window_manager,
                                window_manager.rounds_for)
         round_us = self.round_us if self.round_us is not None \
@@ -254,7 +323,10 @@ class RunSpec:
         for stream in (self.dynamic_streams or []):
             window_manager.register_dynamic_stream(stream, code)
         if self.make_metrics is not None:
-            for metric in self.make_metrics(engine, cluster, gate, factory):
+            metrics = self.make_metrics(engine, cluster, gate, factory)
+            for index, metric in enumerate(metrics):
+                _validate_protocol_part(
+                    f"make_metrics result {index}", metric, Metric)
                 engine.add_metric(metric)
 
         return World(engine=engine, ops=ops, window_manager=window_manager, pool=pool,
@@ -325,6 +397,81 @@ def _validate_program_order(ops, layout) -> None:
                         f"The operation list is missing program-order wiring "
                         f"(run it through _wire_circuit / a frontend)")
                 last_holder[key] = operation.id
+
+
+def _validate_protocol_part(name: str, part, protocol) -> None:
+    """Reject a malformed supplied part before an event can invoke it.
+
+    Runtime-checkable protocols verify that required attributes exist.
+    Binding a representative call to each declared method additionally catches
+    duck-typed methods whose signatures cannot accept the runtime contract.
+    """
+    if part is None:
+        return
+    if not isinstance(part, protocol):
+        raise TypeError(
+            f"{name} must implement {protocol.__name__}; required attributes "
+            f"are missing or not callable")
+    method_names = [
+        method_name
+        for method_name, required_method in protocol.__dict__.items()
+        if not method_name.startswith("_") and callable(required_method)
+    ]
+    _validate_method_signatures(name, part, protocol, method_names)
+
+
+def _validate_protocol_methods(
+    name: str, part, protocol, method_names: list[str],
+) -> None:
+    """Validate the subset of a protocol selected by configuration."""
+    if part is None:
+        return
+    for method_name in method_names:
+        method = getattr(part, method_name, None)
+        if not callable(method):
+            raise TypeError(
+                f"{name} must implement {protocol.__name__}; required method "
+                f"{method_name} is missing or not callable")
+    _validate_method_signatures(name, part, protocol, method_names)
+
+
+def _validate_method_signatures(
+    name: str, part, protocol, method_names: list[str],
+) -> None:
+    for method_name in method_names:
+        method = getattr(part, method_name)
+        required_method = getattr(protocol, method_name)
+        required = inspect.signature(required_method)
+        positional = []
+        keywords = {}
+        for parameter in list(required.parameters.values())[1:]:
+            if parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+                positional.append(object())
+            elif parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD:
+                positional.append(object())
+            elif parameter.kind is inspect.Parameter.KEYWORD_ONLY:
+                keywords[parameter.name] = object()
+        try:
+            inspect.signature(method).bind(*positional, **keywords)
+        except (TypeError, ValueError) as error:
+            raise TypeError(
+                f"{name} does not satisfy {protocol.__name__}: "
+                f"{method_name} has an incompatible signature ({error})"
+            ) from error
+
+
+def _validate_callable_arity(name: str, factory, arity: int) -> None:
+    if factory is None:
+        return
+    if not callable(factory):
+        raise TypeError(f"{name} must be callable")
+    try:
+        inspect.signature(factory).bind(*[object()] * arity)
+    except (TypeError, ValueError) as error:
+        raise TypeError(
+            f"{name} must accept {arity} positional argument"
+            f"{'s' if arity != 1 else ''} ({error})"
+        ) from error
 
 
 def _make_infinite(engine):

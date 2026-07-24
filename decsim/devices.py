@@ -57,6 +57,12 @@ class TimingOnlyDevice:
                                           exclude_faults_touching=None):
         return None
 
+    def strong_window_model_for_operation_with_exclusions(
+        self, op: Operation, window, round_count: int, *,
+        belief_matching: bool = False, fault_exclusion_ranges: tuple,
+    ):
+        return None
+
 
 class ClockedDevice:
     """Emit one syndrome round per round-tick per running operation."""
@@ -179,5 +185,12 @@ class SyndromeBitDevice:
     def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
                                           *, belief_matching: bool = False,
                                           exclude_faults_touching=None):
+        """Fake-bit strong re-decodes carry no detector error model."""
+        return None
+
+    def strong_window_model_for_operation_with_exclusions(
+        self, op: Operation, window, round_count: int, *,
+        belief_matching: bool = False, fault_exclusion_ranges: tuple,
+    ):
         """Fake-bit strong re-decodes carry no detector error model."""
         return None

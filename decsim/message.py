@@ -59,8 +59,8 @@ class Window:
     committed: bool = False           # result folded into the op's accumulator
     queued: bool = False              # job handed to the decoder cluster
     blocked_logged: bool = False      # log-once flag for the "blocked" trace line
-    boundary_in: dict = field(default_factory=dict)  # round or (round, patch) ->
-                                      # defect mask XORed into that round's bits
+    boundary_in: Any = field(default_factory=dict)  # state owned by the
+                                      # configured WindowInteraction
     t_first_round: Optional[int] = None    # tick the first round arrived
     t_data_complete: Optional[int] = None  # tick the last buffered round arrived
     t_queued: Optional[int] = None         # tick the job entered the decode queue
@@ -70,6 +70,43 @@ class Window:
     @property
     def start_round(self) -> int:
         """First round this window needs (leading buffer if present, else commit start)."""
+        return self.commit_lo if self.buffer_lo is None else self.buffer_lo
+
+    @property
+    def key(self) -> tuple:
+        return (self.op_id, self.k)
+
+
+@dataclass(frozen=True)
+class WindowInfo:
+    """Read-only geometry and topology exposed to interaction policies."""
+
+    op_id: int
+    k: int
+    commit_lo: int
+    commit_hi: int
+    buffer_hi: int
+    n_rounds: int
+    buffer_lo: Optional[int]
+    deps: tuple
+    dependents: tuple
+
+    @classmethod
+    def from_window(cls, window: Window) -> "WindowInfo":
+        return cls(
+            op_id=window.op_id,
+            k=window.k,
+            commit_lo=window.commit_lo,
+            commit_hi=window.commit_hi,
+            buffer_hi=window.buffer_hi,
+            n_rounds=window.n_rounds,
+            buffer_lo=window.buffer_lo,
+            deps=tuple(window.deps),
+            dependents=tuple(window.dependents),
+        )
+
+    @property
+    def start_round(self) -> int:
         return self.commit_lo if self.buffer_lo is None else self.buffer_lo
 
     @property
@@ -109,6 +146,61 @@ class WindowPlan:
     summary: dict = field(default_factory=dict)   # printable planning stats
 
 
+# ------------------------------------------------------ window interaction
+
+@dataclass(frozen=True)
+class BoundaryDelivery:
+    """One versioned boundary message offered to an interaction policy."""
+
+    source_key: tuple
+    destination_key: tuple
+    source_revision: int
+    delivery_revision: int
+    latest_source_revision: int
+    latest_delivery_revision: int
+    source_operation_round_count: int
+    dependency_released: bool
+    payload: Any
+
+    @property
+    def is_current(self) -> bool:
+        """Whether no newer source or edge-specific delivery supersedes this."""
+        return (
+            self.source_revision == self.latest_source_revision
+            and self.delivery_revision == self.latest_delivery_revision
+        )
+
+
+@dataclass(frozen=True)
+class BoundaryUpdate:
+    """A policy's decision for one boundary arrival."""
+
+    state: Any
+    accepted: bool
+    release_dependency: bool
+
+
+class SeamFaultOwner(Enum):
+    """Which side commits faults crossing a strong-region restart seam."""
+
+    STRONG_REGION = auto()
+    RESTART_WINDOW = auto()
+
+
+@dataclass(frozen=True)
+class StrongRegionPlan:
+    """Geometry and seam ownership for one deferred strong decode."""
+
+    commit_lo: int
+    commit_hi: int
+    context_lo: int
+    context_hi: int
+    absorbed_window_keys: tuple
+    restart_window_key: Optional[tuple]
+    restart_buffer_lo: Optional[int]
+    restart_seam_fault_owner: Optional[SeamFaultOwner]
+
+
 # ------------------------------------------------------------------- decode
 
 @dataclass
@@ -134,6 +226,7 @@ class DecodeJob:
     awaiting_strong_result: bool = False     # weak result held non-final until the strong sibling lands
     cancelled: bool = False                  # set when a speculative sibling is cancelled;
                                              # the completion callback then discards the result
+    completed: bool = False                  # guards against duplicate completion delivery
 
 
 @dataclass
@@ -147,6 +240,7 @@ class DecodeResult:
     logical_value: Optional[int] = None      # predicted logical observable bit
     soft_output: Optional[float] = None      # decoder confidence; below the Switching threshold escalates
     boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
+    boundary_data: Optional[Any] = None      # optional richer interaction payload
 
 
 @dataclass

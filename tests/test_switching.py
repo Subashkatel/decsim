@@ -24,12 +24,15 @@ from decsim.codes import SurfaceCodeModel
 from decsim.config import us
 from decsim.decoders import (PerRoundDecoder, SampledConfidenceDecoder, SwitchingDecoder,
                              SwitchingRouter, switch_probability_per_round)
-from decsim.message import DecodeJob, DecodeResult, Operation, Window
+from decsim.devices import TimingOnlyDevice
+from decsim.message import (DecodeJob, DecodeResult, Operation,
+                            SeamFaultOwner, StrongRegionPlan, Window)
 from decsim.metrics import DecodeBacklog, StrongDecoderBacklog
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
+from decsim.window_interactions import DefaultWindowInteraction
 
 TAU_GEN_US = 1.0          # syndrome round time
 D = 3
@@ -528,7 +531,10 @@ class _DispatchRecorder:
         return self.inner.decode(job)
 
 
-def _double_window_run(escalate_window, rounds=30, strong_tau=F_STRONG):
+def _double_window_run(
+    escalate_window, rounds=30, strong_tau=F_STRONG,
+    window_interaction=None, device=None,
+):
     """One memory op on sliding d/d windows; exactly the window with index
     escalate_window reports low confidence (deterministic, no sampling)."""
     env = {}
@@ -548,10 +554,317 @@ def _double_window_run(escalate_window, rounds=30, strong_tau=F_STRONG):
                                  double_window=True),
               decoder=weak,
               router=SwitchingRouter(weak, strong),
+              window_interaction=window_interaction,
+              device=device,
               unit_pools={"default": 1, "strong": 1},
               make_metrics=lambda e, c, ch, fa: env.update(engine=e) or [],
           ), verbose=False)
     return res, weak, strong
+
+
+def test_double_window_uses_the_interaction_region_plan():
+    class RecordingDevice(TimingOnlyDevice):
+        def __init__(self):
+            self.exclusions = []
+
+        def strong_window_model_for_operation(
+            self, op, window, round_count, *, belief_matching=False,
+            exclude_faults_touching=None,
+        ):
+            if exclude_faults_touching is not None:
+                exclude_lo, exclude_hi = exclude_faults_touching
+                assert isinstance(exclude_lo, int)
+                assert isinstance(exclude_hi, int)
+            self.exclusions.append(
+                (window.commit_lo, window.commit_hi, exclude_faults_touching))
+            return None
+
+    class ShorterRegion(DefaultWindowInteraction):
+        def __init__(self):
+            self.calls = []
+
+        def plan_strong_region(
+            self, weak_window, later_windows, strong_round_count,
+            operation_round_count, buffer_round_count,
+        ):
+            self.calls.append(weak_window.key)
+            return StrongRegionPlan(
+                commit_lo=7,
+                commit_hi=12,
+                context_lo=4,
+                context_hi=15,
+                absorbed_window_keys=((0, 3),),
+                restart_window_key=(0, 4),
+                restart_buffer_lo=10,
+                restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
+            )
+
+    interaction = ShorterRegion()
+    device = RecordingDevice()
+    result, weak, strong = _double_window_run(
+        escalate_window=2,
+        window_interaction=interaction,
+        device=device,
+    )
+
+    assert interaction.calls == [(0, 2)]
+    assert result["cluster"].window_manager.absorbed_windows == {(0, 3)}
+    assert [job.window_id for _, job in weak.starts] == [
+        0, 1, 2, 4, 5, 6, 7, 8, 9,
+    ]
+    (_, strong_job), = strong.starts
+    assert (
+        strong_job.window.commit_lo,
+        strong_job.window.commit_hi,
+        strong_job.n_rounds,
+    ) == (7, 12, 6)
+    assert device.exclusions == [
+        (13, 15, (1, 12)),
+        (7, 12, (1, 6)),
+    ]
+
+
+def test_restart_model_failure_leaves_strong_plan_state_unchanged():
+    class RestartModelFailure(RuntimeError):
+        pass
+
+    class FailingDevice(TimingOnlyDevice):
+        def strong_window_model_for_operation(
+            self, op, window, round_count, *, belief_matching=False,
+            exclude_faults_touching=None,
+        ):
+            raise RestartModelFailure("injected restart model failure")
+
+    weak = SampledConfidenceDecoder(
+        FixedLogicalDecoder(logical_value=0),
+        0.0,
+        probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0,
+    )
+    strong = FixedLogicalDecoder(logical_value=0)
+    world = RunSpec(
+        ops=[_memory_op()],
+        d=D,
+        rounds_policy=FixedRounds(21),
+        scheme=SlidingWindowScheme(),
+        strategy=Switching(confidence_threshold=0.5, double_window=True),
+        decoder=weak,
+        router=SwitchingRouter(weak, strong),
+        device=FailingDevice(),
+        unit_pools={"default": 1, "strong": 1},
+    ).build(verbose=False)
+    runtime = world.window_manager
+    restart = runtime.windows[(0, 5)]
+    before = {
+        "absorbed": set(runtime.absorbed_windows),
+        "deferred_strong": dict(runtime._deferred_strong),
+        "deferred_by_far": dict(runtime._deferred_by_far),
+        "restart_buffer_lo": restart.buffer_lo,
+        "restart_deps": list(restart.deps),
+        "restart_refs": list(runtime.store._leases[(restart.key)]),
+    }
+    world.gate.load(world.ops)
+
+    with pytest.raises(RestartModelFailure, match="restart model"):
+        world.engine.run()
+
+    assert {
+        "absorbed": runtime.absorbed_windows,
+        "deferred_strong": runtime._deferred_strong,
+        "deferred_by_far": runtime._deferred_by_far,
+        "restart_buffer_lo": restart.buffer_lo,
+        "restart_deps": restart.deps,
+        "restart_refs": runtime.store._leases[restart.key],
+    } == before
+
+
+def test_strong_decoder_result_identity_is_checked_before_finalization():
+    class WrongIdentityStrongDecoder(FixedLogicalDecoder):
+        def decode(self, job):
+            return DecodeResult(
+                job.op_id,
+                job.window_id + 1,
+                logical_value=self.logical_value,
+            )
+
+    weak = SampledConfidenceDecoder(
+        FixedLogicalDecoder(logical_value=0),
+        0.0,
+        probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0,
+    )
+    strong = WrongIdentityStrongDecoder(logical_value=1)
+
+    with pytest.raises(RuntimeError, match="result identity"):
+        simulate(RunSpec(
+            ops=[_memory_op()],
+            d=D,
+            rounds_policy=FixedRounds(21),
+            scheme=SlidingWindowScheme(),
+            strategy=Switching(confidence_threshold=0.5, double_window=True),
+            decoder=weak,
+            router=SwitchingRouter(weak, strong),
+            unit_pools={"default": 1, "strong": 1},
+        ), verbose=False)
+
+
+def test_restart_owned_seam_requires_multi_range_device_capability():
+    class SingleRangeOnlyDevice:
+        def __init__(self):
+            self._timing = TimingOnlyDevice()
+
+        def __getattr__(self, name):
+            if name == "strong_window_model_for_operation_with_exclusions":
+                raise AttributeError(name)
+            return getattr(self._timing, name)
+
+        def strong_window_model_for_operation(
+            self, op, window, round_count, *, belief_matching=False,
+            exclude_faults_touching=None,
+        ):
+            return None
+
+    class RestartOwned(DefaultWindowInteraction):
+        def plan_strong_region(self, *args, **kwargs):
+            plan = super().plan_strong_region(*args, **kwargs)
+            return StrongRegionPlan(
+                commit_lo=plan.commit_lo,
+                commit_hi=plan.commit_hi,
+                context_lo=plan.context_lo,
+                context_hi=plan.context_hi,
+                absorbed_window_keys=plan.absorbed_window_keys,
+                restart_window_key=plan.restart_window_key,
+                restart_buffer_lo=plan.restart_buffer_lo,
+                restart_seam_fault_owner=SeamFaultOwner.RESTART_WINDOW,
+            )
+
+    with pytest.raises(
+        TypeError,
+        match="multiple fault-exclusion ranges",
+    ):
+        _double_window_run(
+            escalate_window=2,
+            rounds=21,
+            window_interaction=RestartOwned(),
+            device=SingleRangeOnlyDevice(),
+        )
+
+
+def test_double_window_retains_every_round_added_to_the_restart_buffer():
+    class EarlierRetainedRestart(DefaultWindowInteraction):
+        def plan_strong_region(
+            self, weak_window, later_windows, strong_round_count,
+            operation_round_count, buffer_round_count,
+        ):
+            return StrongRegionPlan(
+                commit_lo=7,
+                commit_hi=12,
+                context_lo=7,
+                context_hi=15,
+                absorbed_window_keys=((0, 3),),
+                restart_window_key=(0, 4),
+                restart_buffer_lo=4,
+                restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
+            )
+
+    result, weak, _ = _double_window_run(
+        escalate_window=2,
+        window_interaction=EarlierRetainedRestart(),
+    )
+
+    restart = result["cluster"].windows[(0, 4)]
+    restart_job = next(
+        job for _, job in weak.starts if job.window_id == restart.k)
+    assert restart.start_round == 4
+    assert [payload.round_index for payload in restart_job.payloads] == \
+        list(range(restart.start_round, restart.buffer_hi + 1))
+
+
+def test_double_window_rejects_restart_reads_that_are_already_freed():
+    class FreedRestartHistory(DefaultWindowInteraction):
+        def plan_strong_region(
+            self, weak_window, later_windows, strong_round_count,
+            operation_round_count, buffer_round_count,
+        ):
+            return StrongRegionPlan(
+                commit_lo=7,
+                commit_hi=12,
+                context_lo=7,
+                context_hi=15,
+                absorbed_window_keys=((0, 3),),
+                restart_window_key=(0, 4),
+                restart_buffer_lo=1,
+                restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
+            )
+
+    with pytest.raises(RuntimeError, match="retained payload"):
+        _double_window_run(
+            escalate_window=2,
+            window_interaction=FreedRestartHistory(),
+        )
+
+
+def test_double_window_rejects_commit_ownership_before_the_escalated_window():
+    class BackwardCommitRegion(DefaultWindowInteraction):
+        def plan_strong_region(
+            self, weak_window, later_windows, strong_round_count,
+            operation_round_count, buffer_round_count,
+        ):
+            return StrongRegionPlan(
+                commit_lo=4,
+                commit_hi=12,
+                context_lo=4,
+                context_hi=15,
+                absorbed_window_keys=((0, 3),),
+                restart_window_key=(0, 4),
+                restart_buffer_lo=10,
+                restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
+            )
+
+    with pytest.raises(RuntimeError, match="cannot precede"):
+        _double_window_run(
+            escalate_window=2,
+            rounds=15,
+            window_interaction=BackwardCommitRegion(),
+        )
+
+
+@pytest.mark.parametrize("invalid_owner", [None, "strong", 17])
+def test_double_window_rejects_invalid_restart_seam_owner(invalid_owner):
+    class InvalidFaultOwnership(DefaultWindowInteraction):
+        def plan_strong_region(
+            self, weak_window, later_windows, strong_round_count,
+            operation_round_count, buffer_round_count,
+        ):
+            return StrongRegionPlan(
+                commit_lo=7,
+                commit_hi=12,
+                context_lo=4,
+                context_hi=15,
+                absorbed_window_keys=((0, 3),),
+                restart_window_key=(0, 4),
+                restart_buffer_lo=10,
+                restart_seam_fault_owner=invalid_owner,
+            )
+
+    with pytest.raises(RuntimeError, match="valid restart seam fault owner"):
+        _double_window_run(
+            escalate_window=2,
+            window_interaction=InvalidFaultOwnership(),
+        )
+
+
+def test_double_window_rejects_an_interaction_without_a_region_plan():
+    class NoRegion(DefaultWindowInteraction):
+        def plan_strong_region(
+            self, weak_window, later_windows, strong_round_count,
+            operation_round_count, buffer_round_count,
+        ):
+            return None
+
+    with pytest.raises(TypeError, match="must return StrongRegionPlan"):
+        _double_window_run(
+            escalate_window=2,
+            window_interaction=NoRegion(),
+        )
 
 
 def test_double_window_slab_extends_forward_and_absorbs_the_weak_chain():

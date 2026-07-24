@@ -24,7 +24,7 @@ from decsim.config import us
 from decsim.engine import Engine
 from decsim.decoders import CodeRouter, PerRoundDecoder
 from decsim.decoder_manager import DecoderManager
-from decsim.message import DecodeJob
+from decsim.message import DecodeJob, DecodeResult
 from decsim.schedulers import FifoScheduler
 
 
@@ -33,10 +33,12 @@ class _NullStrategy:
         return None
 
 
-def build(bulk_strong=True):
+def build(bulk_strong=True, decoder=None):
     eng = Engine(verbose=False)
+    if decoder is None:
+        decoder = PerRoundDecoder(tau_us=1.0)
     manager = DecoderManager(
-        eng, router=CodeRouter(default=PerRoundDecoder(tau_us=1.0)),
+        eng, router=CodeRouter(default=decoder),
         scheduler=FifoScheduler(),
         unit_pools={"default": 1, "strong": 1}, bulk_strong=bulk_strong)
     manager.strategy = _NullStrategy()
@@ -72,16 +74,91 @@ def test_bulk_merge_delivers_every_key_and_frees_units():
     assert not manager._windows_waiting_for_strong_result
 
 
+@pytest.mark.parametrize(
+    ("field_name", "field_value"),
+    [
+        ("correction", ("aggregate-correction",)),
+        ("logical_value", 1),
+        ("soft_output", 0.25),
+        ("boundary_defects", {6: [1]}),
+        ("boundary_data", {"confidence": "aggregate"}),
+    ],
+)
+def test_merged_result_rejects_accuracy_fields_before_lifecycle_mutation(
+    field_name, field_value,
+):
+    class AccuracyBearingBatchDecoder(PerRoundDecoder):
+        def decode(self, job):
+            fields = {}
+            if job.op_id == -1:
+                fields[field_name] = field_value
+            return DecodeResult(job.op_id, job.window_id, **fields)
+
+    class RecordingStrategy:
+        def __init__(self):
+            self.outcomes = []
+
+        def on_decode_outcome(self, outcome, services):
+            self.outcomes.append(outcome)
+
+    eng, manager, results = build(decoder=AccuracyBearingBatchDecoder())
+    strategy = RecordingStrategy()
+    manager.strategy = strategy
+    occupy_then_merge(eng, manager)
+
+    with pytest.raises(
+        RuntimeError,
+        match="merged strong decode.*accuracy-bearing",
+    ):
+        eng.run()
+
+    assert [key for _, key in results] == [(1, 0)]
+    assert [(outcome.job.op_id, outcome.job.window_id)
+            for outcome in strategy.outcomes] == [(1, 0)]
+    assert manager.pool_free == {"default": 1, "strong": 0}
+    assert manager.strong_running_rounds == 10
+    assert set(manager._running_strong_decodes) == {(2, 0), (3, 0)}
+    assert manager._windows_waiting_for_strong_result == {(2, 0), (3, 0)}
+    merged_job = manager._running_strong_decodes[(2, 0)]
+    assert not merged_job.completed
+
+
+def test_timing_only_merged_result_is_reidentified_for_each_window():
+    eng, manager, _ = build()
+    delivered = []
+    manager.on_strong_window_decoded = (
+        lambda key, result: delivered.append((key, result))
+    )
+    occupy_then_merge(eng, manager)
+
+    eng.run()
+
+    assert [(key, (result.op_id, result.window_id))
+            for key, result in delivered] == [
+                ((1, 0), (1, 0)),
+                ((2, 0), (2, 0)),
+                ((3, 0), (3, 0)),
+            ]
+    assert len({id(result) for _, result in delivered}) == len(delivered)
+
+
 def test_cancel_one_merged_key_keeps_sibling_result():
     """THE bug: before the fix, cancelling (2,0) killed the whole
     running batch and (3,0) hung forever with rounds leaked."""
-    eng, manager, results = build()
+    eng, manager, _ = build()
+    delivered = []
+    manager.on_strong_window_decoded = (
+        lambda key, result: delivered.append((eng.now, key, result))
+    )
     occupy_then_merge(eng, manager)
     eng.schedule(us(12), lambda: manager.cancel_strong((2, 0)))
     eng.run()
-    keys = [k for _, k in results]
+    keys = [key for _, key, _ in delivered]
     assert (3, 0) in keys, "sibling result lost on merged-key cancel"
     assert (2, 0) not in keys, "cancelled key must not deliver"
+    survivor_result = next(
+        result for _, key, result in delivered if key == (3, 0))
+    assert (survivor_result.op_id, survivor_result.window_id) == (3, 0)
     assert manager.strong_cancelled == 1
     assert manager.strong_running_rounds == 0, "rounds accounting leaked"
     assert manager.pool_free == {"default": 1, "strong": 1}

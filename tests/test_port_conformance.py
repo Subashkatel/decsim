@@ -32,6 +32,11 @@ from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
 from decsim.schemes import (NaiveOnlineScheme, ParallelWindowScheme,
                             SlidingWindowScheme)
 from decsim.switching import Baseline, Switching
+from decsim.window_interactions import DefaultWindowInteraction
+
+
+class AlternateWindowInteraction(DefaultWindowInteraction):
+    pass
 
 
 def _ops():
@@ -66,6 +71,8 @@ def test_wired_world_parts_satisfy_their_ports(world):
         (world.window_manager.rounds_policy, protocols.RoundsPolicy),   # port 5
         (world.window_manager.deadline_policy, protocols.DeadlinePolicy),  # port 13
         (world.window_manager.boundary_policy, protocols.BoundaryPolicy),  # port 16
+        (world.window_manager.window_interaction,
+         protocols.WindowInteraction),                         # port 21
         (world.cluster.planner, protocols.ExecutionPlanner),     # port 7
         (world.pool, protocols.ResourcePool),                    # port 12
         (world.pool.scheduler, protocols.Scheduler),             # port 11
@@ -104,6 +111,7 @@ def test_every_shipped_part_family_satisfies_its_port():
         protocols.DeadlinePolicy: [EnqueueTimeDeadline(),
                                ReactionPathDeadline(slack_ticks=100)],  # 13
         protocols.BoundaryPolicy: [Eager(), Held()],                     # port 16
+        protocols.WindowInteraction: [DefaultWindowInteraction()],        # port 21
         protocols.IdlePolicy: [Ignore(), ExtendStream(), SeparateDecodeJobs()],  # 17
         protocols.MagicStateFactory: [InfiniteFactory(engine)],                    # port 19
     }
@@ -174,6 +182,7 @@ def _resolved_types(world):
         "rounds": type(world.window_manager.rounds_policy),
         "deadline": type(world.window_manager.deadline_policy),
         "boundary": type(world.window_manager.boundary_policy),
+        "window_interaction": type(world.window_manager.window_interaction),
         "idle": type(world.gate.idle_policy),
         "scheduler": type(world.pool.scheduler),
         "strategy": type(world.cluster.strategy),
@@ -187,6 +196,8 @@ def _resolved_types(world):
 
 SWAPS = [
     ("boundary", dict(boundary_policy=Held())),
+    ("window_interaction",
+     dict(window_interaction=AlternateWindowInteraction())),
     ("rounds", dict(rounds_policy=GateRounds())),
     ("idle", dict(idle_policy=ExtendStream())),
     ("scheduler", dict(scheduler=EarliestDeadlineScheduler())),

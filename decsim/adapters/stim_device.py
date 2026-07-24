@@ -184,7 +184,7 @@ class StimDevice:
                                           *, belief_matching: bool = False,
                                           exclude_faults_touching=None):
         """Build an independent two-sided context model for a strong re-decode
-        (or, with exclude_faults_touching, the B-side of a slab seam)."""
+        with one optional inclusive range assigned to another seam side."""
         if op.circuit is None:
             return None
 
@@ -199,3 +199,25 @@ class StimDevice:
             detector_rounds=detector_rounds,
             belief_matching=belief_matching,
             exclude_faults_touching=exclude_faults_touching)
+
+    def strong_window_model_for_operation_with_exclusions(
+        self, op: Operation, window, round_count: int, *,
+        belief_matching: bool = False, fault_exclusion_ranges: tuple,
+    ):
+        """Build a strong model with multiple non-owned inclusive ranges."""
+        if op.circuit is None:
+            return None
+
+        from ..detector_error_model import (
+            build_single_window_error_model_with_exclusions,
+        )
+
+        detector_rounds = self._detector_rounds_for_key(
+            self._key(op), op.circuit, round_count)
+        return build_single_window_error_model_with_exclusions(
+            op.circuit,
+            (window.start_round, window.commit_lo,
+             window.commit_hi, min(window.buffer_hi, round_count)),
+            detector_rounds=detector_rounds,
+            belief_matching=belief_matching,
+            fault_exclusion_ranges=fault_exclusion_ranges)

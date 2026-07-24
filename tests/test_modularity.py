@@ -41,7 +41,8 @@ class MyDevice:
         return None
 
     def strong_window_model_for_operation(self, op, window, round_count,
-                                          *, belief_matching=False):
+                                          *, belief_matching=False,
+                                          exclude_faults_touching=None):
         return None
 
 class MyCode:
@@ -50,6 +51,7 @@ class MyCode:
     def rounds_per_logical_cycle(self): return 3
     def commit_rounds(self): return 3
     def buffer_rounds(self): return 3
+    def buffering_floor(self, scheme=None): return (3, 3)
     def spatial_nodes(self, n): return 9 * max(1, n)
     def syndrome_bits_per_round(self, n): return 8 * max(1, n)
 

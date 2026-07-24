@@ -6,10 +6,11 @@ what the core never sees: unit occupancy, per-pool queues, strong-job
 bookkeeping (hold-or-deliver, cancellation), external jobs, bulk batching.
 
 Parity anchors:
-  - completion order (Contract 2b): cancelled-return -> free unit -> strong
-    bookkeeping -> [strong path | external path] -> decode -> strategy
-    directive (sets awaiting BEFORE the commit callback) -> window_manager commit ->
-    apply held early strong same tick -> try_dispatch.
+  - completion order (Contract 2b): cancelled/duplicate guard -> decode and
+    validate identity -> free unit -> strong bookkeeping/strategy, or strategy
+    directive (sets awaiting BEFORE the commit callback) -> window_manager
+    commit -> apply held early strong same tick -> try_dispatch. External jobs
+    have no decoder result and free their unit before their callback.
   - only strong jobs re-stamp ready/deadline at enqueue (dm:139-140);
     weak jobs keep their DeadlinePolicy deadline.
   - cancel: queued -> remove silently (never dispatched); executing -> mark
@@ -259,18 +260,27 @@ class DecoderManager:
         """Contract 2b pipeline with the strategy seam in the switching slots."""
         if job.cancelled:
             return
-        self.pool_free[job.pool] += 1
-        self._finish_strong_bookkeeping(job)
+        if job.completed:
+            raise RuntimeError(
+                f"duplicate decoder completion for job "
+                f"({job.op_id}, {job.window_id})")
 
         if job.strong_decode_for is not None:
-            result = self.decoder_for(job).decode(job)
+            result = self._decode_and_validate_result(job)
+            strong_result_deliveries = self._prepare_strong_result_deliveries(
+                job, result)
+            job.completed = True
+            self.pool_free[job.pool] += 1
+            self._finish_strong_bookkeeping(job)
             self.strategy.on_decode_outcome(DecodeOutcome(job, result),
                                             self.services)   # FINALIZE_STRONG
-            self._handle_strong_decode_result(job, result)
+            self._handle_strong_decode_result(strong_result_deliveries)
             self.try_dispatch()
             return
 
         if job.on_done is not None:                            # external job
+            job.completed = True
+            self.pool_free[job.pool] += 1
             self.engine.log(self.log_name,
                             f"DECODE DONE {job.label} "
                             f"({self.pool_tag(job.pool)}units free now "
@@ -279,7 +289,9 @@ class DecoderManager:
             self.try_dispatch()
             return
 
-        result = self.decoder_for(job).decode(job)
+        result = self._decode_and_validate_result(job)
+        job.completed = True
+        self.pool_free[job.pool] += 1
         directive = self.strategy.on_decode_outcome(DecodeOutcome(job, result),
                                                     self.services)
         key = (job.op_id, job.window_id)
@@ -298,6 +310,21 @@ class DecoderManager:
             self._wait_for_strong_result(key)      # applies a held early strong
         self.try_dispatch()
 
+    def _decode_and_validate_result(self, job: DecodeJob) -> DecodeResult:
+        """Decode one job and reject output for any other operation or window."""
+        result = self.decoder_for(job).decode(job)
+        if not isinstance(result, DecodeResult):
+            raise TypeError(
+                f"decoder for job ({job.op_id}, {job.window_id}) must return "
+                f"DecodeResult, got {type(result).__name__}")
+        expected = (job.op_id, job.window_id)
+        actual = (result.op_id, result.window_id)
+        if actual != expected:
+            raise RuntimeError(
+                f"decoder result identity {actual} does not match job "
+                f"identity {expected}")
+        return result
+
     def _finish_strong_bookkeeping(self, job: DecodeJob) -> None:
         if job.strong_decode_for is not None:
             for key in getattr(job, "merged_keys", None) or [job.strong_decode_for]:
@@ -305,16 +332,48 @@ class DecoderManager:
             self.strong_running_rounds = max(
                 0, self.strong_running_rounds - job.n_rounds)
 
-    def _handle_strong_decode_result(self, job: DecodeJob,
-                                     result: DecodeResult) -> None:
-        keys = getattr(job, "merged_keys", None) or [job.strong_decode_for]
-        if len(keys) > 1 and (result.logical_value is not None
-                              or result.boundary_defects is not None):
+    def _prepare_strong_result_deliveries(
+        self, job: DecodeJob, result: DecodeResult,
+    ) -> tuple:
+        """Validate batch provenance and return per-window result deliveries."""
+        keys = tuple(
+            getattr(job, "merged_keys", None) or [job.strong_decode_for])
+        result_identity = (result.op_id, result.window_id)
+        is_merged_delivery = (
+            len(keys) > 1
+            or any(key != result_identity for key in keys)
+        )
+        if not is_merged_delivery:
+            return ((keys[0], result),)
+
+        accuracy_field_names = (
+            "correction",
+            "logical_value",
+            "soft_output",
+            "boundary_defects",
+            "boundary_data",
+        )
+        populated_field_names = [
+            field_name
+            for field_name in accuracy_field_names
+            if getattr(result, field_name) is not None
+        ]
+        if populated_field_names:
+            populated_fields = ", ".join(populated_field_names)
             raise RuntimeError(
-                "A merged strong decode cannot give one logical result for "
-                "several windows; disable bulk_strong for accuracy-coupled "
-                "switching.")
-        for key in keys:
+                "merged strong decode returned accuracy-bearing fields "
+                f"({populated_fields}); disable bulk_strong for accuracy-coupled "
+                "switching")
+
+        return tuple(
+            (key, DecodeResult(op_id=key[0], window_id=key[1]))
+            for key in keys
+        )
+
+    def _handle_strong_decode_result(
+        self, strong_result_deliveries: tuple,
+    ) -> None:
+        for key, result in strong_result_deliveries:
             self._complete_strong_result(key, result)
 
     def _complete_strong_result(self, key: tuple, result: DecodeResult) -> None:

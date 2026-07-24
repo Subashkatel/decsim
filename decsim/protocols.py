@@ -14,9 +14,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Callable, Optional, Protocol, runtime_checkable
+from typing import Any, Callable, Mapping, Optional, Protocol, runtime_checkable
 
-from .message import DecodeJob, DecodeOutcome, DecodeResult, Window
+from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
+                      DecodeOutcome, DecodeResult, StrongRegionPlan, Window,
+                      WindowInfo)
 
 
 # --------------------------------------------------------------- strategy seam
@@ -57,6 +59,14 @@ class StrategyServices(Protocol):
     def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
                         label: str) -> DecodeJob: ...
 
+    def defer_strong_escalation(
+        self, weak_job: DecodeJob, n_rounds: int, label: str,
+    ) -> None: ...
+
+    def check_strong_route(
+        self, weak_job: DecodeJob, strong_job: DecodeJob,
+    ) -> None: ...
+
     def cancel_strong(self, key: tuple) -> None: ...
 
     def ws_delay(self) -> int: ...
@@ -85,9 +95,66 @@ class DecodingStrategy(Protocol):
 class BoundaryPolicy(Protocol):
     """Port 16. Decides when a committed window may ship its boundary
     defects to dependent windows: True = ship now. Eager ships at every
-    weak commit (the default); Held ships only once the result is final."""
+    weak commit (the default); Held ships only once the result is final.
+    Implementations may set ``speculative = True`` to request recovery when
+    an eagerly sent boundary is later revised. The attribute is optional for
+    compatibility; absence means non-speculative delivery."""
 
-    def on_commit(self, window: Window, final: bool) -> bool: ...
+    def on_commit(self, window: Window, *, final: bool) -> bool: ...
+
+
+@runtime_checkable
+class WindowInteraction(Protocol):
+    """Port 21. Decisions relating adjacent or replaced windows.
+
+    Implementations return data and immutable decisions; the window manager
+    remains the sole owner of event ordering, lifecycle mutation, retention,
+    logical accounting, and finality.
+    """
+
+    def initial_boundary_state(self, window: WindowInfo) -> Any: ...
+
+    def boundary_from_result(
+        self, result: Optional[DecodeResult], fallback: Any,
+    ) -> Any: ...
+
+    def boundaries_equal(self, left: Any, right: Any) -> bool: ...
+
+    def boundary_targets(
+        self, source: WindowInfo, windows: Mapping[tuple, WindowInfo],
+    ) -> list:
+        """Select unstarted destinations from the source's declared edges."""
+        ...
+
+    def merge_boundary(
+        self,
+        delivery: BoundaryDelivery,
+        destination: WindowInfo,
+        current_state: Any,
+    ) -> BoundaryUpdate: ...
+
+    def apply_boundary(
+        self,
+        state: Any,
+        window: WindowInfo,
+        payload,
+        round_key: int,
+    ): ...
+
+    def invalidated_windows(
+        self, source_key: tuple, windows: Mapping[tuple, WindowInfo],
+    ) -> list:
+        """Select replay roots; the runtime adds their dependent closure."""
+        ...
+
+    def plan_strong_region(
+        self,
+        weak_window: WindowInfo,
+        later_windows: list[WindowInfo],
+        strong_round_count: int,
+        operation_round_count: int,
+        buffer_round_count: int,
+    ) -> Optional[StrongRegionPlan]: ...
 
 
 @runtime_checkable
@@ -106,7 +173,7 @@ class DeadlinePolicy(Protocol):
     """Port 13. Stamps DecodeJob.deadline when the job is built; the EDF
     scheduler dispatches by it."""
 
-    def deadline(self, op, window: Window, now: int,
+    def deadline(self, op, window: Window, now: int, *,
                  on_reaction_path: bool) -> int: ...
 
 
@@ -125,6 +192,13 @@ class Decoder(Protocol):
     def decode(self, job: DecodeJob) -> DecodeResult: ...
 
     def latency(self, job: DecodeJob) -> int: ...
+
+
+@runtime_checkable
+class DecoderRouter(Protocol):
+    """Port 9. Selects a decoder for each job."""
+
+    def route(self, job: DecodeJob) -> Decoder: ...
 
 
 @runtime_checkable
@@ -171,6 +245,51 @@ class SyndromeSource(Protocol):
 
 
 @runtime_checkable
+class SyndromeDevice(Protocol):
+    """The unclocked syndrome and error-model source supplied to RunSpec."""
+
+    def begin_operation(self, op) -> None: ...
+
+    def round_payloads(self, op, round_index: int) -> list: ...
+
+    def idle_round_payloads(
+        self, op, stream_id, global_round: int, patch,
+    ) -> list: ...
+
+    def register_dynamic_stream(
+        self, stream_op, round_count: int, *, belief_matching: bool = False,
+    ): ...
+
+    def validate_stream_length(
+        self, stream_op, stream_round_count: int,
+    ) -> None: ...
+
+    def window_models_for_operation(
+        self, op, windows: list, round_count: int, *,
+        belief_matching: bool = False,
+    ) -> list: ...
+
+    def window_model_for_stream(
+        self, stream_id, window, *, is_last: bool,
+    ): ...
+
+    def strong_window_model_for_operation(
+        self, op, window, round_count: int, *,
+        belief_matching: bool = False, exclude_faults_touching=None,
+    ): ...
+
+
+@runtime_checkable
+class MultiFaultExclusionSyndromeDevice(Protocol):
+    """Optional device capability for disjoint fault-exclusion ranges."""
+
+    def strong_window_model_for_operation_with_exclusions(
+        self, op, window, round_count: int, *,
+        belief_matching: bool = False, fault_exclusion_ranges: tuple,
+    ): ...
+
+
+@runtime_checkable
 class Controller(Protocol):
     """Port 14. Delivers messages across the classical network one named
     hop at a time (edges qc, cd, dd, do, oc, cq, ws — priced by
@@ -179,10 +298,6 @@ class Controller(Protocol):
     def relay_syndrome(self, payload, deliver: Callable) -> None: ...
 
     def relay_instruction(self, decision, deliver: Callable) -> None: ...
-
-    def send(self, edge: str, payload, deliver: Callable[[], None],
-             now: int) -> None: ...
-
 
 @runtime_checkable
 class Orchestrator(Protocol):
@@ -208,17 +323,20 @@ class InputFrontend(Protocol):
 
 @runtime_checkable
 class CodeModel(Protocol):
-    """Port 3. The QEC code's numbers: distance, rounds per logical cycle,
-    the buffering floor a scheme needs, and decoding-graph size per round."""
+    """Port 3. Window sizes, cycle length, graph size, and syndrome width."""
 
-    @property
-    def distance(self) -> int: ...
+    name: str
+    distance: int
 
     def rounds_per_logical_cycle(self) -> int: ...
 
-    def buffering_floor(self, scheme) -> tuple: ...
+    def commit_rounds(self) -> int: ...
+
+    def buffer_rounds(self) -> int: ...
 
     def spatial_nodes(self, num_patches: int) -> int: ...
+
+    def syndrome_bits_per_round(self, num_patches: int) -> int: ...
 
 
 @runtime_checkable

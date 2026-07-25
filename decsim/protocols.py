@@ -217,8 +217,13 @@ class ResourcePool(Protocol):
     """Port 12. The decode units and their ready queues (implemented by
     DecoderManager).
 
-    A DecodeJob is submitted once. enqueue raises on a job it has already
-    dispatched or cancelled, before touching any state.
+    A DecodeJob is submitted once. enqueue raises, before touching any state,
+    on a job it has already admitted, completed or cancelled; admitted spans
+    the whole time the job holds a queue slot or a unit, from the moment
+    enqueue accepts it through crossing the weak->strong link, queueing and
+    execution. A refused submission leaves the job and the pool untouched, so
+    a strong request refused as a duplicate may be built again and submitted
+    once the destination's result is consumed.
 
     A destination window owns at most one unconsumed strong result, either a
     live request or a completion held for a demand that has not registered
@@ -232,6 +237,15 @@ class ResourcePool(Protocol):
     destination registered a strong demand (AWAIT_STRONG); held if one of that
     destination's weak decodes is still outstanding and may raise one; and
     otherwise raises, because nothing would consume it.
+
+    That ownership is per destination window, not per decode attempt, and it
+    holds while at most one of a destination's weak decodes is in flight,
+    which is what the window manager submits: a window is queued once and
+    re-queued only after its decode has produced a directive. A caller that
+    puts two weak decodes for one destination in flight at once breaks it,
+    because either decode's directive then consumes whichever held result the
+    destination owns. Per-attempt ownership would need the attempt carried
+    through the request, the hold and the demand, which this port does not do.
 
     cancel_strong is atomic at the event-queue pop: a queued job, or one still
     crossing the weak->strong link, is removed outright and never dispatched;

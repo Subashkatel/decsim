@@ -218,6 +218,54 @@ def test_a_replayed_window_re_escalates_whichever_order_it_is_submitted_in(
     assert ordered["cluster"].pool._completed_strong_results == {}
 
 
+@pytest.mark.parametrize("run_both_at_once", [True, False])
+def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
+    """The precondition Port 12's strong-result ownership rests on.
+
+    The pool keys a destination's live strong request, its held completion and
+    its registered demand by (op_id, window_id) alone, so it can tell one
+    destination's decode attempts apart only while at most one of that
+    destination's weak decodes is in flight.  Eager replay is the mechanism
+    that decodes a window more than once, and it re-queues a window only after
+    its previous decode has produced its directive.  A change that lets two
+    attempts of one window overlap breaks the ownership rule, and this is
+    where it becomes visible.
+    """
+    weak = _WeakBoundaryDecoder((1, 2), ticks=1)
+    world = RunSpec(
+        ops=[Operation(0, "memory", (0,))],
+        d=3,
+        rounds_policy=FixedRounds(15),
+        scheme=SlidingWindowScheme(),
+        strategy=Switching(confidence_threshold=0.5,
+                           run_both_at_once=run_both_at_once),
+        boundary_policy=Eager(),
+        decoder=weak,
+        router=SwitchingRouter(weak, _CorrectingStrongDecoder()),
+        unit_pools={"default": 1, "strong": 1},
+    ).build(verbose=False)
+
+    pool = world.pool
+    submit = pool.enqueue
+    peak_in_flight = {}
+
+    def watch(job, delay_ticks=0):
+        # a weak submission enqueues on the spot, so the count it raises is
+        # readable here; only strong requests cross the weak->strong link
+        assert delay_ticks == 0 or job.strong_decode_for is not None
+        submit(job, delay_ticks)
+        for key, in_flight in pool._unresolved_weak_decodes.items():
+            peak_in_flight[key] = max(peak_in_flight.get(key, 0), in_flight)
+
+    world.window_manager.submit_fn = watch
+    world.gate.load(world.ops)
+    world.engine.run()
+
+    assert world.window_manager.speculative_replays > 0, \
+        "no window was decoded twice, so the precondition was never exercised"
+    assert peak_in_flight and max(peak_in_flight.values()) == 1
+
+
 def test_overlapping_escalations_discard_stale_descendant_strong_result():
     recovered, weak = _deterministic_run(Eager(), uncertain=(1, 2))
     held, _ = _deterministic_run(Held(), uncertain=(1, 2))

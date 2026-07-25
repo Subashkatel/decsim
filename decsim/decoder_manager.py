@@ -8,11 +8,13 @@ bookkeeping (hold-or-deliver, cancellation), external jobs, bulk batching.
 Parity anchors:
   - completion order (Contract 2b): cancelled/duplicate guard -> decode and
     validate identity -> free unit -> strong bookkeeping/strategy, or strategy
-    directive (registers the strong demand and sets awaiting BEFORE the commit
-    callback, so a replacement the same directive carries is admitted against
-    a destination already recorded as waiting) -> window_manager commit ->
-    apply held early strong same tick -> try_dispatch. External jobs have no
-    decoder result and free their unit before their callback.
+    directive (one transition: the demand is registered, the replacement the
+    directive carries is enqueued, and awaiting is set, all BEFORE the commit
+    callback, so no reader reached from that callback sees a destination that
+    asked for a strong result and is not yet recorded as waiting) ->
+    window_manager commit -> apply held early strong same tick -> try_dispatch.
+    External jobs have no decoder result and free their unit before their
+    callback.
   - only strong jobs re-stamp ready/deadline at enqueue (dm:139-140);
     weak jobs keep their DeadlinePolicy deadline.
   - cancel: queued -> remove silently (never dispatched); executing -> mark
@@ -121,6 +123,7 @@ class DecoderManager:
         self._reject_spent_job(job)
         if job.strong_decode_for is not None:
             self._admit_strong_request(job)
+        job.submitted = True
         if delay_ticks <= 0:
             self._enqueue_now(job)
             return
@@ -136,9 +139,14 @@ class DecoderManager:
     def _reject_spent_job(job: DecodeJob) -> None:
         """A DecodeJob is submitted once: it carries the unit it occupies and
         the cancellation handle its destination holds, so a second submission
-        of the same object hands out both twice."""
-        if job.cancelled or job.completed:
-            spent = "cancelled" if job.cancelled else "completed"
+        of the same object hands out both twice. Admitted covers the whole
+        span a queue slot or a unit is held, from the moment enqueue accepts
+        the job through crossing the weak->strong link, queueing and
+        execution; cancelled and completed name the two ways that span ends.
+        """
+        if job.cancelled or job.completed or job.submitted:
+            spent = ("cancelled" if job.cancelled else
+                     "completed" if job.completed else "admitted")
             raise RuntimeError(
                 f"decode job {job.label!r} for window "
                 f"({job.op_id}, {job.window_id}) has already been {spent}: a "
@@ -369,9 +377,9 @@ class DecoderManager:
             self.cancel_strong(key)                # no-op unless one is live/held
         if awaiting:
             self.strong_needed += 1
-            # the directive registers the demand, so a replacement the same
-            # directive carries is admitted against a destination that is
-            # already recorded as waiting
+            # applying the directive is one transition: the demand is
+            # registered, then the replacement the directive carries is
+            # enqueued, and no reader runs between the two
             self._windows_waiting_for_strong_result.add(key)
             if directive.extra is not None:        # serial redo, after ws
                 self.enqueue(directive.extra.job, directive.extra.delay_ticks)
@@ -493,10 +501,6 @@ class DecoderManager:
         if key in self._completed_strong_results:
             result = self._completed_strong_results.pop(key)
             self._complete_strong_result(key, result)
-
-    def _wait_for_strong_result(self, key: tuple) -> None:
-        self._windows_waiting_for_strong_result.add(key)
-        self._apply_held_strong_result(key)
 
 
 class StrategyServicesImpl:

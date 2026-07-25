@@ -1,23 +1,17 @@
-"""Gate-6 leftover: bulk_strong merge invariants (V9 caveat closure).
+"""bulk_strong merge invariants and the strong-demand contract they share.
 
-Covers the previously-uncovered bulk_strong paths of DecoderManager:
-merge-and-deliver, refusal of accuracy-coupled merges, running-rounds
-accounting, and the cancel-one-merged-key edge. The last one exposed
-TWO real bugs (2026-07-04, probe-verified before the fix): cancelling
-one key of a RUNNING merged batch cancelled the whole batch — the
-sibling keys' results were silently lost (their windows hung in
-_windows_waiting_for_strong_result forever) — and strong_running_rounds
-leaked (never decremented on a cancelled batch). Fixed in
-decoder_manager.cancel_strong: a running merged batch with live
-siblings survives the cancel (only the cancelled key is dropped from
-delivery); a batch with no survivors cancels AND settles the rounds
-accounting.
+The bulk_strong paths of DecoderManager: merge-and-deliver, refusal of
+accuracy-coupled merges, running-rounds accounting, and cancellation of one
+key of a running merged batch, which keeps the batch alive for its siblings
+and drops only the cancelled key from delivery.
 
-The same destination-keyed state carries the entitlement contract, which
-is exercised here at both bulk_strong settings: a destination window owns
-at most one unconsumed strong result, admission hands that entitlement out
-and refuses a request no destination would consume, and a completion is
-held only while its destination can still ask for one.
+The same destination-keyed state carries the strong-demand contract, which is
+exercised here at both bulk_strong settings. A destination window owns at most
+one unconsumed strong result, a live request or a held completion, and
+admission refuses a second. Whether a result will be consumed is decided when
+it completes, not when it is requested: it is delivered to a registered
+demand, held while one of the destination's weak decodes is still outstanding
+to raise one, and otherwise refused.
 """
 import sys
 import pathlib
@@ -43,6 +37,26 @@ class _NullStrategy:
         return None
 
 
+class _AdoptTheWeakResult:
+    """Every weak outcome is confident enough to keep, which halts the strong
+    computation (arXiv:2510.25222 Sec. III A Step 3)."""
+
+    def on_decode_outcome(self, outcome, services):
+        if outcome.job.strong_decode_for is not None:
+            return OutcomeDirective(Directive.FINALIZE_STRONG)
+        return OutcomeDirective(Directive.FINALIZE)
+
+
+class _EscalateThenAdopt:
+    """Every weak outcome asks for a strong result; every strong one is
+    adopted. The shape that makes an early strong completion holdable."""
+
+    def on_decode_outcome(self, outcome, services):
+        if outcome.job.strong_decode_for is not None:
+            return OutcomeDirective(Directive.FINALIZE_STRONG)
+        return OutcomeDirective(Directive.AWAIT_STRONG)
+
+
 def build(bulk_strong=True, decoder=None):
     eng = Engine(verbose=False)
     if decoder is None:
@@ -62,6 +76,46 @@ def strong_job(op, rounds, label=None):
     return DecodeJob(op_id=op, window_id=0, n_rounds=rounds,
                      strong_decode_for=(op, 0), hint="strong",
                      label=label or f"s{op}")
+
+
+def weak_job(op, rounds, label=None):
+    return DecodeJob(op_id=op, window_id=0, n_rounds=rounds,
+                     label=label or f"w{op}")
+
+
+class _RecordingDecoder(PerRoundDecoder):
+    """Names every job that actually reaches a decoder."""
+
+    def __init__(self, tau_us=1.0):
+        super().__init__(tau_us=tau_us)
+        self.decoded = []
+
+    def decode(self, job):
+        self.decoded.append(job.label)
+        return super().decode(job)
+
+
+def escalating_world(strategy, name="escalate-every-window"):
+    """A real RunSpec whose windows all escalate through the strategy seam."""
+    weak = PerRoundDecoder(tau_us=0.05)
+    strong = PerRoundDecoder(tau_us=2.0)
+    world = RunSpec(
+        ops=[Operation(88, name, (6,), clifford=True)],
+        d=3, rounds_policy=FixedRounds(30), round_us=1.0,
+        scheme=SlidingWindowScheme(), strategy=strategy,
+        decoder=weak, router=SwitchingRouter(weak, strong),
+        unit_pools={"default": 1, "strong": 1},
+    ).build(verbose=False)
+    world.gate.load(world.ops)
+    return world
+
+
+def escalating_attempt(eng, manager, op, weak_rounds):
+    """Start destination (op, 0)'s decode attempt with a weak decode slow
+    enough to still be outstanding when a strong result lands."""
+    manager.strategy = _EscalateThenAdopt()
+    manager.on_window_decoded = lambda job, result: None
+    manager.enqueue(weak_job(op, weak_rounds, f"w{op}-slow"))
 
 
 def occupy_then_merge(eng, manager):
@@ -153,8 +207,9 @@ def test_timing_only_merged_result_is_reidentified_for_each_window():
 
 
 def test_cancel_one_merged_key_keeps_sibling_result():
-    """THE bug: before the fix, cancelling (2,0) killed the whole
-    running batch and (3,0) hung forever with rounds leaked."""
+    """Cancelling one key of a running merged batch drops only that key from
+    delivery: the siblings still get their results and the rounds accounting
+    settles."""
     eng, manager, _ = build()
     delivered = []
     manager.on_strong_window_decoded = (
@@ -194,6 +249,8 @@ def test_bulk_strong_refuses_accuracy_coupled_merges():
     j2.dem = object()                       # accuracy-coupled marker
     manager.enqueue(j2)
     manager.enqueue(strong_job(3, 5))
+    for key in [(1, 0), (2, 0), (3, 0)]:
+        manager._windows_waiting_for_strong_result.add(key)
     with pytest.raises(RuntimeError, match="bulk_strong only merges"):
         eng.run()
 
@@ -272,16 +329,7 @@ def test_public_strategy_duplicate_strong_submission_is_rejected_end_to_end():
         def metrics(self):
             return {}
 
-    weak = PerRoundDecoder(tau_us=0.05)
-    strong = PerRoundDecoder(tau_us=2.0)
-    world = RunSpec(
-        ops=[Operation(88, "duplicate-request", (6,), clifford=True)],
-        d=3, rounds_policy=FixedRounds(30), round_us=1.0,
-        scheme=SlidingWindowScheme(), strategy=DuplicateStrongStrategy(),
-        decoder=weak, router=SwitchingRouter(weak, strong),
-        unit_pools={"default": 1, "strong": 1},
-    ).build(verbose=False)
-    world.gate.load(world.ops)
+    world = escalating_world(DuplicateStrongStrategy(), "duplicate-request")
 
     with pytest.raises(RuntimeError, match="duplicate strong decode"):
         world.engine.run()
@@ -292,45 +340,45 @@ def test_public_strategy_duplicate_strong_submission_is_rejected_end_to_end():
 
 @pytest.mark.parametrize("bulk_strong", [True, False])
 def test_early_strong_result_is_held_until_its_destination_asks(bulk_strong):
-    """The case the hold map exists for: the strong decode finishes before
-    the destination's weak commit registers the wait, and that wait is what
-    consumes it."""
+    """The case the hold map exists for: the strong decode finishes while the
+    destination's weak decode is still running, and the demand that weak
+    outcome raises is what consumes it."""
     eng, manager, results = build(bulk_strong=bulk_strong)
+    escalating_attempt(eng, manager, 2, weak_rounds=50)
     manager.enqueue(strong_job(2, 5, "s-early"))
+    while_the_weak_still_runs = []
+    eng.schedule(us(10), lambda: while_the_weak_still_runs.append(
+        (set(manager._completed_strong_results), list(results))))
+
     eng.run()
 
-    assert results == []
-    assert set(manager._completed_strong_results) == {(2, 0)}
-
-    manager._wait_for_strong_result((2, 0))
+    assert while_the_weak_still_runs == [({(2, 0)}, [])], \
+        "the early strong result was not held for the running weak attempt"
     assert [key for _, key in results] == [(2, 0)]
     assert manager._completed_strong_results == {}
+    assert manager._unresolved_weak_decodes == {}
 
 
 @pytest.mark.parametrize("bulk_strong", [True, False])
-def test_strong_request_for_a_destination_that_already_adopted_one_is_refused(
+def test_strong_result_for_a_destination_that_already_adopted_one_is_refused(
     bulk_strong,
 ):
-    """The duplicate separated in time: the first request has completed and
-    been adopted when the second is submitted, so the guard on live requests
-    never sees it and its result would be parked for nobody."""
+    """The duplicate separated in time. Admission cannot see it, because the
+    first request is gone by then, so the completion is where it is caught:
+    the destination adopted a result and has no weak decode outstanding to
+    ask for another, so nothing would consume this one."""
     eng, manager, results = build(bulk_strong=bulk_strong)
     manager._windows_waiting_for_strong_result.add((2, 0))
     manager.enqueue(strong_job(2, 5, "s-first"))
     eng.run()
     assert [key for _, key in results] == [(2, 0)]
 
-    with pytest.raises(RuntimeError, match="settled window"):
-        manager.enqueue(strong_job(2, 7, "s-late"))
+    manager.enqueue(strong_job(2, 7, "s-late"))    # the destination owns none
+    with pytest.raises(RuntimeError, match="no destination waiting"):
+        eng.run()
 
-    eng.run()
     assert [key for _, key in results] == [(2, 0)]
     assert manager._completed_strong_results == {}
-
-    manager._wait_for_strong_result((2, 0))      # a replay of the same key
-    assert manager._windows_waiting_for_strong_result == {(2, 0)}
-    assert [key for _, key in results] == [(2, 0)], \
-        "a wait was released by a decode that was never assigned to it"
 
 
 @pytest.mark.parametrize("bulk_strong", [True, False])
@@ -357,19 +405,24 @@ def test_time_separated_duplicate_is_refused_however_it_is_timed(bulk_strong):
 @pytest.mark.parametrize("bulk_strong", [True, False])
 def test_second_request_while_a_completion_is_held_is_refused(bulk_strong):
     """A held completion is unconsumed state: a second request would replace
-    it, and the destination's wait would then be released by a decode the
+    it, and the destination's demand would then be released by a decode the
     first request produced nothing for."""
     eng, manager, results = build(bulk_strong=bulk_strong)
-    first = strong_job(2, 5, "s-first")
-    manager.enqueue(first)
+    escalating_attempt(eng, manager, 2, weak_rounds=50)
+    manager.enqueue(strong_job(2, 5, "s-first"))
+    refused_against_the_held_result = []
+
+    def submit_a_second_request():
+        held = manager._completed_strong_results[(2, 0)]
+        with pytest.raises(RuntimeError, match="duplicate strong decode"):
+            manager.enqueue(strong_job(2, 7, "s-second"))
+        refused_against_the_held_result.append(
+            manager._completed_strong_results[(2, 0)] is held)
+
+    eng.schedule(us(10), submit_a_second_request)
     eng.run()
-    held = manager._completed_strong_results[(2, 0)]
 
-    with pytest.raises(RuntimeError, match="duplicate strong decode"):
-        manager.enqueue(strong_job(2, 7, "s-second"))
-
-    assert manager._completed_strong_results[(2, 0)] is held
-    manager._wait_for_strong_result((2, 0))
+    assert refused_against_the_held_result == [True]
     assert [key for _, key in results] == [(2, 0)]
     assert manager._completed_strong_results == {}
 
@@ -439,10 +492,11 @@ def test_strong_result_displaced_by_a_new_request_in_the_hook_is_refused(
             return OutcomeDirective(Directive.FINALIZE_STRONG)
 
     eng, manager, results = build(bulk_strong=bulk_strong)
+    escalating_attempt(eng, manager, 2, weak_rounds=50)
     manager.strategy = ResubmitInHookStrategy(manager)
     manager.enqueue(strong_job(2, 5, "s-first"))
 
-    with pytest.raises(RuntimeError, match="no destination waiting"):
+    with pytest.raises(RuntimeError, match="took the destination's next"):
         eng.run()
 
     assert results == []
@@ -450,19 +504,14 @@ def test_strong_result_displaced_by_a_new_request_in_the_hook_is_refused(
 
 
 @pytest.mark.parametrize("bulk_strong", [True, False])
-def test_a_new_weak_attempt_reopens_a_settled_destination(bulk_strong):
-    """A settled destination is settled for its attempt, not forever: a new
-    weak attempt for the window may escalate again, and its strong result may
-    again arrive before the new weak commit."""
-
-    class AwaitStrongStrategy:
-        def on_decode_outcome(self, outcome, services):
-            if outcome.job.strong_decode_for is not None:
-                return OutcomeDirective(Directive.FINALIZE_STRONG)
-            return OutcomeDirective(Directive.AWAIT_STRONG)
-
+def test_a_destination_that_adopted_a_result_escalates_again_on_its_next_attempt(
+    bulk_strong,
+):
+    """Adopting a strong result resolves one attempt, not the window: the next
+    attempt for the same destination may escalate again, and its strong result
+    may again arrive before that attempt's weak decode finishes."""
     eng, manager, results = build(bulk_strong=bulk_strong)
-    manager.strategy = AwaitStrongStrategy()
+    manager.strategy = _EscalateThenAdopt()
     manager.on_window_decoded = lambda job, result: None
     manager._windows_waiting_for_strong_result.add((2, 0))
     manager.enqueue(strong_job(2, 5, "s-first"))
@@ -503,16 +552,7 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
         def metrics(self):
             return {}
 
-    weak = PerRoundDecoder(tau_us=0.05)
-    strong = PerRoundDecoder(tau_us=2.0)
-    world = RunSpec(
-        ops=[Operation(88, "escalate-every-window", (6,), clifford=True)],
-        d=3, rounds_policy=FixedRounds(30), round_us=1.0,
-        scheme=SlidingWindowScheme(), strategy=EscalateEveryWindowStrategy(),
-        decoder=weak, router=SwitchingRouter(weak, strong),
-        unit_pools={"default": 1, "strong": 1},
-    ).build(verbose=False)
-    world.gate.load(world.ops)
+    world = escalating_world(EscalateEveryWindowStrategy())
     commit_strong_result = world.pool.on_strong_window_decoded
     delivered = []
 
@@ -559,20 +599,244 @@ def test_public_strategy_delayed_duplicate_submission_is_refused_end_to_end():
         def metrics(self):
             return {}
 
-    weak = PerRoundDecoder(tau_us=0.05)
-    strong = PerRoundDecoder(tau_us=2.0)
-    world = RunSpec(
-        ops=[Operation(88, "duplicate-request", (6,), clifford=True)],
-        d=3, rounds_policy=FixedRounds(30), round_us=1.0,
-        scheme=SlidingWindowScheme(),
-        strategy=DelayedDuplicateStrongStrategy(),
-        decoder=weak, router=SwitchingRouter(weak, strong),
-        unit_pools={"default": 1, "strong": 1},
-    ).build(verbose=False)
-    world.gate.load(world.ops)
+    world = escalating_world(DelayedDuplicateStrongStrategy(),
+                             "duplicate-request")
 
     with pytest.raises(RuntimeError, match="duplicate strong decode"):
         world.engine.run()
 
     assert world.window_manager._finished_ops == set()
     assert world.pool._completed_strong_results == {}
+
+
+@pytest.mark.parametrize("bulk_strong", [True, False])
+def test_a_request_cancelled_across_the_link_is_replaced_by_one_decode(
+    bulk_strong,
+):
+    """A cancel while the request is crossing the weak->strong link ends that
+    request alone. The replacement admitted before the cancelled job's handoff
+    lands owns the destination, and the cancelled job must not enqueue
+    alongside it: two live decodes for one destination is the defect this
+    contract exists to prevent."""
+    decoder = _RecordingDecoder()
+    eng, manager, results = build(bulk_strong=bulk_strong, decoder=decoder)
+    manager._windows_waiting_for_strong_result.add((2, 0))
+    manager.enqueue(strong_job(2, 5, "s-cancelled"), delay_ticks=us(20))
+
+    def cancel_then_replace():
+        manager.cancel_strong((2, 0))
+        manager.enqueue(strong_job(2, 7, "s-replacement"), delay_ticks=us(20))
+
+    eng.schedule(us(5), cancel_then_replace)
+    eng.run()
+
+    assert decoder.decoded == ["s-replacement"], \
+        "the cancelled request enqueued alongside its replacement"
+    assert [key for _, key in results] == [(2, 0)]
+    assert manager.strong_cancelled == 1
+    assert manager._running_strong_decodes == {}
+    assert manager._completed_strong_results == {}
+    assert manager.queued_total() == 0
+    assert manager.pool_free == {"default": 1, "strong": 1}
+
+
+@pytest.mark.parametrize("bulk_strong", [True, False])
+def test_a_destination_that_keeps_its_weak_result_discards_its_held_strong(
+    bulk_strong,
+):
+    """Sec. III A Step 3: a confident destination adopts the weak result and
+    halts the strong computation. A strong result that already landed is
+    discarded with the request rather than left for a later demand."""
+    eng, manager, results = build(bulk_strong=bulk_strong)
+    manager.strategy = _AdoptTheWeakResult()
+    manager.on_window_decoded = lambda job, result: None
+    manager.enqueue(weak_job(2, 50, "w2-slow"))
+    manager.enqueue(strong_job(2, 5, "s-early"))
+    while_the_weak_still_runs = []
+    eng.schedule(us(10), lambda: while_the_weak_still_runs.append(
+        set(manager._completed_strong_results)))
+
+    eng.run()
+
+    assert while_the_weak_still_runs == [{(2, 0)}], \
+        "the early strong result was never held, so the discard is untested"
+    assert results == []
+    assert manager._completed_strong_results == {}
+    assert manager._windows_waiting_for_strong_result == set()
+    assert manager._unresolved_weak_decodes == {}
+    assert manager.pool_free == {"default": 1, "strong": 1}
+
+
+@pytest.mark.parametrize("bulk_strong", [True, False])
+def test_strong_result_for_a_destination_that_committed_without_one_is_refused(
+    bulk_strong,
+):
+    """The other half of a resolved attempt. The weak decode ran and kept its
+    own result, so a strong request submitted afterwards has no consumer: its
+    result is refused rather than parked for a demand that will not come."""
+    eng, manager, results = build(bulk_strong=bulk_strong)
+    manager.strategy = _AdoptTheWeakResult()
+    manager.on_window_decoded = lambda job, result: None
+    manager.enqueue(weak_job(2, 5, "w2"))
+    eng.run()
+    assert manager._unresolved_weak_decodes == {}
+
+    manager.enqueue(strong_job(2, 5, "s-after-the-weak-committed"))
+    with pytest.raises(RuntimeError, match="no destination waiting"):
+        eng.run()
+
+    assert results == []
+    assert manager._completed_strong_results == {}
+
+
+@pytest.mark.parametrize("bulk_strong", [True, False])
+def test_a_later_attempt_cannot_consume_an_earlier_requests_result(bulk_strong):
+    """A completion outlives nothing. An earlier request whose destination has
+    no weak decode outstanding to ask for it is refused when it completes, so
+    a later attempt's demand has nothing stale to be released by."""
+    eng, manager, results = build(bulk_strong=bulk_strong)
+    manager.strategy = _EscalateThenAdopt()
+    manager.on_window_decoded = lambda job, result: None
+    manager.enqueue(strong_job(2, 5, "earlier-request"))
+
+    with pytest.raises(RuntimeError, match="no destination waiting"):
+        eng.run()
+    assert manager._completed_strong_results == {}
+
+    manager.enqueue(weak_job(2, 5, "later-attempt"))
+    eng.run()
+
+    assert results == [], \
+        "a later attempt was released by an earlier request's result"
+    assert manager._windows_waiting_for_strong_result == {(2, 0)}
+
+
+def test_result_for_a_destination_with_no_decode_attempt_is_refused():
+    """Nothing is decoding for this destination and nothing ever asked, so its
+    result is refused when it completes rather than retained for a consumer
+    that never arrives."""
+    eng, manager, results = build()
+    manager.enqueue(strong_job(999, 5, "orphan"))
+
+    with pytest.raises(RuntimeError, match="no destination waiting"):
+        eng.run()
+
+    assert results == []
+    assert manager._completed_strong_results == {}
+
+
+@pytest.mark.parametrize("bulk_strong", [True, False])
+def test_a_cancelled_job_cannot_be_submitted_again(bulk_strong):
+    """A DecodeJob carries the unit it occupies and the cancellation handle
+    its destination holds, so a second submission would hand out both twice
+    and its completion callback would return without releasing the unit."""
+    eng, manager, results = build(bulk_strong=bulk_strong)
+    manager._windows_waiting_for_strong_result.add((2, 0))
+    job = strong_job(2, 5, "reused")
+    manager.enqueue(job)
+    manager.cancel_strong((2, 0))
+    before = (dict(manager.pool_free), set(manager._running_strong_decodes),
+              manager.queued_total(), len(manager.queue_log))
+
+    with pytest.raises(RuntimeError, match="has already been cancelled"):
+        manager.enqueue(job)
+
+    assert (dict(manager.pool_free), set(manager._running_strong_decodes),
+            manager.queued_total(), len(manager.queue_log)) == before
+    eng.run()
+    assert results == []
+    assert manager.pool_free == {"default": 1, "strong": 1}
+
+
+def test_a_completed_job_cannot_be_submitted_again():
+    """The same rule from the other end of the lifecycle: a job that already
+    produced its result would be decoded and delivered twice."""
+    eng, manager, results = build()
+    manager._windows_waiting_for_strong_result.add((2, 0))
+    job = strong_job(2, 5, "already-run")
+    manager.enqueue(job)
+    eng.run()
+    assert [key for _, key in results] == [(2, 0)]
+
+    with pytest.raises(RuntimeError, match="has already been completed"):
+        manager.enqueue(job)
+
+    eng.run()
+    assert [key for _, key in results] == [(2, 0)]
+    assert manager.pool_free == {"default": 1, "strong": 1}
+
+
+@pytest.mark.parametrize("strong_first", [True, False])
+def test_public_strategy_may_list_its_submissions_in_either_order(strong_first):
+    """arXiv:2510.25222 Sec. III A Step 1 feeds the weak and strong decoders
+    simultaneously, so a Submission list carries no order: the pool admits the
+    pair either way, to the same run."""
+
+    class OrderedEscalationStrategy:
+        def on_window_ready(self, window, weak_job, services):
+            strong = services.make_strong_job(
+                weak_job, weak_job.n_rounds, f"strong-{weak_job.label}")
+            return ([Submission(strong), Submission(weak_job)] if strong_first
+                    else [Submission(weak_job), Submission(strong)])
+
+        def on_decode_outcome(self, outcome, services):
+            if outcome.job.strong_decode_for is not None:
+                return OutcomeDirective(Directive.FINALIZE_STRONG)
+            return OutcomeDirective(Directive.AWAIT_STRONG)
+
+        def metrics(self):
+            return {}
+
+    world = escalating_world(OrderedEscalationStrategy())
+    world.engine.run()
+
+    assert world.window_manager._finished_ops == {88}
+    assert world.pool.strong_needed == world.window_manager.window_count[88]
+    assert world.pool._completed_strong_results == {}
+    assert world.pool._windows_waiting_for_strong_result == set()
+
+
+def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
+    """Sec. III A Step 3 halts the speculative strong computation. A policy
+    that then asks for a different strong decode instead of keeping the weak
+    result is a legitimate variation: the cancel ends one request, and the
+    replacement the same directive carries is admitted against a destination
+    that directive has already recorded as waiting."""
+
+    class CancelAndReplaceStrategy:
+        def on_window_ready(self, window, weak_job, services):
+            speculative = services.make_strong_job(
+                weak_job, weak_job.n_rounds, f"speculative-{weak_job.label}")
+            return [Submission(weak_job), Submission(speculative)]
+
+        def on_decode_outcome(self, outcome, services):
+            if outcome.job.strong_decode_for is not None:
+                return OutcomeDirective(Directive.FINALIZE_STRONG)
+            services.cancel_strong((outcome.job.op_id, outcome.job.window_id))
+            replacement = services.make_strong_job(
+                outcome.job, outcome.job.n_rounds,
+                f"replacement-{outcome.job.label}")
+            return OutcomeDirective(Directive.AWAIT_STRONG,
+                                    extra=Submission(replacement))
+
+        def metrics(self):
+            return {}
+
+    world = escalating_world(CancelAndReplaceStrategy())
+    delivered = []
+    commit_strong_result = world.pool.on_strong_window_decoded
+
+    def record(key, result):
+        delivered.append(key)
+        commit_strong_result(key, result)
+
+    world.pool.on_strong_window_decoded = record
+    world.engine.run()
+
+    window_count = world.window_manager.window_count[88]
+    assert world.window_manager._finished_ops == {88}
+    assert sorted(delivered) == sorted(set(delivered))
+    assert len(delivered) == window_count
+    assert world.pool.strong_cancelled == window_count
+    assert world.pool._completed_strong_results == {}
+    assert world.pool._windows_waiting_for_strong_result == set()

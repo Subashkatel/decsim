@@ -693,6 +693,7 @@ def simulate(run: RunSpec, verbose: bool = False) -> dict:
     world = run.build(verbose=verbose)
     world.gate.load(world.ops)
     world.engine.run()
+    world.pool.check_decode_work_settled()
     return {
         "engine": world.engine,
         "cluster": world.cluster,

@@ -234,18 +234,30 @@ class ResourcePool(Protocol):
     from any hook position.
 
     A completing strong result is delivered to its destination if the
-    destination registered a strong demand (AWAIT_STRONG); held if one of that
-    destination's weak decodes is still outstanding and may raise one; and
-    otherwise raises, because nothing would consume it.
+    destination registered a strong demand (AWAIT_STRONG); held if that
+    destination's weak decode is still open and may raise one; and otherwise
+    raises, because nothing would consume it.
 
-    That ownership is per destination window, not per decode attempt, and it
-    holds while at most one of a destination's weak decodes is in flight,
-    which is what the window manager submits: a window is queued once and
-    re-queued only after its decode has produced a directive. A caller that
-    puts two weak decodes for one destination in flight at once breaks it,
-    because either decode's directive then consumes whichever held result the
-    destination owns. Per-attempt ownership would need the attempt carried
-    through the request, the hold and the demand, which this port does not do.
+    That ownership is per destination window, not per decode attempt, so it
+    needs at most one of a destination's weak decodes open at a time: with two,
+    either decode's directive consumes whichever result the destination owns
+    and the other attempt is left waiting for one that never comes. enqueue
+    therefore refuses a second weak decode for a destination whose first has
+    not yet produced a directive. Per-attempt ownership, which would let a
+    destination decode twice at once, needs the attempt carried through the
+    request, the hold and the demand, and this port does not carry it.
+
+    Two shipped components keep clear of that refusal, and both are
+    load-bearing: the window manager queues a window once and re-queues it only
+    after its decode has produced a directive, and the Switching strategy lists
+    one weak Submission per window. A new strategy is as able to break the rule
+    as a change to the window manager.
+
+    check_decode_work_settled raises when the run has gone quiescent with any
+    destination still recorded as decoding, waiting for a strong result,
+    holding an unclaimed one, or holding a strong request. Each of those is a
+    window that never became final, which no metric or view would otherwise
+    report.
 
     cancel_strong is atomic at the event-queue pop: a queued job, or one still
     crossing the weak->strong link, is removed outright and never dispatched;
@@ -264,6 +276,8 @@ class ResourcePool(Protocol):
     def cancel_strong(self, key: tuple) -> None: ...
 
     def try_dispatch(self) -> None: ...
+
+    def check_decode_work_settled(self) -> None: ...
 
 
 # ------------------------------------------------------------------ dataflow

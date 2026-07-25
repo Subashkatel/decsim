@@ -72,7 +72,7 @@ class _CorrectingStrongDecoder:
 def _deterministic_run(boundary_policy, *, uncertain=(1,), strong=None,
                        run_both_at_once=False, weak_ticks=1, operation=None,
                        propagate=False, rounds=15, timing=None,
-                       window_interaction=None):
+                       window_interaction=None, strategy=None):
     weak = _WeakBoundaryDecoder(
         uncertain, ticks=weak_ticks, propagate=propagate)
     strong = strong if strong is not None else _CorrectingStrongDecoder()
@@ -82,8 +82,9 @@ def _deterministic_run(boundary_policy, *, uncertain=(1,), strong=None,
         d=3,
         rounds_policy=FixedRounds(rounds),
         scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5,
-                           run_both_at_once=run_both_at_once),
+        strategy=strategy if strategy is not None
+        else Switching(confidence_threshold=0.5,
+                       run_both_at_once=run_both_at_once),
         boundary_policy=boundary_policy,
         window_interaction=window_interaction,
         decoder=weak,
@@ -184,6 +185,37 @@ def test_eager_boundary_disagreement_replays_the_transitive_weak_cone():
     assert weak.window_ids.count(4) == 2
     assert runtime.speculative_replays == 1
     assert runtime.payloads_held == 0
+
+
+@pytest.mark.parametrize("strong_first", [True, False])
+def test_a_replayed_window_re_escalates_whichever_order_it_is_submitted_in(
+    strong_first,
+):
+    """A replayed window escalates again, and Sec. III A Step 1 feeds the weak
+    and strong decoders simultaneously, so the pool must admit the replayed
+    attempt's strong request whether the strategy lists it before or after the
+    attempt's weak job."""
+
+    class _OrderedSwitching(Switching):
+        def on_window_ready(self, window, weak_job, services):
+            submissions = super().on_window_ready(window, weak_job, services)
+            if strong_first and len(submissions) == 2:
+                submissions = list(reversed(submissions))
+            return submissions
+
+    ordered, _ = _deterministic_run(
+        Eager(), uncertain=(1, 2),
+        strategy=_OrderedSwitching(confidence_threshold=0.5,
+                                   run_both_at_once=True))
+    baseline, _ = _deterministic_run(Eager(), uncertain=(1, 2),
+                                     run_both_at_once=True)
+
+    runtime = ordered["cluster"].window_manager
+    assert runtime.op_results[0] == baseline["cluster"].op_results[0]
+    assert runtime.speculative_replays == \
+        baseline["cluster"].window_manager.speculative_replays
+    assert runtime._finished_ops == {0}
+    assert ordered["cluster"].pool._completed_strong_results == {}
 
 
 def test_overlapping_escalations_discard_stale_descendant_strong_result():

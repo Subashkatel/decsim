@@ -215,13 +215,32 @@ class Scheduler(Protocol):
 @runtime_checkable
 class ResourcePool(Protocol):
     """Port 12. The decode units and their ready queues (implemented by
-    DecoderManager). enqueue admits one unconsumed strong result per
-    destination window and raises on any further strong request for that
-    window, including one whose destination has already adopted a strong
-    result or committed without one. cancel_strong is atomic at the
-    event-queue pop: a queued job, or one still crossing the weak->strong
-    link, is removed outright; an executing job finishes but its result is
-    discarded."""
+    DecoderManager).
+
+    A DecodeJob is submitted once. enqueue raises on a job it has already
+    dispatched or cancelled, before touching any state.
+
+    A destination window owns at most one unconsumed strong result, either a
+    live request or a completion held for a demand that has not registered
+    yet. enqueue raises on a second strong request while the first is
+    unconsumed, and checks nothing else about the destination: whether a
+    result will be consumed is decided when it completes, so a strategy may
+    return its Submissions in any order and may cancel and replace a request
+    from any hook position.
+
+    A completing strong result is delivered to its destination if the
+    destination registered a strong demand (AWAIT_STRONG); held if one of that
+    destination's weak decodes is still outstanding and may raise one; and
+    otherwise raises, because nothing would consume it.
+
+    cancel_strong is atomic at the event-queue pop: a queued job, or one still
+    crossing the weak->strong link, is removed outright and never dispatched;
+    an executing job is marked cancelled, releases its modeled unit at the
+    cancel, and delivers nothing on completion; a held completion is
+    discarded. A batched strong decode with siblings that are still wanted
+    keeps running and drops only the cancelled key from delivery. A cancel
+    ends one request and passes no verdict on the destination, which may be
+    given a replacement."""
 
     def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None: ...
 

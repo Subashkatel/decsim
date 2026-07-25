@@ -119,6 +119,15 @@ class DecoderManager:
 
     def _enqueue_now(self, job: DecodeJob) -> None:
         if job.strong_decode_for is not None:
+            if job.strong_decode_for in self._running_strong_decodes:
+                # Strong state is keyed by destination alone: a second live
+                # request clobbers the first's cancellation handle and holds an
+                # extra delivery for a key nothing waits on. Reject ahead of the
+                # re-stamp so a refused job leaves no state behind.
+                raise RuntimeError(
+                    f"duplicate strong decode for window "
+                    f"{job.strong_decode_for}: a destination window has at "
+                    f"most one live strong request")
             job.ready_time = self.engine.now       # re-stamp strong only
             job.deadline = self.engine.now
             self._running_strong_decodes[job.strong_decode_for] = job

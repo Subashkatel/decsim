@@ -227,6 +227,8 @@ class DecodeJob:
     cancelled: bool = False                  # set when a speculative sibling is cancelled;
                                              # the completion callback then discards the result
     completed: bool = False                  # guards against duplicate completion delivery
+    submitted: bool = False                  # set once the pool admits the job; a job holds one
+                                             # queue slot and one unit, so it is enqueued once
 
 
 @dataclass

@@ -302,7 +302,8 @@ def test_duplicate_active_strong_destination_is_rejected_before_any_mutation(
     assert [key for _, key in results] == [(1, 0), (2, 0)]
     assert manager._completed_strong_results == {}
 
-    manager._wait_for_strong_result((2, 0))          # a replay of the same key
+    manager._windows_waiting_for_strong_result.add((2, 0))   # a replay of the
+    manager._apply_held_strong_result((2, 0))                # same key
     assert manager._windows_waiting_for_strong_result == {(2, 0)}
     assert [key for _, key in results] == [(1, 0), (2, 0)]
 
@@ -569,7 +570,8 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
     assert world.pool._windows_waiting_for_strong_result == set()
 
     finalized_key = delivered[-1]
-    world.pool._wait_for_strong_result(finalized_key)
+    world.pool._windows_waiting_for_strong_result.add(finalized_key)
+    world.pool._apply_held_strong_result(finalized_key)
     assert world.pool._windows_waiting_for_strong_result == {finalized_key}
     assert delivered.count(finalized_key) == 1, \
         "a wait was released after finality without a decode of its own"
@@ -764,6 +766,84 @@ def test_a_completed_job_cannot_be_submitted_again():
     eng.run()
     assert [key for _, key in results] == [(2, 0)]
     assert manager.pool_free == {"default": 1, "strong": 1}
+
+
+@pytest.mark.parametrize("bulk_strong", [True, False])
+def test_a_dispatched_job_cannot_be_submitted_again(bulk_strong):
+    """The middle of the lifecycle, which cancelled and completed do not
+    cover: a job already occupying a unit would take a second one, and its
+    single completion releases only one."""
+    eng, manager, results = build(bulk_strong=bulk_strong)
+    manager.strategy = _AdoptTheWeakResult()
+    manager.on_window_decoded = lambda job, result: None
+    job = weak_job(2, 5, "dispatched")
+    manager.enqueue(job)
+    assert job.pool == "default" and not job.completed
+    before = (dict(manager.pool_free), manager.queued_total(),
+              len(manager.queue_log))
+
+    with pytest.raises(RuntimeError, match="has already been admitted"):
+        manager.enqueue(job)
+
+    assert (dict(manager.pool_free), manager.queued_total(),
+            len(manager.queue_log)) == before
+    eng.run()
+    assert manager.pool_free == {"default": 1, "strong": 1}
+
+
+@pytest.mark.parametrize("bulk_strong", [True, False])
+def test_a_queued_job_cannot_be_submitted_again(bulk_strong):
+    """The same rule one step earlier, where a unit-occupancy test would not
+    reach: a job still in the ready queue holds a queue slot, so a second
+    submission is dispatched twice once a unit frees."""
+    eng, manager, results = build(bulk_strong=bulk_strong)
+    manager.strategy = _AdoptTheWeakResult()
+    manager.on_window_decoded = lambda job, result: None
+    manager.enqueue(weak_job(1, 10, "holds-the-unit"))
+    job = weak_job(2, 5, "queued")
+    manager.enqueue(job)
+    assert job.pool is None and job in manager.ready
+    before = (dict(manager.pool_free), manager.queued_total(),
+              len(manager.queue_log))
+
+    with pytest.raises(RuntimeError, match="has already been admitted"):
+        manager.enqueue(job)
+
+    assert (dict(manager.pool_free), manager.queued_total(),
+            len(manager.queue_log)) == before
+    eng.run()
+    assert manager.pool_free == {"default": 1, "strong": 1}
+
+
+@pytest.mark.parametrize("bulk_strong", [True, False])
+def test_public_strategy_listing_one_weak_submission_twice_is_refused(
+    bulk_strong,
+):
+    """The single-use rule at the seam that carries it. Submission order is
+    free (Sec. III A Step 1), so the same list a strategy may reorder is also
+    the list that can name one job twice; the refusal is the documented one at
+    submission, and the window occupies one queue slot or unit, never two."""
+
+    class DuplicateWeakStrategy:
+        def __init__(self, bulk_strong):
+            self.bulk_strong = bulk_strong
+
+        def on_window_ready(self, window, weak_job, services):
+            return [Submission(weak_job), Submission(weak_job)]
+
+        def on_decode_outcome(self, outcome, services):
+            return OutcomeDirective(Directive.FINALIZE)
+
+        def metrics(self):
+            return {}
+
+    world = escalating_world(DuplicateWeakStrategy(bulk_strong))
+    with pytest.raises(RuntimeError, match="has already been admitted"):
+        world.engine.run()
+
+    pool = world.pool
+    occupied = pool.unit_totals["default"] - pool.pool_free["default"]
+    assert pool.queued_total() + occupied == 1
 
 
 @pytest.mark.parametrize("strong_first", [True, False])

@@ -22,10 +22,14 @@ import pytest
 
 from decsim.config import us
 from decsim.engine import Engine
-from decsim.decoders import CodeRouter, PerRoundDecoder
+from decsim.decoders import CodeRouter, PerRoundDecoder, SwitchingRouter
 from decsim.decoder_manager import DecoderManager
-from decsim.message import DecodeJob, DecodeResult
+from decsim.message import DecodeJob, DecodeResult, Operation
+from decsim.planner import FixedRounds
+from decsim.protocols import Directive, OutcomeDirective, Submission
+from decsim.run_spec import RunSpec
 from decsim.schedulers import FifoScheduler
+from decsim.schemes import SlidingWindowScheme
 
 
 class _NullStrategy:
@@ -202,3 +206,70 @@ def test_running_rounds_tracks_merged_batch_lifecycle():
     by_time = dict(seen)
     assert by_time[11.0] == 10              # merged batch (5+5) running
     assert by_time[21.0] == 0               # settled after completion
+
+
+def test_duplicate_active_strong_destination_is_rejected_before_any_mutation():
+    """A destination window has at most one live strong request, and a
+    refused duplicate leaves nothing a later wait could consume."""
+    eng, manager, results = build()
+    manager.enqueue(strong_job(1, 10, "s-block"))
+    manager.enqueue(strong_job(2, 5, "s-first"))
+    before = (dict(manager.pool_free), manager.strong_running_rounds,
+              set(manager._running_strong_decodes), manager.queued_total(),
+              dict(manager._completed_strong_results))
+
+    with pytest.raises(RuntimeError, match="duplicate strong decode"):
+        manager.enqueue(strong_job(2, 7, "s-duplicate"))
+
+    assert (dict(manager.pool_free), manager.strong_running_rounds,
+            set(manager._running_strong_decodes), manager.queued_total(),
+            dict(manager._completed_strong_results)) == before
+
+    manager._windows_waiting_for_strong_result.update({(1, 0), (2, 0)})
+    eng.run()
+    assert [key for _, key in results] == [(1, 0), (2, 0)]
+    assert manager._completed_strong_results == {}
+
+    manager._wait_for_strong_result((2, 0))          # a replay of the same key
+    assert manager._windows_waiting_for_strong_result == {(2, 0)}
+    assert [key for _, key in results] == [(1, 0), (2, 0)]
+
+
+def test_public_strategy_duplicate_strong_submission_is_rejected_end_to_end():
+    """Destination uniqueness is owned by the manager, not the strategy: a
+    real DecodingStrategy that escalates one weak window twice is refused."""
+
+    class DuplicateStrongStrategy:
+        bulk_strong = True
+
+        def on_window_ready(self, window, weak_job, services):
+            first = services.make_strong_job(
+                weak_job, weak_job.n_rounds, f"first-{weak_job.label}")
+            second = services.make_strong_job(
+                weak_job, weak_job.n_rounds, f"second-{weak_job.label}")
+            return [Submission(weak_job), Submission(first), Submission(second)]
+
+        def on_decode_outcome(self, outcome, services):
+            if outcome.job.strong_decode_for is not None:
+                return OutcomeDirective(Directive.FINALIZE_STRONG)
+            return OutcomeDirective(Directive.AWAIT_STRONG)
+
+        def metrics(self):
+            return {}
+
+    weak = PerRoundDecoder(tau_us=0.05)
+    strong = PerRoundDecoder(tau_us=2.0)
+    world = RunSpec(
+        ops=[Operation(88, "duplicate-request", (6,), clifford=True)],
+        d=3, rounds_policy=FixedRounds(30), round_us=1.0,
+        scheme=SlidingWindowScheme(), strategy=DuplicateStrongStrategy(),
+        decoder=weak, router=SwitchingRouter(weak, strong),
+        unit_pools={"default": 1, "strong": 1},
+    ).build(verbose=False)
+    world.gate.load(world.ops)
+
+    with pytest.raises(RuntimeError, match="duplicate strong decode"):
+        world.engine.run()
+
+    assert world.window_manager._finished_ops == set()
+    assert world.pool._completed_strong_results == {}

@@ -225,11 +225,11 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
     The pool keys a destination's live strong request, its held completion and
     its registered demand by (op_id, window_id) alone, so it can tell one
     destination's decode attempts apart only while at most one of that
-    destination's weak decodes is in flight.  Eager replay is the mechanism
-    that decodes a window more than once, and it re-queues a window only after
-    its previous decode has produced its directive.  A change that lets two
-    attempts of one window overlap breaks the ownership rule, and this is
-    where it becomes visible.
+    destination's weak decodes is open.  Eager replay is the mechanism that
+    decodes a window more than once, and it re-queues a window only after its
+    previous decode has produced its directive.  A change that lets two
+    attempts of one window overlap is refused by the pool at submission, so it
+    surfaces here as a failed run rather than as a stranded window.
     """
     weak = _WeakBoundaryDecoder((1, 2), ticks=1)
     world = RunSpec(
@@ -247,15 +247,17 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
 
     pool = world.pool
     submit = pool.enqueue
-    peak_in_flight = {}
+    weak_submissions = {}
 
     def watch(job, delay_ticks=0):
-        # a weak submission enqueues on the spot, so the count it raises is
-        # readable here; only strong requests cross the weak->strong link
+        # a weak submission enqueues on the spot, so a second one for a
+        # destination still decoding would be refused right here; only strong
+        # requests cross the weak->strong link
         assert delay_ticks == 0 or job.strong_decode_for is not None
+        if job.strong_decode_for is None:
+            key = (job.op_id, job.window_id)
+            weak_submissions[key] = weak_submissions.get(key, 0) + 1
         submit(job, delay_ticks)
-        for key, in_flight in pool._unresolved_weak_decodes.items():
-            peak_in_flight[key] = max(peak_in_flight.get(key, 0), in_flight)
 
     world.window_manager.submit_fn = watch
     world.gate.load(world.ops)
@@ -263,7 +265,9 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
 
     assert world.window_manager.speculative_replays > 0, \
         "no window was decoded twice, so the precondition was never exercised"
-    assert peak_in_flight and max(peak_in_flight.values()) == 1
+    assert max(weak_submissions.values()) > 1, \
+        "no destination reached the pool twice, so the replay never re-decoded"
+    assert pool._unresolved_weak_decodes == set()
 
 
 def test_overlapping_escalations_discard_stale_descendant_strong_result():

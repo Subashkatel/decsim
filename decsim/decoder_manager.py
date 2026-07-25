@@ -83,10 +83,11 @@ class DecoderManager:
         self._running_strong_decodes: dict[tuple, DecodeJob] = {}
         self._windows_waiting_for_strong_result: set[tuple] = set()
         self._completed_strong_results: dict[tuple, DecodeResult] = {}
-        # A destination's weak decodes that are enqueued and have not yet
-        # produced an outcome directive: while one is outstanding the
-        # destination may still ask for a strong result.
-        self._unresolved_weak_decodes: dict[tuple, int] = {}
+        # Destinations whose weak decode is admitted and has not yet produced
+        # an outcome directive: while one is open the destination may still ask
+        # for a strong result. One per destination, because every structure
+        # above is keyed by destination alone.
+        self._unresolved_weak_decodes: set[tuple] = set()
 
     # -------------------------------------------------------------- queues
 
@@ -123,6 +124,8 @@ class DecoderManager:
         self._reject_spent_job(job)
         if job.strong_decode_for is not None:
             self._admit_strong_request(job)
+        elif job.on_done is None:
+            self._admit_weak_decode(job)
         job.submitted = True
         if delay_ticks <= 0:
             self._enqueue_now(job)
@@ -174,12 +177,32 @@ class DecoderManager:
                 f"window has at most one unconsumed strong result")
         self._running_strong_decodes[key] = job
 
+    def _admit_weak_decode(self, job: DecodeJob) -> None:
+        """Open one destination window's decode attempt.
+
+        Every strong structure is keyed by destination alone, so two of a
+        destination's weak decodes open at once are indistinguishable: either
+        decode's directive consumes whichever result the destination owns, and
+        the other attempt commits awaiting a result nothing will deliver. One
+        open decode per destination is what makes the destination key
+        sufficient, so a second is refused here rather than left to strand a
+        window. Admission runs ahead of every mutation, so a refused job leaves
+        no state and no trace behind.
+        """
+        key = (job.op_id, job.window_id)
+        if key in self._unresolved_weak_decodes:
+            raise RuntimeError(
+                f"second weak decode for window {key} while the first is "
+                f"unresolved: a destination window decodes once at a time, so "
+                f"that its strong result reaches the attempt that asked")
+        self._unresolved_weak_decodes.add(key)
+
     def _destination_may_consume_strong(self, key: tuple) -> bool:
         """Whether a strong result for this destination still has a consumer:
-        the destination is waiting for one now, or one of its weak decodes is
-        outstanding and its directive may still ask for one."""
+        the destination is waiting for one now, or its weak decode is open and
+        its directive may still ask for one."""
         return (key in self._windows_waiting_for_strong_result
-                or self._unresolved_weak_decodes.get(key, 0) > 0)
+                or key in self._unresolved_weak_decodes)
 
     def _enqueue_now(self, job: DecodeJob) -> None:
         if job.strong_decode_for is not None:
@@ -187,10 +210,6 @@ class DecoderManager:
                 return                             # cancelled across the link
             job.ready_time = self.engine.now       # re-stamp strong only
             job.deadline = self.engine.now
-        elif job.on_done is None:
-            key = (job.op_id, job.window_id)       # a weak attempt may escalate
-            self._unresolved_weak_decodes[key] = \
-                self._unresolved_weak_decodes.get(key, 0) + 1
         pool = self.pool_for(job)
         queue = self.queue_for(pool)
         self.scheduler.insert(queue, job)
@@ -392,13 +411,11 @@ class DecoderManager:
         self.try_dispatch()
 
     def _resolve_weak_decode(self, key: tuple) -> None:
-        """This destination's weak decode is about to produce its directive,
-        so it stops being a reason to keep a strong result for the window."""
-        outstanding = self._unresolved_weak_decodes.get(key, 0) - 1
-        if outstanding > 0:
-            self._unresolved_weak_decodes[key] = outstanding
-        else:
-            self._unresolved_weak_decodes.pop(key, None)
+        """This destination's weak decode is about to produce its directive, so
+        it stops being a reason to keep a strong result for the window and the
+        destination is free to be decoded again. Every job reaching here was
+        admitted by _admit_weak_decode, so the key is present."""
+        self._unresolved_weak_decodes.remove(key)
 
     def _decode_and_validate_result(self, job: DecodeJob) -> DecodeResult:
         """Decode one job and reject output for any other operation or window."""
@@ -470,8 +487,8 @@ class DecoderManager:
         """Apply a strong result if the weak already committed, else hold it.
 
         A hold is the early-strong case: it lasts only until the destination's
-        demand arrives, so it is legitimate only while a weak decode of that
-        destination is still outstanding to raise one. A destination whose
+        demand arrives, so it is legitimate only while that destination's weak
+        decode is still open to raise one. A destination whose
         decode attempt has resolved without asking will never ask, and one
         whose next result already belongs to another live request would have
         this one replaced unseen: both refuse rather than park a value in a map
@@ -501,6 +518,34 @@ class DecoderManager:
         if key in self._completed_strong_results:
             result = self._completed_strong_results.pop(key)
             self._complete_strong_result(key, result)
+
+    def check_decode_work_settled(self) -> None:
+        """Every window the run decoded reached a final result.
+
+        Each state below is legitimate while the run continues, so the pool
+        cannot judge one as it happens; at quiescence none is, because no
+        decode is running and no queue holds work. A destination still recorded
+        here never became final, and no metric or view reports any of these
+        structures, so the run would otherwise return a logical accounting with
+        that window's value silently missing (arXiv:2510.25222 Sec. III A Step
+        4: an unconfident window's final estimate *is* the strong result).
+        """
+        unsettled = {
+            state: sorted(keys) for state, keys in (
+                ("waiting for a strong result",
+                 self._windows_waiting_for_strong_result),
+                ("holding an unclaimed strong result",
+                 self._completed_strong_results),
+                ("still holding a strong request", self._running_strong_decodes),
+                ("decoding with no outcome", self._unresolved_weak_decodes),
+            ) if keys
+        }
+        if unsettled:
+            detail = "; ".join(f"{state}: {keys}"
+                               for state, keys in unsettled.items())
+            raise RuntimeError(
+                f"the run ended with decode work unsettled ({detail}): every "
+                f"window is final once the simulation is quiescent")
 
 
 class StrategyServicesImpl:

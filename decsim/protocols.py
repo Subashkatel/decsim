@@ -215,9 +215,13 @@ class Scheduler(Protocol):
 @runtime_checkable
 class ResourcePool(Protocol):
     """Port 12. The decode units and their ready queues (implemented by
-    DecoderManager). cancel_strong is atomic at the event-queue pop:
-    a queued job is removed outright; an executing job finishes but its
-    result is discarded."""
+    DecoderManager). enqueue admits one unconsumed strong result per
+    destination window and raises on any further strong request for that
+    window, including one whose destination has already adopted a strong
+    result or committed without one. cancel_strong is atomic at the
+    event-queue pop: a queued job, or one still crossing the weak->strong
+    link, is removed outright; an executing job finishes but its result is
+    discarded."""
 
     def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None: ...
 

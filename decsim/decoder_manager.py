@@ -70,9 +70,14 @@ class DecoderManager:
         self.strong_needed = 0
         self.strong_cancelled = 0
         self.strong_running_rounds = 0
+        # One destination window owns at most one unconsumed strong result at
+        # a time: a live request, or a completion held for a demand that has
+        # not registered yet. A settled destination owns none, and stays
+        # settled until a new weak attempt or a new demand reopens it.
         self._running_strong_decodes: dict[tuple, DecodeJob] = {}
         self._windows_waiting_for_strong_result: set[tuple] = set()
         self._completed_strong_results: dict[tuple, DecodeResult] = {}
+        self._settled_strong_destinations: set[tuple] = set()
 
     # -------------------------------------------------------------- queues
 
@@ -106,6 +111,8 @@ class DecoderManager:
 
     def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None:
         """Entry point for the window_manager's strategy Submissions."""
+        if job.strong_decode_for is not None:
+            self._admit_strong_request(job)
         if delay_ticks <= 0:
             self._enqueue_now(job)
             return
@@ -117,20 +124,47 @@ class DecoderManager:
         self.engine.schedule(delay_ticks, lambda: self._enqueue_now(job),
                              label=f"weak->strong handoff {job.label}")
 
+    def _admit_strong_request(self, job: DecodeJob) -> None:
+        """Give one destination window's next strong result to this job.
+
+        Strong state is keyed by destination alone, so the destination's
+        entitlement is what admission hands out: a second request for a
+        destination that still owns one clobbers the live cancellation handle
+        or replaces a held completion, and a request for a settled destination
+        produces a result nothing will ever ask for. Admission runs at
+        submission, ahead of the handoff log and of every mutation, so a
+        refused job leaves no state and no trace behind, and a request still
+        crossing the weak->strong link is cancellable.
+        """
+        key = job.strong_decode_for
+        if (key in self._running_strong_decodes
+                or key in self._completed_strong_results):
+            raise RuntimeError(
+                f"duplicate strong decode for window {key}: a destination "
+                f"window has at most one unconsumed strong result")
+        if not self._destination_may_consume_strong(key):
+            raise RuntimeError(
+                f"strong decode for settled window {key}: the destination "
+                f"has already adopted a strong result or committed without "
+                f"one, so nothing would consume this decode")
+        self._running_strong_decodes[key] = job
+
+    def _destination_may_consume_strong(self, key: tuple) -> bool:
+        """Whether a strong result for this destination still has a consumer:
+        the destination is waiting for one now, or its attempt has not
+        resolved yet and may still ask."""
+        return (key in self._windows_waiting_for_strong_result
+                or key not in self._settled_strong_destinations)
+
     def _enqueue_now(self, job: DecodeJob) -> None:
         if job.strong_decode_for is not None:
-            if job.strong_decode_for in self._running_strong_decodes:
-                # Strong state is keyed by destination alone: a second live
-                # request clobbers the first's cancellation handle and holds an
-                # extra delivery for a key nothing waits on. Reject ahead of the
-                # re-stamp so a refused job leaves no state behind.
-                raise RuntimeError(
-                    f"duplicate strong decode for window "
-                    f"{job.strong_decode_for}: a destination window has at "
-                    f"most one live strong request")
+            if self._running_strong_decodes.get(job.strong_decode_for) is not job:
+                return                             # cancelled across the link
             job.ready_time = self.engine.now       # re-stamp strong only
             job.deadline = self.engine.now
-            self._running_strong_decodes[job.strong_decode_for] = job
+        else:
+            # a fresh weak attempt may escalate again
+            self._settled_strong_destinations.discard((job.op_id, job.window_id))
         pool = self.pool_for(job)
         queue = self.queue_for(pool)
         self.scheduler.insert(queue, job)
@@ -166,8 +200,16 @@ class DecoderManager:
                 "distinct decoder.")
 
     def cancel_strong(self, key: tuple) -> None:
-        """Cancel an unneeded strong re-decode if queued, running, or held."""
+        """Cancel an unneeded strong re-decode if queued, crossing the link,
+        running, or held.
+
+        A destination with no demand left is settled by the cancel: it keeps
+        its weak result and will not consume a strong one. A destination still
+        waiting keeps its demand, so the cancelled request can be replaced.
+        """
         self._completed_strong_results.pop(key, None)
+        if key not in self._windows_waiting_for_strong_result:
+            self._settled_strong_destinations.add(key)
         job = self._running_strong_decodes.pop(key, None)
         if job is None:
             return
@@ -386,14 +428,29 @@ class DecoderManager:
             self._complete_strong_result(key, result)
 
     def _complete_strong_result(self, key: tuple, result: DecodeResult) -> None:
-        """Apply a strong result if the weak already committed, else hold it."""
-        if key not in self._windows_waiting_for_strong_result:
-            self._completed_strong_results[key] = result
+        """Apply a strong result if the weak already committed, else hold it.
+
+        A hold is the early-strong case and lasts only until the destination's
+        demand arrives, so it is legitimate only while that demand is still to
+        come. A settled destination will never register one, and a destination
+        whose next result already belongs to another live request would have
+        this one replaced unseen: both refuse rather than park a value in a map
+        nothing consumes.
+        """
+        if key in self._windows_waiting_for_strong_result:
+            self._windows_waiting_for_strong_result.remove(key)
+            self._settled_strong_destinations.add(key)
+            if self.on_strong_window_decoded is None:
+                raise RuntimeError(
+                    "DecoderManager has no strong completion callback")
+            self.on_strong_window_decoded(key, result)
             return
-        self._windows_waiting_for_strong_result.remove(key)
-        if self.on_strong_window_decoded is None:
-            raise RuntimeError("DecoderManager has no strong completion callback")
-        self.on_strong_window_decoded(key, result)
+        if (not self._destination_may_consume_strong(key)
+                or key in self._running_strong_decodes):
+            raise RuntimeError(
+                f"strong result for window {key} has no destination waiting "
+                f"for it: the destination holds no outstanding strong demand")
+        self._completed_strong_results[key] = result
 
     def _wait_for_strong_result(self, key: tuple) -> None:
         self._windows_waiting_for_strong_result.add(key)

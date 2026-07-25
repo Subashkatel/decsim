@@ -977,6 +977,120 @@ def test_a_destination_may_be_decoded_again_once_its_attempt_resolved():
     assert manager.pool_free == {"default": 1, "strong": 1}
 
 
+def test_the_destination_stays_open_until_its_outcome_hook_returns():
+    """A decode produces its directive by returning from on_decode_outcome, so
+    the destination is still open for the whole call and free again by the time
+    the directive is applied and the window commits."""
+
+    class ObserveTheReservation:
+        def __init__(self, manager):
+            self.manager = manager
+            self.inside_the_hook = []
+
+        def on_decode_outcome(self, outcome, services):
+            key = (outcome.job.op_id, outcome.job.window_id)
+            self.inside_the_hook.append(
+                key in self.manager._unresolved_weak_decodes)
+            return OutcomeDirective(Directive.FINALIZE)
+
+    eng, manager, _ = build()
+    strategy = ObserveTheReservation(manager)
+    manager.strategy = strategy
+    at_commit = []
+    manager.on_window_decoded = lambda job, result: at_commit.append(
+        (job.op_id, job.window_id) in manager._unresolved_weak_decodes)
+    manager.enqueue(weak_job(2, 5, "w2"))
+    eng.run()
+
+    assert strategy.inside_the_hook == [True]
+    assert at_commit == [False]
+    manager.check_decode_work_settled()
+
+
+def test_a_second_weak_decode_from_inside_the_outcome_hook_is_refused():
+    """A strategy holding the pool may submit from its own outcome hook, which
+    is the one position where the destination is open and no queue slot or unit
+    is held for it. The refusal is the same there as anywhere else in the
+    attempt, and leaves the refused job and the pool untouched."""
+
+    class SubmitFromTheHook:
+        def __init__(self, manager):
+            self.manager = manager
+            self.second = weak_job(2, 5, "w2-from-hook")
+            self.hook_calls = 0
+            self.refusals = []
+            self.left_the_pool_alone = []
+
+        def on_decode_outcome(self, outcome, services):
+            self.hook_calls += 1
+            if self.hook_calls == 1:
+                before = pool_state(self.manager)
+                try:
+                    self.manager.enqueue(self.second)
+                except RuntimeError as refusal:
+                    self.refusals.append(str(refusal))
+                self.left_the_pool_alone.append(
+                    pool_state(self.manager) == before)
+            return OutcomeDirective(Directive.FINALIZE)
+
+    eng, manager, _ = build()
+    strategy = SubmitFromTheHook(manager)
+    manager.strategy = strategy
+    manager.on_window_decoded = lambda job, result: None
+    manager.enqueue(weak_job(2, 5, "w2"))
+    eng.run()
+
+    assert len(strategy.refusals) == 1
+    assert "second weak decode for window (2, 0)" in strategy.refusals[0]
+    assert strategy.left_the_pool_alone == [True]
+    assert not strategy.second.submitted
+    assert strategy.hook_calls == 1
+    manager.check_decode_work_settled()
+
+
+def test_two_open_weak_decodes_cannot_coalesce_onto_one_strong_result():
+    """What the refusal costs if it stops one hook too early.  Both attempts of
+    one destination commit AWAIT_STRONG, their demands are the same key, and
+    the single strong result clears it once: the later attempt waits forever
+    while every settlement structure is empty, so no check downstream reports
+    the window as unfinal."""
+
+    class EscalateAndSubmitFromTheHook:
+        def __init__(self, manager):
+            self.manager = manager
+            self.refusals = []
+            self.weak_outcomes = 0
+
+        def on_decode_outcome(self, outcome, services):
+            if outcome.job.strong_decode_for is not None:
+                return OutcomeDirective(Directive.FINALIZE_STRONG)
+            self.weak_outcomes += 1
+            if self.weak_outcomes > 1:
+                return OutcomeDirective(Directive.AWAIT_STRONG)
+            try:
+                self.manager.enqueue(weak_job(2, 1, "w2-second"))
+            except RuntimeError as refusal:
+                self.refusals.append(str(refusal))
+            return OutcomeDirective(
+                Directive.AWAIT_STRONG,
+                extra=Submission(strong_job(2, 40, "s2")))
+
+    eng, manager, deliveries = build()
+    strategy = EscalateAndSubmitFromTheHook(manager)
+    manager.strategy = strategy
+    commits = []
+    manager.on_window_decoded = lambda job, result: commits.append(
+        (job.label, job.awaiting_strong_result))
+    manager.enqueue(weak_job(2, 1, "w2-first"))
+    eng.run()
+
+    assert len(strategy.refusals) == 1
+    assert strategy.weak_outcomes == 1
+    assert commits == [("w2-first", True)]
+    assert [key for _, key in deliveries] == [(2, 0)]
+    manager.check_decode_work_settled()
+
+
 def test_public_strategy_listing_two_weak_decodes_for_one_window_is_refused():
     """The precondition at the seam that can break it.  A strategy builds the
     second job itself, so the single-use guard does not apply and only the

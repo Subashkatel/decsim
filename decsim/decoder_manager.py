@@ -388,9 +388,9 @@ class DecoderManager:
         job.completed = True
         self.pool_free[job.pool] += 1
         key = (job.op_id, job.window_id)
-        self._resolve_weak_decode(key)
         directive = self.strategy.on_decode_outcome(DecodeOutcome(job, result),
                                                     self.services)
+        self._resolve_weak_decode(key)
         awaiting = directive.directive is Directive.AWAIT_STRONG
         if directive.directive is Directive.FINALIZE:
             self.cancel_strong(key)                # no-op unless one is live/held
@@ -411,10 +411,12 @@ class DecoderManager:
         self.try_dispatch()
 
     def _resolve_weak_decode(self, key: tuple) -> None:
-        """This destination's weak decode is about to produce its directive, so
-        it stops being a reason to keep a strong result for the window and the
-        destination is free to be decoded again. Every job reaching here was
-        admitted by _admit_weak_decode, so the key is present."""
+        """This destination's weak decode has produced its directive, so it
+        stops being a reason to keep a strong result for the window and the
+        destination is free to be decoded again. The reservation covers
+        on_decode_outcome, which is where the directive is chosen, and ends
+        before that directive is applied. Every job reaching here was admitted
+        by _admit_weak_decode, so the key is present."""
         self._unresolved_weak_decodes.remove(key)
 
     def _decode_and_validate_result(self, job: DecodeJob) -> DecodeResult:

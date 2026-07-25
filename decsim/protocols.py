@@ -243,9 +243,14 @@ class ResourcePool(Protocol):
     either decode's directive consumes whichever result the destination owns
     and the other attempt is left waiting for one that never comes. enqueue
     therefore refuses a second weak decode for a destination whose first has
-    not yet produced a directive. Per-attempt ownership, which would let a
-    destination decode twice at once, needs the attempt carried through the
-    request, the hold and the demand, and this port does not carry it.
+    not yet produced a directive. A decode produces its directive by returning
+    from on_decode_outcome, so the refusal covers that whole call: a strategy
+    calling enqueue from inside its own outcome hook is refused a second weak
+    decode of the destination it is deciding, and the destination reopens
+    before the returned directive is applied. Per-attempt ownership, which
+    would let a destination decode twice at once, needs the attempt carried
+    through the request, the hold and the demand, and this port does not carry
+    it.
 
     Two shipped components keep clear of that refusal, and both are
     load-bearing: the window manager queues a window once and re-queues it only

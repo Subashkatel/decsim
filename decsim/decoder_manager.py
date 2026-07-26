@@ -258,9 +258,9 @@ class DecoderManager:
         if job is None:
             return
         if job.pool is None:
-            # scan every queue rather than recomputing pool_for(job):
-            # a lane policy is not required to be stable between
-            # enqueue and cancel (Codex G7P1 review finding 3)
+            # scan every queue rather than recomputing pool_for(job): a lane
+            # policy may be reconfigured after this job was queued, and a
+            # queued job keeps its enqueue-time placement
             for pool in self.unit_totals:
                 queue = self.queue_for(pool)
                 if job in queue:

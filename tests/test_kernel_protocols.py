@@ -51,3 +51,152 @@ def test_seam_types_flow():
     directive = _FakeStrategy().on_decode_outcome(
         DecodeOutcome(job, DecodeResult(1, 0)), _FakeServices())
     assert directive.directive is Directive.FINALIZE and directive.extra is None
+
+
+def test_run_seed_capabilities_are_structural_and_children_are_typed():
+    from decsim.message import RunSeedChild, RunSeedPathSegment
+    from decsim.protocols import RunSeedComposite, RunSeedConsumer
+
+    class Consumer:
+        def reserve_run_seed(self, seed): return object()
+        def commit_run_seed(self, reservation): return None
+        def cancel_run_seed(self, reservation): return None
+
+    class Composite:
+        def run_seed_children(self):
+            return (
+                RunSeedChild(
+                    relative_path=(
+                        RunSeedPathSegment("field", "inner"),
+                    ),
+                    child=Consumer(),
+                ),
+            )
+
+    assert isinstance(Consumer(), RunSeedConsumer)
+    assert isinstance(Composite(), RunSeedComposite)
+    child = tuple(Composite().run_seed_children())[0]
+    assert child.relative_path[0].canonical_bytes() == b"F\x00\x00\x00\x05inner"
+
+
+def _seed_child_paths(component):
+    return {
+        tuple((segment.kind, segment.value) for segment in child.relative_path):
+        child.child
+        for child in component.run_seed_children()
+    }
+
+
+def test_decoder_routers_expose_every_semantic_child():
+    from decsim.decoders import CodeRouter, SwitchingRouter
+
+    default = object()
+    by_code = object()
+    by_none = object()
+    code_router = CodeRouter(
+        default,
+        {"surface": by_code, None: by_none},
+    )
+    assert _seed_child_paths(code_router) == {
+        (("field", "default"),): default,
+        (("field", "by_code"), ("string_key", "surface")): by_code,
+        (("field", "by_code"), ("none_key", None)): by_none,
+    }
+
+    weak = object()
+    strong = object()
+    assert _seed_child_paths(SwitchingRouter(weak, strong)) == {
+        (("field", "weak"),): weak,
+        (("field", "strong"),): strong,
+    }
+
+
+def test_code_router_rejects_keys_outside_the_typed_seed_path_domain():
+    import pytest
+
+    from decsim.decoders import CodeRouter
+
+    for key in (1, True, 1.0, ("surface",)):
+        with pytest.raises(TypeError, match="exact built-in str or None"):
+            CodeRouter(object(), {key: object()})
+
+
+def test_decoder_wrappers_expose_children_and_behavior_callbacks():
+    from decsim.decoders import (
+        FunctionLatencyDecoder,
+        SampledConfidenceDecoder,
+        SwitchingDecoder,
+    )
+    from decsim.soft_output import SoftOutputDecoder
+
+    weak = object()
+    strong = object()
+    switching = SwitchingDecoder(weak, strong, gamma_switch=0.5)
+    assert _seed_child_paths(switching) == {
+        (("field", "weak"),): weak,
+        (("field", "strong"),): strong,
+    }
+
+    inner = object()
+    probability_for = lambda job: 0.5
+    sampled = SampledConfidenceDecoder(
+        inner,
+        escalation_probability=0.5,
+        probability_for=probability_for,
+    )
+    assert _seed_child_paths(sampled) == {
+        (("field", "inner"),): inner,
+        (("field", "probability_for"),): probability_for,
+    }
+
+    latency_for = lambda job: 1.0
+    assert _seed_child_paths(FunctionLatencyDecoder(latency_for)) == {
+        (("field", "latency_us_for"),): latency_for,
+    }
+
+    metric_cls = type("Metric", (), {})
+    soft = SoftOutputDecoder(inner, metric_cls)
+    assert _seed_child_paths(soft) == {
+        (("field", "base"),): inner,
+        (("field", "metric_cls"),): metric_cls,
+    }
+
+
+def test_devices_and_switching_expose_circuit_scope_and_behavior_children():
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.codes import SurfaceCodeModel
+    from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
+    from decsim.switching import Switching, ThresholdRegister
+
+    rounds_for = lambda operation: 3
+    stim_device = StimDevice(rounds_for=rounds_for)
+    assert stim_device.operation_circuit_scope == "per_operation"
+    assert _seed_child_paths(stim_device) == {
+        (("field", "rounds_for"),): rounds_for,
+    }
+
+    code = SurfaceCodeModel(d=3)
+    bit_device = SyndromeBitDevice(code)
+    assert bit_device.operation_circuit_scope == "none"
+    assert _seed_child_paths(bit_device) == {
+        (("field", "code"),): code,
+    }
+    assert TimingOnlyDevice.operation_circuit_scope == "none"
+
+    register = ThresholdRegister(default=0.5)
+    switching = Switching(0.5, threshold_register=register)
+    assert _seed_child_paths(switching) == {
+        (("field", "threshold_register"),): register,
+    }
+
+
+def test_real_decoder_adapters_expose_their_latency_models():
+    from decsim.belief_matching_decoder import BeliefMatchingDecoder
+    from decsim.bposd_decoder import BPOSDDecoder
+    from decsim.mwpm_decoder import PyMatchingDecoder
+
+    latency_model = object()
+    expected = {(("field", "latency_model"),): latency_model}
+    assert _seed_child_paths(PyMatchingDecoder(latency_model)) == expected
+    assert _seed_child_paths(BPOSDDecoder(latency_model)) == expected
+    assert _seed_child_paths(BeliefMatchingDecoder(latency_model)) == expected

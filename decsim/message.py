@@ -44,6 +44,108 @@ def same_stable_identity(left: Any, right: Any) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class RunSeedPathSegment:
+    """One framed semantic edge in the run-level seed component graph."""
+
+    kind: str
+    value: Any
+
+    def __post_init__(self) -> None:
+        if self.kind == "field":
+            if type(self.value) is not str or not self.value:
+                raise ValueError(
+                    "run-seed field segments require a nonempty built-in str"
+                )
+            return
+        if self.kind == "string_key":
+            if type(self.value) is not str:
+                raise TypeError(
+                    "run-seed string-key segments require a built-in str"
+                )
+            return
+        if self.kind == "none_key":
+            if self.value is not None:
+                raise ValueError(
+                    "run-seed none-key segments cannot carry a value"
+                )
+            return
+        if self.kind == "integer_key":
+            if type(self.value) is not int:
+                raise TypeError(
+                    "run-seed integer-key segments require a built-in int"
+                )
+            return
+        raise ValueError(f"unknown run-seed path segment kind {self.kind!r}")
+
+    def canonical_bytes(self) -> bytes:
+        """Return the normative typed and length-framed seed-path bytes."""
+        if self.kind == "none_key":
+            return b"N" + (0).to_bytes(4, "big")
+        if self.kind == "integer_key":
+            encoded_value = str(self.value).encode("ascii")
+            return (
+                b"I"
+                + len(encoded_value).to_bytes(4, "big")
+                + encoded_value
+            )
+        encoded_value = self.value.encode()
+        tag = b"F" if self.kind == "field" else b"S"
+        return tag + len(encoded_value).to_bytes(4, "big") + encoded_value
+
+
+@dataclass(frozen=True)
+class RunSeedChild:
+    """One semantic child edge exposed by a seed-graph composite."""
+
+    relative_path: tuple[RunSeedPathSegment, ...]
+    child: Any
+
+    def __post_init__(self) -> None:
+        if type(self.relative_path) is not tuple or not self.relative_path:
+            raise ValueError(
+                "run-seed child paths must be nonempty tuples"
+            )
+        if not all(
+            isinstance(segment, RunSeedPathSegment)
+            for segment in self.relative_path
+        ):
+            raise TypeError(
+                "run-seed child paths contain only RunSeedPathSegment values"
+            )
+
+
+@dataclass(frozen=True, eq=False)
+class RunSeedReservation:
+    """A leaf-owned prepared RNG replacement plus manifest seed provenance."""
+
+    proposed_seed_source: str
+    proposed_seed: Optional[int]
+    prepared_state: Any = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self.proposed_seed_source not in (
+            "derived",
+            "explicit_local",
+            "entropy",
+        ):
+            raise ValueError(
+                f"unknown run-seed source {self.proposed_seed_source!r}"
+            )
+        if self.proposed_seed_source == "entropy":
+            if self.proposed_seed is not None:
+                raise ValueError("entropy reservations cannot carry a seed")
+            return
+        if (
+            type(self.proposed_seed) is not int
+            or not 0 <= self.proposed_seed < (1 << 64)
+        ):
+            raise ValueError(
+                f"{self.proposed_seed_source} reservations require an unsigned "
+                f"64-bit built-in integer seed"
+            )
+
+
 # ----------------------------------------------------------------- syndrome
 
 @dataclass

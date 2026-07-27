@@ -128,8 +128,8 @@ def test_engine_belief_matching_matches_offline():
                                            belief_matching=True)
     ref_inner = belief_matching_window_decoder()
 
-    device = StimDevice(seed=17)
     for s in range(30):
+        device = StimDevice()
         op = Operation(id=1, name="memory", qubits=(0,), clifford=True, circuit=circuit)
         res = simulate(RunSpec(
                   ops=[op],
@@ -140,6 +140,7 @@ def test_engine_belief_matching_matches_offline():
                   device=device,
                   decoder=BeliefMatchingDecoder(_ZeroLat()),
                   make_controller=_zero_links,
+                  seed=17 + s,
               ), verbose=False)
         pred_engine = res["cluster"].op_results[1]
         pred_offline = int(decode_windowed(ref_models, device._dets[1], ref_inner)[0])

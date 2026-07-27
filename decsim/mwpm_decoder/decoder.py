@@ -9,7 +9,12 @@ from ..adapters.window_decode_results import (
     payload_syndrome,
     result_from_selected_faults,
 )
-from ..message import DecodeJob, DecodeResult
+from ..message import (
+    DecodeJob,
+    DecodeResult,
+    RunSeedChild,
+    RunSeedPathSegment,
+)
 
 if TYPE_CHECKING:
     from ..protocols import Decoder
@@ -21,6 +26,15 @@ class PyMatchingDecoder:
     def __init__(self, latency_model: Decoder):
         self.latency_model = latency_model
         self._matchings: dict = {}
+
+    def run_seed_children(self):
+        """Expose the latency model that controls simulated service time."""
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "latency_model"),),
+                self.latency_model,
+            ),
+        )
 
     def latency(self, job: DecodeJob) -> int:
         """Timing comes from the wrapped latency model."""

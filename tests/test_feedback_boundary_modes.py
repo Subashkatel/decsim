@@ -165,7 +165,7 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
 
     result = simulate(RunSpec(
                  ops=operations,
-                 device=StimDevice(seed=19),
+                 device=StimDevice(),
                  code=code,
                  scheme=SlidingWindowScheme(),
                  decoder=PyMatchingDecoder(PresetLatencyDecoder(0.0)),
@@ -174,6 +174,7 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
                  round_us=1.0,
                  make_controller=_zero_link_controller,
                  feedback_boundary_mode="measurement_closed",
+                 seed=19,
              ), verbose=False)
 
     assert result["cluster"].rounds_arrived[operations[0].id] == code.commit_rounds()
@@ -207,7 +208,7 @@ def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
             ops=operations,
             dynamic_streams=[stream],
             idle_policy=from_mode("extend_stream"),
-            device=StimDevice(seed=19),
+            device=StimDevice(),
             code=code,
             rounds_policy=PerOpRounds(rounds),
             scheme=SlidingWindowScheme(),
@@ -216,4 +217,5 @@ def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
             round_us=1.0,
             make_controller=_zero_link_controller,
             feedback_boundary_mode="measurement_closed",
+            seed=19,
         ), verbose=False)

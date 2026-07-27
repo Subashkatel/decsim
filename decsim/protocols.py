@@ -14,11 +14,41 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Any, Callable, Mapping, Optional, Protocol, runtime_checkable
+from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
+                    runtime_checkable)
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
-                      DecodeOutcome, DecodeResult, StrongRegionPlan, Window,
-                      WindowInfo)
+                      DecodeOutcome, DecodeResult, RunSeedChild,
+                      RunSeedReservation, StrongRegionPlan, Window, WindowInfo)
+
+
+# ------------------------------------------------------ run seed capabilities
+
+@runtime_checkable
+class RunSeedConsumer(Protocol):
+    """A stochastic runtime owner with reversible seed reservation."""
+
+    def reserve_run_seed(
+        self,
+        seed: Optional[int],
+    ) -> RunSeedReservation: ...
+
+    def commit_run_seed(
+        self,
+        reservation: RunSeedReservation,
+    ) -> None: ...
+
+    def cancel_run_seed(
+        self,
+        reservation: RunSeedReservation,
+    ) -> None: ...
+
+
+@runtime_checkable
+class RunSeedComposite(Protocol):
+    """A runtime owner that exposes semantic stochastic child edges."""
+
+    def run_seed_children(self) -> Iterable[RunSeedChild]: ...
 
 
 # --------------------------------------------------------------- strategy seam
@@ -303,6 +333,8 @@ class SyndromeSource(Protocol):
 @runtime_checkable
 class SyndromeDevice(Protocol):
     """The unclocked syndrome and error-model source supplied to RunSpec."""
+
+    operation_circuit_scope: str
 
     def begin_operation(self, op) -> None: ...
 

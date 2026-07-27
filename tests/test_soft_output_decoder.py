@@ -36,7 +36,7 @@ def _circuit(d, rounds, p):
         before_measure_flip_probability=p, before_round_data_depolarization=p)
 
 
-def _naive_shot(circuit, device, decoder, d, rounds):
+def _naive_shot(circuit, device, decoder, d, rounds, *, seed):
     op = Operation(id=1, name="memory", qubits=(0,), clifford=True, circuit=circuit)
     res = simulate(RunSpec(
               ops=[op],
@@ -46,6 +46,7 @@ def _naive_shot(circuit, device, decoder, d, rounds):
               scheme=NaiveOnlineScheme(),
               device=device,
               decoder=decoder,
+              seed=seed,
           ), verbose=False)
     return res["cluster"].op_results[1]
 
@@ -67,11 +68,17 @@ def test_engine_emits_real_soft_output_not_flag():
     """Through the real engine, soft_output is a continuous gap, never the {0,1} flag."""
     d, rounds, p = 3, 6, 5e-3
     circuit = _circuit(d, rounds, p)
-    device = StimDevice(seed=4)
     decoder = _Capturing(PyMatchingDecoder(_ZeroLatency()), ComplementaryGapMetric)
     softs = []
-    for _ in range(40):
-        _naive_shot(circuit, device, decoder, d, rounds)
+    for shot in range(40):
+        _naive_shot(
+            circuit,
+            StimDevice(),
+            decoder,
+            d,
+            rounds,
+            seed=4 + shot,
+        )
         assert decoder.last_soft is not None
         assert decoder.last_soft >= 0.0
         softs.append(decoder.last_soft)
@@ -83,13 +90,25 @@ def test_soft_output_decoder_preserves_hard_decode():
     """Attaching soft output must not change the committed logical value."""
     d, rounds, p = 3, 6, 5e-3
     circuit = _circuit(d, rounds, p)
-    plain_dev = StimDevice(seed=8)
-    soft_dev = StimDevice(seed=8)
     plain = PyMatchingDecoder(_ZeroLatency())
     soft = SoftOutputDecoder(PyMatchingDecoder(_ZeroLatency()), ComplementaryGapMetric)
-    for _ in range(30):
-        a = _naive_shot(circuit, plain_dev, plain, d, rounds)
-        b = _naive_shot(circuit, soft_dev, soft, d, rounds)
+    for shot in range(30):
+        a = _naive_shot(
+            circuit,
+            StimDevice(),
+            plain,
+            d,
+            rounds,
+            seed=8 + shot,
+        )
+        b = _naive_shot(
+            circuit,
+            StimDevice(),
+            soft,
+            d,
+            rounds,
+            seed=8 + shot,
+        )
         assert a == b
 
 
@@ -97,12 +116,19 @@ def test_engine_soft_output_is_error_predictive():
     """corr(real soft output, logical error) < 0 through the engine (low g = error-prone)."""
     d, rounds, p = 3, 6, 8e-3
     circuit = _circuit(d, rounds, p)
-    device = StimDevice(seed=15)
     decoder = _Capturing(PyMatchingDecoder(_ZeroLatency()), ComplementaryGapMetric)
     gaps, errs = [], []
     shots = 600
-    for _ in range(shots):
-        decoded = _naive_shot(circuit, device, decoder, d, rounds)
+    for shot in range(shots):
+        device = StimDevice()
+        decoded = _naive_shot(
+            circuit,
+            device,
+            decoder,
+            d,
+            rounds,
+            seed=15 + shot,
+        )
         truth = int(device._truth[1][0])
         gaps.append(decoder.last_soft)
         errs.append(decoded[0] ^ truth)

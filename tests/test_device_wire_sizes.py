@@ -48,6 +48,40 @@ def test_aggregate_fake_device_counts_physical_patches_not_qubits():
     assert payload.size_bits == 8
 
 
+def test_fake_device_run_seed_binding_is_atomic_and_replayable():
+    code = SurfaceCodeModel(d=3)
+    operation = Operation(0, "mem", (0,))
+    first = SyndromeBitDevice(code)
+    reservation = first.reserve_run_seed(41)
+    assert (reservation.proposed_seed_source, reservation.proposed_seed) == ("derived", 41)
+    first.commit_run_seed(reservation)
+
+    second = SyndromeBitDevice(code)
+    second_reservation = second.reserve_run_seed(41)
+    second.commit_run_seed(second_reservation)
+
+    assert first.round_payloads(operation, 1)[0].bits == \
+        second.round_payloads(operation, 1)[0].bits
+
+
+def test_fake_device_rng_state_has_no_public_bypass():
+    device = SyndromeBitDevice(SurfaceCodeModel(d=3))
+
+    assert not hasattr(device, "rng")
+
+
+def test_fake_device_explicit_seed_conflicts_and_direct_use_is_monotone():
+    code = SurfaceCodeModel(d=3)
+    explicit = SyndromeBitDevice(code, seed=0)
+    with pytest.raises(ValueError, match=r"SyndromeBitDevice.*explicit seed"):
+        explicit.reserve_run_seed(41)
+
+    used = SyndromeBitDevice(code)
+    used.round_payloads(Operation(0, "mem", (0,)), 1)
+    with pytest.raises(ValueError, match=r"SyndromeBitDevice.*already used"):
+        used.reserve_run_seed(41)
+
+
 def test_stim_payloads_report_their_bit_counts():
     stim = pytest.importorskip("stim")
     from decsim.adapters.stim_device import StimDevice

@@ -41,10 +41,10 @@ def _agreement(segment_rounds, shots, seed=11):
     segments, stream_op, rounds_map = continuous_stream(circ, segment_rounds, patch=0, base_id=0)
     gm = pymatching.Matching.from_detector_error_model(
         circ.detector_error_model(decompose_errors=True))
-    device = StimDevice(seed=seed)
     agree = eng_err = glob_err = 0
     last = None
-    for _ in range(shots):
+    for shot in range(shots):
+        device = StimDevice()
         res = simulate(RunSpec(
                   ops=segments,
                   decode_ops=[stream_op],
@@ -54,6 +54,7 @@ def _agreement(segment_rounds, shots, seed=11):
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),
                   decoder=PyMatchingDecoder(_ZeroLatency()),
+                  seed=seed + shot,
               ), verbose=False)
         pe = res["cluster"].op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])

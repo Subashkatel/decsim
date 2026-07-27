@@ -9,7 +9,7 @@ from ..adapters.window_decode_results import (
     payload_syndrome,
     result_from_selected_faults,
 )
-from ..message import DecodeResult
+from ..message import DecodeResult, RunSeedChild, RunSeedPathSegment
 from .window_decoder import bposd_window_decoder
 
 if TYPE_CHECKING:
@@ -27,6 +27,15 @@ class BPOSDDecoder:
         self._inner = bposd_window_decoder(max_iter=max_iter, osd_order=osd_order,
                                            bp_method=bp_method, schedule=schedule,
                                            osd_method=osd_method)
+
+    def run_seed_children(self):
+        """Expose the latency model that controls simulated service time."""
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "latency_model"),),
+                self.latency_model,
+            ),
+        )
 
     def latency(self, job: "DecodeJob") -> int:
         """Timing comes from the wrapped latency model."""

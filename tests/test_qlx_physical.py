@@ -267,8 +267,7 @@ def test_qlx_circuit_runs_through_the_full_engine(circuit, detector_rounds):
     mismatches = 0
     engine_fails = 0
     for shot in range(40):
-        device = StimDevice(seed=900 + shot,
-                            detector_rounds={1: detector_rounds})
+        device = StimDevice(detector_rounds={1: detector_rounds})
         op = Operation(id=1, name="qlx-mem", qubits=(0,), clifford=True,
                        circuit=circuit)
         res = simulate(RunSpec(
@@ -279,6 +278,7 @@ def test_qlx_circuit_runs_through_the_full_engine(circuit, detector_rounds):
                   scheme=SlidingWindowScheme(),
                   device=device,
                   decoder=PyMatchingDecoder(_ZeroLatency()),
+                  seed=900 + shot,
               ), verbose=False)
         engine_value = res["cluster"].op_results[1][0]
         offline = int(decode_windowed(models, device._dets[1],

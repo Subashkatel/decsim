@@ -82,13 +82,14 @@ def test_gate_finalize_releases_after_strong_commit():
     """Escalating strategy: every weak decode escalates, the strong redo
     stamps op_strong_commit_time, the predicate turns true inside the normal
     strong-completion path, and the (now final) Decision releases B."""
-    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 1.0, seed=7)
+    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 1.0)
     spec = RunSpec(ops=_blocked_pair(), d=3, rounds_policy=FixedRounds(11),
                  strategy=Switching(confidence_threshold=0.5),
                  decoder=weak,
                  router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
                  unit_pools={"default": 1, "strong": 1},
-                 boundary_policy=Held())
+                 boundary_policy=Held(),
+                 seed=7)
     world = spec.build()
     world.window_manager.gate_finalize(
         0, lambda op: op.id in world.window_manager.op_strong_commit_time)

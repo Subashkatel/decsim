@@ -86,10 +86,11 @@ def test_units_conserved_when_a_decoder_mutates_the_hint_mid_flight():
     from decsim.decoders import SwitchingDecoder
     for seed in range(5):
         sw = SwitchingDecoder(PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0),
-                              gamma_switch=0.5, seed=seed)
+                              gamma_switch=0.5)
         r = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), d=3,
                              rounds_policy=FixedRounds(11), decoder=sw,
-                             unit_pools={"default": 2, "strong": 1}), verbose=False)
+                             unit_pools={"default": 2, "strong": 1},
+                             seed=seed), verbose=False)
         cluster = r["cluster"]
         assert cluster.pool_free == cluster.unit_totals, \
             f"seed {seed}: a unit leaked into the wrong pool"

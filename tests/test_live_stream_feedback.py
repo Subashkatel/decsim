@@ -246,13 +246,14 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
                  ops=operations,
                  dynamic_streams=[stream],
                  idle_policy=from_mode("extend_stream"),
-                 device=StimDevice(seed=13),
+                 device=StimDevice(),
                  code=code,
                  rounds_policy=PerOpRounds(rounds),
                  scheme=SlidingWindowScheme(),
                  decoder=decoder,
                  num_units=1,
                  round_us=1.0,
+                 seed=13,
              ), verbose=False)
 
     cluster = result["cluster"]
@@ -294,11 +295,12 @@ def test_real_syndrome_live_stream_rejects_inexact_circuit_length():
             ops=operations,
             dynamic_streams=[stream],
             idle_policy=from_mode("extend_stream"),
-            device=StimDevice(seed=17),
+            device=StimDevice(),
             code=code,
             rounds_policy=PerOpRounds(rounds),
             scheme=SlidingWindowScheme(),
             decoder=PyMatchingDecoder(PresetLatencyDecoder(2.0)),
             num_units=1,
             round_us=1.0,
+            seed=17,
         ), verbose=False)

@@ -22,7 +22,12 @@ class Event:
 class Engine:
     """A minimal discrete event simulator: a clock plus a priority queue of events."""
 
-    def __init__(self, verbose: bool = True):
+    def __init__(
+        self,
+        verbose: bool = True,
+        *,
+        construction_guarded: bool = False,
+    ):
         """Create an empty simulator with the clock at zero."""
         self.now: int = 0
         self._event_queue: list[Event] = []
@@ -31,6 +36,11 @@ class Engine:
         self.log_lines: list[str] = []
         self.metrics: list = []
         self.log_sink = None
+        self._construction_guarded = construction_guarded
+
+    def _finish_construction(self) -> None:
+        """Permit event execution after the composition root binds RNG state."""
+        self._construction_guarded = False
 
     def schedule(self, delay: int, action: Callable[[], None],
                  label: str = "", priority: int = 0) -> None:
@@ -68,6 +78,11 @@ class Engine:
 
         Events at exactly ``until`` still fire; if later events remain, the
         clock is left at ``until`` so a follow-up run() resumes from there."""
+        if self._construction_guarded:
+            raise RuntimeError(
+                "engine construction is guarded until run-seed binding "
+                "finishes"
+            )
         while self._event_queue:
             next_event_time = self._event_queue[0].time
             if until is not None and next_event_time > until:

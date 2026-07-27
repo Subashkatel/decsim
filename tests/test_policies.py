@@ -1,10 +1,13 @@
 #==================================================================
 # TESTS FOR POLICY SEAMS (deadlines, routing, switching, round time, idle decode)
 #==================================================================
+import pytest
+
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
 from decsim.decoders import (CodeRouter, FunctionLatencyDecoder,
-                             PresetLatencyDecoder, SwitchingDecoder)
+                             PerRoundDecoder, PresetLatencyDecoder,
+                             SampledConfidenceDecoder, SwitchingDecoder)
 from decsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
 from decsim.message import DecodeJob, Operation
 from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
@@ -106,10 +109,86 @@ def test_switching_decoder_charges_t_comm_weak_on_every_path():
 
 def test_switching_decoder_end_to_end():
     sw = SwitchingDecoder(PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0),
-                          gamma_switch=0.5, seed=7)
+                          gamma_switch=0.5)
     r = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), num_units=2, d=3,
-                         rounds_policy=FixedRounds(11), decoder=sw), verbose=False)
+                         rounds_policy=FixedRounds(11), decoder=sw, seed=7),
+                 verbose=False)
     assert r["fully_done"] > 0                 # runs to completion with mixed latencies
+
+
+def test_switching_decoder_run_seed_binding_replays_and_rejects_direct_use():
+    def build():
+        decoder = SwitchingDecoder(
+            PresetLatencyDecoder(1.0),
+            PresetLatencyDecoder(10.0),
+            gamma_switch=0.5,
+        )
+        reservation = decoder.reserve_run_seed(37)
+        decoder.commit_run_seed(reservation)
+        return decoder
+
+    first = build()
+    second = build()
+    first_paths = []
+    second_paths = []
+    for window_id in range(12):
+        first_job = DecodeJob(0, window_id, 3)
+        second_job = DecodeJob(0, window_id, 3)
+        first.latency(first_job)
+        second.latency(second_job)
+        first_paths.append(first_job.hint)
+        second_paths.append(second_job.hint)
+    assert first_paths == second_paths
+
+    with pytest.raises(ValueError, match=r"SwitchingDecoder.*already used"):
+        first.reserve_run_seed(37)
+
+
+def test_sampled_confidence_run_seed_binding_and_explicit_conflict():
+    explicit = SampledConfidenceDecoder(
+        PerRoundDecoder(1.0),
+        escalation_probability=0.5,
+        seed=0,
+    )
+    with pytest.raises(
+        ValueError,
+        match=r"SampledConfidenceDecoder.*explicit seed",
+    ):
+        explicit.reserve_run_seed(37)
+
+    def build():
+        decoder = SampledConfidenceDecoder(
+            PerRoundDecoder(1.0),
+            escalation_probability=0.5,
+        )
+        reservation = decoder.reserve_run_seed(37)
+        decoder.commit_run_seed(reservation)
+        return decoder
+
+    first = build()
+    second = build()
+    assert [
+        first.decode(DecodeJob(0, window_id, 3)).soft_output
+        for window_id in range(12)
+    ] == [
+        second.decode(DecodeJob(0, window_id, 3)).soft_output
+        for window_id in range(12)
+    ]
+
+
+def test_sampled_decoders_do_not_expose_their_rng_state():
+    switching = SwitchingDecoder(
+        PresetLatencyDecoder(1.0),
+        PresetLatencyDecoder(10.0),
+        gamma_switch=0.5,
+    )
+    confidence = SampledConfidenceDecoder(
+        PerRoundDecoder(1.0),
+        escalation_probability=0.5,
+    )
+
+    assert not hasattr(switching, "rng")
+    assert not hasattr(confidence, "rng")
 
 
 # ---- per-code round time (heterogeneous cadence infrastructure) ------------------------

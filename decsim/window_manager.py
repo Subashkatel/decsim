@@ -616,7 +616,6 @@ class WindowManager:
         try:
             self._deferred_strong[key] = {
                 "weak_job": weak_job, "label": label,
-                "slab_lo": plan.commit_lo, "slab_hi": plan.commit_hi,
                 "context_lo": plan.context_lo, "context_hi": plan.context_hi,
                 "strong_window": slab, "strong_model": strong_model,
                 "restart_key": restart_key,
@@ -807,6 +806,7 @@ class WindowManager:
         """Install a restart model prepared before plan mutation."""
         restart = self.windows[restart_key]
         restart.buffer_lo = buffer_lo
+        restart.n_rounds = restart.buffer_hi - restart.buffer_lo + 1
         self._replace_window_read_refs(restart_key, restart)
         if model is not None:
             self.window_models[restart_key] = model
@@ -861,7 +861,7 @@ class WindowManager:
                 f"only start once every stored block exists (Fig. 12)")
         strong_job = DecodeJob(
             op_id=key[0], window_id=key[1],
-            n_rounds=pending["slab_hi"] - pending["slab_lo"] + 1,
+            n_rounds=slab.n_rounds,
             ready_time=self.engine.now, deadline=self.engine.now,
             label=pending["label"], hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,

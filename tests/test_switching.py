@@ -26,7 +26,8 @@ from decsim.decoders import (PerRoundDecoder, SampledConfidenceDecoder, Switchin
                              SwitchingRouter, switch_probability_per_round)
 from decsim.devices import TimingOnlyDevice
 from decsim.message import (DecodeJob, DecodeResult, Operation,
-                            SeamFaultOwner, StrongRegionPlan, Window)
+                            SeamFaultOwner, StrongRegionPlan, Window,
+                            WindowInfo)
 from decsim.metrics import DecodeBacklog, StrongDecoderBacklog
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
@@ -616,8 +617,10 @@ def test_double_window_uses_the_interaction_region_plan():
     assert (
         strong_job.window.commit_lo,
         strong_job.window.commit_hi,
-        strong_job.n_rounds,
-    ) == (7, 12, 6)
+    ) == (7, 12)
+    # priced for the rounds it is handed (context 4-15), not its commit extent
+    assert strong_job.n_rounds == 12
+    assert len({p.round_index for p in strong_job.payloads}) == 12
     assert device.exclusions == [
         (13, 15, (1, 12)),
         (7, 12, (1, 6)),
@@ -876,13 +879,108 @@ def test_double_window_slab_extends_forward_and_absorbs_the_weak_chain():
     (start_tick, job), = strong.starts
     assert job.strong_decode_for == (0, 2)
     assert (job.window.commit_lo, job.window.commit_hi) == (7, 15)
-    assert job.n_rounds == 3 * D                    # the paper's r_strong
+    assert job.window.commit_hi - job.window.commit_lo + 1 == 3 * D  # r_strong
+    # Thm 1 bounds tau_strong against rounds of decoder INPUT, so the job is
+    # priced for the context it reads (4-18), not for the slab it commits.
+    assert job.n_rounds == 3 * D + 2 * D
+    assert len({p.round_index for p in job.payloads}) == job.n_rounds
     assert runtime.absorbed_windows == {(0, 3), (0, 4)}
     weak_windows_decoded = [j.window_id for _, j in weak.starts]
     assert weak_windows_decoded == [0, 1, 2, 5, 6, 7, 8, 9]
     for absorbed_key in runtime.absorbed_windows:
         window = runtime.windows[absorbed_key]
         assert window.committed and window.t_done is None
+
+
+def test_double_window_restart_window_is_priced_for_its_widened_read():
+    """Fig. 12 panel 5: the restart window carries a LEADING buffer that
+    reaches back into the slab, so it reads r_buf + r_com + r_buf rounds
+    while committing only r_com. It must be priced for what it reads: it is
+    the one window the protocol deliberately enlarges, and charging it as an
+    ordinary window understates the weak decoder exactly there."""
+    res, weak, strong = _double_window_run(escalate_window=2)
+    runtime = res["cluster"].window_manager
+    (_, slab), = strong.starts
+    restart = runtime.windows[(0, 5)]
+
+    assert restart.buffer_lo <= slab.window.commit_hi   # reads into the slab
+    assert (restart.commit_lo, restart.commit_hi) == (16, 18)   # commits r_com
+    assert restart.buffer_lo == 13                      # slab_hi - r_buf + 1
+    assert restart.n_rounds == restart.buffer_hi - restart.buffer_lo + 1
+
+    restart_job = next(job for _, job in weak.starts if job.window_id == 5)
+    assert restart_job.n_rounds == 3 * D                # r_buf + r_com + r_buf
+    assert len({p.round_index for p in restart_job.payloads}) == 3 * D
+
+    ordinary_job = next(job for _, job in weak.starts if job.window_id == 6)
+    assert ordinary_job.n_rounds == 2 * D               # r_com + r_buf
+    assert restart_job.n_rounds > ordinary_job.n_rounds
+
+
+def test_double_window_restart_pricing_separates_commit_and_buffer():
+    """The r_com == r_buf == d fixtures cannot tell the restart formula
+    r_buf + r_com + r_buf apart from a wrong 3 * r_com. Asymmetric geometry
+    (r_com=2, r_buf=3) separates them: 8 rounds versus 6."""
+    code = SurfaceCodeModel(d=D, commit_rounds_override=2,
+                            buffer_rounds_override=3)
+    env = {}
+    weak = _DispatchRecorder(SampledConfidenceDecoder(
+        PerRoundDecoder(F_WEAK * TAU_GEN_US), 0.0,
+        probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0), env)
+    strong = _DispatchRecorder(PerRoundDecoder(F_STRONG * TAU_GEN_US), env)
+    res = simulate(RunSpec(
+        ops=[_memory_op()], num_units=1, d=D, code=code,
+        rounds_policy=FixedRounds(30), round_us=TAU_GEN_US,
+        scheme=SlidingWindowScheme(),
+        strategy=Switching(confidence_threshold=0.5, double_window=True),
+        decoder=weak, router=SwitchingRouter(weak, strong),
+        unit_pools={"default": 1, "strong": 1},
+        make_metrics=lambda e, c, ch, fa: env.update(engine=e) or [],
+    ), verbose=False)
+    runtime = res["cluster"].window_manager
+    assert (runtime.commit, runtime.buffer) == (2, 3)   # r_com != r_buf
+
+    (_, slab), = strong.starts
+    restart_key = runtime.window_interaction.plan_strong_region(
+        WindowInfo.from_window(runtime.windows[(0, 2)]),
+        [WindowInfo.from_window(runtime.windows[(0, k)])
+         for k in runtime.op_windows[0] if k > 2],
+        Switching.strong_redo_rounds(runtime.windows[(0, 2)]),
+        30, runtime.buffer,
+    ).restart_window_key
+    restart_job = next(job for _, job in weak.starts
+                       if (0, job.window_id) == restart_key)
+
+    # r_buf + r_com + r_buf = 3 + 2 + 3, NOT 3 * r_com = 6
+    assert restart_job.n_rounds == 8
+    assert restart_job.n_rounds != 3 * runtime.commit
+    assert len({p.round_index for p in restart_job.payloads}) == 8
+
+    # and the slab is still priced for its whole context, r_strong + 2*r_buf
+    commit_extent = slab.window.commit_hi - slab.window.commit_lo + 1
+    assert commit_extent == runtime.commit + 2 * runtime.buffer   # 8
+    assert slab.n_rounds == commit_extent + 2 * runtime.buffer    # 14
+    assert slab.n_rounds != commit_extent
+
+
+def test_double_window_restart_pricing_is_not_the_geometry_constant():
+    """A restart window that lands on a short commit tail is narrower than
+    the geometry constant commit + 2*buffer, so pricing it from that constant
+    is wrong even though every full-width fixture agrees with it. The
+    invariant is the window's own extent."""
+    res, weak, strong = _double_window_run(escalate_window=5, rounds=26)
+    runtime = res["cluster"].window_manager
+    (_, slab), = strong.starts
+    restart = next(runtime.windows[k] for k in sorted(runtime.windows)
+                   if runtime.windows[k].commit_lo > slab.window.commit_hi
+                   and runtime.windows[k].buffer_lo <= slab.window.commit_hi)
+    restart_job = next(job for _, job in weak.starts
+                       if job.window_id == restart.k)
+
+    geometry_constant = runtime.commit + 2 * runtime.buffer
+    assert restart.buffer_hi - restart.buffer_lo + 1 != geometry_constant
+    assert restart_job.n_rounds == restart.buffer_hi - restart.buffer_lo + 1
+    assert restart_job.n_rounds != geometry_constant
 
 
 def test_double_window_strong_waits_for_the_restart_windows_weak_commit():
@@ -917,7 +1015,9 @@ def test_double_window_last_window_uses_the_terminal_boundary():
     w9 = cluster.windows[(0, 9)]
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (28, 30)
-    assert job.n_rounds == 3                        # clamped r_strong
+    # clamped r_strong is 3 committed rounds; the decoder reads 25-30
+    assert job.n_rounds == 6
+    assert len({p.round_index for p in job.payloads}) == 6
     assert start_tick == w9.t_done + us(0.5)
     assert cluster.window_manager.absorbed_windows == set()
 
@@ -929,7 +1029,9 @@ def test_double_window_end_clamped_slab_absorbs_the_tail():
     runtime = res["cluster"].window_manager
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (25, 30)
-    assert job.n_rounds == 6
+    # 6 committed rounds, read with one buffer of leading context (22-30)
+    assert job.n_rounds == 9
+    assert len({p.round_index for p in job.payloads}) == 9
     assert runtime.absorbed_windows == {(0, 9)}
     assert [j.window_id for _, j in weak.starts] == [0, 1, 2, 3, 4, 5, 6, 7, 8]
     w8 = res["cluster"].windows[(0, 8)]

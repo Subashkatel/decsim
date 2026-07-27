@@ -78,9 +78,11 @@ class Switching:
     no folded decoded defects (folding at a raw-read face double-counts;
     see test_parallel_two_sided_windows_match_global_decoding). Unlike the
     paper's exactly-r_strong read with weak-pinned faces, the context
-    reads are extra and uncharged: seam-edge accuracy is slightly
-    optimistic, and the transfer cost belongs to the strong-data-path
-    backlog item."""
+    reads are extra: seam-edge accuracy is slightly optimistic, and the
+    slab is priced for the whole context it reads rather than the
+    r_strong rounds it commits, so its decode cost is conservative
+    against Theorem 1 rather than optimistic. The transfer cost of the
+    extra context still belongs to the strong-data-path backlog item."""
 
     def __init__(self, confidence_threshold: float,
                  run_both_at_once: bool = False,

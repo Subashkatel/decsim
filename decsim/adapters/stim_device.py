@@ -74,7 +74,8 @@ class StimDevice:
     def begin_operation(self, op: Operation) -> None:
         """Sample one fresh shot, or reuse the stream shot for later segments."""
         key = self._key(op)
-        self._validate_sample_key(key)
+        if self._seed is not None:
+            self._validate_sample_key(key)
         if op.stream_id is not None and op.stream_offset:
             self._dets[op.id] = self._dets[key]
             self._truth[op.id] = self._truth[key]

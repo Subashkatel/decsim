@@ -134,6 +134,22 @@ def test_invalid_identity_is_rejected_before_cached_sampler_lookup():
         device.begin_operation(colliding_bool)
 
 
+def test_unseeded_sampling_keeps_stim_owned_identity_behavior():
+    circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
+    legacy_key = ("stream", 1)
+    device = StimDevice(seed=None)
+    operation = Operation(
+        2,
+        "unseeded",
+        (0,),
+        circuit=circ,
+        stream_id=legacy_key,
+    )
+
+    device.begin_operation(operation)
+    assert legacy_key in device._dets
+
+
 @pytest.mark.parametrize("invalid_seed", [-1, 1 << 64, 1.0, "1"])
 def test_invalid_root_seed_retains_stim_validation(invalid_seed):
     circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)

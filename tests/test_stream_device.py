@@ -117,6 +117,33 @@ def test_sample_substreams_distinguish_identity_types():
         device._sample_seed(("stream", 1))
 
 
+def test_invalid_identity_is_rejected_before_cached_sampler_lookup():
+    """A bool must not alias an already-cached integer identity."""
+    circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
+    device = StimDevice(seed=77)
+    device.begin_operation(Operation(1, "integer", (0,), circuit=circ))
+
+    colliding_bool = Operation(
+        2,
+        "boolean",
+        (0,),
+        circuit=circ,
+        stream_id=True,
+    )
+    with pytest.raises(TypeError, match="stream_id must be an int or str"):
+        device.begin_operation(colliding_bool)
+
+
+@pytest.mark.parametrize("invalid_seed", [-1, 1 << 64, 1.0, "1"])
+def test_invalid_root_seed_retains_stim_validation(invalid_seed):
+    circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
+    device = StimDevice(seed=invalid_seed)
+    operation = Operation(1, "mem", (0,), circuit=circ)
+
+    with pytest.raises(ValueError, match="64-bit unsigned integer"):
+        device.begin_operation(operation)
+
+
 def test_stream_segments_still_share_one_shot():
     """Substreams are keyed on the shot identity the device already uses,
     so a stream's segments keep sharing one draw."""

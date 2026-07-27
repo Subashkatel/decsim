@@ -34,17 +34,33 @@ class StimDevice:
         """Sample key for a standalone operation or continuous stream."""
         return op.stream_id if op.stream_id is not None else op.id
 
-    def _sample_seed(self, key) -> int:
-        """Derive a cross-process-stable substream from the shot-reuse identity."""
+    @staticmethod
+    def _validate_sample_key(key) -> None:
+        """Reject identities whose equality can alias a legal cache key."""
         sample_key_type = type(key)
         if sample_key_type not in (int, str):
             raise TypeError(
-                f"sample key {key!r} is a {sample_key_type.__name__}; a stream_id "
-                f"must be an int or str so the run's sampling is "
-                f"reproducible across processes")
+                f"stream_id must be an int or str so the run's sampling is "
+                f"reproducible across processes; sample key {key!r} is a "
+                f"{sample_key_type.__name__}")
+
+    def _validated_root_seed(self) -> int:
+        """Return the seed under Stim's public unsigned-64-bit contract."""
+        if (not isinstance(self._seed, int)
+                or not 0 <= self._seed < (1 << 64)):
+            raise ValueError(
+                f"seed must be None or a 64-bit unsigned integer; "
+                f"got {self._seed!r}")
+        return int(self._seed)
+
+    def _sample_seed(self, key) -> int:
+        """Derive a cross-process-stable substream from the shot-reuse identity."""
+        self._validate_sample_key(key)
+        root_seed = self._validated_root_seed()
+        sample_key_type = type(key)
         key_type_tag = b"int" if sample_key_type is int else b"str"
         hash_input = b"\0".join((
-            str(self._seed).encode(),
+            str(root_seed).encode(),
             b"stim_device",
             key_type_tag,
             str(key).encode(),
@@ -58,6 +74,7 @@ class StimDevice:
     def begin_operation(self, op: Operation) -> None:
         """Sample one fresh shot, or reuse the stream shot for later segments."""
         key = self._key(op)
+        self._validate_sample_key(key)
         if op.stream_id is not None and op.stream_offset:
             self._dets[op.id] = self._dets[key]
             self._truth[op.id] = self._truth[key]

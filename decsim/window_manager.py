@@ -1121,6 +1121,24 @@ class WindowManager:
                 f"logical prediction interval {stream_id!r} "
                 f"{commit_lo}-{commit_hi} has no contribution coverage")
 
+        cursor = commit_lo
+        for contribution in contributions:
+            covered_lo = max(contribution.commit_lo, commit_lo)
+            covered_hi = min(contribution.commit_hi, commit_hi)
+            if covered_lo != cursor:
+                relation = "overlap" \
+                    if covered_lo < cursor else "gap"
+                raise RuntimeError(
+                    f"logical prediction interval {stream_id!r} "
+                    f"{commit_lo}-{commit_hi} has a contribution "
+                    f"{relation} at round {cursor}")
+            cursor = covered_hi + 1
+        if cursor != commit_hi + 1:
+            raise RuntimeError(
+                f"logical prediction interval {stream_id!r} "
+                f"{commit_lo}-{commit_hi} has a contribution gap at "
+                f"round {cursor}")
+
         for contribution in contributions:
             crosses_boundary = (
                 contribution.commit_lo < commit_lo
@@ -1132,7 +1150,7 @@ class WindowManager:
                 boundary_policy == "stream_segment"
                 and contribution.logical_observables is None
             ):
-                return None
+                continue
             if boundary_policy == "stream_segment":
                 raise RuntimeError(
                     f"functional logical contribution "
@@ -1141,22 +1159,6 @@ class WindowManager:
             raise RuntimeError(
                 f"logical contribution {contribution.owner_key} crosses "
                 f"strict interval boundary {commit_lo}-{commit_hi}")
-
-        cursor = commit_lo
-        for contribution in contributions:
-            if contribution.commit_lo != cursor:
-                relation = "overlap" \
-                    if contribution.commit_lo < cursor else "gap"
-                raise RuntimeError(
-                    f"logical prediction interval {stream_id!r} "
-                    f"{commit_lo}-{commit_hi} has a contribution "
-                    f"{relation} at round {cursor}")
-            cursor = contribution.commit_hi + 1
-        if cursor != commit_hi + 1:
-            raise RuntimeError(
-                f"logical prediction interval {stream_id!r} "
-                f"{commit_lo}-{commit_hi} has a contribution gap at "
-                f"round {cursor}")
 
         if any(
             contribution.logical_observables is None

@@ -351,6 +351,54 @@ def test_functional_segment_cannot_split_a_contribution_extent():
         )
 
 
+def test_timing_only_segment_crossing_still_requires_exact_coverage():
+    _, runtime, _, _ = _runtime()
+    runtime.logical_contributions = {
+        (0, 0): LogicalContribution(
+            owner_key=(0, 0),
+            commit_lo=1,
+            commit_hi=2,
+            ownership_kind="ordinary_window",
+            logical_observables=None,
+        ),
+    }
+
+    with pytest.raises(RuntimeError, match="contribution gap at round 3"):
+        runtime._logical_observables_for_interval(
+            0,
+            2,
+            4,
+            boundary_policy="stream_segment",
+        )
+
+
+def test_timing_only_segment_crossing_with_exact_coverage_is_inert():
+    _, runtime, _, _ = _runtime()
+    runtime.logical_contributions = {
+        (0, 0): LogicalContribution(
+            owner_key=(0, 0),
+            commit_lo=1,
+            commit_hi=2,
+            ownership_kind="ordinary_window",
+            logical_observables=None,
+        ),
+        (0, 1): LogicalContribution(
+            owner_key=(0, 1),
+            commit_lo=3,
+            commit_hi=4,
+            ownership_kind="ordinary_window",
+            logical_observables=None,
+        ),
+    }
+
+    assert runtime._logical_observables_for_interval(
+        0,
+        2,
+        4,
+        boundary_policy="stream_segment",
+    ) is None
+
+
 def test_operation_observable_arity_cannot_change_between_windows():
     _, runtime, _, _ = _runtime()
     runtime._install_logical_contribution(

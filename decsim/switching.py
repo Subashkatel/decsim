@@ -151,7 +151,7 @@ class Switching:
 
     # ------------------------------------------------------------ validation
 
-    def validate(self, spec) -> None:
+    def validate(self, spec, planning) -> None:
         """Reject RunSpec combinations that would deadlock, bypass the
         faithful start condition, or need skip semantics the runtime does
         not model yet."""
@@ -173,7 +173,7 @@ class Switching:
                 "(the far boundary IS the restart window's weak commit); "
                 "the Held boundary policy would make later windows wait for "
                 "the strong result and deadlock the slab")
-        if spec.scheme is not None and hasattr(spec.scheme, "wire_deps"):
+        if hasattr(planning.scheme, "wire_deps"):
             raise ValueError(
                 "double_window is defined for linearly-chained sliding "
                 "windows (arXiv:2510.25222 Fig. 12); two-layer parallel "

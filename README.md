@@ -28,6 +28,14 @@ print(result["chip_done"], result["fully_done"])
 To build your own workload, create `Operation`s (or use a frontend in
 [`decsim/frontends/`](decsim/frontends/)) and pass them as `ops=`.
 
+Planning inputs have exclusive ownership. Supply at most one of `d=`,
+`code=`, or `layout=`; omitting all three selects distance 3. A custom
+`planner=` supplies its own layout, scheme, and rounds policy, so those
+sibling fields are omitted. Custom magic-state factories use
+`make_factory(engine, cluster)` so the returned factory is bound to the
+event engine the run drives. A built world's exact code, layout, scheme,
+rounds policy, and planner are inspectable through `world.planning`.
+
 ## Module map
 
 The one entry point is `simulate(RunSpec(...))`: `RunSpec` (in `run_spec.py`)

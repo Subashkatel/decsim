@@ -133,7 +133,6 @@ def test_timing_only_stream_runs_through_normal_parallel_scheme():
               decode_ops=[stream_op],
               device=TimingOnlyDevice(),
               num_units=4,
-              d=d,
               rounds_policy=PerOpRounds(rounds_map),
               code=SurfaceCodeModel(d=d),
               scheme=ParallelWindowScheme(),
@@ -164,7 +163,6 @@ def test_short_successor_closes_cross_operation_buffer():
     result = simulate(RunSpec(
                  ops=[first, second],
                  num_units=2,
-                 d=3,
                  rounds_policy=PerOpRounds(rounds_map),
                  code=SurfaceCodeModel(d=3),
                  scheme=SlidingWindowScheme(),

@@ -15,18 +15,44 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import inspect
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .message import Operation
 from .pauli_frame import PauliFrame
 from .config import TimingConfig, us
 
+if TYPE_CHECKING:
+    from .protocols import (
+        CodeModel,
+        DecodingScheme,
+        ExecutionPlanner,
+        LayoutModel,
+        RoundsPolicy,
+    )
+
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
+
+
+@dataclass(frozen=True)
+class ResolvedPlanningParts:
+    """Exact planning/runtime collaborators selected for one build."""
+
+    code: "CodeModel"
+    layout: "LayoutModel"
+    scheme: "DecodingScheme"
+    rounds_policy: "RoundsPolicy"
+    planner: "ExecutionPlanner"
 
 
 @dataclass
 class RunSpec:
-    """Typed simulator configuration; every knob is a part object or a scalar."""
+    """Typed simulator configuration with one owner per planning choice.
+
+    Supply at most one of ``d``, ``code``, or ``layout``; omitting all three
+    selects distance 3. A supplied ``planner`` owns its layout, scheme, and
+    rounds policy, so those sibling fields must be omitted. Custom magic-state
+    factories are constructed through ``make_factory(engine, cluster)``.
+    """
 
     # workload (exactly one of ops/frontend)
     ops: Optional[list] = None
@@ -37,7 +63,7 @@ class RunSpec:
     # code / layout
     code: Optional[Any] = None
     layout: Optional[Any] = None
-    d: int = 3
+    d: Optional[int] = None
 
     # decode stage
     decoder: Optional[Any] = None
@@ -69,7 +95,6 @@ class RunSpec:
     device: Optional[Any] = None              # default TimingOnlyDevice
     memory_model: Optional[Any] = None        # port 18; default unbounded
     make_controller: Optional[Callable] = None  # (engine) -> Controller (port 14)
-    factory: Optional[Any] = None
     make_factory: Optional[Callable] = None   # (engine, cluster) -> factory
     make_metrics: Optional[Callable] = None   # (engine, cluster, gate, factory)
     seed: int = 0
@@ -78,6 +103,14 @@ class RunSpec:
 
     def validate(self) -> None:
         """Cross-part validation before any build."""
+        planning = self._validate_configuration()
+        operations = list(self.ops or [])
+        operations.extend(self.decode_ops or [])
+        operations.extend(self.dynamic_streams or [])
+        self._validate_layout_selection(planning, operations)
+
+    def _validate_configuration(self) -> ResolvedPlanningParts:
+        """Validate configuration-only state and resolve planning once."""
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
         self._validate_supplied_parts()
@@ -99,19 +132,6 @@ class RunSpec:
             raise ValueError(
                 f"feedback_boundary_mode must be one of "
                 f"{FEEDBACK_BOUNDARY_MODES} (got {self.feedback_boundary_mode!r})")
-        code = self._resolve_code()
-        scheme = self.scheme
-        if (scheme is not None and hasattr(scheme, "validate_buffer")
-                and getattr(code, "buffer_rounds_override", None) is None):
-            # an explicit buffer override is the expert escape hatch
-            # (e.g. measurement-closed streams need no trailing buffer)
-            scheme.validate_buffer(code)
-        rounds = self.rounds_policy
-        if rounds is not None:
-            probe = Operation(-1, "probe", (0,))
-            value = rounds.rounds_for(probe, code)
-            if value < 1:
-                raise ValueError(f"rounds_policy returned {value} (< 1)")
         if self.decode_ops and self.dynamic_streams:
             static_ids = {op.id for op in self.decode_ops}
             dyn_ids = {op.id for op in self.dynamic_streams}
@@ -120,9 +140,10 @@ class RunSpec:
                 raise ValueError(f"ops {sorted(overlap)} appear in both "
                                  f"decode_ops and dynamic_streams (a stream "
                                  f"is planned statically OR dynamically)")
-        for part in (self.strategy, self.decoder, self.factory):
-            if part is not None and hasattr(part, "validate"):
-                part.validate(self)
+        planning = self._resolve_planning_parts()
+        self._validate_resolved_planning(planning)
+        self._validate_cross_part_combinations(planning)
+        return planning
 
     def _validate_supplied_parts(self) -> None:
         """Validate every externally supplied part against its public port."""
@@ -147,7 +168,6 @@ class RunSpec:
             ("idle_policy", self.idle_policy, protocols.IdlePolicy),
             ("orchestrator", self.orchestrator, protocols.Orchestrator),
             ("memory_model", self.memory_model, protocols.MemoryModel),
-            ("factory", self.factory, protocols.MagicStateFactory),
         )
         for name, part, protocol in parts:
             _validate_protocol_part(name, part, protocol)
@@ -180,39 +200,209 @@ class RunSpec:
         _validate_protocol_methods(
             "device", self.device, device_protocol, methods)
 
-    def _resolve_code(self):
-        if self.code is not None:
-            return self.code
-        if self.layout is not None:
-            return self.layout.codes()[0]
+    def _resolve_planning_parts(self) -> ResolvedPlanningParts:
         from .codes import SurfaceCodeModel
-        return SurfaceCodeModel(d=self.d)
+        from .layouts import UniformLayout
+        from .planner import GateRounds, WindowPlanner
+        from .schemes import SlidingWindowScheme
+
+        if self.planner is not None:
+            sibling_names = [
+                name
+                for name in ("d", "code", "layout", "scheme", "rounds_policy")
+                if getattr(self, name) is not None
+            ]
+            if sibling_names:
+                supplied = ", ".join(sibling_names)
+                raise ValueError(
+                    "planner owns layout, scheme, and rounds_policy; "
+                    f"remove sibling planning fields: {supplied}")
+            planner = self.planner
+            scheme = planner.scheme
+            layout = planner.layout
+            rounds_policy = planner.rounds_policy
+            from . import protocols
+            _validate_protocol_part(
+                "planner.layout",
+                layout,
+                protocols.LayoutModel,
+            )
+            code = _single_layout_code(layout, "planner.layout")
+            return ResolvedPlanningParts(
+                code=code,
+                layout=layout,
+                scheme=scheme,
+                rounds_policy=rounds_policy,
+                planner=planner,
+            )
+
+        code_sources = [
+            name
+            for name in ("d", "code", "layout")
+            if getattr(self, name) is not None
+        ]
+        if len(code_sources) > 1:
+            supplied = ", ".join(code_sources)
+            raise ValueError(
+                f"multiple code sources supplied: {supplied}; "
+                "provide exactly one of d, code, or layout")
+
+        if self.layout is not None:
+            layout = self.layout
+            code = _single_layout_code(layout, "layout")
+        else:
+            code = self.code
+            if code is None:
+                distance = self.d if self.d is not None else 3
+                code = SurfaceCodeModel(d=distance)
+            layout = UniformLayout(code)
+
+        scheme = self.scheme if self.scheme is not None else SlidingWindowScheme()
+        rounds_policy = (
+            self.rounds_policy
+            if self.rounds_policy is not None
+            else GateRounds()
+        )
+        planner = WindowPlanner(scheme, layout, rounds_policy)
+        return ResolvedPlanningParts(
+            code=code,
+            layout=layout,
+            scheme=scheme,
+            rounds_policy=rounds_policy,
+            planner=planner,
+        )
+
+    def _validate_resolved_planning(
+        self,
+        planning: ResolvedPlanningParts,
+    ) -> None:
+        from . import protocols
+
+        supplied_planner = self.planner is not None
+        parts = (
+            ("resolved code", planning.code, protocols.CodeModel),
+            (
+                "planner.layout" if supplied_planner else "resolved layout",
+                planning.layout,
+                protocols.LayoutModel,
+            ),
+            (
+                "planner.scheme" if supplied_planner else "resolved scheme",
+                planning.scheme,
+                protocols.DecodingScheme,
+            ),
+            (
+                (
+                    "planner.rounds_policy"
+                    if supplied_planner
+                    else "resolved rounds_policy"
+                ),
+                planning.rounds_policy,
+                protocols.RoundsPolicy,
+            ),
+            ("resolved planner", planning.planner, protocols.ExecutionPlanner),
+        )
+        for name, part, protocol in parts:
+            _validate_protocol_part(name, part, protocol)
+
+        declared_code = _single_layout_code(
+            planning.layout,
+            "resolved layout",
+        )
+        if declared_code is not planning.code:
+            raise ValueError(
+                "resolved layout declared a code different from the resolved "
+                "planning/runtime code")
+        if planning.planner.scheme is not planning.scheme:
+            raise ValueError("resolved planner uses a different scheme")
+        if planning.planner.layout is not planning.layout:
+            raise ValueError("resolved planner uses a different layout")
+        if planning.planner.rounds_policy is not planning.rounds_policy:
+            raise ValueError("resolved planner uses a different rounds_policy")
+
+        if getattr(planning.code, "buffer_rounds_override", None) is None:
+            # An explicit buffer override is the expert escape hatch, including
+            # measurement-closed streams that need no trailing buffer.
+            planning.scheme.validate_buffer(planning.code)
+
+        probe = Operation(-1, "probe", (0,))
+        round_count = planning.rounds_policy.rounds_for(
+            probe,
+            planning.code,
+        )
+        if round_count < 1:
+            raise ValueError(
+                f"rounds_policy returned {round_count} (< 1)")
+
+    def _validate_cross_part_combinations(
+        self,
+        planning: ResolvedPlanningParts,
+    ) -> None:
+        from . import protocols
+
+        for name, part in (
+            ("strategy", self.strategy),
+            ("decoder", self.decoder),
+        ):
+            if part is None or not isinstance(
+                part,
+                protocols.CrossPartValidator,
+            ):
+                continue
+            _validate_protocol_part(
+                f"{name} cross-part validator",
+                part,
+                protocols.CrossPartValidator,
+            )
+            part.validate(self, planning)
+
+    @staticmethod
+    def _validate_layout_selection(
+        planning: ResolvedPlanningParts,
+        operations,
+    ) -> None:
+        for operation in operations:
+            selected_code = planning.layout.code_for_op(operation)
+            if selected_code is not planning.code:
+                raise ValueError(
+                    f"layout {planning.layout!r} operation {operation.id} "
+                    f"selected {selected_code!r}, but resolved "
+                    f"planning/runtime code is {planning.code!r}")
+
+            patch_ids = operation.patches
+            if not patch_ids:
+                patch_ids = operation.qubits
+            if not patch_ids:
+                patch_ids = (0,)
+            for patch_id in patch_ids:
+                selected_code = planning.layout.code_for_patch(patch_id)
+                if selected_code is not planning.code:
+                    raise ValueError(
+                        f"layout {planning.layout!r} patch {patch_id!r} "
+                        f"selected {selected_code!r} in "
+                        f"operation {operation.id}, but resolved "
+                        f"planning/runtime code is {planning.code!r}")
 
     # ---------------------------------------------------------------- build
 
     def build(self, verbose: bool = False) -> "World":
         """Construct and wire every component in the canonical order."""
-        self.validate()
+        planning = self._validate_configuration()
         from .policies import Eager
-        from .codes import SurfaceCodeModel  # noqa: F401 (via _resolve_code)
         from .decoders import CodeRouter
         from .engine import Engine
         from .orchestrators import ExecutionOrchestrator
         from .policies import Ignore
-        from .layouts import UniformLayout
         from .payload_store import PayloadStore
         from .decoder_manager import StrategyServicesImpl, DecoderManager
         from .chip import Chip
-        from .planner import WindowPlanner, GateRounds
         from .schedulers import EnqueueTimeDeadline, FifoScheduler
-        from .schemes import SlidingWindowScheme
         from .devices import ClockedDevice, TimingOnlyDevice
         from .switching import Baseline
         from .controllers import ModularController, LinkModel
         from .window_manager import WindowManager
         from .window_interactions import DefaultWindowInteraction
 
-        engine = Engine(verbose=verbose)
         ops = self.frontend.build() if self.frontend is not None else self.ops
         if self.frontend is not None:
             from .planner import _validate_operation_graph
@@ -224,12 +414,13 @@ class RunSpec:
                 external_blocker_ids=auxiliary_ids)
         self._apply_feedback_boundary_default(ops)
 
-        code = self._resolve_code()
-        layout = self.layout if self.layout is not None else UniformLayout(code)
-        _validate_program_order(ops, layout)
-        scheme = self.scheme if self.scheme is not None else SlidingWindowScheme()
-        rounds_policy = self.rounds_policy if self.rounds_policy is not None \
-            else GateRounds()
+        all_operations = list(ops)
+        all_operations.extend(self.decode_ops or [])
+        all_operations.extend(self.dynamic_streams or [])
+        self._validate_layout_selection(planning, all_operations)
+        _validate_program_order(ops, planning.layout)
+
+        engine = Engine(verbose=verbose)
         strategy = self.strategy if self.strategy is not None else Baseline()
         scheduler = self.scheduler if self.scheduler is not None \
             else FifoScheduler()
@@ -266,8 +457,9 @@ class RunSpec:
         store = PayloadStore(memory_model=self.memory_model) \
             if self.memory_model is not None else None
         window_manager = WindowManager(
-            engine, scheme=scheme, layout=layout, rounds_policy=rounds_policy,
-            code=code, deadline_policy=deadline_policy, links=links,
+            engine, scheme=planning.scheme, layout=planning.layout,
+            rounds_policy=planning.rounds_policy,
+            code=planning.code, deadline_policy=deadline_policy, links=links,
             orchestrator=orchestrator, boundary_policy=boundary_policy,
             window_interaction=window_interaction,
             syndrome_source=device, store=store,
@@ -290,16 +482,22 @@ class RunSpec:
         pool.on_window_decoded = window_manager.on_decode_done
         pool.on_strong_window_decoded = window_manager.on_strong_decode_done
 
-        planner = self.planner if self.planner is not None \
-            else WindowPlanner(scheme, layout, rounds_policy)
-        cluster = ClusterFacade(window_manager, pool, layout, planner, strategy,
-                                self._decode_plan_operations(ops))
+        cluster = ClusterFacade(
+            window_manager,
+            pool,
+            planning.layout,
+            planning.planner,
+            strategy,
+            self._decode_plan_operations(ops),
+        )
 
-        factory = self.factory
-        if factory is None:
-            factory = self.make_factory(engine, cluster) \
-                if self.make_factory is not None else _make_infinite(engine)
+        factory = self.make_factory(engine, cluster) \
+            if self.make_factory is not None else _make_infinite(engine)
         _validate_protocol_part("factory", factory, MagicStateFactory)
+        if factory.engine is not engine:
+            raise ValueError(
+                f"{type(factory).__name__} uses a different engine from "
+                "the RunSpec build")
         source = ClockedDevice(engine, device, controller, window_manager,
                                window_manager.rounds_for)
         round_us = self.round_us if self.round_us is not None \
@@ -307,7 +505,7 @@ class RunSpec:
         gate = Chip(
             engine, source=source, controller=controller, cluster=cluster,
             factory=factory, round_ticks=us(round_us),
-            code_distance=code.distance, idle_policy=idle_policy,
+            code_distance=planning.code.distance, idle_policy=idle_policy,
             max_idle_rounds=self.max_idle_rounds,
             gates_start_on_round_boundaries=self.gates_start_on_round_boundaries,
             frame=getattr(orchestrator, "frame", None) or PauliFrame())
@@ -321,7 +519,7 @@ class RunSpec:
         # (prepare_execution ran before _register_dynamic_streams).
         cluster.prepare(ops)
         for stream in (self.dynamic_streams or []):
-            window_manager.register_dynamic_stream(stream, code)
+            window_manager.register_dynamic_stream(stream, planning.code)
         if self.make_metrics is not None:
             metrics = self.make_metrics(engine, cluster, gate, factory)
             for index, metric in enumerate(metrics):
@@ -329,9 +527,18 @@ class RunSpec:
                     f"make_metrics result {index}", metric, Metric)
                 engine.add_metric(metric)
 
-        return World(engine=engine, ops=ops, window_manager=window_manager, pool=pool,
-                     gate=gate, orchestrator=orchestrator, factory=factory,
-                     controller=controller, cluster=cluster, code=code)
+        return World(
+            engine=engine,
+            ops=ops,
+            window_manager=window_manager,
+            pool=pool,
+            gate=gate,
+            orchestrator=orchestrator,
+            factory=factory,
+            controller=controller,
+            cluster=cluster,
+            planning=planning,
+        )
 
     def _apply_feedback_boundary_default(self, ops) -> None:
         operations = list(ops) + list(self.decode_ops or []) \
@@ -348,6 +555,15 @@ class RunSpec:
             return None
         dynamic_ids = {stream.id for stream in self.dynamic_streams}
         return [op for op in ops if op.stream_id not in dynamic_ids]
+
+
+def _single_layout_code(layout, owner_name: str):
+    codes = list(layout.codes())
+    if len(codes) != 1:
+        raise ValueError(
+            f"{owner_name} must declare exactly one planning/runtime code "
+            f"(got {len(codes)})")
+    return codes[0]
 
 
 def _validate_program_order(ops, layout) -> None:
@@ -685,7 +901,7 @@ class World:
     factory: Any
     controller: Any
     cluster: Any
-    code: Any
+    planning: ResolvedPlanningParts
 
 
 def simulate(run: RunSpec, verbose: bool = False) -> dict:

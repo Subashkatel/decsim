@@ -130,7 +130,9 @@ class MyOrchestrator:
                 for blocked_id in self.blocked.pop(op.id, [])]
 
 class MyFactory:
-    def __init__(self): self.requests = 0
+    def __init__(self, engine):
+        self.engine = engine
+        self.requests = 0
     def request(self, op_id, callback):
         self.requests += 1; callback()
     def shutdown(self):
@@ -159,15 +161,22 @@ def test_every_seam_accepts_a_from_scratch_implementation():
     from-scratch stack above (device, code, layout, scheme, rounds, decoder,
     router, scheduler, deadline policy, controller, orchestrator, factory, metric
     -- all at once), with assertions that each custom piece participated."""
-    decoder, factory, metric = MyDecoder(), MyFactory(), MyMetric()
+    decoder, metric = MyDecoder(), MyMetric()
     orchestrator = MyOrchestrator()
     router = MyRouter(decoder)
+    code = MyCode()
+    built_factories = []
+
+    def make_factory(engine, cluster):
+        factory = MyFactory(engine)
+        built_factories.append(factory)
+        return factory
+
     r = simulate(RunSpec(
             ops=_blocked_ops(),
             num_units=2,
             device=MyDevice(),
-            code=MyCode(),
-            layout=MyLayout(MyCode()),
+            layout=MyLayout(code),
             scheme=MyScheme(),
             rounds_policy=MyRounds(),
             decoder=decoder,
@@ -176,9 +185,10 @@ def test_every_seam_accepts_a_from_scratch_implementation():
             deadline_policy=MyDeadline(),
             make_controller=MyController,
             orchestrator=orchestrator,
-            factory=factory,
+            make_factory=make_factory,
             make_metrics=lambda e, cl, ch, f: [metric],
         ), verbose=False)
+    factory = built_factories[0]
     chip = r["chip"]
     assert len(chip.done_bodies) == 3          # all ops ran, including the blocked T
     assert decoder.decodes >= 3                # the custom decoder decoded every window
@@ -192,7 +202,12 @@ def test_every_seam_accepts_a_from_scratch_implementation():
 def test_planner_parameter_swaps_the_planning_algorithm():
     """planner= replaces the WindowPlanner in the standard wiring."""
     class CountingPlanner:
-        def __init__(self, inner): self.inner = inner; self.calls = 0
+        def __init__(self, inner):
+            self.inner = inner
+            self.scheme = inner.scheme
+            self.layout = inner.layout
+            self.rounds_policy = inner.rounds_policy
+            self.calls = 0
         def plan(self, ops):
             self.calls += 1
             return self.inner.plan(ops)
@@ -201,10 +216,10 @@ def test_planner_parameter_swaps_the_planning_algorithm():
         SlidingWindowScheme(), UniformLayout(code), FixedRounds(11)))
     r = simulate(RunSpec(
             ops=_blocked_ops(),
-            d=3,
-            rounds_policy=FixedRounds(11),
             planner=planner,
             decoder=PerRoundDecoder(tau_us=1.0),
         ), verbose=False)
     assert planner.calls == 1                  # OUR planner produced the plan
+    assert r["cluster"].planner is planner
+    assert r["cluster"].scheme is planner.scheme
     assert r["fully_done"] > 0

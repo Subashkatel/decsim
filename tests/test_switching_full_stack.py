@@ -72,7 +72,6 @@ def _run(threshold, d=3, rounds=9, seed=7, double_window=False, device=None):
     res = simulate(RunSpec(
               ops=[op],
               num_units=1,
-              d=d,
               rounds_policy=FixedRounds(rounds),
               code=SurfaceCodeModel(d=d),
               scheme=SlidingWindowScheme(),
@@ -134,7 +133,6 @@ def test_never_escalating_matches_weak_only():
     res_weak = simulate(RunSpec(
                    ops=[op],
                    num_units=1,
-                   d=3,
                    rounds_policy=FixedRounds(9),
                    code=SurfaceCodeModel(d=3),
                    scheme=SlidingWindowScheme(),
@@ -301,7 +299,6 @@ def test_double_window_seam_models_are_decodable_and_partition_ownership(
     result = simulate(RunSpec(
         ops=[op],
         num_units=1,
-        d=3,
         rounds_policy=FixedRounds(rounds),
         code=SurfaceCodeModel(d=3),
         scheme=SlidingWindowScheme(),

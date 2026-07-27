@@ -250,7 +250,6 @@ def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
 
     result = simulate(RunSpec(
                  frontend=frontend,
-                 code=code,
                  layout=layout,
                  num_units=2,
                  rounds_policy=FixedRounds(4),
@@ -283,7 +282,6 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
 
     result = simulate(RunSpec(
                  frontend=frontend,
-                 code=code,
                  layout=layout,
                  num_units=2,
                  rounds_policy=FixedRounds(4),

@@ -929,7 +929,7 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
         probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0), env)
     strong = _DispatchRecorder(PerRoundDecoder(F_STRONG * TAU_GEN_US), env)
     res = simulate(RunSpec(
-        ops=[_memory_op()], num_units=1, d=D, code=code,
+        ops=[_memory_op()], num_units=1, code=code,
         rounds_policy=FixedRounds(30), round_us=TAU_GEN_US,
         scheme=SlidingWindowScheme(),
         strategy=Switching(confidence_threshold=0.5, double_window=True),

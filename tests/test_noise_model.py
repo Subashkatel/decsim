@@ -140,7 +140,6 @@ def test_runs_through_full_engine():
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=D,
               rounds_policy=FixedRounds(R),
               code=SurfaceCodeModel(d=D),
               scheme=SlidingWindowScheme(),

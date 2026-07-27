@@ -77,7 +77,6 @@ def test_per_window_release_holds_only_the_live_set():
         res = simulate(RunSpec(
                   ops=[op],
                   num_units=4,
-                  d=3,
                   rounds_policy=FixedRounds(rounds),
                   round_us=1.0,
                   decoder=_Dec(),

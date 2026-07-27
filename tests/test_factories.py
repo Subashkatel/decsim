@@ -30,6 +30,89 @@ class DelayedService:
         self.engine.schedule(self.latency_ticks, on_done, label=label)
 
 
+def _seeded_single_level_factory(explicit_seed=None):
+    engine = Engine(verbose=False)
+    factory = DistillationFactory(
+        engine,
+        num_units=1,
+        cycle_ticks=1,
+        decode_service=ImmediateService(),
+        corr_rounds=0,
+        n_corr=0,
+        p_success=0.5,
+        seed=explicit_seed,
+    )
+    return engine, factory
+
+
+def _seeded_multi_level_factory(explicit_seed=None):
+    engine = Engine(verbose=False)
+    factory = MultiLevelDistillationFactory(
+        engine,
+        [DistillLevel(units=1, d=1, O=1, P=0.5)],
+        W_ticks=1,
+        M=1,
+        N=1,
+        prep_units=1,
+        prep_O=0,
+        prep_P=1.0,
+        seed=explicit_seed,
+    )
+    return engine, factory
+
+
+@pytest.mark.parametrize(
+    "build_factory",
+    [_seeded_single_level_factory, _seeded_multi_level_factory],
+)
+def test_factory_run_seed_binding_replays_and_explicit_zero_conflicts(
+    build_factory,
+):
+    _, explicit = build_factory(0)
+    with pytest.raises(ValueError, match=r"Factory.*explicit seed"):
+        explicit.reserve_run_seed(53)
+
+    runs = []
+    for _ in range(2):
+        engine, factory = build_factory()
+        reservation = factory.reserve_run_seed(53)
+        factory.commit_run_seed(reservation)
+        delivered = []
+        factory.request(0, lambda: delivered.append(engine.now))
+        engine.run()
+        runs.append((
+            delivered,
+            tuple(engine.log_lines),
+            getattr(factory, "failures", None),
+        ))
+    assert runs[0] == runs[1]
+
+
+@pytest.mark.parametrize(
+    "build_factory",
+    [_seeded_single_level_factory, _seeded_multi_level_factory],
+)
+def test_factory_direct_random_use_prevents_later_run_seed_binding(
+    build_factory,
+):
+    engine, factory = build_factory()
+    factory.request(0, lambda: None)
+    engine.run()
+
+    with pytest.raises(ValueError, match=r"Factory.*already used"):
+        factory.reserve_run_seed(53)
+
+
+@pytest.mark.parametrize(
+    "build_factory",
+    [_seeded_single_level_factory, _seeded_multi_level_factory],
+)
+def test_factory_rng_state_has_no_public_bypass(build_factory):
+    _, factory = build_factory()
+
+    assert not hasattr(factory, "rng")
+
+
 def test_continuous_requires_capacity():
     eng = Engine(verbose=False)
     with pytest.raises(ValueError):

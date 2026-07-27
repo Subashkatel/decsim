@@ -223,15 +223,21 @@ def test_one_port_switch_moves_only_that_part(slot, override):
 
 def test_strategy_switch_moves_only_the_strategy():
     """Baseline -> Switching with the router/pools held constant."""
-    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.5, seed=7)
-    shared = dict(decoder=weak,
-                  router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
-                  unit_pools={"default": 1, "strong": 1})
-    base = RunSpec(ops=_ops(), d=3, rounds_policy=FixedRounds(11),
-                   strategy=Baseline(), **shared)
-    swapped = RunSpec(ops=_ops(), d=3, rounds_policy=FixedRounds(11),
-                      strategy=Switching(confidence_threshold=0.5),
-                      **shared)
+    def make_spec(strategy):
+        weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.5)
+        return RunSpec(
+            ops=_ops(),
+            d=3,
+            rounds_policy=FixedRounds(11),
+            decoder=weak,
+            router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
+            unit_pools={"default": 1, "strong": 1},
+            strategy=strategy,
+            seed=7,
+        )
+
+    base = make_spec(Baseline())
+    swapped = make_spec(Switching(confidence_threshold=0.5))
     base.validate(), swapped.validate()
     before, after = (_resolved_types(base.build()),
                      _resolved_types(swapped.build()))

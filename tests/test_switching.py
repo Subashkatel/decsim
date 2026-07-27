@@ -55,7 +55,7 @@ def _memory_op():
 
 def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=None, metrics=None):
     weak = SampledConfidenceDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
-                                    low_confidence_probability, seed=seed)
+                                    low_confidence_probability)
     strong = PerRoundDecoder(F_STRONG * TAU_GEN_US)
     return simulate(RunSpec(
                ops=[_memory_op()],
@@ -69,6 +69,7 @@ def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=Non
                router=SwitchingRouter(weak, strong),
                unit_pools=pools or {"default": 1, "strong": 1},
                make_metrics=metrics,
+               seed=seed,
            ), verbose=False)
 
 
@@ -173,7 +174,7 @@ def test_custom_decision_rule_can_replace_the_threshold():
 def test_escalated_window_uses_strong_logical_result():
     """A low-confidence window advances with the weak boundary but finalizes with strong logic."""
     weak = SampledConfidenceDecoder(FixedLogicalDecoder(logical_value=0),
-                                    escalation_probability=1.0, seed=1)
+                                    escalation_probability=1.0)
     strong = FixedLogicalDecoder(logical_value=1)
     res = simulate(RunSpec(
               ops=[_memory_op()],
@@ -186,6 +187,7 @@ def test_escalated_window_uses_strong_logical_result():
               decoder=weak,
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
+              seed=1,
           ), verbose=False)
     cluster = res["cluster"]
     assert cluster.total_windows % 2 == 1
@@ -196,7 +198,7 @@ def test_escalated_window_uses_strong_logical_result():
 def test_parallel_strong_result_can_finish_before_weak_decision():
     """Run-both mode can store an early strong result until the weak decoder decides to switch."""
     weak = SampledConfidenceDecoder(FixedLogicalDecoder(logical_value=0, tau_us=0.05),
-                                    escalation_probability=1.0, seed=1)
+                                    escalation_probability=1.0)
     strong = FixedLogicalDecoder(logical_value=1, tau_us=0.0)
     res = simulate(RunSpec(
               ops=[_memory_op()],
@@ -209,6 +211,7 @@ def test_parallel_strong_result_can_finish_before_weak_decision():
               decoder=weak,
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
+              seed=1,
           ), verbose=False)
     assert res["cluster"].op_results[0] == (1,)
 
@@ -216,7 +219,7 @@ def test_parallel_strong_result_can_finish_before_weak_decision():
 def test_switching_requires_a_router_to_reach_the_strong_decoder():
     """Switching must not silently route strong jobs back to the weak decoder."""
     weak = SampledConfidenceDecoder(FixedLogicalDecoder(logical_value=0),
-                                    escalation_probability=1.0, seed=1)
+                                    escalation_probability=1.0)
     with pytest.raises(RuntimeError, match="SwitchingRouter"):
         simulate(RunSpec(
             ops=[_memory_op()],
@@ -228,13 +231,14 @@ def test_switching_requires_a_router_to_reach_the_strong_decoder():
             strategy=Switching(confidence_threshold=0.5),
             decoder=weak,
             unit_pools={"default": 1, "strong": 1},
+            seed=1,
         ), verbose=False)
 
 
 def test_strong_redecode_receives_two_sided_context_payloads():
     """The strong job is charged and fed commit + leading buffer + trailing buffer."""
     weak = SampledConfidenceDecoder(RecordingLogicalDecoder(logical_value=0),
-                                    escalation_probability=1.0, seed=1)
+                                    escalation_probability=1.0)
     strong = RecordingLogicalDecoder(logical_value=1)
     simulate(RunSpec(
         ops=[_memory_op()],
@@ -247,6 +251,7 @@ def test_strong_redecode_receives_two_sided_context_payloads():
         decoder=weak,
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
+        seed=1,
     ), verbose=False)
 
     middle_job = next(job for job in strong.jobs if job.window_id == 1)
@@ -272,7 +277,7 @@ def test_stim_strong_redecode_receives_two_sided_window_model():
         before_round_data_depolarization=0.001)
     op = Operation(0, "memory", (0,), clifford=True, circuit=circuit)
     weak_inner = RecordingLogicalDecoder(logical_value=0)
-    weak = SampledConfidenceDecoder(weak_inner, escalation_probability=1.0, seed=1)
+    weak = SampledConfidenceDecoder(weak_inner, escalation_probability=1.0)
     strong = RecordingLogicalDecoder(logical_value=1)
 
     simulate(RunSpec(
@@ -283,10 +288,11 @@ def test_stim_strong_redecode_receives_two_sided_window_model():
         round_us=TAU_GEN_US,
         scheme=SlidingWindowScheme(),
         strategy=Switching(confidence_threshold=0.5),
-        device=StimDevice(seed=3),
+        device=StimDevice(),
         decoder=weak,
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
+        seed=3,
     ), verbose=False)
 
     weak_middle = next(job for job in weak_inner.jobs if job.window_id == 1)
@@ -348,7 +354,7 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
     rounds, rate = 400, 0.05
     naive_decoder = SwitchingDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
                                      PerRoundDecoder(F_STRONG * TAU_GEN_US),
-                                     gamma_switch=rate, seed=1)
+                                     gamma_switch=rate)
     naive = simulate(RunSpec(
                 ops=[_memory_op()],
                 num_units=1,
@@ -358,6 +364,7 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
                 scheme=SlidingWindowScheme(),
                 decoder=naive_decoder,
                 make_metrics=lambda e, c, ch, fa: [DecodeBacklog(c)],
+                seed=1,
             ), verbose=False)
     double = _switch_run(Switching(confidence_threshold=0.5), rate, rounds,
                          metrics=lambda e, c, ch, fa: [DecodeBacklog(c)])
@@ -434,7 +441,7 @@ def test_decode_backlog_trace_tracks_the_rising_backlog():
         return [m]
     naive_decoder = SwitchingDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
                                      PerRoundDecoder(F_STRONG * TAU_GEN_US),
-                                     gamma_switch=0.05, seed=1)
+                                     gamma_switch=0.05)
     simulate(RunSpec(
         ops=[_memory_op()],
         num_units=1,
@@ -444,6 +451,7 @@ def test_decode_backlog_trace_tracks_the_rising_backlog():
         scheme=SlidingWindowScheme(),
         decoder=naive_decoder,
         make_metrics=metrics,
+        seed=1,
     ), verbose=False)
     m = captured["m"]
     rows = m.rows()

@@ -40,7 +40,7 @@ def _switch_run(switching, low_confidence_probability, *, rounds=60, tau_weak=0.
     keep_weak_result is controllable) routed against a slow PerRoundDecoder strong by a
     SwitchingRouter, with separate "default"/"strong" unit pools."""
     weak = SampledConfidenceDecoder(PerRoundDecoder(tau_weak * TAU),
-                                    low_confidence_probability, seed=seed)
+                                    low_confidence_probability)
     strong = PerRoundDecoder(tau_strong * TAU)
     return simulate(RunSpec(
                ops=[_memory_op()],
@@ -53,6 +53,7 @@ def _switch_run(switching, low_confidence_probability, *, rounds=60, tau_weak=0.
                router=SwitchingRouter(weak, strong),
                unit_pools=pools or {"default": 1, "strong": 1},
                make_metrics=make_metrics,
+               seed=seed,
            ), verbose=False)
 
 

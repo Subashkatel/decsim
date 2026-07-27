@@ -896,7 +896,7 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
             UnweightedPyMatchingDecoder(_Latency(1)), 0.0,
             probability_for=lambda job: 1.0 if job.window_id == 1 else 0.0))
         strong = _Recording(PyMatchingDecoder(_Latency(10_000_000)))
-        device = StimDevice(seed=seed)
+        device = StimDevice()
         result = simulate(RunSpec(
             ops=[operation],
             d=3,
@@ -908,6 +908,7 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
             decoder=weak,
             router=SwitchingRouter(weak, strong),
             unit_pools={"default": 1, "strong": 1},
+            seed=seed,
         ))
         return result, device, weak, strong
 

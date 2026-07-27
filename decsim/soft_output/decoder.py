@@ -4,7 +4,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..adapters.window_decode_results import payload_syndrome
-from ..message import DecodeJob, DecodeResult
+from ..message import (
+    DecodeJob,
+    DecodeResult,
+    RunSeedChild,
+    RunSeedPathSegment,
+)
 
 if TYPE_CHECKING:
     from ..protocols import Decoder
@@ -17,6 +22,19 @@ class SoftOutputDecoder:
         self.base = base
         self.metric_cls = metric_cls
         self._metrics: dict = {}
+
+    def run_seed_children(self):
+        """Expose the base decoder and confidence metric constructor."""
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "base"),),
+                self.base,
+            ),
+            RunSeedChild(
+                (RunSeedPathSegment("field", "metric_cls"),),
+                self.metric_cls,
+            ),
+        )
 
     def latency(self, job: DecodeJob) -> int:
         """Timing is the base decoder's; the soft output adds no modelled latency."""

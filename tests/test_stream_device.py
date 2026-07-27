@@ -117,6 +117,95 @@ def test_sample_substreams_distinguish_identity_types():
         device._sample_seed(("stream", 1))
 
 
+@pytest.mark.parametrize("explicit_seed", [0, 7])
+def test_run_seed_rejects_an_explicit_stim_seed_including_zero(explicit_seed):
+    device = StimDevice(seed=explicit_seed)
+
+    with pytest.raises(
+        ValueError,
+        match=r"StimDevice.*explicit seed.*run root",
+    ):
+        device.reserve_run_seed(23)
+
+
+def test_stim_run_seed_reservation_cancels_or_commits_without_a_draw():
+    cancelled_device = StimDevice()
+    cancelled = cancelled_device.reserve_run_seed(19)
+    assert (cancelled.proposed_seed_source, cancelled.proposed_seed) == ("derived", 19)
+    cancelled_device.cancel_run_seed(cancelled)
+
+    committed_device = StimDevice()
+    committed = committed_device.reserve_run_seed(19)
+    committed_device.commit_run_seed(committed)
+    with pytest.raises(ValueError, match=r"StimDevice.*already claimed"):
+        committed_device.reserve_run_seed(19)
+
+    operation = Operation(
+        5,
+        "target",
+        (0,),
+        circuit=NoiseModel.circuit_level(0.01).circuit(
+            distance=D,
+            rounds=R1,
+        ),
+    )
+    committed_device.begin_operation(operation)
+
+    reference = StimDevice(seed=19)
+    reference.begin_operation(operation)
+    assert np.array_equal(
+        committed_device._dets[operation.id],
+        reference._dets[operation.id],
+    )
+    assert np.array_equal(
+        committed_device._truth[operation.id],
+        reference._truth[operation.id],
+    )
+
+
+def test_stim_direct_draw_prevents_later_run_seed_binding_without_reset():
+    operation = Operation(
+        6,
+        "used",
+        (0,),
+        circuit=NoiseModel.circuit_level(0.01).circuit(
+            distance=D,
+            rounds=R1,
+        ),
+    )
+    device = StimDevice(seed=None)
+    device.begin_operation(operation)
+    detectors_before = np.array(device._dets[operation.id], copy=True)
+    truth_before = np.array(device._truth[operation.id], copy=True)
+
+    with pytest.raises(ValueError, match=r"StimDevice.*already used"):
+        device.reserve_run_seed(23)
+
+    assert np.array_equal(device._dets[operation.id], detectors_before)
+    assert np.array_equal(device._truth[operation.id], truth_before)
+
+
+@pytest.mark.parametrize(
+    ("explicit_seed", "expected_source", "expected_seed"),
+    [
+        (None, "entropy", None),
+        (0, "explicit_local", 0),
+    ],
+)
+def test_none_run_root_preserves_stim_entropy_or_explicit_local_seed(
+    explicit_seed,
+    expected_source,
+    expected_seed,
+):
+    device = StimDevice(seed=explicit_seed)
+    reservation = device.reserve_run_seed(None)
+
+    assert (reservation.proposed_seed_source, reservation.proposed_seed) == (
+        expected_source,
+        expected_seed,
+    )
+
+
 def test_invalid_identity_is_rejected_before_cached_sampler_lookup():
     """A bool must not alias an already-cached integer identity."""
     circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)

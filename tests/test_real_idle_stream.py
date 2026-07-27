@@ -66,10 +66,10 @@ def test_continuous_idle_decode_equals_global_per_shot():
     circ, segments, stream_op, rounds_map = _setup()
     gm = pymatching.Matching.from_detector_error_model(
         circ.detector_error_model(decompose_errors=True))
-    device = StimDevice(seed=17)
     agree = eng_err = glob_err = 0
     shots = 250
-    for _ in range(shots):
+    for shot in range(shots):
+        device = StimDevice()
         res = simulate(RunSpec(
                   ops=segments,
                   decode_ops=[stream_op],
@@ -79,6 +79,7 @@ def test_continuous_idle_decode_equals_global_per_shot():
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),
                   decoder=PyMatchingDecoder(_ZeroLatency()),
+                  seed=17 + shot,
               ), verbose=False)
         pe = res["cluster"].op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
@@ -102,10 +103,10 @@ def test_idle_stretch_decoded_by_runtime_builder_equals_global():
     circ, segments, stream_op, rounds_map = _setup()
     gm = pymatching.Matching.from_detector_error_model(
         circ.detector_error_model(decompose_errors=True))
-    device = StimDevice(seed=21)
     agree = 0
     shots = 200
-    for _ in range(shots):
+    for shot in range(shots):
+        device = StimDevice()
         res = simulate(RunSpec(
                   ops=segments,
                   dynamic_streams=[stream_op],
@@ -115,6 +116,7 @@ def test_idle_stretch_decoded_by_runtime_builder_equals_global():
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),
                   decoder=PyMatchingDecoder(_ZeroLatency()),
+                  seed=21 + shot,
               ), verbose=False)
         pe = res["cluster"].op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
@@ -129,12 +131,13 @@ def test_a_window_commits_inside_the_idle_stretch():
     res = simulate(RunSpec(
               ops=segments,
               decode_ops=[stream_op],
-              device=StimDevice(seed=3),
+              device=StimDevice(),
               num_units=4,
               rounds_policy=PerOpRounds(rounds_map),
               code=SurfaceCodeModel(d=D),
               scheme=SlidingWindowScheme(),
               decoder=PyMatchingDecoder(_ZeroLatency()),
+              seed=3,
           ), verbose=False)
     cluster = res["cluster"]
     lo, hi = OP_A + 1, OP_A + IDLE

@@ -45,7 +45,7 @@ def _memory_ops(n=1):
     return CircuitFrontend(ops).build()
 
 
-def _run(ops, emit, device=None):
+def _run(ops, emit, device=None, seed=0):
     dec = DefectEmittingDecoder(emit)
     simulate(RunSpec(
         ops=ops,
@@ -54,6 +54,7 @@ def _run(ops, emit, device=None):
         rounds_policy=FixedRounds(11),
         decoder=dec,
         device=device,
+        seed=seed,
     ), verbose=False)
     return dec.seen
 
@@ -61,9 +62,9 @@ def _run(ops, emit, device=None):
 def test_artificial_defects_reach_next_window_same_op():
     # sequential scheme, one op: W_k commits rounds 3k+1..3k+3; W_{k-1}'s defects land
     # exactly on W_k's first round (3k+1).
-    device = lambda: SyndromeBitDevice(SurfaceCodeModel(d=3), seed=1)
-    base = _run(_memory_ops(), emit=False, device=device())
-    flipped = _run(_memory_ops(), emit=True, device=device())
+    device = lambda: SyndromeBitDevice(SurfaceCodeModel(d=3))
+    base = _run(_memory_ops(), emit=False, device=device(), seed=1)
+    flipped = _run(_memory_ops(), emit=True, device=device(), seed=1)
     assert set(base) == set(flipped)
     changed = []
     for key, bits in base.items():
@@ -79,10 +80,10 @@ def test_artificial_defects_reach_next_window_same_op():
 def test_artificial_defects_cross_op_shift():
     # two chained ops, 11 rounds each: op0's last window commits up to round 11 and emits
     # defects at op0-local round 12 -> shifted to op1-local round 1 on op1's first window.
-    device = SyndromeBitDevice(SurfaceCodeModel(d=3), seed=2)
-    base = _run(_memory_ops(2), emit=False, device=device)
-    device = SyndromeBitDevice(SurfaceCodeModel(d=3), seed=2)
-    flipped = _run(_memory_ops(2), emit=True, device=device)
+    device = SyndromeBitDevice(SurfaceCodeModel(d=3))
+    base = _run(_memory_ops(2), emit=False, device=device, seed=2)
+    device = SyndromeBitDevice(SurfaceCodeModel(d=3))
+    flipped = _run(_memory_ops(2), emit=True, device=device, seed=2)
     key = next(k for k in base
                if k[0] == 1 and k[1] == 0 and k[2] == 1 and k[3] == 1)  # op1 W0, round 1
     assert flipped[key] == tuple(b ^ m for b, m in zip(base[key], MASK))
@@ -122,7 +123,8 @@ def test_per_patch_device_end_to_end():
         d=3,
         rounds_policy=FixedRounds(11),
         decoder=dec,
-        device=SyndromeBitDevice(SurfaceCodeModel(d=3), seed=3, per_patch=True),
+        device=SyndromeBitDevice(SurfaceCodeModel(d=3), per_patch=True),
+        seed=3,
     ), verbose=False)
     w0_rounds = {(r, p) for (_, k, _, r, p) in dec.seen if k == 0}
     assert {(r, p) for r in range(1, 7) for p in (0, 1)} <= w0_rounds

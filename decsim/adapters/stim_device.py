@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import hashlib
 from numbers import Integral
+import threading
 from typing import Callable, Optional
 
-from ..message import Operation, SyndromePayload
+from ..message import (
+    Operation,
+    RunSeedChild,
+    RunSeedPathSegment,
+    RunSeedReservation,
+    SyndromePayload,
+)
 
 
 class StimDevice:
@@ -19,6 +26,8 @@ class StimDevice:
     stream id to be an exact built-in ``int`` or ``str``. Unsupported seeded
     identities raise before sampler-cache or stream-alias lookup.
     """
+
+    operation_circuit_scope = "per_operation"
 
     def __init__(self, seed: Optional[Integral] = None,
                  rounds_for: Optional[Callable[[Operation], int]] = None,
@@ -33,7 +42,12 @@ class StimDevice:
         See the class contract for the root-seed domain and the conditional
         seeded identity restriction.
         """
+        self._explicit_seed = seed
         self._seed = seed
+        self._run_seed_lock = threading.Lock()
+        self._pending_run_seed = None
+        self._run_seed_claimed = False
+        self._stochastic_use_started = False
         self._rounds_for = rounds_for
         self._detector_rounds_override = {
             key: dict(rounds_map)
@@ -43,6 +57,97 @@ class StimDevice:
         self._truth: dict = {}
         self._by_round: dict = {}
         self._stream_models: dict = {}
+
+    def run_seed_children(self):
+        """Expose the optional callback that resolves operation rounds."""
+        if self._rounds_for is None:
+            return ()
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "rounds_for"),),
+                self._rounds_for,
+            ),
+        )
+
+    def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
+        """Prepare a run-root binding without changing active sampling state."""
+        if seed is not None and (
+            type(seed) is not int or not 0 <= seed < (1 << 64)
+        ):
+            raise TypeError(
+                "StimDevice run root must be an unsigned 64-bit built-in "
+                f"integer or None; got {seed!r}"
+            )
+        with self._run_seed_lock:
+            if self._stochastic_use_started:
+                raise ValueError(
+                    "StimDevice was already used and cannot be rebound to a "
+                    "run root; construct a fresh device"
+                )
+            if self._run_seed_claimed:
+                raise ValueError(
+                    "StimDevice is already claimed by a built run"
+                )
+            if self._pending_run_seed is not None:
+                raise ValueError(
+                    "StimDevice already has a pending run-seed reservation"
+                )
+            if seed is not None and self._explicit_seed is not None:
+                raise ValueError(
+                    "StimDevice has an explicit seed that conflicts with the "
+                    f"numeric run root {seed}; move the seed to RunSpec"
+                )
+
+            if seed is not None:
+                seed_source = "derived"
+                effective_seed = seed
+            elif self._explicit_seed is not None:
+                seed_source = "explicit_local"
+                effective_seed = self._validated_root_seed()
+            else:
+                seed_source = "entropy"
+                effective_seed = None
+
+            prepared_state = (
+                effective_seed,
+                {},
+                {},
+                {},
+                {},
+                {},
+            )
+            reservation = RunSeedReservation(
+                proposed_seed_source=seed_source,
+                proposed_seed=effective_seed,
+                prepared_state=prepared_state,
+            )
+            self._pending_run_seed = reservation
+            return reservation
+
+    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
+        """Release only the matching reversible run-seed reservation."""
+        with self._run_seed_lock:
+            if self._pending_run_seed is reservation:
+                self._pending_run_seed = None
+
+    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
+        """Install one prepared component seed after the root owns all leaves."""
+        with self._run_seed_lock:
+            if self._pending_run_seed is not reservation:
+                raise ValueError(
+                    "StimDevice can commit only its exact pending run-seed "
+                    "reservation"
+                )
+            (
+                self._seed,
+                self._samplers,
+                self._dets,
+                self._truth,
+                self._by_round,
+                self._stream_models,
+            ) = reservation.prepared_state
+            self._pending_run_seed = None
+            self._run_seed_claimed = True
 
     @staticmethod
     def _key(op: Operation):
@@ -107,6 +212,13 @@ class StimDevice:
                 sample_seed = self._sample_seed(key)
                 sampler = op.circuit.compile_detector_sampler(seed=sample_seed)
             self._samplers[key] = sampler
+        with self._run_seed_lock:
+            if self._pending_run_seed is not None:
+                raise RuntimeError(
+                    "StimDevice cannot sample while a run-seed reservation "
+                    "is pending"
+                )
+            self._stochastic_use_started = True
         dets, obs = sampler.sample(shots=1, separate_observables=True)
         self._dets[key] = dets[0]
         self._truth[key] = obs[0]

@@ -14,12 +14,17 @@ GateRounds + InfiniteFactory.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import inspect
+from numbers import Integral
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .message import (
     IntrinsicMeasurement,
     Operation,
+    RunSeedChild,
+    RunSeedPathSegment,
+    RunSeedReservation,
     is_stable_identity,
     same_stable_identity,
 )
@@ -36,6 +41,25 @@ if TYPE_CHECKING:
     )
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
+RUN_SEED_NAMESPACE = b"decsim.run-seed.v1"
+
+
+def _derive_run_component_seed(
+    root_seed: int,
+    component_path: tuple[RunSeedPathSegment, ...],
+) -> int:
+    """Derive one stable unsigned-64-bit component seed."""
+    encoded_path = b"".join(
+        segment.canonical_bytes()
+        for segment in component_path
+    )
+    digest = hashlib.blake2b(
+        RUN_SEED_NAMESPACE
+        + root_seed.to_bytes(8, "big")
+        + encoded_path,
+        digest_size=8,
+    ).digest()
+    return int.from_bytes(digest, "big")
 
 
 @dataclass(frozen=True)
@@ -47,6 +71,15 @@ class ResolvedPlanningParts:
     scheme: "DecodingScheme"
     rounds_policy: "RoundsPolicy"
     planner: "ExecutionPlanner"
+
+
+@dataclass(frozen=True)
+class _RunSeedPlanEntry:
+    """One canonical stochastic leaf in a frozen run component graph."""
+
+    component_path: tuple[RunSeedPathSegment, ...]
+    component: Any
+    derived_seed: Optional[int]
 
 
 @dataclass
@@ -102,7 +135,12 @@ class RunSpec:
     make_controller: Optional[Callable] = None  # (engine) -> Controller (port 14)
     make_factory: Optional[Callable] = None   # (engine, cluster) -> factory
     make_metrics: Optional[Callable] = None   # (engine, cluster, gate, factory)
-    seed: int = 0
+    seed: Optional[Integral] = 0
+    _build_state: str = field(
+        default="unstarted",
+        init=False,
+        repr=False,
+    )
 
     # ------------------------------------------------------------- validate
 
@@ -116,6 +154,7 @@ class RunSpec:
 
     def _validate_configuration(self) -> ResolvedPlanningParts:
         """Validate configuration-only state and resolve planning once."""
+        self._validated_root_seed()
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
         self._validate_supplied_parts()
@@ -152,6 +191,23 @@ class RunSpec:
         self._validate_resolved_planning(planning)
         self._validate_cross_part_combinations(planning)
         return planning
+
+    def _validated_root_seed(self) -> Optional[int]:
+        """Return the run root under the unsigned 64-bit seed contract."""
+        if self.seed is None:
+            return None
+        if type(self.seed) is bool or not isinstance(self.seed, Integral):
+            raise TypeError(
+                "seed must be a 64-bit unsigned integer or None; "
+                f"got {self.seed!r}"
+            )
+        root_seed = int(self.seed)
+        if not 0 <= root_seed < (1 << 64):
+            raise ValueError(
+                "seed must be in [0, 2**64); "
+                f"got {self.seed!r}"
+            )
+        return root_seed
 
     def _validate_supplied_parts(self) -> None:
         """Validate every externally supplied part against its public port."""
@@ -394,6 +450,22 @@ class RunSpec:
     # ---------------------------------------------------------------- build
 
     def build(self, verbose: bool = False) -> "World":
+        """Construct one runtime graph and bind every declared RNG owner."""
+        if self._build_state != "unstarted":
+            raise RuntimeError(
+                f"RunSpec build is already {self._build_state}; "
+                "construct a fresh RunSpec and runtime graph"
+            )
+        self._build_state = "committing"
+        try:
+            world = self._build_once(verbose=verbose)
+        except BaseException:
+            self._build_state = "invalid"
+            raise
+        self._build_state = "ready"
+        return world
+
+    def _build_once(self, verbose: bool = False) -> "World":
         """Construct and wire every component in the canonical order."""
         planning = self._validate_configuration()
         from .policies import Eager
@@ -429,7 +501,7 @@ class RunSpec:
         self._validate_layout_selection(planning, all_operations)
         _validate_program_order(ops, planning.layout)
 
-        engine = Engine(verbose=verbose)
+        engine = Engine(verbose=verbose, construction_guarded=True)
         strategy = self.strategy if self.strategy is not None else Baseline()
         scheduler = self.scheduler if self.scheduler is not None \
             else FifoScheduler()
@@ -519,6 +591,47 @@ class RunSpec:
             gates_start_on_round_boundaries=self.gates_start_on_round_boundaries,
             frame=getattr(orchestrator, "frame", None) or PauliFrame())
 
+        metrics = []
+        if self.make_metrics is not None:
+            metrics = self.make_metrics(engine, cluster, gate, factory)
+            if type(metrics) is not list:
+                raise TypeError("make_metrics must return a list")
+            metric_names = set()
+            for index, metric in enumerate(metrics):
+                _validate_protocol_part(
+                    f"make_metrics result {index}", metric, Metric)
+                if type(metric.name) is not str or not metric.name:
+                    raise TypeError(
+                        f"make_metrics result {index} name must be an exact "
+                        "nonempty built-in str"
+                    )
+                if metric.name in metric_names:
+                    raise ValueError(
+                        f"duplicate metric name {metric.name!r}"
+                    )
+                metric_names.add(metric.name)
+
+        seed_roots = self._run_seed_roots(
+            device=device,
+            router=router,
+            factory=factory,
+            strategy=strategy,
+            scheduler=scheduler,
+            deadline_policy=deadline_policy,
+            boundary_policy=boundary_policy,
+            window_interaction=window_interaction,
+            idle_policy=idle_policy,
+            orchestrator=orchestrator,
+            controller=controller,
+            links=links,
+            metrics=metrics,
+        )
+        seed_plan = _materialize_run_seed_plan(
+            seed_roots,
+            self._validated_root_seed(),
+        )
+        _bind_run_seed_plan(seed_plan)
+
         orchestrator.connect(controller, gate.on_decision)
         window_manager.on_workload_complete = factory.shutdown
         for op in ops:
@@ -529,12 +642,9 @@ class RunSpec:
         cluster.prepare(ops)
         for stream in (self.dynamic_streams or []):
             window_manager.register_dynamic_stream(stream, planning.code)
-        if self.make_metrics is not None:
-            metrics = self.make_metrics(engine, cluster, gate, factory)
-            for index, metric in enumerate(metrics):
-                _validate_protocol_part(
-                    f"make_metrics result {index}", metric, Metric)
-                engine.add_metric(metric)
+        for metric in metrics:
+            engine.add_metric(metric)
+        engine._finish_construction()
 
         return World(
             engine=engine,
@@ -548,6 +658,64 @@ class RunSpec:
             cluster=cluster,
             planning=planning,
         )
+
+    def _run_seed_roots(
+        self,
+        *,
+        device,
+        router,
+        factory,
+        strategy,
+        scheduler,
+        deadline_policy,
+        boundary_policy,
+        window_interaction,
+        idle_policy,
+        orchestrator,
+        controller,
+        links,
+        metrics,
+    ):
+        """Return the complete runtime root set under fixed semantic paths."""
+        field_segment = lambda name: RunSeedPathSegment("field", name)
+        roots = [
+            ((field_segment("device"),), device),
+            ((field_segment("decoder_router"),), router),
+            ((field_segment("magic_state_factory"),), factory),
+            ((field_segment("strategy"),), strategy),
+            ((field_segment("scheduler"),), scheduler),
+            ((field_segment("deadline_policy"),), deadline_policy),
+            ((field_segment("boundary_policy"),), boundary_policy),
+            ((field_segment("window_interaction"),), window_interaction),
+            ((field_segment("idle_policy"),), idle_policy),
+            ((field_segment("orchestrator"),), orchestrator),
+            ((field_segment("controller"),), controller),
+        ]
+        if self.memory_model is not None:
+            roots.append(
+                ((field_segment("memory_model"),), self.memory_model)
+            )
+        for link_name in ("qc", "cd", "dd", "do", "oc", "cq", "ws"):
+            roots.append(
+                (
+                    (
+                        field_segment("controller_links"),
+                        field_segment(link_name),
+                    ),
+                    getattr(links, link_name),
+                )
+            )
+        for metric in metrics:
+            roots.append(
+                (
+                    (
+                        field_segment("metrics"),
+                        RunSeedPathSegment("string_key", metric.name),
+                    ),
+                    metric,
+                )
+            )
+        return tuple(roots)
 
     def _apply_feedback_boundary_default(self, ops) -> None:
         operations = list(ops) + list(self.decode_ops or []) \
@@ -613,6 +781,154 @@ class RunSpec:
             return None
         dynamic_ids = {stream.id for stream in self.dynamic_streams}
         return [op for op in ops if op.stream_id not in dynamic_ids]
+
+
+def _materialize_run_seed_plan(
+    roots,
+    root_seed: Optional[int],
+) -> tuple[_RunSeedPlanEntry, ...]:
+    """Freeze all canonical consumers reachable through the seed graph."""
+    from .protocols import RunSeedComposite, RunSeedConsumer
+
+    canonical_paths: dict[int, tuple[RunSeedPathSegment, ...]] = {}
+    active_ids: set[int] = set()
+    plan = []
+
+    def walk(component_path, component) -> None:
+        component_id = id(component)
+        if component_id in active_ids:
+            first_path = canonical_paths[component_id]
+            raise ValueError(
+                "run-seed component cycle from "
+                f"{_render_run_seed_path(component_path)} to "
+                f"{_render_run_seed_path(first_path)}"
+            )
+        if component_id in canonical_paths:
+            return
+
+        canonical_paths[component_id] = component_path
+        active_ids.add(component_id)
+        try:
+            if isinstance(component, RunSeedConsumer):
+                derived_seed = (
+                    None
+                    if root_seed is None
+                    else _derive_run_component_seed(root_seed, component_path)
+                )
+                plan.append(
+                    _RunSeedPlanEntry(
+                        component_path=component_path,
+                        component=component,
+                        derived_seed=derived_seed,
+                    )
+                )
+
+            if not isinstance(component, RunSeedComposite):
+                return
+            children = tuple(component.run_seed_children())
+            canonical_children = []
+            seen_relative_paths = set()
+            for child in children:
+                if type(child) is not RunSeedChild:
+                    raise TypeError(
+                        f"{type(component).__name__}.run_seed_children() "
+                        "must yield exact RunSeedChild values"
+                    )
+                encoded_path = b"".join(
+                    segment.canonical_bytes()
+                    for segment in child.relative_path
+                )
+                if encoded_path in seen_relative_paths:
+                    raise ValueError(
+                        "duplicate run-seed child path beneath "
+                        f"{_render_run_seed_path(component_path)}"
+                    )
+                seen_relative_paths.add(encoded_path)
+                canonical_children.append((encoded_path, child))
+            canonical_children.sort(key=lambda item: item[0])
+            for _, child in canonical_children:
+                walk(component_path + child.relative_path, child.child)
+        finally:
+            active_ids.remove(component_id)
+
+    canonical_roots = []
+    seen_root_paths = set()
+    for component_path, component in roots:
+        encoded_path = b"".join(
+            segment.canonical_bytes()
+            for segment in component_path
+        )
+        if encoded_path in seen_root_paths:
+            raise ValueError(
+                f"duplicate run-seed root path "
+                f"{_render_run_seed_path(component_path)}"
+            )
+        seen_root_paths.add(encoded_path)
+        canonical_roots.append((encoded_path, component_path, component))
+    canonical_roots.sort(key=lambda item: item[0])
+    for _, component_path, component in canonical_roots:
+        walk(component_path, component)
+    return tuple(plan)
+
+
+def _bind_run_seed_plan(
+    plan: tuple[_RunSeedPlanEntry, ...],
+) -> tuple[RunSeedReservation, ...]:
+    """Reserve every leaf, cancel on error, then perform total commits."""
+    acquired = []
+    try:
+        for entry in plan:
+            reservation = entry.component.reserve_run_seed(
+                entry.derived_seed,
+            )
+            if type(reservation) is not RunSeedReservation:
+                raise TypeError(
+                    f"{type(entry.component).__name__}.reserve_run_seed() "
+                    "must return an exact RunSeedReservation"
+                )
+            if entry.derived_seed is not None and (
+                reservation.proposed_seed_source != "derived"
+                or reservation.proposed_seed != entry.derived_seed
+            ):
+                raise ValueError(
+                    f"{type(entry.component).__name__}.reserve_run_seed() "
+                    "returned metadata that does not match the derived "
+                    f"component seed at "
+                    f"{_render_run_seed_path(entry.component_path)}"
+                )
+            if entry.derived_seed is None and (
+                reservation.proposed_seed_source
+                not in ("explicit_local", "entropy")
+            ):
+                raise ValueError(
+                    f"{type(entry.component).__name__}.reserve_run_seed() "
+                    "must report explicit_local or entropy under a None "
+                    "run root"
+                )
+            acquired.append((entry, reservation))
+    except BaseException:
+        for entry, reservation in reversed(acquired):
+            entry.component.cancel_run_seed(reservation)
+        raise
+
+    for entry, reservation in acquired:
+        entry.component.commit_run_seed(reservation)
+    return tuple(reservation for _, reservation in acquired)
+
+
+def _render_run_seed_path(
+    component_path: tuple[RunSeedPathSegment, ...],
+) -> str:
+    """Render typed seed paths only for diagnostics, never for hashing."""
+    parts = []
+    for segment in component_path:
+        if segment.kind == "none_key":
+            parts.append("[None]")
+        elif segment.kind == "string_key":
+            parts.append(f"[{segment.value!r}]")
+        else:
+            parts.append(segment.value)
+    return ".".join(parts)
 
 
 def _single_layout_code(layout, owner_name: str):

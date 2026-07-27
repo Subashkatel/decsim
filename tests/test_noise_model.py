@@ -143,7 +143,8 @@ def test_runs_through_full_engine():
               rounds_policy=FixedRounds(R),
               code=SurfaceCodeModel(d=D),
               scheme=SlidingWindowScheme(),
-              device=StimDevice(seed=1),
+              device=StimDevice(),
               decoder=PyMatchingDecoder(_ZeroLatency()),
+              seed=1,
           ), verbose=False)
     assert 1 in res["cluster"].op_results        # produced a real logical value

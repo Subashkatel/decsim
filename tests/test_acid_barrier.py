@@ -34,12 +34,12 @@ def _chain():
 
 
 def _run_chain(p_escalate, seed, **overrides):
-    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), p_escalate, seed=seed)
+    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), p_escalate)
     return simulate(RunSpec(
         ops=_chain(), d=3, rounds_policy=FixedRounds(11),
         strategy=Switching(confidence_threshold=0.5),
         decoder=weak, router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
-        unit_pools={"default": 1, "strong": 1}, **overrides))
+        unit_pools={"default": 1, "strong": 1}, seed=seed, **overrides))
 
 
 def _stalls(res):

@@ -12,6 +12,7 @@ import inspect
 import math
 from typing import Optional
 
+from .message import RunSeedChild, RunSeedPathSegment
 from .protocols import Directive, OutcomeDirective, Submission
 
 
@@ -111,6 +112,17 @@ class Switching:
         self.weak_keepup_ratio = weak_keepup_ratio
         self.bulk_strong = bulk_strong
         self.double_window = double_window
+
+    def run_seed_children(self):
+        """Expose the optional register that selects confidence thresholds."""
+        if self.threshold_register is None:
+            return ()
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "threshold_register"),),
+                self.threshold_register,
+            ),
+        )
 
     # ------------------------------------------------------------ the hooks
 

@@ -62,14 +62,15 @@ def test_metric_numbers_feedback_circuit():
 
 
 def test_metric_numbers_switching_pools():
-    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.6, seed=SEED)
+    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.6)
     strong = PerRoundDecoder(3.0)
     res = simulate(RunSpec(ops=cnot_plus_two_t_circuit(),
                            rounds_policy=FixedRounds(11), d=3, decoder=weak,
                            router=SwitchingRouter(weak, strong),
                            unit_pools={"default": 1, "strong": 1},
                            strategy=Switching(confidence_threshold=0.5),
-                           make_metrics=_switch_metrics))
+                           make_metrics=_switch_metrics,
+                           seed=SEED))
     assert res["metrics"]["strong_backlog"]["peak_jobs"] >= 1
 
 
@@ -113,14 +114,15 @@ def test_backlog_window_truth_strong_views_populated_by_real_run():
     def with_strong(engine, cluster, chip, factory):
         return [StrongDecoderBacklog(cluster)]
 
-    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.6, seed=SEED)
+    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.6)
     res = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), d=3,
                            rounds_policy=FixedRounds(11),
                            strategy=Switching(confidence_threshold=0.5),
                            decoder=weak,
                            router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
                            unit_pools={"default": 1, "strong": 1},
-                           make_metrics=with_strong))
+                           make_metrics=with_strong,
+                           seed=SEED))
     cluster = res["cluster"]
 
     util = utilization_view(cluster)

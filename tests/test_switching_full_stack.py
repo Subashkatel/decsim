@@ -77,10 +77,11 @@ def _run(threshold, d=3, rounds=9, seed=7, double_window=False, device=None):
               scheme=SlidingWindowScheme(),
               strategy=Switching(confidence_threshold=threshold,
                                  double_window=double_window),
-              device=device if device is not None else StimDevice(seed=seed),
+              device=device if device is not None else StimDevice(),
               decoder=weak,
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
+              seed=seed,
           ), verbose=False)
     return res, weak, strong
 
@@ -136,9 +137,10 @@ def test_never_escalating_matches_weak_only():
                    rounds_policy=FixedRounds(9),
                    code=SurfaceCodeModel(d=3),
                    scheme=SlidingWindowScheme(),
-                   device=StimDevice(seed=7),
+                   device=StimDevice(),
                    decoder=SoftOutputDecoder(UnweightedPyMatchingDecoder(_Latency()),
                                   ComplementaryGapMetric),
+                   seed=7,
                ), verbose=False)
     assert res_sw["cluster"].op_results[0] == res_weak["cluster"].op_results[0]
 
@@ -184,7 +186,7 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
     assert len(gaps) >= 2, f"soft output did not distinguish windows: {gaps}"
     threshold = (gaps[0] + gaps[-1]) / 2
 
-    device = StimDevice(seed=7)
+    device = StimDevice()
     res, weak, strong = _run(threshold=threshold, rounds=rounds,
                              double_window=True, device=device)
     cluster = res["cluster"]
@@ -303,11 +305,12 @@ def test_double_window_seam_models_are_decodable_and_partition_ownership(
         code=SurfaceCodeModel(d=3),
         scheme=SlidingWindowScheme(),
         strategy=Switching(confidence_threshold=0.5, double_window=True),
-        device=StimDevice(seed=seed),
+        device=StimDevice(),
         decoder=weak,
         router=SwitchingRouter(weak, strong),
         window_interaction=SelectedSeamOwner(),
         unit_pools={"default": 1, "strong": 1},
+        seed=seed,
     ), verbose=False)
 
     (slab_job,) = strong.jobs

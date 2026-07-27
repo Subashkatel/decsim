@@ -1,11 +1,12 @@
 import pytest
+import numpy as np
 
 from decsim.decoders import PerRoundDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.codes import SurfaceCodeModel
 from decsim.engine import Engine
 from decsim.layouts import UniformLayout
-from decsim.message import DecodeResult, Operation
+from decsim.message import DecodeResult, Operation, RunSeedReservation
 from decsim.planner import FixedRounds, WindowPlanner
 from decsim.run_spec import RunSpec, simulate
 from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
@@ -44,6 +45,35 @@ class StaticDecoder:
     def decode(self, job):
         return DecodeResult(job.op_id, job.window_id,
                             logical_observables=(0,))
+
+
+class SeedRecordingDecoder(StaticDecoder):
+    def __init__(self, *, fail_reservation=False, source_override=None):
+        self.fail_reservation = fail_reservation
+        self.source_override = source_override
+        self.reserved = []
+        self.cancelled = []
+        self.committed = []
+
+    def reserve_run_seed(self, seed):
+        if self.fail_reservation:
+            raise ValueError("deliberate reservation failure")
+        reservation = RunSeedReservation(
+            proposed_seed_source=(
+                self.source_override
+                or ("entropy" if seed is None else "derived")
+            ),
+            proposed_seed=seed,
+            prepared_state=object(),
+        )
+        self.reserved.append(reservation)
+        return reservation
+
+    def cancel_run_seed(self, reservation):
+        self.cancelled.append(reservation)
+
+    def commit_run_seed(self, reservation):
+        self.committed.append(reservation)
 
 
 class RecordingPlanner:
@@ -100,6 +130,208 @@ class EngineBoundFactory:
 
     def shutdown(self):
         return None
+
+
+@pytest.mark.parametrize("seed", [True, 1.0, "1", object()])
+def test_run_seed_rejects_non_integral_values_before_build(seed):
+    spec = RunSpec(ops=[], seed=seed)
+
+    with pytest.raises(
+        TypeError,
+        match=r"seed.*64-bit unsigned integer or None",
+    ):
+        spec.validate()
+
+
+@pytest.mark.parametrize("seed", [-1, 1 << 64])
+def test_run_seed_rejects_values_outside_unsigned_64_bit_domain(seed):
+    spec = RunSpec(ops=[], seed=seed)
+
+    with pytest.raises(
+        ValueError,
+        match=r"seed.*0.*2\*\*64",
+    ):
+        spec.validate()
+
+
+@pytest.mark.parametrize(
+    "seed",
+    [None, 0, (1 << 64) - 1, np.int64(7), np.uint64(7)],
+)
+def test_run_seed_accepts_none_and_unsigned_integral_values(seed):
+    RunSpec(ops=[], seed=seed).validate()
+
+
+def test_run_root_binds_nested_consumers_by_stable_semantic_path():
+    from decsim.decoders import CodeRouter
+    from decsim.message import RunSeedPathSegment
+    from decsim.run_spec import _derive_run_component_seed
+
+    default = SeedRecordingDecoder()
+    surface = SeedRecordingDecoder()
+    RunSpec(
+        ops=[],
+        decoder=default,
+        router=CodeRouter(default, {"surface": surface}),
+        seed=7,
+    ).build()
+
+    default_path = (
+        RunSeedPathSegment("field", "decoder_router"),
+        RunSeedPathSegment("field", "default"),
+    )
+    surface_path = (
+        RunSeedPathSegment("field", "decoder_router"),
+        RunSeedPathSegment("field", "by_code"),
+        RunSeedPathSegment("string_key", "surface"),
+    )
+    assert [item.proposed_seed for item in default.committed] == [
+        _derive_run_component_seed(7, default_path),
+    ]
+    assert [item.proposed_seed for item in surface.committed] == [
+        _derive_run_component_seed(7, surface_path),
+    ]
+
+
+def test_run_seed_reservation_failure_cancels_prior_leaves_without_committing():
+    from decsim.decoders import CodeRouter
+
+    acquired = SeedRecordingDecoder()
+    failing = SeedRecordingDecoder(fail_reservation=True)
+    spec = RunSpec(
+        ops=[],
+        decoder=acquired,
+        router=CodeRouter(
+            default=failing,
+            by_code={"surface": acquired},
+        ),
+    )
+
+    with pytest.raises(ValueError, match="deliberate reservation failure"):
+        spec.build()
+
+    assert acquired.cancelled == acquired.reserved
+    assert acquired.committed == []
+
+
+def test_run_root_rejects_leaf_metadata_that_denies_the_derived_seed():
+    dishonest = SeedRecordingDecoder(source_override="explicit_local")
+
+    with pytest.raises(
+        ValueError,
+        match=r"metadata.*derived component seed",
+    ):
+        RunSpec(ops=[], decoder=dishonest, seed=7).build()
+
+    assert dishonest.committed == []
+
+
+def test_run_spec_build_is_single_use_even_after_success():
+    spec = RunSpec(ops=[], decoder=StaticDecoder())
+    spec.build()
+
+    with pytest.raises(RuntimeError, match="already ready"):
+        spec.build()
+
+
+def test_factory_cannot_drive_the_engine_before_seed_binding():
+    def malicious_factory(engine, cluster):
+        engine.run()
+        return EngineBoundFactory(engine)
+
+    with pytest.raises(RuntimeError, match="construction is guarded"):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            make_factory=malicious_factory,
+        ).build()
+
+
+@pytest.mark.parametrize(
+    ("root_seed", "path_parts", "expected"),
+    [
+        (0, (("field", "device"),), 11874377230878857407),
+        (
+            0,
+            (
+                ("field", "decoder_router"),
+                ("field", "by_code"),
+                ("string_key", "x"),
+            ),
+            6126402147709124294,
+        ),
+        (
+            0,
+            (
+                ("field", "decoder_router"),
+                ("field", "by_code"),
+                ("none_key", None),
+            ),
+            6969999416613313845,
+        ),
+        (
+            (1 << 64) - 1,
+            (("field", "device"),),
+            4727110291892774543,
+        ),
+        (
+            (1 << 64) - 1,
+            (
+                ("field", "decoder_router"),
+                ("field", "by_code"),
+                ("string_key", "x"),
+            ),
+            261415811638871216,
+        ),
+        (
+            (1 << 64) - 1,
+            (
+                ("field", "decoder_router"),
+                ("field", "by_code"),
+                ("none_key", None),
+            ),
+            15694113753403175836,
+        ),
+        (
+            0,
+            (
+                ("field", "workload_circuits"),
+                ("integer_key", 9),
+            ),
+            6422064279578959929,
+        ),
+        (
+            0,
+            (
+                ("field", "workload_circuits"),
+                ("integer_key", -1),
+            ),
+            15629268580557925073,
+        ),
+    ],
+)
+def test_run_component_seed_derivation_matches_frozen_golden_vectors(
+    root_seed,
+    path_parts,
+    expected,
+):
+    from decsim.message import RunSeedPathSegment
+    from decsim.run_spec import _derive_run_component_seed
+
+    path = tuple(
+        RunSeedPathSegment(kind, value)
+        for kind, value in path_parts
+    )
+
+    assert _derive_run_component_seed(root_seed, path) == expected
+
+
+def test_integer_seed_path_rejects_bool_and_non_integer_values():
+    from decsim.message import RunSeedPathSegment
+
+    for value in (True, "9", 9.0):
+        with pytest.raises(TypeError, match="built-in int"):
+            RunSeedPathSegment("integer_key", value)
 
 
 def test_run_spec_rejects_an_incompatible_boundary_policy_before_build():

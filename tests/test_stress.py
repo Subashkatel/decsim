@@ -125,7 +125,10 @@ def test_parallel_scheme_under_load_stays_consistent():
 
 def _switching_run(low_confidence_probability, rounds, patches, pools, seed=3,
                    scheduler=None, metrics_box=None, switching=None):
-    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2 * TAU), low_confidence_probability, seed=seed)
+    weak = SampledConfidenceDecoder(
+        PerRoundDecoder(0.2 * TAU),
+        low_confidence_probability,
+    )
     strong = PerRoundDecoder(5.0 * TAU)
     return simulate(RunSpec(
                ops=_independent_patches(patches),
@@ -138,6 +141,7 @@ def _switching_run(low_confidence_probability, rounds, patches, pools, seed=3,
                router=SwitchingRouter(weak, strong),
                unit_pools=pools,
                scheduler=scheduler,
+               seed=seed,
                make_metrics=lambda e, c, ch, fa: [metrics_box.setdefault("g", InvariantGuard(c))]
                      if metrics_box is not None else [],
            ), verbose=False)

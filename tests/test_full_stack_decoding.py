@@ -52,7 +52,7 @@ def _circuit():
         before_measure_flip_probability=P, before_round_data_depolarization=P)
 
 
-def _run_engine_shot(circuit, device, decoder):
+def _run_engine_shot(circuit, device, decoder, *, seed):
     op = Operation(id=1, name="memory", qubits=(0,), clifford=True, circuit=circuit)
     res = simulate(RunSpec(
               ops=[op],
@@ -62,6 +62,7 @@ def _run_engine_shot(circuit, device, decoder):
               scheme=SlidingWindowScheme(),
               device=device,
               decoder=decoder,
+              seed=seed,
           ), verbose=False)
     return res["cluster"].op_results[1]
 
@@ -126,7 +127,7 @@ def test_same_seed_double_run_is_bit_identical():
     def one_run():
         results = []
         for shot in range(8):
-            device = StimDevice(seed=100 + shot)
+            device = StimDevice()
             op = Operation(id=1, name="memory", qubits=(0,), clifford=True,
                            circuit=circuit)
             res = simulate(RunSpec(
@@ -137,6 +138,7 @@ def test_same_seed_double_run_is_bit_identical():
                       scheme=SlidingWindowScheme(),
                       device=device,
                       decoder=PyMatchingDecoder(_ZeroLatency()),
+                      seed=100 + shot,
                   ), verbose=False)
             results.append((res["cluster"].op_results[1],
                             res["chip_done"], res["fully_done"],
@@ -171,10 +173,15 @@ def test_engine_matches_offline_reference_and_global_exactly():
                 defect_bits += sum(sum(m) for m in r.boundary_defects.values())
             return r
 
-    device = StimDevice(seed=11)
     shots = 150
     for s in range(shots):
-        pred_engine = _run_engine_shot(circuit, device, CountingDecoder(_ZeroLatency()))
+        device = StimDevice()
+        pred_engine = _run_engine_shot(
+            circuit,
+            device,
+            CountingDecoder(_ZeroLatency()),
+            seed=11 + s,
+        )
         shot = device._dets[1]
         pred_offline = (int(decode_windowed(ref_models, shot, ref_inner)[0]),)
         pred_global = (int(global_m.decode(shot)[0]),)
@@ -198,9 +205,14 @@ def test_engine_bposd_matches_offline_reference():
     ref_models = build_window_error_models(circuit, plan, detector_rounds=folded)
     ref_inner = bposd_window_decoder()
 
-    device = StimDevice(seed=29)
     for s in range(15):
-        pred_engine = _run_engine_shot(circuit, device, BPOSDDecoder(_ZeroLatency()))
+        device = StimDevice()
+        pred_engine = _run_engine_shot(
+            circuit,
+            device,
+            BPOSDDecoder(_ZeroLatency()),
+            seed=29 + s,
+        )
         pred_offline = (
             int(decode_windowed(ref_models, device._dets[1], ref_inner)[0]),
         )
@@ -249,7 +261,7 @@ def test_blocked_successor_waits_for_real_pymatching_result():
         Operation(1, "T1(memory)", (0,), clifford=False, blocked_by=0,
                   consumes_magic_state=False, circuit=circuit),
     ]).build()
-    device = StimDevice(seed=23)
+    device = StimDevice()
     res = simulate(RunSpec(
               ops=ops,
               num_units=4,
@@ -259,6 +271,7 @@ def test_blocked_successor_waits_for_real_pymatching_result():
               device=device,
               decoder=decoder,
               make_controller=_zero_link_controller,
+              seed=23,
           ), verbose=False)
 
     # every window was decoded before op0's result integrated, and the

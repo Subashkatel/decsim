@@ -350,7 +350,15 @@ class StrongDecoderBacklog:
             self.trace.append((engine.now, self._last))
 
     def rows(self) -> list:
-        """Strong-backlog time series, one record per value change."""
+        """Strong-backlog time series, one record per value change.
+
+        SCOPE: `rounds` is a job count times the configured nominal redo size
+        (commit + 2*buffer). It is NOT the decoder input a strong job is billed
+        for: a double-window slab reads one buffer of context per face and is
+        priced for that wider extent (see Switching), and an end-clamped slab or
+        a bulk batch differs again. Theorem 1 of arXiv:2510.25222 bounds
+        tau_strong against unprocessed rounds of decoder INPUT, so this series
+        may not be published as that quantity."""
         per_job = strong_pool_view(self.cluster, self.pool).redo_rounds
         return [{"t": time_ticks, "jobs": jobs, "rounds": jobs * per_job}
                 for time_ticks, jobs in self.trace]

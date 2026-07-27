@@ -164,7 +164,8 @@ class _FixedLatencyDecoder:
         return self._t
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
 def _run_regime(tau_w_us, rounds=120):

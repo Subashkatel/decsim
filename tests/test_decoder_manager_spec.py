@@ -7,6 +7,7 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+import numpy as np
 import pytest
 
 from decsim.decoders import CodeRouter
@@ -15,7 +16,7 @@ from decsim.config import us
 from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
                              SampledConfidenceDecoder, SwitchingRouter)
 from decsim.engine import Engine
-from decsim.message import Operation
+from decsim.message import DecodeJob, DecodeResult, Operation
 from decsim.schedulers import FifoScheduler
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
@@ -356,3 +357,78 @@ def test_A7_strong_latency_does_not_affect_an_all_confident_run():
     fast = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds=30, tau_strong=2.0)
     assert slow["cluster"].strong_needed == fast["cluster"].strong_needed == 0
     assert slow["engine"].now == fast["engine"].now
+
+
+# =====================================================================================
+# A8 -- functional decoder-result boundary
+# =====================================================================================
+
+class _FixedResultDecoder:
+    def __init__(self, logical_observables):
+        self.logical_observables = logical_observables
+
+    def decode(self, job):
+        return DecodeResult(
+            job.op_id,
+            job.window_id,
+            logical_observables=self.logical_observables,
+        )
+
+
+class _EqualToOne:
+    def __eq__(self, other):
+        return other == 1
+
+
+@pytest.mark.parametrize(
+    "logical_observables",
+    [
+        [0, 1],
+        (True,),
+        (0.0,),
+        (np.uint8(1),),
+        (_EqualToOne(),),
+    ],
+    ids=["list", "bool", "float", "numpy-integer", "equality-spoof"],
+)
+def test_A8_decoder_boundary_rejects_non_exact_prediction_bits(
+        logical_observables):
+    engine = Engine(verbose=False)
+    cluster = DecoderManager(
+        engine,
+        router=CodeRouter(_FixedResultDecoder(logical_observables)),
+        scheduler=FifoScheduler(),
+    )
+    job = DecodeJob(op_id=5, window_id=2, n_rounds=3)
+
+    with pytest.raises(TypeError, match=r"job \(5, 2\).*logical_observables"):
+        cluster._decode_and_validate_result(job)
+
+
+def test_A8_decoder_boundary_rejects_prediction_bits_outside_binary_domain():
+    engine = Engine(verbose=False)
+    cluster = DecoderManager(
+        engine,
+        router=CodeRouter(_FixedResultDecoder((0, 2))),
+        scheduler=FifoScheduler(),
+    )
+    job = DecodeJob(op_id=5, window_id=2, n_rounds=3)
+
+    with pytest.raises(ValueError, match=r"job \(5, 2\).*index 1.*2"):
+        cluster._decode_and_validate_result(job)
+
+
+@pytest.mark.parametrize("logical_observables", [None, (), (0,), (1, 0, 1)])
+def test_A8_decoder_boundary_accepts_timing_and_exact_prediction_vectors(
+        logical_observables):
+    engine = Engine(verbose=False)
+    cluster = DecoderManager(
+        engine,
+        router=CodeRouter(_FixedResultDecoder(logical_observables)),
+        scheduler=FifoScheduler(),
+    )
+    job = DecodeJob(op_id=5, window_id=2, n_rounds=3)
+
+    result = cluster._decode_and_validate_result(job)
+
+    assert result.logical_observables == logical_observables

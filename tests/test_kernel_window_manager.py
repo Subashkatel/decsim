@@ -9,7 +9,7 @@ from decsim.engine import Engine
 from decsim.message import (DecodeJob, DecodeResult, Operation, SyndromePayload,
                           Window, WindowPlan)
 from decsim.protocols import Directive, OutcomeDirective, Submission
-from decsim.window_manager import WindowManager
+from decsim.window_manager import LogicalContribution, WindowManager
 from decsim.window_interactions import DefaultWindowInteraction
 
 T_DD = 500_000
@@ -145,7 +145,7 @@ def test_eager_ships_weak_boundary_unconditionally_contract_1_2():
     _feed_rounds(rt, 0, 6)
     job, _ = submitted[0]
     job.awaiting_strong_result = True             # escalated (set by decode layer)
-    rt.on_decode_done(job, DecodeResult(0, 0, logical_value=1,
+    rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(1,),
                                         boundary_defects={7: [1, 0, 1]}))
     dep = rt.windows[(1, 0)]
     assert dep.deps_remaining == 1                # not yet: travels t_dd
@@ -197,14 +197,14 @@ def test_strong_revises_logical_only_contract_1_4():
     _feed_rounds(rt, 0, 6)
     job, _ = submitted[0]
     job.awaiting_strong_result = True
-    rt.on_decode_done(job, DecodeResult(0, 0, logical_value=1,
+    rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(1,),
                                         boundary_defects={7: [1]}))
     eng.run(until=T_DD)
     dep_boundary_before = dict(rt.windows[(1, 0)].boundary_in)
-    assert rt.op_results[0] == 1
-    rt.on_strong_decode_done((0, 0), DecodeResult(0, 0, logical_value=0,
+    rt.on_strong_decode_done((0, 0), DecodeResult(
+        0, 0, logical_observables=(0,),
                                                   boundary_defects={7: [1, 1]}))
-    assert rt.op_results[0] == 0                              # XOR-swapped
+    assert rt.logical_contributions[(0, 0)].logical_observables == (0,)
     assert rt.windows[(1, 0)].boundary_in == dep_boundary_before  # untouched
     assert rt.op_strong_commit_time[0] == eng.now
 
@@ -214,10 +214,13 @@ def test_op_delivery_gated_on_pending_strong_contract_1_5():
     _feed_rounds(rt, 0, 6)
     job, _ = submitted[0]
     job.awaiting_strong_result = True
-    rt.on_decode_done(job, DecodeResult(0, 0, logical_value=1))
+    rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(1,)))
     eng.run()
     assert fb.integrated == []                    # gated: pending strong
-    rt.on_strong_decode_done((0, 0), DecodeResult(0, 0, logical_value=1))
+    rt.on_strong_decode_done(
+        (0, 0),
+        DecodeResult(0, 0, logical_observables=(1,)),
+    )
     eng.run()
     assert [op_id for op_id, _ in fb.integrated] == [0]   # released after final
 
@@ -226,11 +229,11 @@ def test_op_delivery_immediate_when_not_awaiting():
     eng, rt, fb, submitted = _runtime()
     _feed_rounds(rt, 0, 6)
     job, _ = submitted[0]
-    rt.on_decode_done(job, DecodeResult(0, 0, logical_value=1))
+    rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(1,)))
     assert fb.integrated == []                    # travels t_do
     eng.run(until=T_DO)
     assert [op_id for op_id, _ in fb.integrated] == [0]
-    assert fb.integrated[0][1].logical_value == 1
+    assert fb.integrated[0][1].logical_observables == (1,)
 
 
 def test_held_ships_only_when_final():
@@ -239,11 +242,12 @@ def test_held_ships_only_when_final():
     _feed_rounds(rt, 0, 6)
     job, _ = submitted[0]
     job.awaiting_strong_result = True
-    rt.on_decode_done(job, DecodeResult(0, 0, logical_value=1,
+    rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(1,),
                                         boundary_defects={7: [1]}))
     eng.run()
     assert rt.windows[(1, 0)].deps_remaining == 1   # held: nothing shipped
-    rt.on_strong_decode_done((0, 0), DecodeResult(0, 0, logical_value=1,
+    rt.on_strong_decode_done((0, 0), DecodeResult(
+        0, 0, logical_observables=(1,),
                                                   boundary_defects={7: [1]}))
     eng.run()
     assert rt.windows[(1, 0)].deps_remaining == 0   # shipped at final
@@ -253,7 +257,7 @@ def test_late_round_after_op_freed_raises():
     eng, rt, fb, submitted = _runtime()
     _feed_rounds(rt, 0, 6)
     job, _ = submitted[0]
-    rt.on_decode_done(job, DecodeResult(0, 0, logical_value=0))
+    rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(0,)))
     eng.run()
     with pytest.raises(RuntimeError, match="syndrome RAM was freed"):
         rt.on_syndrome_arrival(SyndromePayload(0, 0, 7))
@@ -268,3 +272,104 @@ def test_strong_job_two_sided_context_contract_2b6():
     assert (w.buffer_lo, w.commit_lo, w.commit_hi, w.buffer_hi) == (1, 1, 3, 6)
     assert strong.hint == "strong" and strong.attempt == 1
     assert strong.strong_decode_for == (0, 0) and strong.deadline == eng.now
+
+
+def test_logical_contributions_xor_vectors_over_exact_round_coverage():
+    _, runtime, _, _ = _runtime()
+    runtime.logical_contributions = {
+        (0, 0): LogicalContribution(
+            owner_key=(0, 0),
+            commit_lo=1,
+            commit_hi=3,
+            ownership_kind="ordinary_window",
+            logical_observables=(1, 0, 1),
+        ),
+        (0, 1): LogicalContribution(
+            owner_key=(0, 1),
+            commit_lo=4,
+            commit_hi=6,
+            ownership_kind="ordinary_window",
+            logical_observables=(0, 1, 1),
+        ),
+    }
+
+    prediction = runtime._logical_observables_for_interval(
+        0,
+        1,
+        6,
+        boundary_policy="strict",
+    )
+
+    assert prediction == (1, 1, 0)
+
+
+def test_real_timing_only_contribution_keeps_interval_timing_only():
+    _, runtime, _, _ = _runtime()
+    runtime.logical_contributions = {
+        (0, 0): LogicalContribution(
+            owner_key=(0, 0),
+            commit_lo=1,
+            commit_hi=3,
+            ownership_kind="ordinary_window",
+            logical_observables=(1,),
+        ),
+        (0, 1): LogicalContribution(
+            owner_key=(0, 1),
+            commit_lo=4,
+            commit_hi=6,
+            ownership_kind="ordinary_window",
+            logical_observables=None,
+        ),
+    }
+
+    assert runtime._logical_observables_for_interval(
+        0,
+        1,
+        6,
+        boundary_policy="strict",
+    ) is None
+
+
+def test_functional_segment_cannot_split_a_contribution_extent():
+    _, runtime, _, _ = _runtime()
+    runtime.logical_contributions = {
+        (0, 0): LogicalContribution(
+            owner_key=(0, 0),
+            commit_lo=1,
+            commit_hi=6,
+            ownership_kind="strong_slab",
+            logical_observables=(1,),
+        ),
+    }
+
+    with pytest.raises(RuntimeError, match="functional.*boundary"):
+        runtime._logical_observables_for_interval(
+            0,
+            1,
+            3,
+            boundary_policy="stream_segment",
+        )
+
+
+def test_operation_observable_arity_cannot_change_between_windows():
+    _, runtime, _, _ = _runtime()
+    runtime._install_logical_contribution(
+        LogicalContribution(
+            owner_key=(0, 0),
+            commit_lo=1,
+            commit_hi=3,
+            ownership_kind="ordinary_window",
+            logical_observables=(1, 0),
+        )
+    )
+
+    with pytest.raises(ValueError, match="length 1.*expected 2"):
+        runtime._install_logical_contribution(
+            LogicalContribution(
+                owner_key=(0, 1),
+                commit_lo=4,
+                commit_hi=6,
+                ownership_kind="ordinary_window",
+                logical_observables=(1,),
+            )
+        )

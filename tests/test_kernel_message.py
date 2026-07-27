@@ -2,8 +2,9 @@
 import pytest
 
 from decsim.message import (Decision, DecodeJob, DecodeOutcome,
-                            DecodeResult, OpKind, Operation, ResourceClaim,
-                            SyndromePayload, Window, WindowGraph)
+                            DecodeResult, FeedbackEffect,
+                            IntrinsicMeasurement, OpKind, Operation,
+                            ResourceClaim, SyndromePayload, Window, WindowGraph)
 from decsim.pauli_frame import PauliFrame
 
 
@@ -48,12 +49,62 @@ def test_operation_kind_and_magic_state_rule():
 
 def test_outcome_claim_decision_shapes():
     out = DecodeOutcome(job=DecodeJob(1, 0, 11),
-                        result=DecodeResult(op_id=1, window_id=0, logical_value=1))
-    assert out.result.logical_value == 1
+                        result=DecodeResult(
+                            op_id=1,
+                            window_id=0,
+                            logical_observables=(1, 0),
+                        ))
+    assert out.result.logical_observables == (1, 0)
     c = ResourceClaim("qubits", frozenset({0, 1}))
     assert c.kind == "qubits"
-    d = Decision(4, "Z")
-    assert d.releases_operation and d.pauli == "I"
+    effect = FeedbackEffect(
+        logical_observable_index=1,
+        decoded_value=0,
+        intrinsic_measurement=None,
+        correction_value=0,
+        basis="Z",
+        pauli="I",
+        apply_s=False,
+    )
+    d = Decision(4, effect)
+    assert d.releases_operation and d.effect is effect
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("operation_id", True, TypeError),
+        ("operation_id", object(), TypeError),
+        ("trajectory_id", (1, object()), TypeError),
+        ("value", True, TypeError),
+        ("value", 1.0, TypeError),
+        ("value", 2, ValueError),
+        ("source", "", ValueError),
+    ],
+)
+def test_intrinsic_measurement_rejects_unstable_identity_or_non_exact_bit(
+        field, value, error):
+    kwargs = {
+        "operation_id": 3,
+        "trajectory_id": ("stream", 3),
+        "value": 1,
+        "source": "controlled fixture",
+    }
+    kwargs[field] = value
+
+    with pytest.raises(error):
+        IntrinsicMeasurement(**kwargs)
+
+
+def test_intrinsic_measurement_accepts_recursive_stable_identity():
+    measurement = IntrinsicMeasurement(
+        operation_id=3,
+        trajectory_id=("stream", (3, "branch")),
+        value=0,
+        source="controlled fixture",
+    )
+
+    assert measurement.value == 0
 
 
 def test_pauli_frame_behavior():

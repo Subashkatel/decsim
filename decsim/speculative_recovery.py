@@ -141,9 +141,11 @@ class SpeculativeRecovery:
         source_window = runtime.windows[key]
         source_op = runtime.ops[key[0]]
 
-        if result is not None and result.logical_value is not None:
-            runtime._replace_window_logical_value(
-                key, key[0], int(result.logical_value))
+        if result is not None and result.logical_observables is not None:
+            runtime._replace_contribution_prediction(
+                key,
+                result.logical_observables,
+            )
         corrected_boundary = record["strong_boundary"]
         runtime._committed_boundaries[key] = corrected_boundary
 
@@ -240,10 +242,8 @@ class SpeculativeRecovery:
             runtime._boundary_delivery_versions[delivery_key] = \
                 runtime._boundary_delivery_versions.get(delivery_key, 0) + 1
             runtime._released_boundary_dependencies.discard(delivery_key)
-        previous = runtime._window_logical_values.pop(key, None)
-        if previous is not None:
-            runtime.op_results[window.op_id] = \
-                runtime.op_results.get(window.op_id, 0) ^ previous
+        runtime.logical_contributions.pop(key, None)
+        runtime.op_results.pop(window.op_id, None)
         if window.committed:
             runtime.committed_windows.discard(key)
             remaining = runtime._committed_per_op.get(window.op_id, 0) - 1

@@ -35,7 +35,8 @@ class _Decoder:
         self._latency, self.soft, self.logical = latency, soft, logical
     def latency(self, job): return self._latency
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=self.logical,
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(self.logical,),
                             soft_output=self.soft)
 
 

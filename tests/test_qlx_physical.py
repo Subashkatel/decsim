@@ -280,7 +280,7 @@ def test_qlx_circuit_runs_through_the_full_engine(circuit, detector_rounds):
                   device=device,
                   decoder=PyMatchingDecoder(_ZeroLatency()),
               ), verbose=False)
-        engine_value = int(res["cluster"].op_results[1])
+        engine_value = res["cluster"].op_results[1][0]
         offline = int(decode_windowed(models, device._dets[1],
                                       decode_window)[0])
         mismatches += int(engine_value != offline)

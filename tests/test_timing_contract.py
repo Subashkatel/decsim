@@ -27,7 +27,8 @@ class BlockingDecoder:
     def decode(self, job):
         self.calls += 1
         time.sleep(self.sleep_s)
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
 def _zero_link_controller(engine):

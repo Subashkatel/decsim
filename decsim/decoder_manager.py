@@ -432,7 +432,33 @@ class DecoderManager:
             raise RuntimeError(
                 f"decoder result identity {actual} does not match job "
                 f"identity {expected}")
+        self._validate_logical_observables(job, result)
         return result
+
+    @staticmethod
+    def _validate_logical_observables(
+        job: DecodeJob,
+        result: DecodeResult,
+    ) -> None:
+        logical_observables = result.logical_observables
+        if logical_observables is None:
+            return
+        if type(logical_observables) is not tuple:
+            raise TypeError(
+                f"job ({job.op_id}, {job.window_id}) logical_observables "
+                f"must be an exact tuple, got "
+                f"{type(logical_observables).__name__}")
+        for observable_index, bit in enumerate(logical_observables):
+            if type(bit) is not int:
+                raise TypeError(
+                    f"job ({job.op_id}, {job.window_id}) "
+                    f"logical_observables index {observable_index} must be "
+                    f"an exact int bit, got {type(bit).__name__}")
+            if bit not in (0, 1):
+                raise ValueError(
+                    f"job ({job.op_id}, {job.window_id}) "
+                    f"logical_observables index {observable_index} must be "
+                    f"0 or 1, got {bit}")
 
     def _finish_strong_bookkeeping(self, job: DecodeJob) -> None:
         if job.strong_decode_for is not None:
@@ -457,7 +483,7 @@ class DecoderManager:
 
         accuracy_field_names = (
             "correction",
-            "logical_value",
+            "logical_observables",
             "soft_output",
             "boundary_defects",
             "boundary_data",

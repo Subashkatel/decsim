@@ -89,7 +89,8 @@ class MyDecoder:
     def latency(self, job): return us(0.2)
     def decode(self, job):
         self.decodes += 1
-        return DecodeResult(job.op_id, job.window_id, logical_value=1)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(1,))
 
 class MyScheduler:
     """LIFO -- a genuinely different policy than the default FIFO."""
@@ -113,7 +114,7 @@ class MyController:
         self.engine.schedule(us(0.1), lambda: deliver(decision))
 
 class MyOrchestrator:
-    """From-scratch Orchestrator: releases blocked ops on basis 'Z'."""
+    """From-scratch Orchestrator: releases blocked ops without an effect."""
     def __init__(self):
         self.blocked = {}; self.controller = None; self.sink = None
         self.integrated = 0
@@ -126,7 +127,7 @@ class MyOrchestrator:
         for decision in self.on_result(op, result):
             self.controller.relay_instruction(decision, self.sink)
     def on_result(self, op, result):
-        return [Decision(blocked_id, "Z")
+        return [Decision(blocked_id)
                 for blocked_id in self.blocked.pop(op.id, [])]
 
 class MyFactory:

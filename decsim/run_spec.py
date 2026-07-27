@@ -17,7 +17,12 @@ from dataclasses import dataclass, field
 import inspect
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
-from .message import Operation
+from .message import (
+    IntrinsicMeasurement,
+    Operation,
+    is_stable_identity,
+    same_stable_identity,
+)
 from .pauli_frame import PauliFrame
 from .config import TimingConfig, us
 
@@ -120,6 +125,9 @@ class RunSpec:
             _validate_operation_graph(
                 self.ops, validate_blockers=True,
                 external_blocker_ids=(operation.id for operation in auxiliary_ops))
+        self._validate_operation_feedback_contracts(
+            list(self.ops or []) + auxiliary_ops,
+        )
         for label, operations in (("decode_ops", self.decode_ops),
                                   ("dynamic_streams", self.dynamic_streams)):
             seen_ids = set()
@@ -417,6 +425,7 @@ class RunSpec:
         all_operations = list(ops)
         all_operations.extend(self.decode_ops or [])
         all_operations.extend(self.dynamic_streams or [])
+        self._validate_operation_feedback_contracts(all_operations)
         self._validate_layout_selection(planning, all_operations)
         _validate_program_order(ops, planning.layout)
 
@@ -546,6 +555,55 @@ class RunSpec:
         for operation in operations:
             if operation.feedback_boundary_mode is None:
                 operation.feedback_boundary_mode = self.feedback_boundary_mode
+
+    @staticmethod
+    def _validate_operation_feedback_contracts(operations) -> None:
+        for operation in operations:
+            observable_index = operation.logical_observable_index
+            if observable_index is not None:
+                if type(observable_index) is not int:
+                    raise TypeError(
+                        f"operation {operation.id} "
+                        "logical_observable_index must be an exact int")
+                if observable_index < 0:
+                    raise ValueError(
+                        f"operation {operation.id} "
+                        "logical_observable_index must be nonnegative")
+
+            measurement = operation.intrinsic_measurement
+            if measurement is None:
+                continue
+            if type(measurement) is not IntrinsicMeasurement:
+                raise TypeError(
+                    f"operation {operation.id} intrinsic_measurement must "
+                    "be IntrinsicMeasurement")
+            trajectory_id = (
+                operation.stream_id
+                if operation.stream_id is not None
+                else operation.id
+            )
+            if not is_stable_identity(operation.id):
+                raise TypeError(
+                    f"operation {operation.id!r} with an intrinsic "
+                    "measurement needs a stable operation id")
+            if not is_stable_identity(trajectory_id):
+                raise TypeError(
+                    f"operation {operation.id} intrinsic trajectory identity "
+                    "must be a stable built-in int, str, or recursive tuple")
+            if not same_stable_identity(
+                measurement.operation_id,
+                operation.id,
+            ):
+                raise ValueError(
+                    f"operation {operation.id} intrinsic_measurement "
+                    f"operation_id does not match")
+            if not same_stable_identity(
+                measurement.trajectory_id,
+                trajectory_id,
+            ):
+                raise ValueError(
+                    f"operation {operation.id} intrinsic_measurement "
+                    f"trajectory_id does not match")
 
     def _decode_plan_operations(self, ops):
         """Operations that receive compile-time decode windows (wiring parity)."""

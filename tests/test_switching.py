@@ -34,6 +34,7 @@ from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
 from decsim.window_interactions import DefaultWindowInteraction
+from decsim.window_manager import WindowManager
 
 TAU_GEN_US = 1.0          # syndrome round time
 D = 3
@@ -92,7 +93,11 @@ class FixedLogicalDecoder:
 
     def decode(self, job: DecodeJob) -> DecodeResult:
         """Return the configured logical value."""
-        return DecodeResult(job.op_id, job.window_id, logical_value=self.logical_value)
+        return DecodeResult(
+            job.op_id,
+            job.window_id,
+            logical_observables=(self.logical_value,),
+        )
 
 
 class RecordingLogicalDecoder(FixedLogicalDecoder):
@@ -185,7 +190,7 @@ def test_escalated_window_uses_strong_logical_result():
     cluster = res["cluster"]
     assert cluster.total_windows % 2 == 1
     assert cluster.strong_needed == cluster.total_windows
-    assert cluster.op_results[0] == 1
+    assert cluster.op_results[0] == (1,)
 
 
 def test_parallel_strong_result_can_finish_before_weak_decision():
@@ -205,7 +210,7 @@ def test_parallel_strong_result_can_finish_before_weak_decision():
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
           ), verbose=False)
-    assert res["cluster"].op_results[0] == 1
+    assert res["cluster"].op_results[0] == (1,)
 
 
 def test_switching_requires_a_router_to_reach_the_strong_decoder():
@@ -686,7 +691,7 @@ def test_strong_decoder_result_identity_is_checked_before_finalization():
             return DecodeResult(
                 job.op_id,
                 job.window_id + 1,
-                logical_value=self.logical_value,
+                logical_observables=(self.logical_value,),
             )
 
     weak = SampledConfidenceDecoder(
@@ -1072,8 +1077,80 @@ def test_double_window_strong_result_owns_the_whole_slab():
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
           ), verbose=False)
-    assert res["cluster"].op_results[0] == 1
+    assert res["cluster"].op_results[0] == (1,)
     assert res["cluster"].strong_needed == 1
+    runtime = res["cluster"].window_manager
+    contribution = runtime.logical_contributions[(0, 2)]
+    assert (
+        contribution.ownership_kind,
+        contribution.commit_lo,
+        contribution.commit_hi,
+        contribution.logical_observables,
+    ) == ("strong_slab", 7, 15, (0,))
+    assert (0, 3) not in runtime.logical_contributions
+    assert (0, 4) not in runtime.logical_contributions
+
+
+def test_double_window_installs_slab_owner_before_every_submission_path(
+        monkeypatch):
+    snapshots = []
+    original_submit = WindowManager._submit_deferred_strong
+
+    def record_then_submit(runtime, key):
+        contribution = runtime.logical_contributions[key]
+        snapshots.append({
+            "key": key,
+            "commit_lo": contribution.commit_lo,
+            "commit_hi": contribution.commit_hi,
+            "kind": contribution.ownership_kind,
+            "prediction": contribution.logical_observables,
+            "weak_committed": runtime.windows[key].committed,
+            "absorbed_have_contributions": (
+                runtime.absorbed_windows
+                & set(runtime.logical_contributions)
+            ),
+        })
+        return original_submit(runtime, key)
+
+    monkeypatch.setattr(
+        WindowManager,
+        "_submit_deferred_strong",
+        record_then_submit,
+    )
+
+    _double_window_run(escalate_window=2)
+    _double_window_run(escalate_window=2, rounds=14)
+    _double_window_run(escalate_window=9)
+
+    assert snapshots == [
+        {
+            "key": (0, 2),
+            "commit_lo": 7,
+            "commit_hi": 15,
+            "kind": "strong_slab",
+            "prediction": None,
+            "weak_committed": True,
+            "absorbed_have_contributions": set(),
+        },
+        {
+            "key": (0, 2),
+            "commit_lo": 7,
+            "commit_hi": 14,
+            "kind": "strong_slab",
+            "prediction": None,
+            "weak_committed": True,
+            "absorbed_have_contributions": set(),
+        },
+        {
+            "key": (0, 9),
+            "commit_lo": 28,
+            "commit_hi": 30,
+            "kind": "strong_slab",
+            "prediction": None,
+            "weak_committed": False,
+            "absorbed_have_contributions": set(),
+        },
+    ]
 
 
 def test_double_window_slab_payloads_cover_slab_plus_two_sided_context():

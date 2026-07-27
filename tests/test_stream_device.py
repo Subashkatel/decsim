@@ -135,19 +135,71 @@ def test_invalid_identity_is_rejected_before_cached_sampler_lookup():
 
 
 def test_unseeded_sampling_keeps_stim_owned_identity_behavior():
-    circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
+    class RecordingSampler:
+        def __init__(self):
+            self.sample_calls = 0
+
+        def sample(self, *, shots, separate_observables):
+            self.sample_calls += 1
+            assert shots == 1
+            assert separate_observables is True
+            return np.zeros((1, 0), dtype=np.uint8), \
+                np.zeros((1, 1), dtype=np.uint8)
+
+    class RecordingCircuit:
+        def __init__(self):
+            self.compile_kwargs = []
+            self.sampler = RecordingSampler()
+
+        def compile_detector_sampler(self, **kwargs):
+            self.compile_kwargs.append(kwargs)
+            return self.sampler
+
+        def get_detector_coordinates(self):
+            return {}
+
+    circ = RecordingCircuit()
     legacy_key = ("stream", 1)
     device = StimDevice(seed=None)
-    operation = Operation(
+    first_segment = Operation(
         2,
         "unseeded",
         (0,),
         circuit=circ,
         stream_id=legacy_key,
+        stream_offset=0,
+    )
+    later_segment = Operation(
+        3,
+        "unseeded-later",
+        (0,),
+        circuit=circ,
+        stream_id=legacy_key,
+        stream_offset=1,
     )
 
-    device.begin_operation(operation)
+    device.begin_operation(first_segment)
+    device.begin_operation(later_segment)
+    assert circ.compile_kwargs == [{}]
+    assert circ.sampler.sample_calls == 1
     assert legacy_key in device._dets
+    assert device._dets[2] is device._dets[legacy_key]
+    assert device._dets[3] is device._dets[legacy_key]
+
+
+@pytest.mark.parametrize("integral_seed", [np.int64(1), np.uint64(1)])
+def test_root_seed_accepts_numpy_integral_scalars(integral_seed):
+    """Scientific sweep scalars retain Stim's integer seed semantics."""
+    circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
+    operation = Operation(4, "numpy-seed", (0,), circuit=circ)
+
+    device = StimDevice(seed=integral_seed)
+    device.begin_operation(operation)
+
+    builtin_reference = StimDevice(seed=1)
+    builtin_reference.begin_operation(operation)
+    assert np.array_equal(device._dets[4], builtin_reference._dets[4])
+    assert np.array_equal(device._truth[4], builtin_reference._truth[4])
 
 
 @pytest.mark.parametrize("invalid_seed", [-1, 1 << 64, 1.0, "1"])

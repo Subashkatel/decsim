@@ -3,21 +3,36 @@
 from __future__ import annotations
 
 import hashlib
+from numbers import Integral
 from typing import Callable, Optional
 
 from ..message import Operation, SyndromePayload
 
 
 class StimDevice:
-    """Sample Stim circuits and stream detection events by syndrome round."""
+    """Sample Stim circuits and stream detection events by syndrome round.
 
-    def __init__(self, seed: Optional[int] = None,
+    ``seed=None`` delegates entropy selection to Stim and preserves legacy
+    hashable operation/stream identities. A numeric seed may be any
+    :class:`numbers.Integral` value in ``[0, 2**64)``; it enables stable
+    per-identity substreams and therefore requires the selected operation id or
+    stream id to be an exact built-in ``int`` or ``str``. Unsupported seeded
+    identities raise before sampler-cache or stream-alias lookup.
+    """
+
+    def __init__(self, seed: Optional[Integral] = None,
                  rounds_for: Optional[Callable[[Operation], int]] = None,
                  detector_rounds: Optional[dict] = None):
-        """detector_rounds: optional {op_or_stream_key: {detector: 1-based
-        round}} override for circuits whose DETECTORs carry no coordinates
-        (e.g. QLX-emitted circuits; the map comes from
-        emit_decoder_params()['dem_detector_locs'] packet indices)."""
+        """Configure Stim sampling and optional detector-round overrides.
+
+        ``detector_rounds`` maps an operation or stream identity to
+        ``{detector: 1-based round}`` for circuits whose DETECTORs carry no
+        coordinates (for example QLX-emitted circuits; the map comes from
+        ``emit_decoder_params()['dem_detector_locs']`` packet indices).
+
+        See the class contract for the root-seed domain and the conditional
+        seeded identity restriction.
+        """
         self._seed = seed
         self._rounds_for = rounds_for
         self._detector_rounds_override = {
@@ -46,12 +61,16 @@ class StimDevice:
 
     def _validated_root_seed(self) -> int:
         """Return the seed under Stim's public unsigned-64-bit contract."""
-        if (not isinstance(self._seed, int)
-                or not 0 <= self._seed < (1 << 64)):
+        if not isinstance(self._seed, Integral):
             raise ValueError(
                 f"seed must be None or a 64-bit unsigned integer; "
                 f"got {self._seed!r}")
-        return int(self._seed)
+        root_seed = int(self._seed)
+        if not 0 <= root_seed < (1 << 64):
+            raise ValueError(
+                f"seed must be None or a 64-bit unsigned integer; "
+                f"got {self._seed!r}")
+        return root_seed
 
     def _sample_seed(self, key) -> int:
         """Derive a cross-process-stable substream from the shot-reuse identity."""

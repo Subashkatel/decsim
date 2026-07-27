@@ -319,7 +319,10 @@ class Operation:
     patches: tuple = ()               # patch ids whose syndrome streams feed the op
     predecessors: tuple = ()          # op ids whose windows must decode first
     has_successor: bool = False       # a later op consumes this op's boundary
-    stream_id: Optional[Any] = None   # decode stream this segment's rounds fold into
+    # Decode stream this segment's rounds fold into. Seeded StimDevice runs
+    # require an exact built-in int/str; unseeded and non-Stim devices may use
+    # another identity type accepted by that device.
+    stream_id: Optional[Any] = None
     stream_offset: Optional[int] = None  # global-round offset of the segment in its stream
     blocked_by: Optional[int] = None  # op id whose Decision must release this op
     feedback_boundary_mode: Optional[str] = None  # per-op override of the RunSpec mode

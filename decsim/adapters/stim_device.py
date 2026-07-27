@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Callable, Optional
 
 from ..message import Operation, SyndromePayload
@@ -33,6 +34,27 @@ class StimDevice:
         """Sample key for a standalone operation or continuous stream."""
         return op.stream_id if op.stream_id is not None else op.id
 
+    def _sample_seed(self, key) -> int:
+        """Derive a cross-process-stable substream from the shot-reuse identity."""
+        sample_key_type = type(key)
+        if sample_key_type not in (int, str):
+            raise TypeError(
+                f"sample key {key!r} is a {sample_key_type.__name__}; a stream_id "
+                f"must be an int or str so the run's sampling is "
+                f"reproducible across processes")
+        key_type_tag = b"int" if sample_key_type is int else b"str"
+        hash_input = b"\0".join((
+            str(self._seed).encode(),
+            b"stim_device",
+            key_type_tag,
+            str(key).encode(),
+        ))
+        digest = hashlib.blake2b(
+            hash_input,
+            digest_size=8,
+        ).digest()
+        return int.from_bytes(digest, "big")
+
     def begin_operation(self, op: Operation) -> None:
         """Sample one fresh shot, or reuse the stream shot for later segments."""
         key = self._key(op)
@@ -42,8 +64,11 @@ class StimDevice:
             return
         sampler = self._samplers.get(key)
         if sampler is None:
-            sampler = op.circuit.compile_detector_sampler(seed=self._seed) \
-                if self._seed is not None else op.circuit.compile_detector_sampler()
+            if self._seed is None:
+                sampler = op.circuit.compile_detector_sampler()
+            else:
+                sample_seed = self._sample_seed(key)
+                sampler = op.circuit.compile_detector_sampler(seed=sample_seed)
             self._samplers[key] = sampler
         dets, obs = sampler.sample(shots=1, separate_observables=True)
         self._dets[key] = dets[0]

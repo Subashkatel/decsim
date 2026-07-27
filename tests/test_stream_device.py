@@ -59,9 +59,11 @@ def test_stream_segment_serves_its_global_rounds():
     dev = StimDevice(seed=7)
     dev.begin_operation(segA)
     dev.begin_operation(segB)
-    # segB local round r serves global round R1+r: compare against a single-circuit reference
+    # segB local round r serves global round R1+r: compare against the same
+    # stream sampled as one segment (same stream_id, so the same shot)
     ref = StimDevice(seed=7)
-    whole = Operation(9, "whole", (0,), circuit=circ)     # standalone: local==global
+    whole = Operation(9, "whole", (0,), circuit=circ, stream_id="s",
+                      stream_offset=0)                   # local == global
     ref.begin_operation(whole)
     for r in range(1, R2 + 1):
         got = np.asarray(_single_payload(dev, segB, r).bits, np.uint8)
@@ -76,3 +78,55 @@ def test_standalone_op_unchanged():
     dev.begin_operation(op)
     total = sum(len(_single_payload(dev, op, r).bits) for r in range(1, R1 + 1))
     assert total == circ.num_detectors                   # every detector emitted exactly once
+
+
+def test_distinct_operations_draw_independent_shots():
+    """Standalone operations use distinct per-identity sampling substreams."""
+    circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
+    dev = StimDevice(seed=1234)
+    first = Operation(0, "memA", (0,), circuit=circ)
+    second = Operation(1, "memB", (1,), circuit=circ)
+    dev.begin_operation(first)
+    dev.begin_operation(second)
+    assert not np.array_equal(dev._dets[0], dev._dets[1])
+
+
+def test_operation_shots_do_not_depend_on_the_other_operations_present():
+    """An operation's draw is keyed on its own identity, so adding,
+    removing or reordering unrelated operations leaves it untouched."""
+    circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
+    alone = StimDevice(seed=77)
+    target = Operation(5, "target", (0,), circuit=circ)
+    alone.begin_operation(target)
+    expected = np.asarray(alone._dets[5], np.uint8)
+
+    crowded = StimDevice(seed=77)
+    for op_id in (9, 2):                       # decoded first, and out of order
+        other = Operation(op_id, f"other{op_id}", (0,), circuit=circ)
+        crowded.begin_operation(other)
+    crowded.begin_operation(Operation(5, "target", (0,), circuit=circ))
+    assert np.array_equal(np.asarray(crowded._dets[5], np.uint8), expected)
+
+
+def test_sample_substreams_distinguish_identity_types():
+    device = StimDevice(seed=77)
+    assert device._sample_seed(1) != device._sample_seed("1")
+    with pytest.raises(TypeError):
+        device._sample_seed(True)
+    with pytest.raises(TypeError):
+        device._sample_seed(("stream", 1))
+
+
+def test_stream_segments_still_share_one_shot():
+    """Substreams are keyed on the shot identity the device already uses,
+    so a stream's segments keep sharing one draw."""
+    circ = _continuous_circuit()
+    dev = StimDevice(seed=4)
+    segA = Operation(0, "segA", (0,), circuit=circ, stream_id="s", stream_offset=0)
+    segB = Operation(1, "segB", (0,), circuit=circ, stream_id="s", stream_offset=R1)
+    dev.begin_operation(segA)
+    dev.begin_operation(segB)
+    assert np.array_equal(np.asarray(dev._dets[0], np.uint8),
+                          np.asarray(dev._dets["s"], np.uint8))
+    assert np.array_equal(np.asarray(dev._dets[1], np.uint8),
+                          np.asarray(dev._dets["s"], np.uint8))

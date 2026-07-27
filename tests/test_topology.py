@@ -38,7 +38,8 @@ class _FixedLatency:
         return self.latency_ticks
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
 def _controller(t_qc=0.0, t_cd=0.0, t_dd=0.0, t_do=0.0, t_oc=0.0, t_cq=0.0):

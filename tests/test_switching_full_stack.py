@@ -213,9 +213,9 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
 
     # same-shot provenance: recompute the op verdict from this shot's
     # per-window results; absorbed windows contribute nothing
-    weak_values = {(j.op_id, j.window_id): int(r.logical_value)
+    weak_values = {(j.op_id, j.window_id): r.logical_observables[0]
                    for j, r in zip(weak.jobs, weak.results)}
-    strong_values = {j.strong_decode_for: int(r.logical_value)
+    strong_values = {j.strong_decode_for: r.logical_observables[0]
                      for j, r in zip(strong.jobs, strong.results)}
     expected = 0
     for key, value in weak_values.items():
@@ -223,7 +223,7 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
             expected ^= value
     for value in strong_values.values():
         expected ^= value
-    assert int(cluster.op_results[0]) == expected
+    assert cluster.op_results[0] == (expected,)
     # the far side feeds the slab through its raw trailing context: every
     # context round past the slab must arrive with real sampled bits (the
     # repo's validated two-sided formalism; decoded defects from the restart
@@ -241,7 +241,7 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
     # exactly those error labels
     import pymatching
     truth = int(device._truth[0][0])
-    verdict = int(cluster.op_results[0])
+    verdict = cluster.op_results[0][0]
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z", distance=3, rounds=rounds,
         after_clifford_depolarization=0.008,
@@ -343,13 +343,13 @@ def test_double_window_seam_models_are_decodable_and_partition_ownership(
         seam_owner is SeamFaultOwner.STRONG_REGION)
 
     weak_values = {
-        (job.op_id, job.window_id): int(decode_result.logical_value)
+        (job.op_id, job.window_id): decode_result.logical_observables[0]
         for job, decode_result in zip(weak.jobs, weak.results)
     }
-    expected = int(strong.results[0].logical_value)
+    expected = strong.results[0].logical_observables[0]
     for key, value in weak_values.items():
         if key not in {(0, 2), (0, 3), (0, 4)}:
             expected ^= value
     runtime = result["cluster"].window_manager
-    assert runtime.op_results[0] == expected
+    assert runtime.op_results[0] == (expected,)
     assert runtime.payloads_held == 0

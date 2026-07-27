@@ -42,7 +42,8 @@ class StaticDecoder:
         return 1
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
 class RecordingPlanner:

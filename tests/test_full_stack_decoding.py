@@ -4,6 +4,7 @@ Stim syndromes flow through the simulator and must match the offline window
 reference. Paper contract: docs/PAPER_MODEL_MAP.md.
 """
 import sys, pathlib
+from types import SimpleNamespace
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import pytest
@@ -19,6 +20,7 @@ from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
 from decsim.detector_error_model import (build_window_error_models,
                                              decode_windowed)
+from decsim.adapters.window_decode_results import result_from_selected_faults
 from decsim.schemes import SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import FixedRounds
@@ -62,6 +64,30 @@ def _run_engine_shot(circuit, device, decoder):
               decoder=decoder,
           ), verbose=False)
     return res["cluster"].op_results[1]
+
+
+def test_window_adapter_preserves_every_logical_observable_row():
+    obs = np.zeros((12, 3), dtype=np.uint8)
+    obs[9, 0] = 1
+    obs[10, 1] = 1
+    obs[11, 2] = 1
+    model = SimpleNamespace(
+        owned=np.ones(3, dtype=bool),
+        obs=obs,
+        future_flips={},
+        defect_positions={},
+    )
+    job = SimpleNamespace(op_id=7, window_id=4)
+
+    result = result_from_selected_faults(
+        job,
+        model,
+        np.ones(3, dtype=np.uint8),
+    )
+
+    assert result.logical_observables == (
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1,
+    )
 
 
 def test_stim_device_round_alignment():
@@ -112,7 +138,7 @@ def test_same_seed_double_run_is_bit_identical():
                       device=device,
                       decoder=PyMatchingDecoder(_ZeroLatency()),
                   ), verbose=False)
-            results.append((int(res["cluster"].op_results[1]),
+            results.append((res["cluster"].op_results[1],
                             res["chip_done"], res["fully_done"],
                             device._dets[1].tobytes()))
         return results
@@ -150,8 +176,8 @@ def test_engine_matches_offline_reference_and_global_exactly():
     for s in range(shots):
         pred_engine = _run_engine_shot(circuit, device, CountingDecoder(_ZeroLatency()))
         shot = device._dets[1]
-        pred_offline = int(decode_windowed(ref_models, shot, ref_inner)[0])
-        pred_global = int(global_m.decode(shot)[0])
+        pred_offline = (int(decode_windowed(ref_models, shot, ref_inner)[0]),)
+        pred_global = (int(global_m.decode(shot)[0]),)
         assert pred_engine == pred_offline, f"shot {s}: engine != offline reference"
         assert pred_engine == pred_global, f"shot {s}: engine != global decode"
     assert defect_bits > 0, "no artificial defects ever crossed a commit boundary"
@@ -175,7 +201,9 @@ def test_engine_bposd_matches_offline_reference():
     device = StimDevice(seed=29)
     for s in range(15):
         pred_engine = _run_engine_shot(circuit, device, BPOSDDecoder(_ZeroLatency()))
-        pred_offline = int(decode_windowed(ref_models, device._dets[1], ref_inner)[0])
+        pred_offline = (
+            int(decode_windowed(ref_models, device._dets[1], ref_inner)[0]),
+        )
         assert pred_engine == pred_offline, f"shot {s}: engine != offline BP-OSD reference"
 
 
@@ -199,9 +227,18 @@ def test_blocked_successor_waits_for_real_pymatching_result():
         def decode(self, job):
             r = super().decode(job)
             self.seen.append((job.op_id, job.window_id))
-            if r.logical_value is not None:
-                self.accumulated[job.op_id] = (
-                    self.accumulated.get(job.op_id, 0) ^ int(r.logical_value))
+            if r.logical_observables is not None:
+                previous = self.accumulated.get(
+                    job.op_id,
+                    (0,) * len(r.logical_observables),
+                )
+                self.accumulated[job.op_id] = tuple(
+                    left ^ right
+                    for left, right in zip(
+                        previous,
+                        r.logical_observables,
+                    )
+                )
             return r
 
     decoder = RecordingDecoder()
@@ -231,7 +268,9 @@ def test_blocked_successor_waits_for_real_pymatching_result():
 
     global_m = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
-    assert res["cluster"].op_results[0] == int(global_m.decode(device._dets[0])[0])
+    assert res["cluster"].op_results[0] == (
+        int(global_m.decode(device._dets[0])[0]),
+    )
     assert res["chip"].decode_release_time[1] == res["cluster"].windows[(0, window_count - 1)].t_done
     assert res["chip"].decode_release_time[1] <= res["chip"].body_done_time[1]
 

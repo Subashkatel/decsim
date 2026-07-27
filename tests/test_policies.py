@@ -162,4 +162,4 @@ def test_function_latency_decoder_prices_jobs_from_the_supplied_function():
     assert decoder.latency(long_narrow) == us(2.0 + 6.0 + 0.25)
     result = decoder.decode(short_wide)
     assert (result.op_id, result.window_id) == (0, 0)
-    assert result.correction is None and result.logical_value is None
+    assert result.correction is None and result.logical_observables is None

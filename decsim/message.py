@@ -17,6 +17,33 @@ from enum import Enum, auto
 from typing import Any, Callable, Optional
 
 
+def is_stable_identity(value: Any) -> bool:
+    """Whether a value has deterministic, recursively typed identity."""
+    value_type = type(value)
+    if value_type is int or value_type is str:
+        return True
+    if value_type is tuple:
+        return all(is_stable_identity(item) for item in value)
+    return False
+
+
+def same_stable_identity(left: Any, right: Any) -> bool:
+    """Compare stable identities without Python's cross-type equality."""
+    if type(left) is not type(right):
+        return False
+    if type(left) is tuple:
+        return (
+            len(left) == len(right)
+            and all(
+                same_stable_identity(left_item, right_item)
+                for left_item, right_item in zip(left, right)
+            )
+        )
+    if type(left) is int or type(left) is str:
+        return left == right
+    return False
+
+
 # ----------------------------------------------------------------- syndrome
 
 @dataclass
@@ -239,7 +266,8 @@ class DecodeResult:
     op_id: int
     window_id: int
     correction: Optional[Any] = None         # correction operator (None = timing-only)
-    logical_value: Optional[int] = None      # predicted logical observable bit
+    logical_observables: Optional[tuple[int, ...]] = None
+    # Complete predicted logical-observable vector; None is timing-only.
     soft_output: Optional[float] = None      # decoder confidence; below the Switching threshold escalates
     boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
@@ -277,18 +305,84 @@ class ResourceClaim:
 
 # ----------------------------------------------------------------- feedback
 
-@dataclass
-class Decision:
-    """Feedback decision sent orchestrator -> controller -> chip after a
-    non-Clifford measurement decodes: steer the successor's basis and fold
-    the byproduct into its Pauli frame."""
+@dataclass(frozen=True)
+class IntrinsicMeasurement:
+    """Supplied intrinsic measurement with stable trajectory provenance."""
 
-    target_operation_id: int          # blocked op this decision addresses
-    basis: str                        # measurement basis chosen for the successor
+    operation_id: Any
+    trajectory_id: Any
+    value: int
+    source: str
+
+    def __post_init__(self) -> None:
+        if not is_stable_identity(self.operation_id):
+            raise TypeError(
+                "intrinsic measurement operation_id must be a stable "
+                "built-in int, str, or recursive tuple")
+        if not is_stable_identity(self.trajectory_id):
+            raise TypeError(
+                "intrinsic measurement trajectory_id must be a stable "
+                "built-in int, str, or recursive tuple")
+        if type(self.value) is not int:
+            raise TypeError(
+                "intrinsic measurement value must be an exact int bit")
+        if self.value not in (0, 1):
+            raise ValueError(
+                f"intrinsic measurement value must be 0 or 1, got "
+                f"{self.value}")
+        if type(self.source) is not str:
+            raise TypeError("intrinsic measurement source must be a string")
+        if not self.source.strip():
+            raise ValueError(
+                "intrinsic measurement source must be nonempty")
+
+
+@dataclass(frozen=True)
+class FeedbackEffect:
+    """One complete functional consequence selected from a decode vector."""
+
+    logical_observable_index: int
+    decoded_value: int
+    intrinsic_measurement: Optional[IntrinsicMeasurement]
+    correction_value: int
+    basis: str
+    pauli: str
+    apply_s: bool
+
+    def __post_init__(self) -> None:
+        if type(self.logical_observable_index) is not int:
+            raise TypeError(
+                "logical_observable_index must be an exact int")
+        if self.logical_observable_index < 0:
+            raise ValueError(
+                "logical_observable_index must be nonnegative")
+        for field_name in ("decoded_value", "correction_value"):
+            value = getattr(self, field_name)
+            if type(value) is not int:
+                raise TypeError(f"{field_name} must be an exact int bit")
+            if value not in (0, 1):
+                raise ValueError(f"{field_name} must be 0 or 1, got {value}")
+        if (
+            self.intrinsic_measurement is not None
+            and type(self.intrinsic_measurement) is not IntrinsicMeasurement
+        ):
+            raise TypeError(
+                "intrinsic_measurement must be IntrinsicMeasurement or None")
+        if type(self.basis) is not str or not self.basis:
+            raise ValueError("basis must be a nonempty string")
+        if type(self.pauli) is not str or not self.pauli:
+            raise ValueError("pauli must be a nonempty string")
+        if type(self.apply_s) is not bool:
+            raise TypeError("apply_s must be an exact bool")
+
+
+@dataclass(frozen=True)
+class Decision:
+    """Feedback timing plus an optional functional effect."""
+
+    target_operation_id: int
+    effect: Optional[FeedbackEffect] = None
     releases_operation: bool = True   # False = result-return only, no op waiting
-    pauli: str = "I"                  # byproduct Pauli folded into the frame
-    apply_s: bool = False             # also fold an S gate (X -> Y) into the frame
-    correction_value: int = 0         # the decoded logical measurement bit
     strong_committed: bool = False    # mirrors op.requires_strong_commit (marker)
 
 
@@ -330,6 +424,8 @@ class Operation:
     requires_strong_commit: bool = False  # marker only; release stays unconditional
     byproduct_pauli: str = "X"        # Pauli applied to the successor on measurement 1
     measurement_basis: str = "Z"
+    logical_observable_index: Optional[int] = None
+    intrinsic_measurement: Optional[IntrinsicMeasurement] = None
     kind: OpKind = OpKind.GENERIC     # rounds-policy vocabulary (see OpKind)
 
     @property

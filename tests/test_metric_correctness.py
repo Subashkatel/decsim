@@ -74,7 +74,8 @@ class _FixedLatencyDecoder:
         return self._t
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
 def test_decode_backlog_summary_is_consistent_with_its_own_trace():

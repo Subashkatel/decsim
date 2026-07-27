@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .message import Decision, Operation, SyndromePayload
+from .message import Decision, FeedbackEffect, Operation, SyndromePayload
 from .pauli_frame import PauliFrame
 from .config import us
 
@@ -389,41 +389,70 @@ class Chip:
     def on_decision(self, decision: Decision) -> None:
         """Receive feedback from the controller. Release is unconditional
         on releases_operation=True."""
+        effect = decision.effect
+        if effect is not None and type(effect) is not FeedbackEffect:
+            raise TypeError(
+                f"decision for operation {decision.target_operation_id} "
+                "effect must be FeedbackEffect or None")
         if decision.releases_operation:
             self._release_blocked_operation(decision)
             return
         operation_id = decision.target_operation_id
         self.result_return_time_by_operation[operation_id] = self.engine.now
         target = self.ops[operation_id]
-        self.engine.log("Chip", f"received result return for {target.name}: "
-                                f"basis '{decision.basis}'")
+        detail = "timing-only" if effect is None \
+            else (
+                f"observable {effect.logical_observable_index}, "
+                f"basis '{effect.basis}'"
+            )
+        self.engine.log(
+            "Chip",
+            f"received result return for {target.name}: {detail}",
+        )
 
     def _release_blocked_operation(self, decision: Decision) -> None:
         operation_id = decision.target_operation_id
         target = self.ops[operation_id]
-        self._consume_decision(target, decision)
+        effect = decision.effect
+        if effect is not None:
+            self._consume_effect(target, effect)
         self.decode_released.add(operation_id)
         self.decode_release_time[operation_id] = self.engine.now
-        self.engine.log(
-            "Chip",
-            f"CONSUMED decision for {target.name}: measure basis "
-            f"'{decision.basis}', frame byproduct '{decision.pauli}'"
-            f"{' + S' if decision.apply_s else ''} on qubits {target.qubits}"
-            f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
-            f"successor steered, now trying to start")
+        if effect is None:
+            self.engine.log(
+                "Chip",
+                f"CONSUMED timing-only release for {target.name}"
+                f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
+                "no basis or frame effect, now trying to start",
+            )
+        else:
+            self.engine.log(
+                "Chip",
+                f"CONSUMED decision for {target.name}: observable "
+                f"{effect.logical_observable_index}, measure basis "
+                f"'{effect.basis}', frame byproduct '{effect.pauli}'"
+                f"{' + S' if effect.apply_s else ''} on qubits "
+                f"{target.qubits}"
+                f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
+                "successor steered, now trying to start",
+            )
         self._maybe_begin(target)
 
-    def _consume_decision(self, target: Operation, decision: Decision) -> None:
+    def _consume_effect(
+        self,
+        target: Operation,
+        effect: FeedbackEffect,
+    ) -> None:
         op_id = target.id
-        self.applied_basis[op_id] = decision.basis
-        self.applied_pauli[op_id] = decision.pauli
-        self.applied_s[op_id] = bool(decision.apply_s)
+        self.applied_basis[op_id] = effect.basis
+        self.applied_pauli[op_id] = effect.pauli
+        self.applied_s[op_id] = effect.apply_s
         primary = target.qubits[0] if target.qubits else None
         x_before = self.frame.x_of(primary) if primary is not None else 0
         z_before = self.frame.z_of(primary) if primary is not None else 0
         for qubit in target.qubits:
-            self.frame.apply_pauli(qubit, decision.pauli)
-            if decision.apply_s:
+            self.frame.apply_pauli(qubit, effect.pauli)
+            if effect.apply_s:
                 self.frame.apply_s(qubit)
         delta = (0, 0) if primary is None else (
             self.frame.x_of(primary) ^ x_before,

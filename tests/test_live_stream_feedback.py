@@ -9,7 +9,7 @@ import pytest
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
-from decsim.message import Operation
+from decsim.message import DecodeResult, Operation
 from decsim.planner import PerOpRounds
 from decsim.schemes import SlidingWindowScheme
 from decsim.run_spec import RunSpec, simulate
@@ -71,6 +71,18 @@ class _RecordingDecoder:
         return self.inner.decode(job)
 
 
+class _FunctionalDecoder:
+    def latency(self, job):
+        return 0
+
+    def decode(self, job):
+        return DecodeResult(
+            job.op_id,
+            job.window_id,
+            logical_observables=(1,),
+        )
+
+
 def test_feedback_idle_rounds_extend_the_live_stream():
     """Feedback idle rounds become real stream rounds in extend_stream mode."""
     stream, operations = _live_stream_pair()
@@ -129,6 +141,64 @@ def test_committed_stream_round_count_releases_blocked_operation_before_stream_r
     assert second.id in chip.decode_release_time
     assert chip.decode_release_time[second.id] >= chip.body_done_time[first.id]
     assert chip.decode_release_time[second.id] < chip.body_done_time[second.id]
+
+
+def test_exact_live_segment_publishes_functional_vector_and_effect():
+    stream, operations = _live_stream_pair()
+    code = SurfaceCodeModel(
+        d=3,
+        commit_rounds_override=2,
+        buffer_rounds_override=1,
+    )
+    rounds = {
+        operations[0].id: 2,
+        operations[1].id: 2,
+    }
+
+    result = simulate(RunSpec(
+        ops=operations,
+        dynamic_streams=[stream],
+        idle_policy=from_mode("extend_stream"),
+        device=TimingOnlyDevice(),
+        code=code,
+        rounds_policy=PerOpRounds(rounds),
+        scheme=SlidingWindowScheme(),
+        decoder=_FunctionalDecoder(),
+        num_units=1,
+        round_us=1.0,
+    ), verbose=False)
+
+    first, second = operations
+    assert result["cluster"].op_results[first.id] == (1,)
+    assert result["chip"].applied_basis[second.id] == "X"
+    assert result["chip"].applied_frame_delta[second.id] != (0, 0)
+
+
+def test_functional_live_segment_rejects_contribution_boundary_crossing():
+    stream, operations = _live_stream_pair()
+    code = SurfaceCodeModel(
+        d=3,
+        commit_rounds_override=3,
+        buffer_rounds_override=1,
+    )
+    rounds = {
+        operations[0].id: 2,
+        operations[1].id: 2,
+    }
+
+    with pytest.raises(RuntimeError, match="functional.*boundary"):
+        simulate(RunSpec(
+            ops=operations,
+            dynamic_streams=[stream],
+            idle_policy=from_mode("extend_stream"),
+            device=TimingOnlyDevice(),
+            code=code,
+            rounds_policy=PerOpRounds(rounds),
+            scheme=SlidingWindowScheme(),
+            decoder=_FunctionalDecoder(),
+            num_units=1,
+            round_us=1.0,
+        ), verbose=False)
 
 
 def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():

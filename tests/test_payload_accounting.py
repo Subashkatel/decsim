@@ -67,7 +67,8 @@ def test_per_window_release_holds_only_the_live_set():
         def latency(self, job):
             return us(1.0)
         def decode(self, job):
-            return DecodeResult(job.op_id, job.window_id, logical_value=0)
+            return DecodeResult(job.op_id, job.window_id,
+                                logical_observables=(0,))
 
     def _links(engine):
         return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)

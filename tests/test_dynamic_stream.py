@@ -58,7 +58,7 @@ def test_runtime_built_windows_equal_global_per_shot():
     shots = 250
     for _ in range(shots):
         res = _run(circ, segments, stream_op, rounds_map, device)
-        pe = int(res["cluster"].op_results.get(stream_op.id, 0))
+        pe = res["cluster"].op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         t = int(device._truth[stream_op.id][0])
         agree += (pe == pg); eng_err += (pe != t); glob_err += (pg != t)
@@ -102,5 +102,5 @@ def test_dynamic_matches_static_decode_unit_per_shot():
                  scheme=SlidingWindowScheme(),
                  decoder=PyMatchingDecoder(_ZeroLatency()),
              ), verbose=False)
-        assert int(rd["cluster"].op_results.get(stream_d.id, 0)) == \
-               int(rs["cluster"].op_results.get(stream_s.id, 0))
+        assert rd["cluster"].op_results[stream_d.id] == \
+               rs["cluster"].op_results[stream_s.id]

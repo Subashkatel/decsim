@@ -95,7 +95,7 @@ def test_decoder_result_identity_is_rejected_before_interaction_or_commit():
             return DecodeResult(
                 job.op_id + 1,
                 job.window_id + 1,
-                logical_value=1,
+                logical_observables=(1,),
                 boundary_data={"source": (job.op_id + 1, job.window_id + 1)},
             )
 
@@ -178,7 +178,7 @@ class _OrderedBoundaryDecoder:
         return DecodeResult(
             job.op_id,
             job.window_id,
-            logical_value=0,
+            logical_observables=(0,),
             boundary_defects={4: [1]} if job.op_id == 0 else None,
         )
 

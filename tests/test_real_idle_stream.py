@@ -80,7 +80,7 @@ def test_continuous_idle_decode_equals_global_per_shot():
                   scheme=SlidingWindowScheme(),
                   decoder=PyMatchingDecoder(_ZeroLatency()),
               ), verbose=False)
-        pe = int(res["cluster"].op_results.get(stream_op.id, 0))
+        pe = res["cluster"].op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         t = int(device._truth[stream_op.id][0])
         agree += (pe == pg); eng_err += (pe != t); glob_err += (pg != t)
@@ -116,7 +116,7 @@ def test_idle_stretch_decoded_by_runtime_builder_equals_global():
                   scheme=SlidingWindowScheme(),
                   decoder=PyMatchingDecoder(_ZeroLatency()),
               ), verbose=False)
-        pe = int(res["cluster"].op_results.get(stream_op.id, 0))
+        pe = res["cluster"].op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         agree += (pe == pg)
     assert agree >= 0.98 * shots                      # idle rounds decoded at runtime track global

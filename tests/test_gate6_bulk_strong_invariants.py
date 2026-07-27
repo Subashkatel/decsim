@@ -147,7 +147,7 @@ def test_bulk_merge_delivers_every_key_and_frees_units():
     ("field_name", "field_value"),
     [
         ("correction", ("aggregate-correction",)),
-        ("logical_value", 1),
+        ("logical_observables", (1,)),
         ("soft_output", 0.25),
         ("boundary_defects", {6: [1]}),
         ("boundary_data", {"confidence": "aggregate"}),

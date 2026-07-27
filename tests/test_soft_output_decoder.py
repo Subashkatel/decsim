@@ -105,7 +105,7 @@ def test_engine_soft_output_is_error_predictive():
         decoded = _naive_shot(circuit, device, decoder, d, rounds)
         truth = int(device._truth[1][0])
         gaps.append(decoder.last_soft)
-        errs.append(int(decoded) ^ truth)
+        errs.append(decoded[0] ^ truth)
     gaps, errs = np.asarray(gaps), np.asarray(errs)
     assert errs.sum() > 0
     assert np.corrcoef(gaps, errs)[0, 1] < 0

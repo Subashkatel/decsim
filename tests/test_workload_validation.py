@@ -9,8 +9,9 @@
 import pytest
 
 from decsim.codes import SurfaceCodeModel
+from decsim.decoders import PresetLatencyDecoder
 from decsim.layouts import UniformLayout
-from decsim.message import Operation
+from decsim.message import IntrinsicMeasurement, Operation
 from decsim.planner import FixedRounds, WindowPlanner
 from decsim.run_spec import RunSpec
 from decsim.schemes import SlidingWindowScheme
@@ -96,3 +97,72 @@ def test_duplicate_ids_within_decode_ops_are_rejected():
         spec.validate()
     message = str(err.value)
     assert "42" in message and "decode_ops" in message
+
+
+def test_direct_operation_rejects_non_exact_logical_observable_index():
+    operation = Operation(
+        0,
+        "op0",
+        (0,),
+        logical_observable_index=True,
+    )
+
+    with pytest.raises(TypeError, match="logical_observable_index"):
+        RunSpec(ops=[operation]).validate()
+
+
+def test_intrinsic_measurement_must_match_operation_and_stream_identity():
+    operation = Operation(
+        3,
+        "op3",
+        (0,),
+        stream_id=("stream", 3),
+        intrinsic_measurement=IntrinsicMeasurement(
+            operation_id=3,
+            trajectory_id=("stream", 4),
+            value=0,
+            source="controlled fixture",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="trajectory_id"):
+        RunSpec(ops=[operation]).validate()
+
+
+def test_recursive_stable_intrinsic_identity_is_accepted():
+    operation = Operation(
+        3,
+        "op3",
+        (0,),
+        stream_id=("stream", (3, "branch")),
+        intrinsic_measurement=IntrinsicMeasurement(
+            operation_id=3,
+            trajectory_id=("stream", (3, "branch")),
+            value=0,
+            source="controlled fixture",
+        ),
+    )
+
+    RunSpec(ops=[operation]).validate()
+
+
+class _InvalidFeedbackFrontend:
+    def build(self):
+        return [
+            Operation(
+                0,
+                "frontend op",
+                (0,),
+                logical_observable_index=-1,
+            )
+        ]
+
+
+def test_frontend_materialized_operation_uses_same_feedback_validation():
+    spec = RunSpec(
+        frontend=_InvalidFeedbackFrontend(),
+        decoder=PresetLatencyDecoder(0.0),
+    )
+
+    with pytest.raises(ValueError, match="logical_observable_index"):
+        spec.build()

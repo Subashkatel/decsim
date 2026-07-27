@@ -40,7 +40,7 @@ def result_from_selected_faults(job: DecodeJob, model, selected) -> DecodeResult
         job.op_id,
         job.window_id,
         correction=committed.astype(np.uint8),
-        logical_value=int(observable_flips[0]) if observable_flips.size else 0,
+        logical_observables=tuple(int(bit) for bit in observable_flips),
         boundary_defects=_boundary_defects(model, committed),
     )
 

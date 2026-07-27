@@ -47,7 +47,9 @@ class _WeakBoundaryDecoder:
         return DecodeResult(
             job.op_id,
             job.window_id,
-            logical_value=int(job.window_id >= 2 and has_boundary_defect),
+            logical_observables=(
+                int(job.window_id >= 2 and has_boundary_defect),
+            ),
             soft_output=0.0 if job.window_id in self.uncertain else 1.0,
             boundary_defects={job.window.commit_hi + 1: [1]}
             if (job.window_id in self.uncertain
@@ -65,7 +67,8 @@ class _CorrectingStrongDecoder:
         return self.ticks
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0,
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,),
                             boundary_defects={job.window.commit_hi + 1: [0]})
 
 
@@ -144,7 +147,7 @@ def test_interaction_cannot_invalidate_unrelated_finished_work():
             return DecodeResult(
                 job.op_id,
                 job.window_id,
-                logical_value=0,
+                logical_observables=(0,),
                 soft_output=0.0 if job.op_id == 0 else 1.0,
                 boundary_defects={job.window.commit_hi + 1: [1]}
                 if job.op_id == 0 else None,
@@ -176,8 +179,10 @@ def test_eager_boundary_disagreement_replays_the_transitive_weak_cone():
     held, _ = _deterministic_run(Held())
 
     runtime = recovered["cluster"].window_manager
-    assert runtime.op_results[0] == held["cluster"].op_results[0] == 0
-    assert runtime._window_logical_values[(0, 2)] == 0
+    assert runtime.op_results[0] == held["cluster"].op_results[0] == (0,)
+    assert runtime.logical_contributions[
+        (0, 2)
+    ].logical_observables == (0,)
     assert weak.window_ids.count(0) == 1
     assert weak.window_ids.count(1) == 1
     assert weak.window_ids.count(2) == 2
@@ -288,7 +293,7 @@ def test_leaf_escalation_wakes_an_ancestor_waiting_to_replay():
     held, _ = _deterministic_run(Held(), uncertain=(1, 4))
 
     runtime = recovered["cluster"].window_manager
-    assert runtime.op_results[0] == held["cluster"].op_results[0] == 0
+    assert runtime.op_results[0] == held["cluster"].op_results[0] == (0,)
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
     assert runtime._finished_ops == {0}
@@ -301,7 +306,7 @@ def test_agreeing_descendant_wakes_an_ancestor_waiting_to_replay():
             return DecodeResult(
                 job.op_id,
                 job.window_id,
-                logical_value=0,
+                logical_observables=(0,),
                 boundary_defects={job.window.commit_hi + 1: [boundary_bit]},
             )
 
@@ -330,7 +335,7 @@ def test_strong_can_add_a_defect_to_an_empty_weak_boundary():
                 job.op_id,
                 job.window_id,
                 correction=[1],
-                logical_value=0,
+                logical_observables=(0,),
                 boundary_defects={job.window.commit_hi + 1: [1]},
             )
 
@@ -351,8 +356,10 @@ def test_strong_can_add_a_defect_to_an_empty_weak_boundary():
 
     recovered = run(Eager())["cluster"].window_manager
     held = run(Held())["cluster"].window_manager
-    assert recovered.op_results[0] == held.op_results[0] == 1
-    assert recovered._window_logical_values[(0, 2)] == 1
+    assert recovered.op_results[0] == held.op_results[0] == (1,)
+    assert recovered.logical_contributions[
+        (0, 2)
+    ].logical_observables == (1,)
     assert recovered.speculative_replays == 1
 
 
@@ -361,7 +368,7 @@ def test_early_strong_correction_waits_for_inflight_weak_cone_then_replays():
         Eager(), strong=_CorrectingStrongDecoder(ticks=1))
 
     runtime = recovered["cluster"].window_manager
-    assert runtime.op_results[0] == 0
+    assert runtime.op_results[0] == (0,)
     assert runtime.speculative_replays == 1
     # The correction beats W2's original dispatch, so W2-W4 consume the
     # corrected seam on their first and only decode.
@@ -415,7 +422,7 @@ def test_replay_invalidates_an_inflight_descendant_boundary():
     held_runtime = held["cluster"].window_manager
 
     assert runtime.op_results[0] == held_runtime.op_results[0]
-    assert runtime._window_logical_values == held_runtime._window_logical_values
+    assert runtime.logical_contributions == held_runtime.logical_contributions
     assert all(window.deps_remaining == 0
                for window in runtime.windows.values())
     assert weak.window_ids.count(3) == 1
@@ -436,7 +443,7 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
             return DecodeResult(
                 job.op_id,
                 job.window_id,
-                logical_value=0,
+                logical_observables=(0,),
                 soft_output=0.0 if escalates else 1.0,
                 boundary_defects={job.window.commit_hi + 1: [1]},
             )
@@ -450,7 +457,7 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
                 job.op_id,
                 job.window_id,
                 correction=[0],
-                logical_value=0,
+                logical_observables=(0,),
                 boundary_defects=None,
             )
 
@@ -491,6 +498,7 @@ def test_non_clifford_result_is_not_final_until_recovery_finishes():
         "measurement",
         (0,),
         clifford=False,
+        consumes_magic_state=False,
         requires_result_return_to_chip=True,
     )
     recovered, _ = _deterministic_run(
@@ -511,7 +519,7 @@ def test_equal_strong_boundary_preserves_eager_progress_without_replay():
             return DecodeResult(
                 job.op_id,
                 job.window_id,
-                logical_value=0,
+                logical_observables=(0,),
                 boundary_defects={job.window.commit_hi + 1: [1]},
             )
 
@@ -600,8 +608,13 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
             return DecodeResult(
                 job.op_id,
                 job.window_id,
-                logical_value=int(
-                    job.op_id == 1 and job.window_id == 0 and boundary_bit),
+                logical_observables=(
+                    int(
+                        job.op_id == 1
+                        and job.window_id == 0
+                        and boundary_bit
+                    ),
+                ),
                 soft_output=0.0 if escalates else 1.0,
                 boundary_defects={job.window.commit_hi + 1: [1]}
                 if escalates else None,
@@ -615,7 +628,7 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
             return DecodeResult(
                 job.op_id,
                 job.window_id,
-                logical_value=0,
+                logical_observables=(0,),
                 correction=[0],
                 boundary_defects=None,
             )
@@ -645,7 +658,7 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
     held_runtime = held["cluster"].window_manager
 
     assert runtime.speculative_replays == 1
-    assert runtime.op_results[1] == held_runtime.op_results[1] == 0
+    assert runtime.op_results[1] == held_runtime.op_results[1] == (0,)
     assert weak.calls.count((1, 0, (1,))) == 1
     assert sum(op_id == 1 and window_id == 0
                for op_id, window_id, _ in weak.calls) == 2
@@ -653,7 +666,7 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
     publications = [record for record in eager["orchestrator"].history
                     if record["op_id"] == 1]
     assert len(publications) == 1
-    assert publications[0]["outcome"] == 0
+    assert publications[0]["logical_observables"] == (0,)
     assert publications[0]["t"] >= runtime.op_strong_commit_time[0]
     assert eager["orchestrator"].frame.snapshot() == \
         held["orchestrator"].frame.snapshot()
@@ -683,7 +696,9 @@ class _StreamWeakDecoder:
         return DecodeResult(
             job.op_id,
             job.window_id,
-            logical_value=int(job.window_id >= 2 and has_boundary_defect),
+            logical_observables=(
+                int(job.window_id >= 2 and has_boundary_defect),
+            ),
             soft_output=0.0 if escalates else 1.0,
             boundary_defects={job.window.commit_hi + 1: [1]}
             if escalates else None,
@@ -705,7 +720,7 @@ class _StreamStrongDecoder:
         return DecodeResult(
             job.op_id,
             job.window_id,
-            logical_value=0,
+            logical_observables=(0,),
             correction=[0],
             boundary_defects=boundary,
         )
@@ -908,8 +923,8 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
     assert np.array_equal(eager_device._truth[0], held_device._truth[0])
 
     truth = int(eager_device._truth[0][0])
-    eager_prediction = int(eager["cluster"].op_results[0])
-    held_prediction = int(held["cluster"].op_results[0])
+    eager_prediction = eager["cluster"].op_results[0][0]
+    held_prediction = held["cluster"].op_results[0][0]
     assert eager_prediction == held_prediction
     # Truth is the observable sampled with these exact detector arrays, not a
     # strong-decoder result.  This compares the two policies' actual logical

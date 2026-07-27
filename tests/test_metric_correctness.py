@@ -93,7 +93,6 @@ def test_decode_backlog_summary_is_consistent_with_its_own_trace():
     simulate(RunSpec(
         ops=[op],
         num_units=1,
-        d=3,
         rounds_policy=FixedRounds(18),
         round_us=1.0,
         decoder=_FixedLatencyDecoder(6.0),

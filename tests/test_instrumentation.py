@@ -147,7 +147,6 @@ def test_backlog_rounds_use_the_ops_own_cadence():
     r = simulate(RunSpec(
             ops=ops,
             num_units=2,
-            d=3,
             rounds_policy=FixedRounds(11),
             code=fast,
             decoder=PresetLatencyDecoder(1.0),

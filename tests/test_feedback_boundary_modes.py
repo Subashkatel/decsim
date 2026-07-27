@@ -40,7 +40,6 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
     result = simulate(RunSpec(
                  ops=_feedback_chain(),
                  num_units=1,
-                 d=3,
                  rounds_policy=FixedRounds(3),
                  round_us=1.0,
                  code=SurfaceCodeModel(d=3),
@@ -63,7 +62,6 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
     result = simulate(RunSpec(
                  ops=_feedback_chain(),
                  num_units=1,
-                 d=3,
                  rounds_policy=FixedRounds(3),
                  round_us=1.0,
                  code=SurfaceCodeModel(d=3),

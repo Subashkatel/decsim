@@ -134,7 +134,6 @@ def test_engine_belief_matching_matches_offline():
         res = simulate(RunSpec(
                   ops=[op],
                   num_units=4,
-                  d=D,
                   rounds_policy=FixedRounds(R),
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),

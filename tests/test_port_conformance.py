@@ -86,7 +86,8 @@ def test_wired_world_parts_satisfy_their_ports(world):
     for part, port in checks:
         assert isinstance(part, port), \
             f"{type(part).__name__} does not satisfy {port.__name__}"
-    assert world.code.buffering_floor(world.window_manager.scheme)  # port 3 (Code)
+    assert world.planning.code.buffering_floor(
+        world.window_manager.scheme)  # port 3 (Code)
 
 
 def test_every_shipped_part_family_satisfies_its_port():
@@ -190,7 +191,7 @@ def _resolved_types(world):
         "factory": type(world.factory),
         "source": type(world.gate.source),
         "transport": type(world.controller),
-        "code": type(world.code),
+        "code": type(world.planning.code),
     }
 
 

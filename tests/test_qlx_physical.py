@@ -274,7 +274,6 @@ def test_qlx_circuit_runs_through_the_full_engine(circuit, detector_rounds):
         res = simulate(RunSpec(
                   ops=[op],
                   num_units=4,
-                  d=3,
                   rounds_policy=FixedRounds(rounds),
                   code=SurfaceCodeModel(d=3),
                   scheme=SlidingWindowScheme(),

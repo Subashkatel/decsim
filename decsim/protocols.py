@@ -398,7 +398,12 @@ class CodeModel(Protocol):
 @runtime_checkable
 class LayoutModel(Protocol):
     """Port 4. Maps operations and patches to their codes, decoding-graph
-    sizes, and resource claims."""
+    sizes, and resource claims.
+
+    ``codes()``, ``code_for_op()``, and ``code_for_patch()`` must remain stable
+    for a build. The current runtime accepts one declared planning/runtime code,
+    and every reachable selector must return that exact object.
+    """
 
     def code_for_op(self, op): ...
 
@@ -440,7 +445,18 @@ class ExecutionPlanner(Protocol):
     """Port 7. Single owner of windowing resolution: holds scheme + layout +
     rounds policy and plans a whole workload into a WindowPlan."""
 
+    scheme: DecodingScheme
+    layout: LayoutModel
+    rounds_policy: RoundsPolicy
+
     def plan(self, ops: list): ...
+
+
+@runtime_checkable
+class CrossPartValidator(Protocol):
+    """Optional exact capability for parts that reject whole-run combinations."""
+
+    def validate(self, spec, planning) -> None: ...
 
 
 # ----------------------------------------------------------------- resources
@@ -448,7 +464,9 @@ class ExecutionPlanner(Protocol):
 @runtime_checkable
 class MagicStateFactory(Protocol):
     """Port 19. Async magic-state supply: request() calls back once a
-    distilled state is ready for the op."""
+    distilled state is ready for the op on its declared event engine."""
+
+    engine: Any
 
     def request(self, op_id: int, callback: Callable[[], None]): ...
 

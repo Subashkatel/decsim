@@ -60,7 +60,6 @@ def _run(latency_us, rounds):
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=D,
               rounds_policy=FixedRounds(rounds),
               round_us=ROUND_US,
               decoder=_FixedLatencyDecoder(latency_us),

@@ -48,7 +48,6 @@ def _engine_failures(p: float, shots: int, seed0: int) -> int:
         res = simulate(RunSpec(
                   ops=[op],
                   num_units=4,
-                  d=D,
                   rounds_policy=FixedRounds(ROUNDS),
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),

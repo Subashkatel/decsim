@@ -55,7 +55,6 @@ def _run_engine_shot(circuit, device, decoder):
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=D,
               rounds_policy=FixedRounds(ROUNDS),
               code=SurfaceCodeModel(d=D),
               scheme=SlidingWindowScheme(),
@@ -107,7 +106,6 @@ def test_same_seed_double_run_is_bit_identical():
             res = simulate(RunSpec(
                       ops=[op],
                       num_units=4,
-                      d=D,
                       rounds_policy=FixedRounds(ROUNDS),
                       code=SurfaceCodeModel(d=D),
                       scheme=SlidingWindowScheme(),
@@ -218,7 +216,6 @@ def test_blocked_successor_waits_for_real_pymatching_result():
     res = simulate(RunSpec(
               ops=ops,
               num_units=4,
-              d=D,
               rounds_policy=FixedRounds(ROUNDS),
               code=SurfaceCodeModel(d=D),
               scheme=SlidingWindowScheme(),
@@ -247,7 +244,6 @@ def test_timing_only_ops_still_run():
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=D,
               rounds_policy=FixedRounds(ROUNDS),
               code=SurfaceCodeModel(d=D),
               scheme=SlidingWindowScheme(),

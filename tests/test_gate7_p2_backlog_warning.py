@@ -172,7 +172,6 @@ def _run_regime(tau_w_us, rounds=120):
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=3,
               rounds_policy=FixedRounds(rounds),
               round_us=1.0,
               decoder=_FixedLatencyDecoder(tau_w_us),

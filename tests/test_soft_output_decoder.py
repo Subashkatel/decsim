@@ -41,7 +41,6 @@ def _naive_shot(circuit, device, decoder, d, rounds):
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=d,
               rounds_policy=FixedRounds(rounds),
               code=SurfaceCodeModel(d=d),
               scheme=NaiveOnlineScheme(),

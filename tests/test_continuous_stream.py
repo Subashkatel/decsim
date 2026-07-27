@@ -50,7 +50,6 @@ def _agreement(segment_rounds, shots, seed=11):
                   decode_ops=[stream_op],
                   device=device,
                   num_units=4,
-                  d=D,
                   rounds_policy=PerOpRounds(rounds_map),
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),

@@ -771,7 +771,8 @@ class UnionFindDecoder:
     def _graph_for_model(self, model, job_label: str) -> UnionFindGraph:
         import weakref
 
-        entry = self._graphs.get(id(model))
+        model_identity = id(model)
+        entry = self._graphs.get(model_identity)
         graph = entry[1] if entry is not None and entry[0]() is model else None
         if graph is None:
             location = (
@@ -780,5 +781,12 @@ class UnionFindDecoder:
                 else "Union-Find window model"
             )
             graph = _graph_from_model(model, location=location)
-            self._graphs[id(model)] = (weakref.ref(model), graph)
+
+            def discard_dead_model(reference) -> None:
+                current = self._graphs.get(model_identity)
+                if current is not None and current[0] is reference:
+                    del self._graphs[model_identity]
+
+            reference = weakref.ref(model, discard_dead_model)
+            self._graphs[model_identity] = (reference, graph)
         return graph

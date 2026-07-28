@@ -25,7 +25,7 @@
       ],
       "global_mwpm_fails": 64,
       "windowed_mwpm_fails": 64,
-      "windowed_bm_fails": 11
+      "windowed_bm_fails": 10
     },
     "rsc-d5-r10-p0.005": {
       "kind": "surface",

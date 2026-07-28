@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from numbers import Integral
 from typing import TYPE_CHECKING
 
 from ..message import SoftOutput, SoftOutputSource
@@ -41,41 +42,47 @@ _EPS = 1e-9
 
 def _edge_pieces(dets, obs, weight):
     """One DEM error component -> a graph edge tuple ``(u, v, weight, obs_parity)``."""
-    if not dets and not obs:
-        return None
     parity = len(obs) % 2
     if len(dets) == 1:
         return (dets[0], BOUNDARY, weight, parity)
     if len(dets) == 2:
         return (dets[0], dets[1], weight, parity)
-    return None   # hyperedge (>2) -- not graphlike; skip (DEM should be decomposed)
+    raise ValueError(
+        f"cluster-gap graph received a detector hyperedge {tuple(dets)}"
+    )
 
 
 def dem_to_graph(dem: "stim.DetectorErrorModel"):
     """Build the weighted decoding graph (edge list) from a graphlike DEM."""
     import numpy as np
 
+    from ..detector_error_model import (
+        canonical_error_instructions,
+        validate_graphlike_fault,
+    )
+
     edges = []
-    for instr in dem.flattened():
-        if instr.type != "error":
-            continue
-        prob = instr.args_copy()[0]
+    for record in canonical_error_instructions(dem):
+        prob = record.probability
         weight = float(np.log((1 - prob) / prob)) if 0 < prob < 1 else 50.0
-        dets: list = []
-        obs: list = []
-        for target in instr.targets_copy():
-            if target.is_separator():
-                edge = _edge_pieces(dets, obs, weight)
-                if edge is not None:
-                    edges.append(edge)
-                dets, obs = [], []
-            elif target.is_relative_detector_id():
-                dets.append(target.val)
-            elif target.is_logical_observable_id():
-                obs.append(target.val)
-        edge = _edge_pieces(dets, obs, weight)
-        if edge is not None:
-            edges.append(edge)
+        for component in record.components:
+            fault = validate_graphlike_fault(
+                component.detectors,
+                component.logical_observables,
+                location=(
+                    f"error {record.error_ordinal} component "
+                    f"{component.component_ordinal}"
+                ),
+            )
+            assert fault is not None
+            detectors, logical_observables = fault
+            edges.append(
+                _edge_pieces(
+                    detectors,
+                    logical_observables,
+                    weight,
+                )
+            )
     return edges
 
 
@@ -83,9 +90,16 @@ def edges_from_matrices(check, obs, weights):
     """Build the decoding graph edge list from check/obs matrices + per-fault weights."""
     import numpy as np
 
+    from ..detector_error_model import validate_graphlike_matrices
+
     check = np.asarray(check, dtype=np.uint8)
     obs = np.asarray(obs, dtype=np.uint8)
     weights = np.asarray(weights, dtype=float)
+    validate_graphlike_matrices(
+        check,
+        obs,
+        location="reconstructed cluster-gap window model",
+    )
     edges = []
     for j in range(check.shape[1]):
         dets = list(np.nonzero(check[:, j])[0])
@@ -273,8 +287,49 @@ class ClusterGapMetric:
     name = "cluster_gap"
 
     def __init__(self, edges, n_det, matching):
+        from ..detector_error_model import validate_graphlike_fault
+
+        detector_count = int(n_det)
+        if detector_count < 0:
+            raise ValueError("cluster-gap detector count must be nonnegative")
+        for edge_index, edge in enumerate(edges):
+            if len(edge) != 4:
+                raise ValueError(
+                    f"cluster-gap edge {edge_index} must have four fields"
+                )
+            u, v, _weight, logical_parity = edge
+            if not isinstance(u, Integral) or not isinstance(v, Integral):
+                raise TypeError(
+                    f"cluster-gap edge {edge_index} endpoints must be integers"
+                )
+            if not (
+                (u == BOUNDARY or 0 <= u < detector_count)
+                and (v == BOUNDARY or 0 <= v < detector_count)
+            ):
+                raise ValueError(
+                    f"cluster-gap edge {edge_index} has an endpoint outside "
+                    f"the {detector_count}-detector graph"
+                )
+            if logical_parity not in (0, 1):
+                raise ValueError(
+                    f"cluster-gap edge {edge_index} logical parity must be binary"
+                )
+            detector_ids = tuple(
+                endpoint for endpoint in (int(u), int(v))
+                if endpoint != BOUNDARY
+            )
+            logical_ids = (0,) if logical_parity else ()
+            identity = validate_graphlike_fault(
+                detector_ids,
+                logical_ids,
+                location=f"cluster-gap edge {edge_index}",
+            )
+            if identity is None:
+                raise ValueError(
+                    f"cluster-gap edge {edge_index} is inert and must be removed"
+                )
         self.edges = edges
-        self.n_det = int(n_det)
+        self.n_det = detector_count
         self._matching = matching
 
     @classmethod

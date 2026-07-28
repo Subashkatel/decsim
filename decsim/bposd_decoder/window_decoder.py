@@ -19,8 +19,15 @@ def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,
         if decoder is None:
             import weakref
 
+            from ..detector_error_model import validate_placed_fault_matrices
             from ldpc import BpOsdDecoder
             from scipy.sparse import csr_matrix
+
+            validate_placed_fault_matrices(
+                model.check,
+                model.obs,
+                location="BP-OSD window model",
+            )
             decoder = BpOsdDecoder(csr_matrix(model.check),
                                    error_channel=list(model.priors),
                                    max_iter=max_iter, bp_method=bp_method,

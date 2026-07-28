@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 def _require_belief_matching_model(model: "WindowErrorModel") -> None:
     """Fail if the window model lacks hyperedge data for belief matching."""
-    if model.h_check is None:
+    if model.h_check is None or model.h_priors is None or model.h2e is None:
         raise ValueError("belief_matching_window_decoder needs models built with "
                          "build_window_error_models(..., belief_matching=True)")
 
@@ -28,6 +28,16 @@ def _cache_entry(model: "WindowErrorModel", cache: dict,
     if entry is not None:
         return entry
 
+    from ..detector_error_model import validate_belief_matching_matrices
+
+    validate_belief_matching_matrices(
+        model.check,
+        model.obs,
+        model.h_check,
+        model.h_priors,
+        model.h2e,
+        location="belief-matching window model",
+    )
     bp = BpDecoder(csr_matrix(model.h_check),
                    error_channel=list(model.h_priors),
                    max_iter=max_iter,

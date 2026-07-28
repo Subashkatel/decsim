@@ -36,49 +36,395 @@ class WindowErrorModel:
         return self.buffer_lo < self.commit_lo
 
 
+@dataclass(frozen=True)
+class CanonicalErrorComponent:
+    """One parity-reduced component of a physical Stim error instruction."""
+
+    component_ordinal: int
+    detectors: tuple[int, ...]
+    logical_observables: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CanonicalErrorInstruction:
+    """Both physical and decomposed identities of one Stim error mechanism."""
+
+    error_ordinal: int
+    probability: float
+    aggregate_detectors: tuple[int, ...]
+    aggregate_logical_observables: tuple[int, ...]
+    components: tuple[CanonicalErrorComponent, ...]
+
+
 def _merge_probability(current: float, incoming: float) -> float:
     """Merge independent faults with p (+) q = p(1-q) + q(1-p)."""
     return current * (1 - incoming) + incoming * (1 - current)
 
 
-def _error_components(inst) -> tuple:
-    """Parse one Stim error instruction into decomposed components and one hyperedge."""
-    probability = inst.args_copy()[0]
-    components = []
-    detectors = []
-    observables = []
-    all_detectors = []
-    all_observables = []
+def _xor_target_ids(target_ids) -> tuple[int, ...]:
+    """Return the sorted ids with even multiplicities removed."""
+    odd_ids: set[int] = set()
+    for target_id in target_ids:
+        if target_id in odd_ids:
+            odd_ids.remove(target_id)
+        else:
+            odd_ids.add(target_id)
+    return tuple(sorted(odd_ids))
 
-    for target in inst.targets_copy():
+
+def _canonical_error_instruction(
+    instruction,
+    error_ordinal: int,
+) -> Optional[CanonicalErrorInstruction]:
+    """Parse one complete error before any consumer sees its components."""
+    raw_components: list[tuple[list[int], list[int]]] = []
+    component_detectors: list[int] = []
+    component_logicals: list[int] = []
+    aggregate_detectors: list[int] = []
+    aggregate_logicals: list[int] = []
+
+    for target in instruction.targets_copy():
         if target.is_separator():
-            components.append((tuple(sorted(detectors)), tuple(sorted(observables))))
-            detectors = []
-            observables = []
+            raw_components.append(
+                (component_detectors, component_logicals)
+            )
+            component_detectors = []
+            component_logicals = []
         elif target.is_relative_detector_id():
-            detectors.append(target.val)
-            all_detectors.append(target.val)
+            component_detectors.append(target.val)
+            aggregate_detectors.append(target.val)
         elif target.is_logical_observable_id():
-            observables.append(target.val)
-            all_observables.append(target.val)
+            component_logicals.append(target.val)
+            aggregate_logicals.append(target.val)
+    raw_components.append((component_detectors, component_logicals))
 
-    components.append((tuple(sorted(detectors)), tuple(sorted(observables))))
-    hyperedge = (tuple(sorted(all_detectors)), tuple(sorted(all_observables)))
-    return probability, components, hyperedge
+    canonical_aggregate_detectors = _xor_target_ids(aggregate_detectors)
+    canonical_aggregate_logicals = _xor_target_ids(aggregate_logicals)
+    if not canonical_aggregate_detectors:
+        if canonical_aggregate_logicals:
+            raise ValueError(
+                f"error {error_ordinal} is a detectorless logical "
+                "mechanism after instruction-wide XOR reduction: "
+                f"logical observables {canonical_aggregate_logicals}"
+            )
+        return None
+
+    canonical_components: list[CanonicalErrorComponent] = []
+    for component_ordinal, (
+        raw_detectors,
+        raw_logicals,
+    ) in enumerate(raw_components):
+        detectors = _xor_target_ids(raw_detectors)
+        logical_observables = _xor_target_ids(raw_logicals)
+        if not detectors:
+            if logical_observables:
+                raise ValueError(
+                    f"error {error_ordinal} component "
+                    f"{component_ordinal} is a detectorless logical "
+                    "mechanism after component XOR reduction: "
+                    f"logical observables {logical_observables}"
+                )
+            continue
+        canonical_components.append(
+            CanonicalErrorComponent(
+                component_ordinal=component_ordinal,
+                detectors=detectors,
+                logical_observables=logical_observables,
+            )
+        )
+
+    return CanonicalErrorInstruction(
+        error_ordinal=error_ordinal,
+        probability=float(instruction.args_copy()[0]),
+        aggregate_detectors=canonical_aggregate_detectors,
+        aggregate_logical_observables=canonical_aggregate_logicals,
+        components=tuple(canonical_components),
+    )
+
+
+def canonical_error_instructions(dem) -> tuple[CanonicalErrorInstruction, ...]:
+    """Return canonical physical errors from one flattened Stim DEM.
+
+    Detector and logical identities are reduced across the complete
+    instruction before its ``^``-separated components can be consumed.
+    """
+    records: list[CanonicalErrorInstruction] = []
+    error_ordinal = 0
+    for instruction in dem.flattened():
+        if instruction.type != "error":
+            continue
+        record = _canonical_error_instruction(
+            instruction,
+            error_ordinal,
+        )
+        if record is not None:
+            records.append(record)
+        error_ordinal += 1
+    return tuple(records)
+
+
+def validate_fault_identity(
+    detector_ids,
+    logical_observable_ids,
+    *,
+    location: str,
+) -> Optional[tuple[tuple[int, ...], tuple[int, ...]]]:
+    """Canonicalize one placed fault without changing its decoder domain."""
+    detectors = _xor_target_ids(detector_ids)
+    logical_observables = _xor_target_ids(logical_observable_ids)
+    if not detectors:
+        if logical_observables:
+            raise ValueError(
+                f"{location} is a detectorless logical fault: "
+                f"logical observables {logical_observables}"
+            )
+        return None
+    return detectors, logical_observables
+
+
+def validate_graphlike_fault(
+    detector_ids,
+    logical_observable_ids,
+    *,
+    location: str,
+) -> Optional[tuple[tuple[int, ...], tuple[int, ...]]]:
+    """Canonicalize one fault and require the one-/two-detector domain."""
+    fault = validate_fault_identity(
+        detector_ids,
+        logical_observable_ids,
+        location=location,
+    )
+    if fault is None:
+        return None
+    detectors, logical_observables = fault
+    if len(detectors) > 2:
+        raise ValueError(
+            f"{location} is a detector hyperedge with detectors {detectors}; "
+            "this graphlike decoder supports one or two detectors per fault"
+        )
+    return detectors, logical_observables
+
+
+def _binary_matrix(value, *, location: str, name: str):
+    """Return one rank-2 binary matrix without changing its identities."""
+    import numpy as np
+
+    matrix = np.asarray(value)
+    if matrix.ndim != 2:
+        raise ValueError(f"{location} {name} must be a rank-2 matrix")
+    if not np.all((matrix == 0) | (matrix == 1)):
+        raise ValueError(f"{location} {name} must contain only binary values")
+    return matrix.astype(np.uint8, copy=False)
+
+
+def _placed_matrix_faults(
+    check,
+    observables,
+    *,
+    location: str,
+) -> tuple[tuple[int, tuple[int, ...], tuple[int, ...]], ...]:
+    """Return canonical ids for every placed matrix fault column."""
+    import numpy as np
+
+    check_matrix = _binary_matrix(
+        check,
+        location=location,
+        name="check",
+    )
+    observable_matrix = _binary_matrix(
+        observables,
+        location=location,
+        name="observable matrix",
+    )
+    if check_matrix.shape[1] != observable_matrix.shape[1]:
+        raise ValueError(
+            f"{location} check and observable matrices have different fault "
+            f"counts: {check_matrix.shape[1]} and "
+            f"{observable_matrix.shape[1]}"
+        )
+    faults = []
+    for fault_index in range(check_matrix.shape[1]):
+        detector_ids = np.nonzero(check_matrix[:, fault_index])[0]
+        logical_observable_ids = np.nonzero(
+            observable_matrix[:, fault_index]
+        )[0]
+        faults.append(
+            (
+                fault_index,
+                tuple(int(value) for value in detector_ids),
+                tuple(int(value) for value in logical_observable_ids),
+            )
+        )
+    return tuple(faults)
+
+
+def validate_placed_fault_matrices(
+    check,
+    observables,
+    *,
+    location: str,
+) -> None:
+    """Reject lost logical identity while preserving a decoder's degree domain."""
+    for fault_index, detector_ids, logical_ids in _placed_matrix_faults(
+        check,
+        observables,
+        location=location,
+    ):
+        validate_fault_identity(
+            detector_ids,
+            logical_ids,
+            location=f"{location} column {fault_index}",
+        )
+
+
+def validate_graphlike_matrices(
+    check,
+    observables,
+    *,
+    location: str,
+) -> None:
+    """Validate every placed fault column at a graphlike consumer boundary."""
+    for fault_index, detector_ids, logical_ids in _placed_matrix_faults(
+        check,
+        observables,
+        location=location,
+    ):
+        validate_graphlike_fault(
+            detector_ids,
+            logical_ids,
+            location=f"{location} column {fault_index}",
+        )
+
+
+def validate_belief_matching_matrices(
+    check,
+    observables,
+    hyperedge_check,
+    hyperedge_priors,
+    hyperedge_to_edge,
+    *,
+    location: str,
+) -> None:
+    """Validate the linked physical and graphlike belief-matching domains."""
+    import numpy as np
+
+    check_matrix = _binary_matrix(
+        check,
+        location=location,
+        name="component check",
+    )
+    observable_matrix = _binary_matrix(
+        observables,
+        location=location,
+        name="component observable matrix",
+    )
+    hyperedge_check_matrix = _binary_matrix(
+        hyperedge_check,
+        location=location,
+        name="physical check",
+    )
+    hyperedge_to_edge_matrix = _binary_matrix(
+        hyperedge_to_edge,
+        location=location,
+        name="physical-to-component map",
+    )
+    if check_matrix.shape[1] != observable_matrix.shape[1]:
+        raise ValueError(
+            f"{location} component check and observable matrices have "
+            "different fault counts"
+        )
+    if check_matrix.shape[0] != hyperedge_check_matrix.shape[0]:
+        raise ValueError(
+            f"{location} component and physical checks have different "
+            "detector counts"
+        )
+    expected_map_shape = (
+        check_matrix.shape[1],
+        hyperedge_check_matrix.shape[1],
+    )
+    if hyperedge_to_edge_matrix.shape != expected_map_shape:
+        raise ValueError(
+            f"{location} physical-to-component map has shape "
+            f"{hyperedge_to_edge_matrix.shape}; expected {expected_map_shape}"
+        )
+
+    try:
+        priors = np.asarray(hyperedge_priors, dtype=float)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"{location} physical priors must be real probabilities"
+        ) from error
+    if priors.ndim != 1:
+        raise ValueError(f"{location} physical priors must be rank 1")
+    if priors.shape[0] != hyperedge_check_matrix.shape[1]:
+        raise ValueError(
+            f"{location} has {priors.shape[0]} physical priors for "
+            f"{hyperedge_check_matrix.shape[1]} physical fault columns"
+        )
+    if not np.all(np.isfinite(priors)):
+        raise ValueError(f"{location} physical priors must be finite")
+    if not np.all((0.0 <= priors) & (priors <= 1.0)):
+        raise ValueError(
+            f"{location} physical priors must lie in the inclusive range [0, 1]"
+        )
+
+    validate_graphlike_matrices(
+        check_matrix,
+        observable_matrix,
+        location=f"{location} component graph",
+    )
+    for physical_index in range(hyperedge_check_matrix.shape[1]):
+        component_indices = np.nonzero(
+            hyperedge_to_edge_matrix[:, physical_index]
+        )[0]
+        if not component_indices.size:
+            raise ValueError(
+                f"{location} physical column {physical_index} has no "
+                "suggested graph components"
+            )
+        derived_detector_bits = (
+            check_matrix[:, component_indices].sum(axis=1) % 2
+        )
+        stored_detector_bits = hyperedge_check_matrix[:, physical_index]
+        if not np.array_equal(derived_detector_bits, stored_detector_bits):
+            raise ValueError(
+                f"{location} physical column {physical_index} detector "
+                "identity does not equal its component XOR"
+            )
+        derived_logical_bits = (
+            observable_matrix[:, component_indices].sum(axis=1) % 2
+        )
+        identity = validate_fault_identity(
+            np.nonzero(stored_detector_bits)[0],
+            np.nonzero(derived_logical_bits)[0],
+            location=f"{location} physical column {physical_index}",
+        )
+        if identity is None:
+            raise ValueError(
+                f"{location} physical column {physical_index} is inert and "
+                "must be removed before belief matching"
+            )
 
 
 def detector_error_model_to_faults(dem) -> tuple:
     """Convert a Stim detector error model into merged fault columns."""
     merged: dict = {}
-    for inst in dem.flattened():
-        if inst.type != "error":
-            continue
-        probability, components, _hyperedge = _error_components(inst)
-        for key in components:
-            if not key[0]:
-                continue
+    for record in canonical_error_instructions(dem):
+        for component in record.components:
+            key = validate_fault_identity(
+                component.detectors,
+                component.logical_observables,
+                location=(
+                    f"error {record.error_ordinal} component "
+                    f"{component.component_ordinal}"
+                ),
+            )
+            assert key is not None
             current_probability = merged.get(key, 0.0)
-            merged[key] = _merge_probability(current_probability, probability)
+            merged[key] = _merge_probability(
+                current_probability,
+                record.probability,
+            )
     det_sets = [k[0] for k in merged]
     obs_sets = [k[1] for k in merged]
     priors = list(merged.values())
@@ -94,27 +440,44 @@ def detector_error_model_to_faults_bm(dem) -> tuple:
     hyper_list: list = []
     h2e_pairs: set = set()
 
-    for inst in dem.flattened():
-        if inst.type != "error":
-            continue
-        probability, components, hyperedge_key = _error_components(inst)
-        if not hyperedge_key[0]:
-            continue
+    for record in canonical_error_instructions(dem):
+        hyperedge_key = (
+            record.aggregate_detectors,
+            record.aggregate_logical_observables,
+        )
 
         hyperedge_index = hyper_merged.get(hyperedge_key)
-        if hyperedge_index is None:
+        is_first_decomposition = hyperedge_index is None
+        if is_first_decomposition:
             hyperedge_index = len(hyper_list)
             hyper_merged[hyperedge_key] = hyperedge_index
             hyper_list.append([hyperedge_key[0], hyperedge_key[1], 0.0])
         hyper_list[hyperedge_index][2] = _merge_probability(
-            hyper_list[hyperedge_index][2], probability)
+            hyper_list[hyperedge_index][2],
+            record.probability,
+        )
 
-        for component_key in components:
-            if not component_key[0]:
-                continue
+        for component in record.components:
+            component_key = validate_graphlike_fault(
+                component.detectors,
+                component.logical_observables,
+                location=(
+                    f"error {record.error_ordinal} component "
+                    f"{component.component_ordinal}"
+                ),
+            )
+            assert component_key is not None
             current = edge_merged.get(component_key, 0.0)
-            edge_merged[component_key] = _merge_probability(current, probability)
-            h2e_pairs.add((hyperedge_index, component_key))
+            edge_merged[component_key] = _merge_probability(
+                current,
+                record.probability,
+            )
+            if is_first_decomposition:
+                pair = (hyperedge_index, component_key)
+                if pair in h2e_pairs:
+                    h2e_pairs.remove(pair)
+                else:
+                    h2e_pairs.add(pair)
 
     edge_keys = list(edge_merged)
     edge_index = {k: i for i, k in enumerate(edge_keys)}
@@ -197,10 +560,10 @@ def _fault_columns_for_window(det_sets: list, row_index: dict, lead_rows: set,
     return columns
 
 
-def _belief_matching_fields(columns: list, rows: list, row_index: dict,
-                            h_det_sets: list, h_priors: list,
+def _belief_matching_fields(columns: list, check,
+                            h_priors: list,
                             hyperedge_to_edge_map) -> dict:
-    """Build the optional hyperedge fields used by belief matching."""
+    """Project physical faults through the components present in this window."""
     import numpy as np
 
     hyperedge_columns = sorted({
@@ -213,13 +576,6 @@ def _belief_matching_fields(columns: list, rows: list, row_index: dict,
         for column_index, hyperedge_index in enumerate(hyperedge_columns)
     }
 
-    hyperedge_check = np.zeros((len(rows), len(hyperedge_columns)), dtype=np.uint8)
-    for hyperedge_index in hyperedge_columns:
-        column_index = hyperedge_index_by_id[hyperedge_index]
-        for detector_id in h_det_sets[hyperedge_index]:
-            if detector_id in row_index:
-                hyperedge_check[row_index[detector_id], column_index] = 1
-
     hyperedge_to_edge = np.zeros((len(columns), len(hyperedge_columns)),
                                  dtype=np.uint8)
     for edge_column, fault_index in enumerate(columns):
@@ -227,8 +583,12 @@ def _belief_matching_fields(columns: list, rows: list, row_index: dict,
             hyperedge_to_edge[edge_column,
                               hyperedge_index_by_id[hyperedge_index]] = 1
 
+    local_component_check = np.asarray(check, dtype=np.uint64)
+    hyperedge_check = (
+        local_component_check @ hyperedge_to_edge.astype(np.uint64)
+    ) % 2
     return {
-        "h_check": hyperedge_check,
+        "h_check": hyperedge_check.astype(np.uint8),
         "h_priors": np.array([h_priors[hyperedge_index]
                               for hyperedge_index in hyperedge_columns]),
         "h2e": hyperedge_to_edge,
@@ -342,7 +702,6 @@ def _build_one_window_model(*, det_sets: list, obs_sets: list, priors: list,
                             buffer_hi: int, is_last: bool,
                             unowned_faults: Optional[set] = None,
                             belief_matching: bool = False,
-                            h_det_sets: Optional[list] = None,
                             h_priors: Optional[list] = None,
                             hyperedge_to_edge_map=None) -> WindowErrorModel:
     """Build one sliced window and update the fault ownership set."""
@@ -362,7 +721,7 @@ def _build_one_window_model(*, det_sets: list, obs_sets: list, priors: list,
     hyperedge_fields: dict = {}
     if belief_matching:
         hyperedge_fields = _belief_matching_fields(
-            columns, rows, row_index, h_det_sets, h_priors,
+            columns, check, h_priors,
             hyperedge_to_edge_map)
 
     return WindowErrorModel(
@@ -393,7 +752,7 @@ def _fault_data_from_circuit(circuit, *, decompose_errors: bool,
 def _build_models_from_plan(*, plan: list, det_sets: list, obs_sets: list,
                             priors: list, n_obs: int, round_of: dict,
                             fault_rounds: list, pos_of: dict,
-                            belief_matching: bool, h_det_sets, h_priors,
+                            belief_matching: bool, h_priors,
                             hyperedge_to_edge_map) -> list:
     """Build all window models for a normalized fault list and plan."""
     models: list = []
@@ -408,7 +767,7 @@ def _build_models_from_plan(*, plan: list, det_sets: list, obs_sets: list,
             pos_of=pos_of, committed_elsewhere=committed_elsewhere,
             buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
             buffer_hi=buffer_hi, is_last=(window_index == last_window),
-            belief_matching=belief_matching, h_det_sets=h_det_sets,
+            belief_matching=belief_matching,
             h_priors=h_priors, hyperedge_to_edge_map=hyperedge_to_edge_map))
     return models
 
@@ -418,17 +777,18 @@ def _prepare_model_inputs(circuit, num_observables: Optional[int],
                           detector_rounds: Optional[dict],
                           belief_matching: bool) -> tuple:
     """Parse the circuit once into the data needed by window builders."""
-    det_sets, obs_sets, priors, h_det_sets, h_priors, hyperedge_to_edge_map = \
+    round_of = _detector_rounds_from_circuit(circuit, detector_rounds)
+    (det_sets, obs_sets, priors, _physical_detector_sets, h_priors,
+     hyperedge_to_edge_map) = \
         _fault_data_from_circuit(
             circuit,
             decompose_errors=decompose_errors,
             belief_matching=belief_matching)
     n_obs = num_observables if num_observables is not None else circuit.num_observables
-    round_of = _detector_rounds_from_circuit(circuit, detector_rounds)
     fault_rounds = [tuple(round_of[d] for d in dets) for dets in det_sets]
     pos_of = _detector_position_in_round(round_of)
     return (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
-            h_det_sets, h_priors, hyperedge_to_edge_map)
+            h_priors, hyperedge_to_edge_map)
 
 
 def build_window_error_models(circuit, plan: list, num_observables: Optional[int] = None,
@@ -437,13 +797,13 @@ def build_window_error_models(circuit, plan: list, num_observables: Optional[int
                           belief_matching: bool = False) -> list:
     """Slice an operation circuit into one WindowErrorModel per planned window."""
     (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
-     h_det_sets, h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
+     h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
          circuit, num_observables, decompose_errors, detector_rounds, belief_matching)
     return _build_models_from_plan(
         plan=plan, det_sets=det_sets, obs_sets=obs_sets, priors=priors,
         n_obs=n_obs, round_of=round_of, fault_rounds=fault_rounds,
         pos_of=pos_of, belief_matching=belief_matching,
-        h_det_sets=h_det_sets, h_priors=h_priors,
+        h_priors=h_priors,
         hyperedge_to_edge_map=hyperedge_to_edge_map)
 
 
@@ -454,7 +814,7 @@ def _build_single_window_error_model(
 ) -> WindowErrorModel:
     """Build an independent model with explicit non-owned fault ranges."""
     (det_sets, obs_sets, priors, n_obs, round_of, fault_rounds, pos_of,
-     h_det_sets, h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
+     h_priors, hyperedge_to_edge_map) = _prepare_model_inputs(
          circuit, num_observables, decompose_errors, detector_rounds, belief_matching)
     buffer_lo, commit_lo, commit_hi, buffer_hi = _parse_window_entry(window_entry)
     for exclusion in fault_exclusion_ranges:
@@ -488,7 +848,7 @@ def _build_single_window_error_model(
         unowned_faults=unowned_faults,
         buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
         buffer_hi=buffer_hi, is_last=False,
-        belief_matching=belief_matching, h_det_sets=h_det_sets,
+        belief_matching=belief_matching,
         h_priors=h_priors, hyperedge_to_edge_map=hyperedge_to_edge_map)
 
 
@@ -543,11 +903,11 @@ class WindowSlicer:
         dem = circuit.detector_error_model(decompose_errors=decompose_errors)
         if belief_matching:
             (self.det_sets, self.obs_sets, self.priors,
-             self.h_det_sets, self.h_priors,
+             _physical_detector_sets, self.h_priors,
              self.hyperedge_to_edge_map) = detector_error_model_to_faults_bm(dem)
         else:
             self.det_sets, self.obs_sets, self.priors = detector_error_model_to_faults(dem)
-            self.h_det_sets = self.h_priors = self.hyperedge_to_edge_map = None
+            self.h_priors = self.hyperedge_to_edge_map = None
         self.n_obs = num_observables if num_observables is not None else circuit.num_observables
         round_of = _detector_rounds_from_circuit(circuit, detector_rounds)
         self.round_of = round_of
@@ -565,7 +925,7 @@ class WindowSlicer:
             committed_elsewhere=self.committed_elsewhere,
             buffer_lo=buffer_lo, commit_lo=commit_lo, commit_hi=commit_hi,
             buffer_hi=buffer_hi, is_last=is_last,
-            belief_matching=self.belief_matching, h_det_sets=self.h_det_sets,
+            belief_matching=self.belief_matching,
             h_priors=self.h_priors,
             hyperedge_to_edge_map=self.hyperedge_to_edge_map)
 

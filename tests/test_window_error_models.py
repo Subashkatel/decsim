@@ -10,9 +10,14 @@ import pytest
 stim = pytest.importorskip("stim")
 np = pytest.importorskip("numpy")
 
-from decsim.detector_error_model import (build_window_error_models,
-                                             decode_windowed,
-                                             detector_error_model_to_faults)
+from decsim.detector_error_model import (
+    WindowErrorModel,
+    build_window_error_models,
+    canonical_error_instructions,
+    decode_windowed,
+    detector_error_model_to_faults,
+    detector_error_model_to_faults_bm,
+)
 from decsim.mwpm_decoder import matching_window_decoder
 from decsim.codes import SurfaceCodeModel
 from decsim.schemes import SlidingWindowScheme, ParallelWindowScheme
@@ -68,6 +73,476 @@ def test_composite_errors_split_into_matchable_components():
     sets, _, _ = detector_error_model_to_faults(
         circuit.detector_error_model(decompose_errors=True))
     assert max(len(s) for s in sets) <= 2
+
+
+@pytest.mark.parametrize(
+    ("instruction", "expected_detectors", "expected_logicals"),
+    [
+        ("error(0.25) D0 D0", (), ()),
+        ("error(0.25) D0 ^ D0", (), ()),
+        ("error(0.25) D0 L0 ^ D0 L0", (), ()),
+        ("error(0.25) D0 D0 D1 L0", ((1,),), ((0,),)),
+    ],
+)
+def test_canonical_error_instruction_uses_instruction_wide_xor_identity(
+    instruction, expected_detectors, expected_logicals,
+):
+    records = canonical_error_instructions(
+        stim.DetectorErrorModel(instruction)
+    )
+
+    assert tuple(
+        component.detectors
+        for record in records
+        for component in record.components
+    ) == expected_detectors
+    assert tuple(
+        component.logical_observables
+        for record in records
+        for component in record.components
+    ) == expected_logicals
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "error(0.25) L0",
+        "error(0.25) D0 D0 L0",
+        "error(0.25) D0 L0 ^ D0",
+    ],
+)
+def test_canonical_error_instruction_rejects_detectorless_logical_mechanism(
+    instruction,
+):
+    dem = stim.DetectorErrorModel(instruction)
+
+    with pytest.raises(
+        ValueError,
+        match="error 0.*detectorless logical",
+    ):
+        canonical_error_instructions(dem)
+
+
+def test_every_raw_graph_consumer_shares_instruction_wide_validation():
+    from decsim.soft_output.cluster import dem_to_graph
+    from decsim.soft_output.complementary import dem_to_matrices
+
+    malformed = stim.DetectorErrorModel(
+        "error(0.25) D0 L0 ^ D0"
+    )
+    consumers = (
+        detector_error_model_to_faults,
+        detector_error_model_to_faults_bm,
+        dem_to_graph,
+        dem_to_matrices,
+    )
+
+    for consume in consumers:
+        with pytest.raises(ValueError, match="detectorless logical"):
+            consume(malformed)
+
+
+def test_every_placed_construction_path_rejects_detectorless_logical_fault():
+    from decsim.belief_matching_decoder import BeliefMatchingDecoder
+    from decsim.belief_matching_decoder import belief_matching_window_decoder
+    from decsim.bposd_decoder import BPOSDDecoder
+    from decsim.bposd_decoder import bposd_window_decoder
+    from decsim.message import DecodeJob
+    from decsim.mwpm_decoder import PyMatchingDecoder
+    from decsim.mwpm_decoder import matching_window_decoder
+    from decsim.soft_output import ComplementaryGapMetric, ClusterGapMetric
+    from decsim.soft_output.cluster import BOUNDARY
+
+    class ZeroLatency:
+        def latency(self, job):
+            return 0
+
+    model = WindowErrorModel(
+        detector_ids=(),
+        commit_hi=0,
+        check=np.zeros((0, 1), dtype=np.uint8),
+        priors=np.array([0.25]),
+        obs=np.ones((1, 1), dtype=np.uint8),
+        owned=np.ones(1, dtype=bool),
+        future_flips={},
+        defect_positions={},
+        h_check=np.zeros((0, 1), dtype=np.uint8),
+        h_priors=np.array([0.25]),
+        h2e=np.ones((1, 1), dtype=np.uint8),
+    )
+    job = DecodeJob(
+        op_id=7,
+        window_id=3,
+        n_rounds=1,
+        dem=model,
+        label="malformed W3",
+    )
+    consumers = (
+        lambda: PyMatchingDecoder(ZeroLatency()).decode(job),
+        lambda: BPOSDDecoder(ZeroLatency()).decode(job),
+        lambda: BeliefMatchingDecoder(ZeroLatency()).decode(job),
+        lambda: ComplementaryGapMetric.from_window_model(model),
+        lambda: ClusterGapMetric.from_window_model(model),
+        lambda: matching_window_decoder()(model, np.zeros(0, dtype=np.uint8)),
+        lambda: bposd_window_decoder()(model, np.zeros(0, dtype=np.uint8)),
+        lambda: belief_matching_window_decoder()(
+            model,
+            np.zeros(0, dtype=np.uint8),
+        ),
+        lambda: ComplementaryGapMetric(
+            model.check,
+            model.obs,
+            np.ones(1),
+        ),
+        lambda: ClusterGapMetric(
+            [(BOUNDARY, BOUNDARY, 1.0, 1)],
+            0,
+            None,
+        ),
+    )
+
+    for consume in consumers:
+        with pytest.raises(
+            ValueError,
+            match="(column 0|edge 0).*detectorless logical",
+        ):
+            consume()
+
+
+def test_bposd_retains_general_placed_hyperedges():
+    pytest.importorskip("ldpc")
+    from decsim.bposd_decoder import bposd_window_decoder
+
+    model = WindowErrorModel(
+        detector_ids=(0, 1, 2),
+        commit_hi=1,
+        check=np.ones((3, 1), dtype=np.uint8),
+        priors=np.array([0.25]),
+        obs=np.zeros((1, 1), dtype=np.uint8),
+        owned=np.ones(1, dtype=bool),
+        future_flips={},
+    )
+
+    selected = bposd_window_decoder()(
+        model,
+        np.zeros(3, dtype=np.uint8),
+    )
+
+    assert np.array_equal(selected, np.zeros(1, dtype=np.uint8))
+
+
+def test_every_placed_graph_path_rejects_a_detector_hyperedge():
+    from decsim.belief_matching_decoder import (
+        BeliefMatchingDecoder,
+        belief_matching_window_decoder,
+    )
+    from decsim.message import DecodeJob, SyndromePayload
+    from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
+    from decsim.soft_output import ComplementaryGapMetric, ClusterGapMetric
+
+    class ZeroLatency:
+        def latency(self, job):
+            return 0
+
+    model = WindowErrorModel(
+        detector_ids=(0, 1, 2),
+        commit_hi=1,
+        check=np.ones((3, 1), dtype=np.uint8),
+        priors=np.array([0.25]),
+        obs=np.zeros((1, 1), dtype=np.uint8),
+        owned=np.ones(1, dtype=bool),
+        future_flips={},
+        h_check=np.ones((3, 1), dtype=np.uint8),
+        h_priors=np.array([0.25]),
+        h2e=np.ones((1, 1), dtype=np.uint8),
+    )
+    job = DecodeJob(
+        op_id=7,
+        window_id=3,
+        n_rounds=1,
+        dem=model,
+        payloads=[
+            SyndromePayload(
+                operation_id=7,
+                patch_id=0,
+                round_index=1,
+                bits=np.zeros(3, dtype=np.uint8),
+            )
+        ],
+        label="hyperedge W3",
+    )
+    consumers = (
+        lambda: PyMatchingDecoder(ZeroLatency()).decode(job),
+        lambda: BeliefMatchingDecoder(ZeroLatency()).decode(job),
+        lambda: matching_window_decoder()(model, np.zeros(3, dtype=np.uint8)),
+        lambda: belief_matching_window_decoder()(
+            model,
+            np.zeros(3, dtype=np.uint8),
+        ),
+        lambda: ComplementaryGapMetric(
+            model.check,
+            model.obs,
+            np.ones(1),
+        ),
+        lambda: ClusterGapMetric.from_window_model(model),
+    )
+
+    for consume in consumers:
+        with pytest.raises(
+            ValueError,
+            match="detector hyperedge.*graphlike decoder",
+        ):
+            consume()
+
+
+def test_belief_placed_validation_separates_physical_and_component_domains():
+    from decsim.detector_error_model import validate_belief_matching_matrices
+
+    check = np.array(
+        [
+            [1, 0],
+            [1, 0],
+            [0, 1],
+        ],
+        dtype=np.uint8,
+    )
+    obs = np.zeros((1, 2), dtype=np.uint8)
+    h_check = np.ones((3, 1), dtype=np.uint8)
+    h2e = np.ones((2, 1), dtype=np.uint8)
+
+    validate_belief_matching_matrices(
+        check,
+        obs,
+        h_check,
+        np.array([0.25]),
+        h2e,
+        location="valid physical hyperedge",
+    )
+
+
+def test_belief_placed_validation_rejects_detectorless_logical_aggregate():
+    from decsim.detector_error_model import validate_belief_matching_matrices
+
+    with pytest.raises(
+        ValueError,
+        match="physical column 0.*detectorless logical",
+    ):
+        validate_belief_matching_matrices(
+            np.array([[1, 1]], dtype=np.uint8),
+            np.array([[0, 1]], dtype=np.uint8),
+            np.zeros((1, 1), dtype=np.uint8),
+            np.array([0.25]),
+            np.ones((2, 1), dtype=np.uint8),
+            location="lost aggregate",
+        )
+
+
+@pytest.mark.parametrize("prior", [0.0, 0.5, 1.0])
+def test_belief_inner_accepts_inclusive_physical_prior_range(prior):
+    from decsim.belief_matching_decoder import belief_matching_window_decoder
+
+    model = WindowErrorModel(
+        detector_ids=(0,),
+        commit_hi=1,
+        check=np.ones((1, 1), dtype=np.uint8),
+        priors=np.array([0.25]),
+        obs=np.zeros((1, 1), dtype=np.uint8),
+        owned=np.ones(1, dtype=bool),
+        future_flips={},
+        h_check=np.ones((1, 1), dtype=np.uint8),
+        h_priors=np.array([prior]),
+        h2e=np.ones((1, 1), dtype=np.uint8),
+    )
+
+    selected = belief_matching_window_decoder()(
+        model,
+        np.zeros(1, dtype=np.uint8),
+    )
+
+    assert selected.shape == (1,)
+
+
+@pytest.mark.parametrize(
+    ("priors", "message"),
+    [
+        (np.array([], dtype=float), "0 physical priors for 1"),
+        (np.array([-0.1]), "inclusive range"),
+        (np.array([1.1]), "inclusive range"),
+        (np.array([np.inf]), "must be finite"),
+        (np.array([-np.inf]), "must be finite"),
+        (np.array([np.nan]), "must be finite"),
+    ],
+)
+def test_belief_inner_rejects_invalid_physical_priors(priors, message):
+    from decsim.belief_matching_decoder import belief_matching_window_decoder
+
+    model = WindowErrorModel(
+        detector_ids=(0,),
+        commit_hi=1,
+        check=np.ones((1, 1), dtype=np.uint8),
+        priors=np.array([0.25]),
+        obs=np.zeros((1, 1), dtype=np.uint8),
+        owned=np.ones(1, dtype=bool),
+        future_flips={},
+        h_check=np.ones((1, 1), dtype=np.uint8),
+        h_priors=priors,
+        h2e=np.ones((1, 1), dtype=np.uint8),
+    )
+
+    with pytest.raises(ValueError, match=message):
+        belief_matching_window_decoder()(
+            model,
+            np.zeros(1, dtype=np.uint8),
+        )
+
+
+def _belief_converter_matrices(dem):
+    (
+        edge_detectors,
+        edge_logicals,
+        _edge_priors,
+        physical_detectors,
+        physical_priors,
+        physical_to_edge,
+    ) = detector_error_model_to_faults_bm(dem)
+    check = np.zeros(
+        (dem.num_detectors, len(edge_detectors)),
+        dtype=np.uint8,
+    )
+    obs = np.zeros(
+        (dem.num_observables, len(edge_logicals)),
+        dtype=np.uint8,
+    )
+    h_check = np.zeros(
+        (dem.num_detectors, len(physical_detectors)),
+        dtype=np.uint8,
+    )
+    for column, detector_ids in enumerate(edge_detectors):
+        check[list(detector_ids), column] = 1
+    for column, logical_ids in enumerate(edge_logicals):
+        obs[list(logical_ids), column] = 1
+    for column, detector_ids in enumerate(physical_detectors):
+        h_check[list(detector_ids), column] = 1
+    return check, obs, h_check, np.asarray(physical_priors), physical_to_edge
+
+
+def test_belief_first_decomposition_component_multiplicity_is_gf2():
+    for instruction, expected_logical in (
+        ("error(0.1) D0 ^ D0 ^ D1", []),
+        ("error(0.1) D0 L0 ^ D0 ^ D1", [[1]]),
+    ):
+        dem = stim.DetectorErrorModel(instruction)
+        check, obs, h_check, _priors, h2e = _belief_converter_matrices(dem)
+
+        assert np.array_equal((check @ h2e) % 2, h_check)
+        assert ((obs @ h2e) % 2).tolist() == expected_logical
+        assert h_check.tolist() == [[0], [1]]
+
+
+def test_belief_converter_matches_upstream_on_unambiguous_identities():
+    from beliefmatching.belief_matching import (
+        detector_error_model_to_check_matrices,
+    )
+
+    dem = stim.DetectorErrorModel(
+        """
+        error(0.1) D0
+        error(0.2) D1 D2 ^ D3 L0
+        """
+    )
+    check, obs, h_check, priors, h2e = _belief_converter_matrices(dem)
+    upstream = detector_error_model_to_check_matrices(dem)
+
+    assert np.array_equal(check, upstream.edge_check_matrix.toarray())
+    assert np.array_equal(obs, upstream.edge_observables_matrix.toarray())
+    assert np.array_equal(h_check, upstream.check_matrix.toarray())
+    assert np.array_equal(
+        (obs @ h2e) % 2,
+        upstream.observables_matrix.toarray(),
+    )
+    assert np.array_equal(priors, upstream.priors)
+    assert np.array_equal(h2e, upstream.hyperedge_to_edge_matrix.toarray())
+
+
+@pytest.mark.parametrize(
+    "instructions",
+    [
+        "error(0.1) D0\nerror(0.2) D0 L0",
+        "error(0.2) D0 L0\nerror(0.1) D0",
+    ],
+)
+def test_belief_physical_merge_key_includes_logical_identity(instructions):
+    dem = stim.DetectorErrorModel(instructions)
+    check, obs, h_check, priors, h2e = _belief_converter_matrices(dem)
+
+    assert h_check.tolist() == [[1, 1]]
+    assert sorted(priors.tolist()) == [0.1, 0.2]
+    assert {
+        tuple(column)
+        for column in ((obs @ h2e) % 2).T.tolist()
+    } == {(0,), (1,)}
+    assert np.array_equal((check @ h2e) % 2, h_check)
+
+
+def test_belief_repeated_physical_identity_keeps_first_decomposition():
+    dem = stim.DetectorErrorModel(
+        """
+        error(0.1) D0 D1
+        error(0.2) D0 ^ D1
+        """
+    )
+    edge_detectors, _, _, physical_detectors, priors, h2e = (
+        detector_error_model_to_faults_bm(dem)
+    )
+
+    assert physical_detectors == [(0, 1)]
+    assert priors == pytest.approx([0.26])
+    selected_edges = {
+        edge_detectors[index]
+        for index in np.nonzero(h2e[:, 0])[0]
+    }
+    assert selected_edges == {(0, 1)}
+
+
+def test_belief_window_projection_preserves_physical_component_identity():
+    class DemBackedCircuit:
+        num_observables = 0
+
+        def detector_error_model(self, *, decompose_errors):
+            assert decompose_errors
+            return stim.DetectorErrorModel(
+                "error(0.1) D0 D1 ^ D1 D2"
+            )
+
+        def get_detector_coordinates(self):
+            return {
+                detector_id: [detector_id, 0, 0]
+                for detector_id in range(3)
+            }
+
+    exact_model = build_window_error_models(
+        DemBackedCircuit(),
+        [(1, 1, 1)],
+        belief_matching=True,
+    )[0]
+    assert exact_model.h_check.tolist() == [[1], [0], [1]]
+    assert np.array_equal(
+        (exact_model.check @ exact_model.h2e) % 2,
+        exact_model.h_check,
+    )
+
+    circuit = _memory_circuit(rounds=6)
+    models = build_window_error_models(
+        circuit,
+        _plan(circuit),
+        belief_matching=True,
+    )
+
+    for model in models:
+        assert np.array_equal(
+            (model.check @ model.h2e) % 2,
+            model.h_check,
+        )
 
 
 def test_every_fault_is_owned_by_exactly_one_window():

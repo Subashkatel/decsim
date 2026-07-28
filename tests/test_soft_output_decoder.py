@@ -135,3 +135,43 @@ def test_engine_soft_output_is_error_predictive():
     gaps, errs = np.asarray(gaps), np.asarray(errs)
     assert errs.sum() > 0
     assert np.corrcoef(gaps, errs)[0, 1] < 0
+
+
+def test_union_find_engine_path_reproduces_a_deterministic_logical_fault():
+    from decsim.soft_output import (
+        UNION_FIND_CLUSTER_GAP_SOURCE,
+        UnionFindDecoder,
+    )
+
+    circuit = stim.Circuit(
+        """
+        X_ERROR(1) 0
+        M 0
+        DETECTOR(0, 0, 1) rec[-1]
+        OBSERVABLE_INCLUDE(0) rec[-1]
+        """
+    )
+
+    class CapturingUnionFind(UnionFindDecoder):
+        def decode(self, job):
+            result = super().decode(job)
+            self.last_result = result
+            return result
+
+    decoder = CapturingUnionFind(_ZeroLatency())
+    decoded = _naive_shot(
+        circuit,
+        StimDevice(),
+        decoder,
+        d=3,
+        rounds=1,
+        seed=8801,
+    )
+
+    assert decoded == (1,)
+    assert decoder.last_result.correction.tolist() == [1]
+    assert decoder.last_result.logical_observables == (1,)
+    assert decoder.last_result.soft_output.source == (
+        UNION_FIND_CLUSTER_GAP_SOURCE
+    )
+    assert np.isinf(decoder.last_result.soft_output.gap)

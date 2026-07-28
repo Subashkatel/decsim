@@ -597,11 +597,10 @@ class StrategyServicesImpl:
         self._pool.check_strong_route(weak_job, strong)   # fail at build time
         return strong
 
-    def defer_strong_escalation(self, weak_job: DecodeJob, n_rounds: int,
-                                label: str) -> None:
+    def defer_strong_escalation(self, weak_job: DecodeJob) -> None:
         """Faithful double window: the runtime submits the strong job once
         the far-side weak boundary is determined (arXiv:2510.25222 III C)."""
-        self._runtime.defer_strong_escalation(weak_job, n_rounds, label)
+        self._runtime.defer_strong_escalation(weak_job)
 
     def check_strong_route(self, weak_job: DecodeJob,
                            strong_job: DecodeJob) -> None:

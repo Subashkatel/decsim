@@ -126,7 +126,7 @@ class StrategyServices(Protocol):
                         label: str) -> DecodeJob: ...
 
     def defer_strong_escalation(
-        self, weak_job: DecodeJob, n_rounds: int, label: str,
+        self, weak_job: DecodeJob,
     ) -> None: ...
 
     def check_strong_route(
@@ -237,9 +237,7 @@ class WindowInteraction(Protocol):
         self,
         weak_window: WindowInfo,
         later_windows: list[WindowInfo],
-        strong_round_count: int,
         operation_round_count: int,
-        buffer_round_count: int,
     ) -> Optional[StrongRegionPlan]: ...
 
 

@@ -132,6 +132,58 @@ class EngineBoundFactory:
         return None
 
 
+class PrebindingSeedConsumer:
+    def __init__(self):
+        self.entries = 0
+
+    def reserve_run_seed(self, seed):
+        raise AssertionError("pre-binding consumer must not reserve")
+
+    def commit_run_seed(self, reservation):
+        raise AssertionError("pre-binding consumer must not commit")
+
+    def cancel_run_seed(self, reservation):
+        raise AssertionError("pre-binding consumer must not cancel")
+
+    def build(self):
+        self.entries += 1
+        return []
+
+
+class SeedConsumingProviderOwner:
+    def __init__(self):
+        self.entries = 0
+
+    def reserve_run_seed(self, seed):
+        raise AssertionError("pre-binding provider must not reserve")
+
+    def commit_run_seed(self, reservation):
+        raise AssertionError("pre-binding provider must not commit")
+
+    def cancel_run_seed(self, reservation):
+        raise AssertionError("pre-binding provider must not cancel")
+
+    def make_controller(self, engine):
+        self.entries += 1
+        raise AssertionError("pre-binding provider must not be called")
+
+
+class DescriptorPlanner:
+    scheme = SlidingWindowScheme()
+    rounds_policy = FixedRounds(3)
+
+    def __init__(self):
+        self.layout_entries = 0
+
+    @property
+    def layout(self):
+        self.layout_entries += 1
+        return UniformLayout(SurfaceCodeModel(3))
+
+    def plan(self, operations):
+        raise AssertionError("descriptor-backed planner must not plan")
+
+
 @pytest.mark.parametrize("seed", [True, 1.0, "1", object()])
 def test_run_seed_rejects_non_integral_values_before_build(seed):
     spec = RunSpec(ops=[], seed=seed)
@@ -160,6 +212,59 @@ def test_run_seed_rejects_values_outside_unsigned_64_bit_domain(seed):
 )
 def test_run_seed_accepts_none_and_unsigned_integral_values(seed):
     RunSpec(ops=[], seed=seed).validate()
+
+
+@pytest.mark.parametrize("seed", [None, 7])
+@pytest.mark.parametrize("entrypoint", ["validate", "build"])
+def test_prebinding_frontend_seed_consumer_rejects_before_entry(
+    seed,
+    entrypoint,
+):
+    frontend = PrebindingSeedConsumer()
+    spec = RunSpec(frontend=frontend, seed=seed)
+
+    with pytest.raises(
+        ValueError,
+        match=r"frontend.*RunSeedConsumer.*before run-seed binding",
+    ):
+        getattr(spec, entrypoint)()
+
+    assert frontend.entries == 0
+
+
+@pytest.mark.parametrize("entrypoint", ["validate", "build"])
+def test_bound_provider_seed_consumer_rejects_before_signature_or_entry(
+    entrypoint,
+):
+    owner = SeedConsumingProviderOwner()
+    spec = RunSpec(
+        ops=[],
+        make_controller=owner.make_controller,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"make_controller.*RunSeedConsumer.*before run-seed binding",
+    ):
+        getattr(spec, entrypoint)()
+
+    assert owner.entries == 0
+
+
+@pytest.mark.parametrize("entrypoint", ["validate", "build"])
+def test_descriptor_backed_planner_child_rejects_without_descriptor_entry(
+    entrypoint,
+):
+    planner = DescriptorPlanner()
+    spec = RunSpec(ops=[], planner=planner)
+
+    with pytest.raises(
+        TypeError,
+        match=r"planner\.layout.*stored non-descriptor",
+    ):
+        getattr(spec, entrypoint)()
+
+    assert planner.layout_entries == 0
 
 
 def test_run_root_binds_nested_consumers_by_stable_semantic_path():

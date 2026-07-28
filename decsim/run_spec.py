@@ -41,6 +41,7 @@ from .message import (
     is_stable_identity,
     is_stable_string,
     same_stable_identity,
+    stable_identity_bytes,
 )
 from .config import TICKS_PER_US, TimingConfig, us
 
@@ -401,23 +402,7 @@ class StableIdentityRecord:
         return tuple(item.to_identity() for item in self.items)
 
     def canonical_bytes(self) -> bytes:
-        if self.kind == "integer":
-            encoded = self.value.encode("ascii")
-            return b"I" + len(encoded).to_bytes(8, "big") + encoded
-        if self.kind == "string":
-            encoded = self.value.encode("utf-8")
-            return b"S" + len(encoded).to_bytes(8, "big") + encoded
-        encoded_items = []
-        for item in self.items:
-            encoded = item.canonical_bytes()
-            encoded_items.append(
-                len(encoded).to_bytes(8, "big") + encoded
-            )
-        return (
-            b"T"
-            + len(encoded_items).to_bytes(8, "big")
-            + b"".join(encoded_items)
-        )
+        return stable_identity_bytes(self.to_identity())
 
     def to_json_value(self) -> dict:
         return {
@@ -1379,21 +1364,23 @@ class RunSpec:
                 "construct a fresh RunSpec and runtime graph"
             )
         self._build_state = "committing"
+        from .engine import Engine
+        engine = Engine(verbose=verbose, construction_guarded=True)
         try:
-            completed_run = self._build_once(verbose=verbose)
-        except BaseException:
+            completed_run = self._build_once(engine, verbose=verbose)
+        except BaseException as error:
+            engine._invalidate(error)
             self._build_state = "invalid"
             raise
         self._build_state = "complete"
         return completed_run
 
-    def _build_once(self, verbose: bool = False) -> "CompletedRun":
+    def _build_once(self, engine, verbose: bool = False) -> "CompletedRun":
         """Construct and wire every component in the canonical order."""
         planning = self._validate_configuration()
         provider_records = _resolved_provider_records(self)
         from .policies import Eager
         from .decoders import CodeRouter
-        from .engine import Engine
         from .orchestrators import ExecutionOrchestrator
         from .policies import Ignore
         from .payload_store import PayloadStore
@@ -1496,7 +1483,6 @@ class RunSpec:
             for operation in code_cadence_plan.operations
         }
 
-        engine = Engine(verbose=verbose, construction_guarded=True)
         scheduler = self.scheduler if self.scheduler is not None \
             else FifoScheduler()
         deadline_policy = self.deadline_policy if self.deadline_policy is not None \
@@ -1831,8 +1817,8 @@ class RunSpec:
                 ).hexdigest(),
             )
             engine._complete()
-        except BaseException:
-            engine._invalidate()
+        except BaseException as error:
+            engine._invalidate(error)
             raise
 
         return CompletedRun(

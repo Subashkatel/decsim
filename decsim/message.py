@@ -59,6 +59,35 @@ def same_stable_identity(left: Any, right: Any) -> bool:
     return False
 
 
+def stable_identity_bytes(identity: Any) -> bytes:
+    """Encode one stable identity with exact recursive type framing."""
+    if not is_stable_identity(identity):
+        raise TypeError(
+            "stable identities are exact int, Unicode scalar str, or "
+            "recursive tuples"
+        )
+    if type(identity) is int:
+        encoded = str(identity).encode("ascii")
+        return b"I" + len(encoded).to_bytes(8, "big") + encoded
+    if type(identity) is str:
+        encoded = identity.encode("utf-8")
+        return b"S" + len(encoded).to_bytes(8, "big") + encoded
+    encoded_items = tuple(stable_identity_bytes(item) for item in identity)
+    return (
+        b"T"
+        + len(encoded_items).to_bytes(8, "big")
+        + b"".join(
+            len(item).to_bytes(8, "big") + item
+            for item in encoded_items
+        )
+    )
+
+
+def stable_identity_order_key(identity: Any) -> bytes:
+    """Return the version-stable structural ordering key for an identity."""
+    return stable_identity_bytes(identity)
+
+
 @dataclass(frozen=True)
 class RunSeedPathSegment:
     """One framed semantic edge in the run-level seed component graph."""

@@ -7,7 +7,9 @@ from decsim.message import (Decision, DecodeJob, DecodeOutcome,
                             DecodeResult, FeedbackEffect,
                             IntrinsicMeasurement, OpKind, Operation,
                             ResourceClaim, SoftOutput, SoftOutputSource,
-                            SyndromePayload, Window, WindowGraph)
+                            SyndromePayload, Window, WindowGraph,
+                            stable_identity_bytes,
+                            stable_identity_order_key)
 from decsim.pauli_frame import PauliFrame
 
 
@@ -17,6 +19,58 @@ def test_syndrome_round_matches_todays_payload_shape():
     assert r.n_fragments == 1 and r.size_bits is None
     with pytest.raises(ValueError):
         SyndromePayload(operation_id=1, patch_id=0, round_index=1, n_fragments=0)
+
+
+def test_stable_identity_bytes_define_the_manifest_compatible_total_order():
+    from decsim.run_spec import StableIdentityRecord
+
+    def independent_bytes(identity):
+        if type(identity) is int:
+            payload = str(identity).encode("ascii")
+            return b"I" + len(payload).to_bytes(8, "big") + payload
+        if type(identity) is str:
+            payload = identity.encode("utf-8")
+            return b"S" + len(payload).to_bytes(8, "big") + payload
+        encoded_items = tuple(independent_bytes(item) for item in identity)
+        return (
+            b"T"
+            + len(encoded_items).to_bytes(8, "big")
+            + b"".join(
+                len(item).to_bytes(8, "big") + item
+                for item in encoded_items
+            )
+        )
+
+    identities = (
+        2,
+        "2",
+        (),
+        (2, "north"),
+        ("gross", (5, "north")),
+        -11,
+        "",
+    )
+    expected = {identity: independent_bytes(identity) for identity in identities}
+
+    assert all(stable_identity_bytes(identity) == expected[identity]
+               for identity in identities)
+    assert all(stable_identity_order_key(identity) == expected[identity]
+               for identity in identities)
+    assert sorted(identities, key=stable_identity_order_key) == sorted(
+        identities,
+        key=independent_bytes,
+    )
+    assert all(
+        StableIdentityRecord.from_identity(identity).canonical_bytes()
+        == expected[identity]
+        for identity in identities
+    )
+
+
+@pytest.mark.parametrize("identity", [True, 1.0, "\ud800", (1, object())])
+def test_stable_identity_bytes_reject_values_outside_the_exact_domain(identity):
+    with pytest.raises(TypeError, match="stable identities"):
+        stable_identity_bytes(identity)
 
 
 def test_decode_job_has_no_rollback_fields():

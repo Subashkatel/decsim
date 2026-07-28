@@ -2052,6 +2052,45 @@ def test_shipped_manifest_configuration_drift_invalidates_the_atomic_run(
     assert declarations == 2
 
 
+def test_provider_failure_invalidates_the_root_engine_before_any_event_runs():
+    from decsim.engine import SimulationFailed
+
+    captured_engines = []
+    sentinel_events = []
+    originating_failure = RuntimeError("controller construction failed")
+
+    def failing_controller(engine):
+        captured_engines.append(engine)
+        engine.schedule(0, lambda: sentinel_events.append("ran"))
+        raise originating_failure
+
+    spec = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_controller=failing_controller,
+    )
+
+    with pytest.raises(RuntimeError) as raised:
+        spec.build()
+
+    assert raised.value is originating_failure
+    assert spec._build_state == "invalid"
+    assert len(captured_engines) == 1
+    engine = captured_engines[0]
+    assert engine._phase == "invalid"
+    assert engine._failure_cause is originating_failure
+    assert sentinel_events == []
+    assert len(engine._event_queue) == 1
+
+    with pytest.raises(SimulationFailed) as run_failure:
+        engine.run()
+    assert run_failure.value.__cause__ is originating_failure
+    with pytest.raises(SimulationFailed) as schedule_failure:
+        engine.schedule(0, lambda: sentinel_events.append("late"))
+    assert schedule_failure.value.__cause__ is originating_failure
+    assert sentinel_events == []
+
+
 def test_manifest_configuration_rejects_non_mapping_before_seed_reservation():
     events = []
 
@@ -2410,7 +2449,7 @@ def test_layout_selection_is_validated_before_engine_construction(monkeypatch):
     )
 
     def fail_if_engine_is_constructed(*args, **kwargs):
-        raise AssertionError("engine constructed before layout validation")
+        raise AssertionError("explicit validation must not construct an engine")
 
     monkeypatch.setattr(
         "decsim.engine.Engine",
@@ -2422,7 +2461,37 @@ def test_layout_selection_is_validated_before_engine_construction(monkeypatch):
             ops=[Operation(21, "invalid selection", (0,))],
             layout=layout,
             decoder=StaticDecoder(),
+        ).validate()
+
+
+def test_layout_selection_failure_invalidates_the_root_engine(monkeypatch):
+    from decsim.engine import Engine as RuntimeEngine
+
+    declared_code = SurfaceCodeModel(d=3)
+    layout = SelectorLayout(
+        declared_code,
+        operation_code=SurfaceCodeModel(d=5),
+    )
+    constructed_engines = []
+
+    class CapturingEngine(RuntimeEngine):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            constructed_engines.append(self)
+
+    monkeypatch.setattr("decsim.engine.Engine", CapturingEngine)
+
+    with pytest.raises(ValueError, match=r"layout.*operation 21") as raised:
+        RunSpec(
+            ops=[Operation(21, "invalid selection", (0,))],
+            layout=layout,
+            decoder=StaticDecoder(),
         ).build()
+
+    assert len(constructed_engines) == 1
+    engine = constructed_engines[0]
+    assert engine._phase == "invalid"
+    assert engine._failure_cause is raised.value
 
 
 def test_factory_builder_result_must_use_the_run_engine():

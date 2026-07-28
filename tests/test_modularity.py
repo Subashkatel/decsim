@@ -99,7 +99,7 @@ class MyDecoder:
 class MyScheduler:
     """LIFO -- a genuinely different policy than the default FIFO."""
     def insert(self, queue, job): queue.append(job)
-    def pop(self, queue): return queue.pop()
+    def pop(self, queue, now_ticks): return queue.pop()
 
 class MyDeadline:
     def deadline(self, op, window, now, on_reaction_path): return now

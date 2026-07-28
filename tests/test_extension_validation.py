@@ -9,6 +9,17 @@ from decsim.codes import SurfaceCodeModel
 from decsim.engine import Engine
 from decsim.layouts import UniformLayout
 from decsim.message import DecodeResult, Operation, RunSeedReservation
+from decsim.metrics import (
+    BacklogEarlyWarning,
+    BacklogTrajectory,
+    ConditionalReactionTime,
+    DecodeBacklog,
+    DecoderUtilization,
+    MagicStateLatency,
+    ReadyQueueStats,
+    StrongDecoderBacklog,
+    WindowLatencyBreakdown,
+)
 from decsim.planner import FixedRounds, WindowPlanner
 from decsim.policies import Held, ExtendStream, SeparateDecodeJobs
 from decsim.run_spec import RunSpec, simulate
@@ -1387,6 +1398,72 @@ def test_threshold_register_manifest_configuration_is_its_initial_state():
     register.set("surface_d5", 0.6)
 
     assert register.run_manifest_config() == initial_configuration
+
+
+def test_every_shipped_runtime_metric_declares_effective_configuration():
+    def make_metrics(engine, cluster, chip, factory):
+        return [
+            DecoderUtilization(cluster),
+            ReadyQueueStats(cluster),
+            WindowLatencyBreakdown(cluster),
+            DecodeBacklog(cluster),
+            BacklogEarlyWarning(
+                cluster,
+                round_ticks=3,
+                window_ticks=20,
+                threshold_f=0.15,
+                consecutive=4,
+            ),
+            StrongDecoderBacklog(cluster, pool="strong"),
+            BacklogTrajectory(chip),
+            ConditionalReactionTime(
+                chip,
+                divergence_threshold_rounds=12.5,
+                require_all_released=False,
+            ),
+            MagicStateLatency(factory),
+        ]
+
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_metrics=make_metrics,
+    ).build()
+    metric_components = {
+        component["component_path"][-1]["value"]: component
+        for component in completed.manifest.to_json_value()["components"]
+        if component["component_path"][0]["value"] == "metrics"
+    }
+
+    expected = {
+        "decoder_utilization": {"kind": "decoder_utilization"},
+        "ready_queue": {"kind": "ready_queue"},
+        "window_latency": {"kind": "window_latency"},
+        "decode_backlog": {"kind": "decode_backlog"},
+        "backlog_early_warning": {
+            "kind": "backlog_early_warning",
+            "round_ticks": 3,
+            "window_ticks": 20,
+            "threshold_f": 0.15,
+            "consecutive": 4,
+        },
+        "strong_backlog": {"pool": "strong"},
+        "backlog_trajectory": {"kind": "backlog_trajectory"},
+        "conditional_reaction_time": {
+            "kind": "conditional_reaction_time",
+            "divergence_threshold_rounds": 12.5,
+            "require_all_released": False,
+        },
+        "magic_state_latency": {"kind": "magic_state_latency"},
+    }
+    assert {
+        name: component["configuration"]
+        for name, component in metric_components.items()
+    } == expected
+    assert all(
+        component["configuration_status"] == "declared"
+        for component in metric_components.values()
+    )
 
 
 def test_manifest_records_the_exact_fixed_composition_anchors():

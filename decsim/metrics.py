@@ -30,6 +30,9 @@ class DecoderUtilization:
         self._busy_area = 0.0
         self._last_busy = 0
 
+    def run_manifest_config(self):
+        return {"kind": "decoder_utilization"}
+
     def observe(self, engine: "Engine") -> None:
         """Add the busy level held since the last event, then re-sample it."""
         view = utilization_view(self.cluster)
@@ -55,6 +58,9 @@ class ReadyQueueStats:
         self._last_len = 0
         self.peak = 0
 
+    def run_manifest_config(self):
+        return {"kind": "ready_queue"}
+
     def observe(self, engine: "Engine") -> None:
         """Accumulate time-weighted queue length and track the peak."""
         view = backlog_view(self.cluster, include_rounds=False)
@@ -75,6 +81,9 @@ class WindowLatencyBreakdown:
 
     def __init__(self, cluster):
         self.cluster = cluster
+
+    def run_manifest_config(self):
+        return {"kind": "window_latency"}
 
     def observe(self, engine: "Engine") -> None:
         """Nothing to sample (event-driven; the cluster stamps the windows)."""
@@ -121,6 +130,9 @@ class DecodeBacklog:
         self._last = 0
         self.peak = 0
         self.trace = []
+
+    def run_manifest_config(self):
+        return {"kind": "decode_backlog"}
 
     def observe(self, engine: "Engine") -> None:
         """Sample the backlog and update peak, average, and trace."""
@@ -184,6 +196,15 @@ class BacklogEarlyWarning:
         self._last_view = None
         self._streak = 0
         self._streak_start_per_patch = {}
+
+    def run_manifest_config(self):
+        return {
+            "kind": "backlog_early_warning",
+            "round_ticks": self.round_ticks,
+            "window_ticks": self.window_ticks,
+            "threshold_f": self.threshold_f,
+            "consecutive": self.consecutive,
+        }
 
     def _slope(self, delta_rounds: int, ticks: int) -> float:
         return delta_rounds * self.round_ticks / ticks if ticks else 0.0
@@ -384,6 +405,9 @@ class BacklogTrajectory:
     def __init__(self, chip):
         self.chip = chip
 
+    def run_manifest_config(self):
+        return {"kind": "backlog_trajectory"}
+
     def observe(self, engine: "Engine") -> None:
         """Nothing to sample (event-driven; the chip stamps the timestamps)."""
         return None
@@ -437,6 +461,15 @@ class ConditionalReactionTime:
         self.chip = chip
         self.divergence_threshold_rounds = divergence_threshold_rounds
         self.require_all_released = require_all_released
+
+    def run_manifest_config(self):
+        return {
+            "kind": "conditional_reaction_time",
+            "divergence_threshold_rounds": (
+                self.divergence_threshold_rounds
+            ),
+            "require_all_released": self.require_all_released,
+        }
 
     def observe(self, engine: "Engine") -> None:
         """Nothing to sample. The chip stamps body-done and release times."""
@@ -539,6 +572,9 @@ class MagicStateLatency:
 
     def __init__(self, factory):
         self.factory = factory
+
+    def run_manifest_config(self):
+        return {"kind": "magic_state_latency"}
 
     def observe(self, engine: "Engine") -> None:
         """Nothing to sample (the factory stamps each state's StateTrace)."""

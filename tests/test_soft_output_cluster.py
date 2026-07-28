@@ -17,6 +17,7 @@ The round-1 minimal-cluster gap held the inequality on only ~29% of shots; the g
 fill (crediting the outward frontier) is what makes it robust. See the per-(d,p) Monte
 Carlo fractions in the task report.
 """
+import gc
 import itertools
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -347,3 +348,26 @@ def test_union_find_decoder_publishes_actual_cluster_source_and_manifest():
     assert len(child) == 1
     assert child[0].relative_path[0].value == "latency_model"
     assert child[0].child is decoder.latency_model
+
+
+def test_union_find_graph_cache_releases_dead_window_models():
+    from decsim.soft_output import UnionFindDecoder
+
+    class FixedLatency:
+        def latency(self, job):
+            return 1
+
+    decoder = UnionFindDecoder(FixedLatency())
+
+    def populate_transient_models():
+        for detector_count in range(1, 257):
+            model = _unit_window_model(
+                detector_count,
+                ((0, None),),
+            )
+            decoder._graph_for_model(model, "transient cache probe")
+
+    populate_transient_models()
+    gc.collect()
+
+    assert decoder._graphs == {}

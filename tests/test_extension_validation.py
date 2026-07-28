@@ -456,6 +456,43 @@ def test_all_operation_consuming_planning_ports_receive_frozen_views():
     assert scheme.data_complete_calls > 0
 
 
+def test_late_dynamic_stream_is_frozen_before_planning():
+    code = SurfaceCodeModel(3)
+    layout = CircuitRejectingLayout(code)
+    rounds = CircuitRejectingRounds(7)
+    completed = RunSpec(
+        ops=[],
+        layout=layout,
+        rounds_policy=rounds,
+        decoder=StaticDecoder(),
+        feedback_boundary_mode="measurement_closed",
+    ).build()
+    caller_operation = Operation(
+        7,
+        "late stream",
+        (0,),
+        circuit=object(),
+        feedback_boundary_mode=None,
+    )
+    rounds_calls_before_registration = rounds.calls
+
+    completed.window_manager.register_dynamic_stream(
+        caller_operation,
+        code,
+    )
+
+    runtime_operation = completed.window_manager.ops[7]
+    planning_view = (
+        completed.window_manager._planning_view_by_operation_id[7]
+    )
+    assert runtime_operation is not caller_operation
+    assert runtime_operation.feedback_boundary_mode == "measurement_closed"
+    assert caller_operation.feedback_boundary_mode is None
+    assert not hasattr(planning_view, "circuit")
+    assert planning_view.feedback_boundary_mode == "measurement_closed"
+    assert rounds.calls == rounds_calls_before_registration + 1
+
+
 def test_run_uses_private_operation_copy_without_mutating_caller():
     caller_operation = Operation(
         0,
@@ -497,7 +534,7 @@ def test_active_stim_circuit_is_reconstructed_for_private_execution():
     caller_circuit = stim.Circuit("X 0")
     device = CircuitRecordingActiveDevice()
 
-    RunSpec(
+    completed = RunSpec(
         ops=[Operation(0, "memory", (0,), circuit=caller_circuit)],
         device=device,
         decoder=StaticDecoder(),
@@ -508,6 +545,17 @@ def test_active_stim_circuit_is_reconstructed_for_private_execution():
     assert type(private_circuit) is stim.Circuit
     assert private_circuit is not caller_circuit
     assert str(private_circuit) == str(caller_circuit)
+    workload_components = [
+        component
+        for component in completed.manifest.to_json_value()["components"]
+        if component["component_path"][0]["value"] == "workload_circuits"
+    ]
+    assert [component["component_path"] for component in workload_components] == [
+        [
+            {"kind": "field", "value": "workload_circuits"},
+            {"kind": "integer_key", "value": "0"},
+        ],
+    ]
 
 
 def test_active_custom_circuit_rejects_before_device_entry():
@@ -552,6 +600,116 @@ def test_run_root_binds_nested_consumers_by_stable_semantic_path():
     assert [item.proposed_seed for item in surface.committed] == [
         _derive_run_component_seed(7, surface_path),
     ]
+
+
+def test_component_graph_records_shared_decoder_alias_once():
+    from decsim.decoders import CodeRouter
+
+    shared = SeedRecordingDecoder()
+    completed = RunSpec(
+        ops=[],
+        decoder=shared,
+        router=CodeRouter(
+            default=shared,
+            by_code={"surface": shared},
+        ),
+        seed=7,
+    ).build()
+    manifest = completed.manifest.to_json_value()
+
+    assert manifest["aliases"] == [
+        {
+            "alias_path": [
+                {"kind": "field", "value": "decoder_router"},
+                {"kind": "field", "value": "default"},
+            ],
+            "canonical_path": [
+                {"kind": "field", "value": "decoder_router"},
+                {"kind": "field", "value": "by_code"},
+                {"kind": "string_key", "value": "surface"},
+            ],
+        },
+    ]
+    shared_bindings = [
+        binding
+        for binding in manifest["seed_bindings"]
+        if binding["component_path"][0]["value"] == "decoder_router"
+    ]
+    assert len(shared_bindings) == 1
+    assert shared_bindings[0]["component_path"] == (
+        manifest["aliases"][0]["canonical_path"]
+    )
+
+
+def test_component_graph_records_the_resolved_orchestrator_frame():
+    completed = RunSpec(ops=[], decoder=StaticDecoder()).build()
+    paths = [
+        component["component_path"]
+        for component in completed.manifest.to_json_value()["components"]
+    ]
+
+    assert [
+        {"kind": "field", "value": "orchestrator"},
+        {"kind": "field", "value": "frame"},
+    ] in paths
+
+
+def test_factory_decode_service_is_the_fixed_cluster_alias():
+    from decsim.factories import DistillationFactory
+
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_factory=lambda engine, cluster: DistillationFactory(
+            engine,
+            num_units=1,
+            cycle_ticks=1,
+            decode_service=cluster,
+            corr_rounds=1,
+            n_corr=1,
+        ),
+    ).build()
+    manifest = completed.manifest.to_json_value()
+
+    assert {
+        "alias_path": [
+            {"kind": "field", "value": "magic_state_factory"},
+            {"kind": "field", "value": "decode_service"},
+        ],
+        "canonical_path": [
+            {"kind": "field", "value": "fixed"},
+            {"kind": "field", "value": "cluster"},
+        ],
+    } in manifest["aliases"]
+    assert not any(
+        component["component_path"] == [
+            {"kind": "field", "value": "magic_state_factory"},
+            {"kind": "field", "value": "decode_service"},
+        ]
+        for component in manifest["components"]
+    )
+
+
+def test_factory_rejects_a_foreign_correction_decode_service():
+    from decsim.factories import DistillationFactory
+
+    foreign_service = object()
+    with pytest.raises(
+        ValueError,
+        match=r"DistillationFactory.*decode_service.*run-owned cluster",
+    ):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            make_factory=lambda engine, _cluster: DistillationFactory(
+                engine,
+                num_units=1,
+                cycle_ticks=1,
+                decode_service=foreign_service,
+                corr_rounds=1,
+                n_corr=1,
+            ),
+        ).build()
 
 
 def test_run_seed_reservation_failure_cancels_prior_leaves_without_committing():

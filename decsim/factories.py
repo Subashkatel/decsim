@@ -10,7 +10,7 @@ from typing import Callable, Optional, TYPE_CHECKING
 
 from .config import fmt
 from .engine import Engine
-from .message import RunSeedReservation
+from .message import RunSeedChild, RunSeedPathSegment, RunSeedReservation
 
 if TYPE_CHECKING:
     from .protocols import ResourcePool as DecodeService
@@ -112,6 +112,16 @@ def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -
         raise ValueError("continuous production needs buffer_capacity >= 1")
 
 
+def _validate_correction_decode_service(decode_service, n_corr: int) -> None:
+    """Require one unambiguous correction-service disposition."""
+    if type(n_corr) is not int or n_corr < 0:
+        raise TypeError("n_corr must be a nonnegative built-in int")
+    if n_corr == 0 and decode_service is not None:
+        raise ValueError("decode_service must be None when n_corr is zero")
+    if n_corr > 0 and decode_service is None:
+        raise ValueError("decode_service is required when n_corr is positive")
+
+
 @dataclass
 class StateTrace:
     """Per-magic-state production and delivery timestamps."""
@@ -168,6 +178,7 @@ class DistillationFactory(_RandomSeedConsumer):
                  initial_store: int = 0, production: str = "demand",
                  buffer_capacity: Optional[int] = None):
         _validate_production_mode(production, buffer_capacity)
+        _validate_correction_decode_service(decode_service, n_corr)
         self.engine = engine
         self.num_units = num_units
         self.cycle_ticks = cycle_ticks
@@ -183,6 +194,17 @@ class DistillationFactory(_RandomSeedConsumer):
 
         if production == "continuous":
             self.engine.schedule(0, self._maybe_start, label="factory_start")
+
+    def run_seed_children(self):
+        """Expose the active correction service that affects completion."""
+        if self.decode_service is None:
+            return ()
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "decode_service"),),
+                self.decode_service,
+            ),
+        )
 
     def _init_runtime_state(self, initial_store: int) -> None:
         """Initialize queues, counters, and bounded trace storage."""
@@ -330,6 +352,7 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
                  seed: Optional[int] = None,
                  production: str = "demand", buffer_capacity: Optional[int] = None):
         _validate_production_mode(production, buffer_capacity)
+        _validate_correction_decode_service(decode_service, n_corr)
         self.production = production
         self.buffer_capacity = buffer_capacity
         self.engine = engine
@@ -348,6 +371,17 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
 
         if production == "continuous":
             self.engine.schedule(0, self._drive, label="factory_start")
+
+    def run_seed_children(self):
+        """Expose the active correction service that affects completion."""
+        if self.decode_service is None:
+            return ()
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "decode_service"),),
+                self.decode_service,
+            ),
+        )
 
     def _init_multilevel_state(self, W_ticks: int) -> None:
         """Initialize buffers, busy counts, counters, and round times."""

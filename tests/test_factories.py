@@ -36,7 +36,7 @@ def _seeded_single_level_factory(explicit_seed=None):
         engine,
         num_units=1,
         cycle_ticks=1,
-        decode_service=ImmediateService(),
+        decode_service=None,
         corr_rounds=0,
         n_corr=0,
         p_success=0.5,
@@ -111,6 +111,89 @@ def test_factory_rng_state_has_no_public_bypass(build_factory):
     _, factory = build_factory()
 
     assert not hasattr(factory, "rng")
+
+
+@pytest.mark.parametrize(
+    "factory_cls",
+    [DistillationFactory, MultiLevelDistillationFactory],
+)
+@pytest.mark.parametrize("invalid_count", [True, -1, 0.0])
+def test_factory_rejects_nonexact_or_negative_correction_count_before_events(
+    factory_cls,
+    invalid_count,
+):
+    engine = Engine(verbose=False)
+
+    with pytest.raises(
+        (TypeError, ValueError),
+        match=r"n_corr.*nonnegative.*built-in int",
+    ):
+        if factory_cls is DistillationFactory:
+            factory_cls(
+                engine,
+                num_units=1,
+                cycle_ticks=1,
+                decode_service=None,
+                corr_rounds=0,
+                n_corr=invalid_count,
+                production="continuous",
+                buffer_capacity=1,
+            )
+        else:
+            factory_cls(
+                engine,
+                [DistillLevel(units=1, d=1)],
+                W_ticks=1,
+                decode_service=None,
+                corr_rounds=0,
+                n_corr=invalid_count,
+                production="continuous",
+                buffer_capacity=1,
+            )
+
+    assert engine._event_queue == []
+
+
+@pytest.mark.parametrize(
+    "factory_cls",
+    [DistillationFactory, MultiLevelDistillationFactory],
+)
+def test_factory_correction_service_presence_matches_correction_count(
+    factory_cls,
+):
+    engine = Engine(verbose=False)
+
+    def construct(decode_service, n_corr):
+        if factory_cls is DistillationFactory:
+            return factory_cls(
+                engine,
+                num_units=1,
+                cycle_ticks=1,
+                decode_service=decode_service,
+                corr_rounds=0,
+                n_corr=n_corr,
+            )
+        return factory_cls(
+            engine,
+            [DistillLevel(units=1, d=1)],
+            W_ticks=1,
+            decode_service=decode_service,
+            corr_rounds=0,
+            n_corr=n_corr,
+        )
+
+    with pytest.raises(ValueError, match=r"decode_service.*None.*n_corr.*zero"):
+        construct(ImmediateService(), 0)
+    with pytest.raises(ValueError, match=r"decode_service.*required.*n_corr"):
+        construct(None, 1)
+
+    service = ImmediateService()
+    active = construct(service, 1)
+    assert active.run_seed_children()[0].child is service
+    assert active.run_seed_children()[0].relative_path[0].value == (
+        "decode_service"
+    )
+    assert construct(None, 0).run_seed_children() == ()
 
 
 def test_continuous_requires_capacity():

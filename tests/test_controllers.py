@@ -99,6 +99,29 @@ def test_controller_copies_mixed_identity_fragments_into_one_packet():
     )
 
 
+def test_controller_freezes_fragment_count_before_transport():
+    engine = Engine(verbose=False)
+    controller = ModularController(engine, log_syndromes=False)
+    delivered = []
+    payload = SyndromePayload(
+        operation_id=0,
+        patch_id="north",
+        round_index=1,
+        n_fragments=1,
+    )
+
+    controller.relay_syndrome(payload, delivered.append)
+    payload.n_fragments = 2
+    engine.run()
+
+    assert len(delivered) == 1
+    assert tuple(
+        fragment.patch_id for fragment in delivered[0].fragments
+    ) == ("north",)
+    assert controller._pending == {}
+    assert controller._completed_rounds == {(0, 1)}
+
+
 def test_controller_rejects_invalid_fragment_before_packet_state_mutates():
     eng = Engine(verbose=False)
     ctrl = ModularController(eng, log_syndromes=False)

@@ -11,6 +11,7 @@ from decsim.message import (
     ResolvedOperationPlanning,
     ResolvedPatchPlanning,
     ResourceClaim,
+    SyndromePayload,
 )
 from decsim.chip import Chip
 
@@ -157,6 +158,32 @@ def _blocked_pair(**succ_kw):
     b = Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0,
                   predecessors=(0,), **succ_kw)
     return [a, b]
+
+
+def test_chip_live_stream_relay_does_not_mutate_source_fragment_counts():
+    class RecordingController:
+        def __init__(self):
+            self.payloads = []
+
+        def relay_syndrome(self, payload, deliver):
+            self.payloads.append(payload)
+
+    _, gate, _, _ = _gate([Operation(0, "memory", (0, 1))])
+    controller = RecordingController()
+    gate.controller = controller
+    source_payloads = [
+        SyndromePayload("stream", "north", 1),
+        SyndromePayload("stream", "south", 1),
+    ]
+
+    gate.relay_syndrome_payloads(source_payloads)
+
+    assert [payload.n_fragments for payload in source_payloads] == [1, 1]
+    assert [payload.n_fragments for payload in controller.payloads] == [2, 2]
+    assert all(
+        relayed is not source
+        for relayed, source in zip(controller.payloads, source_payloads)
+    )
 
 
 def test_release_unconditional_on_decision_contract_3_4():

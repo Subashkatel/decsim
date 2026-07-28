@@ -9,8 +9,8 @@
 import pytest
 
 from decsim.codes import SurfaceCodeModel
-from decsim.devices import SyndromeBitDevice
-from decsim.message import Operation
+from decsim.devices import ClockedDevice, SyndromeBitDevice
+from decsim.message import Operation, SyndromePayload
 
 
 def test_aggregate_fake_payload_reports_its_bit_count():
@@ -27,6 +27,41 @@ def test_per_patch_fake_payloads_report_their_bit_counts():
     assert len(payloads) == 2
     for payload in payloads:
         assert payload.size_bits == len(payload.bits) == 5
+
+
+def test_clocked_device_relay_does_not_mutate_source_fragment_counts():
+    class RecordingController:
+        def __init__(self):
+            self.payloads = []
+
+        def relay_syndrome(self, payload, deliver):
+            self.payloads.append(payload)
+
+    class Cluster:
+        def on_syndrome_arrival(self, packet):
+            raise AssertionError("recording controller must not deliver")
+
+    controller = RecordingController()
+    clocked = ClockedDevice(
+        engine=None,
+        device=None,
+        controller=controller,
+        cluster=Cluster(),
+        round_count_by_operation_id={},
+    )
+    source_payloads = [
+        SyndromePayload(0, "north", 1),
+        SyndromePayload(0, "south", 1),
+    ]
+
+    clocked.relay_payloads(source_payloads)
+
+    assert [payload.n_fragments for payload in source_payloads] == [1, 1]
+    assert [payload.n_fragments for payload in controller.payloads] == [2, 2]
+    assert all(
+        relayed is not source
+        for relayed, source in zip(controller.payloads, source_payloads)
+    )
 
 
 def test_idle_round_fake_payload_reports_its_bit_count():

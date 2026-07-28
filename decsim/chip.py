@@ -21,6 +21,7 @@ Behavior frozen by the timing goldens:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from types import MappingProxyType
 from typing import Optional
 
@@ -394,9 +395,13 @@ class Chip:
 
     def relay_syndrome_payloads(self, payloads) -> None:
         """Send all fragments from one syndrome round through the controller."""
+        fragment_count = len(payloads)
         for payload in payloads:
-            payload.n_fragments = len(payloads)
-            self.controller.relay_syndrome(payload,
+            relayed_payload = replace(
+                payload,
+                n_fragments=fragment_count,
+            )
+            self.controller.relay_syndrome(relayed_payload,
                                            self.cluster.on_syndrome_arrival)
 
     def _start_released_successors_on_boundary(self, op_id: int, patch) -> None:

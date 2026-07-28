@@ -14,11 +14,13 @@ GateRounds + InfiniteFactory.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import functools
 import hashlib
 import inspect
 import json
 import math
 from numbers import Integral
+import types
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .message import (
@@ -44,6 +46,26 @@ if TYPE_CHECKING:
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
 RUN_SEED_NAMESPACE = b"decsim.run-seed.v1"
+PREBINDING_OBJECT_FIELDS = (
+    "frontend",
+    "code",
+    "layout",
+    "scheme",
+    "rounds_policy",
+    "planner",
+    "strategy",
+)
+PREBINDING_PROVIDER_FIELDS = (
+    "make_controller",
+    "make_factory",
+    "make_metrics",
+)
+PLANNER_CHILD_FIELDS = ("layout", "scheme", "rounds_policy")
+RUN_SEED_CONSUMER_MEMBERS = (
+    "reserve_run_seed",
+    "commit_run_seed",
+    "cancel_run_seed",
+)
 
 
 def _derive_run_component_seed(
@@ -295,6 +317,7 @@ class RunSpec:
     def _validate_configuration(self) -> ResolvedPlanningParts:
         """Validate configuration-only state and resolve planning once."""
         self._validated_root_seed()
+        self._reject_prebinding_seed_consumers()
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
         self._validate_supplied_parts()
@@ -331,6 +354,27 @@ class RunSpec:
         self._validate_resolved_planning(planning)
         self._validate_cross_part_combinations(planning)
         return planning
+
+    def _reject_prebinding_seed_consumers(self) -> None:
+        """Reject stochastic owners that would execute before root binding."""
+        for field_name in PREBINDING_OBJECT_FIELDS:
+            component = object.__getattribute__(self, field_name)
+            if component is not None:
+                _reject_static_seed_consumer(field_name, component)
+
+        planner = object.__getattribute__(self, "planner")
+        if planner is not None:
+            for child_name in PLANNER_CHILD_FIELDS:
+                child = _stored_planner_child(planner, child_name)
+                _reject_static_seed_consumer(
+                    f"planner.{child_name}",
+                    child,
+                )
+
+        for field_name in PREBINDING_PROVIDER_FIELDS:
+            provider = object.__getattribute__(self, field_name)
+            if provider is not None:
+                _scan_prebinding_provider(field_name, provider)
 
     def _validated_root_seed(self) -> Optional[int]:
         """Return the run root under the unsigned 64-bit seed contract."""
@@ -1236,6 +1280,76 @@ def _validate_callable_arity(name: str, factory, arity: int) -> None:
             f"{name} must accept {arity} positional argument"
             f"{'s' if arity != 1 else ''} ({error})"
         ) from error
+
+
+def _declares_static_seed_consumer(component) -> bool:
+    """Inspect the seed capability without invoking user-controlled access."""
+    missing = object()
+    return all(
+        inspect.getattr_static(component, member_name, missing) is not missing
+        for member_name in RUN_SEED_CONSUMER_MEMBERS
+    )
+
+
+def _reject_static_seed_consumer(component_path: str, component) -> None:
+    if _declares_static_seed_consumer(component):
+        raise ValueError(
+            f"{component_path} object {type(component).__name__} declares "
+            "RunSeedConsumer behavior that would execute before run-seed "
+            "binding"
+        )
+
+
+def _stored_planner_child(planner, child_name: str):
+    """Read an approved planner child shape without binding a descriptor."""
+    try:
+        instance_fields = object.__getattribute__(planner, "__dict__")
+    except AttributeError:
+        instance_fields = {}
+    if type(instance_fields) is dict and child_name in instance_fields:
+        return instance_fields[child_name]
+
+    missing = object()
+    child = inspect.getattr_static(planner, child_name, missing)
+    if child is missing:
+        raise TypeError(
+            "planner does not satisfy ExecutionPlanner: "
+            f"planner.{child_name} must be a stored non-descriptor child"
+        )
+    if inspect.isdatadescriptor(child) or (
+        getattr(type(child), "__get__", None) is not None
+    ):
+        raise TypeError(
+            "planner does not satisfy ExecutionPlanner: "
+            f"planner.{child_name} must be a stored non-descriptor child"
+        )
+    return child
+
+
+def _scan_prebinding_provider(component_path: str, provider) -> None:
+    """Classify provider ownership without binding or invoking a wrapper."""
+    provider_type = type(provider)
+    if provider_type is types.FunctionType:
+        _reject_static_seed_consumer(component_path, provider)
+        return
+    if provider_type is types.MethodType:
+        _reject_static_seed_consumer(component_path, provider.__func__)
+        _reject_static_seed_consumer(component_path, provider.__self__)
+        return
+    if (
+        provider_type is functools.partial
+        or provider_type is types.BuiltinFunctionType
+        or provider_type is types.BuiltinMethodType
+        or provider_type is type
+    ):
+        raise TypeError(
+            f"{component_path} has unsupported provider shape "
+            f"{provider_type.__name__}"
+        )
+    if callable(provider):
+        _reject_static_seed_consumer(component_path, provider)
+        return
+    raise TypeError(f"{component_path} must be callable")
 
 
 def _make_infinite(engine):

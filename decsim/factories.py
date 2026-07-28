@@ -411,16 +411,55 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
                  production: str = "demand", buffer_capacity: Optional[int] = None):
         _validate_production_mode(production, buffer_capacity)
         _validate_correction_decode_service(decode_service, n_corr)
+        if type(levels) is not list or not levels:
+            raise TypeError("levels must be a nonempty built-in list")
+        validated_levels = []
+        for index, level in enumerate(levels):
+            if type(level) is not DistillLevel:
+                raise TypeError(
+                    f"levels[{index}] must be an exact DistillLevel"
+                )
+            validated_levels.append(
+                DistillLevel(
+                    units=_validate_exact_integer(
+                        f"levels[{index}].units", level.units, minimum=1
+                    ),
+                    d=_validate_exact_integer(
+                        f"levels[{index}].d", level.d, minimum=1
+                    ),
+                    O=_validate_exact_integer(
+                        f"levels[{index}].O", level.O, minimum=0
+                    ),
+                    P=_validate_probability(
+                        f"levels[{index}].P", level.P
+                    ),
+                )
+            )
+        W_ticks = _validate_exact_integer("W_ticks", W_ticks, minimum=0)
+        M = _validate_exact_integer("M", M, minimum=1)
+        N = _validate_exact_integer("N", N, minimum=1)
+        prep_units = _validate_exact_integer(
+            "prep_units", prep_units, minimum=1
+        )
+        prep_O = _validate_exact_integer("prep_O", prep_O, minimum=0)
+        prep_d = _validate_exact_integer("prep_d", prep_d, minimum=1)
+        prep_P = _validate_probability("prep_P", prep_P)
+        corr_rounds = _validate_exact_integer(
+            "corr_rounds", corr_rounds, minimum=0
+        )
         self.production = production
         self.buffer_capacity = buffer_capacity
         self.engine = engine
-        self.levels = levels
-        self.L = len(levels)
+        self.levels = tuple(validated_levels)
+        self.L = len(self.levels)
         self.M = M
         self.N = N
         self.prep_units = prep_units
         self.prep_time = prep_O * prep_d * W_ticks
         self.prep_P = prep_P
+        self._window_ticks = W_ticks
+        self._prep_O = prep_O
+        self._prep_d = prep_d
         self.decode_service = decode_service
         self.corr_rounds = corr_rounds
         self.n_corr = n_corr
@@ -440,6 +479,39 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
                 self.decode_service,
             ),
         )
+
+    def run_manifest_config(self):
+        return {
+            "kind": "multi_level",
+            "levels": [
+                {
+                    "units": level.units,
+                    "distance": level.d,
+                    "physical_time_multiplier": level.O,
+                    "success_probability": level.P,
+                }
+                for level in self.levels
+            ],
+            "window_ticks": self._window_ticks,
+            "input_states_per_round": self.M,
+            "output_states_per_round": self.N,
+            "preparation_units": self.prep_units,
+            "preparation_steps": self._prep_O,
+            "preparation_distance": self._prep_d,
+            "preparation_success_probability": self.prep_P,
+            "preparation_time_ticks": self.prep_time,
+            "level_timing": [
+                {
+                    "level": level,
+                    "round_time_ticks": self.round_time[level],
+                }
+                for level in range(1, self.L + 1)
+            ],
+            "corr_rounds": self.corr_rounds,
+            "n_corr": self.n_corr,
+            "production": self.production,
+            "buffer_capacity": self.buffer_capacity,
+        }
 
     def _init_multilevel_state(self, W_ticks: int) -> None:
         """Initialize buffers, busy counts, counters, and round times."""

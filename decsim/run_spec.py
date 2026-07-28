@@ -36,7 +36,6 @@ from .message import (
     is_stable_identity,
     same_stable_identity,
 )
-from .pauli_frame import PauliFrame
 from .config import TimingConfig, us
 
 if TYPE_CHECKING:
@@ -297,6 +296,52 @@ class TypedPathSegmentRecord:
     kind: str
     value: Optional[str]
 
+    def __post_init__(self) -> None:
+        if type(self.kind) is not str:
+            raise TypeError("typed path segment kind must be a built-in str")
+        if self.kind == "field":
+            if type(self.value) is not str:
+                raise TypeError(
+                    "typed field path values must be built-in str"
+                )
+            if not self.value:
+                raise ValueError("typed field path values cannot be empty")
+            return
+        if self.kind == "string_key":
+            if type(self.value) is not str:
+                raise TypeError(
+                    "typed string-key path values must be built-in str"
+                )
+            return
+        if self.kind == "none_key":
+            if self.value is not None:
+                raise ValueError("typed none-key path values must be None")
+            return
+        if self.kind == "integer_key":
+            if type(self.value) is not str:
+                raise TypeError(
+                    "typed integer-key path values must be decimal strings"
+                )
+            digits = (
+                self.value[1:]
+                if self.value.startswith("-")
+                else self.value
+            )
+            if (
+                not digits
+                or not digits.isascii()
+                or not digits.isdigit()
+                or (len(digits) > 1 and digits.startswith("0"))
+                or self.value == "-0"
+                or self.value.startswith("+")
+            ):
+                raise ValueError(
+                    "typed integer-key path values must be canonical decimal "
+                    "strings"
+                )
+            return
+        raise ValueError(f"unknown typed path segment kind {self.kind!r}")
+
     @classmethod
     def from_seed_segment(
         cls,
@@ -325,6 +370,15 @@ class ResolvedComponent:
 
 
 @dataclass(frozen=True)
+class FixedCompositionRecord:
+    """One behavior-bearing object constructed directly by the run root."""
+
+    component_path: tuple[TypedPathSegmentRecord, ...]
+    implementation: str
+    configuration: Any
+
+
+@dataclass(frozen=True)
 class ResolvedAlias:
     """A repeated behavior path and its first canonical object path."""
 
@@ -348,6 +402,7 @@ class ResolvedRunManifest:
     schema_version: int
     root_seed: Optional[int]
     components: tuple[ResolvedComponent, ...]
+    fixed_composition: tuple[FixedCompositionRecord, ...]
     aliases: tuple[ResolvedAlias, ...]
     seed_bindings: tuple[ResolvedSeedBinding, ...]
     primary_result_sha256: str
@@ -378,6 +433,16 @@ class ResolvedRunManifest:
                     ),
                 }
                 for component in self.components
+            ],
+            "fixed_composition": [
+                {
+                    "component_path": _typed_path_json(
+                        component.component_path
+                    ),
+                    "implementation": component.implementation,
+                    "configuration": component.configuration,
+                }
+                for component in self.fixed_composition
             ],
             "aliases": [
                 {
@@ -971,10 +1036,9 @@ class RunSpec:
         _validate_protocol_part("controller", controller, Controller)
         # the whole fabric shares the controller's LinkModel: the window
         # manager's dd/do hops ride the same links a custom controller set
-        links = getattr(controller, "links", None) or LinkModel.from_timing(self.timing)
+        links = controller.links
 
-        store = PayloadStore(memory_model=self.memory_model) \
-            if self.memory_model is not None else None
+        store = PayloadStore(memory_model=self.memory_model)
         window_manager = WindowManager(
             engine, scheme=planning.scheme, layout=planning.layout,
             rounds_policy=planning.rounds_policy,
@@ -1019,7 +1083,7 @@ class RunSpec:
                 f"{type(factory).__name__} uses a different engine from "
                 "the RunSpec build")
         _validate_shipped_factory_decode_service(factory, cluster)
-        source = ClockedDevice(engine, device, controller, window_manager,
+        source = ClockedDevice(engine, device, controller, cluster,
                                window_manager.rounds_for)
         round_us = self.round_us if self.round_us is not None \
             else self.timing.round_us
@@ -1033,7 +1097,7 @@ class RunSpec:
             ),
             max_idle_rounds=self.max_idle_rounds,
             gates_start_on_round_boundaries=self.gates_start_on_round_boundaries,
-            frame=getattr(orchestrator, "frame", None) or PauliFrame())
+            frame=orchestrator.frame)
 
         metrics = []
         if self.make_metrics is not None:
@@ -1056,6 +1120,8 @@ class RunSpec:
                 metric_names.add(metric.name)
 
         seed_roots = self._run_seed_roots(
+            frontend=self.frontend,
+            planning=planning,
             device=device,
             router=router,
             factory=factory,
@@ -1071,18 +1137,20 @@ class RunSpec:
             metrics=metrics,
             workload=workload,
         )
+        fixed_composition_anchors = _fixed_composition_anchors(
+            engine=engine,
+            payload_store=store,
+            window_manager=window_manager,
+            decoder_manager=pool,
+            strategy_services=services,
+            cluster=cluster,
+            clocked_device=source,
+            chip=gate,
+        )
         component_graph = _materialize_component_graph(
             seed_roots,
             self._validated_root_seed(),
-            anchors=(
-                (
-                    (
-                        RunSeedPathSegment("field", "fixed"),
-                        RunSeedPathSegment("field", "cluster"),
-                    ),
-                    cluster,
-                ),
-            ),
+            anchors=fixed_composition_anchors,
         )
         seed_plan = component_graph.seed_plan
         reservations = _bind_run_seed_plan(seed_plan)
@@ -1095,6 +1163,9 @@ class RunSpec:
             for entry, reservation in zip(seed_plan, reservations)
         )
         resolved_components = _resolved_components(component_graph)
+        fixed_composition = _resolved_fixed_composition(
+            fixed_composition_anchors
+        )
         resolved_aliases = tuple(
             ResolvedAlias(
                 alias_path=_typed_path_records(alias.alias_path),
@@ -1137,6 +1208,7 @@ class RunSpec:
                 schema_version=1,
                 root_seed=self._validated_root_seed(),
                 components=resolved_components,
+                fixed_composition=fixed_composition,
                 aliases=resolved_aliases,
                 seed_bindings=seed_bindings,
                 primary_result_sha256=hashlib.sha256(
@@ -1165,6 +1237,8 @@ class RunSpec:
     def _run_seed_roots(
         self,
         *,
+        frontend,
+        planning,
         device,
         router,
         factory,
@@ -1183,6 +1257,11 @@ class RunSpec:
         """Return the complete runtime root set under fixed semantic paths."""
         field_segment = lambda name: RunSeedPathSegment("field", name)
         roots = [
+            ((field_segment("code"),), planning.code),
+            ((field_segment("layout"),), planning.layout),
+            ((field_segment("scheme"),), planning.scheme),
+            ((field_segment("rounds_policy"),), planning.rounds_policy),
+            ((field_segment("planner"),), planning.planner),
             ((field_segment("device"),), device),
             ((field_segment("decoder_router"),), router),
             ((field_segment("magic_state_factory"),), factory),
@@ -1195,6 +1274,8 @@ class RunSpec:
             ((field_segment("orchestrator"),), orchestrator),
             ((field_segment("controller"),), controller),
         ]
+        if frontend is not None:
+            roots.append(((field_segment("frontend"),), frontend))
         if self.memory_model is not None:
             roots.append(
                 ((field_segment("memory_model"),), self.memory_model)
@@ -1827,6 +1908,49 @@ def _typed_path_json(
 def _implementation_name(component) -> str:
     implementation = type(component)
     return f"{implementation.__module__}.{implementation.__qualname__}"
+
+
+def _fixed_composition_anchors(**components):
+    field_segment = lambda value: RunSeedPathSegment("field", value)
+    return tuple(
+        (
+            (
+                field_segment("fixed"),
+                field_segment(component_name),
+            ),
+            component,
+        )
+        for component_name, component in components.items()
+    )
+
+
+def _resolved_fixed_composition(
+    anchors,
+) -> tuple[FixedCompositionRecord, ...]:
+    records = [
+        FixedCompositionRecord(
+            component_path=_typed_path_records(component_path),
+            implementation=_implementation_name(component),
+            configuration=None,
+        )
+        for component_path, component in anchors
+    ]
+    records.sort(
+        key=lambda record: b"".join(
+            _public_path_segment_bytes(segment)
+            for segment in record.component_path
+        )
+    )
+    return tuple(records)
+
+
+def _public_path_segment_bytes(segment: TypedPathSegmentRecord) -> bytes:
+    value = (
+        int(segment.value)
+        if segment.kind == "integer_key"
+        else segment.value
+    )
+    return RunSeedPathSegment(segment.kind, value).canonical_bytes()
 
 
 def _resolved_components(

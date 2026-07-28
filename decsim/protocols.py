@@ -383,6 +383,8 @@ class Controller(Protocol):
     hop at a time (edges qc, cd, dd, do, oc, cq, ws — priced by
     TimingConfig)."""
 
+    links: Any
+
     def relay_syndrome(self, payload, deliver: Callable) -> None: ...
 
     def relay_instruction(self, decision, deliver: Callable) -> None: ...
@@ -391,6 +393,8 @@ class Controller(Protocol):
 class Orchestrator(Protocol):
     """Port 15. Turns final decoded measurements into Decisions (the Pauli
     byproduct / S-gate algebra) and releases the operations they block."""
+
+    frame: Any
 
     def connect(self, controller, decision_sink: Callable) -> None: ...
 

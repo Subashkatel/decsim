@@ -641,6 +641,52 @@ def test_component_graph_records_shared_decoder_alias_once():
     )
 
 
+@pytest.mark.parametrize(
+    ("kind", "value", "error"),
+    [
+        ("field", "", ValueError),
+        ("field", 1, TypeError),
+        ("string_key", 1, TypeError),
+        ("none_key", "none", ValueError),
+        ("integer_key", 0, TypeError),
+        ("integer_key", "", ValueError),
+        ("integer_key", "01", ValueError),
+        ("integer_key", "+1", ValueError),
+        ("integer_key", "-0", ValueError),
+        ("unknown", "value", ValueError),
+    ],
+)
+def test_public_typed_path_segment_rejects_noncanonical_wire_values(
+    kind,
+    value,
+    error,
+):
+    from decsim.run_spec import TypedPathSegmentRecord
+
+    with pytest.raises(error):
+        TypedPathSegmentRecord(kind, value)
+
+
+def test_public_typed_path_segment_has_an_exact_two_key_wire_form():
+    from decsim.run_spec import TypedPathSegmentRecord
+
+    records = [
+        TypedPathSegmentRecord("field", "owner"),
+        TypedPathSegmentRecord("string_key", ""),
+        TypedPathSegmentRecord("none_key", None),
+        TypedPathSegmentRecord("integer_key", "-9"),
+        TypedPathSegmentRecord("integer_key", "0"),
+    ]
+
+    assert [record.to_json_value() for record in records] == [
+        {"kind": "field", "value": "owner"},
+        {"kind": "string_key", "value": ""},
+        {"kind": "none_key", "value": None},
+        {"kind": "integer_key", "value": "-9"},
+        {"kind": "integer_key", "value": "0"},
+    ]
+
+
 def test_component_graph_records_the_resolved_orchestrator_frame():
     completed = RunSpec(ops=[], decoder=StaticDecoder()).build()
     paths = [
@@ -652,6 +698,119 @@ def test_component_graph_records_the_resolved_orchestrator_frame():
         {"kind": "field", "value": "orchestrator"},
         {"kind": "field", "value": "frame"},
     ] in paths
+
+
+@pytest.mark.parametrize(
+    ("workload_fields", "expected_optional_fields"),
+    [
+        ({"ops": []}, set()),
+        ({"frontend": StaticFrontend([])}, {"frontend"}),
+    ],
+)
+def test_component_graph_contains_every_resolved_singleton_root(
+    workload_fields,
+    expected_optional_fields,
+):
+    completed = RunSpec(
+        decoder=StaticDecoder(),
+        **workload_fields,
+    ).build()
+    singleton_fields = {
+        component["component_path"][0]["value"]
+        for component in completed.manifest.to_json_value()["components"]
+        if len(component["component_path"]) == 1
+    }
+
+    assert {
+        "code",
+        "layout",
+        "scheme",
+        "rounds_policy",
+        "planner",
+        "device",
+        "decoder_router",
+        "magic_state_factory",
+        "strategy",
+        "scheduler",
+        "deadline_policy",
+        "boundary_policy",
+        "window_interaction",
+        "idle_policy",
+        "orchestrator",
+        "controller",
+    } | expected_optional_fields <= singleton_fields
+    assert ("frontend" in singleton_fields) == bool(expected_optional_fields)
+    assert "memory_model" not in singleton_fields
+
+
+def test_manifest_records_the_exact_fixed_composition_anchors():
+    from decsim.payload_store import PayloadStore
+
+    completed = RunSpec(ops=[], decoder=StaticDecoder()).build()
+    manifest = completed.manifest.to_json_value()
+
+    assert [
+        tuple(segment["value"] for segment in record["component_path"])
+        for record in manifest["fixed_composition"]
+    ] == [
+        ("fixed", "chip"),
+        ("fixed", "engine"),
+        ("fixed", "cluster"),
+        ("fixed", "payload_store"),
+        ("fixed", "clocked_device"),
+        ("fixed", "window_manager"),
+        ("fixed", "decoder_manager"),
+        ("fixed", "strategy_services"),
+    ]
+    fixed_by_path = {
+        tuple(
+            segment["value"]
+            for segment in record["component_path"]
+        ): record
+        for record in manifest["fixed_composition"]
+    }
+    assert fixed_by_path[("fixed", "payload_store")]["implementation"] == (
+        "decsim.payload_store.PayloadStore"
+    )
+    assert isinstance(completed.window_manager.store, PayloadStore)
+    assert completed.chip.source.cluster is completed.cluster
+    assert completed.chip.frame is completed.orchestrator.frame
+    assert completed.window_manager.links is completed.controller.links
+
+
+def test_controller_port_requires_the_actual_retained_links():
+    class MissingLinksController:
+        def relay_syndrome(self, payload, deliver):
+            deliver(payload)
+
+        def relay_instruction(self, decision, deliver):
+            deliver(decision)
+
+    with pytest.raises(TypeError, match=r"controller.*Controller"):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            make_controller=lambda _engine: MissingLinksController(),
+        ).build()
+
+
+def test_orchestrator_port_requires_the_actual_retained_frame():
+    class MissingFrameOrchestrator:
+        def connect(self, controller, decision_sink):
+            return None
+
+        def register_blocked_operation(self, blocked_op_id, blocking_op_id):
+            return None
+
+        def integrate(self, op, outcome):
+            return None
+
+    with pytest.raises(TypeError, match=r"orchestrator.*Orchestrator"):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            orchestrator=MissingFrameOrchestrator(),
+        ).build()
 
 
 def test_factory_decode_service_is_the_fixed_cluster_alias():

@@ -197,6 +197,7 @@ class Window:
     buffer_hi: int                    # last round it reads (trailing buffer)
     n_rounds: int                     # rounds the decode spans (sets job size)
     buffer_lo: Optional[int] = None   # leading-buffer start (parallel-scheme layer B)
+    batched_preceding_idle_round_count: int = 0
     deps: list = field(default_factory=list)        # window keys this one waits on
     dependents: list = field(default_factory=list)  # window keys waiting on this one
     deps_remaining: int = 0           # unfinished deps countdown; 0 = unblocked
@@ -277,6 +278,257 @@ class WindowGraph:
         dst.deps_remaining += 1
 
 
+def _exact_positive_int(value, label: str) -> None:
+    if type(value) is not int or value < 1:
+        raise TypeError(f"{label} must be an exact positive int")
+
+
+def _exact_nonnegative_int(value, label: str) -> None:
+    if type(value) is not int or value < 0:
+        raise TypeError(f"{label} must be an exact nonnegative int")
+
+
+@dataclass(frozen=True)
+class ResolvedCodeGeometry:
+    """Canonical planning/control geometry resolved once for one run."""
+
+    code_name: str
+    distance: int
+    commit_round_count: int
+    buffer_round_count: int
+    minimum_leading_buffer_round_count: int
+    minimum_trailing_buffer_round_count: int
+    one_patch_spatial_node_count: int
+    buffer_floor_override_active: bool
+
+    def __post_init__(self) -> None:
+        if type(self.code_name) is not str or not self.code_name:
+            raise TypeError("code_name must be a nonempty exact str")
+        try:
+            self.code_name.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise ValueError("code_name must contain only Unicode scalars") from exc
+        _exact_positive_int(self.distance, "distance")
+        _exact_positive_int(self.commit_round_count, "commit_round_count")
+        _exact_nonnegative_int(self.buffer_round_count, "buffer_round_count")
+        _exact_nonnegative_int(
+            self.minimum_leading_buffer_round_count,
+            "minimum_leading_buffer_round_count",
+        )
+        _exact_nonnegative_int(
+            self.minimum_trailing_buffer_round_count,
+            "minimum_trailing_buffer_round_count",
+        )
+        _exact_positive_int(
+            self.one_patch_spatial_node_count,
+            "one_patch_spatial_node_count",
+        )
+        if type(self.buffer_floor_override_active) is not bool:
+            raise TypeError("buffer_floor_override_active must be an exact bool")
+
+
+@dataclass(frozen=True)
+class ResolvedCodeSpatialProfile:
+    """One base code-size result for each consumed patch cardinality."""
+
+    entries: tuple[tuple[int, int], ...]
+
+    def __post_init__(self) -> None:
+        if type(self.entries) is not tuple or not self.entries:
+            raise TypeError("spatial profile entries must be a nonempty tuple")
+        previous = 0
+        for entry in self.entries:
+            if type(entry) is not tuple or len(entry) != 2:
+                raise TypeError("spatial profile entries must be exact pairs")
+            patch_count, node_count = entry
+            _exact_positive_int(patch_count, "spatial profile patch_count")
+            _exact_positive_int(node_count, "spatial profile node_count")
+            if patch_count <= previous:
+                raise ValueError(
+                    "spatial profile patch counts must be unique and ascending"
+                )
+            previous = patch_count
+        if self.entries[0][0] != 1:
+            raise ValueError("spatial profile must contain patch count 1")
+
+    def for_patch_count(self, patch_count: int) -> int:
+        _exact_positive_int(patch_count, "patch_count")
+        for candidate, node_count in self.entries:
+            if candidate == patch_count:
+                return node_count
+        raise KeyError(f"patch count {patch_count} was not resolved")
+
+
+@dataclass(frozen=True)
+class ResolvedOperationPlanning:
+    """Exact immutable planning/control facts for one operation."""
+
+    operation_id: int
+    code_geometry: ResolvedCodeGeometry
+    round_count: int
+    round_ticks: int
+    spatial_node_count: int
+
+    def __post_init__(self) -> None:
+        if type(self.operation_id) is not int:
+            raise TypeError("operation_id must be an exact int")
+        if type(self.code_geometry) is not ResolvedCodeGeometry:
+            raise TypeError("code_geometry must be an exact ResolvedCodeGeometry")
+        _exact_positive_int(self.round_count, "round_count")
+        _exact_positive_int(self.round_ticks, "round_ticks")
+        _exact_positive_int(self.spatial_node_count, "spatial_node_count")
+
+
+@dataclass(frozen=True)
+class ResolvedPatchPlanning:
+    """Exact immutable cadence and idle-work facts for one patch."""
+
+    patch_identity: Any
+    code_geometry: ResolvedCodeGeometry
+    round_ticks: int
+    spatial_node_count: int
+
+    def __post_init__(self) -> None:
+        if type(self.code_geometry) is not ResolvedCodeGeometry:
+            raise TypeError("code_geometry must be an exact ResolvedCodeGeometry")
+        _exact_positive_int(self.round_ticks, "round_ticks")
+        _exact_positive_int(self.spatial_node_count, "spatial_node_count")
+
+
+@dataclass(frozen=True)
+class WindowGeometry:
+    """One immutable static window interval."""
+
+    buffer_lo: int
+    commit_lo: int
+    commit_hi: int
+    buffer_hi: int
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("buffer_lo", self.buffer_lo),
+            ("commit_lo", self.commit_lo),
+            ("commit_hi", self.commit_hi),
+            ("buffer_hi", self.buffer_hi),
+        ):
+            _exact_positive_int(value, label)
+        if not (
+            self.buffer_lo
+            <= self.commit_lo
+            <= self.commit_hi
+            <= self.buffer_hi
+        ):
+            raise ValueError("window geometry bounds are not ordered")
+
+    @property
+    def round_count(self) -> int:
+        return self.buffer_hi - self.buffer_lo + 1
+
+
+@dataclass(frozen=True)
+class OperationWindowPlan:
+    """One scheme's complete immutable result for one operation."""
+
+    operation_id: int
+    windows: tuple[WindowGeometry, ...]
+    internal_dependencies: tuple[tuple[int, int], ...]
+    entry_window_indices: tuple[int, ...]
+    exit_window_indices: tuple[int, ...]
+    windowed: bool
+    batch_preceding_idle_rounds: bool
+
+    def __post_init__(self) -> None:
+        if type(self.operation_id) is not int:
+            raise TypeError("operation_id must be an exact int")
+        if (
+            type(self.windows) is not tuple
+            or not self.windows
+            or any(type(window) is not WindowGeometry for window in self.windows)
+        ):
+            raise TypeError("windows must be a nonempty tuple of WindowGeometry")
+        if type(self.internal_dependencies) is not tuple:
+            raise TypeError("internal_dependencies must be an exact tuple")
+        window_count = len(self.windows)
+        edge_set = set()
+        predecessors = [set() for _ in self.windows]
+        dependents = [set() for _ in self.windows]
+        for edge in self.internal_dependencies:
+            if (
+                type(edge) is not tuple
+                or len(edge) != 2
+                or any(type(index) is not int for index in edge)
+            ):
+                raise TypeError("dependency edges must be exact (int, int) pairs")
+            source, destination = edge
+            if (
+                source < 0
+                or destination < 0
+                or source >= window_count
+                or destination >= window_count
+                or source == destination
+            ):
+                raise ValueError("dependency edge is out of range or self-directed")
+            if edge in edge_set:
+                raise ValueError("dependency edges must be unique")
+            edge_set.add(edge)
+            predecessors[destination].add(source)
+            dependents[source].add(destination)
+
+        self._validate_boundary_indices(
+            self.entry_window_indices,
+            "entry_window_indices",
+            window_count,
+        )
+        self._validate_boundary_indices(
+            self.exit_window_indices,
+            "exit_window_indices",
+            window_count,
+        )
+        expected_entries = tuple(
+            index for index, sources in enumerate(predecessors) if not sources
+        )
+        expected_exits = tuple(
+            index for index, destinations in enumerate(dependents)
+            if not destinations
+        )
+        if self.entry_window_indices != expected_entries:
+            raise ValueError("entry_window_indices must equal all graph roots")
+        if self.exit_window_indices != expected_exits:
+            raise ValueError("exit_window_indices must equal all graph sinks")
+
+        indegree = [len(sources) for sources in predecessors]
+        ready = list(self.entry_window_indices)
+        visited = 0
+        while ready:
+            source = ready.pop()
+            visited += 1
+            for destination in dependents[source]:
+                indegree[destination] -= 1
+                if indegree[destination] == 0:
+                    ready.append(destination)
+        if visited != window_count:
+            raise ValueError("operation window graph must be acyclic")
+        if type(self.windowed) is not bool:
+            raise TypeError("windowed must be an exact bool")
+        if type(self.batch_preceding_idle_rounds) is not bool:
+            raise TypeError("batch_preceding_idle_rounds must be an exact bool")
+
+    @staticmethod
+    def _validate_boundary_indices(indices, label, window_count) -> None:
+        if (
+            type(indices) is not tuple
+            or not indices
+            or any(type(index) is not int for index in indices)
+        ):
+            raise TypeError(f"{label} must be a nonempty tuple of exact ints")
+        if len(set(indices)) != len(indices):
+            raise ValueError(f"{label} must contain unique indices")
+        if tuple(sorted(indices)) != indices:
+            raise ValueError(f"{label} must be ascending")
+        if any(index < 0 or index >= window_count for index in indices):
+            raise ValueError(f"{label} contains an out-of-range index")
+
+
 @dataclass
 class WindowPlan:
     """Compile-time window layout handed to the window manager."""
@@ -290,6 +542,8 @@ class WindowPlan:
     code_names: dict       # op_id -> exact resolved code name
     total_windows: int
     summary: dict = field(default_factory=dict)   # printable planning stats
+    windowed_by_operation: dict = field(default_factory=dict)
+    batch_preceding_idle_rounds_by_operation: dict = field(default_factory=dict)
 
 
 # ------------------------------------------------------ window interaction

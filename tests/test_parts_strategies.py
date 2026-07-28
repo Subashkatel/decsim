@@ -99,7 +99,7 @@ def test_serial_escalation_after_ws_and_awaiting_set_before_commit():
     assert strat.strong_redo_rounds(w) == 9
 
 
-def test_keep_weak_cancels_parallel_strong():
+def test_confident_weak_result_cancels_parallel_strong():
     weak = _Decoder(10, soft=0.9)                 # confident -> keep weak
     strong = _Decoder(1_000_000, name="s")        # would take forever
     strat = Switching(confidence_threshold=0.5, run_both_at_once=True)

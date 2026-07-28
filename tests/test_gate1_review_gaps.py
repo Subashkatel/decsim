@@ -201,11 +201,12 @@ def test_cluster_gap_from_window_model_and_soft_output_decoder_path():
 def test_switching_threshold_equality_keeps_weak():
     strat = Switching(confidence_threshold=0.5)
     assert strat.keep_weak_result(
-        DecodeResult(0, 0, soft_output=0.5)) is True     # == keeps weak
+        DecodeResult(0, 0, soft_output=0.5), None) is True
     assert strat.keep_weak_result(
-        DecodeResult(0, 0, soft_output=0.4999)) is False
-    assert strat.keep_weak_result(DecodeResult(0, 0, soft_output=None)) is False
-    assert strat.keep_weak_result(None) is False
+        DecodeResult(0, 0, soft_output=0.4999), None) is False
+    assert strat.keep_weak_result(
+        DecodeResult(0, 0, soft_output=None), None) is False
+    assert strat.keep_weak_result(None, None) is False
 
 
 # ------------------------------- hidden assumption: data_complete overflow

@@ -2,6 +2,7 @@
 
 Predeclaration: docs/validation/2026-07-06-gate7-p17-predeclaration.md.
 """
+import ast
 import sys
 import pathlib
 
@@ -30,8 +31,8 @@ def test_register_lookup_default_and_update_history():
 
 def test_scalar_semantics_unchanged_without_register():
     s = Switching(confidence_threshold=1.0)
-    assert s.keep_weak_result(result(1.0))
-    assert not s.keep_weak_result(result(0.9))
+    assert s.keep_weak_result(result(1.0), None)
+    assert not s.keep_weak_result(result(0.9), None)
     assert s.keep_weak_result(result(1.0), job("d5"))   # job ignored
 
 
@@ -43,61 +44,42 @@ def test_register_overrides_scalar_per_code():
     reg.set("hard", 1.0)                                    # live update
     assert s.keep_weak_result(result(1.5), job("hard"))
     # no job / no code -> scalar path preserved
-    assert not s.keep_weak_result(result(1.5))
+    assert not s.keep_weak_result(result(1.5), None)
     assert not s.keep_weak_result(result(1.5), job(None))
 
 
-# ---- legacy-override dispatch (P15-P18 review finding C2): every
-# plausible override signature must be called correctly by _keep_weak.
-
-def test_dispatch_legacy_single_arg_override():
-    class Legacy(Switching):
-        def keep_weak_result(self, result):
-            return result.soft_output >= 2.0
-    s = Legacy(confidence_threshold=0.0)
-    assert s._keep_weak(result(2.0), job("d5"))
-    assert not s._keep_weak(result(1.9), job("d5"))
-
-
-def test_dispatch_varargs_override_receives_job():
-    seen = {}
-    class Star(Switching):
-        def keep_weak_result(self, *args):
-            seen["n"] = len(args)
-            return True
-    s = Star(confidence_threshold=0.0)
-    assert s._keep_weak(result(1.0), job("d5"))
-    assert seen["n"] == 2                      # job passed, not dropped
-
-
-def test_dispatch_keyword_only_job_override():
-    seen = {}
-    class KwOnly(Switching):
-        def keep_weak_result(self, result, *, job=None):
-            seen["job"] = job
-            return True
-    s = KwOnly(confidence_threshold=0.0)
-    j = job("d5")
-    assert s._keep_weak(result(1.0), j)
-    assert seen["job"] is j
-
-
-def test_dispatch_kwargs_override():
-    seen = {}
-    class Kw(Switching):
-        def keep_weak_result(self, result, **kwargs):
-            seen.update(kwargs)
-            return True
-    s = Kw(confidence_threshold=0.0)
-    j = job("d5")
-    assert s._keep_weak(result(1.0), j)
-    assert seen["job"] is j
-
-
-def test_dispatch_two_positional_override():
+def test_canonical_override_receives_result_and_job_directly():
     class Two(Switching):
         def keep_weak_result(self, result, job):
             return job.code == "keep"
     s = Two(confidence_threshold=0.0)
-    assert s._keep_weak(result(0.0), job("keep"))
-    assert not s._keep_weak(result(9.9), job("drop"))
+    assert s.keep_weak_result(result(0.0), job("keep"))
+    assert not s.keep_weak_result(result(9.9), job("drop"))
+
+
+def test_every_controlled_threshold_override_has_the_exact_contract():
+    root = pathlib.Path(__file__).resolve().parent.parent
+    paths = [root / "decsim" / "switching.py", *sorted(
+        (root / "tests").glob("test_*.py")
+    )]
+    found = []
+    for path in paths:
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name != "keep_weak_result":
+                continue
+            assert [argument.arg for argument in node.args.args] == [
+                "self",
+                "result",
+                "job",
+            ]
+            assert node.args.posonlyargs == []
+            assert node.args.vararg is None
+            assert node.args.kwonlyargs == []
+            assert node.args.kw_defaults == []
+            assert node.args.kwarg is None
+            assert node.args.defaults == []
+            found.append((path, node.lineno))
+    assert found

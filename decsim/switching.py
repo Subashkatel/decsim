@@ -8,7 +8,6 @@ bookkeeping, hold-or-deliver, and cancellation mechanics.
 
 from __future__ import annotations
 
-import inspect
 import math
 from typing import Optional
 
@@ -161,7 +160,7 @@ class Switching:
         job = outcome.job
         if job.strong_decode_for is not None:
             return OutcomeDirective(Directive.FINALIZE_STRONG)
-        if job.attempt != 0 or self._keep_weak(outcome.result, job):
+        if job.attempt != 0 or self.keep_weak_result(outcome.result, job):
             return OutcomeDirective(Directive.FINALIZE)   # pool cancels sibling
         extra = None
         if self.double_window:
@@ -230,32 +229,7 @@ class Switching:
 
     # ---------------------------------------------------------- policy knobs
 
-    def _keep_weak(self, result, job) -> bool:
-        """Dispatch honoring LEGACY keep_weak_result overrides: a
-        subclass overriding the old single-arg signature keeps
-        working. Probed once via signature.bind (not a param count,
-        which misreads *args / keyword-only / **kwargs overrides)
-        and cached."""
-        style = getattr(self, "_keep_call_style", None)
-        if style is None:
-            sig = inspect.signature(self.keep_weak_result)
-            try:
-                sig.bind(result, job)
-                style = "positional"
-            except TypeError:
-                try:
-                    sig.bind(result, job=job)
-                    style = "keyword"
-                except TypeError:
-                    style = "legacy"
-            self._keep_call_style = style
-        if style == "positional":
-            return self.keep_weak_result(result, job)
-        if style == "keyword":
-            return self.keep_weak_result(result, job=job)
-        return self.keep_weak_result(result)
-
-    def keep_weak_result(self, result, job=None) -> bool:
+    def keep_weak_result(self, result, job) -> bool:
         """True when the weak result should be committed (switching.py:28-31).
 
         With a threshold_register configured and a job carrying a

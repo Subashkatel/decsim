@@ -736,10 +736,31 @@ class StrongRegionPlan:
     commit_hi: int
     context_lo: int
     context_hi: int
-    absorbed_window_keys: tuple
-    restart_window_key: Optional[tuple]
     restart_buffer_lo: Optional[int]
     restart_seam_fault_owner: Optional[SeamFaultOwner]
+
+    def __post_init__(self) -> None:
+        bounds = (
+            self.context_lo,
+            self.commit_lo,
+            self.commit_hi,
+            self.context_hi,
+        )
+        if any(type(bound) is not int for bound in bounds):
+            raise TypeError("strong-region bounds must be exact built-in ints")
+        if not 1 <= self.context_lo <= self.commit_lo \
+                <= self.commit_hi <= self.context_hi:
+            raise ValueError(
+                "strong-region bounds must satisfy 1 <= context_lo <= "
+                "commit_lo <= commit_hi <= context_hi")
+        if self.restart_buffer_lo is not None:
+            if type(self.restart_buffer_lo) is not int:
+                raise TypeError(
+                    "strong-region restart_buffer_lo must be an exact "
+                    "built-in int or None")
+            if self.restart_buffer_lo < 1:
+                raise ValueError(
+                    "strong-region restart_buffer_lo must be at least one")
 
 
 # ------------------------------------------------------------------- decode
@@ -847,6 +868,7 @@ class DecodeJob:
     deadline: int = 0                        # tick stamped by the DeadlinePolicy (EDF)
     on_done: Optional[Callable[[], None]] = None   # completion callback
     label: str = ""                          # log label
+    strong_label: Optional[str] = None       # manager-owned label for a strong sibling
     spatial_nodes: Optional[int] = None      # decoding-graph nodes per round (latency models)
     code: Optional[str] = None               # code name, drives CodeRouter routing
     attempt: int = 0                         # 0 = first (weak) decode, 1 = strong redo

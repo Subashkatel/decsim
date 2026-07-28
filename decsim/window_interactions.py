@@ -120,9 +120,11 @@ class DefaultWindowInteraction:
         return sorted(found)
 
     def plan_strong_region(
-        self, weak_window, later_windows, strong_round_count,
-        operation_round_count, buffer_round_count,
+        self, weak_window, later_windows, operation_round_count,
     ):
+        commit_round_count = weak_window.commit_hi - weak_window.commit_lo + 1
+        buffer_round_count = weak_window.buffer_hi - weak_window.commit_hi
+        strong_round_count = commit_round_count + 2 * buffer_round_count
         commit_lo = weak_window.commit_lo
         commit_hi = min(
             commit_lo + strong_round_count - 1,
@@ -136,35 +138,22 @@ class DefaultWindowInteraction:
             operation_round_count,
         )
 
-        absorbed = []
-        restart_key = None
-        for later in later_windows:
-            if later.commit_hi <= commit_hi:
-                absorbed.append(later.key)
-                continue
-            if later.commit_lo <= commit_hi:
-                raise RuntimeError(
-                    f"window {later.key} commits {later.commit_lo}-"
-                    f"{later.commit_hi} across the strong-region edge "
-                    f"{commit_hi}; the default interaction requires tiled "
-                    f"commit regions")
-            restart_key = later.key
-            break
+        has_restart = any(
+            later.commit_lo > commit_hi for later in later_windows
+        )
 
         return StrongRegionPlan(
             commit_lo=commit_lo,
             commit_hi=commit_hi,
             context_lo=context_lo,
             context_hi=context_hi,
-            absorbed_window_keys=tuple(absorbed),
-            restart_window_key=restart_key,
             restart_buffer_lo=(
                 max(commit_lo, commit_hi - buffer_round_count + 1)
-                if restart_key is not None else None
+                if has_restart else None
             ),
             restart_seam_fault_owner=(
                 SeamFaultOwner.STRONG_REGION
-                if restart_key is not None else None
+                if has_restart else None
             ),
         )
 

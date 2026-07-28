@@ -26,13 +26,14 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, replace
+from enum import Enum, auto
 from types import MappingProxyType
 from typing import Callable, Optional
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecodeResult,
                       Operation, SeamFaultOwner, SyndromeRoundPacket,
                       StrongRegionPlan, Window, WindowInfo, WindowPlan,
-                      stable_identity_order_key)
+                      is_stable_identity, stable_identity_order_key)
 from .payload_store import PayloadStore
 from .dynamic_windows import DynamicWindows
 from .protocols import MultiFaultExclusionSyndromeDevice
@@ -48,6 +49,161 @@ class LogicalContribution:
     commit_hi: int
     ownership_kind: str
     logical_observables: Optional[tuple[int, ...]]
+
+
+@dataclass(frozen=True)
+class _ResolvedStrongRegion:
+    """One policy-selected region resolved against the live window graph."""
+
+    plan: StrongRegionPlan
+    absorbed_window_keys: tuple
+    restart_window_key: Optional[tuple]
+    restart_read_keys: tuple
+    strong_fault_exclusion_ranges: tuple
+    restart_fault_exclusion_ranges: Optional[tuple]
+
+
+class _EscalationPhase(Enum):
+    """The one readiness condition that can transfer a pending strong job."""
+
+    WAITING_FAR_BOUNDARY = auto()
+    WAITING_TERMINAL_DATA = auto()
+
+
+@dataclass(frozen=True)
+class _PendingEscalation:
+    """All immutable state retained until one strong-job transfer."""
+
+    key: tuple
+    weak_job: DecodeJob
+    label: str
+    resolved_region: _ResolvedStrongRegion
+    strong_window: Window
+    strong_model: object
+    phase: _EscalationPhase
+
+
+class _EscalationRegistry:
+    """Own pending escalations and their one exact readiness index."""
+
+    def __init__(self) -> None:
+        self._by_key: dict[tuple, _PendingEscalation] = {}
+        self._by_far_boundary: dict[tuple, tuple] = {}
+        self._by_terminal_operation: dict[object, tuple] = {}
+
+    def register_far(
+        self,
+        pending: _PendingEscalation,
+        far_boundary_key: tuple,
+    ) -> None:
+        self._register(
+            pending,
+            expected_phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
+            readiness_index=self._by_far_boundary,
+            readiness_key=far_boundary_key,
+        )
+
+    def register_terminal(
+        self,
+        pending: _PendingEscalation,
+        operation_id,
+    ) -> None:
+        self._register(
+            pending,
+            expected_phase=_EscalationPhase.WAITING_TERMINAL_DATA,
+            readiness_index=self._by_terminal_operation,
+            readiness_key=operation_id,
+        )
+
+    def _register(
+        self,
+        pending: _PendingEscalation,
+        *,
+        expected_phase: _EscalationPhase,
+        readiness_index: dict,
+        readiness_key,
+    ) -> None:
+        if type(pending) is not _PendingEscalation:
+            raise TypeError("pending escalation must use the exact record type")
+        if not is_stable_identity(pending.key):
+            raise TypeError("pending escalation key must be a stable identity")
+        if not is_stable_identity(readiness_key):
+            raise TypeError("readiness key must be a stable identity")
+        if pending.phase is not expected_phase:
+            raise RuntimeError(
+                f"pending escalation {pending.key} has phase "
+                f"{pending.phase.name}, expected {expected_phase.name}")
+        if pending.key in self._by_key:
+            raise RuntimeError(
+                f"duplicate strong escalation for window {pending.key}: one "
+                "switching event creates exactly one strong job")
+        if readiness_key in readiness_index:
+            raise RuntimeError(
+                f"readiness index collision for {readiness_key}")
+        self._by_key[pending.key] = pending
+        readiness_index[readiness_key] = pending.key
+
+    def peek_key(self, key: tuple) -> Optional[_PendingEscalation]:
+        return self._by_key.get(key)
+
+    def peek_far(self, far_boundary_key: tuple) -> Optional[_PendingEscalation]:
+        key = self._by_far_boundary.get(far_boundary_key)
+        return None if key is None else self._by_key[key]
+
+    def peek_terminal(self, operation_id) -> Optional[_PendingEscalation]:
+        key = self._by_terminal_operation.get(operation_id)
+        return None if key is None else self._by_key[key]
+
+    def take_far(
+        self,
+        far_boundary_key: tuple,
+        expected: _PendingEscalation,
+    ) -> _PendingEscalation:
+        return self._take(
+            expected,
+            expected_phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
+            readiness_index=self._by_far_boundary,
+            readiness_key=far_boundary_key,
+        )
+
+    def take_terminal(
+        self,
+        operation_id,
+        expected: _PendingEscalation,
+    ) -> _PendingEscalation:
+        return self._take(
+            expected,
+            expected_phase=_EscalationPhase.WAITING_TERMINAL_DATA,
+            readiness_index=self._by_terminal_operation,
+            readiness_key=operation_id,
+        )
+
+    def _take(
+        self,
+        expected: _PendingEscalation,
+        *,
+        expected_phase: _EscalationPhase,
+        readiness_index: dict,
+        readiness_key,
+    ) -> _PendingEscalation:
+        if type(expected) is not _PendingEscalation:
+            raise TypeError("expected escalation must use the exact record type")
+        if expected.phase is not expected_phase:
+            raise RuntimeError(
+                f"wrong-phase take for escalation {expected.key}")
+        primary = self._by_key.get(expected.key)
+        indexed_key = readiness_index.get(readiness_key)
+        if primary is not expected or indexed_key != expected.key:
+            raise RuntimeError(
+                f"stale escalation take for readiness key {readiness_key}")
+        del readiness_index[readiness_key]
+        del self._by_key[expected.key]
+        return expected
+
+    def snapshot_phases(self):
+        return MappingProxyType({
+            key: pending.phase for key, pending in self._by_key.items()
+        })
 
 
 class WindowManager:
@@ -117,11 +273,7 @@ class WindowManager:
         self._held_boundary: dict[tuple, tuple] = {}      # Held policy deferrals
         self._pending_strong_windows: set[tuple] = set()
         self._pending_strong_per_op: dict[int, int] = {}
-        #: faithful double-window escalations waiting for their far-side weak
-        #: boundary; slab key -> pending record (see defer_strong_escalation)
-        self._deferred_strong: dict[tuple, dict] = {}
-        self._deferred_by_far: dict[tuple, tuple] = {}   # restart key -> slab key
-        self._deferred_terminal: dict[int, tuple] = {}   # op id -> slab key
+        self._escalations = _EscalationRegistry()
         self.absorbed_windows: set[tuple] = set()        # skipped by the weak chain
         self.op_strong_commit_time: dict[int, int] = {}
         self._finalize_gates: dict[int, Callable] = {}    # gate_finalize seam
@@ -585,8 +737,8 @@ class WindowManager:
                                 op.id
                             ].code_geometry.code_name
                         ),
-                        window=window, label=self._job_desc(window, op))
-        job.strong_label = f"strong({op.name} W{window.k})"
+                        window=window, label=self._job_desc(window, op),
+                        strong_label=f"strong({op.name} W{window.k})")
         window.queued = True
         for submission in self.strategy.on_window_ready(window, job,
                                                         self.services):
@@ -677,18 +829,27 @@ class WindowManager:
     # the slab, start gated on both weak-determined boundaries. Protocol and
     # seam formalism are documented on Switching (switching.py).
 
-    def defer_strong_escalation(self, weak_job: DecodeJob, n_rounds: int,
-                                label: str) -> None:
+    def defer_strong_escalation(self, weak_job: DecodeJob) -> None:
         """Lay out the forward slab, absorb the windows it covers, and hold
         the strong job until the restart window's weak commit
         (waiting_far_boundary) or, terminally, until every clamped slab
         round is stored (waiting_terminal_data). One strong job per
         escalation; duplicates raise."""
         key = (weak_job.op_id, weak_job.window_id)
-        if key in self._deferred_strong:
+        existing_contribution = self.logical_contributions.get(key)
+        if (
+            self._escalations.peek_key(key) is not None
+            or (
+                existing_contribution is not None
+                and existing_contribution.ownership_kind == "strong_slab"
+            )
+        ):
             raise RuntimeError(
                 f"duplicate strong escalation for window {key}: one switching "
                 f"event creates exactly one strong job")
+        if weak_job.strong_label is None:
+            raise RuntimeError(
+                f"double-window escalation {key} needs a declared strong label")
         weak_window = self.windows[key]
         op_id, escalated_index = key
         round_count = self._round_count_for_window(op_id, weak_window)
@@ -700,14 +861,21 @@ class WindowManager:
         plan = self.window_interaction.plan_strong_region(
             WindowInfo.from_window(weak_window),
             [WindowInfo.from_window(window) for window in later_windows],
-            n_rounds,
             round_count,
-            self._code_geometry.buffer_round_count,
         )
-        restart_reads, strong_exclusions, restart_exclusions = \
-            self._validate_strong_region_plan(
-                key, weak_window, later_windows, round_count, plan)
-        restart_key = plan.restart_window_key
+        resolved_region = self._resolve_strong_region_plan(
+            key, weak_window, later_windows, round_count, plan)
+        restart_key = resolved_region.restart_window_key
+        if restart_key is None:
+            readiness_collision = self._escalations.peek_terminal(op_id)
+            readiness_key = op_id
+        else:
+            readiness_collision = self._escalations.peek_far(restart_key)
+            readiness_key = restart_key
+        if readiness_collision is not None:
+            raise RuntimeError(
+                f"readiness index collision for {readiness_key}")
+
         restart_model = None
         if restart_key is not None:
             proposed_restart = deepcopy(self.windows[restart_key])
@@ -716,7 +884,7 @@ class WindowManager:
                 self._ops[op_id],
                 proposed_restart,
                 round_count,
-                restart_exclusions,
+                resolved_region.restart_fault_exclusion_ranges,
             )
         slab = Window(
             op_id=key[0], k=key[1],
@@ -727,41 +895,57 @@ class WindowManager:
             n_rounds=plan.context_hi - plan.context_lo + 1,
         )
         strong_model = self._build_strong_window_model(
-            self._ops[op_id], slab, round_count, strong_exclusions)
+            self._ops[op_id], slab, round_count,
+            resolved_region.strong_fault_exclusion_ranges)
         guard_lease = None
         if restart_key is not None:
             guard_lease = (key, "restart-plan-guard")
-            self.store.lease(guard_lease, restart_reads)
+            self.store.lease(
+                guard_lease, resolved_region.restart_read_keys)
         try:
-            self._install_strong_slab_ownership(key, plan)
-            self._deferred_strong[key] = {
-                "weak_job": weak_job, "label": label,
-                "context_lo": plan.context_lo, "context_hi": plan.context_hi,
-                "strong_window": slab, "strong_model": strong_model,
-                "restart_key": restart_key,
-                "state": "waiting_far_boundary"}
+            self._install_strong_slab_ownership(key, resolved_region)
+            phase = (
+                _EscalationPhase.WAITING_TERMINAL_DATA
+                if restart_key is None
+                else _EscalationPhase.WAITING_FAR_BOUNDARY
+            )
+            pending = _PendingEscalation(
+                key=key,
+                weak_job=weak_job,
+                label=weak_job.strong_label,
+                resolved_region=resolved_region,
+                strong_window=slab,
+                strong_model=strong_model,
+                phase=phase,
+            )
+            if restart_key is None:
+                self._escalations.register_terminal(pending, op_id)
+            else:
+                self._escalations.register_far(pending, restart_key)
             # The deferred slab is assembled after later weak commits release
             # their leases, so retain every context round until submission.
             self.store.replace((key, "strong"),
                                [(op_id, r) for r in
                                 range(plan.context_lo, plan.context_hi + 1)])
-            for absorbed_key in plan.absorbed_window_keys:
+            for absorbed_key in resolved_region.absorbed_window_keys:
                 self._absorb_window(absorbed_key, restart_key)
-            self.engine.log("DecoderCluster",
-                            f"{label}: slab rounds {plan.commit_lo}-"
-                            f"{plan.commit_hi} assigned; weak chain skips "
-                            f"{len(plan.absorbed_window_keys)} window(s); strong "
-                            f"start deferred until the far-side weak boundary")
+            readiness_description = (
+                "terminal data"
+                if restart_key is None
+                else "the far-side weak boundary"
+            )
+            self.engine.log(
+                "DecoderCluster",
+                f"{pending.label}: slab rounds {plan.commit_lo}-"
+                f"{plan.commit_hi} assigned; weak chain skips "
+                f"{len(resolved_region.absorbed_window_keys)} window(s); "
+                f"strong start deferred until {readiness_description}",
+            )
             if restart_key is None:
                 # terminal slab: clamped tail rounds may not be generated yet
                 if self.rounds_arrived[op_id] >= plan.context_hi:
-                    self._submit_deferred_strong(key)
-                else:
-                    self._deferred_strong[key]["state"] = \
-                        "waiting_terminal_data"
-                    self._deferred_terminal[op_id] = key
+                    self._submit_terminal_strong(op_id, pending)
             else:
-                self._deferred_by_far[restart_key] = key
                 self._reslice_restart_window(
                     restart_key,
                     plan.restart_buffer_lo,
@@ -777,10 +961,13 @@ class WindowManager:
     def _install_strong_slab_ownership(
         self,
         key: tuple,
-        plan: StrongRegionPlan,
+        resolved_region: _ResolvedStrongRegion,
     ) -> None:
         """Replace every absorbed result owner with one durable slab owner."""
-        replaced_owner_keys = {key, *plan.absorbed_window_keys}
+        plan = resolved_region.plan
+        replaced_owner_keys = {
+            key, *resolved_region.absorbed_window_keys,
+        }
         for other_key, contribution in self.logical_contributions.items():
             if other_key[0] != key[0]:
                 continue
@@ -814,10 +1001,10 @@ class WindowManager:
             self.logical_contributions = previous
             raise
 
-    def _validate_strong_region_plan(
+    def _resolve_strong_region_plan(
         self, key: tuple, weak_window: Window, later_windows: list,
         round_count: int, plan,
-    ) -> tuple[list, tuple, Optional[tuple]]:
+    ) -> _ResolvedStrongRegion:
         if not isinstance(plan, StrongRegionPlan):
             raise TypeError(
                 f"window interaction must return StrongRegionPlan for "
@@ -841,12 +1028,7 @@ class WindowManager:
             raise RuntimeError(
                 f"strong-region commit for {key} must start at the "
                 f"escalated window's commit start {weak_window.commit_lo}")
-        absorbed = tuple(plan.absorbed_window_keys)
-        if len(set(absorbed)) != len(absorbed):
-            raise RuntimeError(
-                f"strong-region plan for {key} contains duplicate absorbed "
-                f"windows")
-        expected_absorbed = tuple(
+        absorbed = tuple(
             window.key for window in later_windows
             if window.commit_hi <= plan.commit_hi
         )
@@ -860,10 +1042,6 @@ class WindowManager:
                 f"window {window.key} commits {window.commit_lo}-"
                 f"{window.commit_hi} across the strong-region edge "
                 f"{plan.commit_hi}")
-        if absorbed != expected_absorbed:
-            raise RuntimeError(
-                f"strong-region plan for {key} must absorb "
-                f"{expected_absorbed}, got {absorbed}")
         for absorbed_key in absorbed:
             absorbed_window = self.windows[absorbed_key]
             if absorbed_window.queued or absorbed_window.committed:
@@ -875,10 +1053,6 @@ class WindowManager:
              if window.commit_lo > plan.commit_hi),
             None,
         )
-        if plan.restart_window_key != expected_restart:
-            raise RuntimeError(
-                f"strong-region plan for {key} must restart at "
-                f"{expected_restart}, got {plan.restart_window_key}")
         if expected_restart is None:
             restart_reads = []
             if (plan.restart_buffer_lo is not None
@@ -888,6 +1062,12 @@ class WindowManager:
                     f"restart seam data")
         else:
             restart = self.windows[expected_restart]
+            if restart.commit_lo != plan.commit_hi + 1:
+                raise RuntimeError(
+                    f"strong-region plan for {key} ends at "
+                    f"{plan.commit_hi}, but restart {expected_restart} "
+                    f"starts at {restart.commit_lo}; committed regions must "
+                    "tile without a gap")
             if (plan.restart_buffer_lo is None
                     or not 1 <= plan.restart_buffer_lo <= restart.commit_lo):
                 raise RuntimeError(
@@ -924,7 +1104,14 @@ class WindowManager:
         required_reads.extend(restart_reads)
         self._require_retained_payloads(
             required_reads, f"strong-region plan for {key}")
-        return restart_reads, strong_exclusions, restart_exclusions
+        return _ResolvedStrongRegion(
+            plan=plan,
+            absorbed_window_keys=absorbed,
+            restart_window_key=expected_restart,
+            restart_read_keys=tuple(restart_reads),
+            strong_fault_exclusion_ranges=strong_exclusions,
+            restart_fault_exclusion_ranges=restart_exclusions,
+        )
 
     def _build_strong_window_model(
         self, operation: Operation, window: Window, round_count: int,
@@ -1001,62 +1188,94 @@ class WindowManager:
                         f"window {key} absorbed into the strong slab "
                         f"(weak chain skips it)")
 
-    def _submit_deferred_strong(self, key: tuple) -> None:
-        """Both boundaries are weak-determined: build and submit the slab
-        job. The slab commits all r_strong rounds and reads one buffer of
-        raw context per face, owning nothing that touches pre-slab rounds
-        (see the seam formalism on Switching)."""
-        pending = self._deferred_strong[key]
-        weak_job = pending["weak_job"]
-        slab = pending["strong_window"]
-        dem = pending["strong_model"]
+    def _build_pending_strong_job(
+        self,
+        pending: _PendingEscalation,
+    ) -> DecodeJob:
+        """Build a slab job after both boundary conditions are satisfied.
+
+        The slab commits all r_strong rounds and reads one buffer of raw
+        context per face, owning nothing that touches pre-slab rounds (see the
+        seam formalism on Switching).
+        """
+        key = pending.key
+        weak_job = pending.weak_job
+        slab = pending.strong_window
+        dem = pending.strong_model
         payloads = self._assemble_payloads(slab)
         covered = {payload.round_index for payload in payloads}
-        needed = set(range(pending["context_lo"], pending["context_hi"] + 1))
+        plan = pending.resolved_region.plan
+        needed = set(range(plan.context_lo, plan.context_hi + 1))
         if covered != needed:
             raise RuntimeError(
-                f"{pending['label']}: slab submitted with rounds "
+                f"{pending.label}: slab submitted with rounds "
                 f"{sorted(covered)} but it needs "
-                f"{pending['context_lo']}-{pending['context_hi']}; a slab may "
+                f"{plan.context_lo}-{plan.context_hi}; a slab may "
                 f"only start once every stored block exists (Fig. 12)")
-        strong_job = DecodeJob(
+        return DecodeJob(
             op_id=key[0], window_id=key[1],
             n_rounds=slab.n_rounds,
             ready_time=self.engine.now, deadline=self.engine.now,
-            label=pending["label"], hint="strong",
+            label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,
             attempt=1, window=slab, strong_decode_for=key)
-        self.services.check_strong_route(weak_job, strong_job)
+
+    def _submit_far_strong(
+        self,
+        far_boundary_key: tuple,
+        pending: _PendingEscalation,
+    ) -> None:
+        strong_job = self._build_pending_strong_job(pending)
+        self.services.check_strong_route(pending.weak_job, strong_job)
+        self._escalations.take_far(far_boundary_key, pending)
         self.submit_fn(strong_job, self.services.ws_delay())
-        self._deferred_strong.pop(key)
-        self.store.release((key, "strong"))   # slab captured into the job
-        self.engine.log("DecoderCluster",
-                        f"{pending['label']}: far-side weak boundary "
-                        f"determined -> strong slab submitted")
+        self.store.release((pending.key, "strong"))
+        self.engine.log(
+            "DecoderCluster",
+            f"{pending.label}: far-side weak boundary determined -> strong "
+            "slab submitted",
+        )
+
+    def _submit_terminal_strong(
+        self,
+        operation_id,
+        pending: _PendingEscalation,
+    ) -> None:
+        strong_job = self._build_pending_strong_job(pending)
+        self.services.check_strong_route(pending.weak_job, strong_job)
+        self._escalations.take_terminal(operation_id, pending)
+        self.submit_fn(strong_job, self.services.ws_delay())
+        self.store.release((pending.key, "strong"))
+        self.engine.log(
+            "DecoderCluster",
+            f"{pending.label}: terminal data complete -> strong slab submitted",
+        )
 
     def _check_deferred_strong_after_commit(self, committed_key: tuple) -> None:
         """The restart window's weak commit is the far boundary of a slab."""
-        slab_key = self._deferred_by_far.get(committed_key)
-        if slab_key is not None:
-            self._submit_deferred_strong(slab_key)
-            self._deferred_by_far.pop(committed_key)
+        pending = self._escalations.peek_far(committed_key)
+        if pending is not None:
+            self._submit_far_strong(committed_key, pending)
 
     def _check_deferred_strong_after_arrival(self, op_id) -> None:
         """A terminal slab waits for its clamped tail rounds to be stored."""
-        slab_key = self._deferred_terminal.get(op_id)
-        if slab_key is None:
+        pending = self._escalations.peek_terminal(op_id)
+        if pending is None:
             return
-        if self.rounds_arrived[op_id] >= self._deferred_strong[slab_key]["context_hi"]:
-            self._submit_deferred_strong(slab_key)
-            del self._deferred_terminal[op_id]
+        if (
+            self.rounds_arrived[op_id]
+            >= pending.resolved_region.plan.context_hi
+        ):
+            self._submit_terminal_strong(op_id, pending)
 
     @property
     def pending_escalations(self) -> dict:
-        """Deferral state per escalated window key, for tests and metrics
-        (entries exist only while waiting for the far boundary)."""
-        return {key: record["state"]
-                for key, record in self._deferred_strong.items()}
+        """Typed deferral phase per escalated window, for tests and metrics."""
+        return {
+            key: phase.name.lower()
+            for key, phase in self._escalations.snapshot_phases().items()
+        }
 
     # ---------------------------------------------------------------- commit
 
@@ -1107,7 +1326,7 @@ class WindowManager:
             )
         if job.awaiting_strong_result:
             self._mark_window_waiting_for_strong(key, op.id)
-        if key not in self._deferred_strong:
+        if self._escalations.peek_key(key) is None:
             # a deferred slab still needs these rounds; released at submission
             self.store.release((key, "strong"))
 

@@ -42,7 +42,13 @@ from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
 from decsim.window_interactions import DefaultWindowInteraction
-from decsim.window_manager import WindowManager
+from decsim.window_manager import (
+    WindowManager,
+    _EscalationPhase,
+    _EscalationRegistry,
+    _PendingEscalation,
+    _ResolvedStrongRegion,
+)
 
 TAU_GEN_US = 1.0          # syndrome round time
 D = 3
@@ -61,6 +67,10 @@ def _code_geometry(commit_rounds, buffer_rounds):
     )
 F_WEAK = 0.1              # weak decode time per round / round time (well inside the keep-up bound)
 F_STRONG = 10             # the paper's tau_strong = 10 * tau_gen
+
+
+class _IntSubclass(int):
+    pass
 
 # Theorem 1 (Eq. 6) strong-decoder boundary for the standard commit = buffer = d windows: a
 # re-decode covers 3d rounds, the strong decoder clears d / f_strong rounds per commit region, so
@@ -660,8 +670,7 @@ def test_double_window_uses_the_interaction_region_plan():
             self.calls = []
 
         def plan_strong_region(
-            self, weak_window, later_windows, strong_round_count,
-            operation_round_count, buffer_round_count,
+            self, weak_window, later_windows, operation_round_count,
         ):
             self.calls.append(weak_window.key)
             return StrongRegionPlan(
@@ -669,8 +678,6 @@ def test_double_window_uses_the_interaction_region_plan():
                 commit_hi=12,
                 context_lo=4,
                 context_hi=15,
-                absorbed_window_keys=((0, 3),),
-                restart_window_key=(0, 4),
                 restart_buffer_lo=10,
                 restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
             )
@@ -729,8 +736,7 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
             captured["runtime"] = runtime
             captured["before"] = {
                 "absorbed": set(runtime.absorbed_windows),
-                "deferred_strong": dict(runtime._deferred_strong),
-                "deferred_by_far": dict(runtime._deferred_by_far),
+                "escalations": dict(runtime.pending_escalations),
                 "restart_buffer_lo": restart.buffer_lo,
                 "restart_deps": list(restart.deps),
                 "restart_refs": list(runtime.store._leases[(restart.key)]),
@@ -761,8 +767,7 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
     restart = runtime.windows[(0, 5)]
     assert {
         "absorbed": runtime.absorbed_windows,
-        "deferred_strong": runtime._deferred_strong,
-        "deferred_by_far": runtime._deferred_by_far,
+        "escalations": runtime.pending_escalations,
         "restart_buffer_lo": restart.buffer_lo,
         "restart_deps": restart.deps,
         "restart_refs": runtime.store._leases[restart.key],
@@ -822,8 +827,6 @@ def test_restart_owned_seam_requires_multi_range_device_capability():
                 commit_hi=plan.commit_hi,
                 context_lo=plan.context_lo,
                 context_hi=plan.context_hi,
-                absorbed_window_keys=plan.absorbed_window_keys,
-                restart_window_key=plan.restart_window_key,
                 restart_buffer_lo=plan.restart_buffer_lo,
                 restart_seam_fault_owner=SeamFaultOwner.RESTART_WINDOW,
             )
@@ -843,16 +846,13 @@ def test_restart_owned_seam_requires_multi_range_device_capability():
 def test_double_window_retains_every_round_added_to_the_restart_buffer():
     class EarlierRetainedRestart(DefaultWindowInteraction):
         def plan_strong_region(
-            self, weak_window, later_windows, strong_round_count,
-            operation_round_count, buffer_round_count,
+            self, weak_window, later_windows, operation_round_count,
         ):
             return StrongRegionPlan(
                 commit_lo=7,
                 commit_hi=12,
                 context_lo=7,
                 context_hi=15,
-                absorbed_window_keys=((0, 3),),
-                restart_window_key=(0, 4),
                 restart_buffer_lo=4,
                 restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
             )
@@ -873,16 +873,13 @@ def test_double_window_retains_every_round_added_to_the_restart_buffer():
 def test_double_window_rejects_restart_reads_that_are_already_freed():
     class FreedRestartHistory(DefaultWindowInteraction):
         def plan_strong_region(
-            self, weak_window, later_windows, strong_round_count,
-            operation_round_count, buffer_round_count,
+            self, weak_window, later_windows, operation_round_count,
         ):
             return StrongRegionPlan(
                 commit_lo=7,
                 commit_hi=12,
                 context_lo=7,
                 context_hi=15,
-                absorbed_window_keys=((0, 3),),
-                restart_window_key=(0, 4),
                 restart_buffer_lo=1,
                 restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
             )
@@ -897,16 +894,13 @@ def test_double_window_rejects_restart_reads_that_are_already_freed():
 def test_double_window_rejects_commit_ownership_before_the_escalated_window():
     class BackwardCommitRegion(DefaultWindowInteraction):
         def plan_strong_region(
-            self, weak_window, later_windows, strong_round_count,
-            operation_round_count, buffer_round_count,
+            self, weak_window, later_windows, operation_round_count,
         ):
             return StrongRegionPlan(
                 commit_lo=4,
                 commit_hi=12,
                 context_lo=4,
                 context_hi=15,
-                absorbed_window_keys=((0, 3),),
-                restart_window_key=(0, 4),
                 restart_buffer_lo=10,
                 restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
             )
@@ -923,16 +917,13 @@ def test_double_window_rejects_commit_ownership_before_the_escalated_window():
 def test_double_window_rejects_invalid_restart_seam_owner(invalid_owner):
     class InvalidFaultOwnership(DefaultWindowInteraction):
         def plan_strong_region(
-            self, weak_window, later_windows, strong_round_count,
-            operation_round_count, buffer_round_count,
+            self, weak_window, later_windows, operation_round_count,
         ):
             return StrongRegionPlan(
                 commit_lo=7,
                 commit_hi=12,
                 context_lo=4,
                 context_hi=15,
-                absorbed_window_keys=((0, 3),),
-                restart_window_key=(0, 4),
                 restart_buffer_lo=10,
                 restart_seam_fault_owner=invalid_owner,
             )
@@ -947,8 +938,7 @@ def test_double_window_rejects_invalid_restart_seam_owner(invalid_owner):
 def test_double_window_rejects_an_interaction_without_a_region_plan():
     class NoRegion(DefaultWindowInteraction):
         def plan_strong_region(
-            self, weak_window, later_windows, strong_round_count,
-            operation_round_count, buffer_round_count,
+            self, weak_window, later_windows, operation_round_count,
         ):
             return None
 
@@ -1032,13 +1022,21 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
     assert (commit, buffer) == (2, 3)   # r_com != r_buf
 
     (_, slab), = strong.starts
-    restart_key = runtime.window_interaction.plan_strong_region(
+    plan = runtime.window_interaction.plan_strong_region(
         WindowInfo.from_window(runtime.windows[(0, 2)]),
         [WindowInfo.from_window(runtime.windows[(0, k)])
          for k in runtime.op_windows[0] if k > 2],
-        Switching.strong_redo_rounds(runtime.windows[(0, 2)]),
-        30, buffer,
-    ).restart_window_key
+        30,
+    )
+    restart_key = next(
+        window.key
+        for window in (
+            runtime.windows[(0, k)]
+            for k in runtime.op_windows[0]
+            if k > 2
+        )
+        if window.commit_lo > plan.commit_hi
+    )
     restart_job = next(job for _, job in weak.starts
                        if (0, job.window_id) == restart_key)
 
@@ -1138,11 +1136,153 @@ def test_double_window_exactly_one_strong_job_per_escalation():
     res, weak, strong = _double_window_run(escalate_window=2)
     assert len(strong.starts) == 1
     runtime = res.cluster.window_manager
-    runtime._deferred_strong[(0, 2)] = {"state": "waiting_far_boundary"}
+    pending = runtime._escalations.peek_far((0, 4))
+    assert pending is None
+    frozen = runtime.pending_escalations
+    assert frozen == {}
     with pytest.raises(RuntimeError, match="duplicate strong escalation"):
-        runtime.defer_strong_escalation(
-            DecodeJob(op_id=0, window_id=2, n_rounds=9, ready_time=0,
-                      deadline=0), 9, "dup")
+        runtime.defer_strong_escalation(DecodeJob(
+            op_id=0,
+            window_id=2,
+            n_rounds=9,
+            ready_time=0,
+            deadline=0,
+            strong_label="strong(op0 W2)",
+        ))
+
+
+def _pending_escalation(key, phase):
+    plan = StrongRegionPlan(
+        commit_lo=7,
+        commit_hi=12,
+        context_lo=4,
+        context_hi=15,
+        restart_buffer_lo=(10 if phase is _EscalationPhase.WAITING_FAR_BOUNDARY
+                           else None),
+        restart_seam_fault_owner=(
+            SeamFaultOwner.STRONG_REGION
+            if phase is _EscalationPhase.WAITING_FAR_BOUNDARY
+            else None
+        ),
+    )
+
+    resolved = _ResolvedStrongRegion(
+        plan=plan,
+        absorbed_window_keys=((key[0], key[1] + 1),),
+        restart_window_key=(
+            (key[0], key[1] + 2)
+            if phase is _EscalationPhase.WAITING_FAR_BOUNDARY
+            else None
+        ),
+        restart_read_keys=(),
+        strong_fault_exclusion_ranges=(),
+        restart_fault_exclusion_ranges=None,
+    )
+    return _PendingEscalation(
+        key=key,
+        weak_job=DecodeJob(
+            op_id=key[0],
+            window_id=key[1],
+            n_rounds=9,
+            strong_label=f"strong({key})",
+        ),
+        label=f"strong({key})",
+        resolved_region=resolved,
+        strong_window=Window(
+            op_id=key[0],
+            k=key[1],
+            commit_lo=7,
+            commit_hi=12,
+            buffer_lo=4,
+            buffer_hi=15,
+            n_rounds=12,
+        ),
+        strong_model=None,
+        phase=phase,
+    )
+
+
+@pytest.mark.parametrize("invalid_bound", [True, 7.0, _IntSubclass(7)])
+def test_strong_region_plan_rejects_non_exact_integer_bounds(invalid_bound):
+    with pytest.raises(TypeError, match="exact built-in ints"):
+        StrongRegionPlan(
+            commit_lo=invalid_bound,
+            commit_hi=12,
+            context_lo=4,
+            context_hi=15,
+            restart_buffer_lo=10,
+            restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
+        )
+
+
+def test_escalation_registry_far_transfer_is_exactly_once():
+    registry = _EscalationRegistry()
+    pending = _pending_escalation(
+        (0, 2), _EscalationPhase.WAITING_FAR_BOUNDARY)
+    far_boundary_key = (0, 4)
+
+    registry.register_far(pending, far_boundary_key)
+
+    assert registry.peek_key(pending.key) is pending
+    assert registry.peek_far(far_boundary_key) is pending
+    assert dict(registry.snapshot_phases()) == {
+        pending.key: _EscalationPhase.WAITING_FAR_BOUNDARY,
+    }
+    with pytest.raises(RuntimeError, match="wrong-phase take"):
+        registry.take_terminal(0, pending)
+    assert registry.peek_far(far_boundary_key) is pending
+
+    assert registry.take_far(far_boundary_key, pending) is pending
+    assert registry.peek_key(pending.key) is None
+    assert registry.peek_far(far_boundary_key) is None
+    assert dict(registry.snapshot_phases()) == {}
+
+
+def test_escalation_registry_rejects_collisions_before_mutation():
+    registry = _EscalationRegistry()
+    first = _pending_escalation(
+        (0, 2), _EscalationPhase.WAITING_FAR_BOUNDARY)
+    collision = _pending_escalation(
+        (0, 3), _EscalationPhase.WAITING_FAR_BOUNDARY)
+    far_boundary_key = (0, 4)
+    registry.register_far(first, far_boundary_key)
+    before = dict(registry.snapshot_phases())
+
+    with pytest.raises(RuntimeError, match="readiness index collision"):
+        registry.register_far(collision, far_boundary_key)
+
+    assert dict(registry.snapshot_phases()) == before
+    assert registry.peek_key(collision.key) is None
+    assert registry.peek_far(far_boundary_key) is first
+
+
+def test_escalation_registry_terminal_transfer_uses_only_terminal_index():
+    registry = _EscalationRegistry()
+    pending = _pending_escalation(
+        (7, 8), _EscalationPhase.WAITING_TERMINAL_DATA)
+
+    with pytest.raises(RuntimeError, match="expected WAITING_FAR_BOUNDARY"):
+        registry.register_far(pending, (7, 9))
+    assert dict(registry.snapshot_phases()) == {}
+
+    registry.register_terminal(pending, 7)
+    assert registry.peek_terminal(7) is pending
+    assert registry.peek_far((7, 9)) is None
+    assert registry.take_terminal(7, pending) is pending
+    assert registry.peek_terminal(7) is None
+    assert registry.peek_key(pending.key) is None
+
+
+@pytest.mark.parametrize("invalid_key", [True, (0, True), object()])
+def test_escalation_registry_rejects_unstable_keys_before_mutation(invalid_key):
+    registry = _EscalationRegistry()
+    pending = _pending_escalation(
+        (0, 2), _EscalationPhase.WAITING_FAR_BOUNDARY)
+
+    with pytest.raises(TypeError, match="readiness key"):
+        registry.register_far(pending, invalid_key)
+
+    assert dict(registry.snapshot_phases()) == {}
 
 
 def test_double_window_strong_result_owns_the_whole_slab():
@@ -1182,9 +1322,11 @@ def test_double_window_strong_result_owns_the_whole_slab():
 def test_double_window_installs_slab_owner_before_every_submission_path(
         monkeypatch):
     snapshots = []
-    original_submit = WindowManager._submit_deferred_strong
+    original_far_submit = WindowManager._submit_far_strong
+    original_terminal_submit = WindowManager._submit_terminal_strong
 
-    def record_then_submit(runtime, key):
+    def record(runtime, pending):
+        key = pending.key
         contribution = runtime.logical_contributions[key]
         snapshots.append({
             "key": key,
@@ -1198,12 +1340,23 @@ def test_double_window_installs_slab_owner_before_every_submission_path(
                 & set(runtime.logical_contributions)
             ),
         })
-        return original_submit(runtime, key)
+    def record_then_submit_far(runtime, far_boundary_key, pending):
+        record(runtime, pending)
+        return original_far_submit(runtime, far_boundary_key, pending)
+
+    def record_then_submit_terminal(runtime, operation_id, pending):
+        record(runtime, pending)
+        return original_terminal_submit(runtime, operation_id, pending)
 
     monkeypatch.setattr(
         WindowManager,
-        "_submit_deferred_strong",
-        record_then_submit,
+        "_submit_far_strong",
+        record_then_submit_far,
+    )
+    monkeypatch.setattr(
+        WindowManager,
+        "_submit_terminal_strong",
+        record_then_submit_terminal,
     )
 
     _double_window_run(escalate_window=2)

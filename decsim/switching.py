@@ -254,8 +254,7 @@ class Switching:
             # manager builds and submits the slab once the far-side weak
             # boundary is determined (paper Fig. 12 start condition).
             services.defer_strong_escalation(
-                job, self.strong_redo_rounds(job.window),
-                getattr(job, "strong_label", f"strong({job.label})"))
+                job)
         elif not self.run_both_at_once:        # serial: redo after ws (dm:153-154)
             strong = services.make_strong_job(
                 job, self.strong_redo_rounds(job.window),

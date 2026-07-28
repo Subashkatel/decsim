@@ -67,8 +67,7 @@ class RichBoundaryInteraction:
         return []
 
     def plan_strong_region(
-        self, weak_window, later_windows, strong_round_count,
-        operation_round_count, buffer_round_count,
+        self, weak_window, later_windows, operation_round_count,
     ):
         return None
 
@@ -287,14 +286,19 @@ def test_default_strong_region_names_the_restart_seam_owner():
         (0, 4): WindowInfo(
             op_id=0, k=4, commit_lo=13, commit_hi=15,
             buffer_lo=10, buffer_hi=18, n_rounds=9,
-            dependents=(), deps=((0, 3),),
+            dependents=((0, 5),), deps=((0, 3),),
+        ),
+        (0, 5): WindowInfo(
+            op_id=0, k=5, commit_lo=16, commit_hi=18,
+            buffer_lo=13, buffer_hi=18, n_rounds=6,
+            dependents=(), deps=((0, 4),),
         ),
     }
     plan = DefaultWindowInteraction().plan_strong_region(
-        windows[(0, 2)], [windows[(0, 3)], windows[(0, 4)]],
-        strong_round_count=6,
+        windows[(0, 2)],
+        [windows[(0, 3)], windows[(0, 4)], windows[(0, 5)]],
         operation_round_count=18,
-        buffer_round_count=3,
     )
 
+    assert plan.commit_hi == 15
     assert plan.restart_seam_fault_owner is SeamFaultOwner.STRONG_REGION

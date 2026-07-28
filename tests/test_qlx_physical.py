@@ -306,7 +306,7 @@ def test_stim_device_no_override_path_unchanged(circuit):
     for device in (plain, other):
         op = Operation(id=1, name="m", qubits=(0,), clifford=True,
                        circuit=coord_circuit)
-        device.begin_operation(op)
+        device.begin_operation(op, 6)
     assert plain._by_round[1] == other._by_round[1]
     assert (plain._detector_rounds_for_key(1, coord_circuit, 6)
             == other._detector_rounds_for_key(1, coord_circuit, 6)

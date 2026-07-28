@@ -13,7 +13,6 @@ GateRounds + InfiniteFactory.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 import functools
 import hashlib
@@ -65,6 +64,7 @@ PREBINDING_PROVIDER_FIELDS = (
     "make_controller",
     "make_factory",
     "make_metrics",
+    "make_orchestrator",
 )
 PLANNER_CHILD_FIELDS = ("layout", "scheme", "rounds_policy")
 RUN_SEED_CONSUMER_MEMBERS = (
@@ -309,13 +309,17 @@ class TypedPathSegmentRecord:
                 raise TypeError(
                     "typed field path values must be built-in str"
                 )
-            if not self.value:
-                raise ValueError("typed field path values cannot be empty")
+            if not self.value or not is_stable_string(self.value):
+                raise ValueError(
+                    "typed field path values must be nonempty Unicode scalar "
+                    "strings"
+                )
             return
         if self.kind == "string_key":
-            if type(self.value) is not str:
+            if not is_stable_string(self.value):
                 raise TypeError(
-                    "typed string-key path values must be built-in str"
+                    "typed string-key path values must be Unicode scalar "
+                    "strings"
                 )
             return
         if self.kind == "none_key":
@@ -525,6 +529,21 @@ class FixedCompositionRecord:
 
 
 @dataclass(frozen=True)
+class ProviderRecord:
+    """Descriptive provenance and assurance for one direct provider."""
+
+    component_path: tuple[TypedPathSegmentRecord, ...]
+    provider_kind: str
+    module: str
+    qualname: str
+    source_origin: Optional[str]
+    source_sha256: Optional[str]
+    first_line_number: Optional[int]
+    closure_status: str
+    assurance: str
+
+
+@dataclass(frozen=True)
 class ResolvedAlias:
     """A repeated behavior path and its first canonical object path."""
 
@@ -549,6 +568,7 @@ class ResolvedRunManifest:
     root_seed: Optional[int]
     components: tuple[ResolvedComponent, ...]
     fixed_composition: tuple[FixedCompositionRecord, ...]
+    providers: tuple[ProviderRecord, ...]
     code_selections: tuple[ResolvedCodeSelectionRecord, ...]
     cadences: tuple[ResolvedCadenceRecord, ...]
     aliases: tuple[ResolvedAlias, ...]
@@ -593,6 +613,22 @@ class ResolvedRunManifest:
                     "configuration": component.configuration,
                 }
                 for component in self.fixed_composition
+            ],
+            "providers": [
+                {
+                    "component_path": _typed_path_json(
+                        record.component_path
+                    ),
+                    "provider_kind": record.provider_kind,
+                    "module": record.module,
+                    "qualname": record.qualname,
+                    "source_origin": record.source_origin,
+                    "source_sha256": record.source_sha256,
+                    "first_line_number": record.first_line_number,
+                    "closure_status": record.closure_status,
+                    "assurance": record.assurance,
+                }
+                for record in self.providers
             ],
             "code_selections": [
                 {
@@ -691,8 +727,6 @@ class RunSpec:
     max_idle_rounds: Optional[int] = None
     gates_start_on_round_boundaries: bool = False
     feedback_boundary_mode: str = "trailing_buffer"
-    orchestrator: Optional[Any] = None       # default ExecutionOrchestrator
-
     # environment
     timing: TimingConfig = field(default_factory=TimingConfig)
     round_us: Optional[float] = None          # overrides timing.round_us
@@ -701,6 +735,7 @@ class RunSpec:
     make_controller: Optional[Callable] = None  # (engine) -> Controller (port 14)
     make_factory: Optional[Callable] = None   # (engine, cluster) -> factory
     make_metrics: Optional[Callable] = None   # (engine, cluster, gate, factory)
+    make_orchestrator: Optional[Callable] = None  # (engine) -> Orchestrator
     seed: Optional[Integral] = 0
     _build_state: str = field(
         default="unstarted",
@@ -814,6 +849,23 @@ class RunSpec:
         """Validate every externally supplied part against its public port."""
         from . import protocols
 
+        if self.router is not None and (
+            self.decoder is not None or self.decoders
+        ):
+            raise ValueError(
+                "RunSpec.router is exclusive with decoder and decoders"
+            )
+        if self.router is not None:
+            stored_requirement = inspect.getattr_static(
+                self.router,
+                "needs_hyperedges",
+                None,
+            )
+            if type(stored_requirement) is not bool:
+                raise TypeError(
+                    "router does not satisfy DecoderRouter: "
+                    "needs_hyperedges must be a stored exact bool"
+                )
         parts = (
             ("frontend", self.frontend, protocols.InputFrontend),
             ("code", self.code, protocols.CodeModel),
@@ -831,7 +883,6 @@ class RunSpec:
             ("window_interaction", self.window_interaction,
              protocols.WindowInteraction),
             ("idle_policy", self.idle_policy, protocols.IdlePolicy),
-            ("orchestrator", self.orchestrator, protocols.Orchestrator),
             ("memory_model", self.memory_model, protocols.MemoryModel),
         )
         for name, part, protocol in parts:
@@ -843,6 +894,11 @@ class RunSpec:
         _validate_callable_arity("make_controller", self.make_controller, 1)
         _validate_callable_arity("make_factory", self.make_factory, 2)
         _validate_callable_arity("make_metrics", self.make_metrics, 4)
+        _validate_callable_arity(
+            "make_orchestrator",
+            self.make_orchestrator,
+            1,
+        )
 
     def _validate_device_capabilities(self, device_protocol) -> None:
         """Check only device methods reachable in this run configuration."""
@@ -1172,6 +1228,7 @@ class RunSpec:
     def _build_once(self, verbose: bool = False) -> "CompletedRun":
         """Construct and wire every component in the canonical order."""
         planning = self._validate_configuration()
+        provider_records = _resolved_provider_records(self)
         from .policies import Eager
         from .decoders import CodeRouter
         from .engine import Engine
@@ -1276,21 +1333,53 @@ class RunSpec:
         )
         idle_policy = self.idle_policy if self.idle_policy is not None else Ignore()
         device = self.device if self.device is not None else TimingOnlyDevice()
+        from .devices import SyndromeBitDevice
+        if (
+            type(device) is SyndromeBitDevice
+            and device.code is not planning.code
+        ):
+            raise ValueError(
+                "SyndromeBitDevice.code must be the exact resolved run code"
+            )
         _install_private_execution_circuits(workload, device)
-        decoder = self.decoder
-        if decoder is None:
-            raise ValueError("RunSpec.decoder is required (a Decoder part), "
-                             "e.g. PerRoundDecoder(tau_us=1.0)")
-        router = self.router if self.router is not None \
-            else CodeRouter(default=decoder, by_code=dict(self.decoders))
-        orchestrator = self.orchestrator if self.orchestrator is not None \
+        if self.router is None and self.decoder is None:
+            raise ValueError(
+                "RunSpec.decoder is required when router is omitted"
+            )
+        router = (
+            self.router
+            if self.router is not None
+            else CodeRouter(
+                default=self.decoder,
+                by_code=dict(self.decoders),
+            )
+        )
+        orchestrator = (
+            self.make_orchestrator(engine)
+            if self.make_orchestrator is not None
             else ExecutionOrchestrator(engine)
+        )
 
         controller = self.make_controller(engine) \
             if self.make_controller is not None \
             else ModularController(engine, links=LinkModel.from_timing(self.timing),
                               t_pack=self.timing.ticks("t_pack"))
-        from .protocols import Controller, MagicStateFactory, Metric
+        from .protocols import (
+            Controller,
+            MagicStateFactory,
+            Metric,
+            Orchestrator,
+        )
+        _validate_protocol_part(
+            "orchestrator",
+            orchestrator,
+            Orchestrator,
+        )
+        if orchestrator.engine is not engine:
+            raise ValueError(
+                f"{type(orchestrator).__name__} uses a different engine from "
+                "the RunSpec build"
+            )
         _validate_protocol_part("controller", controller, Controller)
         # the whole fabric shares the controller's LinkModel: the window
         # manager's dd/do hops ride the same links a custom controller set
@@ -1319,9 +1408,7 @@ class RunSpec:
         window_manager.strategy = strategy
         window_manager.services = services
         window_manager.submit_fn = pool.enqueue
-        window_manager.needs_hyperedges = getattr(decoder, "needs_hyperedges", False) \
-            or any(getattr(dec, "needs_hyperedges", False)
-                   for dec in self.decoders.values())
+        window_manager.needs_hyperedges = router.needs_hyperedges
         pool.strategy = strategy
         pool.services = services
         pool.on_window_decoded = window_manager.on_decode_done
@@ -1369,10 +1456,10 @@ class RunSpec:
             for index, metric in enumerate(metrics):
                 _validate_protocol_part(
                     f"make_metrics result {index}", metric, Metric)
-                if type(metric.name) is not str or not metric.name:
+                if not is_stable_string(metric.name) or not metric.name:
                     raise TypeError(
-                        f"make_metrics result {index} name must be an exact "
-                        "nonempty built-in str"
+                        f"metric {index} name must be a nonempty Unicode "
+                        "scalar string"
                     )
                 if metric.name in metric_names:
                     raise ValueError(
@@ -1471,6 +1558,7 @@ class RunSpec:
                 root_seed=self._validated_root_seed(),
                 components=resolved_components,
                 fixed_composition=fixed_composition,
+                providers=provider_records,
                 code_selections=code_cadence_plan.code_selections,
                 cadences=code_cadence_plan.cadences,
                 aliases=resolved_aliases,
@@ -1538,6 +1626,12 @@ class RunSpec:
             ((field_segment("orchestrator"),), orchestrator),
             ((field_segment("controller"),), controller),
         ]
+        for field_name in PREBINDING_PROVIDER_FIELDS:
+            provider = object.__getattribute__(self, field_name)
+            if type(provider) is types.MethodType:
+                roots.append(
+                    ((field_segment(field_name),), provider.__self__)
+                )
         if frontend is not None:
             roots.append(((field_segment("frontend"),), frontend))
         if self.memory_model is not None:
@@ -1687,6 +1781,11 @@ def _validate_run_workload_identity(
                 raise TypeError(
                     "operation id must be an exact built-in int, excluding "
                     f"bool; got {operation_id!r}"
+                )
+            if not is_stable_string(operation.name):
+                raise TypeError(
+                    f"operation name for id {operation_id} must be a Unicode "
+                    "scalar string"
                 )
             if operation_id in seen_in_role:
                 raise ValueError(
@@ -2188,12 +2287,12 @@ def _capture_component_configuration(component) -> tuple[Optional[bytes], str]:
     if not isinstance(component, RunManifestPart):
         return None, "opaque"
     candidate = component.run_manifest_config()
-    if not isinstance(candidate, Mapping):
+    if type(candidate) is not dict:
         raise TypeError(
             f"{type(component).__name__}.run_manifest_config() must return "
-            "a mapping"
+            "an exact built-in dict"
         )
-    copied = _validated_json_value(dict(candidate))
+    copied = _validated_json_value(candidate)
     canonical_json = json.dumps(
         copied,
         sort_keys=True,
@@ -2709,9 +2808,115 @@ def _scan_prebinding_provider(component_path: str, provider) -> None:
             f"{provider_type.__name__}"
         )
     if callable(provider):
-        _reject_static_seed_consumer(component_path, provider)
-        return
+        raise TypeError(
+            f"{component_path} has unsupported provider shape "
+            f"{provider_type.__name__}"
+        )
     raise TypeError(f"{component_path} must be callable")
+
+
+def _provider_source_details(target):
+    source_origin = inspect.getsourcefile(target)
+    try:
+        source_text, first_line_number = inspect.getsourcelines(target)
+    except (OSError, TypeError):
+        source_sha256 = None
+        first_line_number = None
+    else:
+        source_sha256 = hashlib.sha256(
+            "".join(source_text).encode("utf-8")
+        ).hexdigest()
+    return source_origin, source_sha256, first_line_number
+
+
+def _provider_source_is_shipped(target) -> bool:
+    source_path = inspect.getsourcefile(target)
+    if source_path is None:
+        return False
+    try:
+        Path(source_path).resolve().relative_to(
+            Path(__file__).resolve().parent
+        )
+    except ValueError:
+        return False
+    return True
+
+
+def _resolved_provider_records(spec: RunSpec) -> tuple[ProviderRecord, ...]:
+    records = []
+    for field_name in PREBINDING_PROVIDER_FIELDS:
+        provider = object.__getattribute__(spec, field_name)
+        if provider is None:
+            continue
+        provider_type = type(provider)
+        if provider_type is types.FunctionType:
+            provider_kind = "function"
+            target = provider
+            closure_status = (
+                "present" if provider.__closure__ else "none"
+            )
+        elif provider_type is types.MethodType:
+            provider_kind = "bound_method"
+            target = provider.__func__
+            closure_status = (
+                "present" if target.__closure__ else "none"
+            )
+        elif provider_type is type:
+            provider_kind = "class"
+            target = provider
+            closure_status = "not_applicable"
+        else:
+            raise TypeError(
+                f"{field_name} has unsupported provider shape "
+                f"{provider_type.__name__}"
+            )
+
+        module = getattr(target, "__module__", None)
+        qualname = getattr(target, "__qualname__", None)
+        if not is_stable_string(module) or not is_stable_string(qualname):
+            raise TypeError(
+                f"{field_name} provider module and qualname must be Unicode "
+                "scalar strings"
+            )
+        source_origin, source_sha256, first_line_number = (
+            _provider_source_details(target)
+        )
+        if source_origin is not None and not is_stable_string(source_origin):
+            raise TypeError(
+                f"{field_name} provider source origin must be a Unicode "
+                "scalar string"
+            )
+        # A bound receiver can depend on state outside its declared
+        # configuration. Keep that provider's assurance conservative even
+        # though the receiver is separately recorded in the component graph.
+        receiver_is_represented = provider_kind != "bound_method"
+        if _provider_source_is_shipped(target) and receiver_is_represented:
+            assurance = "covered_repository_source"
+        elif (
+            provider_kind == "function"
+            and closure_status == "none"
+            and target.__name__ != "<lambda>"
+            and "<locals>" not in qualname
+        ):
+            assurance = "external_named_no_closure"
+        else:
+            assurance = "partial_unattested_callable_state"
+        records.append(
+            ProviderRecord(
+                component_path=(
+                    TypedPathSegmentRecord("field", field_name),
+                ),
+                provider_kind=provider_kind,
+                module=module,
+                qualname=qualname,
+                source_origin=source_origin,
+                source_sha256=source_sha256,
+                first_line_number=first_line_number,
+                closure_status=closure_status,
+                assurance=assurance,
+            )
+        )
+    return tuple(records)
 
 
 def _make_infinite(engine):

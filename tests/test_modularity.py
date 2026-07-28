@@ -22,7 +22,7 @@ from decsim.pauli_frame import PauliFrame
 class MyDevice:
     operation_circuit_scope = "none"
 
-    def begin_operation(self, op):
+    def begin_operation(self, op, resolved_round_count):
         return None
 
     def round_payloads(self, op, r):
@@ -105,7 +105,11 @@ class MyDeadline:
     def deadline(self, op, window, now, on_reaction_path): return now
 
 class MyRouter:
-    def __init__(self, decoder): self.decoder = decoder; self.calls = 0
+    def __init__(self, decoder):
+        self.decoder = decoder
+        self.calls = 0
+        self.needs_hyperedges = False
+
     def route(self, job):
         self.calls += 1
         return self.decoder
@@ -121,7 +125,8 @@ class MyController:
 
 class MyOrchestrator:
     """From-scratch Orchestrator: releases blocked ops without an effect."""
-    def __init__(self):
+    def __init__(self, engine):
+        self.engine = engine
         self.blocked = {}; self.controller = None; self.sink = None
         self.integrated = 0
         self.frame = PauliFrame()
@@ -170,7 +175,7 @@ def test_every_seam_accepts_a_from_scratch_implementation():
     router, scheduler, deadline policy, controller, orchestrator, factory, metric
     -- all at once), with assertions that each custom piece participated."""
     decoder, metric = MyDecoder(), MyMetric()
-    orchestrator = MyOrchestrator()
+    orchestrators = []
     router = MyRouter(decoder)
     code = MyCode()
     built_factories = []
@@ -180,6 +185,11 @@ def test_every_seam_accepts_a_from_scratch_implementation():
         built_factories.append(factory)
         return factory
 
+    def make_orchestrator(engine):
+        orchestrator = MyOrchestrator(engine)
+        orchestrators.append(orchestrator)
+        return orchestrator
+
     r = simulate(RunSpec(
             ops=_blocked_ops(),
             num_units=2,
@@ -187,16 +197,16 @@ def test_every_seam_accepts_a_from_scratch_implementation():
             layout=MyLayout(code),
             scheme=MyScheme(),
             rounds_policy=MyRounds(),
-            decoder=decoder,
             router=router,
             scheduler=MyScheduler(),
             deadline_policy=MyDeadline(),
             make_controller=MyController,
-            orchestrator=orchestrator,
+            make_orchestrator=make_orchestrator,
             make_factory=make_factory,
             make_metrics=lambda e, cl, ch, f: [metric],
         ), verbose=False)
     factory = built_factories[0]
+    orchestrator = orchestrators[0]
     chip = r.chip
     assert len(chip.done_bodies) == 3          # all ops ran, including the blocked T
     assert decoder.decodes >= 3                # the custom decoder decoded every window

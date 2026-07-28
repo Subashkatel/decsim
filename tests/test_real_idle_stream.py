@@ -47,11 +47,11 @@ def _setup():
 def test_idle_stretch_carries_real_firing_syndromes():
     """The idle segment must emit REAL, non-empty, actually-firing detection events -- not the
     empty payloads the stall emitter produces today."""
-    circ, segments, stream_op, _ = _setup()
+    circ, segments, stream_op, rounds_map = _setup()
     idle_seg = segments[1]                     # the middle (idle) segment
     dev = StimDevice(seed=1)
     for seg in segments:
-        dev.begin_operation(seg)
+        dev.begin_operation(seg, rounds_map[seg.id])
     fired = 0
     nbits = 0
     for r in range(1, IDLE + 1):

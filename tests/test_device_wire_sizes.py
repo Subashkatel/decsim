@@ -90,7 +90,7 @@ def test_stim_payloads_report_their_bit_counts():
         after_clifford_depolarization=0.001)
     op = Operation(0, "mem", (0,), circuit=circuit)
     device = StimDevice(seed=0)
-    device.begin_operation(op)
+    device.begin_operation(op, 3)
     for round_index in (1, 2, 3):
         for payload in device.round_payloads(op, round_index):
             assert payload.size_bits == len(payload.bits)

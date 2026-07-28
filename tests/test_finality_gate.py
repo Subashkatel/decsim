@@ -124,7 +124,6 @@ def test_gate_finalize_releases_after_strong_commit():
         d=3,
         rounds_policy=FixedRounds(11),
         strategy=Switching(confidence_threshold=0.5),
-        decoder=weak,
         router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
         unit_pools={"default": 1, "strong": 1},
         boundary_policy=Held(),

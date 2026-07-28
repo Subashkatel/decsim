@@ -38,7 +38,7 @@ def _run_chain(p_escalate, seed, **overrides):
     return simulate(RunSpec(
         ops=_chain(), d=3, rounds_policy=FixedRounds(11),
         strategy=Switching(confidence_threshold=0.5),
-        decoder=weak, router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
+        router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
         unit_pools={"default": 1, "strong": 1}, seed=seed, **overrides))
 
 

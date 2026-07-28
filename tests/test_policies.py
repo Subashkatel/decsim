@@ -64,6 +64,8 @@ def test_custom_router_by_hint():
     class HintRouter:
         def __init__(self, normal, strong):
             self.normal, self.strong = normal, strong
+            self.needs_hyperedges = False
+
         def route(self, job):
             return self.strong if job.hint == "strong" else self.normal
 
@@ -71,11 +73,11 @@ def test_custom_router_by_hint():
     router = HintRouter(weak, strong)
     assert router.route(DecodeJob(0, 0, 6)) is weak
     assert router.route(DecodeJob(0, 0, 6, hint="strong")) is strong
-    # the router seam accepts it end to end (decoder= is the placeholder the
-    # router overrides; the custom router dispatches every job to weak/strong)
+    # The router seam accepts it end to end and dispatches every job to
+    # weak/strong.
     r = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), num_units=2, d=3,
-                         rounds_policy=FixedRounds(11), router=router,
-                         decoder=weak), verbose=False)
+                         rounds_policy=FixedRounds(11), router=router),
+                 verbose=False)
     assert r.result.fully_done_ticks > 0
 
 

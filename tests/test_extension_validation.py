@@ -449,10 +449,10 @@ def test_all_operation_consuming_planning_ports_receive_frozen_views():
         decoder=StaticDecoder(),
     ).build()
 
-    assert layout.operation_calls > 0
-    assert layout.resource_calls > 0
-    assert layout.spatial_calls > 0
-    assert rounds.calls > 0
+    assert layout.operation_calls == 2
+    assert layout.resource_calls == 1
+    assert layout.spatial_calls == 1
+    assert rounds.calls == 2
     assert scheme.data_complete_calls > 0
 
 

@@ -271,6 +271,8 @@ class WindowPlan:
     op_windows: dict      # op_id -> [window keys, in k order]
     successors: dict      # op_id -> [op ids listing it as predecessor]
     spatial_nodes: dict   # op_id -> decoding-graph nodes per round
+    rounds_by_operation: dict  # op_id -> resolved positive round count
+    code_names: dict       # op_id -> exact resolved code name
     total_windows: int
     summary: dict = field(default_factory=dict)   # printable planning stats
 

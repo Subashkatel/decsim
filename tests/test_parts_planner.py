@@ -7,6 +7,7 @@ from decsim.planner import (CodeRounds, WindowPlanner, FixedRounds,
 
 
 class _Code:
+    name = "fake"
     distance = 5
     def rounds_per_op(self): return 5
     def commit_rounds(self): return 5

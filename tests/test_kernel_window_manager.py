@@ -138,7 +138,10 @@ def _runtime(boundary=None, strategy=None, ops=(0,), deps=(), blocking=()):
     rt.load_execution_plan(WindowPlan(
         windows=windows, window_count=count, op_windows=op_windows,
         successors={op_id: [] for op_id in ops},
-        spatial_nodes={}, total_windows=len(windows)))
+        spatial_nodes={op_id: 9 for op_id in ops},
+        rounds_by_operation={op_id: 6 for op_id in ops},
+        code_names={op_id: "fake" for op_id in ops},
+        total_windows=len(windows)))
     return eng, rt, fb, submitted
 
 

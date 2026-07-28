@@ -349,16 +349,19 @@ def test_switching_decoder_run_seed_binding_replays_and_rejects_direct_use():
 
     first = build()
     second = build()
-    first_paths = []
-    second_paths = []
-    for window_id in range(12):
+    first_latencies = []
+    second_latencies = []
+    for window_id in range(64):
         first_job = DecodeJob(0, window_id, 3)
         second_job = DecodeJob(0, window_id, 3)
-        first.latency(first_job)
-        second.latency(second_job)
-        first_paths.append(first_job.hint)
-        second_paths.append(second_job.hint)
-    assert first_paths == second_paths
+        first_latencies.append(first.latency(first_job))
+        second_latencies.append(second.latency(second_job))
+    assert first_latencies == second_latencies
+    assert len(set(first_latencies)) == 2
+    assert first.switches == second.switches
+    assert first.switches == sum(
+        latency != us(1.0) for latency in first_latencies
+    )
 
     with pytest.raises(ValueError, match=r"SwitchingDecoder.*already used"):
         first.reserve_run_seed(37)

@@ -331,6 +331,8 @@ class StrongDecoderBacklog:
     name = "strong_backlog"
 
     def __init__(self, cluster, pool: str = "strong"):
+        if type(pool) is not str or not pool:
+            raise TypeError("pool must be a nonempty built-in str")
         self.cluster = cluster
         self.pool = pool
         self.peak_jobs = 0
@@ -338,6 +340,9 @@ class StrongDecoderBacklog:
         self._area = 0.0
         self._last = 0
         self.trace = []
+
+    def run_manifest_config(self):
+        return {"pool": self.pool}
 
     def observe(self, engine: "Engine") -> None:
         """Sample outstanding strong work and update peak, average, and trace."""

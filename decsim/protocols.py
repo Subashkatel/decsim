@@ -27,22 +27,49 @@ from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
 
 @runtime_checkable
 class RunSeedConsumer(Protocol):
-    """A stochastic runtime owner with reversible seed reservation."""
+    """A stochastic runtime owner with a two-phase seed transaction.
+
+    The root reserves every consumer before committing any consumer.  A
+    successful reservation therefore establishes a failure-free commit phase:
+    preparation that can fail belongs in ``reserve_run_seed``, not in
+    ``commit_run_seed``.
+    """
 
     def reserve_run_seed(
         self,
         seed: Optional[int],
-    ) -> RunSeedReservation: ...
+    ) -> RunSeedReservation:
+        """Prepare replacement state under an exclusive reversible claim.
+
+        This method may fail, but it must not change the active random state or
+        draw from it.  It performs all potentially failing preparation and
+        returns the exact pending reservation that commit or cancel consumes.
+        """
+        ...
 
     def commit_run_seed(
         self,
         reservation: RunSeedReservation,
-    ) -> None: ...
+    ) -> None:
+        """Install an exact reservation in the failure-free commit phase.
+
+        For a reservation returned successfully by this consumer, commit must
+        be total and must not fail, allocate, draw randomness, invoke a
+        callback, or perform validation that can reject.  It may acquire the
+        consumer's private lock and install the already-prepared state.
+        """
+        ...
 
     def cancel_run_seed(
         self,
         reservation: RunSeedReservation,
-    ) -> None: ...
+    ) -> None:
+        """Release the exact pending reservation without changing RNG state.
+
+        Cancellation must be total for the exact pending reservation returned
+        by this consumer.
+        """
+        ...
 
 
 @runtime_checkable

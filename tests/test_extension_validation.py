@@ -1487,6 +1487,7 @@ def test_manifest_has_the_complete_closed_effective_run_schema():
         "assurance",
         "primary_result_sha256",
     }
+    assert manifest["schema_version"] == 2
     assert manifest["root_seed"] == 19
     assert [record["operation_id"] for record in manifest["operations"]] == [
         {"kind": "integer", "value": "7", "items": None},
@@ -1496,9 +1497,60 @@ def test_manifest_has_the_complete_closed_effective_run_schema():
     assert manifest["execution_plan"]["planned_operation_ids"] == [
         {"kind": "integer", "value": "7", "items": None},
     ]
+    assert set(manifest["execution_plan"]) == {
+        "code_geometry",
+        "planned_operation_ids",
+        "operation_plans",
+        "windows",
+        "successors",
+        "total_windows",
+        "dynamic_streams",
+    }
+    assert set(manifest["execution_plan"]["code_geometry"]) == {
+        "code_name",
+        "distance",
+        "commit_round_count",
+        "buffer_round_count",
+        "minimum_leading_buffer_round_count",
+        "minimum_trailing_buffer_round_count",
+        "one_patch_spatial_node_count",
+        "buffer_floor_override_active",
+    }
+    assert set(manifest["execution_plan"]["operation_plans"][0]) == {
+        "operation_id",
+        "round_count",
+        "spatial_node_count",
+        "window_indices",
+        "internal_dependencies",
+        "entry_window_indices",
+        "exit_window_indices",
+        "windowed",
+        "batch_preceding_idle_rounds",
+    }
+    assert "resource_claims" not in manifest["execution_plan"]
     assert manifest["chip_load_plan"]["entries"][0][
         "operation_id"
     ] == {"kind": "integer", "value": "7", "items": None}
+    assert set(manifest["chip_load_plan"]) == {
+        "entries",
+        "shot_owners",
+        "patch_spatial_geometry",
+    }
+    assert manifest["chip_load_plan"]["patch_spatial_geometry"] == [
+        {
+            "patch_identity": {
+                "kind": "string",
+                "value": "patch-a",
+                "items": None,
+            },
+            "spatial_node_count": 9,
+        },
+    ]
+    assert set(manifest["timing"]) == {
+        "ticks_per_us",
+        "t_pack_ticks",
+        "t_pack_us",
+    }
     assert [record["name"] for record in manifest["links"]] == [
         "qc",
         "cd",

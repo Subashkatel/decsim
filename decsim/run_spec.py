@@ -1819,9 +1819,6 @@ class RunSpec:
             )
             execution_plan_record = _resolved_execution_plan_record(
                 execution_plan_spec,
-                resource_claims_by_operation_id=(
-                    resource_claims_by_operation_id
-                ),
                 dynamic_streams=dynamic_streams,
                 resolved_rounds_by_operation_id=(
                     resolved_rounds_by_operation_id
@@ -1836,11 +1833,11 @@ class RunSpec:
                 resource_claims_by_operation_id=(
                     resource_claims_by_operation_id
                 ),
+                resolved_patches=code_cadence_plan.patches,
             )
             timing_record = _effective_timing_record(
                 self,
                 controller=controller,
-                code_cadence_plan=code_cadence_plan,
             )
             link_records = _resolved_link_records(
                 links,
@@ -1872,7 +1869,7 @@ class RunSpec:
                 device=device,
             )
             manifest = ResolvedRunManifest(
-                schema_version=1,
+                schema_version=2,
                 root_seed=self._validated_root_seed(),
                 components=resolved_components,
                 fixed_composition=fixed_composition,
@@ -3003,28 +3000,78 @@ def _resource_claim_json(claim) -> dict:
 def _resolved_execution_plan_record(
     spec: _ResolvedExecutionPlanSpec,
     *,
-    resource_claims_by_operation_id,
     dynamic_streams,
     resolved_rounds_by_operation_id,
     code_geometry,
 ) -> ResolvedExecutionPlanRecord:
-    window_counts = dict(spec.window_count)
-    operation_windows = dict(spec.op_windows)
     successors = dict(spec.successors)
     spatial_nodes = dict(spec.spatial_nodes)
     rounds = dict(spec.rounds_by_operation)
+    operation_windows = dict(spec.op_windows)
+    windows_by_key = {window.key: window for window in spec.windows}
+    windowed_by_operation = dict(spec.windowed_by_operation)
+    batch_idle_by_operation = dict(
+        spec.batch_preceding_idle_rounds_by_operation
+    )
+    operation_plans = []
+    for operation_id in spec.planned_operation_ids:
+        indices = operation_windows[operation_id]
+        internal_dependencies = []
+        internal_sources = set()
+        internal_destinations = set()
+        for destination_index in indices:
+            window = windows_by_key[(operation_id, destination_index)]
+            for dependency_operation_id, source_index in window.deps:
+                if dependency_operation_id != operation_id:
+                    continue
+                internal_dependencies.append(
+                    [source_index, destination_index]
+                )
+                internal_sources.add(source_index)
+                internal_destinations.add(destination_index)
+        operation_plans.append({
+            "operation_id": _identity_json(operation_id),
+            "round_count": rounds[operation_id],
+            "spatial_node_count": spatial_nodes[operation_id],
+            "window_indices": list(indices),
+            "internal_dependencies": internal_dependencies,
+            "entry_window_indices": [
+                index for index in indices
+                if index not in internal_destinations
+            ],
+            "exit_window_indices": [
+                index for index in indices
+                if index not in internal_sources
+            ],
+            "windowed": windowed_by_operation[operation_id],
+            "batch_preceding_idle_rounds": (
+                batch_idle_by_operation[operation_id]
+            ),
+        })
     record = {
+        "code_geometry": {
+            "code_name": code_geometry.code_name,
+            "distance": code_geometry.distance,
+            "commit_round_count": code_geometry.commit_round_count,
+            "buffer_round_count": code_geometry.buffer_round_count,
+            "minimum_leading_buffer_round_count": (
+                code_geometry.minimum_leading_buffer_round_count
+            ),
+            "minimum_trailing_buffer_round_count": (
+                code_geometry.minimum_trailing_buffer_round_count
+            ),
+            "one_patch_spatial_node_count": (
+                code_geometry.one_patch_spatial_node_count
+            ),
+            "buffer_floor_override_active": (
+                code_geometry.buffer_floor_override_active
+            ),
+        },
         "planned_operation_ids": [
             _identity_json(operation_id)
             for operation_id in spec.planned_operation_ids
         ],
-        "rounds_by_operation": [
-            {
-                "operation_id": _identity_json(operation_id),
-                "resolved_rounds": round_count,
-            }
-            for operation_id, round_count in sorted(rounds.items())
-        ],
+        "operation_plans": operation_plans,
         "windows": [
             {
                 "key": _window_key_json(window.key),
@@ -3044,22 +3091,6 @@ def _resolved_execution_plan_record(
             }
             for window in spec.windows
         ],
-        "window_counts": [
-            {
-                "operation_id": _identity_json(operation_id),
-                "count": count,
-            }
-            for operation_id, count in sorted(window_counts.items())
-        ],
-        "operation_windows": [
-            {
-                "operation_id": _identity_json(operation_id),
-                "window_indexes": list(window_indexes),
-            }
-            for operation_id, window_indexes in sorted(
-                operation_windows.items()
-            )
-        ],
         "successors": [
             {
                 "operation_id": _identity_json(operation_id),
@@ -3070,30 +3101,7 @@ def _resolved_execution_plan_record(
             }
             for operation_id, successor_ids in sorted(successors.items())
         ],
-        "spatial_nodes": [
-            {
-                "operation_id": _identity_json(operation_id),
-                "spatial_node_count": count,
-            }
-            for operation_id, count in sorted(spatial_nodes.items())
-        ],
-        "resource_claims": [
-            {
-                "operation_id": _identity_json(operation_id),
-                "claims": [
-                    _resource_claim_json(claim)
-                    for claim in resource_claims_by_operation_id[operation_id]
-                ],
-            }
-            for operation_id in sorted(resource_claims_by_operation_id)
-        ],
         "total_windows": spec.total_windows,
-        "switching_window_validation": {
-            "commit_rounds": code_geometry.commit_round_count,
-            "commit_origin": "resolved_code_geometry",
-            "buffer_rounds": code_geometry.buffer_round_count,
-            "buffer_origin": "resolved_code_geometry",
-        },
         "dynamic_streams": [
             {
                 "operation_id": _identity_json(operation.id),
@@ -3121,6 +3129,7 @@ def _chip_load_plan_record(
     *,
     resolved_rounds_by_operation_id,
     resource_claims_by_operation_id,
+    resolved_patches,
 ) -> ChipLoadPlanRecord:
     entries = []
     shot_owner_by_key = {}
@@ -3165,6 +3174,16 @@ def _chip_load_plan_record(
         for shot_key, owner_operation_id in shot_owner_by_key.items()
     ]
     shot_owners.sort(key=lambda item: item[0].canonical_bytes())
+    patch_spatial_geometry = [
+        (
+            StableIdentityRecord.from_identity(patch.patch_identity),
+            patch.spatial_node_count,
+        )
+        for patch in resolved_patches
+    ]
+    patch_spatial_geometry.sort(
+        key=lambda item: item[0].canonical_bytes()
+    )
     return ChipLoadPlanRecord.freeze({
         "entries": entries,
         "shot_owners": [
@@ -3174,6 +3193,14 @@ def _chip_load_plan_record(
             }
             for shot_key, owner_operation_id in shot_owners
         ],
+        "patch_spatial_geometry": [
+            {
+                "patch_identity": patch_identity.to_json_value(),
+                "spatial_node_count": spatial_node_count,
+            }
+            for patch_identity, spatial_node_count
+            in patch_spatial_geometry
+        ],
     })
 
 
@@ -3181,18 +3208,7 @@ def _effective_timing_record(
     spec: RunSpec,
     *,
     controller,
-    code_cadence_plan,
 ) -> EffectiveTimingRecord:
-    fallback_round_us = (
-        spec.round_us
-        if spec.round_us is not None
-        else spec.timing.round_us
-    )
-    fallback_origin = (
-        "run_spec"
-        if spec.round_us is not None
-        else "timing"
-    )
     t_pack_ticks = getattr(
         controller,
         "t_pack",
@@ -3204,9 +3220,6 @@ def _effective_timing_record(
         )
     return EffectiveTimingRecord.freeze({
         "ticks_per_us": TICKS_PER_US,
-        "round_ticks": us(fallback_round_us),
-        "round_us": float(fallback_round_us),
-        "round_origin": fallback_origin,
         "t_pack_ticks": t_pack_ticks,
         "t_pack_us": t_pack_ticks / TICKS_PER_US,
     })

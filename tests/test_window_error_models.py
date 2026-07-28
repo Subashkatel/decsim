@@ -124,7 +124,6 @@ def test_canonical_error_instruction_rejects_detectorless_logical_mechanism(
 
 
 def test_every_raw_graph_consumer_shares_instruction_wide_validation():
-    from decsim.soft_output.cluster import dem_to_graph
     from decsim.soft_output.complementary import dem_to_matrices
 
     malformed = stim.DetectorErrorModel(
@@ -133,7 +132,6 @@ def test_every_raw_graph_consumer_shares_instruction_wide_validation():
     consumers = (
         detector_error_model_to_faults,
         detector_error_model_to_faults_bm,
-        dem_to_graph,
         dem_to_matrices,
     )
 
@@ -151,11 +149,9 @@ def test_every_placed_construction_path_rejects_detectorless_logical_fault():
     from decsim.mwpm_decoder import PyMatchingDecoder
     from decsim.mwpm_decoder import matching_window_decoder
     from decsim.soft_output import (
-        ClusterGapMetric,
         ComplementaryGapMetric,
         UnionFindDecoder,
     )
-    from decsim.soft_output.cluster import BOUNDARY
 
     class ZeroLatency:
         def latency(self, job):
@@ -187,7 +183,6 @@ def test_every_placed_construction_path_rejects_detectorless_logical_fault():
         lambda: BeliefMatchingDecoder(ZeroLatency()).decode(job),
         lambda: UnionFindDecoder(ZeroLatency()).decode(job),
         lambda: ComplementaryGapMetric.from_window_model(model),
-        lambda: ClusterGapMetric.from_window_model(model),
         lambda: matching_window_decoder()(model, np.zeros(0, dtype=np.uint8)),
         lambda: bposd_window_decoder()(model, np.zeros(0, dtype=np.uint8)),
         lambda: belief_matching_window_decoder()(
@@ -198,11 +193,6 @@ def test_every_placed_construction_path_rejects_detectorless_logical_fault():
             model.check,
             model.obs,
             np.ones(1),
-        ),
-        lambda: ClusterGapMetric(
-            [(BOUNDARY, BOUNDARY, 1.0, 1)],
-            0,
-            None,
         ),
     )
 
@@ -244,7 +234,6 @@ def test_every_placed_graph_path_rejects_a_detector_hyperedge():
     from decsim.message import DecodeJob, SyndromePayload
     from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
     from decsim.soft_output import (
-        ClusterGapMetric,
         ComplementaryGapMetric,
         UnionFindDecoder,
     )
@@ -294,7 +283,6 @@ def test_every_placed_graph_path_rejects_a_detector_hyperedge():
             model.obs,
             np.ones(1),
         ),
-        lambda: ClusterGapMetric.from_window_model(model),
     )
 
     for consume in consumers:

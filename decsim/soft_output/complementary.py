@@ -1,6 +1,7 @@
 """Complementary-gap soft output: ``g_comp = |w_comp - w_min|`` for MWPM (SoftOutputMetric seam)."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..message import SoftOutput, SoftOutputSource
@@ -17,7 +18,7 @@ COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
     growth_schedule="minimum_weight_matching",
     gap_units="log_likelihood_weight",
     correction="opposite_logical_constraint",
-    references=("arXiv:2510.25222 Section II.C",),
+    references=("arXiv:2510.25222v1 Section II.C",),
 )
 
 
@@ -132,3 +133,27 @@ class ComplementaryGapMetric:
             w_min=float(w_min),
             w_comp=float(w_comp),
         )
+
+
+@dataclass(frozen=True)
+class ComplementaryGapMetricFactory:
+    """Configured builder exposed to the run graph as ``metric_cls``.
+
+    The wrapper consumes only ``source``, ``run_manifest_config()``, and
+    ``from_window_model(model)``. This object owns no per-window or per-shot
+    state.
+    """
+
+    source = COMPLEMENTARY_GAP_SOURCE
+
+    def from_window_model(
+        self,
+        model: "WindowErrorModel",
+    ) -> ComplementaryGapMetric:
+        return ComplementaryGapMetric.from_window_model(model)
+
+    def run_manifest_config(self):
+        return {
+            "kind": "complementary_gap_metric_factory",
+            "source": self.source.manifest_value(),
+        }

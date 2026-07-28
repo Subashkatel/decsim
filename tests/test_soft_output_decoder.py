@@ -8,6 +8,9 @@ carries the observable (Toshio et al. 2510.25222; see decsim.soft_output).
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+import gc
+import weakref
+
 import pytest
 
 stim = pytest.importorskip("stim")
@@ -20,8 +23,92 @@ from decsim.mwpm_decoder import PyMatchingDecoder
 from decsim.schemes import NaiveOnlineScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import FixedRounds
-from decsim.soft_output import SoftOutputDecoder, ComplementaryGapMetric
+from decsim.soft_output import (
+    ComplementaryGapMetric,
+    ComplementaryGapMetricFactory,
+    SoftOutputDecoder,
+)
 from decsim.run_spec import RunSpec, simulate
+
+
+def test_soft_output_decoder_requires_a_configured_metric_factory():
+    from decsim.soft_output import (
+        COMPLEMENTARY_GAP_SOURCE,
+        ComplementaryGapMetricFactory,
+    )
+
+    metric_factory = ComplementaryGapMetricFactory()
+    decoder = SoftOutputDecoder(
+        PyMatchingDecoder(_ZeroLatency()),
+        metric_factory,
+    )
+
+    assert decoder.metric_cls is metric_factory
+    assert decoder.run_manifest_config() == {
+        "kind": "soft_output",
+        "metric_source": COMPLEMENTARY_GAP_SOURCE.manifest_value(),
+    }
+    assert metric_factory.run_manifest_config() == {
+        "kind": "complementary_gap_metric_factory",
+        "source": {
+            "method": "complementary_gap",
+            "cluster_origin": "mwpm_opposite_logical",
+            "growth_schedule": "minimum_weight_matching",
+            "gap_units": "log_likelihood_weight",
+            "correction": "opposite_logical_constraint",
+            "references": ["arXiv:2510.25222v1 Section II.C"],
+        },
+    }
+    with pytest.raises(TypeError, match="configured metric factory instance"):
+        SoftOutputDecoder(
+            PyMatchingDecoder(_ZeroLatency()),
+            ComplementaryGapMetric,
+        )
+
+
+def test_soft_output_decoder_releases_metrics_for_dead_window_models():
+    from decsim.message import SoftOutput
+    from decsim.soft_output import COMPLEMENTARY_GAP_SOURCE
+
+    class Model:
+        def __init__(self):
+            self.obs = np.array([[1]], dtype=np.uint8)
+
+    class Metric:
+        def evaluate(self, syndrome):
+            return SoftOutput(
+                gap=1.0,
+                source=COMPLEMENTARY_GAP_SOURCE,
+            )
+
+    class MetricFactory:
+        source = COMPLEMENTARY_GAP_SOURCE
+
+        def from_window_model(self, model):
+            return Metric()
+
+        def run_manifest_config(self):
+            return {
+                "kind": "test_metric_factory",
+                "source": self.source.manifest_value(),
+            }
+
+    decoder = SoftOutputDecoder(object(), MetricFactory())
+    models = [Model() for _ in range(256)]
+    metrics = [decoder._metric_for(model) for model in models]
+    model_references = [weakref.ref(model) for model in models]
+    metric_references = [weakref.ref(metric) for metric in metrics]
+
+    assert len(decoder._metrics) == 256
+    assert decoder._metric_for(models[0]) is metrics[0]
+
+    models.clear()
+    metrics.clear()
+    gc.collect()
+
+    assert all(reference() is None for reference in model_references)
+    assert all(reference() is None for reference in metric_references)
+    assert decoder._metrics == {}
 
 
 class _ZeroLatency:
@@ -68,7 +155,10 @@ def test_engine_emits_real_soft_output_not_flag():
     """Through the real engine, soft_output is a continuous gap, never the {0,1} flag."""
     d, rounds, p = 3, 6, 5e-3
     circuit = _circuit(d, rounds, p)
-    decoder = _Capturing(PyMatchingDecoder(_ZeroLatency()), ComplementaryGapMetric)
+    decoder = _Capturing(
+        PyMatchingDecoder(_ZeroLatency()),
+        ComplementaryGapMetricFactory(),
+    )
     softs = []
     for shot in range(40):
         _naive_shot(
@@ -91,7 +181,10 @@ def test_soft_output_decoder_preserves_hard_decode():
     d, rounds, p = 3, 6, 5e-3
     circuit = _circuit(d, rounds, p)
     plain = PyMatchingDecoder(_ZeroLatency())
-    soft = SoftOutputDecoder(PyMatchingDecoder(_ZeroLatency()), ComplementaryGapMetric)
+    soft = SoftOutputDecoder(
+        PyMatchingDecoder(_ZeroLatency()),
+        ComplementaryGapMetricFactory(),
+    )
     for shot in range(30):
         a = _naive_shot(
             circuit,
@@ -116,7 +209,10 @@ def test_engine_soft_output_is_error_predictive():
     """corr(real soft output, logical error) < 0 through the engine (low g = error-prone)."""
     d, rounds, p = 3, 6, 8e-3
     circuit = _circuit(d, rounds, p)
-    decoder = _Capturing(PyMatchingDecoder(_ZeroLatency()), ComplementaryGapMetric)
+    decoder = _Capturing(
+        PyMatchingDecoder(_ZeroLatency()),
+        ComplementaryGapMetricFactory(),
+    )
     gaps, errs = [], []
     shots = 600
     for shot in range(shots):

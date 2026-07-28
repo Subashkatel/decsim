@@ -178,7 +178,10 @@ def test_decoder_wrappers_expose_children_and_behavior_callbacks():
         SampledConfidenceDecoder,
         SwitchingDecoder,
     )
-    from decsim.soft_output import SoftOutputDecoder
+    from decsim.soft_output import (
+        ComplementaryGapMetricFactory,
+        SoftOutputDecoder,
+    )
 
     weak = object()
     strong = object()
@@ -205,7 +208,7 @@ def test_decoder_wrappers_expose_children_and_behavior_callbacks():
         (("field", "latency_us_for"),): latency_for,
     }
 
-    metric_cls = type("Metric", (), {})
+    metric_cls = ComplementaryGapMetricFactory()
     soft = SoftOutputDecoder(inner, metric_cls)
     assert _seed_child_paths(soft) == {
         (("field", "base"),): inner,

@@ -28,7 +28,7 @@ from decsim.planner import FixedRounds
 from decsim.schemes import SlidingWindowScheme
 from decsim.soft_output import (
     COMPLEMENTARY_GAP_SOURCE,
-    ComplementaryGapMetric,
+    ComplementaryGapMetricFactory,
     SoftOutputDecoder,
 )
 from decsim.switching import Switching
@@ -71,7 +71,9 @@ def _run(threshold, d=3, rounds=9, seed=7, double_window=False, device=None):
         before_round_data_depolarization=0.008)
     op = Operation(0, "memory", (0,), clifford=True, circuit=circuit)
     weak = _Recording(SoftOutputDecoder(
-        UnweightedPyMatchingDecoder(_Latency()), ComplementaryGapMetric))
+        UnweightedPyMatchingDecoder(_Latency()),
+        ComplementaryGapMetricFactory(),
+    ))
     strong = _Recording(PyMatchingDecoder(_Latency()))
     res = simulate(RunSpec(
               ops=[op],
@@ -143,7 +145,7 @@ def test_never_escalating_matches_weak_only():
                    scheme=SlidingWindowScheme(),
                    device=StimDevice(),
                    decoder=SoftOutputDecoder(UnweightedPyMatchingDecoder(_Latency()),
-                                  ComplementaryGapMetric),
+                                  ComplementaryGapMetricFactory()),
                    seed=7,
                ), verbose=False)
     assert res_sw.cluster.op_results[0] == res_weak.cluster.op_results[0]

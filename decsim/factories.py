@@ -154,6 +154,9 @@ class InfiniteFactory:
     def __init__(self, engine: Engine):
         self.engine = engine
 
+    def run_manifest_config(self):
+        return {"kind": "infinite"}
+
     def request(self, op_id: int, callback: Callable[[], None]) -> "Ticket":
         """Deliver instantly."""
         callback()

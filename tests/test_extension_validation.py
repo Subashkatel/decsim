@@ -871,6 +871,155 @@ def test_factory_rejects_a_foreign_correction_decode_service():
         ).build()
 
 
+def test_shipped_manifest_part_declares_the_default_factory_configuration():
+    completed = RunSpec(ops=[], decoder=StaticDecoder()).build()
+    factory_component = next(
+        component
+        for component in completed.manifest.to_json_value()["components"]
+        if component["component_path"] == [
+            {"kind": "field", "value": "magic_state_factory"},
+        ]
+    )
+
+    assert factory_component["configuration"] == {"kind": "infinite"}
+    assert factory_component["configuration_status"] == "declared"
+
+
+def test_external_manifest_configuration_is_copied_before_seed_reservation():
+    events = []
+
+    class ConfiguredFactory:
+        def __init__(self, engine):
+            self.engine = engine
+            self.config = {"mode": "external"}
+
+        def run_manifest_config(self):
+            events.append("config")
+            return self.config
+
+        def reserve_run_seed(self, seed):
+            events.append("reserve")
+            return RunSeedReservation(
+                proposed_seed_source="derived",
+                proposed_seed=seed,
+                prepared_state=None,
+            )
+
+        def commit_run_seed(self, reservation):
+            events.append("commit")
+
+        def cancel_run_seed(self, reservation):
+            events.append("cancel")
+
+        def request(self, op_id, callback):
+            callback()
+
+        def shutdown(self):
+            return None
+
+    built = []
+
+    def make_factory(engine, _cluster):
+        factory = ConfiguredFactory(engine)
+        built.append(factory)
+        return factory
+
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_factory=make_factory,
+        seed=9,
+    ).build()
+    assert events == ["config", "reserve", "commit"]
+
+    first = completed.manifest.to_json_value()
+    factory_component = next(
+        component
+        for component in first["components"]
+        if component["component_path"] == [
+            {"kind": "field", "value": "magic_state_factory"},
+        ]
+    )
+    assert factory_component["configuration"] == {"mode": "external"}
+    assert factory_component["configuration_status"] == "opaque"
+
+    built[0].config["mode"] = "mutated"
+    factory_component["configuration"]["mode"] = "returned-tree mutation"
+    second = completed.manifest.to_json_value()
+    second_factory_component = next(
+        component
+        for component in second["components"]
+        if component["component_path"] == [
+            {"kind": "field", "value": "magic_state_factory"},
+        ]
+    )
+    assert second_factory_component["configuration"] == {"mode": "external"}
+
+
+def test_shipped_manifest_configuration_drift_invalidates_the_atomic_run(
+    monkeypatch,
+):
+    from decsim.factories import InfiniteFactory
+
+    declarations = 0
+
+    def drifting_configuration(self):
+        nonlocal declarations
+        declarations += 1
+        return {"kind": "infinite", "declaration": declarations}
+
+    monkeypatch.setattr(
+        InfiniteFactory,
+        "run_manifest_config",
+        drifting_configuration,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"InfiniteFactory.*changed declared configuration",
+    ):
+        RunSpec(ops=[], decoder=StaticDecoder()).build()
+    assert declarations == 2
+
+
+def test_manifest_configuration_rejects_non_mapping_before_seed_reservation():
+    events = []
+
+    class InvalidConfiguredFactory:
+        def __init__(self, engine):
+            self.engine = engine
+
+        def run_manifest_config(self):
+            events.append("config")
+            return []
+
+        def reserve_run_seed(self, seed):
+            events.append("reserve")
+            raise AssertionError("reservation must follow configuration")
+
+        def commit_run_seed(self, reservation):
+            raise AssertionError("unreachable")
+
+        def cancel_run_seed(self, reservation):
+            raise AssertionError("unreachable")
+
+        def request(self, op_id, callback):
+            callback()
+
+        def shutdown(self):
+            return None
+
+    with pytest.raises(TypeError, match=r"run_manifest_config.*mapping"):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            make_factory=lambda engine, _cluster: InvalidConfiguredFactory(
+                engine
+            ),
+        ).build()
+    assert events == ["config"]
+
+
 def test_run_seed_reservation_failure_cancels_prior_leaves_without_committing():
     from decsim.decoders import CodeRouter
 

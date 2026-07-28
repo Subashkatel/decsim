@@ -71,12 +71,13 @@ class ModularController:
             raise TypeError("n_fragments must be an exact built-in int")
         if payload.n_fragments < 1:
             raise ValueError("n_fragments must be at least one")
+        fragment_count = payload.n_fragments
         fragment = RetainedSyndromeFragment.from_payload(payload)
         sink_identity = _delivery_sink_identity(deliver)
         self.engine.schedule(self._cost("qc", bits=payload.size_bits),
                              lambda: self._receive_fragment(
                                  fragment,
-                                 payload.n_fragments,
+                                 fragment_count,
                                  sink_identity,
                                  deliver,
                              ),

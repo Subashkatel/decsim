@@ -7,6 +7,7 @@ on_body_done(op) at the final round — in the SAME event (Contract 3 rule 1).
 
 from __future__ import annotations
 
+from dataclasses import replace
 import random
 import threading
 from types import MappingProxyType
@@ -154,9 +155,13 @@ class ClockedDevice:
 
     def relay_payloads(self, payloads) -> None:
         """Send all fragments from one syndrome round through the controller."""
+        fragment_count = len(payloads)
         for payload in payloads:
-            payload.n_fragments = len(payloads)
-            self.controller.relay_syndrome(payload,
+            relayed_payload = replace(
+                payload,
+                n_fragments=fragment_count,
+            )
+            self.controller.relay_syndrome(relayed_payload,
                                            self.cluster.on_syndrome_arrival)
 
     def idle_round_payloads(self, operation, stream_id, global_round, patch):

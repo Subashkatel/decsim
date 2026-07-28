@@ -9,22 +9,15 @@
 import pytest
 import numpy as np
 
-from decsim.codes import SurfaceCodeModel
 from decsim.decoders import PresetLatencyDecoder
-from decsim.layouts import UniformLayout
 from decsim.message import IntrinsicMeasurement, Operation
-from decsim.planner import FixedRounds, _plan_static_operations
+from decsim.planner import _validate_operation_graph
 from decsim.run_spec import RunSpec
-from decsim.schemes import SlidingWindowScheme
 
 
 def _plan(operations):
-    return _plan_static_operations(
-        SlidingWindowScheme(),
-        UniformLayout(SurfaceCodeModel(d=3)),
-        FixedRounds(3),
-        operations,
-    )
+    _validate_operation_graph(operations)
+    return operations
 
 
 def test_duplicate_operation_ids_are_rejected():

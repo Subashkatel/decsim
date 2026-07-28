@@ -21,6 +21,7 @@ Behavior frozen by the timing goldens:
 
 from __future__ import annotations
 
+from types import MappingProxyType
 from typing import Optional
 
 from .message import Decision, FeedbackEffect, Operation, SyndromePayload
@@ -45,16 +46,16 @@ class Chip:
         self.round_ticks = round_ticks
         self._code_geometry = code_geometry
         self.idle_policy = idle_policy
-        self._resolved_operations = {
+        self._resolved_operations = MappingProxyType({
             operation.operation_id: operation
             for operation in resolved_operations
-        }
-        self._resolved_patches = {
+        })
+        self._resolved_patches = MappingProxyType({
             patch.patch_identity: patch
             for patch in resolved_patches
-        }
-        self._resource_claims_by_operation_id = dict(
-            resource_claims_by_operation_id
+        })
+        self._resource_claims_by_operation_id = MappingProxyType(
+            dict(resource_claims_by_operation_id)
         )
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
         self.frame = frame if frame is not None else PauliFrame()

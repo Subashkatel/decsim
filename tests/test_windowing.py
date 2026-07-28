@@ -6,8 +6,19 @@ from decsim.config import us
 from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.layouts import UniformLayout
-from decsim.message import Operation, OperationWindowPlan, WindowGeometry
-from decsim.planner import PerOpRounds, _plan_static_operations
+from decsim.message import (
+    Operation,
+    OperationPlanningView,
+    OperationWindowPlan,
+    ResolvedCodeGeometry,
+    ResolvedOperationPlanning,
+    WindowGeometry,
+)
+from decsim.planner import (
+    PerOpRounds,
+    _materialize_execution_plan,
+    _validate_operation_graph,
+)
 from decsim.schemes import (
     NaiveOnlineScheme,
     ParallelWindowScheme,
@@ -83,12 +94,58 @@ def _plan(scheme, ops, rounds_per_op, d=3):
         if hasattr(rounds_per_op, "rounds_for")
         else FixedRounds(rounds_per_op)
     )
-    return _plan_static_operations(
-        scheme,
-        UniformLayout(SurfaceCodeModel(d=d)),
-        rounds_policy,
-        ops,
+    _validate_operation_graph(ops)
+    code = SurfaceCodeModel(d=d)
+    layout = UniformLayout(code)
+    leading_floor, trailing_floor = code.buffering_floor()
+    geometry = ResolvedCodeGeometry(
+        code_name=code.name,
+        distance=code.distance,
+        commit_round_count=code.commit_rounds(),
+        buffer_round_count=code.buffer_rounds(),
+        minimum_leading_buffer_round_count=leading_floor,
+        minimum_trailing_buffer_round_count=trailing_floor,
+        one_patch_spatial_node_count=code.spatial_nodes(1),
+        buffer_floor_override_active=code.buffer_floor_override_active(),
     )
+    resolved = []
+    ledgers = []
+    for operation in ops:
+        round_count = rounds_policy.rounds_for(operation, code)
+        patch_count = max(
+            1,
+            len(operation.patches)
+            if operation.patches
+            else len(operation.qubits),
+        )
+        resolved.append(
+            ResolvedOperationPlanning(
+                operation_id=operation.id,
+                code_geometry=geometry,
+                round_count=round_count,
+                round_ticks=1,
+                spatial_node_count=layout.spatial_nodes_for(
+                    operation,
+                    base_spatial_node_count=code.spatial_nodes(patch_count),
+                ),
+            )
+        )
+        ledgers.append(
+            scheme.plan_operation(
+                operation.id,
+                round_count,
+                commit_round_count=geometry.commit_round_count,
+                buffer_round_count=geometry.buffer_round_count,
+            )
+        )
+    return _materialize_execution_plan(
+        tuple(
+            OperationPlanningView.from_operation(operation)
+            for operation in ops
+        ),
+        tuple(resolved),
+        tuple(ledgers),
+    ).materialize()
 
 
 def _max_window_depth(plan):
@@ -106,14 +163,13 @@ def _max_window_depth(plan):
 
 def _timing_stream_plan(segment_rounds, d=3):
     """Plan one timing-only decode stream split into scheduled operation segments."""
-    code = SurfaceCodeModel(d=d)
     segments, stream_op, rounds_map = continuous_stream(None, segment_rounds,
                                                         patch=0, base_id=0)
-    plan = _plan_static_operations(
+    plan = _plan(
         ParallelWindowScheme(),
-        UniformLayout(code),
-        PerOpRounds(rounds_map),
         [stream_op],
+        PerOpRounds(rounds_map),
+        d=d,
     )
     return plan, segments, stream_op, rounds_map
 

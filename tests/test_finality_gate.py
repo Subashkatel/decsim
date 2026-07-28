@@ -144,8 +144,11 @@ def test_dynamic_window_created_during_held_boundary_still_depends_on_it():
     AFTER its predecessor weak-committed under a deferred (Held) boundary —
     strong redo still pending — must register the dependency and wait for
     the held handoff, not decode defect-free in the gap."""
+    from types import MappingProxyType
+
     from decsim.message import (
         Operation as Op,
+        OperationPlanningView,
         ResolvedOperationPlanning,
     )
 
@@ -161,10 +164,14 @@ def test_dynamic_window_created_during_held_boundary_still_depends_on_it():
         round_ticks=1,
         spatial_node_count=9,
     )
-    wm._resolved_operations = {
+    wm._resolved_operations = MappingProxyType({
         **wm._resolved_operations,
         stream_op.id: resolved,
-    }
+    })
+    wm._planning_view_by_operation_id = MappingProxyType({
+        **wm._planning_view_by_operation_id,
+        stream_op.id: OperationPlanningView.from_operation(stream_op),
+    })
     wm._register_dynamic_stream(stream_op, resolved)
 
     wm.create_dynamic_window(0, 0, 1, 3, 6, is_last=False)

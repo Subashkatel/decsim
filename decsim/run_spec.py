@@ -178,6 +178,27 @@ class _RunSeedPlanEntry:
 
 
 @dataclass(frozen=True)
+class _ComponentGraphEntry:
+    component_path: tuple[RunSeedPathSegment, ...]
+    parent_path: Optional[tuple[RunSeedPathSegment, ...]]
+    edge_path: Optional[tuple[RunSeedPathSegment, ...]]
+    component: Any
+
+
+@dataclass(frozen=True)
+class _ComponentAliasEntry:
+    alias_path: tuple[RunSeedPathSegment, ...]
+    canonical_path: tuple[RunSeedPathSegment, ...]
+
+
+@dataclass(frozen=True)
+class _ResolvedComponentGraph:
+    components: tuple[_ComponentGraphEntry, ...]
+    aliases: tuple[_ComponentAliasEntry, ...]
+    seed_plan: tuple[_RunSeedPlanEntry, ...]
+
+
+@dataclass(frozen=True)
 class LogicalOperationResult:
     """One operation's immutable logical-output disposition."""
 
@@ -270,10 +291,52 @@ class PrimaryRunResult:
 
 
 @dataclass(frozen=True)
+class TypedPathSegmentRecord:
+    """One closed public typed-path segment."""
+
+    kind: str
+    value: Optional[str]
+
+    @classmethod
+    def from_seed_segment(
+        cls,
+        segment: RunSeedPathSegment,
+    ) -> "TypedPathSegmentRecord":
+        if segment.kind == "integer_key":
+            value = str(segment.value)
+        else:
+            value = segment.value
+        return cls(kind=segment.kind, value=value)
+
+    def to_json_value(self) -> dict:
+        return {"kind": self.kind, "value": self.value}
+
+
+@dataclass(frozen=True)
+class ResolvedComponent:
+    """One canonical externally variable behavior component."""
+
+    component_path: tuple[TypedPathSegmentRecord, ...]
+    parent_path: Optional[tuple[TypedPathSegmentRecord, ...]]
+    edge_path: Optional[tuple[TypedPathSegmentRecord, ...]]
+    implementation: str
+    configuration: Any
+    configuration_status: str
+
+
+@dataclass(frozen=True)
+class ResolvedAlias:
+    """A repeated behavior path and its first canonical object path."""
+
+    alias_path: tuple[TypedPathSegmentRecord, ...]
+    canonical_path: tuple[TypedPathSegmentRecord, ...]
+
+
+@dataclass(frozen=True)
 class ResolvedSeedBinding:
     """One canonical stochastic owner and its effective seed source."""
 
-    component_path: tuple[RunSeedPathSegment, ...]
+    component_path: tuple[TypedPathSegmentRecord, ...]
     seed_source: str
     seed: Optional[int]
 
@@ -284,6 +347,8 @@ class ResolvedRunManifest:
 
     schema_version: int
     root_seed: Optional[int]
+    components: tuple[ResolvedComponent, ...]
+    aliases: tuple[ResolvedAlias, ...]
     seed_bindings: tuple[ResolvedSeedBinding, ...]
     primary_result_sha256: str
 
@@ -291,12 +356,43 @@ class ResolvedRunManifest:
         return {
             "schema_version": self.schema_version,
             "root_seed": self.root_seed,
+            "components": [
+                {
+                    "component_path": _typed_path_json(
+                        component.component_path
+                    ),
+                    "parent_path": (
+                        None
+                        if component.parent_path is None
+                        else _typed_path_json(component.parent_path)
+                    ),
+                    "edge_path": (
+                        None
+                        if component.edge_path is None
+                        else _typed_path_json(component.edge_path)
+                    ),
+                    "implementation": component.implementation,
+                    "configuration": component.configuration,
+                    "configuration_status": (
+                        component.configuration_status
+                    ),
+                }
+                for component in self.components
+            ],
+            "aliases": [
+                {
+                    "alias_path": _typed_path_json(alias.alias_path),
+                    "canonical_path": _typed_path_json(
+                        alias.canonical_path
+                    ),
+                }
+                for alias in self.aliases
+            ],
             "seed_bindings": [
                 {
-                    "component_path": [
-                        {"kind": segment.kind, "value": segment.value}
-                        for segment in binding.component_path
-                    ],
+                    "component_path": _typed_path_json(
+                        binding.component_path
+                    ),
                     "seed_source": binding.seed_source,
                     "seed": binding.seed,
                 }
@@ -888,6 +984,7 @@ class RunSpec:
             planning_view_by_operation_id=(
                 workload.planning_view_by_operation_id
             ),
+            feedback_boundary_mode=self.feedback_boundary_mode,
             syndrome_source=device, store=store,
             switching_active=hasattr(strategy, "keep_weak_result"))
         pool = DecoderManager(
@@ -921,6 +1018,7 @@ class RunSpec:
             raise ValueError(
                 f"{type(factory).__name__} uses a different engine from "
                 "the RunSpec build")
+        _validate_shipped_factory_decode_service(factory, cluster)
         source = ClockedDevice(engine, device, controller, window_manager,
                                window_manager.rounds_for)
         round_us = self.round_us if self.round_us is not None \
@@ -971,19 +1069,38 @@ class RunSpec:
             controller=controller,
             links=links,
             metrics=metrics,
+            workload=workload,
         )
-        seed_plan = _materialize_run_seed_plan(
+        component_graph = _materialize_component_graph(
             seed_roots,
             self._validated_root_seed(),
+            anchors=(
+                (
+                    (
+                        RunSeedPathSegment("field", "fixed"),
+                        RunSeedPathSegment("field", "cluster"),
+                    ),
+                    cluster,
+                ),
+            ),
         )
+        seed_plan = component_graph.seed_plan
         reservations = _bind_run_seed_plan(seed_plan)
         seed_bindings = tuple(
             ResolvedSeedBinding(
-                component_path=entry.component_path,
+                component_path=_typed_path_records(entry.component_path),
                 seed_source=reservation.proposed_seed_source,
                 seed=reservation.proposed_seed,
             )
             for entry, reservation in zip(seed_plan, reservations)
+        )
+        resolved_components = _resolved_components(component_graph)
+        resolved_aliases = tuple(
+            ResolvedAlias(
+                alias_path=_typed_path_records(alias.alias_path),
+                canonical_path=_typed_path_records(alias.canonical_path),
+            )
+            for alias in component_graph.aliases
         )
 
         try:
@@ -1019,6 +1136,8 @@ class RunSpec:
             manifest = ResolvedRunManifest(
                 schema_version=1,
                 root_seed=self._validated_root_seed(),
+                components=resolved_components,
+                aliases=resolved_aliases,
                 seed_bindings=seed_bindings,
                 primary_result_sha256=hashlib.sha256(
                     result.canonical_json_bytes(),
@@ -1059,6 +1178,7 @@ class RunSpec:
         controller,
         links,
         metrics,
+        workload,
     ):
         """Return the complete runtime root set under fixed semantic paths."""
         field_segment = lambda name: RunSeedPathSegment("field", name)
@@ -1099,6 +1219,31 @@ class RunSpec:
                     metric,
                 )
             )
+        if device.operation_circuit_scope == "per_operation":
+            seen_operation_ids = set()
+            for operation in (
+                workload.executable_operations
+                + workload.static_decode_operations
+                + workload.dynamic_stream_operations
+            ):
+                if (
+                    operation.id in seen_operation_ids
+                    or operation.circuit is None
+                ):
+                    continue
+                seen_operation_ids.add(operation.id)
+                roots.append(
+                    (
+                        (
+                            field_segment("workload_circuits"),
+                            RunSeedPathSegment(
+                                "integer_key",
+                                operation.id,
+                            ),
+                        ),
+                        operation.circuit,
+                    )
+                )
         return tuple(roots)
 
     @staticmethod
@@ -1393,33 +1538,7 @@ def _planning_view_from_operation(
     operation: Operation,
 ) -> OperationPlanningView:
     """Freeze every logical operation field while excluding its circuit."""
-    return OperationPlanningView(
-        id=operation.id,
-        name=operation.name,
-        qubits=operation.qubits,
-        clifford=operation.clifford,
-        consumes_magic_state=operation.consumes_magic_state,
-        patches=operation.patches,
-        predecessors=operation.predecessors,
-        has_successor=operation.has_successor,
-        stream_id=operation.stream_id,
-        stream_offset=operation.stream_offset,
-        blocked_by=operation.blocked_by,
-        feedback_boundary_mode=(
-            operation.feedback_boundary_mode
-            if operation.feedback_boundary_mode is not None
-            else "trailing_buffer"
-        ),
-        requires_result_return_to_chip=(
-            operation.requires_result_return_to_chip
-        ),
-        requires_strong_commit=operation.requires_strong_commit,
-        byproduct_pauli=operation.byproduct_pauli,
-        measurement_basis=operation.measurement_basis,
-        logical_observable_index=operation.logical_observable_index,
-        intrinsic_measurement=operation.intrinsic_measurement,
-        kind=operation.kind,
-    )
+    return OperationPlanningView.from_operation(operation)
 
 
 def _freeze_execution_plan(
@@ -1684,30 +1803,130 @@ def _install_private_execution_circuits(
         )
 
 
-def _materialize_run_seed_plan(
+def _encoded_component_path(
+    path: tuple[RunSeedPathSegment, ...],
+) -> bytes:
+    return b"".join(segment.canonical_bytes() for segment in path)
+
+
+def _typed_path_records(
+    path: tuple[RunSeedPathSegment, ...],
+) -> tuple[TypedPathSegmentRecord, ...]:
+    return tuple(
+        TypedPathSegmentRecord.from_seed_segment(segment)
+        for segment in path
+    )
+
+
+def _typed_path_json(
+    path: tuple[TypedPathSegmentRecord, ...],
+) -> list[dict]:
+    return [segment.to_json_value() for segment in path]
+
+
+def _implementation_name(component) -> str:
+    implementation = type(component)
+    return f"{implementation.__module__}.{implementation.__qualname__}"
+
+
+def _resolved_components(
+    graph: _ResolvedComponentGraph,
+) -> tuple[ResolvedComponent, ...]:
+    return tuple(
+        ResolvedComponent(
+            component_path=_typed_path_records(entry.component_path),
+            parent_path=(
+                None
+                if entry.parent_path is None
+                else _typed_path_records(entry.parent_path)
+            ),
+            edge_path=(
+                None
+                if entry.edge_path is None
+                else _typed_path_records(entry.edge_path)
+            ),
+            implementation=_implementation_name(entry.component),
+            configuration=None,
+            configuration_status="opaque",
+        )
+        for entry in graph.components
+    )
+
+
+def _materialize_component_graph(
     roots,
     root_seed: Optional[int],
-) -> tuple[_RunSeedPlanEntry, ...]:
-    """Freeze all canonical consumers reachable through the seed graph."""
+    *,
+    anchors=(),
+) -> _ResolvedComponentGraph:
+    """Freeze variable topology, aliases, and canonical seed consumers once."""
     from .protocols import RunSeedComposite, RunSeedConsumer
 
     canonical_paths: dict[int, tuple[RunSeedPathSegment, ...]] = {}
     active_ids: set[int] = set()
-    plan = []
+    seen_full_paths: set[bytes] = set()
+    components = []
+    aliases = []
+    seed_plan = []
 
-    def walk(component_path, component) -> None:
+    canonical_anchors = []
+    for component_path, component in anchors:
+        canonical_anchors.append(
+            (_encoded_component_path(component_path), component_path, component)
+        )
+    canonical_anchors.sort(key=lambda item: item[0])
+    for encoded_path, component_path, component in canonical_anchors:
+        if encoded_path in seen_full_paths:
+            raise ValueError(
+                "duplicate component path "
+                f"{_render_run_seed_path(component_path)}"
+            )
+        seen_full_paths.add(encoded_path)
+        component_id = id(component)
+        if component_id in canonical_paths:
+            aliases.append(
+                _ComponentAliasEntry(
+                    alias_path=component_path,
+                    canonical_path=canonical_paths[component_id],
+                )
+            )
+        else:
+            canonical_paths[component_id] = component_path
+
+    def walk(component_path, component, parent_path, edge_path) -> None:
+        encoded_component_path = _encoded_component_path(component_path)
+        if encoded_component_path in seen_full_paths:
+            raise ValueError(
+                "duplicate component path "
+                f"{_render_run_seed_path(component_path)}"
+            )
+        seen_full_paths.add(encoded_component_path)
         component_id = id(component)
         if component_id in active_ids:
             first_path = canonical_paths[component_id]
             raise ValueError(
-                "run-seed component cycle from "
+                "component cycle from "
                 f"{_render_run_seed_path(component_path)} to "
                 f"{_render_run_seed_path(first_path)}"
             )
         if component_id in canonical_paths:
+            aliases.append(
+                _ComponentAliasEntry(
+                    alias_path=component_path,
+                    canonical_path=canonical_paths[component_id],
+                )
+            )
             return
 
         canonical_paths[component_id] = component_path
+        components.append(
+            _ComponentGraphEntry(
+                component_path=component_path,
+                parent_path=parent_path,
+                edge_path=edge_path,
+                component=component,
+            )
+        )
         active_ids.add(component_id)
         try:
             if isinstance(component, RunSeedConsumer):
@@ -1716,7 +1935,7 @@ def _materialize_run_seed_plan(
                     if root_seed is None
                     else _derive_run_component_seed(root_seed, component_path)
                 )
-                plan.append(
+                seed_plan.append(
                     _RunSeedPlanEntry(
                         component_path=component_path,
                         component=component,
@@ -1748,28 +1967,33 @@ def _materialize_run_seed_plan(
                 canonical_children.append((encoded_path, child))
             canonical_children.sort(key=lambda item: item[0])
             for _, child in canonical_children:
-                walk(component_path + child.relative_path, child.child)
+                walk(
+                    component_path + child.relative_path,
+                    child.child,
+                    component_path,
+                    child.relative_path,
+                )
         finally:
             active_ids.remove(component_id)
 
     canonical_roots = []
-    seen_root_paths = set()
     for component_path, component in roots:
-        encoded_path = b"".join(
-            segment.canonical_bytes()
-            for segment in component_path
-        )
-        if encoded_path in seen_root_paths:
-            raise ValueError(
-                f"duplicate run-seed root path "
-                f"{_render_run_seed_path(component_path)}"
-            )
-        seen_root_paths.add(encoded_path)
+        encoded_path = _encoded_component_path(component_path)
         canonical_roots.append((encoded_path, component_path, component))
     canonical_roots.sort(key=lambda item: item[0])
     for _, component_path, component in canonical_roots:
-        walk(component_path, component)
-    return tuple(plan)
+        walk(component_path, component, None, None)
+    components.sort(
+        key=lambda entry: _encoded_component_path(entry.component_path)
+    )
+    aliases.sort(
+        key=lambda entry: _encoded_component_path(entry.alias_path)
+    )
+    return _ResolvedComponentGraph(
+        components=tuple(components),
+        aliases=tuple(aliases),
+        seed_plan=tuple(seed_plan),
+    )
 
 
 def _bind_run_seed_plan(
@@ -2046,6 +2270,27 @@ def _scan_prebinding_provider(component_path: str, provider) -> None:
 def _make_infinite(engine):
     from .factories import InfiniteFactory
     return InfiniteFactory(engine)
+
+
+def _validate_shipped_factory_decode_service(factory, cluster) -> None:
+    """Pin shipped correction traffic to the run-owned cluster."""
+    from .factories import DistillationFactory, MultiLevelDistillationFactory
+
+    if type(factory) not in (
+        DistillationFactory,
+        MultiLevelDistillationFactory,
+    ):
+        return
+    if factory.n_corr > 0 and factory.decode_service is not cluster:
+        raise ValueError(
+            f"{type(factory).__name__} decode_service must be the run-owned "
+            "cluster when n_corr is positive"
+        )
+    if factory.n_corr == 0 and factory.decode_service is not None:
+        raise ValueError(
+            f"{type(factory).__name__} decode_service must be None when "
+            "n_corr is zero"
+        )
 
 
 class ClusterFacade:

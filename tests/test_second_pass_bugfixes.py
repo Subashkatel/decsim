@@ -43,16 +43,14 @@ def test_zero_correction_factory_still_releases_the_state():
     distillation instead of waiting for a correction callback that will
     never run."""
     eng = Engine(verbose=False)
-    service = _RecordingService()
     factory = DistillationFactory(eng, num_units=1, cycle_ticks=100,
-                                  decode_service=service, corr_rounds=5,
+                                  decode_service=None, corr_rounds=5,
                                   n_corr=0, p_success=1.0)
     delivered = []
     factory.request(0, lambda: delivered.append(eng.now))
     eng.run()
     assert delivered == [100]
     assert factory.in_flight == 0
-    assert service.labels == []          # no correction decodes submitted
 
 
 # --------------------------------------- finding 21: packing vs the bus

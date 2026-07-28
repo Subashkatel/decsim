@@ -10,6 +10,8 @@ from .message import (
     DecodeResult,
     FeedbackEffect,
     Operation,
+    RunSeedChild,
+    RunSeedPathSegment,
     same_stable_identity,
 )
 from .pauli_frame import PauliFrame
@@ -32,6 +34,15 @@ class ExecutionOrchestrator:
         self.archive: Optional[dict] = {} if retain_all else None
         self.controller = None
         self.decision_sink: Optional[Callable] = None
+
+    def run_seed_children(self):
+        """Expose the retained frame that determines feedback behavior."""
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "frame"),),
+                self.frame,
+            ),
+        )
 
     def connect(self, controller, decision_sink: Callable) -> None:
         """Wire the decision return path (pays t_oc + t_cq via the controller)."""

@@ -252,9 +252,11 @@ def test_real_decoder_adapters_expose_their_latency_models():
     from decsim.belief_matching_decoder import BeliefMatchingDecoder
     from decsim.bposd_decoder import BPOSDDecoder
     from decsim.mwpm_decoder import PyMatchingDecoder
+    from decsim.soft_output import UnionFindDecoder
 
     latency_model = object()
     expected = {(("field", "latency_model"),): latency_model}
     assert _seed_child_paths(PyMatchingDecoder(latency_model)) == expected
     assert _seed_child_paths(BPOSDDecoder(latency_model)) == expected
     assert _seed_child_paths(BeliefMatchingDecoder(latency_model)) == expected
+    assert _seed_child_paths(UnionFindDecoder(latency_model)) == expected

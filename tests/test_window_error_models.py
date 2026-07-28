@@ -150,7 +150,11 @@ def test_every_placed_construction_path_rejects_detectorless_logical_fault():
     from decsim.message import DecodeJob
     from decsim.mwpm_decoder import PyMatchingDecoder
     from decsim.mwpm_decoder import matching_window_decoder
-    from decsim.soft_output import ComplementaryGapMetric, ClusterGapMetric
+    from decsim.soft_output import (
+        ClusterGapMetric,
+        ComplementaryGapMetric,
+        UnionFindDecoder,
+    )
     from decsim.soft_output.cluster import BOUNDARY
 
     class ZeroLatency:
@@ -181,6 +185,7 @@ def test_every_placed_construction_path_rejects_detectorless_logical_fault():
         lambda: PyMatchingDecoder(ZeroLatency()).decode(job),
         lambda: BPOSDDecoder(ZeroLatency()).decode(job),
         lambda: BeliefMatchingDecoder(ZeroLatency()).decode(job),
+        lambda: UnionFindDecoder(ZeroLatency()).decode(job),
         lambda: ComplementaryGapMetric.from_window_model(model),
         lambda: ClusterGapMetric.from_window_model(model),
         lambda: matching_window_decoder()(model, np.zeros(0, dtype=np.uint8)),
@@ -238,7 +243,11 @@ def test_every_placed_graph_path_rejects_a_detector_hyperedge():
     )
     from decsim.message import DecodeJob, SyndromePayload
     from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
-    from decsim.soft_output import ComplementaryGapMetric, ClusterGapMetric
+    from decsim.soft_output import (
+        ClusterGapMetric,
+        ComplementaryGapMetric,
+        UnionFindDecoder,
+    )
 
     class ZeroLatency:
         def latency(self, job):
@@ -274,6 +283,7 @@ def test_every_placed_graph_path_rejects_a_detector_hyperedge():
     consumers = (
         lambda: PyMatchingDecoder(ZeroLatency()).decode(job),
         lambda: BeliefMatchingDecoder(ZeroLatency()).decode(job),
+        lambda: UnionFindDecoder(ZeroLatency()).decode(job),
         lambda: matching_window_decoder()(model, np.zeros(3, dtype=np.uint8)),
         lambda: belief_matching_window_decoder()(
             model,

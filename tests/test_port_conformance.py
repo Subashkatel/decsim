@@ -33,6 +33,7 @@ from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
 from decsim.schemes import (NaiveOnlineScheme, ParallelWindowScheme,
                             SlidingWindowScheme)
 from decsim.switching import Baseline, Switching
+from decsim.soft_output import UnionFindDecoder
 from decsim.window_interactions import DefaultWindowInteraction
 
 
@@ -103,7 +104,8 @@ def test_every_shipped_part_family_satisfies_its_port():
         protocols.DecodingScheme: [SlidingWindowScheme(), NaiveOnlineScheme(),
                              ParallelWindowScheme()],                # port 6
         protocols.Decoder: [PerRoundDecoder(0.5), PresetLatencyDecoder(1.0),
-                        SampledConfidenceDecoder(PerRoundDecoder(1.0), 0.5)],  # 8
+                        SampledConfidenceDecoder(PerRoundDecoder(1.0), 0.5),
+                        UnionFindDecoder(PerRoundDecoder(0.5))],  # 8
         protocols.DecodingStrategy: [Baseline(),
                                  Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5)],  # 10
         protocols.Scheduler: [FifoScheduler(), EarliestDeadlineScheduler()],  # 11

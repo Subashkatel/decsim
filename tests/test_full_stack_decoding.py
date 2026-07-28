@@ -21,7 +21,7 @@ from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
 from decsim.detector_error_model import (build_window_error_models,
                                              decode_windowed)
 from decsim.adapters.window_decode_results import result_from_selected_faults
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec, simulate
@@ -195,6 +195,62 @@ def test_engine_matches_offline_reference_and_global_exactly():
         assert pred_engine == pred_offline, f"shot {s}: engine != offline reference"
         assert pred_engine == pred_global, f"shot {s}: engine != global decode"
     assert defect_bits > 0, "no artificial defects ever crossed a commit boundary"
+
+
+def test_parallel_engine_matches_global_decode_on_real_syndromes():
+    """Parallel A/B windows preserve the global logical prediction.
+
+    Geometry and dependency tests separately pin the A/B topology. This gate
+    forces noisy detector data and nonzero seam defects through that topology.
+    """
+    circuit = _circuit()
+    global_matching = pymatching.Matching.from_detector_error_model(
+        circuit.detector_error_model(decompose_errors=True)
+    )
+    boundary_defect_count = 0
+    nonzero_syndrome_count = 0
+
+    class CountingDecoder(PyMatchingDecoder):
+        def decode(self, job):
+            nonlocal boundary_defect_count
+            result = super().decode(job)
+            if result.boundary_defects:
+                boundary_defect_count += sum(
+                    sum(bits)
+                    for bits in result.boundary_defects.values()
+                )
+            return result
+
+    for shot_index in range(100):
+        device = StimDevice()
+        operation = Operation(
+            id=1,
+            name="parallel-memory",
+            qubits=(0,),
+            clifford=True,
+            circuit=circuit,
+        )
+        result = simulate(
+            RunSpec(
+                ops=[operation],
+                num_units=4,
+                rounds_policy=FixedRounds(ROUNDS),
+                code=SurfaceCodeModel(d=D),
+                scheme=ParallelWindowScheme(),
+                device=device,
+                decoder=CountingDecoder(_ZeroLatency()),
+                seed=20260728 + shot_index,
+            ),
+            verbose=False,
+        )
+        syndrome = device._dets[1]
+        nonzero_syndrome_count += int(np.any(syndrome))
+        assert result.cluster.op_results[1] == (
+            int(global_matching.decode(syndrome)[0]),
+        )
+
+    assert nonzero_syndrome_count > 0
+    assert boundary_defect_count > 0
 
 
 def test_engine_bposd_matches_offline_reference():

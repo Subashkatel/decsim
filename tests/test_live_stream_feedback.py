@@ -138,7 +138,7 @@ def test_feedback_idle_rounds_use_frozen_patch_cadence():
 
         def code_for_patch(self, patch_id):
             self.patch_selection_calls += 1
-            if self.patch_selection_calls > 3:
+            if self.patch_selection_calls > 1:
                 raise AssertionError(
                     "runtime consulted the live patch selector"
                 )
@@ -167,7 +167,7 @@ def test_feedback_idle_rounds_use_frozen_patch_cadence():
     ))
 
     assert result.chip.idle_rounds_emitted > 0
-    assert layout.patch_selection_calls == 3
+    assert layout.patch_selection_calls == 1
 
 
 def test_committed_stream_round_count_releases_blocked_operation_before_stream_result():

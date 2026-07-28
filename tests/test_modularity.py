@@ -6,8 +6,15 @@
 # in test_port_conformance.py.)
 #==================================================================
 from decsim.config import us
-from decsim.message import DecodeResult, Decision, Operation, SyndromePayload
-from decsim.planner import WindowPlanner, FixedRounds
+from decsim.message import (
+    DecodeResult,
+    Decision,
+    Operation,
+    OperationWindowPlan,
+    SyndromePayload,
+    WindowGeometry,
+)
+from decsim.planner import FixedRounds
 from decsim.schemes import SlidingWindowScheme
 from decsim.layouts import UniformLayout
 from decsim.codes import SurfaceCodeModel
@@ -53,9 +60,11 @@ class MyCode:
     name = "my-code"
     distance = 3
     def rounds_per_logical_cycle(self): return 3
+    def round_period_us(self): return None
     def commit_rounds(self): return 3
     def buffer_rounds(self): return 3
-    def buffering_floor(self, scheme=None): return (3, 3)
+    def buffering_floor(self): return (3, 3)
+    def buffer_floor_override_active(self): return False
     def spatial_nodes(self, n): return 9 * max(1, n)
     def syndrome_bits_per_round(self, n): return 8 * max(1, n)
 
@@ -65,24 +74,48 @@ class MyLayout:
     distance = 3
     def code_for_patch(self, p): return self.code
     def code_for_op(self, op): return self.code
-    def spatial_nodes_for(self, op): return self.code.spatial_nodes(len(op.qubits))
+    def spatial_nodes_for(self, op, *, base_spatial_node_count):
+        return base_spatial_node_count
+    def patch_spatial_nodes_for(self, patch, *, base_spatial_node_count):
+        return base_spatial_node_count
     def codes(self): return [self.code]
     def resources_for(self, op): return []
 
 class MyScheme:
-    """One window per op committing everything.
+    """One window per operation committing everything."""
 
-    The scheme has no custom dependency hook, so the planner's chain fallback applies
-    trivially to a single window.
-    """
-    def plan_windows(self, op_id, round_count, code):
-        return [(1, round_count, round_count)]
+    def plan_operation(
+        self,
+        operation_id,
+        round_count,
+        *,
+        commit_round_count,
+        buffer_round_count,
+    ):
+        return OperationWindowPlan(
+            operation_id=operation_id,
+            windows=(WindowGeometry(1, 1, round_count, round_count),),
+            internal_dependencies=(),
+            entry_window_indices=(0,),
+            exit_window_indices=(0,),
+            windowed=False,
+            batch_preceding_idle_rounds=False,
+        )
 
-    def data_complete(self, window, rounds_arrived, successor_rounds, memory_rounds,
-                      round_count, has_successor, op=None, layout=None):
+    def data_complete(
+        self,
+        window,
+        *,
+        rounds_arrived,
+        successor_rounds,
+        memory_rounds,
+        round_count,
+        has_successor,
+        operation,
+    ):
         return rounds_arrived >= window.commit_hi
 
-    def validate_buffer(self, code):
+    def validate_buffer(self, geometry):
         return None
 
 class MyRounds:
@@ -215,30 +248,3 @@ def test_every_seam_accepts_a_from_scratch_implementation():
     assert metric.count > 0                    # the custom metric observed events
     assert orchestrator.integrated == 3        # the custom orchestrator saw every result
     assert r.result.fully_done_ticks > r.result.chip_done_ticks >= 0
-
-
-def test_planner_parameter_swaps_the_planning_algorithm():
-    """planner= replaces the WindowPlanner in the standard wiring."""
-    class CountingPlanner:
-        def __init__(self, inner):
-            self.inner = inner
-            self.scheme = inner.scheme
-            self.layout = inner.layout
-            self.rounds_policy = inner.rounds_policy
-            self.calls = 0
-        def plan(self, ops):
-            self.calls += 1
-            return self.inner.plan(ops)
-    code = SurfaceCodeModel(d=3)
-    planner = CountingPlanner(WindowPlanner(
-        SlidingWindowScheme(), UniformLayout(code), FixedRounds(11)))
-    r = simulate(RunSpec(
-            ops=_blocked_ops(),
-            planner=planner,
-            decoder=PerRoundDecoder(tau_us=1.0),
-        ), verbose=False)
-    assert planner.calls == 1                  # OUR planner produced the plan
-    assert r.planning.planner is planner
-    assert not hasattr(r.cluster, "planner")
-    assert r.cluster.scheme is planner.scheme
-    assert r.result.fully_done_ticks > 0

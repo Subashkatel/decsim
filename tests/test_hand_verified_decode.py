@@ -81,7 +81,15 @@ def graphs():
         noisy.detector_error_model(decompose_errors=True))
     n_layers = 1 + max(int(c[-1])
                        for c in noisy.get_detector_coordinates().values())
-    plan = SlidingWindowScheme().plan_windows(0, n_layers, SurfaceCodeModel(d=D))
+    plan = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            n_layers,
+            commit_round_count=D,
+            buffer_round_count=D,
+        ).windows
+    ]
     models = build_window_error_models(noisy, plan)
     coords = {i: tuple(c) for i, c in clean.get_detector_coordinates().items()}
     return matching, models, coords

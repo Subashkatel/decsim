@@ -1,4 +1,4 @@
-from dataclasses import FrozenInstanceError, fields
+from dataclasses import fields
 
 import numpy as np
 import pytest
@@ -21,7 +21,7 @@ from decsim.metrics import (
     StrongDecoderBacklog,
     WindowLatencyBreakdown,
 )
-from decsim.planner import FixedRounds, WindowPlanner
+from decsim.planner import FixedRounds
 from decsim.policies import Held, ExtendStream, SeparateDecodeJobs
 from decsim.run_spec import RunSpec, simulate
 from decsim.schedulers import (
@@ -112,34 +112,6 @@ class SeedRecordingDecoder(StaticDecoder):
         self.committed.append(reservation)
 
 
-class RecordingPlanner:
-    def __init__(self, scheme, layout, rounds_policy):
-        self.scheme = scheme
-        self.layout = layout
-        self.rounds_policy = rounds_policy
-        self.calls = 0
-
-    def plan(self, operations):
-        self.calls += 1
-        return WindowPlanner(
-            self.scheme,
-            self.layout,
-            self.rounds_policy,
-        ).plan(operations)
-
-
-class PlanningViewRecordingPlanner(RecordingPlanner):
-    def __init__(self, scheme, layout, rounds_policy):
-        super().__init__(scheme, layout, rounds_policy)
-        self.operations = ()
-        self.plan_result = None
-
-    def plan(self, operations):
-        self.operations = tuple(operations)
-        self.plan_result = super().plan(operations)
-        return self.plan_result
-
-
 class CircuitRecordingTimingDevice(TimingOnlyDevice):
     operation_circuit_scope = "none"
 
@@ -204,10 +176,13 @@ class CircuitRejectingLayout(UniformLayout):
         self.resource_calls += 1
         return super().resources_for(operation)
 
-    def spatial_nodes_for(self, operation):
+    def spatial_nodes_for(self, operation, *, base_spatial_node_count):
         self._require_planning_view(operation)
         self.spatial_calls += 1
-        return super().spatial_nodes_for(operation)
+        return super().spatial_nodes_for(
+            operation,
+            base_spatial_node_count=base_spatial_node_count,
+        )
 
 
 class CircuitRejectingRounds(FixedRounds):
@@ -225,10 +200,14 @@ class CircuitRejectingScheme(SlidingWindowScheme):
     def __init__(self):
         self.data_complete_calls = 0
 
-    def data_complete(self, window, *, op, **kwargs):
-        assert not hasattr(op, "circuit")
+    def data_complete(self, window, *, operation, **kwargs):
+        assert not hasattr(operation, "circuit")
         self.data_complete_calls += 1
-        return super().data_complete(window, op=op, **kwargs)
+        return super().data_complete(
+            window,
+            operation=operation,
+            **kwargs,
+        )
 
 
 class EngineBoundFactory:
@@ -281,22 +260,6 @@ class SeedConsumingProviderOwner:
 class PlainControllerProvider:
     def __init__(self, engine):
         self.engine = engine
-
-
-class DescriptorPlanner:
-    scheme = SlidingWindowScheme()
-    rounds_policy = FixedRounds(3)
-
-    def __init__(self):
-        self.layout_entries = 0
-
-    @property
-    def layout(self):
-        self.layout_entries += 1
-        return UniformLayout(SurfaceCodeModel(3))
-
-    def plan(self, operations):
-        raise AssertionError("descriptor-backed planner must not plan")
 
 
 @pytest.mark.parametrize("seed", [True, 1.0, "1", object()])
@@ -564,76 +527,6 @@ def test_unsupported_provider_wrappers_reject_before_entry(provider_kind):
     assert entries == []
 
 
-@pytest.mark.parametrize("entrypoint", ["validate", "build"])
-def test_descriptor_backed_planner_child_rejects_without_descriptor_entry(
-    entrypoint,
-):
-    planner = DescriptorPlanner()
-    spec = RunSpec(ops=[], planner=planner)
-
-    with pytest.raises(
-        TypeError,
-        match=r"planner\.layout.*stored non-descriptor",
-    ):
-        getattr(spec, entrypoint)()
-
-    assert planner.layout_entries == 0
-
-
-def test_planner_receives_frozen_circuit_free_operation_view():
-    layout = UniformLayout(SurfaceCodeModel(3))
-    planner = PlanningViewRecordingPlanner(
-        SlidingWindowScheme(),
-        layout,
-        FixedRounds(3),
-    )
-    RunSpec(
-        ops=[Operation(0, "memory", (0,), circuit=object())],
-        planner=planner,
-        decoder=StaticDecoder(),
-    ).build()
-
-    assert len(planner.operations) == 1
-    planning_operation = planner.operations[0]
-    assert not hasattr(planning_operation, "circuit")
-    with pytest.raises(FrozenInstanceError):
-        planning_operation.name = "mutated"
-
-
-def test_runtime_plan_does_not_alias_the_planner_return_value():
-    layout = UniformLayout(SurfaceCodeModel(3))
-    planner = PlanningViewRecordingPlanner(
-        SlidingWindowScheme(),
-        layout,
-        FixedRounds(3),
-    )
-    completed = RunSpec(
-        ops=[Operation(0, "memory", (0,))],
-        planner=planner,
-        decoder=StaticDecoder(),
-    ).build()
-
-    returned_window = planner.plan_result.windows[(0, 0)]
-    runtime_window = completed.window_manager.windows[(0, 0)]
-    assert runtime_window is not returned_window
-    assert completed.window_manager.window_count is not (
-        planner.plan_result.window_count
-    )
-    assert completed.window_manager.op_windows is not (
-        planner.plan_result.op_windows
-    )
-    assert completed.window_manager.successors is not (
-        planner.plan_result.successors
-    )
-
-    expected_commit_hi = runtime_window.commit_hi
-    returned_window.commit_hi += 100
-    planner.plan_result.window_count[0] += 100
-
-    assert runtime_window.commit_hi == expected_commit_hi
-    assert completed.window_manager.window_count[0] == 1
-
-
 def test_planning_view_fields_are_exactly_operation_fields_without_circuit():
     from decsim.message import OperationPlanningView
 
@@ -657,10 +550,10 @@ def test_all_operation_consuming_planning_ports_receive_frozen_views():
         decoder=StaticDecoder(),
     ).build()
 
-    assert layout.operation_calls == 2
+    assert layout.operation_calls == 1
     assert layout.resource_calls == 1
     assert layout.spatial_calls == 1
-    assert rounds.calls == 2
+    assert rounds.calls == 1
     assert scheme.data_complete_calls > 0
 
 
@@ -1079,7 +972,7 @@ def test_non_bmp_metric_json_is_frozen_before_result_digest():
         "expected_origin",
     ),
     [
-        (2.5, 1.5, 4.5, 2.5, "code.round_us"),
+        (2.5, 1.5, 4.5, 2.5, "code.round_period_us"),
         (None, 1.5, 4.5, 1.5, "run_spec.round_us"),
         (None, None, 4.5, 4.5, "timing.round_us"),
     ],
@@ -1241,7 +1134,6 @@ def test_component_graph_contains_every_resolved_singleton_root(
         "layout",
         "scheme",
         "rounds_policy",
-        "planner",
         "device",
         "decoder_router",
         "magic_state_factory",
@@ -1448,7 +1340,10 @@ def test_every_shipped_runtime_metric_declares_effective_configuration():
             "threshold_f": 0.15,
             "consecutive": 4,
         },
-        "strong_backlog": {"pool": "strong"},
+        "strong_backlog": {
+            "pool": "strong",
+            "nominal_window_redo_round_count": 9,
+        },
         "backlog_trajectory": {"kind": "backlog_trajectory"},
         "conditional_reaction_time": {
             "kind": "conditional_reaction_time",
@@ -2093,98 +1988,6 @@ def test_run_spec_rejects_multiple_explicit_code_sources(
         spec.validate()
 
 
-@pytest.mark.parametrize(
-    ("sibling_name", "sibling_value"),
-    [
-        ("d", 5),
-        ("code", SurfaceCodeModel(d=5)),
-        ("layout", UniformLayout(SurfaceCodeModel(d=5))),
-        ("scheme", SlidingWindowScheme()),
-        ("rounds_policy", FixedRounds(7)),
-    ],
-)
-def test_supplied_planner_rejects_every_sibling_planning_owner_before_plan(
-    sibling_name,
-    sibling_value,
-):
-    code = SurfaceCodeModel(d=5)
-    planner = RecordingPlanner(
-        SlidingWindowScheme(),
-        UniformLayout(code),
-        FixedRounds(5),
-    )
-    spec = RunSpec(
-        ops=[],
-        planner=planner,
-        **{sibling_name: sibling_value},
-    )
-
-    with pytest.raises(
-        ValueError,
-        match=rf"planner owns.*{sibling_name}",
-    ):
-        spec.validate()
-
-    assert planner.calls == 0
-
-
-@pytest.mark.parametrize(
-    ("child_name", "invalid_child", "port_name"),
-    [
-        ("scheme", object(), "DecodingScheme"),
-        ("layout", object(), "LayoutModel"),
-        ("rounds_policy", object(), "RoundsPolicy"),
-    ],
-)
-def test_planner_owned_children_are_validated_before_plan(
-    child_name,
-    invalid_child,
-    port_name,
-):
-    code = SurfaceCodeModel(d=5)
-    children = {
-        "scheme": SlidingWindowScheme(),
-        "layout": UniformLayout(code),
-        "rounds_policy": FixedRounds(5),
-    }
-    children[child_name] = invalid_child
-    planner = RecordingPlanner(**children)
-    spec = RunSpec(ops=[], planner=planner)
-
-    with pytest.raises(
-        TypeError,
-        match=rf"planner\.{child_name}.*{port_name}",
-    ):
-        spec.validate()
-
-    assert planner.calls == 0
-
-
-def test_cross_part_validation_reads_the_planner_owned_scheme():
-    code = SurfaceCodeModel(d=5)
-    planner = RecordingPlanner(
-        ParallelWindowScheme(),
-        UniformLayout(code),
-        FixedRounds(5),
-    )
-    spec = RunSpec(
-        ops=[Operation(0, "memory", (0,))],
-        planner=planner,
-        strategy=Switching(
-            confidence_threshold=0.5,
-            double_window=True,
-        ),
-    )
-
-    with pytest.raises(
-        ValueError,
-        match=r"double_window.*parallel.*not supported",
-    ):
-        spec.validate()
-
-    assert planner.calls == 0
-
-
 @pytest.mark.parametrize("operation_source", [
     "ops",
     "frontend",
@@ -2343,10 +2146,10 @@ def test_default_build_exposes_one_resolved_planning_identity():
     ).build()
 
     assert completed_run.planning.code.distance == 3
-    assert completed_run.window_manager.code is completed_run.planning.code
-    assert completed_run.window_manager.layout is completed_run.planning.layout
     assert completed_run.window_manager.scheme is completed_run.planning.scheme
-    assert completed_run.window_manager.rounds_policy is completed_run.planning.rounds_policy
+    assert not hasattr(completed_run.window_manager, "code")
+    assert not hasattr(completed_run.window_manager, "layout")
+    assert not hasattr(completed_run.window_manager, "rounds_policy")
     assert not hasattr(completed_run.cluster, "planner")
     assert not hasattr(completed_run.cluster, "strategy")
     assert not hasattr(completed_run.cluster, "prepare")
@@ -2402,7 +2205,6 @@ def test_switching_device_must_supply_the_selected_strong_model_capability():
         ("deadline_policy", "DeadlinePolicy"),
         ("scheme", "DecodingScheme"),
         ("rounds_policy", "RoundsPolicy"),
-        ("planner", "ExecutionPlanner"),
         ("idle_policy", "IdlePolicy"),
         ("device", "SyndromeDevice"),
         ("memory_model", "MemoryModel"),

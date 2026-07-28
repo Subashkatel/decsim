@@ -32,9 +32,21 @@ class UniformLayout:
     def code_for_op(self, op: Operation) -> CodeModel:
         return self.code
 
-    def spatial_nodes_for(self, op: Operation) -> int:
-        num_patches = len(op.patches) if op.patches else len(op.qubits)
-        return self.code.spatial_nodes(num_patches)
+    def spatial_nodes_for(
+        self,
+        operation: Operation,
+        *,
+        base_spatial_node_count: int,
+    ) -> int:
+        return base_spatial_node_count
+
+    def patch_spatial_nodes_for(
+        self,
+        patch_identity,
+        *,
+        base_spatial_node_count: int,
+    ) -> int:
+        return base_spatial_node_count
 
     def resources_for(self, op: Operation) -> list:
         """Typed exclusivity claims (v1.0: qubit claims only, parity-safe)."""

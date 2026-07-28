@@ -44,14 +44,20 @@ class WindowedCode:
     def rounds_per_logical_cycle(self):
         return self.d
 
-    def rounds_per_op(self):
-        return self.d
+    def round_period_us(self):
+        return None
 
     def commit_rounds(self):
         return self._commit
 
     def buffer_rounds(self):
         return self._buffer
+
+    def buffering_floor(self):
+        return (self.d, self.d)
+
+    def buffer_floor_override_active(self):
+        return True
 
     def spatial_nodes(self, num_patches):
         return max(1, num_patches) * self.d * self.d

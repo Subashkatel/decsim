@@ -122,8 +122,15 @@ def test_engine_belief_matching_matches_offline():
 
     coords = circuit.get_detector_coordinates()
     folded = {det: min(int(c[-1]) + 1, R) for det, c in coords.items()}
-    plan = [(lo, hi, min(b, R)) for lo, hi, b in
-            SlidingWindowScheme().plan_windows(0, R, SurfaceCodeModel(d=D))]
+    plan = [
+        (window.commit_lo, window.commit_hi, min(window.buffer_hi, R))
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            R,
+            commit_round_count=D,
+            buffer_round_count=D,
+        ).windows
+    ]
     ref_models = build_window_error_models(circuit, plan, detector_rounds=folded,
                                            belief_matching=True)
     ref_inner = belief_matching_window_decoder()

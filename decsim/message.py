@@ -541,9 +541,9 @@ class WindowPlan:
     rounds_by_operation: dict  # op_id -> resolved positive round count
     code_names: dict       # op_id -> exact resolved code name
     total_windows: int
+    windowed_by_operation: dict
+    batch_preceding_idle_rounds_by_operation: dict
     summary: dict = field(default_factory=dict)   # printable planning stats
-    windowed_by_operation: dict = field(default_factory=dict)
-    batch_preceding_idle_rounds_by_operation: dict = field(default_factory=dict)
 
 
 # ------------------------------------------------------ window interaction

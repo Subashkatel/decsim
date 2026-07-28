@@ -212,6 +212,8 @@ def test_naive_batch_decode_label_shows_absorbed_idle_rounds():
                  max_idle_rounds=1000,
              ), verbose=False)
 
-    assert result.cluster.windows[(1, 0)].n_rounds > 27
+    window = result.cluster.windows[(1, 0)]
+    assert window.n_rounds == 27
+    assert window.batched_preceding_idle_round_count > 0
     assert any("T1 [whole op," in line and "idle + 27 body" in line
                for line in result.engine.log_lines)

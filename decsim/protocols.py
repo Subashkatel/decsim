@@ -18,8 +18,9 @@ from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
                     runtime_checkable)
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
-                      DecodeOutcome, DecodeResult, RunSeedChild,
-                      RunSeedReservation, StrongRegionPlan, Window, WindowInfo)
+                      DecodeOutcome, DecodeResult, OperationPlanningView,
+                      ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
+                      StrongRegionPlan, Window, WindowInfo)
 
 
 # ------------------------------------------------------ run seed capabilities
@@ -116,6 +117,26 @@ class DecodingStrategy(Protocol):
     escalate it, hold it). For a weak job, on_decode_outcome runs BEFORE
     the core's commit bookkeeping, so its directive decides whether the
     result is held awaiting a strong redo."""
+
+    def validate_declared_run(
+        self,
+        *,
+        scheme,
+        boundary_policy,
+        has_dynamic_streams: bool,
+        static_decode_plan_selected: bool,
+        has_frontend: bool,
+    ) -> None: ...
+
+    def validate_operations(
+        self,
+        operations: tuple[OperationPlanningView, ...],
+    ) -> None: ...
+
+    def validate_code_geometry(
+        self,
+        geometry: ResolvedCodeGeometry,
+    ) -> None: ...
 
     def on_window_ready(self, window: Window, weak_job: DecodeJob,
                         services: StrategyServices) -> list[Submission]: ...
@@ -432,9 +453,15 @@ class CodeModel(Protocol):
 
     def rounds_per_logical_cycle(self) -> int: ...
 
+    def round_period_us(self) -> Optional[float]: ...
+
     def commit_rounds(self) -> int: ...
 
     def buffer_rounds(self) -> int: ...
+
+    def buffering_floor(self) -> tuple[int, int]: ...
+
+    def buffer_floor_override_active(self) -> bool: ...
 
     def spatial_nodes(self, num_patches: int) -> int: ...
 
@@ -457,7 +484,19 @@ class LayoutModel(Protocol):
 
     def codes(self) -> list: ...
 
-    def spatial_nodes_for(self, op) -> int: ...
+    def spatial_nodes_for(
+        self,
+        operation,
+        *,
+        base_spatial_node_count: int,
+    ) -> int: ...
+
+    def patch_spatial_nodes_for(
+        self,
+        patch_identity,
+        *,
+        base_spatial_node_count: int,
+    ) -> int: ...
 
     def resources_for(self, op) -> list: ...
 
@@ -471,31 +510,23 @@ class RoundsPolicy(Protocol):
 
 @runtime_checkable
 class DecodingScheme(Protocol):
-    """Port 6. The windowing discipline: how an op's rounds split into
-    windows (plan_windows), when a window has all the rounds it needs
-    (data_complete), and whether the code can support the scheme's
-    buffer sizes (validate_buffer)."""
+    """Port 6. Complete static topology plus runtime readiness."""
 
-    def plan_windows(self, op_id: int, round_count: int, code) -> list: ...
+    def plan_operation(
+        self,
+        operation_id: int,
+        round_count: int,
+        *,
+        commit_round_count: int,
+        buffer_round_count: int,
+    ): ...
 
     def data_complete(self, window: Window, *, rounds_arrived: int,
                       successor_rounds: int, memory_rounds: int,
                       round_count: int, has_successor: bool,
-                      op=None, layout=None) -> bool: ...
+                      operation: OperationPlanningView) -> bool: ...
 
-    def validate_buffer(self, code) -> None: ...
-
-
-@runtime_checkable
-class ExecutionPlanner(Protocol):
-    """Port 7. Single owner of windowing resolution: holds scheme + layout +
-    rounds policy and plans a whole workload into a WindowPlan."""
-
-    scheme: DecodingScheme
-    layout: LayoutModel
-    rounds_policy: RoundsPolicy
-
-    def plan(self, ops: list): ...
+    def validate_buffer(self, geometry: ResolvedCodeGeometry) -> None: ...
 
 
 @runtime_checkable

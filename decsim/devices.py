@@ -87,17 +87,31 @@ class TimingOnlyDevice:
 class ClockedDevice:
     """Emit one syndrome round per round-tick per running operation."""
 
-    def __init__(self, engine, device, controller, cluster, rounds_for):
+    def __init__(
+        self,
+        engine,
+        device,
+        controller,
+        cluster,
+        round_count_by_operation_id,
+    ):
         self.engine = engine
         self.device = device            # round_payloads / begin_operation / ...
         self.controller = controller    # relay path (t_qc + t_cd)
         self.cluster = cluster          # on_syndrome_arrival sink
-        self.rounds_for = rounds_for    # op -> total rounds (shared with planner)
+        self._round_count_by_operation_id = dict(
+            round_count_by_operation_id
+        )
 
     def start(self, operation, round_ticks: int,
               on_body_done: Callable) -> None:
         """Begin an operation's stream: round 1 fires one round-tick from now."""
-        total_rounds = self.rounds_for(operation)
+        try:
+            total_rounds = self._round_count_by_operation_id[operation.id]
+        except KeyError as error:
+            raise ValueError(
+                f"operation {operation.id} has no resolved round count"
+            ) from error
         self.device.begin_operation(operation, total_rounds)
         self.engine.schedule(
             round_ticks,

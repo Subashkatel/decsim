@@ -215,7 +215,7 @@ def test_data_complete_overflow_branches():
     scheme = SlidingWindowScheme()
     w = Window(op_id=0, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=9)
     round_count = 6                              # overflow = 9 - 6 = 3
-    common = dict(round_count=round_count, op=None, layout=None)
+    common = dict(round_count=round_count, operation=None)
     # not enough in-op data yet -> False regardless of overflow sources
     assert not scheme.data_complete(w, rounds_arrived=5, successor_rounds=9,
                                     memory_rounds=9, has_successor=True, **common)

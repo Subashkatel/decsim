@@ -13,6 +13,7 @@ long stream of sliding windows. The weak decoder reports low confidence with a f
 (SampledConfidenceDecoder), which sets the switching rate; the strong decoder runs on its own unit
 pool, so StrongDecoderBacklog reads the strong backlog directly.
 """
+import math
 import sys
 import pathlib
 
@@ -26,6 +27,7 @@ from decsim.decoders import (PerRoundDecoder, SampledConfidenceDecoder, Switchin
                              SwitchingRouter, switch_probability_per_round)
 from decsim.devices import TimingOnlyDevice
 from decsim.message import (DecodeJob, DecodeResult, Operation,
+                            ResolvedCodeGeometry,
                             SeamFaultOwner, StrongRegionPlan, Window,
                             WindowInfo)
 from decsim.metrics import DecodeBacklog, StrongDecoderBacklog
@@ -38,6 +40,19 @@ from decsim.window_manager import WindowManager
 
 TAU_GEN_US = 1.0          # syndrome round time
 D = 3
+
+
+def _code_geometry(commit_rounds, buffer_rounds):
+    return ResolvedCodeGeometry(
+        code_name="test",
+        distance=D,
+        commit_round_count=commit_rounds,
+        buffer_round_count=buffer_rounds,
+        minimum_leading_buffer_round_count=D,
+        minimum_trailing_buffer_round_count=D,
+        one_patch_spatial_node_count=D * D,
+        buffer_floor_override_active=True,
+    )
 F_WEAK = 0.1              # weak decode time per round / round time (well inside the keep-up bound)
 F_STRONG = 10             # the paper's tau_strong = 10 * tau_gen
 
@@ -123,9 +138,9 @@ def test_window_size_check(ratio, raises):
     s = Switching(confidence_threshold=0.5, weak_keepup_ratio=ratio)
     if raises:
         with pytest.raises(ValueError):
-            s.check_window_size(D, D)
+            s.validate_code_geometry(_code_geometry(D, D))
     else:
-        s.check_window_size(D, D)
+        s.validate_code_geometry(_code_geometry(D, D))
 
 
 def test_window_size_check_fires_through_the_engine():
@@ -138,10 +153,29 @@ def test_window_size_check_accepts_exact_paper_boundary():
     """Eq. 7 accepts equality. The guard must not reject it because of float roundoff."""
     switching = Switching(confidence_threshold=0.5, weak_keepup_ratio=0.9)
     for buffer_rounds in (3, 5, 7):
-        switching.check_window_size(9 * buffer_rounds, buffer_rounds)
+        switching.validate_code_geometry(
+            _code_geometry(9 * buffer_rounds, buffer_rounds)
+        )
 
     with pytest.raises(ValueError):
-        switching.check_window_size(26, 3)
+        switching.validate_code_geometry(_code_geometry(26, 3))
+
+
+def test_window_size_check_distinguishes_adjacent_floats_at_the_boundary():
+    boundary = D / (D + D)
+    Switching(
+        confidence_threshold=0.5,
+        weak_keepup_ratio=boundary,
+    ).validate_code_geometry(_code_geometry(D, D))
+    Switching(
+        confidence_threshold=0.5,
+        weak_keepup_ratio=math.nextafter(boundary, 0.0),
+    ).validate_code_geometry(_code_geometry(D, D))
+    with pytest.raises(ValueError):
+        Switching(
+            confidence_threshold=0.5,
+            weak_keepup_ratio=math.nextafter(boundary, 1.0),
+        ).validate_code_geometry(_code_geometry(D, D))
 
 
 def test_weak_keepup_ratio_must_be_below_one():
@@ -152,8 +186,17 @@ def test_weak_keepup_ratio_must_be_below_one():
 
 def test_strong_reprocess_region_is_commit_plus_two_buffers():
     """The strong decoder reprocesses commit + 2*buffer = 3d rounds for the standard d/d window."""
-    commit_lo, commit_hi, buffer_hi = SlidingWindowScheme().plan_windows(
-        0, 4 * D, SurfaceCodeModel(d=D))[0]
+    geometry = SlidingWindowScheme().plan_operation(
+        0,
+        4 * D,
+        commit_round_count=D,
+        buffer_round_count=D,
+    ).windows[0]
+    commit_lo, commit_hi, buffer_hi = (
+        geometry.commit_lo,
+        geometry.commit_hi,
+        geometry.buffer_hi,
+    )
     w = Window(op_id=0, k=0, commit_lo=commit_lo, commit_hi=commit_hi,
                buffer_hi=buffer_hi, n_rounds=buffer_hi - commit_lo + 1)
     assert Switching(confidence_threshold=0.5).strong_redo_rounds(w) == 3 * D
@@ -464,7 +507,17 @@ def test_commit_buffer_override_sizes_the_window_and_strong_redo():
     commit + 2*buffer = 9 rounds."""
     code = SurfaceCodeModel(d=3, commit_rounds_override=5, buffer_rounds_override=2)
     assert (code.commit_rounds(), code.buffer_rounds()) == (5, 2)
-    commit_lo, commit_hi, buffer_hi = SlidingWindowScheme().plan_windows(0, 20, code)[0]
+    geometry = SlidingWindowScheme().plan_operation(
+        0,
+        20,
+        commit_round_count=code.commit_rounds(),
+        buffer_round_count=code.buffer_rounds(),
+    ).windows[0]
+    commit_lo, commit_hi, buffer_hi = (
+        geometry.commit_lo,
+        geometry.commit_hi,
+        geometry.buffer_hi,
+    )
     assert (commit_lo, commit_hi, buffer_hi) == (1, 5, 7)
     w = Window(op_id=0, k=0, commit_lo=commit_lo, commit_hi=commit_hi,
                buffer_hi=buffer_hi, n_rounds=buffer_hi - commit_lo + 1)
@@ -957,7 +1010,9 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
         make_metrics=lambda e, c, ch, fa: env.update(engine=e) or [],
     ), verbose=False)
     runtime = res.cluster.window_manager
-    assert (runtime.commit, runtime.buffer) == (2, 3)   # r_com != r_buf
+    commit = runtime._code_geometry.commit_round_count
+    buffer = runtime._code_geometry.buffer_round_count
+    assert (commit, buffer) == (2, 3)   # r_com != r_buf
 
     (_, slab), = strong.starts
     restart_key = runtime.window_interaction.plan_strong_region(
@@ -965,20 +1020,20 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
         [WindowInfo.from_window(runtime.windows[(0, k)])
          for k in runtime.op_windows[0] if k > 2],
         Switching.strong_redo_rounds(runtime.windows[(0, 2)]),
-        30, runtime.buffer,
+        30, buffer,
     ).restart_window_key
     restart_job = next(job for _, job in weak.starts
                        if (0, job.window_id) == restart_key)
 
     # r_buf + r_com + r_buf = 3 + 2 + 3, NOT 3 * r_com = 6
     assert restart_job.n_rounds == 8
-    assert restart_job.n_rounds != 3 * runtime.commit
+    assert restart_job.n_rounds != 3 * commit
     assert len({p.round_index for p in restart_job.payloads}) == 8
 
     # and the slab is still priced for its whole context, r_strong + 2*r_buf
     commit_extent = slab.window.commit_hi - slab.window.commit_lo + 1
-    assert commit_extent == runtime.commit + 2 * runtime.buffer   # 8
-    assert slab.n_rounds == commit_extent + 2 * runtime.buffer    # 14
+    assert commit_extent == commit + 2 * buffer   # 8
+    assert slab.n_rounds == commit_extent + 2 * buffer    # 14
     assert slab.n_rounds != commit_extent
 
 
@@ -996,7 +1051,10 @@ def test_double_window_restart_pricing_is_not_the_geometry_constant():
     restart_job = next(job for _, job in weak.starts
                        if job.window_id == restart.k)
 
-    geometry_constant = runtime.commit + 2 * runtime.buffer
+    geometry_constant = (
+        runtime._code_geometry.commit_round_count
+        + 2 * runtime._code_geometry.buffer_round_count
+    )
     assert restart.buffer_hi - restart.buffer_lo + 1 != geometry_constant
     assert restart_job.n_rounds == restart.buffer_hi - restart.buffer_lo + 1
     assert restart_job.n_rounds != geometry_constant
@@ -1201,7 +1259,7 @@ def test_double_window_rejects_unsupported_runspec_shapes():
     with pytest.raises(ValueError, match="Held"):
         RunSpec(ops=[_memory_op()], scheme=SlidingWindowScheme(),
                 boundary_policy=Held(), **base).validate()
-    with pytest.raises(ValueError, match="parallel"):
+    with pytest.raises(ValueError, match="SlidingWindowScheme"):
         RunSpec(ops=[_memory_op()], scheme=ParallelWindowScheme(),
                 **base).validate()
     with pytest.raises(ValueError, match="dynamic_streams"):

@@ -7,8 +7,7 @@ from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.layouts import UniformLayout
 from decsim.message import Operation, OperationWindowPlan, WindowGeometry
-from decsim.planner import WindowPlanner
-from decsim.planner import PerOpRounds
+from decsim.planner import PerOpRounds, _plan_static_operations
 from decsim.schemes import (
     NaiveOnlineScheme,
     ParallelWindowScheme,
@@ -79,8 +78,17 @@ def test_typed_scheme_ledgers_pin_mode_idle_policy_and_parallel_boundaries():
 
 
 def _plan(scheme, ops, rounds_per_op, d=3):
-    planner = WindowPlanner(scheme, UniformLayout(SurfaceCodeModel(d=d)), rounds_per_op)
-    return planner.plan(ops)
+    rounds_policy = (
+        rounds_per_op
+        if hasattr(rounds_per_op, "rounds_for")
+        else FixedRounds(rounds_per_op)
+    )
+    return _plan_static_operations(
+        scheme,
+        UniformLayout(SurfaceCodeModel(d=d)),
+        rounds_policy,
+        ops,
+    )
 
 
 def _max_window_depth(plan):
@@ -101,9 +109,13 @@ def _timing_stream_plan(segment_rounds, d=3):
     code = SurfaceCodeModel(d=d)
     segments, stream_op, rounds_map = continuous_stream(None, segment_rounds,
                                                         patch=0, base_id=0)
-    planner = WindowPlanner(ParallelWindowScheme(), UniformLayout(code),
-                            PerOpRounds(rounds_map))
-    return planner.plan([stream_op]), segments, stream_op, rounds_map
+    plan = _plan_static_operations(
+        ParallelWindowScheme(),
+        UniformLayout(code),
+        PerOpRounds(rounds_map),
+        [stream_op],
+    )
+    return plan, segments, stream_op, rounds_map
 
 
 # ---- structural: the default chain is unchanged by the seam refactor ----------------
@@ -164,7 +176,7 @@ def test_parallel_scheme_tail_window():
 def test_parallel_stream_bounds_depth_across_short_scheduled_ops():
     """DecLat/Skoric parallel windows are global over a decode stream, not reset at every
     short scheduled operation. The clean path is therefore to plan one stream op whose rounds are
-    emitted by several segment ops; the ordinary WindowPlanner then gives O(1) A/B depth."""
+    emitted by several segment ops; static materialization then gives O(1) A/B depth."""
     d = 3
     plan, _segments, stream_op, _rounds_map = _timing_stream_plan([d] * 32, d=d)
 
@@ -181,7 +193,7 @@ def test_parallel_stream_bounds_depth_across_short_scheduled_ops():
 def test_timing_only_stream_runs_through_normal_parallel_scheme():
     """Timing-only and real-syndrome streams use the same runtime path. The device emits empty
     payloads, but they are tagged to the stream id/global round and decoded by the normal
-    WindowPlanner + ParallelWindowScheme path."""
+    static-plan + ParallelWindowScheme path."""
     d = 3
     plan, segments, stream_op, rounds_map = _timing_stream_plan([6, 6, 6], d=d)
     res = simulate(RunSpec(

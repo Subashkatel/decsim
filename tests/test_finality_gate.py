@@ -144,15 +144,28 @@ def test_dynamic_window_created_during_held_boundary_still_depends_on_it():
     AFTER its predecessor weak-committed under a deferred (Held) boundary —
     strong redo still pending — must register the dependency and wait for
     the held handoff, not decode defect-free in the gap."""
-    from decsim.codes import SurfaceCodeModel
-    from decsim.message import Operation as Op
+    from decsim.message import (
+        Operation as Op,
+        ResolvedOperationPlanning,
+    )
 
     completed_run = RunSpec(ops=[Op(9, "M:mem(q9)", (9,), clifford=True)], d=3,
                     rounds_policy=FixedRounds(11),
                     num_units=1, decoder=PerRoundDecoder(0.2)).build()
     wm = completed_run.window_manager
     stream_op = Op(0, "S:stream(q0)", (0,), clifford=True)
-    wm.register_dynamic_stream(stream_op, SurfaceCodeModel(d=3))
+    resolved = ResolvedOperationPlanning(
+        operation_id=stream_op.id,
+        code_geometry=wm._code_geometry,
+        round_count=3,
+        round_ticks=1,
+        spatial_node_count=9,
+    )
+    wm._resolved_operations = {
+        **wm._resolved_operations,
+        stream_op.id: resolved,
+    }
+    wm._register_dynamic_stream(stream_op, resolved)
 
     wm.create_dynamic_window(0, 0, 1, 3, 6, is_last=False)
     # W0 weak-commits while its strong redo is pending: committed, boundary HELD

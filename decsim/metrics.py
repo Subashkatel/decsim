@@ -356,6 +356,9 @@ class StrongDecoderBacklog:
             raise TypeError("pool must be a nonempty built-in str")
         self.cluster = cluster
         self.pool = pool
+        self._nominal_window_redo_round_count = (
+            cluster.nominal_window_redo_round_count
+        )
         self.peak_jobs = 0
         self._t = 0
         self._area = 0.0
@@ -363,11 +366,20 @@ class StrongDecoderBacklog:
         self.trace = []
 
     def run_manifest_config(self):
-        return {"pool": self.pool}
+        return {
+            "pool": self.pool,
+            "nominal_window_redo_round_count": (
+                self._nominal_window_redo_round_count
+            ),
+        }
 
     def observe(self, engine: "Engine") -> None:
         """Sample outstanding strong work and update peak, average, and trace."""
-        view = strong_pool_view(self.cluster, self.pool)
+        view = strong_pool_view(
+            self.cluster,
+            self.pool,
+            self._nominal_window_redo_round_count,
+        )
         self._area += self._last * (engine.now - self._t)
         self._t = engine.now
         self._last = view.queued_jobs + view.busy_units
@@ -385,13 +397,17 @@ class StrongDecoderBacklog:
         a bulk batch differs again. Theorem 1 of arXiv:2510.25222 bounds
         tau_strong against unprocessed rounds of decoder INPUT, so this series
         may not be published as that quantity."""
-        per_job = strong_pool_view(self.cluster, self.pool).redo_rounds
+        per_job = self._nominal_window_redo_round_count
         return [{"t": time_ticks, "jobs": jobs, "rounds": jobs * per_job}
                 for time_ticks, jobs in self.trace]
 
     def result(self) -> dict:
         """Peak and time-average outstanding strong jobs."""
-        view = strong_pool_view(self.cluster, self.pool)
+        view = strong_pool_view(
+            self.cluster,
+            self.pool,
+            self._nominal_window_redo_round_count,
+        )
         return {"peak_jobs": self.peak_jobs,
                 "time_avg_jobs": (self._area / self._t if self._t else 0.0),
                 "strong_needed": view.strong_needed}

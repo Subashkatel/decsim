@@ -210,17 +210,16 @@ def test_A4_confident_weak_never_escalates():
 
 def test_A4_strong_redo_size_is_commit_plus_two_buffers():
     """A4: the strong re-decode covers Switching.strong_redo_rounds(window) =
-    commit + 2*buffer (= 3d when commit=buffer=d). Cross-check the policy's own formula against
-    the public cluster geometry (commit / buffer) the run used."""
+    commit + 2*buffer (= 3d when commit=buffer=d). Cross-check the policy's
+    formula against one frozen runtime window and the explicit nominal scalar."""
     res = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=60)
     c = res.cluster
-    assert (c.commit, c.buffer) == (D, D)             # default sliding scheme
-    # Reconstruct the policy's redo size from the cluster's committed geometry and confirm 3d.
-    from decsim.message import Window
-    w = Window(op_id=0, k=0, commit_lo=1, commit_hi=c.commit,
-               buffer_hi=c.commit + c.buffer, n_rounds=c.commit + c.buffer)
+    w = c.windows[(0, 0)]
+    commit = w.commit_hi - w.commit_lo + 1
+    trailing_buffer = w.buffer_hi - w.commit_hi
+    assert (commit, trailing_buffer) == (D, D)
     redo = Switching(confidence_threshold=0.5).strong_redo_rounds(w)
-    assert redo == c.commit + 2 * c.buffer == 3 * D
+    assert redo == c.nominal_window_redo_round_count == 3 * D
 
 
 # =====================================================================================

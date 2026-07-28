@@ -2,7 +2,13 @@
 import pytest
 
 from decsim.engine import Engine
-from decsim.message import DecodeJob, DecodeOutcome, DecodeResult, Window
+from decsim.message import (
+    DecodeJob,
+    DecodeOutcome,
+    DecodeResult,
+    ResolvedCodeGeometry,
+    Window,
+)
 from decsim.decoder_manager import StrategyServicesImpl, DecoderManager
 from decsim.protocols import Directive, Submission
 from decsim.switching import Baseline, Switching
@@ -152,7 +158,18 @@ def test_switching_config_validation():
     with pytest.raises(ValueError):
         Switching(0.5, run_both_at_once=True, bulk_strong=True)
     with pytest.raises(ValueError):
-        Switching(0.5, weak_keepup_ratio=0.9).check_window_size(3, 3)
+        Switching(0.5, weak_keepup_ratio=0.9).validate_code_geometry(
+            ResolvedCodeGeometry(
+                code_name="test",
+                distance=3,
+                commit_round_count=3,
+                buffer_round_count=3,
+                minimum_leading_buffer_round_count=3,
+                minimum_trailing_buffer_round_count=3,
+                one_patch_spatial_node_count=9,
+                buffer_floor_override_active=True,
+            )
+        )
 
 
 def test_pool_validation():

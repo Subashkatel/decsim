@@ -25,7 +25,7 @@ from decsim.message import Operation
 from decsim.metrics import (DecodeBacklog, DecoderUtilization, ReadyQueueStats,
                             StrongDecoderBacklog)
 from decsim.run_spec import RunSpec
-from decsim.planner import (CodeRounds, WindowPlanner, FixedRounds,
+from decsim.planner import (CodeRounds, FixedRounds,
                            GateRounds, PerOpRounds, TemporalRounds)
 from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
                                FifoScheduler, ReactionPathDeadline)
@@ -64,16 +64,15 @@ def completed_run():
 # CONFORMANCE: shipped implementations satisfy their Protocols
 #==================================================================
 
-def test_wired_world_parts_satisfy_their_ports(completed_run):
+def test_wired_completed_run_parts_satisfy_their_ports(completed_run):
     checks = [
         (completed_run.window_manager.scheme, protocols.DecodingScheme),          # port 6
-        (completed_run.window_manager.layout, protocols.LayoutModel),                # port 4
-        (completed_run.window_manager.rounds_policy, protocols.RoundsPolicy),   # port 5
+        (completed_run.planning.layout, protocols.LayoutModel),                # port 4
+        (completed_run.planning.rounds_policy, protocols.RoundsPolicy),   # port 5
         (completed_run.window_manager.deadline_policy, protocols.DeadlinePolicy),  # port 13
         (completed_run.window_manager.boundary_policy, protocols.BoundaryPolicy),  # port 16
         (completed_run.window_manager.window_interaction,
          protocols.WindowInteraction),                         # port 21
-        (completed_run.planning.planner, protocols.ExecutionPlanner),     # port 7
         (completed_run.pool, protocols.ResourcePool),                    # port 12
         (completed_run.pool.scheduler, protocols.Scheduler),             # port 11
         (completed_run.chip.idle_policy, protocols.IdlePolicy),          # port 17
@@ -87,8 +86,7 @@ def test_wired_world_parts_satisfy_their_ports(completed_run):
     for part, port in checks:
         assert isinstance(part, port), \
             f"{type(part).__name__} does not satisfy {port.__name__}"
-    assert completed_run.planning.code.buffering_floor(
-        completed_run.window_manager.scheme)  # port 3 (Code)
+    assert completed_run.planning.code.buffering_floor()  # port 3 (Code)
 
 
 def test_every_shipped_part_family_satisfies_its_port():
@@ -103,8 +101,6 @@ def test_every_shipped_part_family_satisfies_its_port():
                              TemporalRounds(d_m=3)],                 # port 5
         protocols.DecodingScheme: [SlidingWindowScheme(), NaiveOnlineScheme(),
                              ParallelWindowScheme()],                # port 6
-        protocols.ExecutionPlanner: [WindowPlanner(
-            SlidingWindowScheme(), UniformLayout(code), GateRounds())],  # 7
         protocols.Decoder: [PerRoundDecoder(0.5), PresetLatencyDecoder(1.0),
                         SampledConfidenceDecoder(PerRoundDecoder(1.0), 0.5)],  # 8
         protocols.DecodingStrategy: [Baseline(),
@@ -148,7 +144,10 @@ def test_strong_backlog_pool_is_an_exact_nonempty_string(
 def test_strong_backlog_declares_its_selected_pool(completed_run):
     metric = StrongDecoderBacklog(completed_run.cluster, pool="alternate")
 
-    assert metric.run_manifest_config() == {"pool": "alternate"}
+    assert metric.run_manifest_config() == {
+        "pool": "alternate",
+        "nominal_window_redo_round_count": 9,
+    }
 
 
 def test_factories_conform_and_smoke(completed_run):
@@ -195,8 +194,8 @@ def _resolved_types(completed_run):
     """The types of every resolved part in a built completed_run."""
     return {
         "scheme": type(completed_run.window_manager.scheme),
-        "layout": type(completed_run.window_manager.layout),
-        "rounds": type(completed_run.window_manager.rounds_policy),
+        "layout": type(completed_run.planning.layout),
+        "rounds": type(completed_run.planning.rounds_policy),
         "deadline": type(completed_run.window_manager.deadline_policy),
         "boundary": type(completed_run.window_manager.boundary_policy),
         "window_interaction": type(completed_run.window_manager.window_interaction),

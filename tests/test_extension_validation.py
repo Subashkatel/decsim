@@ -7,6 +7,7 @@ from decsim.decoders import PerRoundDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.codes import SurfaceCodeModel
 from decsim.engine import Engine
+from decsim.frontends.circuit import CircuitFrontend, SurgeryIRFrontend
 from decsim.layouts import UniformLayout
 from decsim.message import DecodeResult, Operation, RunSeedReservation
 from decsim.metrics import (
@@ -1464,6 +1465,33 @@ def test_every_shipped_runtime_metric_declares_effective_configuration():
         component["configuration_status"] == "declared"
         for component in metric_components.values()
     )
+
+
+@pytest.mark.parametrize(
+    ("frontend", "expected"),
+    [
+        (CircuitFrontend([]), {"kind": "operation_list"}),
+        (SurgeryIRFrontend(""), {"kind": "surgery_ir"}),
+    ],
+)
+def test_shipped_frontends_declare_their_transform_configuration(
+    frontend,
+    expected,
+):
+    completed = RunSpec(
+        frontend=frontend,
+        decoder=StaticDecoder(),
+    ).build()
+    frontend_component = next(
+        component
+        for component in completed.manifest.to_json_value()["components"]
+        if component["component_path"] == [
+            {"kind": "field", "value": "frontend"},
+        ]
+    )
+
+    assert frontend_component["configuration"] == expected
+    assert frontend_component["configuration_status"] == "declared"
 
 
 def test_manifest_records_the_exact_fixed_composition_anchors():

@@ -55,10 +55,10 @@ def test_metric_numbers_feedback_circuit():
                            decoder=PerRoundDecoder(3.0), num_units=1,
                            make_metrics=_full_metrics))
     # the run exercised the reaction path (release recorded, waits non-zero)
-    reaction = res["metrics"]["conditional_reaction_time"]
+    reaction = res.result.metric_values()["conditional_reaction_time"]
     assert reaction["released_conditionals"] == 1
     assert reaction["max_wait_rounds"] > 0
-    assert res["metrics"]["backlog_trajectory"]["n"] == 1
+    assert res.result.metric_values()["backlog_trajectory"]["n"] == 1
 
 
 def test_metric_numbers_switching_pools():
@@ -71,7 +71,7 @@ def test_metric_numbers_switching_pools():
                            strategy=Switching(confidence_threshold=0.5),
                            make_metrics=_switch_metrics,
                            seed=SEED))
-    assert res["metrics"]["strong_backlog"]["peak_jobs"] >= 1
+    assert res.result.metric_values()["strong_backlog"]["peak_jobs"] >= 1
 
 
 #==================================================================
@@ -97,9 +97,9 @@ def test_reaction_view_populated_by_real_run():
     res = simulate(RunSpec(ops=t_then_blocked_t(), d=3,
                            rounds_policy=FixedRounds(11),
                            decoder=PerRoundDecoder(3.0), num_units=1))
-    view = reaction_view(res["chip"])
-    assert view.chip_done == res["chip_done"]
-    assert view.fully_done == res["fully_done"]
+    view = reaction_view(res.chip)
+    assert view.chip_done == res.result.chip_done_ticks
+    assert view.fully_done == res.result.fully_done_ticks
     body_done = dict(view.body_done_time)
     released = dict(view.decode_release_time)
     assert set(body_done) == {0, 1}
@@ -123,7 +123,7 @@ def test_backlog_window_truth_strong_views_populated_by_real_run():
                            unit_pools={"default": 1, "strong": 1},
                            make_metrics=with_strong,
                            seed=SEED))
-    cluster = res["cluster"]
+    cluster = res.cluster
 
     util = utilization_view(cluster)
     assert util.total_units == 2 and util.busy_units == 0     # end of run: idle
@@ -176,5 +176,5 @@ def test_utilization_metric_reproduces_hand_computed_number():
 def test_runspec_default_resolves_gate_rounds():
     spec = RunSpec(ops=t_then_blocked_t(), decoder=PerRoundDecoder(0.5))
     assert spec.rounds_policy is None          # RunSpec resolves in build()
-    world = spec.build()
-    assert isinstance(world.window_manager.rounds_policy, GateRounds)
+    completed_run = spec.build()
+    assert isinstance(completed_run.window_manager.rounds_policy, GateRounds)

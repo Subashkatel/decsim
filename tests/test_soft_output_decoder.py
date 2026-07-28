@@ -48,7 +48,7 @@ def _naive_shot(circuit, device, decoder, d, rounds, *, seed):
               decoder=decoder,
               seed=seed,
           ), verbose=False)
-    return res["cluster"].op_results[1]
+    return res.cluster.op_results[1]
 
 
 class _Capturing(SoftOutputDecoder):

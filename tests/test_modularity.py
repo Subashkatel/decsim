@@ -190,14 +190,14 @@ def test_every_seam_accepts_a_from_scratch_implementation():
             make_metrics=lambda e, cl, ch, f: [metric],
         ), verbose=False)
     factory = built_factories[0]
-    chip = r["chip"]
+    chip = r.chip
     assert len(chip.done_bodies) == 3          # all ops ran, including the blocked T
     assert decoder.decodes >= 3                # the custom decoder decoded every window
     assert router.calls >= 3                   # routed per job
     assert factory.requests == 2               # both T gates drew a state
     assert metric.count > 0                    # the custom metric observed events
     assert orchestrator.integrated == 3        # the custom orchestrator saw every result
-    assert r["fully_done"] > r["chip_done"] >= 0
+    assert r.result.fully_done_ticks > r.result.chip_done_ticks >= 0
 
 
 def test_planner_parameter_swaps_the_planning_algorithm():
@@ -221,6 +221,6 @@ def test_planner_parameter_swaps_the_planning_algorithm():
             decoder=PerRoundDecoder(tau_us=1.0),
         ), verbose=False)
     assert planner.calls == 1                  # OUR planner produced the plan
-    assert r["cluster"].planner is planner
-    assert r["cluster"].scheme is planner.scheme
-    assert r["fully_done"] > 0
+    assert r.cluster.planner is planner
+    assert r.cluster.scheme is planner.scheme
+    assert r.result.fully_done_ticks > 0

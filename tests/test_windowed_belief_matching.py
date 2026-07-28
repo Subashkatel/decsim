@@ -142,7 +142,7 @@ def test_engine_belief_matching_matches_offline():
                   make_controller=_zero_links,
                   seed=17 + s,
               ), verbose=False)
-        pred_engine = res["cluster"].op_results[1]
+        pred_engine = res.cluster.op_results[1]
         pred_offline = int(decode_windowed(ref_models, device._dets[1], ref_inner)[0])
         assert pred_engine == (pred_offline,), \
             f"shot {s}: engine {pred_engine} != offline {pred_offline}"

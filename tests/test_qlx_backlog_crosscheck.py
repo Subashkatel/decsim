@@ -69,8 +69,8 @@ def _run(latency_us, rounds):
               make_controller=_zero_link_controller,
               make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl)],
           ), verbose=False)
-    drain_rounds = (res["fully_done"] - res["chip_done"]) / us(ROUND_US)
-    peak = res["metrics"]["decode_backlog"]["peak_rounds"]
+    drain_rounds = (res.result.fully_done_ticks - res.result.chip_done_ticks) / us(ROUND_US)
+    peak = res.result.metric_values()["decode_backlog"]["peak_rounds"]
     return drain_rounds, peak
 
 

@@ -35,7 +35,7 @@ def _run(ops):
                            num_units=2,
                            decoder=PresetLatencyDecoder(1.0),
                            memory_model=model))
-    return res["cluster"], model
+    return res.cluster, model
 
 
 def test_peak_payloads_matches_brute_force_recount():
@@ -85,7 +85,7 @@ def test_per_window_release_holds_only_the_live_set():
                   code=SurfaceCodeModel(d=3),
                   make_controller=_links,
               ), verbose=False)
-        c = res["cluster"]
+        c = res.cluster
         assert c.payloads_held == 0            # drains fully
         return c.peak_payloads
 

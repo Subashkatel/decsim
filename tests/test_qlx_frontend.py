@@ -119,9 +119,9 @@ def test_end_to_end_timing_run_through_the_engine(program):
               round_us=1.0,
               decoder=PerRoundDecoder(tau_us=1.0),
           ), verbose=False)
-    assert res["chip_done"] >= 120 * 1_000_000   # >= the 120-round distill
-    assert res["fully_done"] >= res["chip_done"]
-    cluster = res["cluster"]
+    assert res.result.chip_done_ticks >= 120 * 1_000_000   # >= the 120-round distill
+    assert res.result.fully_done_ticks >= res.result.chip_done_ticks
+    cluster = res.cluster
     assert len(cluster.committed_windows) == cluster.total_windows, \
         "not every QLX-derived window was decoded and committed"
 
@@ -230,7 +230,7 @@ def test_timing_cross_validation_against_real_qlx_schedules(path):
               round_us=1.0,
               decoder=PerRoundDecoder(tau_us=1.0),
           ), verbose=False)
-    decsim_rounds = res["chip_done"] / 1_000_000
+    decsim_rounds = res.result.chip_done_ticks / 1_000_000
     reference = _critical_path_rounds(prog)
     assert decsim_rounds == reference, \
         f"decsim {decsim_rounds} != independent critical path {reference}"

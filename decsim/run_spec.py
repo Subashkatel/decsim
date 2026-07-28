@@ -2,10 +2,10 @@
 
 The one core module allowed to import part implementations — that is its
 job: every field picks one implementation per seam, and ``RunSpec.build()``
-wires them into a runnable World in a fixed order (the frozen timing
-goldens depend on that order). Experiment code still never appears here;
-experiments hand a RunSpec pre-built objects. ``simulate(run)`` (below)
-then drives the result.
+wires and executes one atomic ``CompletedRun`` in a fixed order (the frozen
+timing goldens depend on that order). Experiment code still never appears
+here; experiments hand a RunSpec pre-built objects. ``simulate(run)`` delegates
+to the same completed boundary.
 
 Defaults: sliding window + Baseline strategy + Eager boundaries +
 GateRounds + InfiniteFactory.
@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import inspect
+import json
+import math
 from numbers import Integral
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -80,6 +82,144 @@ class _RunSeedPlanEntry:
     component_path: tuple[RunSeedPathSegment, ...]
     component: Any
     derived_seed: Optional[int]
+
+
+@dataclass(frozen=True)
+class LogicalOperationResult:
+    """One operation's immutable logical-output disposition."""
+
+    operation_id: int
+    result_status: str
+    logical_observables: Optional[tuple[int, ...]]
+
+
+@dataclass(frozen=True)
+class MetricResultRecord:
+    """One validated metric value in declared observation order."""
+
+    name: str
+    canonical_value_json: bytes
+
+    def value(self):
+        """Return a fresh JSON-compatible metric value."""
+        return json.loads(self.canonical_value_json)
+
+
+@dataclass(frozen=True)
+class PrimaryRunResult:
+    """The immutable scientific result of one completed primary drain."""
+
+    schema_version: int
+    terminal_status: str
+    event_queue_empty: bool
+    decode_work_settled: bool
+    chip_workload_complete: bool
+    chip_done_ticks: int
+    fully_done_ticks: int
+    operation_results: tuple[LogicalOperationResult, ...]
+    metric_results: tuple[MetricResultRecord, ...]
+
+    def logical_results(self) -> dict[int, tuple[int, ...]]:
+        """Return logical outputs without conflating absence and empty output."""
+        return {
+            record.operation_id: record.logical_observables
+            for record in self.operation_results
+            if record.result_status == "logical_observables"
+        }
+
+    def metric_values(self) -> dict[str, Any]:
+        """Return fresh decoded metric values keyed by their unique names."""
+        return {
+            record.name: record.value()
+            for record in self.metric_results
+        }
+
+    def to_json_value(self) -> dict:
+        """Return the closed primary-result schema as fresh JSON values."""
+        return {
+            "schema_version": self.schema_version,
+            "terminal_status": self.terminal_status,
+            "event_queue_empty": self.event_queue_empty,
+            "decode_work_settled": self.decode_work_settled,
+            "chip_workload_complete": self.chip_workload_complete,
+            "chip_done_ticks": self.chip_done_ticks,
+            "fully_done_ticks": self.fully_done_ticks,
+            "operation_results": [
+                {
+                    "operation_id": record.operation_id,
+                    "result_status": record.result_status,
+                    "logical_observables": (
+                        None
+                        if record.logical_observables is None
+                        else list(record.logical_observables)
+                    ),
+                }
+                for record in self.operation_results
+            ],
+            "metric_results": [
+                {
+                    "name": record.name,
+                    "value": record.value(),
+                }
+                for record in self.metric_results
+            ],
+        }
+
+    def canonical_json_bytes(self) -> bytes:
+        """Encode the primary result with the one canonical JSON policy."""
+        return json.dumps(
+            self.to_json_value(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+
+
+@dataclass(frozen=True)
+class ResolvedSeedBinding:
+    """One canonical stochastic owner and its effective seed source."""
+
+    component_path: tuple[RunSeedPathSegment, ...]
+    seed_source: str
+    seed: Optional[int]
+
+
+@dataclass(frozen=True)
+class ResolvedRunManifest:
+    """Immutable seed and result provenance for a completed run."""
+
+    schema_version: int
+    root_seed: Optional[int]
+    seed_bindings: tuple[ResolvedSeedBinding, ...]
+    primary_result_sha256: str
+
+    def to_json_value(self) -> dict:
+        return {
+            "schema_version": self.schema_version,
+            "root_seed": self.root_seed,
+            "seed_bindings": [
+                {
+                    "component_path": [
+                        {"kind": segment.kind, "value": segment.value}
+                        for segment in binding.component_path
+                    ],
+                    "seed_source": binding.seed_source,
+                    "seed": binding.seed,
+                }
+                for binding in self.seed_bindings
+            ],
+            "primary_result_sha256": self.primary_result_sha256,
+        }
+
+    def to_json(self) -> str:
+        return json.dumps(
+            self.to_json_value(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
 
 
 @dataclass
@@ -449,8 +589,8 @@ class RunSpec:
 
     # ---------------------------------------------------------------- build
 
-    def build(self, verbose: bool = False) -> "World":
-        """Construct one runtime graph and bind every declared RNG owner."""
+    def build(self, verbose: bool = False) -> "CompletedRun":
+        """Construct, execute, and freeze one complete primary run."""
         if self._build_state != "unstarted":
             raise RuntimeError(
                 f"RunSpec build is already {self._build_state}; "
@@ -458,14 +598,14 @@ class RunSpec:
             )
         self._build_state = "committing"
         try:
-            world = self._build_once(verbose=verbose)
+            completed_run = self._build_once(verbose=verbose)
         except BaseException:
             self._build_state = "invalid"
             raise
-        self._build_state = "ready"
-        return world
+        self._build_state = "complete"
+        return completed_run
 
-    def _build_once(self, verbose: bool = False) -> "World":
+    def _build_once(self, verbose: bool = False) -> "CompletedRun":
         """Construct and wire every component in the canonical order."""
         planning = self._validate_configuration()
         from .policies import Eager
@@ -630,28 +770,62 @@ class RunSpec:
             seed_roots,
             self._validated_root_seed(),
         )
-        _bind_run_seed_plan(seed_plan)
+        reservations = _bind_run_seed_plan(seed_plan)
+        seed_bindings = tuple(
+            ResolvedSeedBinding(
+                component_path=entry.component_path,
+                seed_source=reservation.proposed_seed_source,
+                seed=reservation.proposed_seed,
+            )
+            for entry, reservation in zip(seed_plan, reservations)
+        )
 
-        orchestrator.connect(controller, gate.on_decision)
-        window_manager.on_workload_complete = factory.shutdown
-        for op in ops:
-            if op.blocked_by is not None:
-                orchestrator.register_blocked_operation(op.id, op.blocked_by)
-        # Parity ordering (wiring.py): plan + load BEFORE dynamic streams
-        # (prepare_execution ran before _register_dynamic_streams).
-        cluster.prepare(ops)
-        for stream in (self.dynamic_streams or []):
-            window_manager.register_dynamic_stream(stream, planning.code)
-        for metric in metrics:
-            engine.add_metric(metric)
-        engine._finish_construction()
+        try:
+            orchestrator.connect(controller, gate.on_decision)
+            window_manager.on_workload_complete = factory.shutdown
+            for op in ops:
+                if op.blocked_by is not None:
+                    orchestrator.register_blocked_operation(
+                        op.id,
+                        op.blocked_by,
+                    )
+            cluster.prepare(ops)
+            for stream in (self.dynamic_streams or []):
+                window_manager.register_dynamic_stream(stream, planning.code)
+            for metric in metrics:
+                engine.add_metric(metric)
+            gate.load(ops)
+            engine._start_running()
+            engine.run()
+            pool.check_decode_work_settled()
+            engine._begin_finalization()
+            result = _capture_primary_run_result(
+                engine=engine,
+                gate=gate,
+                window_manager=window_manager,
+                operations=all_operations,
+                metrics=metrics,
+            )
+            manifest = ResolvedRunManifest(
+                schema_version=1,
+                root_seed=self._validated_root_seed(),
+                seed_bindings=seed_bindings,
+                primary_result_sha256=hashlib.sha256(
+                    result.canonical_json_bytes(),
+                ).hexdigest(),
+            )
+            engine._complete()
+        except BaseException:
+            engine._invalidate()
+            raise
 
-        return World(
+        return CompletedRun(
+            result=result,
+            manifest=manifest,
             engine=engine,
-            ops=ops,
             window_manager=window_manager,
             pool=pool,
-            gate=gate,
+            chip=gate,
             orchestrator=orchestrator,
             factory=factory,
             controller=controller,
@@ -1262,15 +1436,16 @@ class ClusterFacade:
         return self.pool.strong_cancelled
 
 
-@dataclass
-class World:
-    """A fully-wired simulator, ready for simulate() to drive."""
+@dataclass(frozen=True)
+class CompletedRun:
+    """One completed run with immutable result and provenance records."""
 
+    result: PrimaryRunResult
+    manifest: ResolvedRunManifest
     engine: Any
-    ops: list
     window_manager: Any
     pool: Any
-    gate: Any
+    chip: Any
     orchestrator: Any
     factory: Any
     controller: Any
@@ -1278,20 +1453,104 @@ class World:
     planning: ResolvedPlanningParts
 
 
-def simulate(run: RunSpec, verbose: bool = False) -> dict:
-    """Build the world from a RunSpec, run it, and return the results."""
-    world = run.build(verbose=verbose)
-    world.gate.load(world.ops)
-    world.engine.run()
-    world.pool.check_decode_work_settled()
-    return {
-        "engine": world.engine,
-        "cluster": world.cluster,
-        "factory": world.factory,
-        "chip": world.gate,
-        "orchestrator": world.orchestrator,
-        "controller": world.controller,
-        "chip_done": world.gate.last_finish_time,
-        "fully_done": world.engine.now,
-        "metrics": world.engine.metric_results(),
-    }
+def _capture_primary_run_result(
+    *,
+    engine,
+    gate,
+    window_manager,
+    operations,
+    metrics,
+) -> PrimaryRunResult:
+    """Validate and freeze the result while scheduling is sealed."""
+    operation_by_id = {}
+    for operation in operations:
+        operation_by_id.setdefault(operation.id, operation)
+
+    operation_results = []
+    for operation_id in sorted(operation_by_id):
+        if operation_id in window_manager.op_results:
+            logical_observables = tuple(
+                _validated_logical_bit(bit)
+                for bit in window_manager.op_results[operation_id]
+            )
+            status = "logical_observables"
+        else:
+            logical_observables = None
+            status = "no_logical_output"
+        operation_results.append(
+            LogicalOperationResult(
+                operation_id=operation_id,
+                result_status=status,
+                logical_observables=logical_observables,
+            )
+        )
+
+    metric_results = []
+    for metric in metrics:
+        value = _validated_json_value(metric.result())
+        canonical_value_json = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        metric_results.append(
+            MetricResultRecord(
+                name=metric.name,
+                canonical_value_json=canonical_value_json,
+            )
+        )
+
+    if engine._event_queue:
+        raise RuntimeError("primary run ended with pending engine events")
+    if not gate.workload_complete:
+        raise RuntimeError("primary run ended before the chip workload completed")
+    return PrimaryRunResult(
+        schema_version=1,
+        terminal_status="complete",
+        event_queue_empty=True,
+        decode_work_settled=True,
+        chip_workload_complete=True,
+        chip_done_ticks=gate.last_finish_time,
+        fully_done_ticks=engine.now,
+        operation_results=tuple(operation_results),
+        metric_results=tuple(metric_results),
+    )
+
+
+def _validated_logical_bit(value) -> int:
+    if type(value) is not int or value not in (0, 1):
+        raise TypeError(f"logical observables must contain exact bits; got {value!r}")
+    return value
+
+
+def _validated_json_value(value):
+    """Copy one value from the closed metric JSON domain."""
+    value_type = type(value)
+    if value is None or value_type in (bool, int, str):
+        return value
+    if value_type is float:
+        if not math.isfinite(value):
+            raise ValueError(f"metric floats must be finite; got {value!r}")
+        return value
+    if value_type is list:
+        return [_validated_json_value(item) for item in value]
+    if value_type is dict:
+        copied = {}
+        for key, item in value.items():
+            if type(key) is not str:
+                raise TypeError(
+                    f"metric object keys must be exact strings; got {key!r}"
+                )
+            copied[key] = _validated_json_value(item)
+        return copied
+    raise TypeError(
+        "metric values must use the closed JSON domain; "
+        f"got {type(value).__name__}"
+    )
+
+
+def simulate(run: RunSpec, verbose: bool = False) -> CompletedRun:
+    """Execute and return the same completed aggregate as RunSpec.build()."""
+    return run.build(verbose=verbose)

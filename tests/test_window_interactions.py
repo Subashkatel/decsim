@@ -83,10 +83,10 @@ def test_custom_interaction_controls_rich_boundary_handoff_end_to_end():
         window_interaction=interaction,
     ))
 
-    assert result["cluster"].window_manager.window_interaction is interaction
+    assert result.cluster.window_manager.window_interaction is interaction
     assert decoder.first_round_bits[0] is None
     assert decoder.first_round_bits[1] == (7,)
-    assert result["cluster"].payloads_held == 0
+    assert result.cluster.payloads_held == 0
 
 
 def test_decoder_result_identity_is_rejected_before_interaction_or_commit():
@@ -123,21 +123,19 @@ def test_duplicate_decoder_completion_is_rejected_before_callback():
             return super().decode(job)
 
     decoder = RecordingDecoder()
-    world = RunSpec(
+    completed_run = RunSpec(
         ops=[Operation(0, "memory", (0,))],
         d=3,
         rounds_policy=FixedRounds(3),
         decoder=decoder,
     ).build()
-    world.gate.load(world.ops)
-    world.engine.run()
     completed_job = decoder.jobs[0]
-    free_before = dict(world.pool.pool_free)
+    free_before = dict(completed_run.pool.pool_free)
 
     with pytest.raises(RuntimeError, match="duplicate decoder completion"):
-        world.pool._on_decode_done(completed_job)
+        completed_run.pool._on_decode_done(completed_job)
 
-    assert world.pool.pool_free == free_before
+    assert completed_run.pool.pool_free == free_before
 
 
 def test_duplicate_boundary_targets_are_rejected_before_delivery():
@@ -183,7 +181,11 @@ class _OrderedBoundaryDecoder:
         )
 
 
-def _independent_operations(interaction, *, slow_source=False):
+def _independent_operations(interaction, *, slow_source=False, capture=None):
+    def capture_runtime(_engine, cluster, _chip, _factory):
+        capture["runtime"] = cluster.window_manager
+        return []
+
     return RunSpec(
         ops=[
             Operation(0, "source", (0,)),
@@ -194,32 +196,38 @@ def _independent_operations(interaction, *, slow_source=False):
         decoder=_OrderedBoundaryDecoder(slow_source=slow_source),
         num_units=2,
         window_interaction=interaction,
+        make_metrics=(
+            None
+            if capture is None
+            else capture_runtime
+        ),
     )
 
 
 def test_invalid_boundary_destination_is_rejected_without_partial_state():
-    world = _independent_operations(_CrossOperationTarget()).build()
-    world.gate.load(world.ops)
-
+    captured = {}
     with pytest.raises(RuntimeError, match="boundary target|live dependency"):
-        world.engine.run()
+        _independent_operations(
+            _CrossOperationTarget(),
+            capture=captured,
+        ).build()
 
-    runtime = world.window_manager
+    runtime = captured["runtime"]
     assert runtime.windows[(1, 0)].boundary_in == {}
     assert runtime._boundary_versions == {}
     assert runtime._boundary_delivery_versions == {}
 
 
 def test_late_boundary_destination_cannot_mutate_finished_work():
-    world = _independent_operations(
-        _CrossOperationTargetWithoutRelease(), slow_source=True,
-    ).build()
-    world.gate.load(world.ops)
-
+    captured = {}
     with pytest.raises(RuntimeError, match="boundary target|live dependency"):
-        world.engine.run()
+        _independent_operations(
+            _CrossOperationTargetWithoutRelease(),
+            slow_source=True,
+            capture=captured,
+        ).build()
 
-    runtime = world.window_manager
+    runtime = captured["runtime"]
     target = runtime.windows[(1, 0)]
     assert target.t_done < runtime.windows[(0, 0)].t_done
     assert target.boundary_in == {}
@@ -238,19 +246,23 @@ def test_rejected_boundary_update_cannot_mutate_aliased_state():
                 release_dependency=True,
             )
 
-    world = RunSpec(
-        ops=[Operation(0, "memory", (0,))],
-        d=3,
-        rounds_policy=FixedRounds(7),
-        decoder=_OrderedBoundaryDecoder(),
-        window_interaction=MutatingRejectedInteraction(),
-    ).build()
-    world.gate.load(world.ops)
+    captured = {}
+
+    def capture_runtime(_engine, cluster, _chip, _factory):
+        captured["runtime"] = cluster.window_manager
+        return []
 
     with pytest.raises(RuntimeError, match="rejected boundary"):
-        world.engine.run()
+        RunSpec(
+            ops=[Operation(0, "memory", (0,))],
+            d=3,
+            rounds_policy=FixedRounds(7),
+            decoder=_OrderedBoundaryDecoder(),
+            window_interaction=MutatingRejectedInteraction(),
+            make_metrics=capture_runtime,
+        ).build()
 
-    destination = world.window_manager.windows[(0, 1)]
+    destination = captured["runtime"].windows[(0, 1)]
     assert destination.boundary_in == {"arrivals": []}
     assert destination.deps_remaining == 1
 

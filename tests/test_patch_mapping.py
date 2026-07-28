@@ -31,7 +31,7 @@ def _run(ops):
             rounds_policy=FixedRounds(11),
             decoder=PresetLatencyDecoder(1.0),
         ), verbose=False)
-    return r["engine"].log_lines
+    return r.engine.log_lines
 
 
 def test_default_every_qubit_is_its_own_patch():

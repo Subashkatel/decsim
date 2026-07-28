@@ -516,7 +516,7 @@ class ConditionalReactionTime:
             "released_conditionals": released_count,
             "pending_conditionals": self.pending_operation_ids(),
             "conditioned_decode_wait_times": {
-                row["op"]: row["wait_rounds"]
+                str(row["op"]): row["wait_rounds"]
                 for row in rows
             },
             "avg_conditioned_decode_wait_time": average,

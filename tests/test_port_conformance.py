@@ -1,7 +1,7 @@
 """Port-conformance suite (plan Task 21, spec §8 test 8).
 
 One case per v1.0 port: every shipped implementation satisfies its
-runtime_checkable Protocol, checked on parts wired into a REAL built world
+runtime_checkable Protocol, checked on parts wired into a REAL built completed_run
 wherever one exists (so the conformance holds for what spec.build actually
 assembles, not just for hand-made instances). Plus the one-port-switching
 guards: swapping exactly one part leaves every other resolved part's type
@@ -56,7 +56,7 @@ def _base_kwargs(**overrides):
 
 
 @pytest.fixture(scope="module")
-def world():
+def completed_run():
     return RunSpec(**_base_kwargs()).build()
 
 
@@ -64,30 +64,30 @@ def world():
 # CONFORMANCE: shipped implementations satisfy their Protocols
 #==================================================================
 
-def test_wired_world_parts_satisfy_their_ports(world):
+def test_wired_world_parts_satisfy_their_ports(completed_run):
     checks = [
-        (world.window_manager.scheme, protocols.DecodingScheme),          # port 6
-        (world.window_manager.layout, protocols.LayoutModel),                # port 4
-        (world.window_manager.rounds_policy, protocols.RoundsPolicy),   # port 5
-        (world.window_manager.deadline_policy, protocols.DeadlinePolicy),  # port 13
-        (world.window_manager.boundary_policy, protocols.BoundaryPolicy),  # port 16
-        (world.window_manager.window_interaction,
+        (completed_run.window_manager.scheme, protocols.DecodingScheme),          # port 6
+        (completed_run.window_manager.layout, protocols.LayoutModel),                # port 4
+        (completed_run.window_manager.rounds_policy, protocols.RoundsPolicy),   # port 5
+        (completed_run.window_manager.deadline_policy, protocols.DeadlinePolicy),  # port 13
+        (completed_run.window_manager.boundary_policy, protocols.BoundaryPolicy),  # port 16
+        (completed_run.window_manager.window_interaction,
          protocols.WindowInteraction),                         # port 21
-        (world.cluster.planner, protocols.ExecutionPlanner),     # port 7
-        (world.pool, protocols.ResourcePool),                    # port 12
-        (world.pool.scheduler, protocols.Scheduler),             # port 11
-        (world.gate.idle_policy, protocols.IdlePolicy),          # port 17
-        (world.gate.source, protocols.SyndromeSource),                   # port 2
-        (world.controller, protocols.Controller),                 # port 14
-        (world.orchestrator, protocols.Orchestrator),          # port 15
-        (world.factory, protocols.MagicStateFactory),                      # port 19
-        (world.cluster.strategy, protocols.DecodingStrategy),    # port 10
+        (completed_run.cluster.planner, protocols.ExecutionPlanner),     # port 7
+        (completed_run.pool, protocols.ResourcePool),                    # port 12
+        (completed_run.pool.scheduler, protocols.Scheduler),             # port 11
+        (completed_run.chip.idle_policy, protocols.IdlePolicy),          # port 17
+        (completed_run.chip.source, protocols.SyndromeSource),                   # port 2
+        (completed_run.controller, protocols.Controller),                 # port 14
+        (completed_run.orchestrator, protocols.Orchestrator),          # port 15
+        (completed_run.factory, protocols.MagicStateFactory),                      # port 19
+        (completed_run.cluster.strategy, protocols.DecodingStrategy),    # port 10
     ]
     for part, port in checks:
         assert isinstance(part, port), \
             f"{type(part).__name__} does not satisfy {port.__name__}"
-    assert world.planning.code.buffering_floor(
-        world.window_manager.scheme)  # port 3 (Code)
+    assert completed_run.planning.code.buffering_floor(
+        completed_run.window_manager.scheme)  # port 3 (Code)
 
 
 def test_every_shipped_part_family_satisfies_its_port():
@@ -122,25 +122,25 @@ def test_every_shipped_part_family_satisfies_its_port():
                 f"{type(impl).__name__} does not satisfy {port.__name__}"
 
 
-def test_metrics_satisfy_the_metric_port(world):
-    for metric in (DecoderUtilization(world.cluster),
-                   ReadyQueueStats(world.cluster),
-                   DecodeBacklog(world.cluster),
-                   StrongDecoderBacklog(world.cluster)):
+def test_metrics_satisfy_the_metric_port(completed_run):
+    for metric in (DecoderUtilization(completed_run.cluster),
+                   ReadyQueueStats(completed_run.cluster),
+                   DecodeBacklog(completed_run.cluster),
+                   StrongDecoderBacklog(completed_run.cluster)):
         assert isinstance(metric, protocols.Metric)                      # port 20
 
 
-def test_strategy_services_satisfy_their_seam(world):
-    assert isinstance(world.cluster.pool.services, protocols.StrategyServices) \
-        or isinstance(world.window_manager.services, protocols.StrategyServices)
+def test_strategy_services_satisfy_their_seam(completed_run):
+    assert isinstance(completed_run.cluster.pool.services, protocols.StrategyServices) \
+        or isinstance(completed_run.window_manager.services, protocols.StrategyServices)
 
 
-def test_factories_conform_and_smoke(world):
+def test_factories_conform_and_smoke(completed_run):
     engine = Engine(verbose=False)
     factories = [
         InfiniteFactory(engine),
         DistillationFactory(engine, num_units=1, cycle_ticks=10,
-                            decode_service=world.pool, corr_rounds=1, n_corr=1),
+                            decode_service=completed_run.pool, corr_rounds=1, n_corr=1),
         MultiLevelDistillationFactory(engine, [DistillLevel(units=1, d=3)],
                                       W_ticks=10),
     ]
@@ -175,23 +175,23 @@ def test_memory_model_port_observes_a_real_run():
 # ONE-PORT-SWITCHING GUARDS: swap exactly one part, nothing else moves
 #==================================================================
 
-def _resolved_types(world):
-    """The types of every resolved part in a built world."""
+def _resolved_types(completed_run):
+    """The types of every resolved part in a built completed_run."""
     return {
-        "scheme": type(world.window_manager.scheme),
-        "layout": type(world.window_manager.layout),
-        "rounds": type(world.window_manager.rounds_policy),
-        "deadline": type(world.window_manager.deadline_policy),
-        "boundary": type(world.window_manager.boundary_policy),
-        "window_interaction": type(world.window_manager.window_interaction),
-        "idle": type(world.gate.idle_policy),
-        "scheduler": type(world.pool.scheduler),
-        "strategy": type(world.cluster.strategy),
-        "orchestrator": type(world.orchestrator),
-        "factory": type(world.factory),
-        "source": type(world.gate.source),
-        "transport": type(world.controller),
-        "code": type(world.planning.code),
+        "scheme": type(completed_run.window_manager.scheme),
+        "layout": type(completed_run.window_manager.layout),
+        "rounds": type(completed_run.window_manager.rounds_policy),
+        "deadline": type(completed_run.window_manager.deadline_policy),
+        "boundary": type(completed_run.window_manager.boundary_policy),
+        "window_interaction": type(completed_run.window_manager.window_interaction),
+        "idle": type(completed_run.chip.idle_policy),
+        "scheduler": type(completed_run.pool.scheduler),
+        "strategy": type(completed_run.cluster.strategy),
+        "orchestrator": type(completed_run.orchestrator),
+        "factory": type(completed_run.factory),
+        "source": type(completed_run.chip.source),
+        "transport": type(completed_run.controller),
+        "code": type(completed_run.planning.code),
     }
 
 

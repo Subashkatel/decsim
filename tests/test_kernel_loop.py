@@ -1,8 +1,10 @@
 """End-to-end simulate() smoke tests (real engine, real parts, fake decoder)."""
+import hashlib
+
 import pytest
 
 from decsim.decoders import PerRoundDecoder
-from decsim.run_spec import simulate
+from decsim.run_spec import CompletedRun, simulate
 from decsim.message import Operation
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec
@@ -18,10 +20,47 @@ def test_simulate_two_clifford_ops_end_to_end():
     res = simulate(RunSpec(ops=_two_op_clifford(),
                            decoder=PerRoundDecoder(0.5),
                            rounds_policy=FixedRounds(11), num_units=2))
-    assert res["chip_done"] == 22 * 1_100_000            # 2 ops x 11 rounds, serial
-    assert res["fully_done"] > res["chip_done"]          # decode + delivery tail
-    assert set(res["cluster"].op_results) <= {0, 1}
-    assert res["chip"].body_done_time[1] == res["chip_done"]
+    assert isinstance(res, CompletedRun)
+    assert res.result.chip_done_ticks == 22 * 1_100_000            # 2 ops x 11 rounds, serial
+    assert res.result.fully_done_ticks > res.result.chip_done_ticks          # decode + delivery tail
+    assert set(res.cluster.op_results) <= {0, 1}
+    assert res.chip.body_done_time[1] == res.result.chip_done_ticks
+    assert res.result.terminal_status == "complete"
+    assert res.result.event_queue_empty
+    assert res.result.decode_work_settled
+    assert res.result.chip_workload_complete
+    with pytest.raises(RuntimeError, match="completed"):
+        res.engine.run()
+    with pytest.raises(RuntimeError, match="completed"):
+        res.engine.schedule(0, lambda: None)
+
+
+def test_completed_run_replaces_the_ambiguous_world_name():
+    import decsim.run_spec as run_spec_module
+
+    assert not hasattr(run_spec_module, "World")
+
+
+def test_completed_run_manifest_and_result_are_canonical_and_replayable():
+    def run():
+        return simulate(RunSpec(
+            ops=_two_op_clifford(),
+            decoder=PerRoundDecoder(0.5),
+            rounds_policy=FixedRounds(11),
+            num_units=2,
+            seed=17,
+        ))
+
+    first = run()
+    second = run()
+
+    assert first.result.canonical_json_bytes() == \
+        second.result.canonical_json_bytes()
+    assert first.manifest.to_json() == second.manifest.to_json()
+    assert first.manifest.primary_result_sha256 == \
+        hashlib.sha256(
+            first.result.canonical_json_bytes(),
+        ).hexdigest()
 
 
 def test_simulate_blocked_t_reaction_path():
@@ -30,10 +69,10 @@ def test_simulate_blocked_t_reaction_path():
                      predecessors=(0,))]
     res = simulate(RunSpec(ops=ops, decoder=PerRoundDecoder(0.5),
                            rounds_policy=FixedRounds(11)))
-    gate = res["chip"]
+    gate = res.chip
     assert 1 in gate.decode_released                     # Decision released B
     assert gate.decode_release_time[1] > gate.body_done_time[0]
-    assert res["cluster"].memory_rounds_total > 0        # idle rounds while blocked
+    assert res.cluster.memory_rounds_total > 0        # idle rounds while blocked
 
 
 def test_runspec_validation():

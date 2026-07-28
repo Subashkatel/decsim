@@ -138,7 +138,7 @@ def test_timing_only_stream_runs_through_normal_parallel_scheme():
               scheme=ParallelWindowScheme(),
               decoder=PresetLatencyDecoder(0.1),
           ), verbose=False)
-    cluster = res["cluster"]
+    cluster = res.cluster
     assert cluster.window_count[stream_op.id] == plan.window_count[stream_op.id]
     assert all(seg.id not in cluster.window_count for seg in segments)
     assert len(cluster.committed_windows) == cluster.total_windows
@@ -168,7 +168,7 @@ def test_short_successor_closes_cross_operation_buffer():
                  scheme=SlidingWindowScheme(),
                  decoder=PresetLatencyDecoder(0.1),
              ), verbose=False)
-    cluster = result["cluster"]
+    cluster = result.cluster
 
     assert len(cluster.committed_windows) == cluster.total_windows
     assert cluster.payloads_held == 0
@@ -188,7 +188,7 @@ def test_parallel_scheme_reaction_matches_eq13():
             decoder=PerRoundDecoder(tau_us=1.0),
             scheme=ParallelWindowScheme(),
         ), verbose=False)
-    tail = r["fully_done"] - r["chip_done"]
+    tail = r.result.fully_done_ticks - r.result.chip_done_ticks
     # after the last round: chip->controller->decoders hops, the last layer-A window
     # (3d rounds), the t_dd boundary, the layer-B window (3d rounds), then t_do.
     # This is Eq. 13's two-window 6d*tau_d(d^2) plus the one-way hops (a Clifford memory
@@ -215,8 +215,8 @@ def test_backlog_sweep_parallel_vs_sequential():
                 decoder=PresetLatencyDecoder(10.0),
                 scheme=scheme,
             ), verbose=False)
-        peak_q = max((q for _, q in r["cluster"].queue_log), default=0)
-        return r["fully_done"], peak_q
+        peak_q = max((q for _, q in r.cluster.queue_log), default=0)
+        return r.result.fully_done_ticks, peak_q
 
     seq = {u: run(SlidingWindowScheme(), u) for u in (1, 2, 4)}
     par = {u: run(ParallelWindowScheme(), u) for u in (1, 2, 4)}
@@ -253,7 +253,7 @@ def test_naive_scheme_decodes_only_after_the_last_round():
             decoder=PresetLatencyDecoder(1.0),
             scheme=NaiveOnlineScheme(),
         ), verbose=False)
-    lines = r["engine"].log_lines
+    lines = r.engine.log_lines
     # naive = one batch decode of the whole op (no "Wk"/commit vocabulary); match the
     # decode-start independent of that wording.
     assert trace_time(lines, "START DECODE M(q0)") >= \

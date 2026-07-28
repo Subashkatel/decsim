@@ -8,7 +8,7 @@ from decsim.codes import SurfaceCodeModel
 from decsim.config import us
 from decsim.controllers import ModularController, LinkModel
 from decsim.decoders import PresetLatencyDecoder
-from decsim.devices import SyndromeBitDevice
+from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.engine import Engine
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation, SyndromePayload
@@ -102,15 +102,39 @@ def test_timing_only_payload_becomes_defect_mask():
 
 def test_per_patch_fragments_gate_round_arrival():
     # a round with n_fragments=2 only counts as arrived once BOTH patches are in
+    class SilentDevice(TimingOnlyDevice):
+        def round_payloads(self, operation, round_index):
+            return []
+
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     op.patches = (0, 1)
-    cl = RunSpec(ops=[op], d=3, rounds_policy=FixedRounds(11),
-                 decoder=PresetLatencyDecoder(1.0),
-                 num_units=1).build().cluster    # ops registered, windows built
-    cl.on_syndrome_arrival(SyndromePayload(0, 0, 1, n_fragments=2))
-    assert cl.rounds_arrived[0] == 0             # half the round is not the round
-    cl.on_syndrome_arrival(SyndromePayload(0, 1, 1, n_fragments=2))
-    assert cl.rounds_arrived[0] == 1
+    observed = []
+
+    def install_probe(engine, cluster, _chip, _factory):
+        def probe():
+            cluster.on_syndrome_arrival(
+                SyndromePayload(0, 0, 1, n_fragments=2),
+            )
+            observed.append(cluster.rounds_arrived[0])
+            cluster.on_syndrome_arrival(
+                SyndromePayload(0, 1, 1, n_fragments=2),
+            )
+            observed.append(cluster.rounds_arrived[0])
+
+        engine.schedule(0, probe, label="fragment arrival probe")
+        return []
+
+    RunSpec(
+        ops=[op],
+        d=3,
+        rounds_policy=FixedRounds(11),
+        decoder=PresetLatencyDecoder(1.0),
+        num_units=1,
+        device=SilentDevice(),
+        make_metrics=install_probe,
+    ).build()
+
+    assert observed == [0, 1]
 
 
 def test_per_patch_device_end_to_end():

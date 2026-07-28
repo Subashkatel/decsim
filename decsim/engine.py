@@ -36,11 +36,37 @@ class Engine:
         self.log_lines: list[str] = []
         self.metrics: list = []
         self.log_sink = None
-        self._construction_guarded = construction_guarded
+        self._phase = "construction" if construction_guarded else "open"
 
-    def _finish_construction(self) -> None:
-        """Permit event execution after the composition root binds RNG state."""
-        self._construction_guarded = False
+    def _start_running(self) -> None:
+        """Open one root-owned engine for its only primary drain."""
+        if self._phase != "construction":
+            raise RuntimeError(
+                f"engine cannot start running from phase {self._phase}"
+            )
+        self._phase = "running"
+
+    def _begin_finalization(self) -> None:
+        """Seal scheduling after a quiescent primary drain."""
+        if self._phase != "running" or self._event_queue:
+            raise RuntimeError(
+                "engine finalization requires a running engine with an "
+                "empty event queue"
+            )
+        self._phase = "finalizing"
+
+    def _complete(self) -> None:
+        """Publish the terminal completed phase."""
+        if self._phase != "finalizing" or self._event_queue:
+            raise RuntimeError(
+                "engine completion requires sealed empty finalization"
+            )
+        self._phase = "completed"
+
+    def _invalidate(self) -> None:
+        """Prevent further use after a failed root-owned run."""
+        if self._phase != "completed":
+            self._phase = "invalid"
 
     def schedule(self, delay: int, action: Callable[[], None],
                  label: str = "", priority: int = 0) -> None:
@@ -48,6 +74,10 @@ class Engine:
 
         Same-tick events fire lowest priority first, then in insertion
         order (the seq counter breaks ties)."""
+        if self._phase in ("finalizing", "completed", "invalid"):
+            raise RuntimeError(
+                f"engine cannot schedule events while {self._phase}"
+            )
         if delay < 0:
             raise ValueError(
                 f"Cannot schedule an event in the past delay={delay} "
@@ -78,10 +108,14 @@ class Engine:
 
         Events at exactly ``until`` still fire; if later events remain, the
         clock is left at ``until`` so a follow-up run() resumes from there."""
-        if self._construction_guarded:
+        if self._phase == "construction":
             raise RuntimeError(
                 "engine construction is guarded until run-seed binding "
                 "finishes"
+            )
+        if self._phase in ("finalizing", "completed", "invalid"):
+            raise RuntimeError(
+                f"engine cannot run while {self._phase}"
             )
         while self._event_queue:
             next_event_time = self._event_queue[0].time

@@ -43,7 +43,6 @@ class _Cluster:
     def __init__(self):
         self.registered, self.prepended, self.memory, self.decodes = [], [], [], []
     def register_op(self, op): self.registered.append(op.id)
-    def build_windows(self): pass
     def rounds_for(self, op): return 4
     def prepend_idle_rounds(self, op_id, n): self.prepended.append((op_id, n))
     def on_memory_round(self, op_id): self.memory.append(op_id)

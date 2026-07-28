@@ -126,6 +126,8 @@ class WindowManager:
         self.total_windows = 0
         self._windows_built = False
         self._plan_spatial = None
+        self._plan_rounds = None
+        self._plan_code_names = None
 
     # ---------------------------------------------------------- registration
 
@@ -158,6 +160,8 @@ class WindowManager:
 
     def rounds_for(self, op: Operation) -> int:
         """Rounds this operation runs for under its code/layout."""
+        if self._plan_rounds is not None and op.id in self._plan_rounds:
+            return self._plan_rounds[op.id]
         planning_view = self._planning_view(op)
         return self.rounds_policy.rounds_for(
             planning_view,
@@ -193,6 +197,8 @@ class WindowManager:
         self.op_windows = plan.op_windows
         self.successors = plan.successors
         self._plan_spatial = plan.spatial_nodes
+        self._plan_rounds = plan.rounds_by_operation
+        self._plan_code_names = plan.code_names
         self.total_windows = plan.total_windows
         self._build_window_error_models()
         self._build_round_leases()
@@ -504,9 +510,16 @@ class WindowManager:
                         spatial_nodes=self._spatial_nodes(op),
                         payloads=self._assemble_payloads(window),
                         dem=self.window_models.get(key),
-                        code=self.layout.code_for_op(
-                            self._planning_view(op)
-                        ).name,
+                        code=(
+                            self._plan_code_names[op.id]
+                            if (
+                                self._plan_code_names is not None
+                                and op.id in self._plan_code_names
+                            )
+                            else self.layout.code_for_op(
+                                self._planning_view(op)
+                            ).name
+                        ),
                         window=window, label=self._job_desc(window, op))
         job.strong_label = f"strong({op.name} W{window.k})"
         window.queued = True

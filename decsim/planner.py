@@ -175,9 +175,16 @@ class WindowPlanner:
         """Compute windows, dependencies, and job sizes for these operations."""
         _validate_operation_graph(ops)
         operations = {operation.id: operation for operation in ops}
+        codes_by_operation = {
+            op_id: self.layout.code_for_op(operation)
+            for op_id, operation in operations.items()
+        }
         rounds_by_operation = {
             op_id: _validated(
-                self.rounds_policy.rounds_for(op, self.layout.code_for_op(op)),
+                self.rounds_policy.rounds_for(
+                    op,
+                    codes_by_operation[op_id],
+                ),
                 f"rounds_for({op.name})")
             for op_id, op in operations.items()}
         successors = {op_id: [] for op_id in operations}
@@ -187,7 +194,7 @@ class WindowPlanner:
         window_specs = {
             op_id: self.scheme.plan_windows(
                 op_id, rounds_by_operation[op_id],
-                self.layout.code_for_op(operation))
+                codes_by_operation[op_id])
             for op_id, operation in operations.items()}
         windows, operation_windows = self._materialize_windows(window_specs)
         window_count = {op_id: len(window_specs[op_id]) for op_id in operations}
@@ -199,6 +206,11 @@ class WindowPlanner:
         return WindowPlan(windows=windows, window_count=window_count,
                           op_windows=operation_windows, successors=successors,
                           spatial_nodes=spatial_nodes,
+                          rounds_by_operation=rounds_by_operation,
+                          code_names={
+                              op_id: code.name
+                              for op_id, code in codes_by_operation.items()
+                          },
                           total_windows=len(windows), summary=summary)
 
     @staticmethod

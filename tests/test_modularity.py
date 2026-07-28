@@ -168,6 +168,9 @@ def test_every_seam_accepts_a_from_scratch_implementation():
     code = MyCode()
     built_factories = []
 
+    def make_controller(engine):
+        return MyController(engine)
+
     def make_factory(engine, cluster):
         factory = MyFactory(engine)
         built_factories.append(factory)
@@ -181,10 +184,10 @@ def test_every_seam_accepts_a_from_scratch_implementation():
             scheme=MyScheme(),
             rounds_policy=MyRounds(),
             decoder=decoder,
-            router=router,
-            scheduler=MyScheduler(),
-            deadline_policy=MyDeadline(),
-            make_controller=MyController,
+                router=router,
+                scheduler=MyScheduler(),
+                deadline_policy=MyDeadline(),
+                make_controller=make_controller,
             orchestrator=orchestrator,
             make_factory=make_factory,
             make_metrics=lambda e, cl, ch, f: [metric],

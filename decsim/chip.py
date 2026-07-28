@@ -25,7 +25,6 @@ from typing import Optional
 
 from .message import Decision, FeedbackEffect, Operation, SyndromePayload
 from .pauli_frame import PauliFrame
-from .config import us
 
 
 class Chip:
@@ -33,7 +32,8 @@ class Chip:
 
     def __init__(self, engine, *, source, controller, cluster, factory,
                  round_ticks: int, code_distance: int, idle_policy,
-                 operation_code, resource_claims_by_operation_id,
+                 round_ticks_by_operation_id, round_ticks_by_patch,
+                 resource_claims_by_operation_id,
                  max_idle_rounds: Optional[int] = None,
                  gates_start_on_round_boundaries: bool = False,
                  frame: Optional[PauliFrame] = None):
@@ -45,7 +45,10 @@ class Chip:
         self.round_ticks = round_ticks
         self.code_distance = code_distance
         self.idle_policy = idle_policy
-        self._operation_code = operation_code
+        self._round_ticks_by_operation_id = dict(
+            round_ticks_by_operation_id
+        )
+        self._round_ticks_by_patch = dict(round_ticks_by_patch)
         self._resource_claims_by_operation_id = dict(
             resource_claims_by_operation_id
         )
@@ -86,17 +89,21 @@ class Chip:
         """Whether every loaded operation body reached physical completion."""
         return set(self.ops) == self.done_bodies
 
-    def _round_ticks_from_code(self, code) -> int:
-        """The code's own round period when it declares one, else the chip default."""
-        round_us = getattr(code, "round_us", None)
-        return us(round_us) if round_us is not None else self.round_ticks
-
     def _round_ticks_for(self, operation: Operation) -> int:
-        return self._round_ticks_from_code(self._operation_code)
+        try:
+            return self._round_ticks_by_operation_id[operation.id]
+        except KeyError as error:
+            raise ValueError(
+                f"operation {operation.id} has no resolved round cadence"
+            ) from error
 
     def _round_ticks_for_patch(self, patch) -> int:
-        return self._round_ticks_from_code(
-            self.cluster.layout.code_for_patch(patch))
+        try:
+            return self._round_ticks_by_patch[patch]
+        except KeyError as error:
+            raise ValueError(
+                f"patch {patch!r} has no resolved round cadence"
+            ) from error
 
     def load(self, ops: list[Operation]) -> None:
         """Register operations, build dependencies, then start dependency roots."""

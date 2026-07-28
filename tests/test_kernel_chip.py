@@ -99,7 +99,19 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
                         controller=_Controller(), cluster=cluster,
                         factory=factory, round_ticks=ROUND, code_distance=3,
                         idle_policy=idle_policy or Ignore(),
-                        operation_code=_Code(),
+                        round_ticks_by_operation_id={
+                            operation.id: ROUND
+                            for operation in ops
+                        },
+                        round_ticks_by_patch={
+                            patch: ROUND
+                            for operation in ops
+                            for patch in (
+                                operation.patches
+                                if operation.patches
+                                else operation.qubits or (0,)
+                            )
+                        },
                         resource_claims_by_operation_id={
                             operation.id: tuple(
                                 cluster.layout.resources_for(operation)

@@ -17,11 +17,24 @@ from enum import Enum, auto
 from typing import Any, Callable, Optional
 
 
+def is_stable_string(value: Any) -> bool:
+    """Whether a value is an exact Unicode-scalar string."""
+    return (
+        type(value) is str
+        and all(
+            not 0xD800 <= ord(character) <= 0xDFFF
+            for character in value
+        )
+    )
+
+
 def is_stable_identity(value: Any) -> bool:
     """Whether a value has deterministic, recursively typed identity."""
     value_type = type(value)
-    if value_type is int or value_type is str:
+    if value_type is int:
         return True
+    if value_type is str:
+        return is_stable_string(value)
     if value_type is tuple:
         return all(is_stable_identity(item) for item in value)
     return False
@@ -53,15 +66,17 @@ class RunSeedPathSegment:
 
     def __post_init__(self) -> None:
         if self.kind == "field":
-            if type(self.value) is not str or not self.value:
+            if not is_stable_string(self.value) or not self.value:
                 raise ValueError(
-                    "run-seed field segments require a nonempty built-in str"
+                    "run-seed field segments require a nonempty Unicode "
+                    "scalar string"
                 )
             return
         if self.kind == "string_key":
-            if type(self.value) is not str:
+            if not is_stable_string(self.value):
                 raise TypeError(
-                    "run-seed string-key segments require a built-in str"
+                    "run-seed string-key segments require a Unicode scalar "
+                    "string"
                 )
             return
         if self.kind == "none_key":

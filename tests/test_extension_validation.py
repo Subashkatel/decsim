@@ -687,6 +687,208 @@ def test_public_typed_path_segment_has_an_exact_two_key_wire_form():
     ]
 
 
+def test_stable_identity_record_round_trips_structured_patch_keys():
+    from decsim.run_spec import StableIdentityRecord
+
+    identities = (
+        1,
+        "1",
+        (),
+        (1,),
+        ("1",),
+        ("gross_0", (5, "north")),
+        "\N{GRINNING FACE}",
+    )
+    records = tuple(
+        StableIdentityRecord.from_identity(identity)
+        for identity in identities
+    )
+
+    assert tuple(record.to_identity() for record in records) == identities
+    assert len({record.canonical_bytes() for record in records}) == len(records)
+    assert records[-2].to_json_value() == {
+        "kind": "tuple",
+        "value": None,
+        "items": [
+            {"kind": "string", "value": "gross_0", "items": None},
+            {
+                "kind": "tuple",
+                "value": None,
+                "items": [
+                    {"kind": "integer", "value": "5", "items": None},
+                    {"kind": "string", "value": "north", "items": None},
+                ],
+            },
+        ],
+    }
+
+
+def test_surrogate_code_units_are_not_stable_identities():
+    from decsim.message import is_stable_identity
+
+    assert not is_stable_identity("\ud800")
+    assert not is_stable_identity("\udfff")
+    assert not is_stable_identity(("gross", ("\ud800", 5)))
+    assert is_stable_identity("\\ud800")
+    assert is_stable_identity("\N{GRINNING FACE}")
+
+
+def test_manifest_json_validator_rejects_surrogates_and_hostile_containers():
+    from decsim.run_spec import _validated_json_value
+
+    class HostileList(list):
+        def __iter__(self):
+            raise AssertionError("hostile list was traversed")
+
+    class HostileDict(dict):
+        def items(self):
+            raise AssertionError("hostile dict was traversed")
+
+    with pytest.raises(TypeError, match="Unicode scalar"):
+        _validated_json_value({"value": "\ud800"})
+    with pytest.raises(TypeError, match="Unicode scalar"):
+        _validated_json_value({"\udfff": "value"})
+    with pytest.raises(TypeError, match="closed JSON domain"):
+        _validated_json_value(HostileList())
+    with pytest.raises(TypeError, match="closed JSON domain"):
+        _validated_json_value(HostileDict())
+
+    value = {"\N{GRINNING FACE}": ["\\ud800"]}
+    assert _validated_json_value(value) == value
+
+
+@pytest.mark.parametrize(
+    (
+        "code_round_us",
+        "run_round_us",
+        "timing_round_us",
+        "expected_round_us",
+        "expected_origin",
+    ),
+    [
+        (2.5, 1.5, 4.5, 2.5, "code.round_us"),
+        (None, 1.5, 4.5, 1.5, "run_spec.round_us"),
+        (None, None, 4.5, 4.5, "timing.round_us"),
+    ],
+)
+def test_manifest_records_every_code_selection_and_effective_cadence(
+    code_round_us,
+    run_round_us,
+    timing_round_us,
+    expected_round_us,
+    expected_origin,
+):
+    from decsim.config import TimingConfig, us
+
+    structured_patch = ("gross_0", (5, "north"))
+    completed = RunSpec(
+        ops=[
+            Operation(
+                7,
+                "memory",
+                (structured_patch,),
+                patches=(structured_patch,),
+            ),
+        ],
+        code=SurfaceCodeModel(3, round_us=code_round_us),
+        round_us=run_round_us,
+        timing=TimingConfig(round_us=timing_round_us),
+        decoder=StaticDecoder(),
+    ).build()
+    manifest = completed.manifest.to_json_value()
+
+    assert manifest["code_selections"] == [
+        {
+            "consumer_kind": "operation",
+            "consumer_identity": {
+                "kind": "integer",
+                "value": "7",
+                "items": None,
+            },
+            "code_path": [{"kind": "field", "value": "code"}],
+        },
+        {
+            "consumer_kind": "patch",
+            "consumer_identity": {
+                "kind": "tuple",
+                "value": None,
+                "items": [
+                    {
+                        "kind": "string",
+                        "value": "gross_0",
+                        "items": None,
+                    },
+                    {
+                        "kind": "tuple",
+                        "value": None,
+                        "items": [
+                            {
+                                "kind": "integer",
+                                "value": "5",
+                                "items": None,
+                            },
+                            {
+                                "kind": "string",
+                                "value": "north",
+                                "items": None,
+                            },
+                        ],
+                    },
+                ],
+            },
+            "code_path": [{"kind": "field", "value": "code"}],
+        },
+    ]
+    assert manifest["cadences"] == [
+        {
+            "consumer_kind": selection["consumer_kind"],
+            "consumer_identity": selection["consumer_identity"],
+            "code_path": selection["code_path"],
+            "round_ticks": us(expected_round_us),
+            "origin": expected_origin,
+        }
+        for selection in manifest["code_selections"]
+    ]
+
+
+def test_resource_claim_id_is_not_promoted_to_a_patch_selector():
+    from decsim.message import ResourceClaim
+
+    class RecordingLayout(UniformLayout):
+        def __init__(self, code):
+            super().__init__(code)
+            self.patch_calls = []
+
+        def code_for_patch(self, patch_id):
+            self.patch_calls.append(patch_id)
+            return self.code
+
+        def resources_for(self, operation):
+            return [
+                ResourceClaim(
+                    "ancilla",
+                    frozenset({"reserved-only"}),
+                ),
+            ]
+
+    layout = RecordingLayout(SurfaceCodeModel(3))
+    completed = RunSpec(
+        ops=[Operation(0, "memory", (0,), patches=("data",))],
+        layout=layout,
+        decoder=StaticDecoder(),
+    ).build()
+
+    assert ("ancilla", "reserved-only") not in layout.patch_calls
+    patch_identities = [
+        record["consumer_identity"]
+        for record in completed.manifest.to_json_value()["code_selections"]
+        if record["consumer_kind"] == "patch"
+    ]
+    assert patch_identities == [
+        {"kind": "string", "value": "data", "items": None},
+    ]
+
+
 def test_component_graph_records_the_resolved_orchestrator_frame():
     completed = RunSpec(ops=[], decoder=StaticDecoder()).build()
     paths = [

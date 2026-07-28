@@ -13,6 +13,7 @@ must terminate at max_idle_rounds.
 import pytest
 
 from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
+                             SAMPLED_CONFIDENCE_SOURCE,
                              SampledConfidenceDecoder, SwitchingRouter)
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.run_spec import simulate
@@ -37,7 +38,7 @@ def _run_chain(p_escalate, seed, **overrides):
     weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), p_escalate)
     return simulate(RunSpec(
         ops=_chain(), d=3, rounds_policy=FixedRounds(11),
-        strategy=Switching(confidence_threshold=0.5),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
         unit_pools={"default": 1, "strong": 1}, seed=seed, **overrides))
 

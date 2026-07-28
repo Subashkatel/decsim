@@ -23,8 +23,14 @@ import pytest
 
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
-from decsim.decoders import (PerRoundDecoder, SampledConfidenceDecoder, SwitchingDecoder,
-                             SwitchingRouter, switch_probability_per_round)
+from decsim.decoders import (
+    PerRoundDecoder,
+    SAMPLED_CONFIDENCE_SOURCE,
+    SampledConfidenceDecoder,
+    SwitchingDecoder,
+    SwitchingRouter,
+    switch_probability_per_round,
+)
 from decsim.devices import TimingOnlyDevice
 from decsim.message import (DecodeJob, DecodeResult, Operation,
                             ResolvedCodeGeometry,
@@ -88,7 +94,7 @@ def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=Non
 
 
 def _strong_backlog_peak(low_confidence_probability, rounds, seed=1):
-    res = _switch_run(Switching(confidence_threshold=0.5), low_confidence_probability, rounds,
+    res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), low_confidence_probability, rounds,
                       seed=seed, metrics=lambda e, c, ch, fa: [StrongDecoderBacklog(c)])
     return res.result.metric_values()["strong_backlog"]["peak_jobs"]
 
@@ -135,7 +141,7 @@ def test_window_size_check(ratio, raises):
     """check_window_size rejects a commit region too small for the weak decoder to keep pace. At
     d=3 (commit=buffer=3): a weak decoder at 0.7 of a round needs commit>=7 (raises); 0.4 needs >=2
     (fine); no ratio skips the check."""
-    s = Switching(confidence_threshold=0.5, weak_keepup_ratio=ratio)
+    s = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, weak_keepup_ratio=ratio)
     if raises:
         with pytest.raises(ValueError):
             s.validate_code_geometry(_code_geometry(D, D))
@@ -146,12 +152,12 @@ def test_window_size_check(ratio, raises):
 def test_window_size_check_fires_through_the_engine():
     """The window-size check runs when the plan loads, so a bad configuration fails the run."""
     with pytest.raises(ValueError):
-        _switch_run(Switching(confidence_threshold=0.5, weak_keepup_ratio=0.7), 0.0, 30)
+        _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, weak_keepup_ratio=0.7), 0.0, 30)
 
 
 def test_window_size_check_accepts_exact_paper_boundary():
     """Eq. 7 accepts equality. The guard must not reject it because of float roundoff."""
-    switching = Switching(confidence_threshold=0.5, weak_keepup_ratio=0.9)
+    switching = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, weak_keepup_ratio=0.9)
     for buffer_rounds in (3, 5, 7):
         switching.validate_code_geometry(
             _code_geometry(9 * buffer_rounds, buffer_rounds)
@@ -164,15 +170,18 @@ def test_window_size_check_accepts_exact_paper_boundary():
 def test_window_size_check_distinguishes_adjacent_floats_at_the_boundary():
     boundary = D / (D + D)
     Switching(
+        expected_source=SAMPLED_CONFIDENCE_SOURCE,
         confidence_threshold=0.5,
         weak_keepup_ratio=boundary,
     ).validate_code_geometry(_code_geometry(D, D))
     Switching(
+        expected_source=SAMPLED_CONFIDENCE_SOURCE,
         confidence_threshold=0.5,
         weak_keepup_ratio=math.nextafter(boundary, 0.0),
     ).validate_code_geometry(_code_geometry(D, D))
     with pytest.raises(ValueError):
         Switching(
+            expected_source=SAMPLED_CONFIDENCE_SOURCE,
             confidence_threshold=0.5,
             weak_keepup_ratio=math.nextafter(boundary, 1.0),
         ).validate_code_geometry(_code_geometry(D, D))
@@ -181,7 +190,7 @@ def test_window_size_check_distinguishes_adjacent_floats_at_the_boundary():
 def test_weak_keepup_ratio_must_be_below_one():
     """The weak decoder must be faster than one syndrome round: weak_keepup_ratio in (0, 1)."""
     with pytest.raises(ValueError):
-        Switching(confidence_threshold=0.5, weak_keepup_ratio=1.0)
+        Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, weak_keepup_ratio=1.0)
 
 
 def test_strong_reprocess_region_is_commit_plus_two_buffers():
@@ -199,7 +208,7 @@ def test_strong_reprocess_region_is_commit_plus_two_buffers():
     )
     w = Window(op_id=0, k=0, commit_lo=commit_lo, commit_hi=commit_hi,
                buffer_hi=buffer_hi, n_rounds=buffer_hi - commit_lo + 1)
-    assert Switching(confidence_threshold=0.5).strong_redo_rounds(w) == 3 * D
+    assert Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5).strong_redo_rounds(w) == 3 * D
 
 
 def test_custom_decision_rule_can_replace_the_threshold():
@@ -209,7 +218,14 @@ def test_custom_decision_rule_can_replace_the_threshold():
         def keep_weak_result(self, result, job):
             return False
 
-    res = _switch_run(AlwaysUseStrong(confidence_threshold=0.5), 0.0, 60)
+    res = _switch_run(
+        AlwaysUseStrong(
+            expected_source=SAMPLED_CONFIDENCE_SOURCE,
+            confidence_threshold=0.5,
+        ),
+        0.0,
+        60,
+    )
     assert res.cluster.strong_needed == res.cluster.total_windows
 
 
@@ -225,7 +241,7 @@ def test_escalated_window_uses_strong_logical_result():
               rounds_policy=FixedRounds(27),
               round_us=TAU_GEN_US,
               scheme=SlidingWindowScheme(),
-              strategy=Switching(confidence_threshold=0.5),
+              strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
               seed=1,
@@ -248,7 +264,7 @@ def test_parallel_strong_result_can_finish_before_weak_decision():
               rounds_policy=FixedRounds(27),
               round_us=TAU_GEN_US,
               scheme=SlidingWindowScheme(),
-              strategy=Switching(confidence_threshold=0.5, run_both_at_once=True),
+              strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True),
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
               seed=1,
@@ -268,7 +284,7 @@ def test_switching_requires_a_router_to_reach_the_strong_decoder():
             rounds_policy=FixedRounds(9),
             round_us=TAU_GEN_US,
             scheme=SlidingWindowScheme(),
-            strategy=Switching(confidence_threshold=0.5),
+            strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             decoder=weak,
             unit_pools={"default": 1, "strong": 1},
             seed=1,
@@ -287,7 +303,7 @@ def test_strong_redecode_receives_two_sided_context_payloads():
         rounds_policy=FixedRounds(9),
         round_us=TAU_GEN_US,
         scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
         seed=1,
@@ -326,7 +342,7 @@ def test_stim_strong_redecode_receives_two_sided_window_model():
         rounds_policy=FixedRounds(9),
         round_us=TAU_GEN_US,
         scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         device=StimDevice(),
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
@@ -348,7 +364,7 @@ def test_no_switching_matches_plain_sliding():
     """With every window confident, no window switches, so a serial-switch run is identical to the
     plain sliding-window scheme: same finish time, same committed windows, nothing sent to strong."""
     rounds = 120
-    switched = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds)
+    switched = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 0.0, rounds)
     plain = simulate(RunSpec(
                 ops=[_memory_op()],
                 num_units=1,
@@ -404,7 +420,7 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
                 make_metrics=lambda e, c, ch, fa: [DecodeBacklog(c)],
                 seed=1,
             ), verbose=False)
-    double = _switch_run(Switching(confidence_threshold=0.5), rate, rounds,
+    double = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), rate, rounds,
                          metrics=lambda e, c, ch, fa: [DecodeBacklog(c)])
     assert naive.result.metric_values()["decode_backlog"]["peak_rounds"] > 100
     assert (double.result.metric_values()["decode_backlog"]["peak_rounds"]
@@ -417,13 +433,13 @@ def test_run_both_at_once_starts_strong_every_window_and_cancels_confident_ones(
     """In "run both at once" mode the strong decoder starts on EVERY window alongside the weak one;
     the confident windows are cancelled, the unsure ones run. So every window's strong job is either
     cancelled or needed, and serial mode starts strong jobs ONLY on the windows that need them."""
-    parallel = _switch_run(Switching(confidence_threshold=0.5, run_both_at_once=True), 0.3, 200,
+    parallel = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True), 0.3, 200,
                            pools={"default": 1, "strong": 2})
     cp = parallel.cluster
     assert cp.strong_cancelled > 0
     assert cp.strong_cancelled + cp.strong_needed == cp.total_windows   # one strong job per window
 
-    serial = _switch_run(Switching(confidence_threshold=0.5), 0.3, 200,
+    serial = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 0.3, 200,
                          pools={"default": 1, "strong": 2})
     assert serial.cluster.strong_cancelled == 0                      # serial never cancels
     assert serial.cluster.strong_needed == cp.strong_needed          # same windows need strong
@@ -433,7 +449,7 @@ def test_run_both_at_once_keeps_the_weak_stream_byte_identical_to_plain_sliding(
     """With the strong decoder on its own pool, cancelling its jobs never perturbs the weak stream:
     the weak windows commit at exactly the same times as plain sliding, and every window commits once."""
     rounds = 90
-    parallel = _switch_run(Switching(confidence_threshold=0.5, run_both_at_once=True), 1.0, rounds,
+    parallel = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True), 1.0, rounds,
                            pools={"default": 1, "strong": 1})
     plain = simulate(RunSpec(
                 ops=[_memory_op()],
@@ -460,7 +476,7 @@ def test_strong_backlog_trace_is_a_step_series_matching_the_peak():
         m = StrongDecoderBacklog(c)
         captured["m"] = m
         return [m]
-    res = _switch_run(Switching(confidence_threshold=0.5), 6 * GAMMA_BOUND, 600, metrics=metrics)
+    res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 6 * GAMMA_BOUND, 600, metrics=metrics)
     rows = captured["m"].rows()
     assert rows                                                    # a series was recorded
     assert [r["t"] for r in rows] == sorted(r["t"] for r in rows)  # non-decreasing in time
@@ -521,7 +537,7 @@ def test_commit_buffer_override_sizes_the_window_and_strong_redo():
     assert (commit_lo, commit_hi, buffer_hi) == (1, 5, 7)
     w = Window(op_id=0, k=0, commit_lo=commit_lo, commit_hi=commit_hi,
                buffer_hi=buffer_hi, n_rounds=buffer_hi - commit_lo + 1)
-    assert Switching(confidence_threshold=0.5).strong_redo_rounds(w) == 5 + 2 * 2
+    assert Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5).strong_redo_rounds(w) == 5 + 2 * 2
 
 
 def test_commit_buffer_override_defaults_to_d_and_rejects_nonpositive():
@@ -557,7 +573,7 @@ def test_sampled_soft_output_uses_the_probability_for_callback():
               rounds_policy=FixedRounds(60),
               round_us=TAU_GEN_US,
               scheme=SlidingWindowScheme(),
-              strategy=Switching(confidence_threshold=0.5),
+              strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
           ), verbose=False)
@@ -611,7 +627,7 @@ def _double_window_run(
               rounds_policy=FixedRounds(rounds),
               round_us=TAU_GEN_US,
               scheme=SlidingWindowScheme(),
-              strategy=Switching(confidence_threshold=0.5,
+              strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5,
                                  double_window=True),
               router=SwitchingRouter(weak, strong),
               window_interaction=window_interaction,
@@ -729,6 +745,7 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
             rounds_policy=FixedRounds(21),
             scheme=SlidingWindowScheme(),
             strategy=Switching(
+                expected_source=SAMPLED_CONFIDENCE_SOURCE,
                 confidence_threshold=0.5,
                 double_window=True,
             ),
@@ -774,7 +791,7 @@ def test_strong_decoder_result_identity_is_checked_before_finalization():
             d=D,
             rounds_policy=FixedRounds(21),
             scheme=SlidingWindowScheme(),
-            strategy=Switching(confidence_threshold=0.5, double_window=True),
+            strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True),
             router=SwitchingRouter(weak, strong),
             unit_pools={"default": 1, "strong": 1},
         ), verbose=False)
@@ -1004,7 +1021,7 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
         ops=[_memory_op()], num_units=1, code=code,
         rounds_policy=FixedRounds(30), round_us=TAU_GEN_US,
         scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5, double_window=True),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True),
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
         make_metrics=lambda e, c, ch, fa: env.update(engine=e) or [],
@@ -1144,7 +1161,7 @@ def test_double_window_strong_result_owns_the_whole_slab():
               rounds_policy=FixedRounds(30),
               round_us=TAU_GEN_US,
               scheme=SlidingWindowScheme(),
-              strategy=Switching(confidence_threshold=0.5, double_window=True),
+              strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True),
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
           ), verbose=False)
@@ -1240,10 +1257,10 @@ def test_double_window_slab_payloads_cover_slab_plus_two_sided_context():
 
 def test_double_window_rejects_contradictory_switch_flags():
     with pytest.raises(ValueError, match="double_window"):
-        Switching(confidence_threshold=0.5, double_window=True,
+        Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True,
                   run_both_at_once=True)
     with pytest.raises(ValueError, match="double_window"):
-        Switching(confidence_threshold=0.5, double_window=True,
+        Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True,
                   bulk_strong=True)
 
 
@@ -1253,7 +1270,7 @@ def test_double_window_rejects_unsupported_runspec_shapes():
     semantics the runtime does not model yet."""
     from decsim.policies import Held
     from decsim.schemes import ParallelWindowScheme
-    strategy = Switching(confidence_threshold=0.5, double_window=True)
+    strategy = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True)
     base = dict(num_units=1, d=D, rounds_policy=FixedRounds(30),
                 round_us=TAU_GEN_US, strategy=strategy)
     with pytest.raises(ValueError, match="Held"):

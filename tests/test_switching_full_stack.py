@@ -21,12 +21,16 @@ pytest.importorskip("pymatching")
 
 from decsim.adapters.stim_device import StimDevice
 from decsim.codes import SurfaceCodeModel
-from decsim.decoders import SwitchingRouter
+from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter
 from decsim.message import Operation, SeamFaultOwner
 from decsim.mwpm_decoder import PyMatchingDecoder, UnweightedPyMatchingDecoder
 from decsim.planner import FixedRounds
 from decsim.schemes import SlidingWindowScheme
-from decsim.soft_output import ComplementaryGapMetric, SoftOutputDecoder
+from decsim.soft_output import (
+    COMPLEMENTARY_GAP_SOURCE,
+    ComplementaryGapMetric,
+    SoftOutputDecoder,
+)
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.window_interactions import DefaultWindowInteraction
@@ -76,6 +80,7 @@ def _run(threshold, d=3, rounds=9, seed=7, double_window=False, device=None):
               code=SurfaceCodeModel(d=d),
               scheme=SlidingWindowScheme(),
               strategy=Switching(confidence_threshold=threshold,
+                                 expected_source=COMPLEMENTARY_GAP_SOURCE,
                                  double_window=double_window),
               device=device if device is not None else StimDevice(),
               router=SwitchingRouter(weak, strong),
@@ -92,7 +97,7 @@ def test_real_soft_output_escalation_reaches_the_strong_path():
     calibration run on the same seed), so decoder updates that shift the
     absolute gap values cannot silently turn the test into all-or-nothing."""
     _, calibration, _ = _run(threshold=0.0)
-    gaps = sorted({result.soft_output for result in calibration.results})
+    gaps = sorted({result.soft_output.gap for result in calibration.results})
     assert len(gaps) >= 2, f"soft output did not distinguish windows: {gaps}"
     threshold = (gaps[0] + gaps[-1]) / 2
 
@@ -181,7 +186,7 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
     never-escalate threshold matches the plain serial weak result."""
     rounds = 15
     _, calibration, _ = _run(threshold=0.0, rounds=rounds, double_window=True)
-    gaps = sorted({result.soft_output for result in calibration.results})
+    gaps = sorted({result.soft_output.gap for result in calibration.results})
     assert len(gaps) >= 2, f"soft output did not distinguish windows: {gaps}"
     threshold = (gaps[0] + gaps[-1]) / 2
 
@@ -303,7 +308,11 @@ def test_double_window_seam_models_are_decodable_and_partition_ownership(
         rounds_policy=FixedRounds(rounds),
         code=SurfaceCodeModel(d=3),
         scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5, double_window=True),
+        strategy=Switching(
+            confidence_threshold=0.5,
+            expected_source=SAMPLED_CONFIDENCE_SOURCE,
+            double_window=True,
+        ),
         device=StimDevice(),
         router=SwitchingRouter(weak, strong),
         window_interaction=SelectedSeamOwner(),

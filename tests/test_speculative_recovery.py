@@ -16,8 +16,8 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.codes import SurfaceCodeModel
 from decsim.config import TimingConfig
-from decsim.decoders import SwitchingRouter
-from decsim.message import DecodeResult, Operation
+from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter
+from decsim.message import DecodeResult, Operation, SoftOutput
 from decsim.planner import FixedRounds, PerOpRounds
 from decsim.policies import Eager, Held
 from decsim.run_spec import RunSpec, simulate
@@ -50,7 +50,10 @@ class _WeakBoundaryDecoder:
             logical_observables=(
                 int(job.window_id >= 2 and has_boundary_defect),
             ),
-            soft_output=0.0 if job.window_id in self.uncertain else 1.0,
+            soft_output=SoftOutput(
+                gap=0.0 if job.window_id in self.uncertain else 1.0,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            ),
             boundary_defects={job.window.commit_hi + 1: [1]}
             if (job.window_id in self.uncertain
                 or (self.propagate and has_boundary_defect)) else None,
@@ -86,7 +89,7 @@ def _deterministic_run(boundary_policy, *, uncertain=(1,), strong=None,
         rounds_policy=FixedRounds(rounds),
         scheme=SlidingWindowScheme(),
         strategy=strategy if strategy is not None
-        else Switching(confidence_threshold=0.5,
+        else Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5,
                        run_both_at_once=run_both_at_once),
         boundary_policy=boundary_policy,
         window_interaction=window_interaction,
@@ -147,7 +150,10 @@ def test_interaction_cannot_invalidate_unrelated_finished_work():
                 job.op_id,
                 job.window_id,
                 logical_observables=(0,),
-                soft_output=0.0 if job.op_id == 0 else 1.0,
+                soft_output=SoftOutput(
+                    gap=0.0 if job.op_id == 0 else 1.0,
+                    source=SAMPLED_CONFIDENCE_SOURCE,
+                ),
                 boundary_defects={job.window.commit_hi + 1: [1]}
                 if job.op_id == 0 else None,
             )
@@ -161,7 +167,7 @@ def test_interaction_cannot_invalidate_unrelated_finished_work():
             ],
             d=3,
             rounds_policy=FixedRounds(3),
-            strategy=Switching(confidence_threshold=0.5),
+            strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=Eager(),
             window_interaction=UnrelatedFinishedTarget(),
             router=SwitchingRouter(weak, _CorrectingStrongDecoder(ticks=10)),
@@ -208,7 +214,7 @@ def test_a_replayed_window_re_escalates_whichever_order_it_is_submitted_in(
 
     ordered, _ = _deterministic_run(
         Eager(), uncertain=(1, 2),
-        strategy=_OrderedSwitching(confidence_threshold=0.5,
+        strategy=_OrderedSwitching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5,
                                    run_both_at_once=True))
     baseline, _ = _deterministic_run(Eager(), uncertain=(1, 2),
                                      run_both_at_once=True)
@@ -255,7 +261,7 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
         d=3,
         rounds_policy=FixedRounds(15),
         scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5,
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5,
                            run_both_at_once=run_both_at_once),
         boundary_policy=Eager(),
         router=SwitchingRouter(weak, _CorrectingStrongDecoder()),
@@ -346,7 +352,7 @@ def test_strong_can_add_a_defect_to_an_empty_weak_boundary():
             d=3,
             rounds_policy=FixedRounds(15),
             scheme=SlidingWindowScheme(),
-            strategy=Switching(confidence_threshold=0.5),
+            strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=policy,
             router=SwitchingRouter(weak, strong),
             unit_pools={"default": 1, "strong": 1},
@@ -442,7 +448,10 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
                 job.op_id,
                 job.window_id,
                 logical_observables=(0,),
-                soft_output=0.0 if escalates else 1.0,
+                soft_output=SoftOutput(
+                    gap=0.0 if escalates else 1.0,
+                    source=SAMPLED_CONFIDENCE_SOURCE,
+                ),
                 boundary_defects={job.window.commit_hi + 1: [1]},
             )
 
@@ -470,7 +479,7 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
             code=SurfaceCodeModel(d=3),
             rounds_policy=PerOpRounds({0: 3, 1: 3, 2: 3}),
             scheme=SlidingWindowScheme(),
-            strategy=Switching(confidence_threshold=0.5),
+            strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=policy,
             router=SwitchingRouter(weak, _MergeStrongDecoder()),
             unit_pools={"default": 1, "strong": 1},
@@ -531,7 +540,7 @@ def test_equal_strong_boundary_preserves_eager_progress_without_replay():
 
 
 def test_dynamic_streams_reject_eager_speculative_recovery():
-    strategy = Switching(confidence_threshold=0.5)
+    strategy = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5)
     stream = Operation(10, "stream", (0,))
     with pytest.raises(ValueError, match="dynamic streams"):
         RunSpec(
@@ -544,7 +553,7 @@ def test_dynamic_streams_reject_eager_speculative_recovery():
     RunSpec(
         ops=[Operation(0, "driver", (1,))],
         dynamic_streams=[Operation(10, "stream", (0,))],
-        strategy=Switching(confidence_threshold=0.5),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         boundary_policy=Held(),
         decoder=_WeakBoundaryDecoder(),
     ).validate()
@@ -555,7 +564,10 @@ def test_static_operation_seam_replays_without_a_data_dependent_crash():
         def decode(self, job):
             result = super().decode(job)
             escalates = job.op_id == 0 and job.window_id == 0
-            result.soft_output = 0.0 if escalates else 1.0
+            result.soft_output = SoftOutput(
+                gap=0.0 if escalates else 1.0,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            )
             result.boundary_defects = (
                 {job.window.commit_hi + 1: [1]} if escalates else None)
             return result
@@ -570,7 +582,7 @@ def test_static_operation_seam_replays_without_a_data_dependent_crash():
         d=3,
         rounds_policy=FixedRounds(6),
         scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         boundary_policy=Eager(),
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
@@ -611,7 +623,10 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
                         and boundary_bit
                     ),
                 ),
-                soft_output=0.0 if escalates else 1.0,
+                soft_output=SoftOutput(
+                    gap=0.0 if escalates else 1.0,
+                    source=SAMPLED_CONFIDENCE_SOURCE,
+                ),
                 boundary_defects={job.window.commit_hi + 1: [1]}
                 if escalates else None,
             )
@@ -640,7 +655,7 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
             d=3,
             rounds_policy=FixedRounds(6),
             scheme=SlidingWindowScheme(),
-            strategy=Switching(confidence_threshold=0.5),
+            strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=policy,
             router=SwitchingRouter(weak, strong),
             unit_pools={"default": 1, "strong": 1},
@@ -694,7 +709,10 @@ class _StreamWeakDecoder:
             logical_observables=(
                 int(job.window_id >= 2 and has_boundary_defect),
             ),
-            soft_output=0.0 if escalates else 1.0,
+            soft_output=SoftOutput(
+                gap=0.0 if escalates else 1.0,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            ),
             boundary_defects={job.window.commit_hi + 1: [1]}
             if escalates else None,
         )
@@ -772,7 +790,7 @@ def _run_static_stream_recovery(policy, *, first_segment_rounds,
             feedback_consumer.id: 1,
         }),
         scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         boundary_policy=policy,
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
@@ -901,7 +919,7 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
             d=3,
             rounds_policy=FixedRounds(rounds),
             scheme=SlidingWindowScheme(),
-            strategy=Switching(confidence_threshold=0.5),
+            strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=policy,
             device=device,
             router=SwitchingRouter(weak, strong),

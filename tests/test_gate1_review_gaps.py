@@ -11,8 +11,15 @@ Each test pins a branch the 2026-07-03 review found uncovered:
 """
 import pytest
 
+from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE
 from decsim.engine import Engine
-from decsim.message import DecodeJob, DecodeResult, SyndromePayload, Window
+from decsim.message import (
+    DecodeJob,
+    DecodeResult,
+    SoftOutput,
+    SyndromePayload,
+    Window,
+)
 from decsim.decoder_manager import StrategyServicesImpl, DecoderManager
 from decsim.payload_store import PayloadStore
 from decsim.schemes import SlidingWindowScheme
@@ -32,7 +39,16 @@ class _FifoScheduler:
 
 class _Decoder:
     def __init__(self, latency, soft=None, logical=0):
-        self._latency, self.soft, self.logical = latency, soft, logical
+        self._latency = latency
+        self.soft = (
+            None
+            if soft is None
+            else SoftOutput(
+                gap=soft,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            )
+        )
+        self.logical = logical
     def latency(self, job): return self._latency
     def decode(self, job):
         return DecodeResult(job.op_id, job.window_id,
@@ -84,7 +100,7 @@ def test_held_early_strong_discarded_on_confident_weak():
     confident -> FINALIZE cancels the held result; it must never apply."""
     weak = _Decoder(10_000, soft=0.9)           # slow weak, HIGH confidence
     strong = _Decoder(10, logical=1)            # strong completes early -> held
-    strat = Switching(confidence_threshold=0.5, run_both_at_once=True)
+    strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True)
     eng, rt, pool = _pool(strat, weak, strong)
     w = _window()
     job = DecodeJob(op_id=0, window_id=0, n_rounds=6, window=w, label="op0 W0")
@@ -179,7 +195,7 @@ def test_cluster_gap_from_window_model_and_soft_output_decoder_path():
 
     empty = np.zeros(model.check.shape[0], dtype=np.uint8)
     out = metric.evaluate(empty)
-    assert out.logical_value == 0
+    assert not hasattr(out, "logical_value")
     assert out.gap > 0.0                        # confident on empty syndrome
     single = empty.copy()
     single[0] = 1
@@ -193,17 +209,35 @@ def test_cluster_gap_from_window_model_and_soft_output_decoder_path():
     job = DecodeJob(op_id=0, window_id=0, n_rounds=3, dem=model,
                     payloads=[payload], label="op0 W0")
     result = wrapper.decode(job)
-    assert result.soft_output == pytest.approx(out.gap)
+    assert result.soft_output == out
 
 
 # ----------------------------------------- hidden assumption: >= threshold
 
 def test_switching_threshold_equality_keeps_weak():
-    strat = Switching(confidence_threshold=0.5)
+    strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5)
     assert strat.keep_weak_result(
-        DecodeResult(0, 0, soft_output=0.5), None) is True
+        DecodeResult(
+            0,
+            0,
+            soft_output=SoftOutput(
+                gap=0.5,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            ),
+        ),
+        None,
+    ) is True
     assert strat.keep_weak_result(
-        DecodeResult(0, 0, soft_output=0.4999), None) is False
+        DecodeResult(
+            0,
+            0,
+            soft_output=SoftOutput(
+                gap=0.4999,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            ),
+        ),
+        None,
+    ) is False
     assert strat.keep_weak_result(
         DecodeResult(0, 0, soft_output=None), None) is False
     assert strat.keep_weak_result(None, None) is False

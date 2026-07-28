@@ -3,13 +3,22 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..message import SoftOutput
+from ..message import SoftOutput, SoftOutputSource
 
 if TYPE_CHECKING:
     import stim
     from ..detector_error_model import WindowErrorModel
 
 _CITATION = "Toshio et al. 2510.25222 Sec. II.C"
+
+COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
+    method="complementary_gap",
+    cluster_origin="mwpm_opposite_logical",
+    growth_schedule="minimum_weight_matching",
+    gap_units="log_likelihood_weight",
+    correction="opposite_logical_constraint",
+    references=("arXiv:2510.25222 Section II.C",),
+)
 
 
 def dem_to_matrices(dem: "stim.DetectorErrorModel"):
@@ -105,8 +114,8 @@ class ComplementaryGapMetric:
         forced = np.concatenate([bits, [pred ^ 1]]).astype(np.uint8)
         _, w_comp = self._aug.decode(forced, return_weight=True)
         return SoftOutput(
-            logical_value=pred,
             gap=abs(float(w_comp) - float(w_min)),
+            source=COMPLEMENTARY_GAP_SOURCE,
             w_min=float(w_min),
             w_comp=float(w_comp),
         )

@@ -21,7 +21,12 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from decsim.decoders import PerRoundDecoder, SampledConfidenceDecoder, SwitchingRouter
+from decsim.decoders import (
+    PerRoundDecoder,
+    SAMPLED_CONFIDENCE_SOURCE,
+    SampledConfidenceDecoder,
+    SwitchingRouter,
+)
 from decsim.message import Operation
 from decsim.schedulers import EarliestDeadlineScheduler
 from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
@@ -136,7 +141,7 @@ def _switching_run(low_confidence_probability, rounds, patches, pools, seed=3,
                rounds_policy=FixedRounds(rounds),
                round_us=TAU,
                scheme=SlidingWindowScheme(),
-               strategy=switching or Switching(confidence_threshold=0.5),
+               strategy=switching or Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
                router=SwitchingRouter(weak, strong),
                unit_pools=pools,
                scheduler=scheduler,
@@ -164,7 +169,7 @@ def test_run_both_at_once_cancel_under_load_stays_consistent():
     exact under load. Most windows are confident here, so the cancel fires constantly."""
     box = {}
     result = _switching_run(0.1, rounds=300, patches=3, pools={"default": 2, "strong": 2},
-                            switching=Switching(confidence_threshold=0.5, run_both_at_once=True),
+                            switching=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True),
                             metrics_box=box)
     cluster = result.cluster
     _assert_clean(result, box["g"])

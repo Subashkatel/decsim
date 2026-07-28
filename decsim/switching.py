@@ -11,7 +11,11 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from .message import RunSeedChild, RunSeedPathSegment
+from .message import (
+    RunSeedChild,
+    RunSeedPathSegment,
+    SoftOutputSource,
+)
 from .protocols import Directive, OutcomeDirective, Submission
 
 
@@ -24,9 +28,29 @@ class ThresholdRegister:
     loop that COMPUTES new thresholds is out of scope (row 11's
     remaining open item)."""
 
-    def __init__(self, default: float, per_code: dict = None):
+    def __init__(
+        self,
+        default: float,
+        expected_source: SoftOutputSource,
+        per_code: dict = None,
+    ):
+        if not isinstance(expected_source, SoftOutputSource):
+            raise TypeError(
+                "ThresholdRegister expected_source must be a SoftOutputSource"
+            )
+        initial_per_code = dict(per_code or {})
+        for code in initial_per_code:
+            if type(code) is not str:
+                raise TypeError(
+                    "threshold-register code identities must be exact strings"
+                )
+            if not code:
+                raise ValueError(
+                    "threshold-register code identities must be nonempty"
+                )
         self.default = float(default)
-        self.per_code = dict(per_code or {})
+        self.expected_source = expected_source
+        self.per_code = initial_per_code
         self._initial_default = self.default
         self._initial_per_code = dict(self.per_code)
         self.history: list = []
@@ -35,18 +59,41 @@ class ThresholdRegister:
     def run_manifest_config(self):
         return {
             "kind": "threshold_register",
-            "initial_default": self._initial_default,
-            "initial_per_code": dict(self._initial_per_code),
+            "default_threshold": self._initial_default,
+            "per_code_thresholds": [
+                {
+                    "code": code,
+                    "threshold": self._initial_per_code[code],
+                }
+                for code in sorted(self._initial_per_code)
+            ],
+            "expected_source": self.expected_source.manifest_value(),
         }
 
     def get(self, code) -> float:
         return self.per_code.get(code, self.default)
 
     def set(self, code, threshold: float) -> None:
+        if type(code) is not str:
+            raise TypeError(
+                "threshold-register code identities must be exact strings"
+            )
+        if not code:
+            raise ValueError(
+                "threshold-register code identities must be nonempty"
+            )
         old = self.get(code)
         self.per_code[code] = float(threshold)
         self._seq += 1
-        self.history.append((self._seq, code, old, float(threshold)))
+        self.history.append(
+            (
+                self._seq,
+                code,
+                old,
+                float(threshold),
+                self.expected_source,
+            )
+        )
 
 
 class Baseline:
@@ -87,8 +134,9 @@ class Baseline:
 class Switching:
     """Weak decoder first; escalate to a strong decoder on low confidence.
 
-    Port of switching.py: confidence_threshold gates keep-weak (soft_output >=
-    threshold); serial mode escalates after the ws hop; run_both_at_once starts
+    The confidence threshold gates keep-weak only for the exact configured
+    source (`soft_output.gap >= threshold`); serial mode escalates after the
+    ws hop; run_both_at_once starts
     the strong sibling with the weak and cancels it on confidence; bulk_strong
     batches queued serial redos (timing-only). Redo covers commit + 2*buffer
     rounds (the paper's two-sided context).
@@ -114,6 +162,7 @@ class Switching:
     extra context still belongs to the strong-data-path backlog item."""
 
     def __init__(self, confidence_threshold: float,
+                 expected_source: SoftOutputSource,
                  run_both_at_once: bool = False,
                  weak_keepup_ratio: Optional[float] = None,
                  bulk_strong: bool = False,
@@ -134,7 +183,23 @@ class Switching:
             raise ValueError(
                 "double_window + bulk_strong is not supported: deferred "
                 "slabs are submitted one per escalation")
+        if not isinstance(expected_source, SoftOutputSource):
+            raise TypeError(
+                "Switching expected_source must be a SoftOutputSource"
+            )
+        if threshold_register is not None:
+            if confidence_threshold != threshold_register.default:
+                raise ValueError(
+                    "Switching confidence threshold must equal the threshold "
+                    "register default"
+                )
+            if expected_source != threshold_register.expected_source:
+                raise ValueError(
+                    "Switching expected source must equal the threshold "
+                    "register source"
+                )
         self.confidence_threshold = confidence_threshold
+        self.expected_source = expected_source
         self.threshold_register = threshold_register   # P17 (None = scalar)
         self.run_both_at_once = run_both_at_once
         self.weak_keepup_ratio = weak_keepup_ratio
@@ -145,6 +210,10 @@ class Switching:
         return {
             "kind": "switching",
             "confidence_threshold": self.confidence_threshold,
+            "expected_source": self.expected_source.manifest_value(),
+            "threshold_register_installed": (
+                self.threshold_register is not None
+            ),
             "run_both_at_once": self.run_both_at_once,
             "weak_keepup_ratio": self.weak_keepup_ratio,
             "bulk_strong": self.bulk_strong,
@@ -287,8 +356,14 @@ class Switching:
         if (self.threshold_register is not None and job is not None
                 and getattr(job, "code", None) is not None):
             threshold = self.threshold_register.get(job.code)
-        return (result is not None and result.soft_output is not None
-                and result.soft_output >= threshold)
+        if result is None or result.soft_output is None:
+            return False
+        if result.soft_output.source != self.expected_source:
+            raise ValueError(
+                "decoder confidence source does not match the switching "
+                "threshold source"
+            )
+        return result.soft_output.gap >= threshold
 
     @staticmethod
     def strong_redo_rounds(window) -> int:

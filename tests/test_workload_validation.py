@@ -7,6 +7,7 @@
 # duplicate stream ids leave ops waiting forever.
 #==================================================================
 import pytest
+import numpy as np
 
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import PresetLatencyDecoder
@@ -116,10 +117,10 @@ def test_intrinsic_measurement_must_match_operation_and_stream_identity():
         3,
         "op3",
         (0,),
-        stream_id=("stream", 3),
+        stream_id=3,
         intrinsic_measurement=IntrinsicMeasurement(
             operation_id=3,
-            trajectory_id=("stream", 4),
+            trajectory_id=4,
             value=0,
             source="controlled fixture",
         ),
@@ -129,7 +130,7 @@ def test_intrinsic_measurement_must_match_operation_and_stream_identity():
         RunSpec(ops=[operation]).validate()
 
 
-def test_recursive_stable_intrinsic_identity_is_accepted():
+def test_run_spec_rejects_tuple_stream_identity_even_if_intrinsic_type_allows_it():
     operation = Operation(
         3,
         "op3",
@@ -143,7 +144,66 @@ def test_recursive_stable_intrinsic_identity_is_accepted():
         ),
     )
 
-    RunSpec(ops=[operation]).validate()
+    with pytest.raises(TypeError, match="stream_id.*exact built-in int"):
+        RunSpec(ops=[operation]).validate()
+
+
+@pytest.mark.parametrize("operation_id", [True, 1.0, np.int64(1), "1"])
+def test_run_spec_requires_exact_integer_operation_ids(operation_id):
+    with pytest.raises(TypeError, match="operation id.*exact built-in int"):
+        RunSpec(
+            ops=[Operation(operation_id, "invalid identity", (0,))],
+        ).validate()
+
+
+@pytest.mark.parametrize(
+    "qubits",
+    [(True,), (np.int64(0),), (("patch", True),), (object(),)],
+)
+def test_run_spec_rejects_runtime_key_collisions_in_qubit_identities(qubits):
+    with pytest.raises(TypeError, match="qubits.*stable built-in"):
+        RunSpec(
+            ops=[Operation(0, "invalid resources", qubits)],
+        ).validate()
+
+
+def test_distinct_objects_cannot_share_an_id_across_workload_roles():
+    executable = Operation(7, "executable", (0,))
+    decode_owner = Operation(7, "decode owner", (0,))
+
+    with pytest.raises(ValueError, match="operation id 7.*distinct objects"):
+        RunSpec(
+            ops=[executable],
+            decode_ops=[decode_owner],
+        ).validate()
+
+
+def test_same_object_may_have_executable_and_static_decode_membership():
+    operation = Operation(7, "shared owner", (0,))
+
+    RunSpec(ops=[operation], decode_ops=[operation]).validate()
+
+
+def test_executable_and_dynamic_stream_membership_cannot_alias():
+    operation = Operation(7, "ambiguous dynamic owner", (0,))
+
+    with pytest.raises(
+        ValueError,
+        match="ops and dynamic_streams",
+    ):
+        RunSpec(ops=[operation], dynamic_streams=[operation]).validate()
+
+
+def test_stream_reference_must_name_a_declared_stream_owner():
+    operation = Operation(
+        0,
+        "orphan segment",
+        (0,),
+        stream_id=99,
+    )
+
+    with pytest.raises(ValueError, match="stream_id 99.*declared stream owner"):
+        RunSpec(ops=[operation]).validate()
 
 
 class _InvalidFeedbackFrontend:

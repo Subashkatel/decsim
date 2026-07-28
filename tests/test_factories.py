@@ -196,6 +196,79 @@ def test_factory_correction_service_presence_matches_correction_count(
     assert construct(None, 0).run_seed_children() == ()
 
 
+def test_single_level_factory_declares_immutable_effective_configuration():
+    engine = Engine(verbose=False)
+    factory = DistillationFactory(
+        engine,
+        num_units=2,
+        cycle_ticks=17,
+        decode_service=None,
+        corr_rounds=3,
+        n_corr=0,
+        return_ticks=5,
+        p_success=1,
+        initial_store=1,
+        production="demand",
+        buffer_capacity=4,
+    )
+
+    expected = {
+        "kind": "single_level",
+        "num_units": 2,
+        "cycle_ticks": 17,
+        "corr_rounds": 3,
+        "n_corr": 0,
+        "return_ticks": 5,
+        "success_probability": 1.0,
+        "initial_store": 1,
+        "production": "demand",
+        "buffer_capacity": 4,
+        "trace_capacity": 4096,
+    }
+    assert factory.run_manifest_config() == expected
+
+    delivered = []
+    factory.request(0, lambda: delivered.append(engine.now))
+    engine.run()
+    assert delivered == [0]
+    assert factory.run_manifest_config() == expected
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_units", True),
+        ("num_units", 0),
+        ("cycle_ticks", -1),
+        ("corr_rounds", 1.0),
+        ("return_ticks", -1),
+        ("initial_store", -1),
+        ("buffer_capacity", 0),
+        ("p_success", True),
+        ("p_success", float("inf")),
+        ("p_success", 1.1),
+        ("production", "free"),
+    ],
+)
+def test_single_level_factory_rejects_invalid_manifest_domains(field, value):
+    kwargs = {
+        "num_units": 1,
+        "cycle_ticks": 1,
+        "decode_service": None,
+        "corr_rounds": 0,
+        "n_corr": 0,
+        "return_ticks": 0,
+        "p_success": 1.0,
+        "initial_store": 0,
+        "production": "demand",
+        "buffer_capacity": None,
+    }
+    kwargs[field] = value
+
+    with pytest.raises((TypeError, ValueError)):
+        DistillationFactory(Engine(verbose=False), **kwargs)
+
+
 def test_continuous_requires_capacity():
     eng = Engine(verbose=False)
     with pytest.raises(ValueError):

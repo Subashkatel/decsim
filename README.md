@@ -32,13 +32,21 @@ To build your own workload, create `Operation`s (or use a frontend in
 [`decsim/frontends/`](decsim/frontends/)) and pass them as `ops=`.
 
 Planning inputs have exclusive ownership. Supply at most one of `d=`,
-`code=`, or `layout=`; omitting all three selects distance 3. A custom
-`planner=` supplies its own layout, scheme, and rounds policy, so those
-sibling fields are omitted. Custom magic-state factories use
+`code=`, or `layout=`; omitting all three selects distance 3. Select window
+layout and operation-round behavior directly with `scheme=` and
+`rounds_policy=`. Custom magic-state factories use
 `make_factory(engine, cluster)` so the returned factory is bound to the
-event engine the run drives. A `CompletedRun`'s exact code, layout, scheme,
-rounds policy, and planner are inspectable through
-`completed_run.planning`.
+event engine the run drives. A `CompletedRun` exposes the exact selections as
+`completed_run.planning.code`, `completed_run.planning.layout`,
+`completed_run.planning.scheme`, and
+`completed_run.planning.rounds_policy`.
+
+Custom stochastic runtime parts participate in run-level seeding through
+`RunSeedConsumer` in
+[`decsim/protocols.py`](decsim/protocols.py). Reservation prepares all work
+that can fail without changing the active random state. Once reservation
+succeeds, commit is a total, failure-free installation of that prepared state:
+it must not allocate, draw randomness, or invoke callbacks.
 
 ## Module map
 

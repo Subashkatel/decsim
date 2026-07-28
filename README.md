@@ -18,11 +18,14 @@ from decsim.run_spec import RunSpec, simulate
 from decsim.decoders import PerRoundDecoder
 from decsim.frontends.circuit import cnot_plus_two_t_circuit
 
-result = simulate(RunSpec(
+completed_run = simulate(RunSpec(
     ops=cnot_plus_two_t_circuit(),
     decoder=PerRoundDecoder(tau_us=1.0),
 ))
-print(result["chip_done"], result["fully_done"])
+print(
+    completed_run.result.chip_done_ticks,
+    completed_run.result.fully_done_ticks,
+)
 ```
 
 To build your own workload, create `Operation`s (or use a frontend in
@@ -33,14 +36,15 @@ Planning inputs have exclusive ownership. Supply at most one of `d=`,
 `planner=` supplies its own layout, scheme, and rounds policy, so those
 sibling fields are omitted. Custom magic-state factories use
 `make_factory(engine, cluster)` so the returned factory is bound to the
-event engine the run drives. A built world's exact code, layout, scheme,
-rounds policy, and planner are inspectable through `world.planning`.
+event engine the run drives. A `CompletedRun`'s exact code, layout, scheme,
+rounds policy, and planner are inspectable through
+`completed_run.planning`.
 
 ## Module map
 
 The one entry point is `simulate(RunSpec(...))`: `RunSpec` (in `run_spec.py`)
-is the typed run configuration, its `build()` wires the world in a fixed
-order, and `simulate` drives it until no events remain. Internally the
+is the typed run configuration, and its atomic `build()` wires and drives one
+run until no events remain before returning `CompletedRun`. Internally the
 simulator is a stable core — the runtime mechanics — plus swappable **parts**
 that `RunSpec` wires in. Parts make decisions through narrow protocols while
 the core retains lifecycle and event-ordering guarantees. See

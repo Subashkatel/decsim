@@ -323,6 +323,11 @@ class RunSpec:
         self._validate_supplied_parts()
         auxiliary_ops = list(self.decode_ops or []) + list(self.dynamic_streams or [])
         if self.ops is not None:
+            _validate_run_workload_identity(
+                list(self.ops),
+                list(self.decode_ops or []),
+                list(self.dynamic_streams or []),
+            )
             from .planner import _validate_operation_graph
             _validate_operation_graph(
                 self.ops, validate_blockers=True,
@@ -669,6 +674,11 @@ class RunSpec:
 
         ops = self.frontend.build() if self.frontend is not None else self.ops
         if self.frontend is not None:
+            _validate_run_workload_identity(
+                list(ops),
+                list(self.decode_ops or []),
+                list(self.dynamic_streams or []),
+            )
             from .planner import _validate_operation_graph
             auxiliary_ids = (operation.id for operation in
                              list(self.decode_ops or [])
@@ -999,6 +1009,153 @@ class RunSpec:
             return None
         dynamic_ids = {stream.id for stream in self.dynamic_streams}
         return [op for op in ops if op.stream_id not in dynamic_ids]
+
+
+def _is_runtime_identity(value) -> bool:
+    value_type = type(value)
+    if value_type is int or value_type is str:
+        return True
+    if value_type is tuple:
+        return all(_is_runtime_identity(item) for item in value)
+    return False
+
+
+def _validate_run_workload_identity(
+    executable_operations,
+    static_decode_operations,
+    dynamic_stream_operations,
+) -> None:
+    """Validate identities before Python mappings can collapse distinct keys."""
+    collections = (
+        ("ops", executable_operations),
+        ("decode_ops", static_decode_operations),
+        ("dynamic_streams", dynamic_stream_operations),
+    )
+    first_object_by_operation_id = {}
+    memberships_by_object_id = {}
+
+    for role, operations in collections:
+        seen_in_role = set()
+        for operation in operations:
+            if type(operation) is not Operation:
+                raise TypeError(
+                    f"{role} entries must be exact Operation values"
+                )
+            operation_id = operation.id
+            if type(operation_id) is not int:
+                raise TypeError(
+                    "operation id must be an exact built-in int, excluding "
+                    f"bool; got {operation_id!r}"
+                )
+            if operation_id in seen_in_role:
+                raise ValueError(
+                    f"operation id {operation_id} appears more than once "
+                    f"in {role}"
+                )
+            seen_in_role.add(operation_id)
+
+            prior = first_object_by_operation_id.get(operation_id)
+            if prior is not None and prior is not operation:
+                raise ValueError(
+                    f"operation id {operation_id} belongs to distinct objects "
+                    "across workload roles"
+                )
+            first_object_by_operation_id[operation_id] = operation
+
+            memberships = memberships_by_object_id.setdefault(
+                id(operation),
+                [],
+            )
+            memberships.append(role)
+            if "ops" in memberships and "dynamic_streams" in memberships:
+                raise ValueError(
+                    f"operation id {operation_id} cannot appear in both "
+                    "ops and dynamic_streams"
+                )
+            if "decode_ops" in memberships and "dynamic_streams" in memberships:
+                raise ValueError(
+                    f"operation id {operation_id} cannot appear in both "
+                    "decode_ops and dynamic_streams"
+                )
+
+            for reference_name, reference_ids in (
+                ("predecessors", operation.predecessors),
+            ):
+                if type(reference_ids) is not tuple:
+                    raise TypeError(
+                        f"operation {operation_id} {reference_name} must "
+                        "be a tuple"
+                    )
+                if any(type(reference) is not int for reference in reference_ids):
+                    raise TypeError(
+                        f"operation {operation_id} {reference_name} must "
+                        "contain exact built-in int operation ids"
+                    )
+            if (
+                operation.blocked_by is not None
+                and type(operation.blocked_by) is not int
+            ):
+                raise TypeError(
+                    f"operation {operation_id} blocked_by must be an exact "
+                    "built-in int operation id or None"
+                )
+
+            for identity_field in ("qubits", "patches"):
+                identities = getattr(operation, identity_field)
+                if type(identities) is not tuple or not all(
+                    _is_runtime_identity(identity)
+                    for identity in identities
+                ):
+                    raise TypeError(
+                        f"operation {operation_id} {identity_field} must "
+                        "contain stable built-in int, str, or recursive tuple "
+                        "identities with bool excluded"
+                    )
+
+            if (
+                operation.stream_id is not None
+                and type(operation.stream_id) is not int
+            ):
+                raise TypeError(
+                    f"operation {operation_id} stream_id must be an exact "
+                    "built-in int or None"
+                )
+
+    static_owner_by_id = {
+        operation.id: operation
+        for operation in static_decode_operations
+    }
+    dynamic_owner_by_id = {
+        operation.id: operation
+        for operation in dynamic_stream_operations
+    }
+    for operation in executable_operations:
+        stream_id = operation.stream_id
+        if stream_id is None:
+            if (
+                static_decode_operations
+                and static_owner_by_id.get(operation.id) is not operation
+            ):
+                raise ValueError(
+                    f"operation {operation.id} must name a declared static "
+                    "stream owner or share static decode membership"
+                )
+            continue
+        if dynamic_stream_operations:
+            owner = dynamic_owner_by_id.get(stream_id)
+        elif static_decode_operations:
+            owner = static_owner_by_id.get(stream_id)
+        else:
+            owner = (
+                operation
+                if stream_id == operation.id
+                else None
+            )
+        if owner is None:
+            raise ValueError(
+                f"operation {operation.id} stream_id {stream_id} does not "
+                "name a declared stream owner"
+            )
 
 
 def _materialize_run_seed_plan(

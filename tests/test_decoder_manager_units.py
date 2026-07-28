@@ -79,10 +79,8 @@ def test_pool_validation_fails_loudly():
                  unit_pools={"default": 1, "strong": 0}, **kwargs)
 
 
-def test_units_conserved_when_a_decoder_mutates_the_hint_mid_flight():
-    """SwitchingDecoder sets job.hint='strong' DURING latency() -- after the job already
-    dispatched on the default pool. The done-path must free the pool the job actually
-    ran on (job.pool), not the pool its mutated hint now names."""
+def test_units_conserved_for_inline_switching_timing_paths():
+    """Either sampled timing path returns every occupied decoder unit."""
     from decsim.decoders import SwitchingDecoder
     for seed in range(5):
         sw = SwitchingDecoder(PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0),

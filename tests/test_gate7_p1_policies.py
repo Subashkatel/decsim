@@ -10,6 +10,8 @@ import random
 import sys
 import pathlib
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.config import us
@@ -41,11 +43,14 @@ def test_buffer_expiry_deadline_is_first_round_plus_capacity():
                            on_reaction_path=True) == expected
 
 
-def test_buffer_expiry_deadline_falls_back_to_now_without_stamp():
+def test_buffer_expiry_deadline_rejects_missing_arrival_provenance():
     policy = BufferExpiryDeadline(capacity_rounds=10, round_ticks=us(2))
     w = make_window(t_first_round=None)
-    assert policy.deadline(None, w, now=us(30),
-                           on_reaction_path=False) == us(30) + 10 * us(2)
+    with pytest.raises(
+        RuntimeError,
+        match=r"window \(0, 0\).*arrival provenance is missing",
+    ):
+        policy.deadline(None, w, now=us(30), on_reaction_path=False)
 
 
 def test_older_windows_get_tighter_deadlines():

@@ -93,8 +93,9 @@ class RunManifestPart(Protocol):
 class Submission:
     """One decode job a strategy wants enqueued, optionally after a delay
     (e.g. the weak->strong ws hop). A strong redo job gets its
-    ready_time/deadline re-stamped when it actually enqueues, so the
-    delay does not count against its queue-wait accounting."""
+    ready_time stamped when it reaches the ready queue, so the delay does not
+    count as queue wait. Its configured deadline remains the physical
+    obligation stamped from the source window before the hop."""
 
     job: DecodeJob
     delay_ticks: int = 0
@@ -255,7 +256,8 @@ class IdlePolicy(Protocol):
 @runtime_checkable
 class DeadlinePolicy(Protocol):
     """Port 13. Stamps DecodeJob.deadline when the job is built; the EDF
-    scheduler dispatches by it."""
+    scheduler dispatches by it. Window.t_first_round may be absent; policies
+    that require arrival provenance must reject that incomplete input."""
 
     def deadline(self, op, window: Window, now: int, *,
                  on_reaction_path: bool) -> int: ...
@@ -270,8 +272,9 @@ class Decoder(Protocol):
     Contract (decoder_manager): ``latency(job)`` is called ONCE, at
     dispatch, and returns the whole job's service time in ticks; the
     manager schedules completion that many ticks later and then calls
-    ``decode(job)`` for the result. Implementations may mutate the job
-    in latency() to steer routing (SwitchingDecoder sets job.hint)."""
+    ``decode(job)`` for the result. Timing evaluation must not mutate routing
+    or accuracy-bearing job state; functional decisions belong to decode and
+    strategy owners."""
 
     def decode(self, job: DecodeJob) -> DecodeResult: ...
 

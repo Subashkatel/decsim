@@ -33,7 +33,7 @@ from decsim.message import DecodeJob, DecodeResult, Operation
 from decsim.planner import FixedRounds
 from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.run_spec import RunSpec, simulate
-from decsim.schedulers import FifoScheduler
+from decsim.schedulers import EarliestDeadlineScheduler, FifoScheduler
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Baseline
 
@@ -151,6 +151,60 @@ def test_bulk_merge_delivers_every_key_and_frees_units():
     assert manager.pool_free == {"default": 1, "strong": 1}
     assert manager.strong_running_rounds == 0
     assert not manager._windows_waiting_for_strong_result
+
+
+def test_strong_handoff_changes_readiness_without_renewing_deadline():
+    eng, manager, _ = build(ws_delay_ticks=us(2))
+    job = strong_job(2, 5)
+    job.deadline = us(99)
+
+    manager.enqueue(job, delay_ticks=us(2))
+    eng.run(until=us(2))
+
+    assert job.ready_time == us(2)
+    assert job.deadline == us(99)
+
+
+@pytest.mark.parametrize("deadlines", [(us(20), us(70)), (us(70), us(20))])
+def test_timing_only_strong_batch_keeps_earliest_member_deadline(deadlines):
+    _, manager, _ = build()
+    first = strong_job(2, 5)
+    second = strong_job(3, 5)
+    first.deadline, second.deadline = deadlines
+
+    batch = manager._merge_strong_batch([first, second])
+
+    assert batch.deadline == min(deadlines)
+
+
+def test_preserved_strong_deadlines_drive_edf_ahead_of_admission_order():
+    eng = Engine(verbose=False)
+    decoder = _RecordingDecoder(tau_us=1.0)
+    manager = DecoderManager(
+        eng,
+        router=CodeRouter(default=decoder),
+        scheduler=EarliestDeadlineScheduler(),
+        unit_pools={"default": 1, "strong": 1},
+        bulk_strong=False,
+    )
+    manager.strategy = _NullStrategy()
+    manager.on_strong_window_decoded = lambda _key, _result: None
+    blocker = strong_job(1, 10, "blocker")
+    admitted_first = strong_job(2, 1, "later-deadline")
+    urgent = strong_job(3, 1, "earlier-deadline")
+    blocker.deadline = us(1)
+    admitted_first.deadline = us(70)
+    urgent.deadline = us(20)
+    manager._windows_waiting_for_strong_result.update(
+        {(1, 0), (2, 0), (3, 0)}
+    )
+
+    manager.enqueue(blocker)
+    manager.enqueue(admitted_first)
+    manager.enqueue(urgent)
+    eng.run()
+
+    assert decoder.decoded == ["blocker", "earlier-deadline", "later-deadline"]
 
 
 @pytest.mark.parametrize(

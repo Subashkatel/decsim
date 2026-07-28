@@ -15,8 +15,9 @@ Parity anchors:
     window_manager commit -> apply held early strong same tick -> try_dispatch.
     External jobs have no decoder result and free their unit before their
     callback.
-  - only strong jobs re-stamp ready/deadline at enqueue (dm:139-140);
-    weak jobs keep their DeadlinePolicy deadline.
+  - a strong job crossing the weak-to-strong link becomes queue-ready at link
+    arrival, while its configured physical deadline remains the one stamped
+    from its source window.
   - cancel: queued -> remove silently (never dispatched); executing -> mark
     cancelled + free the unit immediately (dm:178-192); a held early strong
     result is discarded on keep-weak (dm:180).
@@ -208,8 +209,7 @@ class DecoderManager:
         if job.strong_decode_for is not None:
             if self._running_strong_decodes.get(job.strong_decode_for) is not job:
                 return                             # cancelled across the link
-            job.ready_time = self.engine.now       # re-stamp strong only
-            job.deadline = self.engine.now
+            job.ready_time = self.engine.now
         pool = self.pool_for(job)
         queue = self.queue_for(pool)
         self.scheduler.insert(queue, job)
@@ -325,7 +325,8 @@ class DecoderManager:
         total = sum(j.n_rounds for j in jobs)
         batch = DecodeJob(op_id=-1, window_id=0, n_rounds=total,
                           ready_time=min(j.ready_time for j in jobs),
-                          deadline=self.engine.now, on_done=lambda: None,
+                          deadline=min(j.deadline for j in jobs),
+                          on_done=lambda: None,
                           label=f"strong-batch x{len(jobs)} ({total}r)",
                           hint="strong", spatial_nodes=jobs[0].spatial_nodes,
                           strong_decode_for=window_keys[0] if window_keys

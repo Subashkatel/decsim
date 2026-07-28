@@ -18,6 +18,8 @@ from decsim.decoders import PerRoundDecoder
 # ---- a researcher's from-scratch stack: no defaults, port surface only ----
 
 class MyDevice:
+    operation_circuit_scope = "none"
+
     def begin_operation(self, op):
         return None
 

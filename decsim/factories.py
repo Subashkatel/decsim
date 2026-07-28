@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import math
 import random
 import threading
 from typing import Callable, Optional, TYPE_CHECKING
@@ -105,11 +106,33 @@ class _RandomSeedConsumer:
 
 def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -> None:
     """Validate the factory production mode and buffer setting."""
+    if type(production) is not str:
+        raise TypeError("production must be a built-in str")
     if production not in ("demand", "continuous"):
         raise ValueError(
             f"production must be 'demand' or 'continuous' (got {production!r})")
-    if production == "continuous" and (buffer_capacity is None or buffer_capacity < 1):
+    if buffer_capacity is not None and (
+        type(buffer_capacity) is not int or buffer_capacity < 1
+    ):
+        raise TypeError("buffer_capacity must be a positive built-in int or None")
+    if production == "continuous" and buffer_capacity is None:
         raise ValueError("continuous production needs buffer_capacity >= 1")
+
+
+def _validate_exact_integer(name: str, value, *, minimum: int) -> int:
+    if type(value) is not int or value < minimum:
+        relation = "positive" if minimum == 1 else "nonnegative"
+        raise TypeError(f"{name} must be a {relation} built-in int")
+    return value
+
+
+def _validate_probability(name: str, value) -> float:
+    if type(value) not in (int, float):
+        raise TypeError(f"{name} must be a built-in int or float")
+    normalized = float(value)
+    if not math.isfinite(normalized) or not 0.0 <= normalized <= 1.0:
+        raise ValueError(f"{name} must be finite and in [0, 1]")
+    return normalized
 
 
 def _validate_correction_decode_service(decode_service, n_corr: int) -> None:
@@ -182,6 +205,22 @@ class DistillationFactory(_RandomSeedConsumer):
                  buffer_capacity: Optional[int] = None):
         _validate_production_mode(production, buffer_capacity)
         _validate_correction_decode_service(decode_service, n_corr)
+        num_units = _validate_exact_integer(
+            "num_units", num_units, minimum=1
+        )
+        cycle_ticks = _validate_exact_integer(
+            "cycle_ticks", cycle_ticks, minimum=0
+        )
+        corr_rounds = _validate_exact_integer(
+            "corr_rounds", corr_rounds, minimum=0
+        )
+        return_ticks = _validate_exact_integer(
+            "return_ticks", return_ticks, minimum=0
+        )
+        initial_store = _validate_exact_integer(
+            "initial_store", initial_store, minimum=0
+        )
+        p_success = _validate_probability("p_success", p_success)
         self.engine = engine
         self.num_units = num_units
         self.cycle_ticks = cycle_ticks
@@ -193,6 +232,7 @@ class DistillationFactory(_RandomSeedConsumer):
         self._initialize_run_seed_state(seed)
         self.production = production
         self.buffer_capacity = buffer_capacity
+        self._initial_store = initial_store
         self._init_runtime_state(initial_store)
 
         if production == "continuous":
@@ -208,6 +248,21 @@ class DistillationFactory(_RandomSeedConsumer):
                 self.decode_service,
             ),
         )
+
+    def run_manifest_config(self):
+        return {
+            "kind": "single_level",
+            "num_units": self.num_units,
+            "cycle_ticks": self.cycle_ticks,
+            "corr_rounds": self.corr_rounds,
+            "n_corr": self.n_corr,
+            "return_ticks": self.return_ticks,
+            "success_probability": self.p_success,
+            "initial_store": self._initial_store,
+            "production": self.production,
+            "buffer_capacity": self.buffer_capacity,
+            "trace_capacity": 4096,
+        }
 
     def _init_runtime_state(self, initial_store: int) -> None:
         """Initialize queues, counters, and bounded trace storage."""

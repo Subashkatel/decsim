@@ -10,7 +10,11 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
-from .message import OperationWindowPlan, WindowGeometry
+from .message import (
+    OperationWindowPlan,
+    ResolvedCodeGeometry,
+    WindowGeometry,
+)
 
 if TYPE_CHECKING:
     from .message import Operation, Window
@@ -21,8 +25,6 @@ class SlidingWindowScheme:
     """Serial commit and look-ahead buffer windows."""
 
     scheme_label = "sliding-window (serial commit/buffer chain)"
-    windowed = True
-
     def run_manifest_config(self):
         return {"kind": "sliding"}
 
@@ -64,43 +66,37 @@ class SlidingWindowScheme:
             batch_preceding_idle_rounds=False,
         )
 
-    def plan_windows(self, op_id: int, round_count: int,
-                     code: CodeModel) -> list[tuple[int, int, int]]:
-        """Lay out commit windows with a look-ahead buffer.
-
-        NB when round_count % commit_rounds != 0 the last window commits a
-        SHORT tail (< d rounds). Timing-wise this layout is frozen (the
-        goldens pin the window count); accuracy-wise a short tail window
-        decodes with reduced history — full-decode studies should pick
-        round counts that divide evenly or absorb the tail in their plan
-        (see benchmarks/replicate_skoric_fig6a.py)."""
-        commit_rounds = code.commit_rounds()
-        buffer_rounds = code.buffer_rounds()
-        total_rounds = round_count
-        window_count = max(1, math.ceil(total_rounds / commit_rounds))
-        plan = []
-        for window_index in range(window_count):
-            commit_lo = window_index * commit_rounds + 1
-            commit_hi = min((window_index + 1) * commit_rounds, total_rounds)
-            buffer_hi = commit_hi + buffer_rounds
-            plan.append((commit_lo, commit_hi, buffer_hi))
-        return plan
-
-    def validate_buffer(self, code) -> None:
+    def validate_buffer(self, geometry) -> None:
         """Reject buffers below the literature floor (lead, trail) ~ (d, d)."""
-        floor = getattr(code, "buffering_floor",
-                        lambda scheme=None: (code.distance, code.distance))
-        lead, trail = floor(self)
-        if code.buffer_rounds() < trail:
+        if type(geometry) is not ResolvedCodeGeometry:
+            raise TypeError(
+                "geometry must be an exact ResolvedCodeGeometry"
+            )
+        if geometry.buffer_floor_override_active:
+            return
+        if (
+            geometry.buffer_round_count
+            < geometry.minimum_trailing_buffer_round_count
+        ):
             raise ValueError(
-                f"buffer_rounds={code.buffer_rounds()} is below the buffering "
-                f"floor {trail} (~d) for {getattr(code, 'name', code)}; "
+                f"buffer_rounds={geometry.buffer_round_count} is below the "
+                f"trailing buffering floor "
+                f"{geometry.minimum_trailing_buffer_round_count} (~d) for "
+                f"{geometry.code_name}; "
                 f"windowed accuracy degrades (Skoric 2209.08552, Bombin "
                 f"2303.04846). Raise buffer_rounds_override or use d.")
 
-    def data_complete(self, window: "Window", rounds_arrived: int, successor_rounds: int,
-                      memory_rounds: int, round_count: int, has_successor: bool,
-                      op: "Operation" = None, layout: "LayoutModel" = None) -> bool:
+    def data_complete(
+        self,
+        window: "Window",
+        *,
+        rounds_arrived: int,
+        successor_rounds: int,
+        memory_rounds: int,
+        round_count: int,
+        has_successor: bool,
+        operation,
+    ) -> bool:
         """Return True once commit and buffer data are present."""
         in_operation_needed = min(window.buffer_hi, round_count)
         if rounds_arrived < in_operation_needed:
@@ -118,9 +114,7 @@ class SlidingWindowScheme:
 class NaiveOnlineScheme(SlidingWindowScheme):
     """Decode each operation as one full batch after all rounds arrive."""
 
-    batches_idle_rounds_into_next_op = True
     scheme_label = "naive online batch decode (no windowing)"
-    windowed = False
 
     def run_manifest_config(self):
         return {"kind": "naive_online"}
@@ -143,10 +137,12 @@ class NaiveOnlineScheme(SlidingWindowScheme):
             batch_preceding_idle_rounds=True,
         )
 
-    def plan_windows(self, op_id: int, round_count: int,
-                     code: CodeModel) -> list[tuple[int, int, int]]:
-        """One batch window: commit every round, look ahead none."""
-        return [(1, round_count, round_count)]
+    def validate_buffer(self, geometry) -> None:
+        if type(geometry) is not ResolvedCodeGeometry:
+            raise TypeError(
+                "geometry must be an exact ResolvedCodeGeometry"
+            )
+        pass
 
 
 class ParallelWindowScheme(SlidingWindowScheme):
@@ -210,27 +206,20 @@ class ParallelWindowScheme(SlidingWindowScheme):
             batch_preceding_idle_rounds=False,
         )
 
-    def plan_windows(self, op_id: int, round_count: int,
-                     code: CodeModel) -> list[tuple[int, int, int, int]]:
-        """Lay out alternating A/B commit blocks with two-sided context."""
-        commit_rounds = code.commit_rounds()
-        buffer_rounds = code.buffer_rounds()
-        total_rounds = round_count
-
-        plan = []
-        commit_lo = 1
-        while commit_lo <= total_rounds:
-            commit_hi = min(commit_lo + commit_rounds - 1, total_rounds)
-            buffer_lo = max(1, commit_lo - buffer_rounds)
-            buffer_hi = commit_hi + buffer_rounds
-            plan.append((buffer_lo, commit_lo, commit_hi, buffer_hi))
-            commit_lo = commit_hi + 1
-        return plan
-
-    def wire_deps(self, windows: list) -> None:
-        """Layer-B windows wait for neighboring layer-A boundary data."""
-        for window_index in range(1, len(windows), 2):
-            window = windows[window_index]
-            window.deps.append((window.op_id, window_index - 1))
-            if window_index + 1 < len(windows):
-                window.deps.append((window.op_id, window_index + 1))
+    def validate_buffer(self, geometry) -> None:
+        if type(geometry) is not ResolvedCodeGeometry:
+            raise TypeError(
+                "geometry must be an exact ResolvedCodeGeometry"
+            )
+        if geometry.buffer_floor_override_active:
+            return
+        required = max(
+            geometry.minimum_leading_buffer_round_count,
+            geometry.minimum_trailing_buffer_round_count,
+        )
+        if geometry.buffer_round_count < required:
+            raise ValueError(
+                f"buffer_rounds={geometry.buffer_round_count} is below the "
+                f"two-sided buffering floor {required} (~d) for "
+                f"{geometry.code_name}"
+            )

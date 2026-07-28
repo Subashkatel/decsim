@@ -1,4 +1,4 @@
-"""Rounds policies (port 5) and the compile-time execution planner (port 7).
+"""Rounds policies and deterministic static-window materialization.
 
 Part module: planner.py port with the §5.21 generalizations —
   - every policy result is validated >= 1 (configured values < 1 raise);
@@ -11,7 +11,7 @@ Part module: planner.py port with the §5.21 generalizations —
     op-kind -> 1 (Zhou/AFT 2406.17653);
   - PerOpRounds is the QLX pass-through adapter (schedule durations ->
     per-op counts).
-WindowPlanner.plan(ops) is the single owner of windowing resolution.
+RunSpec owns resolution and calls the private materializer below.
 """
 
 from __future__ import annotations
@@ -144,8 +144,7 @@ class CodeRounds:
         return {"kind": "code", "scale": self.scale}
 
     def rounds_for(self, op, code) -> int:
-        base = code.rounds_per_op() if hasattr(code, "rounds_per_op") \
-            else code.rounds_per_logical_cycle()
+        base = code.rounds_per_logical_cycle()
         return max(1, int(round(self.scale * base)))
 
 
@@ -193,80 +192,73 @@ class TemporalRounds:
         return self.base.rounds_for(op, code)
 
 
-class WindowPlanner:
-    """Build the compile-time decode window plan (the ExecutionPlanner port):
-    plan(ops) is the single owner of windowing resolution for ops of known
-    length. Its runtime twin is dynamic_windows.DynamicWindows, which lays
-    out windows on the fly for streams whose length is not known up front."""
-
-    def __init__(self, scheme, layout, rounds):
-        self.scheme = scheme
-        self.layout = layout
-        if hasattr(rounds, "rounds_for"):
-            self.rounds_policy = rounds
-        else:
-            self.rounds_policy = FixedRounds(int(rounds))
-
-    def run_manifest_config(self):
-        return {"kind": "window"}
-
-    def plan(self, ops: list[Operation]) -> WindowPlan:
-        """Compute windows, dependencies, and job sizes for these operations."""
-        _validate_operation_graph(ops)
-        operations = {operation.id: operation for operation in ops}
-        codes_by_operation = {
-            op_id: self.layout.code_for_op(operation)
-            for op_id, operation in operations.items()
-        }
-        rounds_by_operation = {
-            op_id: _validated(
-                self.rounds_policy.rounds_for(
-                    op,
-                    codes_by_operation[op_id],
-                ),
-                f"rounds_for({op.name})")
-            for op_id, op in operations.items()}
-        successors = {op_id: [] for op_id in operations}
-        for op_id, operation in operations.items():
-            for predecessor_id in operation.predecessors:
-                successors[predecessor_id].append(op_id)
-        spatial_nodes = {
-            op_id: self.layout.spatial_nodes_for(operation)
-            for op_id, operation in operations.items()}
-        resolved_operations = tuple(
-            ResolvedOperationPlanning(
-                operation_id=operation.id,
-                code_geometry=_legacy_code_geometry(
-                    codes_by_operation[operation.id],
-                ),
-                round_count=rounds_by_operation[operation.id],
-                round_ticks=1,
-                spatial_node_count=spatial_nodes[operation.id],
-            )
-            for operation in ops
+def _plan_static_operations(scheme, layout, rounds_policy, ops) -> WindowPlan:
+    """Resolve a static plan through the root-selected collaborators."""
+    _validate_operation_graph(ops)
+    operations = {operation.id: operation for operation in ops}
+    codes_by_operation = {
+        operation_id: layout.code_for_op(operation)
+        for operation_id, operation in operations.items()
+    }
+    rounds_by_operation = {
+        operation_id: _validated(
+            rounds_policy.rounds_for(
+                operation,
+                codes_by_operation[operation_id],
+            ),
+            f"rounds_for({operation.name})",
         )
-        operation_window_plans = tuple(
-            self.scheme.plan_operation(
-                operation.id,
-                rounds_by_operation[operation.id],
-                commit_round_count=codes_by_operation[
-                    operation.id
-                ].commit_rounds(),
-                buffer_round_count=codes_by_operation[
-                    operation.id
-                ].buffer_rounds(),
-            )
-            for operation in ops
+        for operation_id, operation in operations.items()
+    }
+    spatial_nodes = {
+        operation_id: layout.spatial_nodes_for(
+            operation,
+            base_spatial_node_count=codes_by_operation[
+                operation_id
+            ].spatial_nodes(
+                max(
+                    1,
+                    len(operation.patches)
+                    if operation.patches
+                    else len(operation.qubits),
+                )
+            ),
         )
-        return _materialize_execution_plan(
-            tuple(ops),
-            resolved_operations,
-            operation_window_plans,
+        for operation_id, operation in operations.items()
+    }
+    resolved_operations = tuple(
+        ResolvedOperationPlanning(
+            operation_id=operation.id,
+            code_geometry=_resolve_code_geometry(
+                codes_by_operation[operation.id],
+            ),
+            round_count=rounds_by_operation[operation.id],
+            round_ticks=1,
+            spatial_node_count=spatial_nodes[operation.id],
         )
+        for operation in ops
+    )
+    operation_window_plans = tuple(
+        scheme.plan_operation(
+            operation.id,
+            rounds_by_operation[operation.id],
+            commit_round_count=codes_by_operation[
+                operation.id
+            ].commit_rounds(),
+            buffer_round_count=codes_by_operation[
+                operation.id
+            ].buffer_rounds(),
+        )
+        for operation in ops
+    )
+    return _materialize_execution_plan(
+        tuple(ops),
+        resolved_operations,
+        operation_window_plans,
+    )
 
 
-def _legacy_code_geometry(code):
-    """Temporary adapter removed when RunSpec becomes the sole resolver."""
+def _resolve_code_geometry(code):
     from .message import ResolvedCodeGeometry
 
     lead, trail = code.buffering_floor()
@@ -278,9 +270,7 @@ def _legacy_code_geometry(code):
         minimum_leading_buffer_round_count=lead,
         minimum_trailing_buffer_round_count=trail,
         one_patch_spatial_node_count=code.spatial_nodes(1),
-        buffer_floor_override_active=(
-            getattr(code, "buffer_rounds_override", None) is not None
-        ),
+        buffer_floor_override_active=code.buffer_floor_override_active(),
     )
 
 

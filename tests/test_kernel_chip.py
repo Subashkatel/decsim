@@ -7,6 +7,9 @@ from decsim.message import (
     Decision,
     FeedbackEffect,
     Operation,
+    ResolvedCodeGeometry,
+    ResolvedOperationPlanning,
+    ResolvedPatchPlanning,
     ResourceClaim,
 )
 from decsim.chip import Chip
@@ -95,23 +98,48 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
     eng = Engine(verbose=False)
     cluster = _Cluster()
     factory = _Factory(factory_delay, eng)
+    geometry = ResolvedCodeGeometry(
+        code_name="fake",
+        distance=3,
+        commit_round_count=3,
+        buffer_round_count=3,
+        minimum_leading_buffer_round_count=3,
+        minimum_trailing_buffer_round_count=3,
+        one_patch_spatial_node_count=9,
+        buffer_floor_override_active=False,
+    )
     gate = Chip(eng, source=_Source(eng, cluster),
                         controller=_Controller(), cluster=cluster,
-                        factory=factory, round_ticks=ROUND, code_distance=3,
-                        idle_policy=idle_policy or Ignore(),
-                        round_ticks_by_operation_id={
-                            operation.id: ROUND
-                            for operation in ops
-                        },
-                        round_ticks_by_patch={
-                            patch: ROUND
-                            for operation in ops
-                            for patch in (
-                                operation.patches
-                                if operation.patches
-                                else operation.qubits or (0,)
+                        factory=factory, round_ticks=ROUND,
+                        code_geometry=geometry,
+                        resolved_operations=tuple(
+                            ResolvedOperationPlanning(
+                                operation_id=operation.id,
+                                code_geometry=geometry,
+                                round_count=4,
+                                round_ticks=ROUND,
+                                spatial_node_count=9,
                             )
-                        },
+                            for operation in ops
+                        ),
+                        resolved_patches=tuple(
+                            ResolvedPatchPlanning(
+                                patch_identity=patch,
+                                code_geometry=geometry,
+                                round_ticks=ROUND,
+                                spatial_node_count=9,
+                            )
+                            for patch in {
+                                patch
+                                for operation in ops
+                                for patch in (
+                                    operation.patches
+                                    if operation.patches
+                                    else operation.qubits or (0,)
+                                )
+                            }
+                        ),
+                        idle_policy=idle_policy or Ignore(),
                         resource_claims_by_operation_id={
                             operation.id: tuple(
                                 cluster.layout.resources_for(operation)

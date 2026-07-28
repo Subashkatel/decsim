@@ -31,6 +31,10 @@ from .message import (
     IntrinsicMeasurement,
     Operation,
     OperationPlanningView,
+    ResolvedCodeGeometry,
+    ResolvedCodeSpatialProfile,
+    ResolvedOperationPlanning,
+    ResolvedPatchPlanning,
     RunSeedChild,
     RunSeedPathSegment,
     RunSeedReservation,
@@ -47,7 +51,6 @@ if TYPE_CHECKING:
     from .protocols import (
         CodeModel,
         DecodingScheme,
-        ExecutionPlanner,
         LayoutModel,
         RoundsPolicy,
     )
@@ -60,7 +63,6 @@ PREBINDING_OBJECT_FIELDS = (
     "layout",
     "scheme",
     "rounds_policy",
-    "planner",
     "strategy",
 )
 PREBINDING_PROVIDER_FIELDS = (
@@ -69,7 +71,6 @@ PREBINDING_PROVIDER_FIELDS = (
     "make_metrics",
     "make_orchestrator",
 )
-PLANNER_CHILD_FIELDS = ("layout", "scheme", "rounds_policy")
 RUN_SEED_CONSUMER_MEMBERS = (
     "reserve_run_seed",
     "commit_run_seed",
@@ -103,7 +104,6 @@ class ResolvedPlanningParts:
     layout: "LayoutModel"
     scheme: "DecodingScheme"
     rounds_policy: "RoundsPolicy"
-    planner: "ExecutionPlanner"
 
 
 @dataclass
@@ -137,6 +137,8 @@ class _ResolvedExecutionPlanSpec:
     spatial_nodes: tuple[tuple[int, int], ...]
     rounds_by_operation: tuple[tuple[int, int], ...]
     code_names: tuple[tuple[int, str], ...]
+    windowed_by_operation: tuple[tuple[int, bool], ...]
+    batch_preceding_idle_rounds_by_operation: tuple[tuple[int, bool], ...]
     total_windows: int
     summary_json: bytes
 
@@ -171,6 +173,10 @@ class _ResolvedExecutionPlanSpec:
             spatial_nodes=dict(self.spatial_nodes),
             rounds_by_operation=dict(self.rounds_by_operation),
             code_names=dict(self.code_names),
+            windowed_by_operation=dict(self.windowed_by_operation),
+            batch_preceding_idle_rounds_by_operation=dict(
+                self.batch_preceding_idle_rounds_by_operation
+            ),
             total_windows=self.total_windows,
             summary=json.loads(self.summary_json),
         )
@@ -506,6 +512,10 @@ class ResolvedCadenceRecord:
 
 @dataclass(frozen=True)
 class _ResolvedCodeCadencePlan:
+    code_geometry: ResolvedCodeGeometry
+    spatial_profile: ResolvedCodeSpatialProfile
+    operations: tuple[ResolvedOperationPlanning, ...]
+    patches: tuple[ResolvedPatchPlanning, ...]
     code_selections: tuple[ResolvedCodeSelectionRecord, ...]
     cadences: tuple[ResolvedCadenceRecord, ...]
     round_ticks_by_operation_id: tuple[tuple[int, int], ...]
@@ -830,9 +840,8 @@ class RunSpec:
     """Typed simulator configuration with one owner per planning choice.
 
     Supply at most one of ``d``, ``code``, or ``layout``; omitting all three
-    selects distance 3. A supplied ``planner`` owns its layout, scheme, and
-    rounds policy, so those sibling fields must be omitted. Custom magic-state
-    factories are constructed through ``make_factory(engine, cluster)``.
+    selects distance 3. Custom magic-state factories are constructed through
+    ``make_factory(engine, cluster)``.
     """
 
     # workload (exactly one of ops/frontend)
@@ -859,7 +868,6 @@ class RunSpec:
     # windowing / rounds
     scheme: Optional[Any] = None              # default SlidingWindowScheme
     rounds_policy: Optional[Any] = None       # default GateRounds
-    planner: Optional[Any] = None
 
     # control loop
     boundary_policy: Optional[Any] = None     # default Eager (speculative)
@@ -900,7 +908,13 @@ class RunSpec:
             + workload.static_decode_operations
             + workload.dynamic_stream_operations
         )
-        self._validate_layout_selection(planning, planning_operations)
+        from .switching import Baseline
+        strategy = self.strategy if self.strategy is not None else Baseline()
+        self._validate_layout_selection(
+            planning,
+            planning_operations,
+            strategy,
+        )
 
     def _validate_configuration(self) -> ResolvedPlanningParts:
         """Validate configuration-only state and resolve planning once."""
@@ -909,6 +923,35 @@ class RunSpec:
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
         self._validate_supplied_parts()
+        from .policies import Eager
+        from .schemes import SlidingWindowScheme
+        from .switching import Baseline
+
+        selected_scheme = (
+            self.scheme if self.scheme is not None else SlidingWindowScheme()
+        )
+        selected_strategy = (
+            self.strategy if self.strategy is not None else Baseline()
+        )
+        selected_boundary_policy = (
+            self.boundary_policy
+            if self.boundary_policy is not None
+            else Eager()
+        )
+        if self.dynamic_streams and (
+            type(selected_scheme) is not SlidingWindowScheme
+        ):
+            raise ValueError(
+                "dynamic streams require the exact shipped serial "
+                "SlidingWindowScheme"
+            )
+        selected_strategy.validate_declared_run(
+            scheme=selected_scheme,
+            boundary_policy=selected_boundary_policy,
+            has_dynamic_streams=bool(self.dynamic_streams),
+            static_decode_plan_selected=self.decode_ops is not None,
+            has_frontend=self.frontend is not None,
+        )
         auxiliary_ops = list(self.decode_ops or []) + list(self.dynamic_streams or [])
         if self.ops is not None:
             _validate_run_workload_identity(
@@ -920,6 +963,10 @@ class RunSpec:
             _validate_operation_graph(
                 self.ops, validate_blockers=True,
                 external_blocker_ids=(operation.id for operation in auxiliary_ops))
+            selected_strategy.validate_operations(tuple(
+                _planning_view_from_operation(operation)
+                for operation in list(self.ops) + auxiliary_ops
+            ))
         self._validate_operation_feedback_contracts(
             list(self.ops or []) + auxiliary_ops,
         )
@@ -954,15 +1001,6 @@ class RunSpec:
             component = object.__getattribute__(self, field_name)
             if component is not None:
                 _reject_static_seed_consumer(field_name, component)
-
-        planner = object.__getattribute__(self, "planner")
-        if planner is not None:
-            for child_name in PLANNER_CHILD_FIELDS:
-                child = _stored_planner_child(planner, child_name)
-                _reject_static_seed_consumer(
-                    f"planner.{child_name}",
-                    child,
-                )
 
         for field_name in PREBINDING_PROVIDER_FIELDS:
             provider = object.__getattribute__(self, field_name)
@@ -1018,7 +1056,6 @@ class RunSpec:
             ("deadline_policy", self.deadline_policy, protocols.DeadlinePolicy),
             ("scheme", self.scheme, protocols.DecodingScheme),
             ("rounds_policy", self.rounds_policy, protocols.RoundsPolicy),
-            ("planner", self.planner, protocols.ExecutionPlanner),
             ("boundary_policy", self.boundary_policy,
              protocols.BoundaryPolicy),
             ("window_interaction", self.window_interaction,
@@ -1083,38 +1120,8 @@ class RunSpec:
     def _resolve_planning_parts(self) -> ResolvedPlanningParts:
         from .codes import SurfaceCodeModel
         from .layouts import UniformLayout
-        from .planner import GateRounds, WindowPlanner
+        from .planner import GateRounds
         from .schemes import SlidingWindowScheme
-
-        if self.planner is not None:
-            sibling_names = [
-                name
-                for name in ("d", "code", "layout", "scheme", "rounds_policy")
-                if getattr(self, name) is not None
-            ]
-            if sibling_names:
-                supplied = ", ".join(sibling_names)
-                raise ValueError(
-                    "planner owns layout, scheme, and rounds_policy; "
-                    f"remove sibling planning fields: {supplied}")
-            planner = self.planner
-            scheme = planner.scheme
-            layout = planner.layout
-            rounds_policy = planner.rounds_policy
-            from . import protocols
-            _validate_protocol_part(
-                "planner.layout",
-                layout,
-                protocols.LayoutModel,
-            )
-            code = _single_layout_code(layout, "planner.layout")
-            return ResolvedPlanningParts(
-                code=code,
-                layout=layout,
-                scheme=scheme,
-                rounds_policy=rounds_policy,
-                planner=planner,
-            )
 
         code_sources = [
             name
@@ -1143,13 +1150,11 @@ class RunSpec:
             if self.rounds_policy is not None
             else GateRounds()
         )
-        planner = WindowPlanner(scheme, layout, rounds_policy)
         return ResolvedPlanningParts(
             code=code,
             layout=layout,
             scheme=scheme,
             rounds_policy=rounds_policy,
-            planner=planner,
         )
 
     def _validate_resolved_planning(
@@ -1158,29 +1163,15 @@ class RunSpec:
     ) -> None:
         from . import protocols
 
-        supplied_planner = self.planner is not None
         parts = (
             ("resolved code", planning.code, protocols.CodeModel),
+            ("resolved layout", planning.layout, protocols.LayoutModel),
+            ("resolved scheme", planning.scheme, protocols.DecodingScheme),
             (
-                "planner.layout" if supplied_planner else "resolved layout",
-                planning.layout,
-                protocols.LayoutModel,
-            ),
-            (
-                "planner.scheme" if supplied_planner else "resolved scheme",
-                planning.scheme,
-                protocols.DecodingScheme,
-            ),
-            (
-                (
-                    "planner.rounds_policy"
-                    if supplied_planner
-                    else "resolved rounds_policy"
-                ),
+                "resolved rounds_policy",
                 planning.rounds_policy,
                 protocols.RoundsPolicy,
             ),
-            ("resolved planner", planning.planner, protocols.ExecutionPlanner),
         )
         for name, part, protocol in parts:
             _validate_protocol_part(name, part, protocol)
@@ -1193,29 +1184,6 @@ class RunSpec:
             raise ValueError(
                 "resolved layout declared a code different from the resolved "
                 "planning/runtime code")
-        if planning.planner.scheme is not planning.scheme:
-            raise ValueError("resolved planner uses a different scheme")
-        if planning.planner.layout is not planning.layout:
-            raise ValueError("resolved planner uses a different layout")
-        if planning.planner.rounds_policy is not planning.rounds_policy:
-            raise ValueError("resolved planner uses a different rounds_policy")
-
-        if getattr(planning.code, "buffer_rounds_override", None) is None:
-            # An explicit buffer override is the expert escape hatch, including
-            # measurement-closed streams that need no trailing buffer.
-            planning.scheme.validate_buffer(planning.code)
-
-        probe = _planning_view_from_operation(
-            Operation(-1, "probe", (0,))
-        )
-        round_count = planning.rounds_policy.rounds_for(
-            probe,
-            planning.code,
-        )
-        if round_count < 1:
-            raise ValueError(
-                f"rounds_policy returned {round_count} (< 1)")
-
     def _validate_cross_part_combinations(
         self,
         planning: ResolvedPlanningParts,
@@ -1242,11 +1210,12 @@ class RunSpec:
         self,
         planning: ResolvedPlanningParts,
         operations,
+        strategy,
     ) -> _ResolvedCodeCadencePlan:
-        code_round_us = getattr(planning.code, "round_us", None)
+        code_round_us = planning.code.round_period_us()
         if code_round_us is not None:
             round_us = code_round_us
-            cadence_origin = "code.round_us"
+            cadence_origin = "code.round_period_us"
         elif self.round_us is not None:
             round_us = self.round_us
             cadence_origin = "run_spec.round_us"
@@ -1267,7 +1236,61 @@ class RunSpec:
                 "resolved round cadence must be at least one tick"
             )
 
-        operation_records = {}
+        code_name = planning.code.name
+        distance = planning.code.distance
+        commit_round_count = planning.code.commit_rounds()
+        buffer_round_count = planning.code.buffer_rounds()
+        buffering_floor = planning.code.buffering_floor()
+        buffer_floor_override_active = (
+            planning.code.buffer_floor_override_active()
+        )
+        if type(buffering_floor) is not tuple or len(buffering_floor) != 2:
+            raise TypeError(
+                "CodeModel.buffering_floor() must return an exact pair"
+            )
+        minimum_leading, minimum_trailing = buffering_floor
+        if type(buffer_floor_override_active) is not bool:
+            raise TypeError(
+                "CodeModel.buffer_floor_override_active() must return an "
+                "exact bool"
+            )
+
+        patch_counts = {1}
+        patch_count_by_operation_id = {}
+        for operation in operations:
+            patch_count = max(
+                1,
+                len(operation.patches)
+                if operation.patches
+                else len(operation.qubits),
+            )
+            patch_counts.add(patch_count)
+            patch_count_by_operation_id[operation.id] = patch_count
+        spatial_entries = []
+        for patch_count in sorted(patch_counts):
+            node_count = planning.code.spatial_nodes(patch_count)
+            if type(node_count) is not int or node_count < 1:
+                raise TypeError(
+                    "CodeModel.spatial_nodes() must return an exact positive "
+                    "int"
+                )
+            spatial_entries.append((patch_count, node_count))
+        spatial_profile = ResolvedCodeSpatialProfile(tuple(spatial_entries))
+        code_geometry = ResolvedCodeGeometry(
+            code_name=code_name,
+            distance=distance,
+            commit_round_count=commit_round_count,
+            buffer_round_count=buffer_round_count,
+            minimum_leading_buffer_round_count=minimum_leading,
+            minimum_trailing_buffer_round_count=minimum_trailing,
+            one_patch_spatial_node_count=spatial_profile.for_patch_count(1),
+            buffer_floor_override_active=buffer_floor_override_active,
+        )
+        planning.scheme.validate_buffer(code_geometry)
+        strategy.validate_code_geometry(code_geometry)
+
+        operation_identity_records = {}
+        resolved_operations = []
         patch_records_by_bytes = {}
         for operation in operations:
             selected_code = planning.layout.code_for_op(operation)
@@ -1276,9 +1299,39 @@ class RunSpec:
                     f"layout {planning.layout!r} operation {operation.id} "
                     f"selected {selected_code!r}, but resolved "
                     f"planning/runtime code is {planning.code!r}")
-            operation_records.setdefault(
+            operation_identity_records.setdefault(
                 operation.id,
                 StableIdentityRecord.from_identity(operation.id),
+            )
+            round_count = planning.rounds_policy.rounds_for(
+                operation,
+                planning.code,
+            )
+            if type(round_count) is not int or round_count < 1:
+                raise TypeError(
+                    f"resolved rounds for operation {operation.id} must be "
+                    "a positive exact int"
+                )
+            base_spatial_node_count = spatial_profile.for_patch_count(
+                patch_count_by_operation_id[operation.id]
+            )
+            spatial_node_count = planning.layout.spatial_nodes_for(
+                operation,
+                base_spatial_node_count=base_spatial_node_count,
+            )
+            if type(spatial_node_count) is not int or spatial_node_count < 1:
+                raise TypeError(
+                    "LayoutModel.spatial_nodes_for() must return an exact "
+                    "positive int"
+                )
+            resolved_operations.append(
+                ResolvedOperationPlanning(
+                    operation_id=operation.id,
+                    code_geometry=code_geometry,
+                    round_count=round_count,
+                    round_ticks=round_ticks,
+                    spatial_node_count=spatial_node_count,
+                )
             )
 
             patch_ids = operation.patches
@@ -1287,23 +1340,46 @@ class RunSpec:
             if not patch_ids:
                 patch_ids = (0,)
             for patch_id in patch_ids:
-                selected_code = planning.layout.code_for_patch(patch_id)
-                if selected_code is not planning.code:
-                    raise ValueError(
-                        f"layout {planning.layout!r} patch {patch_id!r} "
-                        f"selected {selected_code!r} in "
-                        f"operation {operation.id}, but resolved "
-                        f"planning/runtime code is {planning.code!r}")
                 patch_record = StableIdentityRecord.from_identity(patch_id)
                 patch_records_by_bytes.setdefault(
                     patch_record.canonical_bytes(),
                     (patch_id, patch_record),
                 )
 
+        resolved_patches = []
+        for patch_id, _patch_record in patch_records_by_bytes.values():
+            selected_code = planning.layout.code_for_patch(patch_id)
+            if selected_code is not planning.code:
+                raise ValueError(
+                    f"layout {planning.layout!r} patch {patch_id!r} selected "
+                    f"{selected_code!r}, but resolved planning/runtime code "
+                    f"is {planning.code!r}"
+                )
+            spatial_node_count = planning.layout.patch_spatial_nodes_for(
+                patch_id,
+                base_spatial_node_count=(
+                    spatial_profile.for_patch_count(1)
+                ),
+            )
+            if type(spatial_node_count) is not int or spatial_node_count < 1:
+                raise TypeError(
+                    "LayoutModel.patch_spatial_nodes_for() must return an "
+                    "exact positive int"
+                )
+            resolved_patches.append(
+                ResolvedPatchPlanning(
+                    patch_identity=patch_id,
+                    code_geometry=code_geometry,
+                    round_ticks=round_ticks,
+                    spatial_node_count=spatial_node_count,
+                )
+            )
+
         code_path = (TypedPathSegmentRecord("field", "code"),)
         ordered_consumers = [
             ("operation", operation_id, identity_record)
-            for operation_id, identity_record in operation_records.items()
+            for operation_id, identity_record
+            in operation_identity_records.items()
         ]
         ordered_consumers.sort(
             key=lambda item: item[2].canonical_bytes()
@@ -1335,11 +1411,15 @@ class RunSpec:
             for record in code_selections
         )
         return _ResolvedCodeCadencePlan(
+            code_geometry=code_geometry,
+            spatial_profile=spatial_profile,
+            operations=tuple(resolved_operations),
+            patches=tuple(resolved_patches),
             code_selections=code_selections,
             cadences=cadences,
             round_ticks_by_operation_id=tuple(
                 (operation_id, round_ticks)
-                for operation_id in sorted(operation_records)
+                for operation_id in sorted(operation_identity_records)
             ),
             round_ticks_by_patch=tuple(
                 (patch_id, round_ticks)
@@ -1418,16 +1498,19 @@ class RunSpec:
         all_operations.extend(dynamic_streams)
         planning_operations = workload.planning_views(all_operations)
         self._validate_operation_feedback_contracts(all_operations)
+        strategy = self.strategy if self.strategy is not None else Baseline()
+        if self.frontend is not None:
+            strategy.validate_operations(tuple(planning_operations))
         code_cadence_plan = self._validate_layout_selection(
             planning,
             planning_operations,
+            strategy,
         )
         resource_claims_by_operation_id = _validate_program_order(
             workload.planning_views(ops),
             planning.layout,
         )
 
-        strategy = self.strategy if self.strategy is not None else Baseline()
         decode_plan_operations = self._decode_plan_operations(
             ops,
             decode_operations,
@@ -1440,41 +1523,40 @@ class RunSpec:
             else decode_plan_operations
         )
         planned_views = workload.planning_views(planned_operations)
+        resolved_operation_by_id = {
+            operation.operation_id: operation
+            for operation in code_cadence_plan.operations
+        }
+        planned_resolved_operations = tuple(
+            resolved_operation_by_id[operation.id]
+            for operation in planned_views
+        )
+        operation_window_plans = tuple(
+            planning.scheme.plan_operation(
+                operation.operation_id,
+                operation.round_count,
+                commit_round_count=(
+                    operation.code_geometry.commit_round_count
+                ),
+                buffer_round_count=(
+                    operation.code_geometry.buffer_round_count
+                ),
+            )
+            for operation in planned_resolved_operations
+        )
+        from .planner import _materialize_execution_plan
         execution_plan_spec = _freeze_execution_plan(
-            planning.planner.plan(list(planned_views)),
+            _materialize_execution_plan(
+                tuple(planned_views),
+                planned_resolved_operations,
+                operation_window_plans,
+            ),
             (operation.id for operation in planned_views),
         )
-        execution_plan_summary = json.loads(
-            execution_plan_spec.summary_json
-        )
-        resolved_rounds_by_operation_id = dict(
-            execution_plan_spec.rounds_by_operation
-        )
-        for planning_view in planning_operations:
-            if planning_view.id in resolved_rounds_by_operation_id:
-                continue
-            round_count = planning.rounds_policy.rounds_for(
-                planning_view,
-                planning.code,
-            )
-            if type(round_count) is not int or round_count < 1:
-                raise TypeError(
-                    f"resolved rounds for operation {planning_view.id} "
-                    "must be a positive exact int"
-                )
-            resolved_rounds_by_operation_id[planning_view.id] = round_count
-        check_window_size = getattr(strategy, "check_window_size", None)
-        if check_window_size is not None:
-            check_window_size(
-                execution_plan_summary.get(
-                    "commit",
-                    planning.code.commit_rounds(),
-                ),
-                execution_plan_summary.get(
-                    "buffer",
-                    planning.code.buffer_rounds(),
-                ),
-            )
+        resolved_rounds_by_operation_id = {
+            operation.operation_id: operation.round_count
+            for operation in code_cadence_plan.operations
+        }
 
         engine = Engine(verbose=verbose, construction_guarded=True)
         scheduler = self.scheduler if self.scheduler is not None \
@@ -1544,9 +1626,12 @@ class RunSpec:
 
         store = PayloadStore(memory_model=self.memory_model)
         window_manager = WindowManager(
-            engine, scheme=planning.scheme, layout=planning.layout,
-            rounds_policy=planning.rounds_policy,
-            code=planning.code, deadline_policy=deadline_policy, links=links,
+            engine,
+            scheme=planning.scheme,
+            code_geometry=code_cadence_plan.code_geometry,
+            resolved_operations=code_cadence_plan.operations,
+            resolved_patches=code_cadence_plan.patches,
+            deadline_policy=deadline_policy, links=links,
             orchestrator=orchestrator, boundary_policy=boundary_policy,
             window_interaction=window_interaction,
             planning_view_by_operation_id=(
@@ -1574,7 +1659,10 @@ class RunSpec:
         cluster = ClusterFacade(
             window_manager,
             pool,
-            planning.layout,
+            nominal_window_redo_round_count=(
+                code_cadence_plan.code_geometry.commit_round_count
+                + 2 * code_cadence_plan.code_geometry.buffer_round_count
+            ),
         )
 
         factory = self.make_factory(engine, cluster) \
@@ -1585,18 +1673,23 @@ class RunSpec:
                 f"{type(factory).__name__} uses a different engine from "
                 "the RunSpec build")
         _validate_shipped_factory_decode_service(factory, cluster)
-        source = ClockedDevice(engine, device, controller, cluster,
-                               window_manager.rounds_for)
+        source = ClockedDevice(
+            engine,
+            device,
+            controller,
+            cluster,
+            {
+                operation.operation_id: operation.round_count
+                for operation in code_cadence_plan.operations
+            },
+        )
         gate = Chip(
             engine, source=source, controller=controller, cluster=cluster,
             factory=factory, round_ticks=code_cadence_plan.round_ticks,
-            code_distance=planning.code.distance, idle_policy=idle_policy,
-            round_ticks_by_operation_id=dict(
-                code_cadence_plan.round_ticks_by_operation_id
-            ),
-            round_ticks_by_patch=dict(
-                code_cadence_plan.round_ticks_by_patch
-            ),
+            code_geometry=code_cadence_plan.code_geometry,
+            resolved_operations=code_cadence_plan.operations,
+            resolved_patches=code_cadence_plan.patches,
+            idle_policy=idle_policy,
             resource_claims_by_operation_id=(
                 resource_claims_by_operation_id
             ),
@@ -1698,7 +1791,10 @@ class RunSpec:
                 execution_plan_spec.materialize()
             )
             for stream in dynamic_streams:
-                window_manager.register_dynamic_stream(stream, planning.code)
+                window_manager._register_dynamic_stream(
+                    stream,
+                    resolved_operation_by_id[stream.id],
+                )
             for metric in metrics:
                 engine.add_metric(metric)
             gate._load(ops)
@@ -1730,17 +1826,7 @@ class RunSpec:
                 resolved_rounds_by_operation_id=(
                     resolved_rounds_by_operation_id
                 ),
-                code=planning.code,
-                commit_origin=(
-                    "plan_summary"
-                    if "commit" in execution_plan_summary
-                    else "resolved_code_fallback"
-                ),
-                buffer_origin=(
-                    "plan_summary"
-                    if "buffer" in execution_plan_summary
-                    else "resolved_code_fallback"
-                ),
+                code_geometry=code_cadence_plan.code_geometry,
             )
             chip_load_plan_record = _chip_load_plan_record(
                 workload,
@@ -1855,7 +1941,6 @@ class RunSpec:
             ((field_segment("layout"),), planning.layout),
             ((field_segment("scheme"),), planning.scheme),
             ((field_segment("rounds_policy"),), planning.rounds_policy),
-            ((field_segment("planner"),), planning.planner),
             ((field_segment("device"),), device),
             ((field_segment("decoder_router"),), router),
             ((field_segment("magic_state_factory"),), factory),
@@ -2264,6 +2349,8 @@ def _freeze_execution_plan(
         "spatial_nodes",
         "rounds_by_operation",
         "code_names",
+        "windowed_by_operation",
+        "batch_preceding_idle_rounds_by_operation",
         "summary",
     )
     for field_name in mapping_fields:
@@ -2279,6 +2366,8 @@ def _freeze_execution_plan(
         "spatial_nodes",
         "rounds_by_operation",
         "code_names",
+        "windowed_by_operation",
+        "batch_preceding_idle_rounds_by_operation",
     )
     for field_name in per_operation_fields:
         keys = set(getattr(candidate, field_name))
@@ -2376,6 +2465,8 @@ def _freeze_execution_plan(
     spatial_nodes = []
     rounds_by_operation = []
     code_names = []
+    windowed_by_operation = []
+    batch_preceding_idle_rounds_by_operation = []
     for operation_id in sorted(expected_operation_ids):
         count = candidate.window_count[operation_id]
         if type(count) is not int or count < 1:
@@ -2430,6 +2521,18 @@ def _freeze_execution_plan(
         spatial_nodes.append((operation_id, spatial_node_count))
         rounds_by_operation.append((operation_id, round_count))
         code_names.append((operation_id, code_name))
+        windowed = candidate.windowed_by_operation[operation_id]
+        batch_idle = candidate.batch_preceding_idle_rounds_by_operation[
+            operation_id
+        ]
+        if type(windowed) is not bool or type(batch_idle) is not bool:
+            raise TypeError(
+                "WindowPlan mode and idle-batching facts must be exact bools"
+            )
+        windowed_by_operation.append((operation_id, windowed))
+        batch_preceding_idle_rounds_by_operation.append(
+            (operation_id, batch_idle)
+        )
 
     if (
         type(candidate.total_windows) is not int
@@ -2453,6 +2556,10 @@ def _freeze_execution_plan(
         spatial_nodes=tuple(spatial_nodes),
         rounds_by_operation=tuple(rounds_by_operation),
         code_names=tuple(code_names),
+        windowed_by_operation=tuple(windowed_by_operation),
+        batch_preceding_idle_rounds_by_operation=tuple(
+            batch_preceding_idle_rounds_by_operation
+        ),
         total_windows=candidate.total_windows,
         summary_json=summary_json,
     )
@@ -2899,9 +3006,7 @@ def _resolved_execution_plan_record(
     resource_claims_by_operation_id,
     dynamic_streams,
     resolved_rounds_by_operation_id,
-    code,
-    commit_origin,
-    buffer_origin,
+    code_geometry,
 ) -> ResolvedExecutionPlanRecord:
     window_counts = dict(spec.window_count)
     operation_windows = dict(spec.op_windows)
@@ -2984,10 +3089,10 @@ def _resolved_execution_plan_record(
         ],
         "total_windows": spec.total_windows,
         "switching_window_validation": {
-            "commit_rounds": code.commit_rounds(),
-            "commit_origin": commit_origin,
-            "buffer_rounds": code.buffer_rounds(),
-            "buffer_origin": buffer_origin,
+            "commit_rounds": code_geometry.commit_round_count,
+            "commit_origin": "resolved_code_geometry",
+            "buffer_rounds": code_geometry.buffer_round_count,
+            "buffer_origin": "resolved_code_geometry",
         },
         "dynamic_streams": [
             {
@@ -3001,9 +3106,6 @@ def _resolved_execution_plan_record(
                 "feedback_boundary_mode": (
                     operation.feedback_boundary_mode
                 ),
-                "planner_path": [
-                    {"kind": "field", "value": "planner"},
-                ],
                 "rounds_policy_path": [
                     {"kind": "field", "value": "rounds_policy"},
                 ],
@@ -3831,32 +3933,6 @@ def _reject_static_seed_consumer(component_path: str, component) -> None:
         )
 
 
-def _stored_planner_child(planner, child_name: str):
-    """Read an approved planner child shape without binding a descriptor."""
-    try:
-        instance_fields = object.__getattribute__(planner, "__dict__")
-    except AttributeError:
-        instance_fields = {}
-    if type(instance_fields) is dict and child_name in instance_fields:
-        return instance_fields[child_name]
-
-    missing = object()
-    child = inspect.getattr_static(planner, child_name, missing)
-    if child is missing:
-        raise TypeError(
-            "planner does not satisfy ExecutionPlanner: "
-            f"planner.{child_name} must be a stored non-descriptor child"
-        )
-    if inspect.isdatadescriptor(child) or (
-        getattr(type(child), "__get__", None) is not None
-    ):
-        raise TypeError(
-            "planner does not satisfy ExecutionPlanner: "
-            f"planner.{child_name} must be a stored non-descriptor child"
-        )
-    return child
-
-
 def _scan_prebinding_provider(component_path: str, provider) -> None:
     """Classify provider ownership without binding or invoking a wrapper."""
     provider_type = type(provider)
@@ -4023,17 +4099,22 @@ class ClusterFacade:
     """The 'cluster' read surface chip/factory/metrics code expects,
     backed by the new window_manager + pool."""
 
-    def __init__(self, window_manager, pool, layout):
+    def __init__(
+        self,
+        window_manager,
+        pool,
+        *,
+        nominal_window_redo_round_count,
+    ):
         self.window_manager = window_manager
         self.pool = pool
-        self.layout = layout
+        self._nominal_window_redo_round_count = (
+            nominal_window_redo_round_count
+        )
 
     # chip-side surface
     def register_op(self, op) -> None:
         self.window_manager.register_op(op)
-
-    def rounds_for(self, op) -> int:
-        return self.window_manager.rounds_for(op)
 
     def prepend_idle_rounds(self, op_id, n) -> None:
         self.window_manager.prepend_idle_rounds(op_id, n)
@@ -4089,12 +4170,8 @@ class ClusterFacade:
         return self.window_manager.op_windows
 
     @property
-    def commit(self):
-        return self.window_manager.commit
-
-    @property
-    def buffer(self):
-        return self.window_manager.buffer
+    def nominal_window_redo_round_count(self):
+        return self._nominal_window_redo_round_count
 
     @property
     def rounds_arrived(self):

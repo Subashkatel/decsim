@@ -87,13 +87,21 @@ def test_runtime_window_count_and_geometry_match_static_plan():
         seed=2,
     )
     cluster = res.cluster
-    static = SlidingWindowScheme().plan_windows(0, R, SurfaceCodeModel(d=D))
+    static = SlidingWindowScheme().plan_operation(
+        0,
+        R,
+        commit_round_count=D,
+        buffer_round_count=D,
+    ).windows
     assert cluster.window_count[stream_op.id] == len(static)                  # same number of windows
     assert set(cluster.window_count) == {stream_op.id}                        # segments are not decode units
     built = sorted((cluster.windows[(stream_op.id, k)].commit_lo,
                     min(cluster.windows[(stream_op.id, k)].commit_hi, R))
                    for k in range(cluster.window_count[stream_op.id]))
-    want = sorted((cl, ch) for (cl, ch, _bh) in static)
+    want = sorted(
+        (window.commit_lo, window.commit_hi)
+        for window in static
+    )
     assert built == want                                             # same commit regions
     assert len(cluster.committed_windows) == cluster.total_windows
 

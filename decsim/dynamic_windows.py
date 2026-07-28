@@ -1,6 +1,6 @@
 """Runtime window layout for streams whose length is not known up front.
 
-The runtime twin of planner.WindowPlanner: the planner lays out all windows
+The runtime twin of static root materialization: the root lays out all windows
 up front for ops of known length; this lays them out on the fly for a
 dynamic stream, whose total length only emerges as the run proceeds (op
 segments fold their rounds into it via Operation.stream_id). Windows are
@@ -34,11 +34,18 @@ class DynamicWindows:
 
     # ------------------------------------------------------------ register
 
-    def register(self, stream_op: Operation, code, source_round_limit) -> None:
+    def register(
+        self,
+        stream_op: Operation,
+        *,
+        commit_round_count,
+        buffer_round_count,
+        source_round_limit,
+    ) -> None:
         """Track a stream whose windows are created from arriving rounds."""
         self._streams[stream_op.id] = {
-            "commit_rounds": code.commit_rounds(),
-            "buffer_rounds": code.buffer_rounds(),
+            "commit_rounds": commit_round_count,
+            "buffer_rounds": buffer_round_count,
             "next_window": 0,
             "sealed": False,
             "source_round_limit": source_round_limit,

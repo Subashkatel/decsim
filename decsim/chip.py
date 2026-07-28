@@ -31,8 +31,8 @@ class Chip:
     """Gate operation starts on body deps + magic states + feedback finality."""
 
     def __init__(self, engine, *, source, controller, cluster, factory,
-                 round_ticks: int, code_distance: int, idle_policy,
-                 round_ticks_by_operation_id, round_ticks_by_patch,
+                 round_ticks: int, code_geometry, resolved_operations,
+                 resolved_patches, idle_policy,
                  resource_claims_by_operation_id,
                  max_idle_rounds: Optional[int] = None,
                  gates_start_on_round_boundaries: bool = False,
@@ -43,19 +43,23 @@ class Chip:
         self.cluster = cluster
         self.factory = factory
         self.round_ticks = round_ticks
-        self.code_distance = code_distance
+        self._code_geometry = code_geometry
         self.idle_policy = idle_policy
-        self._round_ticks_by_operation_id = dict(
-            round_ticks_by_operation_id
-        )
-        self._round_ticks_by_patch = dict(round_ticks_by_patch)
+        self._resolved_operations = {
+            operation.operation_id: operation
+            for operation in resolved_operations
+        }
+        self._resolved_patches = {
+            patch.patch_identity: patch
+            for patch in resolved_patches
+        }
         self._resource_claims_by_operation_id = dict(
             resource_claims_by_operation_id
         )
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
         self.frame = frame if frame is not None else PauliFrame()
         self.max_idle_rounds = max_idle_rounds if max_idle_rounds is not None \
-            else 100 * code_distance
+            else 100 * code_geometry.distance
 
         self._ops: dict[int, Operation] = {}
         self._deps_remaining: dict[int, int] = {}
@@ -91,7 +95,7 @@ class Chip:
 
     def _round_ticks_for(self, operation: Operation) -> int:
         try:
-            return self._round_ticks_by_operation_id[operation.id]
+            return self._resolved_operations[operation.id].round_ticks
         except KeyError as error:
             raise ValueError(
                 f"operation {operation.id} has no resolved round cadence"
@@ -99,10 +103,18 @@ class Chip:
 
     def _round_ticks_for_patch(self, patch) -> int:
         try:
-            return self._round_ticks_by_patch[patch]
+            return self._resolved_patches[patch].round_ticks
         except KeyError as error:
             raise ValueError(
                 f"patch {patch!r} has no resolved round cadence"
+            ) from error
+
+    def _round_count_for(self, operation: Operation) -> int:
+        try:
+            return self._resolved_operations[operation.id].round_count
+        except KeyError as error:
+            raise ValueError(
+                f"operation {operation.id} has no resolved round count"
             ) from error
 
     def _load(self, ops: list[Operation]) -> None:
@@ -234,7 +246,9 @@ class Chip:
                 f"{operation.name} starts at stream round "
                 f"{operation.stream_offset + 1}, but stream {stream_id!r} has "
                 f"already reserved through round {next_round}")
-        operation_end = operation.stream_offset + self.cluster.rounds_for(operation)
+        operation_end = operation.stream_offset + self._round_count_for(
+            operation
+        )
         self.stream_next_round[stream_id] = max(next_round, operation_end)
 
     def _patch_for_operation(self, operation: Operation):
@@ -272,7 +286,7 @@ class Chip:
         if operation.stream_id is None:
             return
         stream_round_count = operation.stream_offset \
-            + self.cluster.rounds_for(operation)
+            + self._round_count_for(operation)
         self.cluster.close_stream_boundary(operation.stream_id,
                                            stream_round_count)
 
@@ -399,12 +413,14 @@ class Chip:
                                    round_index: int) -> None:
         if self.idle_policy.mode != "separate_decode_jobs":
             return
-        code = self.cluster.layout.code_for_patch(patch)
-        if round_index % code.commit_rounds() == 0:
+        patch_record = self._resolved_patches[patch]
+        geometry = patch_record.code_geometry
+        if round_index % geometry.commit_round_count == 0:
             self.cluster.submit_decode(
-                code.commit_rounds() + code.buffer_rounds(),
-                on_done=lambda: None, code=code.name,
-                spatial_nodes=code.spatial_nodes(1),
+                geometry.commit_round_count + geometry.buffer_round_count,
+                on_done=lambda: None,
+                code=geometry.code_name,
+                spatial_nodes=patch_record.spatial_node_count,
                 label=f"mem({self._ops[op_id].name},r{round_index})")
 
     # ------------------------------------------------------------- decisions

@@ -85,7 +85,15 @@ def test_high_p_saturates_at_coin_flip_and_windows_survive_dense_syndromes():
 
     n_layers = 1 + max(int(cc[-1])
                        for cc in c.get_detector_coordinates().values())
-    plan = SlidingWindowScheme().plan_windows(0, n_layers, SurfaceCodeModel(d=3))
+    plan = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            n_layers,
+            commit_round_count=3,
+            buffer_round_count=3,
+        ).windows
+    ]
     models = build_window_error_models(c, plan)
     decode = matching_window_decoder()
     global_pred = matcher.decode_batch(dets)[:500, 0]

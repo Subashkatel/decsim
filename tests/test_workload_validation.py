@@ -13,22 +13,25 @@ from decsim.codes import SurfaceCodeModel
 from decsim.decoders import PresetLatencyDecoder
 from decsim.layouts import UniformLayout
 from decsim.message import IntrinsicMeasurement, Operation
-from decsim.planner import FixedRounds, WindowPlanner
+from decsim.planner import FixedRounds, _plan_static_operations
 from decsim.run_spec import RunSpec
 from decsim.schemes import SlidingWindowScheme
 
 
-def _planner():
-    return WindowPlanner(SlidingWindowScheme(),
-                         UniformLayout(SurfaceCodeModel(d=3)),
-                         FixedRounds(3))
+def _plan(operations):
+    return _plan_static_operations(
+        SlidingWindowScheme(),
+        UniformLayout(SurfaceCodeModel(d=3)),
+        FixedRounds(3),
+        operations,
+    )
 
 
 def test_duplicate_operation_ids_are_rejected():
     first = Operation(7, "first", (0,))
     second = Operation(7, "second", (1,))
     with pytest.raises(ValueError) as err:
-        _planner().plan([first, second])
+        _plan([first, second])
     message = str(err.value)
     assert "7" in message and "first" in message and "second" in message
 
@@ -36,7 +39,7 @@ def test_duplicate_operation_ids_are_rejected():
 def test_unknown_predecessor_is_a_named_error_not_a_keyerror():
     op = Operation(0, "op0", (0,), predecessors=(99,))
     with pytest.raises(ValueError) as err:
-        _planner().plan([op])
+        _plan([op])
     message = str(err.value)
     assert "0" in message and "99" in message
 
@@ -44,7 +47,7 @@ def test_unknown_predecessor_is_a_named_error_not_a_keyerror():
 def test_self_dependency_is_rejected():
     op = Operation(0, "op0", (0,), predecessors=(0,))
     with pytest.raises(ValueError) as err:
-        _planner().plan([op])
+        _plan([op])
     assert "itself" in str(err.value)
 
 
@@ -52,7 +55,7 @@ def test_dependency_cycles_are_rejected():
     a = Operation(0, "a", (0,), predecessors=(1,))
     b = Operation(1, "b", (1,), predecessors=(0,))
     with pytest.raises(ValueError) as err:
-        _planner().plan([a, b])
+        _plan([a, b])
     message = str(err.value)
     assert "cycle" in message and "0" in message and "1" in message
 
@@ -60,7 +63,7 @@ def test_dependency_cycles_are_rejected():
 def test_valid_dag_still_plans():
     a = Operation(0, "a", (0,))
     b = Operation(1, "b", (1,), predecessors=(0,))
-    plan = _planner().plan([a, b])
+    plan = _plan([a, b])
     assert plan is not None
 
 

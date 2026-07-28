@@ -16,7 +16,8 @@ windowing quality:
   buffer ≥ d  →  statistically flat (tracks the global decode),
   buffer < d  →  degraded (strictly more failures on the same shots),
 
-and `validate_buffer` rejects exactly the configurations that degrade.
+The typed scheme guard rejects below-floor geometry unless the run explicitly
+declares the expert override that selected that degraded configuration.
 """
 import json
 import pathlib
@@ -31,6 +32,7 @@ from decsim.detector_error_model import (build_window_error_models,  # noqa: E40
                                                  decode_windowed)
 from decsim.codes import SurfaceCodeModel                                     # noqa: E402
 from decsim.mwpm_decoder import matching_window_decoder                       # noqa: E402
+from decsim.message import ResolvedCodeGeometry                               # noqa: E402
 from decsim.schemes import SlidingWindowScheme                                # noqa: E402
 
 DATA = pathlib.Path(__file__).resolve().parent / "data"
@@ -78,13 +80,36 @@ def test_buffer_sweep_floor_at_d(name, d, rounds):
 
 
 @pytest.mark.parametrize("name,d,rounds", SCENARIOS)
-def test_validate_buffer_rejects_exactly_the_degraded_configs(name, d, rounds):
+def test_validate_buffer_requires_an_explicit_override_below_the_floor(
+    name,
+    d,
+    rounds,
+):
     scheme = SlidingWindowScheme()
     for b in ((d + 1) // 2, d, 2 * d):
         code = SurfaceCodeModel(d=d, buffer_rounds_override=b)
+        common = dict(
+            code_name=code.name,
+            distance=d,
+            commit_round_count=d,
+            buffer_round_count=b,
+            minimum_leading_buffer_round_count=d,
+            minimum_trailing_buffer_round_count=d,
+            one_patch_spatial_node_count=d * d,
+        )
         if b < d:
             with pytest.raises(ValueError, match="buffering"):
-                scheme.validate_buffer(code)
+                scheme.validate_buffer(ResolvedCodeGeometry(
+                    **common,
+                    buffer_floor_override_active=False,
+                ))
+            scheme.validate_buffer(ResolvedCodeGeometry(
+                **common,
+                buffer_floor_override_active=True,
+            ))
         else:
-            scheme.validate_buffer(code)
-        assert code.buffering_floor(scheme) == (d, d)
+            scheme.validate_buffer(ResolvedCodeGeometry(
+                **common,
+                buffer_floor_override_active=False,
+            ))
+        assert code.buffering_floor() == (d, d)

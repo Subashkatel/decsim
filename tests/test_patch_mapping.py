@@ -48,7 +48,11 @@ def test_two_qubits_in_one_patch_share_it():
     ], qubit_to_patch=TWO_QUBITS_PER_PATCH).build()
     assert ops[0].patches == ("patch0",)
     layout = UniformLayout(SurfaceCodeModel(d=3))
-    assert layout.spatial_nodes_for(ops[0]) == SurfaceCodeModel(d=3).spatial_nodes(1)
+    base = SurfaceCodeModel(d=3).spatial_nodes(1)
+    assert layout.spatial_nodes_for(
+        ops[0],
+        base_spatial_node_count=base,
+    ) == base
 
 
 def test_ops_on_same_patch_take_turns():

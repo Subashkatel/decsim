@@ -156,8 +156,15 @@ def test_engine_matches_offline_reference_and_global_exactly():
     # offline reference built with the engine's own folded round convention
     coords = circuit.get_detector_coordinates()
     folded = {det: min(int(c[-1]) + 1, ROUNDS) for det, c in coords.items()}
-    plan = [(lo, hi, min(b, ROUNDS)) for lo, hi, b in
-            SlidingWindowScheme().plan_windows(0, ROUNDS, SurfaceCodeModel(d=D))]
+    plan = [
+        (window.commit_lo, window.commit_hi, min(window.buffer_hi, ROUNDS))
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            ROUNDS,
+            commit_round_count=D,
+            buffer_round_count=D,
+        ).windows
+    ]
     ref_models = build_window_error_models(circuit, plan, detector_rounds=folded)
     ref_inner = matching_window_decoder()
     global_m = pymatching.Matching.from_detector_error_model(
@@ -200,8 +207,15 @@ def test_engine_bposd_matches_offline_reference():
     circuit = _circuit()
     coords = circuit.get_detector_coordinates()
     folded = {det: min(int(c[-1]) + 1, ROUNDS) for det, c in coords.items()}
-    plan = [(lo, hi, min(b, ROUNDS)) for lo, hi, b in
-            SlidingWindowScheme().plan_windows(0, ROUNDS, SurfaceCodeModel(d=D))]
+    plan = [
+        (window.commit_lo, window.commit_hi, min(window.buffer_hi, ROUNDS))
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            ROUNDS,
+            commit_round_count=D,
+            buffer_round_count=D,
+        ).windows
+    ]
     ref_models = build_window_error_models(circuit, plan, detector_rounds=folded)
     ref_inner = bposd_window_decoder()
 
@@ -228,7 +242,12 @@ def test_blocked_successor_waits_for_real_pymatching_result():
     path certified above.
     """
     circuit = _circuit()
-    window_count = len(SlidingWindowScheme().plan_windows(0, ROUNDS, SurfaceCodeModel(d=D)))
+    window_count = len(SlidingWindowScheme().plan_operation(
+        0,
+        ROUNDS,
+        commit_round_count=D,
+        buffer_round_count=D,
+    ).windows)
 
     class RecordingDecoder(PyMatchingDecoder):
         def __init__(self):

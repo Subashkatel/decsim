@@ -13,6 +13,9 @@ from decsim.message import (
     DecodeResult,
     Operation,
     OperationPlanningView,
+    ResolvedCodeGeometry,
+    ResolvedOperationPlanning,
+    ResolvedPatchPlanning,
     SyndromePayload,
     Window,
     WindowPlan,
@@ -35,26 +38,9 @@ class _Links:
     do = _Link(T_DO)
 
 
-class _Code:
-    distance = 3
-    name = "fake"
-    def commit_rounds(self): return 3
-    def buffer_rounds(self): return 3
-
-
-class _Layout:
-    def code_for_op(self, op): return _Code()
-    def spatial_nodes_for(self, op): return 9
-
-
-class _Rounds:
-    def rounds_for(self, op, code): return 6
-
-
 class _Scheme:
-    batches_idle_rounds_into_next_op = False
     def data_complete(self, w, *, rounds_arrived, successor_rounds,
-                      memory_rounds, round_count, has_successor, op, layout):
+                      memory_rounds, round_count, has_successor, operation):
         # sliding-window rule: all rounds up to buffer_hi present (or op ended)
         return rounds_arrived + memory_rounds >= min(w.buffer_hi, round_count)
 
@@ -110,8 +96,38 @@ def _runtime(boundary=None, strategy=None, ops=(0,), deps=(), blocking=()):
         )
         for op_id in ops
     }
-    rt = WindowManager(eng, scheme=_Scheme(), layout=_Layout(),
-                       rounds_policy=_Rounds(), code=_Code(),
+    geometry = ResolvedCodeGeometry(
+        code_name="fake",
+        distance=3,
+        commit_round_count=3,
+        buffer_round_count=3,
+        minimum_leading_buffer_round_count=3,
+        minimum_trailing_buffer_round_count=3,
+        one_patch_spatial_node_count=9,
+        buffer_floor_override_active=False,
+    )
+    resolved_operations = tuple(
+        ResolvedOperationPlanning(
+            operation_id=op_id,
+            code_geometry=geometry,
+            round_count=6,
+            round_ticks=1,
+            spatial_node_count=9,
+        )
+        for op_id in ops
+    )
+    resolved_patches = tuple(
+        ResolvedPatchPlanning(
+            patch_identity=op_id,
+            code_geometry=geometry,
+            round_ticks=1,
+            spatial_node_count=9,
+        )
+        for op_id in ops
+    )
+    rt = WindowManager(eng, scheme=_Scheme(), code_geometry=geometry,
+                       resolved_operations=resolved_operations,
+                       resolved_patches=resolved_patches,
                        deadline_policy=_Deadline(), links=_Links(),
                        orchestrator=fb, boundary_policy=boundary or _Eager(),
                        window_interaction=DefaultWindowInteraction(),
@@ -141,6 +157,10 @@ def _runtime(boundary=None, strategy=None, ops=(0,), deps=(), blocking=()):
         spatial_nodes={op_id: 9 for op_id in ops},
         rounds_by_operation={op_id: 6 for op_id in ops},
         code_names={op_id: "fake" for op_id in ops},
+        windowed_by_operation={op_id: True for op_id in ops},
+        batch_preceding_idle_rounds_by_operation={
+            op_id: False for op_id in ops
+        },
         total_windows=len(windows)))
     return eng, rt, fb, submitted
 

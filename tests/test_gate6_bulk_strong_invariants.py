@@ -35,6 +35,7 @@ from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.run_spec import RunSpec, simulate
 from decsim.schedulers import FifoScheduler
 from decsim.schemes import SlidingWindowScheme
+from decsim.switching import Baseline
 
 
 class _NullStrategy:
@@ -172,7 +173,7 @@ def test_merged_result_rejects_accuracy_fields_before_lifecycle_mutation(
                 fields[field_name] = field_value
             return DecodeResult(job.op_id, job.window_id, **fields)
 
-    class RecordingStrategy:
+    class RecordingStrategy(Baseline):
         def __init__(self):
             self.outcomes = []
 
@@ -326,7 +327,7 @@ def test_public_strategy_duplicate_strong_submission_is_rejected_end_to_end():
     """Destination uniqueness is owned by the manager, not the strategy: a
     real DecodingStrategy that escalates one weak window twice is refused."""
 
-    class DuplicateStrongStrategy:
+    class DuplicateStrongStrategy(Baseline):
         bulk_strong = True
 
         def on_window_ready(self, window, weak_job, services):
@@ -465,7 +466,7 @@ def test_strong_result_cancelled_inside_the_completion_hook_is_refused(
     """The destination's demand can disappear while its own result is being
     delivered; the result is then refused rather than parked."""
 
-    class CancelInHookStrategy:
+    class CancelInHookStrategy(Baseline):
         def on_decode_outcome(self, outcome, services):
             services.cancel_strong(outcome.job.strong_decode_for)
             return OutcomeDirective(Directive.FINALIZE_STRONG)
@@ -490,7 +491,7 @@ def test_strong_result_displaced_by_a_new_request_in_the_hook_is_refused(
     completing one has no consumer left and is refused instead of replacing
     it in the hold map."""
 
-    class ResubmitInHookStrategy:
+    class ResubmitInHookStrategy(Baseline):
         def __init__(self, manager):
             self.manager = manager
             self.resubmitted = False
@@ -546,7 +547,7 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
     strong result is adopted by its own destination, the operation finalizes
     with nothing held, and a later wait finds nothing to consume."""
 
-    class EscalateEveryWindowStrategy:
+    class EscalateEveryWindowStrategy(Baseline):
         bulk_strong = True
 
         def on_window_ready(self, window, weak_job, services):
@@ -597,7 +598,7 @@ def test_public_strategy_delayed_duplicate_submission_is_refused_end_to_end():
     weak->strong link: the refusal happens at submission, so no run reaches
     finality on a stale result."""
 
-    class DelayedDuplicateStrongStrategy:
+    class DelayedDuplicateStrongStrategy(Baseline):
         bulk_strong = True
 
         def on_window_ready(self, window, weak_job, services):
@@ -836,7 +837,7 @@ def test_public_strategy_listing_one_weak_submission_twice_is_refused(
     the list that can name one job twice; the refusal is the documented one at
     submission, and the window occupies one queue slot or unit, never two."""
 
-    class DuplicateWeakStrategy:
+    class DuplicateWeakStrategy(Baseline):
         def __init__(self, bulk_strong):
             self.bulk_strong = bulk_strong
 
@@ -859,7 +860,7 @@ def test_public_strategy_may_list_its_submissions_in_either_order(strong_first):
     simultaneously, so a Submission list carries no order: the pool admits the
     pair either way, to the same run."""
 
-    class OrderedEscalationStrategy:
+    class OrderedEscalationStrategy(Baseline):
         def on_window_ready(self, window, weak_job, services):
             strong = services.make_strong_job(
                 weak_job, weak_job.n_rounds, f"strong-{weak_job.label}")
@@ -889,7 +890,7 @@ def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
     replacement the same directive carries is admitted against a destination
     that directive has already recorded as waiting."""
 
-    class CancelAndReplaceStrategy:
+    class CancelAndReplaceStrategy(Baseline):
         def on_window_ready(self, window, weak_job, services):
             speculative = services.make_strong_job(
                 weak_job, weak_job.n_rounds, f"speculative-{weak_job.label}")
@@ -1103,7 +1104,7 @@ def test_public_strategy_listing_two_weak_decodes_for_one_window_is_refused():
     second job itself, so the single-use guard does not apply and only the
     per-destination rule stands between it and a stranded window."""
 
-    class TwoWeakDecodesStrategy:
+    class TwoWeakDecodesStrategy(Baseline):
         def on_window_ready(self, window, weak_job, services):
             twin = replace(weak_job, label=f"twin-{weak_job.label}")
             return [Submission(weak_job), Submission(twin)]
@@ -1127,7 +1128,7 @@ def test_a_run_that_leaves_a_window_waiting_for_a_strong_result_fails():
     set, so without this check the run returns a logical accounting with that
     window's value silently missing."""
 
-    class AwaitWithoutRequestingStrategy:
+    class AwaitWithoutRequestingStrategy(Baseline):
         """Registers the demand and never submits anything to satisfy it."""
 
         def on_window_ready(self, window, weak_job, services):

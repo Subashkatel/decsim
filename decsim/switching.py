@@ -55,6 +55,23 @@ class Baseline:
     def run_manifest_config(self):
         return {"kind": "baseline"}
 
+    def validate_declared_run(
+        self,
+        *,
+        scheme,
+        boundary_policy,
+        has_dynamic_streams,
+        static_decode_plan_selected,
+        has_frontend,
+    ) -> None:
+        pass
+
+    def validate_operations(self, operations) -> None:
+        pass
+
+    def validate_code_geometry(self, geometry) -> None:
+        pass
+
     def on_window_ready(self, window, weak_job, services) -> list:
         return [Submission(weak_job)]
 
@@ -184,48 +201,78 @@ class Switching:
 
     # ------------------------------------------------------------ validation
 
-    def validate(self, spec, planning) -> None:
-        """Reject RunSpec combinations that would deadlock, bypass the
-        faithful start condition, or need skip semantics the runtime does
-        not model yet."""
+    def validate_declared_run(
+        self,
+        *,
+        scheme,
+        boundary_policy,
+        has_dynamic_streams,
+        static_decode_plan_selected,
+        has_frontend,
+    ) -> None:
+        from .policies import Eager, Held
+        from .schemes import SlidingWindowScheme
+
+        if self.weak_keepup_ratio is not None and (
+            type(scheme) is not SlidingWindowScheme
+        ):
+            raise ValueError(
+                "weak_keepup_ratio implements the exact shipped serial "
+                "sliding keep-up contract and requires SlidingWindowScheme"
+            )
         if not self.double_window:
-            from .policies import Eager
-            boundary_policy = spec.boundary_policy
-            if (spec.dynamic_streams
-                    and (boundary_policy is None
-                         or isinstance(boundary_policy, Eager))):
+            if has_dynamic_streams and isinstance(boundary_policy, Eager):
                 raise ValueError(
-                    "Eager speculative recovery needs a statically planned replay "
-                    "cone; dynamic streams create future windows at runtime. Use "
-                    "Held boundaries for dynamic streams.")
+                    "Eager speculative recovery needs a statically planned "
+                    "replay cone; dynamic streams create future windows at "
+                    "runtime. Use Held boundaries for dynamic streams."
+                )
             return
-        from .policies import Held
-        if isinstance(spec.boundary_policy, Held):
+        if type(scheme) is not SlidingWindowScheme:
+            raise ValueError(
+                "double_window requires the exact shipped serial "
+                "SlidingWindowScheme"
+            )
+        if isinstance(boundary_policy, Held):
             raise ValueError(
                 "double_window requires the weak chain to keep committing "
                 "(the far boundary IS the restart window's weak commit); "
                 "the Held boundary policy would make later windows wait for "
                 "the strong result and deadlock the slab")
-        if hasattr(planning.scheme, "wire_deps"):
-            raise ValueError(
-                "double_window is defined for linearly-chained sliding "
-                "windows (arXiv:2510.25222 Fig. 12); two-layer parallel "
-                "window schemes are not supported")
-        if spec.dynamic_streams or spec.decode_ops:
+        if has_dynamic_streams or static_decode_plan_selected:
             raise ValueError(
                 "double_window skips statically planned windows when a slab "
                 "is assigned; stream windows created or folded at runtime "
                 "(dynamic_streams/decode_ops) are not supported yet")
-        if spec.frontend is not None:
+        if has_frontend:
             raise ValueError(
                 "double_window is validated for explicit ops= workloads; "
                 "frontend-built operation chains are not supported yet")
-        if any(op.predecessors or op.has_successor for op in spec.ops or ()):
+
+    def validate_operations(self, operations) -> None:
+        if self.double_window and any(
+            operation.predecessors or operation.has_successor
+            for operation in operations
+        ):
             raise ValueError(
                 "double_window models one single-patch stream per operation "
                 "(arXiv:2510.25222 Fig. 12); operation chains with "
                 "predecessors/successors would let a slab cross an op seam "
                 "where no far-boundary gate exists yet")
+
+    def validate_code_geometry(self, geometry) -> None:
+        if self.weak_keepup_ratio is None:
+            return
+        ratio = self.weak_keepup_ratio
+        commit_rounds = geometry.commit_round_count
+        buffer_rounds = geometry.buffer_round_count
+        if ratio > commit_rounds / (commit_rounds + buffer_rounds):
+            needed = math.ceil(ratio / (1 - ratio) * buffer_rounds)
+            raise ValueError(
+                f"commit region of {commit_rounds} rounds too short for "
+                f"weak_keepup_ratio={ratio} (needs >= {needed}); use a bigger "
+                f"commit region or lower weak_keepup_ratio."
+            )
 
     # ---------------------------------------------------------- policy knobs
 
@@ -249,16 +296,3 @@ class Switching:
         commit = window.commit_hi - window.commit_lo + 1
         buffer = window.buffer_hi - window.commit_hi
         return commit + 2 * buffer
-
-    def check_window_size(self, commit_rounds: int, buffer_rounds: int) -> None:
-        """Raise if the weak decoder cannot keep up with this window size."""
-        if self.weak_keepup_ratio is None:
-            return
-        ratio = self.weak_keepup_ratio
-        weak_decode_rounds = ratio * (commit_rounds + buffer_rounds)
-        if weak_decode_rounds > commit_rounds + 1e-9:
-            needed = math.ceil(ratio / (1 - ratio) * buffer_rounds - 1e-9)
-            raise ValueError(
-                f"commit region of {commit_rounds} rounds too short for "
-                f"weak_keepup_ratio={ratio} (needs >= {needed}); use a bigger "
-                f"commit region or lower weak_keepup_ratio.")

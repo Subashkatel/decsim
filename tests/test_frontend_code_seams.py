@@ -261,7 +261,7 @@ def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
 
     assert isinstance(frontend, P.InputFrontend)
     assert isinstance(code, P.CodeModel)
-    assert result.cluster.layout is layout
+    assert result.planning.layout is layout
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == ()
     assert {job.code for job in decoder.jobs} == {code.name}

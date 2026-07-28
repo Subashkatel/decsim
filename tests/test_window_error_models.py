@@ -30,7 +30,15 @@ def _plan(circuit, d=3):
     (layer t = round t+1), exactly as the cluster would plan it."""
     n_layers = 1 + max(int(c[-1]) for c in
                        circuit.get_detector_coordinates().values())
-    return SlidingWindowScheme().plan_windows(0, n_layers, SurfaceCodeModel(d=d))
+    return [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            n_layers,
+            commit_round_count=d,
+            buffer_round_count=d,
+        ).windows
+    ]
 
 
 def test_fault_conversion_merges_duplicates_with_the_standard_rule():
@@ -244,7 +252,15 @@ def test_sub_d_tail_window_measurably_degrades_accuracy():
     # 11 detector layers its final window commits only 2 (< d) layers. If
     # this assertion fails, the shipped plan changed -- re-evaluate the whole
     # caveat, not just this test.
-    shipped = SlidingWindowScheme().plan_windows(0, 11, SurfaceCodeModel(d=d))
+    shipped = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            11,
+            commit_round_count=d,
+            buffer_round_count=d,
+        ).windows
+    ]
     assert shipped[-1] == (10, 11, 14)
     assert shipped[-1][1] - shipped[-1][0] + 1 < d
 
@@ -284,7 +300,20 @@ def test_parallel_two_sided_windows_match_global_decoding():
     d, rounds = 5, 20
     circuit = _memory_circuit(d=d, rounds=rounds, p=0.005)
     n_layers = 1 + max(int(c[-1]) for c in circuit.get_detector_coordinates().values())
-    plan = ParallelWindowScheme().plan_windows(0, n_layers, SurfaceCodeModel(d=d))
+    plan = [
+        (
+            window.buffer_lo,
+            window.commit_lo,
+            window.commit_hi,
+            window.buffer_hi,
+        )
+        for window in ParallelWindowScheme().plan_operation(
+            0,
+            n_layers,
+            commit_round_count=d,
+            buffer_round_count=d,
+        ).windows
+    ]
     assert any(len(w) == 4 and w[0] < w[1] for w in plan), "expected two-sided windows"
     models = build_window_error_models(circuit, plan)
     assert any(m.has_leading_buffer for m in models)

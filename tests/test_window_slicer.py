@@ -51,7 +51,25 @@ def test_slicer_identical_to_static_builder(scheme, R):
     pins the two against drift for both the sliding and the A/B (two-sided-buffer) schemes."""
     circ = NoiseModel.circuit_level(0.003).circuit(distance=D, rounds=R)
     folded = {det: min(int(c[-1]) + 1, R) for det, c in circ.get_detector_coordinates().items()}
-    plan = [tuple(list(t[:-1]) + [min(t[-1], R)]) for t in scheme.plan_windows(0, R, SurfaceCodeModel(d=D))]
+    planned = scheme.plan_operation(
+        0,
+        R,
+        commit_round_count=D,
+        buffer_round_count=D,
+    ).windows
+    plan = [
+        (
+            (window.commit_lo, window.commit_hi, min(window.buffer_hi, R))
+            if window.buffer_lo == window.commit_lo
+            else (
+                window.buffer_lo,
+                window.commit_lo,
+                window.commit_hi,
+                min(window.buffer_hi, R),
+            )
+        )
+        for window in planned
+    ]
     ref = build_window_error_models(circ, plan, detector_rounds=folded)
     inc = _incremental(circ, plan, folded)
     assert len(inc) == len(ref)
@@ -65,7 +83,15 @@ def test_incremental_sliding_decode_equals_global_per_shot():
     R = 24
     circ = NoiseModel.circuit_level(0.003).circuit(distance=D, rounds=R)
     folded = {det: min(int(c[-1]) + 1, R) for det, c in circ.get_detector_coordinates().items()}
-    plan = SlidingWindowScheme().plan_windows(0, R, SurfaceCodeModel(d=D))
+    plan = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            R,
+            commit_round_count=D,
+            buffer_round_count=D,
+        ).windows
+    ]
     inc = _incremental(circ, plan, folded)
     gm = pymatching.Matching.from_detector_error_model(circ.detector_error_model(decompose_errors=True))
     inner = matching_window_decoder()

@@ -140,9 +140,16 @@ def test_backlog_window_truth_strong_views_populated_by_real_run():
         assert row.total == (row.buffer_fill + row.dep_block
                              + row.queue_wait + row.service)
 
-    strong = strong_pool_view(cluster)
+    strong = strong_pool_view(
+        cluster,
+        "strong",
+        cluster.nominal_window_redo_round_count,
+    )
     assert strong.total_units == 1 and strong.busy_units == 0
-    assert strong.redo_rounds == cluster.commit + 2 * cluster.buffer
+    assert (
+        strong.redo_rounds
+        == cluster.nominal_window_redo_round_count
+    )
 
 
 #==================================================================
@@ -176,4 +183,4 @@ def test_runspec_default_resolves_gate_rounds():
     spec = RunSpec(ops=t_then_blocked_t(), decoder=PerRoundDecoder(0.5))
     assert spec.rounds_policy is None          # RunSpec resolves in build()
     completed_run = spec.build()
-    assert isinstance(completed_run.window_manager.rounds_policy, GateRounds)
+    assert isinstance(completed_run.planning.rounds_policy, GateRounds)

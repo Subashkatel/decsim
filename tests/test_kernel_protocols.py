@@ -17,6 +17,9 @@ class _FakeServices:
 
 
 class _FakeStrategy:
+    def validate_declared_run(self, **kwargs): pass
+    def validate_operations(self, operations): pass
+    def validate_code_geometry(self, geometry): pass
     def on_window_ready(self, window, weak_job, services):
         return [Submission(weak_job)]
     def on_decode_outcome(self, outcome, services):

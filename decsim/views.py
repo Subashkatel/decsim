@@ -191,7 +191,7 @@ def reaction_view(gate) -> ReactionView:
     ops = tuple(
         OpReactionInfo(op=op_id, name=op.name, blocked_by=op.blocked_by,
                        round_ticks=gate._round_ticks_for(op),
-                       rounds=gate.cluster.rounds_for(op))
+                       rounds=gate._round_count_for(op))
         for op_id, op in sorted(gate._ops.items()))
     return ReactionView(
         chip_done=gate.last_finish_time,
@@ -213,7 +213,11 @@ def truth_view(cluster, device) -> TruthView:
     return TruthView(observables=observables, predictions=predictions)
 
 
-def strong_pool_view(cluster, pool: str = "strong") -> StrongPoolView:
+def strong_pool_view(
+    cluster,
+    pool: str,
+    nominal_window_redo_round_count: int,
+) -> StrongPoolView:
     """Snapshot one strong lane's queue depth and occupancy."""
     totals = getattr(cluster, "unit_totals", {}) or {}
     free = getattr(cluster, "pool_free", {}) or {}
@@ -225,4 +229,4 @@ def strong_pool_view(cluster, pool: str = "strong") -> StrongPoolView:
         busy_units=total - free.get(pool, 0),
         total_units=total,
         strong_needed=getattr(cluster, "strong_needed", 0),
-        redo_rounds=cluster.commit + 2 * cluster.buffer)
+        redo_rounds=nominal_window_redo_round_count)

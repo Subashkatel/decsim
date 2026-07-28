@@ -4,10 +4,10 @@ When a window's rounds are all present it builds the decode job (submission
 itself is DecodingStrategy.on_window_ready), hands the result to the
 orchestrator, ships boundary data to dependent windows at commit (gated by
 BoundaryPolicy.on_commit; Eager, the default, always ships), and declares
-the op finished once every window is committed. The windows themselves are
-laid out either up front by planner.WindowPlanner (ops of known length) or
-at runtime by DynamicWindows (streams of unknown length); this hub runs
-whatever both produce. Two helpers own adjacent state: PayloadStore (how
+the op finished once every window is committed. The windows are laid out
+either statically by the composition root or at runtime by DynamicWindows
+for streams of unknown length; this hub runs whatever both produce. Two
+helpers own adjacent state: PayloadStore (how
 long raw syndrome rounds stay retained) and DynamicWindows (dynamic-stream
 growth and sealing).
 
@@ -52,7 +52,8 @@ class LogicalContribution:
 class WindowManager:
     """Own window state, readiness, commits, and boundary handoff."""
 
-    def __init__(self, engine, *, scheme, layout, rounds_policy, code,
+    def __init__(self, engine, *, scheme, code_geometry,
+                 resolved_operations, resolved_patches,
                  deadline_policy, links, orchestrator, boundary_policy,
                  window_interaction,
                  planning_view_by_operation_id,
@@ -61,9 +62,15 @@ class WindowManager:
                  store: Optional[PayloadStore] = None):
         self.engine = engine
         self.scheme = scheme
-        self.layout = layout
-        self.rounds_policy = rounds_policy
-        self.code = code
+        self._code_geometry = code_geometry
+        self._resolved_operations = MappingProxyType({
+            operation.operation_id: operation
+            for operation in resolved_operations
+        })
+        self._resolved_patches = MappingProxyType({
+            patch.patch_identity: patch
+            for patch in resolved_patches
+        })
         self.deadline_policy = deadline_policy
         self.links = links
         self.orchestrator = orchestrator
@@ -83,10 +90,6 @@ class WindowManager:
         self.submit_fn: Optional[Callable] = None    # (job, delay_ticks) -> None
         self.needs_hyperedges = False
         self.on_workload_complete: Optional[Callable[[], None]] = None
-
-        self.d = code.distance
-        self.commit = code.commit_rounds()
-        self.buffer = code.buffer_rounds()
 
         self.store = store if store is not None else PayloadStore()
         self.lifecycle = DynamicWindows(self)
@@ -127,9 +130,8 @@ class WindowManager:
         self.window_models: dict = {}
         self.total_windows = 0
         self._windows_built = False
-        self._plan_spatial = None
-        self._plan_rounds = None
-        self._plan_code_names = None
+        self._windowed_by_operation = {}
+        self._batch_preceding_idle_rounds_by_operation = {}
 
     # ---------------------------------------------------------- registration
 
@@ -143,8 +145,23 @@ class WindowManager:
         if op.blocked_by is not None:
             self.blocking_ops.add(op.blocked_by)
 
-    def register_dynamic_stream(self, stream_op: Operation, code) -> None:
+    def _register_dynamic_stream(
+        self,
+        stream_op: Operation,
+        resolved_operation,
+    ) -> None:
         """Register a stream whose windows are created at runtime."""
+        if stream_op.id != resolved_operation.operation_id:
+            raise ValueError(
+                "dynamic stream and resolved operation identities differ"
+            )
+        if (
+            self._resolved_operations.get(stream_op.id)
+            is not resolved_operation
+        ):
+            raise ValueError(
+                "dynamic stream must use the root-resolved operation record"
+            )
         resolved_feedback_mode = (
             stream_op.feedback_boundary_mode
             if stream_op.feedback_boundary_mode is not None
@@ -171,27 +188,35 @@ class WindowManager:
         self.window_count[stream_id] = 0
         self.op_windows[stream_id] = []
         self.successors.setdefault(stream_id, [])
+        self._windowed_by_operation[stream_id] = True
+        self._batch_preceding_idle_rounds_by_operation[stream_id] = False
         source_round_limit = None
         if self.syndrome_source is not None:
             source_round_limit = self.syndrome_source.register_dynamic_stream(
                 stream_op, self.rounds_for(stream_op),
                 belief_matching=self.needs_hyperedges)
-        self.lifecycle.register(stream_op, code, source_round_limit)
-
-    def rounds_for(self, op: Operation) -> int:
-        """Rounds this operation runs for under its code/layout."""
-        if self._plan_rounds is not None and op.id in self._plan_rounds:
-            return self._plan_rounds[op.id]
-        planning_view = self._planning_view(op)
-        return self.rounds_policy.rounds_for(
-            planning_view,
-            self.layout.code_for_op(planning_view),
+        self.lifecycle.register(
+            stream_op,
+            commit_round_count=(
+                resolved_operation.code_geometry.commit_round_count
+            ),
+            buffer_round_count=(
+                resolved_operation.code_geometry.buffer_round_count
+            ),
+            source_round_limit=source_round_limit,
         )
 
+    def rounds_for(self, op: Operation) -> int:
+        """Return the root-resolved operation duration."""
+        try:
+            return self._resolved_operations[op.id].round_count
+        except KeyError as error:
+            raise ValueError(
+                f"operation {op.id} has no resolved planning record"
+            ) from error
+
     def _spatial_nodes(self, op: Operation) -> int:
-        if self._plan_spatial is not None and op.id in self._plan_spatial:
-            return self._plan_spatial[op.id]
-        return self.layout.spatial_nodes_for(self._planning_view(op))
+        return self._resolved_operations[op.id].spatial_node_count
 
     def _planning_view(self, op: Operation):
         try:
@@ -216,9 +241,10 @@ class WindowManager:
         self.window_count = plan.window_count
         self.op_windows = plan.op_windows
         self.successors = plan.successors
-        self._plan_spatial = plan.spatial_nodes
-        self._plan_rounds = plan.rounds_by_operation
-        self._plan_code_names = plan.code_names
+        self._windowed_by_operation = plan.windowed_by_operation
+        self._batch_preceding_idle_rounds_by_operation = (
+            plan.batch_preceding_idle_rounds_by_operation
+        )
         self.total_windows = plan.total_windows
         self._build_window_error_models()
         self._build_round_leases()
@@ -412,11 +438,16 @@ class WindowManager:
 
     def prepend_idle_rounds(self, op_id: int, round_count: int) -> None:
         """Fold pre-gate idle rounds into a batch-style op when the scheme asks."""
-        if round_count <= 0 or not getattr(
-                self.scheme, "batches_idle_rounds_into_next_op", False):
+        if (
+            round_count <= 0
+            or not self._batch_preceding_idle_rounds_by_operation.get(
+                op_id,
+                False,
+            )
+        ):
             return
         w = self.windows[(op_id, 0)]
-        w.n_rounds += round_count
+        w.batched_preceding_idle_round_count += round_count
 
     # ------------------------------------------------------------- readiness
 
@@ -452,20 +483,17 @@ class WindowManager:
             w, rounds_arrived=self.rounds_arrived[w.op_id],
             successor_rounds=succ_rounds, memory_rounds=self.memory_rounds[w.op_id],
             round_count=round_count, has_successor=has_successor,
-            op=self._planning_view(op), layout=self.layout)
-
-    @property
-    def _windowed(self) -> bool:
-        return getattr(self.scheme, "windowed", True)
+            operation=self._planning_view(op))
 
     def _job_desc(self, w: Window, op: Operation) -> str:
         """Human decode-job label."""
-        if self._windowed:
+        if self._windowed_by_operation[w.op_id]:
             return f"{op.name} W{w.k} [commit {w.commit_lo}-{w.commit_hi}]"
         body_rounds = self._round_count_for_window(op.id, w)
-        idle_rounds = max(0, w.n_rounds - body_rounds)
+        idle_rounds = w.batched_preceding_idle_round_count
         if idle_rounds:
-            return (f"{op.name} [whole op, {w.n_rounds} rounds: "
+            effective_rounds = w.n_rounds + idle_rounds
+            return (f"{op.name} [whole op, {effective_rounds} rounds: "
                     f"{idle_rounds} idle + {body_rounds} body]")
         return f"{op.name} [whole op, {w.n_rounds} rounds]"
 
@@ -524,21 +552,20 @@ class WindowManager:
         deadline = self.deadline_policy.deadline(
             op, window, self.engine.now,
             on_reaction_path=(op.id in self.blocking_ops))
-        job = DecodeJob(op_id=window.op_id, window_id=window.k,
-                        n_rounds=window.n_rounds,
+        job = DecodeJob(
+                        op_id=window.op_id, window_id=window.k,
+                        n_rounds=(
+                            window.n_rounds
+                            + window.batched_preceding_idle_round_count
+                        ),
                         ready_time=self.engine.now, deadline=deadline,
                         spatial_nodes=self._spatial_nodes(op),
                         payloads=self._assemble_payloads(window),
                         dem=self.window_models.get(key),
                         code=(
-                            self._plan_code_names[op.id]
-                            if (
-                                self._plan_code_names is not None
-                                and op.id in self._plan_code_names
-                            )
-                            else self.layout.code_for_op(
-                                self._planning_view(op)
-                            ).name
+                            self._resolved_operations[
+                                op.id
+                            ].code_geometry.code_name
                         ),
                         window=window, label=self._job_desc(window, op))
         job.strong_label = f"strong({op.name} W{window.k})"
@@ -647,7 +674,7 @@ class WindowManager:
             [WindowInfo.from_window(window) for window in later_windows],
             n_rounds,
             round_count,
-            self.buffer,
+            self._code_geometry.buffer_round_count,
         )
         restart_reads, strong_exclusions, restart_exclusions = \
             self._validate_strong_region_plan(

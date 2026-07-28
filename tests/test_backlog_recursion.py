@@ -10,7 +10,7 @@ processed before the next feedback -- so waiting creates work, which creates wai
 
 In decsim this emerges from one rule: a patch's idle stretch joins the next op's
 batch window (chip.idle_rounds_by_patch -> cluster.prepend_idle_rounds, honored by
-NaiveOnlineScheme.batches_idle_rounds_into_next_op). These tests pin the simulated
+the naive operation plan's idle-batching policy). These tests pin the simulated
 r_i (BacklogTrajectory) to the closed form.
 
 TOLERANCE: rounds are discrete in the simulator, continuous in the formula (the paper
@@ -156,8 +156,16 @@ def test_round_grid_mode_matches_the_strict_recursion_exactly():
         windows = r.cluster.windows
         seg = ROP                                     # gate 0 absorbed no idle rounds
         assert windows[(0, 0)].n_rounds == seg
+        assert windows[(0, 0)].batched_preceding_idle_round_count == 0
         for i in range(1, NGATES):
             wait = t_comm + us(seg * tau_us)          # the simulator's exact decode+links
             seg = (wait // g + 1) + ROP               # idle rounds to the boundary + the gate
-            assert windows[(i, 0)].n_rounds == seg, \
-                f"f={f} gate {i}: sim {windows[(i, 0)].n_rounds} != strict {seg}"
+            window = windows[(i, 0)]
+            effective_rounds = (
+                window.n_rounds
+                + window.batched_preceding_idle_round_count
+            )
+            assert window.n_rounds == ROP
+            assert effective_rounds == seg, (
+                f"f={f} gate {i}: sim {effective_rounds} != strict {seg}"
+            )

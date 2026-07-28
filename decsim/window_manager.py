@@ -55,6 +55,7 @@ class WindowManager:
     def __init__(self, engine, *, scheme, layout, rounds_policy, code,
                  deadline_policy, links, orchestrator, boundary_policy,
                  window_interaction,
+                 planning_view_by_operation_id,
                  syndrome_source=None, switching_active: bool = False,
                  store: Optional[PayloadStore] = None):
         self.engine = engine
@@ -67,6 +68,9 @@ class WindowManager:
         self.orchestrator = orchestrator
         self.boundary_policy = boundary_policy
         self.window_interaction = window_interaction
+        self._planning_view_by_operation_id = dict(
+            planning_view_by_operation_id
+        )
         self.syndrome_source = syndrome_source
         #: retains rounds for possible strong re-decodes (today: switching set).
         self.switching_active = switching_active
@@ -154,12 +158,24 @@ class WindowManager:
 
     def rounds_for(self, op: Operation) -> int:
         """Rounds this operation runs for under its code/layout."""
-        return self.rounds_policy.rounds_for(op, self.layout.code_for_op(op))
+        planning_view = self._planning_view(op)
+        return self.rounds_policy.rounds_for(
+            planning_view,
+            self.layout.code_for_op(planning_view),
+        )
 
     def _spatial_nodes(self, op: Operation) -> int:
         if self._plan_spatial is not None and op.id in self._plan_spatial:
             return self._plan_spatial[op.id]
-        return self.layout.spatial_nodes_for(op)
+        return self.layout.spatial_nodes_for(self._planning_view(op))
+
+    def _planning_view(self, op: Operation):
+        try:
+            return self._planning_view_by_operation_id[op.id]
+        except KeyError as error:
+            raise ValueError(
+                f"operation {op.id} has no frozen planning view"
+            ) from error
 
     # ----------------------------------------------------------------- plan
 
@@ -410,7 +426,7 @@ class WindowManager:
             w, rounds_arrived=self.rounds_arrived[w.op_id],
             successor_rounds=succ_rounds, memory_rounds=self.memory_rounds[w.op_id],
             round_count=round_count, has_successor=has_successor,
-            op=op, layout=self.layout)
+            op=self._planning_view(op), layout=self.layout)
 
     @property
     def _windowed(self) -> bool:
@@ -488,7 +504,9 @@ class WindowManager:
                         spatial_nodes=self._spatial_nodes(op),
                         payloads=self._assemble_payloads(window),
                         dem=self.window_models.get(key),
-                        code=self.layout.code_for_op(op).name,
+                        code=self.layout.code_for_op(
+                            self._planning_view(op)
+                        ).name,
                         window=window, label=self._job_desc(window, op))
         job.strong_label = f"strong({op.name} W{window.k})"
         window.queued = True

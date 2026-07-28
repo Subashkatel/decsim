@@ -3,11 +3,20 @@
 These drive a real Engine with fakes at the ports; end-to-end validation
 against real decoders/streams happens via the frozen timing goldens (Task 19).
 """
+from dataclasses import fields
+
 import pytest
 
 from decsim.engine import Engine
-from decsim.message import (DecodeJob, DecodeResult, Operation, SyndromePayload,
-                          Window, WindowPlan)
+from decsim.message import (
+    DecodeJob,
+    DecodeResult,
+    Operation,
+    OperationPlanningView,
+    SyndromePayload,
+    Window,
+    WindowPlan,
+)
 from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.window_manager import LogicalContribution, WindowManager
 from decsim.window_interactions import DefaultWindowInteraction
@@ -82,22 +91,40 @@ class _RecordingStrategy:
     def metrics(self): return {}
 
 
+def _planning_view(operation):
+    return OperationPlanningView(**{
+        item.name: getattr(operation, item.name)
+        for item in fields(OperationPlanningView)
+    })
+
+
 def _runtime(boundary=None, strategy=None, ops=(0,), deps=(), blocking=()):
     eng = Engine(verbose=False)
     fb = _Feedback()
+    runtime_operations = {
+        op_id: Operation(
+            op_id,
+            f"op{op_id}",
+            (op_id,),
+            blocked_by=(op_id - 1 if op_id in blocking else None),
+        )
+        for op_id in ops
+    }
     rt = WindowManager(eng, scheme=_Scheme(), layout=_Layout(),
                        rounds_policy=_Rounds(), code=_Code(),
                        deadline_policy=_Deadline(), links=_Links(),
                        orchestrator=fb, boundary_policy=boundary or _Eager(),
-                       window_interaction=DefaultWindowInteraction())
+                       window_interaction=DefaultWindowInteraction(),
+                       planning_view_by_operation_id={
+                           op_id: _planning_view(operation)
+                           for op_id, operation in runtime_operations.items()
+                       })
     rt.strategy = strategy or _RecordingStrategy()
     rt.services = object()
     submitted = []
     rt.submit_fn = lambda job, delay: submitted.append((job, delay))
     windows, op_windows, count = {}, {}, {}
-    for op_id in ops:
-        op = Operation(op_id, f"op{op_id}", (op_id,),
-                       blocked_by=(op_id - 1 if op_id in blocking else None))
+    for op_id, op in runtime_operations.items():
         rt.register_op(op)
         w = Window(op_id=op_id, k=0, commit_lo=1, commit_hi=3, buffer_hi=6,
                    n_rounds=6)

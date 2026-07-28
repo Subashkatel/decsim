@@ -33,6 +33,7 @@ class Chip:
 
     def __init__(self, engine, *, source, controller, cluster, factory,
                  round_ticks: int, code_distance: int, idle_policy,
+                 planning_view_by_operation_id,
                  max_idle_rounds: Optional[int] = None,
                  gates_start_on_round_boundaries: bool = False,
                  frame: Optional[PauliFrame] = None):
@@ -44,6 +45,9 @@ class Chip:
         self.round_ticks = round_ticks
         self.code_distance = code_distance
         self.idle_policy = idle_policy
+        self._planning_view_by_operation_id = dict(
+            planning_view_by_operation_id
+        )
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
         self.frame = frame if frame is not None else PauliFrame()
         self.max_idle_rounds = max_idle_rounds if max_idle_rounds is not None \
@@ -88,7 +92,7 @@ class Chip:
 
     def _round_ticks_for(self, operation: Operation) -> int:
         return self._round_ticks_from_code(
-            self.cluster.layout.code_for_op(operation))
+            self.cluster.layout.code_for_op(self._planning_view(operation)))
 
     def _round_ticks_for_patch(self, patch) -> int:
         return self._round_ticks_from_code(
@@ -144,7 +148,9 @@ class Chip:
                     f"{operation.name} lists qubit {qubit} more than "
                     f"once: {operation.qubits}")
             seen.add(qubit)
-        for claim in self.cluster.layout.resources_for(operation):
+        for claim in self.cluster.layout.resources_for(
+            self._planning_view(operation)
+        ):
             for rid in sorted(claim.ids, key=repr):
                 key = (claim.kind, rid)
                 if key in self.busy_claims:
@@ -157,9 +163,19 @@ class Chip:
                 self.busy_claims[key] = operation.id
 
     def _free_resources(self, operation: Operation) -> None:
-        for claim in self.cluster.layout.resources_for(operation):
+        for claim in self.cluster.layout.resources_for(
+            self._planning_view(operation)
+        ):
             for rid in claim.ids:
                 self.busy_claims.pop((claim.kind, rid), None)
+
+    def _planning_view(self, operation: Operation):
+        try:
+            return self._planning_view_by_operation_id[operation.id]
+        except KeyError as error:
+            raise ValueError(
+                f"operation {operation.id} has no frozen planning view"
+            ) from error
 
     def _on_state_ready(self, operation: Operation) -> None:
         self.state_ready.add(operation.id)

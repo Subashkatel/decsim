@@ -827,6 +827,9 @@ class RunSpec:
             code=planning.code, deadline_policy=deadline_policy, links=links,
             orchestrator=orchestrator, boundary_policy=boundary_policy,
             window_interaction=window_interaction,
+            planning_view_by_operation_id=(
+                workload.planning_view_by_operation_id
+            ),
             syndrome_source=device, store=store,
             switching_active=hasattr(strategy, "keep_weak_result"))
         pool = DecoderManager(
@@ -868,6 +871,9 @@ class RunSpec:
             engine, source=source, controller=controller, cluster=cluster,
             factory=factory, round_ticks=us(round_us),
             code_distance=planning.code.distance, idle_policy=idle_policy,
+            planning_view_by_operation_id=(
+                workload.planning_view_by_operation_id
+            ),
             max_idle_rounds=self.max_idle_rounds,
             gates_start_on_round_boundaries=self.gates_start_on_round_boundaries,
             frame=getattr(orchestrator, "frame", None) or PauliFrame())

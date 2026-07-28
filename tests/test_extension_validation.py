@@ -113,10 +113,12 @@ class PlanningViewRecordingPlanner(RecordingPlanner):
     def __init__(self, scheme, layout, rounds_policy):
         super().__init__(scheme, layout, rounds_policy)
         self.operations = ()
+        self.plan_result = None
 
     def plan(self, operations):
         self.operations = tuple(operations)
-        return super().plan(operations)
+        self.plan_result = super().plan(operations)
+        return self.plan_result
 
 
 class CircuitRecordingTimingDevice(TimingOnlyDevice):
@@ -160,6 +162,54 @@ class SelectorLayout(UniformLayout):
 
     def code_for_patch(self, patch_id):
         return self.patch_codes.get(patch_id, self.code)
+
+
+class CircuitRejectingLayout(UniformLayout):
+    def __init__(self, code):
+        super().__init__(code)
+        self.operation_calls = 0
+        self.resource_calls = 0
+        self.spatial_calls = 0
+
+    @staticmethod
+    def _require_planning_view(operation):
+        assert not hasattr(operation, "circuit")
+
+    def code_for_op(self, operation):
+        self._require_planning_view(operation)
+        self.operation_calls += 1
+        return super().code_for_op(operation)
+
+    def resources_for(self, operation):
+        self._require_planning_view(operation)
+        self.resource_calls += 1
+        return super().resources_for(operation)
+
+    def spatial_nodes_for(self, operation):
+        self._require_planning_view(operation)
+        self.spatial_calls += 1
+        return super().spatial_nodes_for(operation)
+
+
+class CircuitRejectingRounds(FixedRounds):
+    def __init__(self, round_count):
+        super().__init__(round_count)
+        self.calls = 0
+
+    def rounds_for(self, operation, code):
+        assert not hasattr(operation, "circuit")
+        self.calls += 1
+        return super().rounds_for(operation, code)
+
+
+class CircuitRejectingScheme(SlidingWindowScheme):
+    def __init__(self):
+        self.data_complete_calls = 0
+
+    def data_complete(self, window, *, op, **kwargs):
+        assert not hasattr(op, "circuit")
+        self.data_complete_calls += 1
+        return super().data_complete(window, op=op, **kwargs)
 
 
 class EngineBoundFactory:
@@ -342,6 +392,40 @@ def test_planner_receives_frozen_circuit_free_operation_view():
         planning_operation.name = "mutated"
 
 
+def test_runtime_plan_does_not_alias_the_planner_return_value():
+    layout = UniformLayout(SurfaceCodeModel(3))
+    planner = PlanningViewRecordingPlanner(
+        SlidingWindowScheme(),
+        layout,
+        FixedRounds(3),
+    )
+    completed = RunSpec(
+        ops=[Operation(0, "memory", (0,))],
+        planner=planner,
+        decoder=StaticDecoder(),
+    ).build()
+
+    returned_window = planner.plan_result.windows[(0, 0)]
+    runtime_window = completed.window_manager.windows[(0, 0)]
+    assert runtime_window is not returned_window
+    assert completed.window_manager.window_count is not (
+        planner.plan_result.window_count
+    )
+    assert completed.window_manager.op_windows is not (
+        planner.plan_result.op_windows
+    )
+    assert completed.window_manager.successors is not (
+        planner.plan_result.successors
+    )
+
+    expected_commit_hi = runtime_window.commit_hi
+    returned_window.commit_hi += 100
+    planner.plan_result.window_count[0] += 100
+
+    assert runtime_window.commit_hi == expected_commit_hi
+    assert completed.window_manager.window_count[0] == 1
+
+
 def test_planning_view_fields_are_exactly_operation_fields_without_circuit():
     from decsim.message import OperationPlanningView
 
@@ -349,6 +433,27 @@ def test_planning_view_fields_are_exactly_operation_fields_without_circuit():
     planning_fields = {item.name for item in fields(OperationPlanningView)}
 
     assert planning_fields == operation_fields - {"circuit"}
+
+
+def test_all_operation_consuming_planning_ports_receive_frozen_views():
+    code = SurfaceCodeModel(3)
+    layout = CircuitRejectingLayout(code)
+    rounds = CircuitRejectingRounds(3)
+    scheme = CircuitRejectingScheme()
+
+    RunSpec(
+        ops=[Operation(0, "memory", (0,), circuit=object())],
+        layout=layout,
+        rounds_policy=rounds,
+        scheme=scheme,
+        decoder=StaticDecoder(),
+    ).build()
+
+    assert layout.operation_calls > 0
+    assert layout.resource_calls > 0
+    assert layout.spatial_calls > 0
+    assert rounds.calls > 0
+    assert scheme.data_complete_calls > 0
 
 
 def test_run_uses_private_operation_copy_without_mutating_caller():

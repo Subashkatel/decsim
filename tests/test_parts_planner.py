@@ -120,3 +120,61 @@ def test_materializer_rejects_live_operations():
 
     with pytest.raises(TypeError, match="OperationPlanningView"):
         _materialize_execution_plan((operation,), (object(),), (object(),))
+
+
+def test_materializer_adds_no_transitive_boundary_edge():
+    operations = (
+        Operation(0, "a", (0,), has_successor=True),
+        Operation(
+            1,
+            "b",
+            (0,),
+            predecessors=(0,),
+            has_successor=True,
+        ),
+        Operation(2, "c", (0,), predecessors=(1,)),
+    )
+    geometry = ResolvedCodeGeometry(
+        code_name="fake",
+        distance=3,
+        commit_round_count=3,
+        buffer_round_count=3,
+        minimum_leading_buffer_round_count=3,
+        minimum_trailing_buffer_round_count=3,
+        one_patch_spatial_node_count=9,
+        buffer_floor_override_active=False,
+    )
+    resolved = tuple(
+        ResolvedOperationPlanning(
+            operation_id=operation.id,
+            code_geometry=geometry,
+            round_count=3,
+            round_ticks=1,
+            spatial_node_count=9,
+        )
+        for operation in operations
+    )
+    ledgers = tuple(
+        OperationWindowPlan(
+            operation_id=operation.id,
+            windows=(WindowGeometry(1, 1, 3, 3),),
+            internal_dependencies=(),
+            entry_window_indices=(0,),
+            exit_window_indices=(0,),
+            windowed=True,
+            batch_preceding_idle_rounds=False,
+        )
+        for operation in operations
+    )
+
+    plan = _materialize_execution_plan(
+        tuple(
+            OperationPlanningView.from_operation(operation)
+            for operation in operations
+        ),
+        resolved,
+        ledgers,
+    ).materialize()
+
+    assert plan.windows[(2, 0)].deps == [(1, 0)]
+    assert (0, 0) not in plan.windows[(2, 0)].deps

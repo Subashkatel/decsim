@@ -30,7 +30,7 @@ from types import MappingProxyType
 from typing import Callable, Optional
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecodeResult,
-                      Operation, OperationPlanningView, SeamFaultOwner,
+                      Operation, SeamFaultOwner,
                       StrongRegionPlan, Window, WindowInfo, WindowPlan)
 from .payload_store import PayloadStore
 from .dynamic_windows import DynamicWindows
@@ -76,8 +76,8 @@ class WindowManager:
         self.orchestrator = orchestrator
         self.boundary_policy = boundary_policy
         self.window_interaction = window_interaction
-        self._planning_view_by_operation_id = dict(
-            planning_view_by_operation_id
+        self._planning_view_by_operation_id = MappingProxyType(
+            dict(planning_view_by_operation_id)
         )
         self.feedback_boundary_mode = feedback_boundary_mode
         self.syndrome_source = syndrome_source
@@ -173,13 +173,8 @@ class WindowManager:
         )
         stream_id = stream_op.id
         if stream_id not in self._planning_view_by_operation_id:
-            self._planning_view_by_operation_id[stream_id] = (
-                OperationPlanningView.from_operation(
-                    stream_op,
-                    default_feedback_boundary_mode=(
-                        self.feedback_boundary_mode
-                    ),
-                )
+            raise ValueError(
+                "dynamic stream must have a root-resolved planning view"
             )
         self._ops[stream_id] = stream_op
         self.rounds_arrived.setdefault(stream_id, 0)

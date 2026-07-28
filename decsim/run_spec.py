@@ -38,9 +38,6 @@ from .message import (
     RunSeedChild,
     RunSeedPathSegment,
     RunSeedReservation,
-    Window,
-    WindowInfo,
-    WindowPlan,
     is_stable_identity,
     is_stable_string,
     same_stable_identity,
@@ -48,6 +45,7 @@ from .message import (
 from .config import TICKS_PER_US, TimingConfig, us
 
 if TYPE_CHECKING:
+    from .planner import _ResolvedExecutionPlanSpec
     from .protocols import (
         CodeModel,
         DecodingScheme,
@@ -122,63 +120,6 @@ class _RunOwnedWorkload:
         return tuple(
             self.planning_view_by_operation_id[operation.id]
             for operation in operations
-        )
-
-
-@dataclass(frozen=True)
-class _ResolvedExecutionPlanSpec:
-    """Validated immutable copy of the one planner result."""
-
-    planned_operation_ids: tuple[int, ...]
-    windows: tuple[WindowInfo, ...]
-    window_count: tuple[tuple[int, int], ...]
-    op_windows: tuple[tuple[int, tuple[int, ...]], ...]
-    successors: tuple[tuple[int, tuple[int, ...]], ...]
-    spatial_nodes: tuple[tuple[int, int], ...]
-    rounds_by_operation: tuple[tuple[int, int], ...]
-    code_names: tuple[tuple[int, str], ...]
-    windowed_by_operation: tuple[tuple[int, bool], ...]
-    batch_preceding_idle_rounds_by_operation: tuple[tuple[int, bool], ...]
-    total_windows: int
-    summary_json: bytes
-
-    def materialize(self) -> WindowPlan:
-        """Create fresh runtime-owned windows and containers."""
-        windows = {
-            info.key: Window(
-                op_id=info.op_id,
-                k=info.k,
-                commit_lo=info.commit_lo,
-                commit_hi=info.commit_hi,
-                buffer_hi=info.buffer_hi,
-                n_rounds=info.n_rounds,
-                buffer_lo=info.buffer_lo,
-                deps=list(info.deps),
-                dependents=list(info.dependents),
-                deps_remaining=len(info.deps),
-            )
-            for info in self.windows
-        }
-        return WindowPlan(
-            windows=windows,
-            window_count=dict(self.window_count),
-            op_windows={
-                operation_id: list(window_indices)
-                for operation_id, window_indices in self.op_windows
-            },
-            successors={
-                operation_id: list(successor_ids)
-                for operation_id, successor_ids in self.successors
-            },
-            spatial_nodes=dict(self.spatial_nodes),
-            rounds_by_operation=dict(self.rounds_by_operation),
-            code_names=dict(self.code_names),
-            windowed_by_operation=dict(self.windowed_by_operation),
-            batch_preceding_idle_rounds_by_operation=dict(
-                self.batch_preceding_idle_rounds_by_operation
-            ),
-            total_windows=self.total_windows,
-            summary=json.loads(self.summary_json),
         )
 
 
@@ -1545,13 +1486,10 @@ class RunSpec:
             for operation in planned_resolved_operations
         )
         from .planner import _materialize_execution_plan
-        execution_plan_spec = _freeze_execution_plan(
-            _materialize_execution_plan(
-                tuple(planned_views),
-                planned_resolved_operations,
-                operation_window_plans,
-            ),
-            (operation.id for operation in planned_views),
+        execution_plan_spec = _materialize_execution_plan(
+            tuple(planned_views),
+            planned_resolved_operations,
+            operation_window_plans,
         )
         resolved_rounds_by_operation_id = {
             operation.operation_id: operation.round_count
@@ -2326,240 +2264,6 @@ def _planning_view_from_operation(
 ) -> OperationPlanningView:
     """Freeze every logical operation field while excluding its circuit."""
     return OperationPlanningView.from_operation(operation)
-
-
-def _freeze_execution_plan(
-    candidate,
-    planned_operation_ids,
-) -> _ResolvedExecutionPlanSpec:
-    """Validate and detach the sole planner result from caller-owned state."""
-    if type(candidate) is not WindowPlan:
-        raise TypeError("planner must return an exact WindowPlan")
-    operation_ids = tuple(planned_operation_ids)
-    expected_operation_ids = set(operation_ids)
-
-    mapping_fields = (
-        "windows",
-        "window_count",
-        "op_windows",
-        "successors",
-        "spatial_nodes",
-        "rounds_by_operation",
-        "code_names",
-        "windowed_by_operation",
-        "batch_preceding_idle_rounds_by_operation",
-        "summary",
-    )
-    for field_name in mapping_fields:
-        if type(getattr(candidate, field_name)) is not dict:
-            raise TypeError(
-                f"WindowPlan.{field_name} must be an exact dict"
-            )
-
-    per_operation_fields = (
-        "window_count",
-        "op_windows",
-        "successors",
-        "spatial_nodes",
-        "rounds_by_operation",
-        "code_names",
-        "windowed_by_operation",
-        "batch_preceding_idle_rounds_by_operation",
-    )
-    for field_name in per_operation_fields:
-        keys = set(getattr(candidate, field_name))
-        if keys != expected_operation_ids:
-            raise ValueError(
-                f"WindowPlan.{field_name} keys must exactly match planned "
-                "operation ids"
-            )
-
-    frozen_windows = []
-    for key in sorted(candidate.windows):
-        if (
-            type(key) is not tuple
-            or len(key) != 2
-            or any(type(item) is not int for item in key)
-        ):
-            raise TypeError(
-                "WindowPlan window keys must be exact (int, int) tuples"
-            )
-        window = candidate.windows[key]
-        if type(window) is not Window:
-            raise TypeError("WindowPlan.windows must contain exact Window values")
-        if window.key != key:
-            raise ValueError(
-                f"WindowPlan key {key!r} does not match Window.key "
-                f"{window.key!r}"
-            )
-        if window.op_id not in expected_operation_ids:
-            raise ValueError(
-                f"WindowPlan window {key!r} has an unplanned operation id"
-            )
-        if (
-            window.k < 0
-            or window.commit_lo < 1
-            or window.commit_hi < window.commit_lo
-            or window.buffer_hi < window.commit_hi
-            or (
-                window.buffer_lo is not None
-                and (
-                    type(window.buffer_lo) is not int
-                    or not 1 <= window.buffer_lo <= window.commit_lo
-                )
-            )
-        ):
-            raise ValueError(f"WindowPlan window {key!r} has invalid geometry")
-        if window.n_rounds != window.buffer_hi - window.start_round + 1:
-            raise ValueError(
-                f"WindowPlan window {key!r} has inconsistent n_rounds"
-            )
-        if any(
-            type(item) is not tuple
-            or len(item) != 2
-            or any(type(part) is not int for part in item)
-            for item in tuple(window.deps) + tuple(window.dependents)
-        ):
-            raise TypeError(
-                f"WindowPlan window {key!r} dependencies must be exact "
-                "(int, int) tuples"
-            )
-        if (
-            window.deps_remaining != len(window.deps)
-            or window.committed
-            or window.queued
-            or window.blocked_logged
-            or window.boundary_in != {}
-            or any(
-                timestamp is not None
-                for timestamp in (
-                    window.t_first_round,
-                    window.t_data_complete,
-                    window.t_queued,
-                    window.t_dispatch,
-                    window.t_done,
-                )
-            )
-        ):
-            raise ValueError(
-                f"WindowPlan window {key!r} contains runtime state"
-            )
-        frozen_windows.append(WindowInfo.from_window(window))
-
-    frozen_window_keys = {window.key for window in frozen_windows}
-    for window in frozen_windows:
-        if (
-            any(key not in frozen_window_keys for key in window.deps)
-            or any(key not in frozen_window_keys for key in window.dependents)
-        ):
-            raise ValueError(
-                f"WindowPlan window {window.key!r} names an unknown dependency"
-            )
-
-    window_count = []
-    op_windows = []
-    successors = []
-    spatial_nodes = []
-    rounds_by_operation = []
-    code_names = []
-    windowed_by_operation = []
-    batch_preceding_idle_rounds_by_operation = []
-    for operation_id in sorted(expected_operation_ids):
-        count = candidate.window_count[operation_id]
-        if type(count) is not int or count < 1:
-            raise ValueError(
-                f"WindowPlan.window_count[{operation_id}] must be positive"
-            )
-        indices = candidate.op_windows[operation_id]
-        if type(indices) is not list or any(
-            type(index) is not int for index in indices
-        ):
-            raise TypeError(
-                f"WindowPlan.op_windows[{operation_id}] must be a list "
-                "of exact ints"
-            )
-        expected_indices = list(range(count))
-        if indices != expected_indices or any(
-            (operation_id, index) not in frozen_window_keys
-            for index in indices
-        ):
-            raise ValueError(
-                f"WindowPlan.op_windows[{operation_id}] is inconsistent"
-            )
-        successor_ids = candidate.successors[operation_id]
-        if type(successor_ids) is not list or any(
-            type(successor_id) is not int
-            or successor_id not in expected_operation_ids
-            for successor_id in successor_ids
-        ):
-            raise TypeError(
-                f"WindowPlan.successors[{operation_id}] must be a list "
-                "of planned exact-int ids"
-            )
-        spatial_node_count = candidate.spatial_nodes[operation_id]
-        if type(spatial_node_count) is not int or spatial_node_count < 1:
-            raise ValueError(
-                f"WindowPlan.spatial_nodes[{operation_id}] must be positive"
-            )
-        round_count = candidate.rounds_by_operation[operation_id]
-        if type(round_count) is not int or round_count < 1:
-            raise ValueError(
-                f"WindowPlan.rounds_by_operation[{operation_id}] "
-                "must be positive"
-            )
-        code_name = candidate.code_names[operation_id]
-        if type(code_name) is not str or not code_name:
-            raise ValueError(
-                f"WindowPlan.code_names[{operation_id}] must be nonempty"
-            )
-        window_count.append((operation_id, count))
-        op_windows.append((operation_id, tuple(indices)))
-        successors.append((operation_id, tuple(successor_ids)))
-        spatial_nodes.append((operation_id, spatial_node_count))
-        rounds_by_operation.append((operation_id, round_count))
-        code_names.append((operation_id, code_name))
-        windowed = candidate.windowed_by_operation[operation_id]
-        batch_idle = candidate.batch_preceding_idle_rounds_by_operation[
-            operation_id
-        ]
-        if type(windowed) is not bool or type(batch_idle) is not bool:
-            raise TypeError(
-                "WindowPlan mode and idle-batching facts must be exact bools"
-            )
-        windowed_by_operation.append((operation_id, windowed))
-        batch_preceding_idle_rounds_by_operation.append(
-            (operation_id, batch_idle)
-        )
-
-    if (
-        type(candidate.total_windows) is not int
-        or candidate.total_windows != len(frozen_windows)
-        or candidate.total_windows != sum(count for _, count in window_count)
-    ):
-        raise ValueError("WindowPlan.total_windows is inconsistent")
-    summary_json = json.dumps(
-        _validated_json_value(candidate.summary),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-    return _ResolvedExecutionPlanSpec(
-        planned_operation_ids=operation_ids,
-        windows=tuple(frozen_windows),
-        window_count=tuple(window_count),
-        op_windows=tuple(op_windows),
-        successors=tuple(successors),
-        spatial_nodes=tuple(spatial_nodes),
-        rounds_by_operation=tuple(rounds_by_operation),
-        code_names=tuple(code_names),
-        windowed_by_operation=tuple(windowed_by_operation),
-        batch_preceding_idle_rounds_by_operation=tuple(
-            batch_preceding_idle_rounds_by_operation
-        ),
-        total_windows=candidate.total_windows,
-        summary_json=summary_json,
-    )
 
 
 def _install_private_execution_circuits(
@@ -3856,21 +3560,43 @@ def _validate_program_order(ops, layout) -> dict:
 def _validate_protocol_part(name: str, part, protocol) -> None:
     """Reject a malformed supplied part before an event can invoke it.
 
-    Runtime-checkable protocols verify that required attributes exist.
-    Binding a representative call to each declared method additionally catches
-    duck-typed methods whose signatures cannot accept the runtime contract.
+    Static inspection verifies the declared surface without executing
+    descriptors. Binding a representative call to each declared method
+    additionally catches duck-typed methods whose signatures cannot accept
+    the runtime contract.
     """
     if part is None:
         return
-    if not isinstance(part, protocol):
-        raise TypeError(
-            f"{name} must implement {protocol.__name__}; required attributes "
-            f"are missing or not callable")
+    missing = object()
+    data_names = {
+        attribute_name
+        for protocol_base in protocol.__mro__
+        for attribute_name in getattr(
+            protocol_base,
+            "__annotations__",
+            {},
+        )
+        if not attribute_name.startswith("_")
+    }
     method_names = [
         method_name
         for method_name, required_method in protocol.__dict__.items()
         if not method_name.startswith("_") and callable(required_method)
     ]
+    required_names = data_names | set(method_names)
+    if any(
+        inspect.getattr_static(part, required_name, missing) is missing
+        for required_name in required_names
+    ):
+        raise TypeError(
+            f"{name} must implement {protocol.__name__}; required attributes "
+            f"are missing or not callable")
+    for method_name in method_names:
+        if not callable(getattr(part, method_name)):
+            raise TypeError(
+                f"{name} must implement {protocol.__name__}; required "
+                f"method {method_name} is not callable"
+            )
     _validate_method_signatures(name, part, protocol, method_names)
 
 

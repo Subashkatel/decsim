@@ -16,14 +16,78 @@ RunSpec owns resolution and calls the private materializer below.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import json
+
 from .message import (
     Operation,
+    OperationPlanningView,
     OperationWindowPlan,
     OpKind,
     ResolvedOperationPlanning,
     Window,
+    WindowInfo,
     WindowPlan,
 )
+
+
+@dataclass(frozen=True)
+class _ResolvedExecutionPlanSpec:
+    """Immutable static plan produced by the root-owned materializer."""
+
+    planned_operation_ids: tuple[int, ...]
+    windows: tuple[WindowInfo, ...]
+    window_count: tuple[tuple[int, int], ...]
+    op_windows: tuple[tuple[int, tuple[int, ...]], ...]
+    successors: tuple[tuple[int, tuple[int, ...]], ...]
+    spatial_nodes: tuple[tuple[int, int], ...]
+    rounds_by_operation: tuple[tuple[int, int], ...]
+    code_names: tuple[tuple[int, str], ...]
+    windowed_by_operation: tuple[tuple[int, bool], ...]
+    batch_preceding_idle_rounds_by_operation: tuple[
+        tuple[int, bool], ...
+    ]
+    total_windows: int
+    summary_json: bytes
+
+    def materialize(self) -> WindowPlan:
+        """Create fresh runtime-owned windows and containers."""
+        windows = {
+            info.key: Window(
+                op_id=info.op_id,
+                k=info.k,
+                commit_lo=info.commit_lo,
+                commit_hi=info.commit_hi,
+                buffer_hi=info.buffer_hi,
+                n_rounds=info.n_rounds,
+                buffer_lo=info.buffer_lo,
+                deps=list(info.deps),
+                dependents=list(info.dependents),
+                deps_remaining=len(info.deps),
+            )
+            for info in self.windows
+        }
+        return WindowPlan(
+            windows=windows,
+            window_count=dict(self.window_count),
+            op_windows={
+                operation_id: list(window_indices)
+                for operation_id, window_indices in self.op_windows
+            },
+            successors={
+                operation_id: list(successor_ids)
+                for operation_id, successor_ids in self.successors
+            },
+            spatial_nodes=dict(self.spatial_nodes),
+            rounds_by_operation=dict(self.rounds_by_operation),
+            code_names=dict(self.code_names),
+            windowed_by_operation=dict(self.windowed_by_operation),
+            batch_preceding_idle_rounds_by_operation=dict(
+                self.batch_preceding_idle_rounds_by_operation
+            ),
+            total_windows=self.total_windows,
+            summary=json.loads(self.summary_json),
+        )
 
 
 def _validated(value: int, source: str) -> int:
@@ -192,93 +256,11 @@ class TemporalRounds:
         return self.base.rounds_for(op, code)
 
 
-def _plan_static_operations(scheme, layout, rounds_policy, ops) -> WindowPlan:
-    """Resolve a static plan through the root-selected collaborators."""
-    _validate_operation_graph(ops)
-    operations = {operation.id: operation for operation in ops}
-    codes_by_operation = {
-        operation_id: layout.code_for_op(operation)
-        for operation_id, operation in operations.items()
-    }
-    rounds_by_operation = {
-        operation_id: _validated(
-            rounds_policy.rounds_for(
-                operation,
-                codes_by_operation[operation_id],
-            ),
-            f"rounds_for({operation.name})",
-        )
-        for operation_id, operation in operations.items()
-    }
-    spatial_nodes = {
-        operation_id: layout.spatial_nodes_for(
-            operation,
-            base_spatial_node_count=codes_by_operation[
-                operation_id
-            ].spatial_nodes(
-                max(
-                    1,
-                    len(operation.patches)
-                    if operation.patches
-                    else len(operation.qubits),
-                )
-            ),
-        )
-        for operation_id, operation in operations.items()
-    }
-    resolved_operations = tuple(
-        ResolvedOperationPlanning(
-            operation_id=operation.id,
-            code_geometry=_resolve_code_geometry(
-                codes_by_operation[operation.id],
-            ),
-            round_count=rounds_by_operation[operation.id],
-            round_ticks=1,
-            spatial_node_count=spatial_nodes[operation.id],
-        )
-        for operation in ops
-    )
-    operation_window_plans = tuple(
-        scheme.plan_operation(
-            operation.id,
-            rounds_by_operation[operation.id],
-            commit_round_count=codes_by_operation[
-                operation.id
-            ].commit_rounds(),
-            buffer_round_count=codes_by_operation[
-                operation.id
-            ].buffer_rounds(),
-        )
-        for operation in ops
-    )
-    return _materialize_execution_plan(
-        tuple(ops),
-        resolved_operations,
-        operation_window_plans,
-    )
-
-
-def _resolve_code_geometry(code):
-    from .message import ResolvedCodeGeometry
-
-    lead, trail = code.buffering_floor()
-    return ResolvedCodeGeometry(
-        code_name=code.name,
-        distance=code.distance,
-        commit_round_count=code.commit_rounds(),
-        buffer_round_count=code.buffer_rounds(),
-        minimum_leading_buffer_round_count=lead,
-        minimum_trailing_buffer_round_count=trail,
-        one_patch_spatial_node_count=code.spatial_nodes(1),
-        buffer_floor_override_active=code.buffer_floor_override_active(),
-    )
-
-
 def _materialize_execution_plan(
-    operations: tuple[Operation, ...],
+    operations: tuple[OperationPlanningView, ...],
     resolved_operations: tuple[ResolvedOperationPlanning, ...],
     operation_window_plans: tuple[OperationWindowPlan, ...],
-) -> WindowPlan:
+) -> _ResolvedExecutionPlanSpec:
     """Materialize exactly the typed scheme ledgers and direct DAG edges."""
     if not (
         len(operations)
@@ -303,6 +285,20 @@ def _materialize_execution_plan(
         resolved_operations,
         operation_window_plans,
     ):
+        if type(operation) is not OperationPlanningView:
+            raise TypeError(
+                "operations must contain exact OperationPlanningView values"
+            )
+        if type(resolved) is not ResolvedOperationPlanning:
+            raise TypeError(
+                "resolved_operations must contain exact "
+                "ResolvedOperationPlanning values"
+            )
+        if type(operation_plan) is not OperationWindowPlan:
+            raise TypeError(
+                "operation_window_plans must contain exact "
+                "OperationWindowPlan values"
+            )
         if (
             operation.id != resolved.operation_id
             or operation.id != operation_plan.operation_id
@@ -387,16 +383,36 @@ def _materialize_execution_plan(
             else 0
         ),
     }
-    return WindowPlan(
-        windows=windows,
-        window_count=window_count,
-        op_windows=op_windows,
-        successors=successors,
-        spatial_nodes=spatial_nodes,
-        rounds_by_operation=rounds_by_operation,
-        code_names=code_names,
+    return _ResolvedExecutionPlanSpec(
+        planned_operation_ids=tuple(
+            operation.id for operation in operations
+        ),
+        windows=tuple(
+            WindowInfo.from_window(windows[key])
+            for key in sorted(windows)
+        ),
+        window_count=tuple(sorted(window_count.items())),
+        op_windows=tuple(
+            (operation_id, tuple(window_indices))
+            for operation_id, window_indices in sorted(op_windows.items())
+        ),
+        successors=tuple(
+            (operation_id, tuple(successor_ids))
+            for operation_id, successor_ids in sorted(successors.items())
+        ),
+        spatial_nodes=tuple(sorted(spatial_nodes.items())),
+        rounds_by_operation=tuple(sorted(rounds_by_operation.items())),
+        code_names=tuple(sorted(code_names.items())),
+        windowed_by_operation=tuple(
+            sorted(windowed_by_operation.items())
+        ),
+        batch_preceding_idle_rounds_by_operation=tuple(
+            sorted(batch_idle_by_operation.items())
+        ),
         total_windows=len(windows),
-        summary=summary,
-        windowed_by_operation=windowed_by_operation,
-        batch_preceding_idle_rounds_by_operation=batch_idle_by_operation,
+        summary_json=json.dumps(
+            summary,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8"),
     )

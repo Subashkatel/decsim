@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import random
 import threading
+from types import MappingProxyType
 from typing import Callable, Optional
 
 from .message import (
@@ -99,8 +100,8 @@ class ClockedDevice:
         self.device = device            # round_payloads / begin_operation / ...
         self.controller = controller    # relay path (t_qc + t_cd)
         self.cluster = cluster          # on_syndrome_arrival sink
-        self._round_count_by_operation_id = dict(
-            round_count_by_operation_id
+        self._round_count_by_operation_id = MappingProxyType(
+            dict(round_count_by_operation_id)
         )
 
     def start(self, operation, round_ticks: int,

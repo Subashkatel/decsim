@@ -199,6 +199,28 @@ class CircuitRejectingRounds(FixedRounds):
 class CircuitRejectingScheme(SlidingWindowScheme):
     def __init__(self):
         self.data_complete_calls = 0
+        self.plan_calls = []
+
+    def plan_operation(
+        self,
+        operation_id,
+        round_count,
+        *,
+        commit_round_count,
+        buffer_round_count,
+    ):
+        self.plan_calls.append((
+            operation_id,
+            round_count,
+            commit_round_count,
+            buffer_round_count,
+        ))
+        return super().plan_operation(
+            operation_id,
+            round_count,
+            commit_round_count=commit_round_count,
+            buffer_round_count=buffer_round_count,
+        )
 
     def data_complete(self, window, *, operation, **kwargs):
         assert not hasattr(operation, "circuit")
@@ -554,6 +576,7 @@ def test_all_operation_consuming_planning_ports_receive_frozen_views():
     assert layout.resource_calls == 1
     assert layout.spatial_calls == 1
     assert rounds.calls == 1
+    assert scheme.plan_calls == [(0, 3, 3, 3)]
     assert scheme.data_complete_calls > 0
 
 
@@ -1055,6 +1078,76 @@ def test_manifest_records_every_code_selection_and_effective_cadence(
         }
         for selection in manifest["code_selections"]
     ]
+
+
+def test_code_geometry_and_spatial_profile_are_resolved_once():
+    class SingleReadCode:
+        def __init__(self):
+            self.calls = {}
+
+        def _read(self, key, value):
+            self.calls[key] = self.calls.get(key, 0) + 1
+            if self.calls[key] > 1:
+                raise AssertionError(f"code input {key!r} was re-read")
+            return value
+
+        @property
+        def name(self):
+            return self._read("name", "single-read-code")
+
+        @property
+        def distance(self):
+            return self._read("distance", 3)
+
+        def rounds_per_logical_cycle(self):
+            return self._read("logical_cycle", 3)
+
+        def round_period_us(self):
+            return self._read("round_period_us", None)
+
+        def commit_rounds(self):
+            return self._read("commit_rounds", 3)
+
+        def buffer_rounds(self):
+            return self._read("buffer_rounds", 3)
+
+        def buffering_floor(self):
+            return self._read("buffering_floor", (3, 3))
+
+        def buffer_floor_override_active(self):
+            return self._read("buffer_floor_override_active", False)
+
+        def spatial_nodes(self, patch_count):
+            return self._read(("spatial_nodes", patch_count), 9 * patch_count)
+
+        def syndrome_bits_per_round(self, patch_count):
+            return self._read(
+                ("syndrome_bits_per_round", patch_count),
+                8 * patch_count,
+            )
+
+        def run_manifest_config(self):
+            return {"kind": "single_read"}
+
+    code = SingleReadCode()
+    RunSpec(
+        ops=[Operation(7, "memory", (0,), patches=(0, 1))],
+        layout=UniformLayout(code),
+        rounds_policy=FixedRounds(5),
+        decoder=StaticDecoder(),
+    ).build()
+
+    assert code.calls == {
+        "round_period_us": 1,
+        "name": 1,
+        "distance": 1,
+        "commit_rounds": 1,
+        "buffer_rounds": 1,
+        "buffering_floor": 1,
+        "buffer_floor_override_active": 1,
+        ("spatial_nodes", 1): 1,
+        ("spatial_nodes", 2): 1,
+    }
 
 
 def test_resource_claim_id_is_not_promoted_to_a_patch_selector():
@@ -1562,6 +1655,36 @@ def test_manifest_has_the_complete_closed_effective_run_schema():
     ]
     assert manifest["runtime_flags"]["decoder_needs_hyperedges"] is False
     assert manifest["assurance"]["executed_software_status"] == "unattested"
+
+
+def test_static_plan_has_one_private_immutable_materialization_path():
+    import decsim.planner as planner_module
+    import decsim.run_spec as run_spec_module
+
+    assert not hasattr(planner_module, "_plan_static_operations")
+    assert not hasattr(planner_module, "_resolve_code_geometry")
+    assert not hasattr(run_spec_module, "_freeze_execution_plan")
+
+
+def test_runtime_owners_retain_frozen_resolved_lookup_maps():
+    completed = RunSpec(
+        ops=[Operation(7, "memory", ("patch-a",))],
+        rounds_policy=FixedRounds(5),
+        decoder=StaticDecoder(),
+    ).build()
+
+    frozen_maps = (
+        completed.window_manager._resolved_operations,
+        completed.window_manager._resolved_patches,
+        completed.window_manager._planning_view_by_operation_id,
+        completed.chip._resolved_operations,
+        completed.chip._resolved_patches,
+        completed.chip._resource_claims_by_operation_id,
+        completed.chip.source._round_count_by_operation_id,
+    )
+    for frozen_map in frozen_maps:
+        with pytest.raises(TypeError):
+            frozen_map["mutation"] = object()
 
 
 def test_completed_diagnostic_handles_do_not_expose_executable_operations():

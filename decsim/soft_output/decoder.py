@@ -9,6 +9,7 @@ from ..message import (
     DecodeResult,
     RunSeedChild,
     RunSeedPathSegment,
+    SoftOutputSource,
 )
 
 if TYPE_CHECKING:
@@ -16,18 +17,46 @@ if TYPE_CHECKING:
 
 
 class SoftOutputDecoder:
-    """Attach one configured metric's confidence without changing hard output."""
+    """Attach one configured metric's confidence without changing hard output.
+
+    ``metric_cls`` is the stable component-graph field name. Its value is a
+    configured factory instance declaring ``source``,
+    ``run_manifest_config()``, and ``from_window_model(model)``.
+    """
 
     def __init__(self, base: "Decoder", metric_cls):
+        if isinstance(metric_cls, type):
+            raise TypeError(
+                "SoftOutputDecoder requires a configured metric factory "
+                "instance, not a metric class"
+            )
+        if not isinstance(
+            getattr(metric_cls, "source", None),
+            SoftOutputSource,
+        ):
+            raise TypeError(
+                "configured metric factory must declare one SoftOutputSource"
+            )
+        if not callable(getattr(metric_cls, "from_window_model", None)):
+            raise TypeError(
+                "configured metric factory must build from a window model"
+            )
+        if not callable(getattr(metric_cls, "run_manifest_config", None)):
+            raise TypeError(
+                "configured metric factory must declare run configuration"
+            )
         self.base = base
         self.metric_cls = metric_cls
         self._metrics: dict = {}
 
     def run_manifest_config(self):
-        return {"kind": "soft_output"}
+        return {
+            "kind": "soft_output",
+            "metric_source": self.metric_cls.source.manifest_value(),
+        }
 
     def run_seed_children(self):
-        """Expose the base decoder and confidence metric constructor."""
+        """Expose the base decoder and configured confidence builder."""
         return (
             RunSeedChild(
                 (RunSeedPathSegment("field", "base"),),
@@ -66,5 +95,13 @@ class SoftOutputDecoder:
         metric = entry[1] if entry is not None and entry[0]() is model else None
         if metric is None:
             metric = self.metric_cls.from_window_model(model)
-            self._metrics[id(model)] = (weakref.ref(model), metric)
+            model_identity = id(model)
+
+            def discard_dead_model(reference) -> None:
+                current = self._metrics.get(model_identity)
+                if current is not None and current[0] is reference:
+                    del self._metrics[model_identity]
+
+            reference = weakref.ref(model, discard_dead_model)
+            self._metrics[model_identity] = (reference, metric)
         return metric

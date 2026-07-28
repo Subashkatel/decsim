@@ -4,7 +4,6 @@ Each test pins a branch the 2026-07-03 review found uncovered:
   7  held-early-strong result discarded when the weak proves confident
   8  PayloadStore.replace strictly frees rounds the new lease drops
   9  dem.decode_windowed raises when artificial defects are never consumed
-  10 ClusterGapMetric.from_window_model + the SoftOutputDecoder wrapper path
   HA switching threshold equality keeps weak (>= semantics)
   HA SlidingWindowScheme.data_complete overflow branches
   HA ComplementaryGapMetric multi-observable guard
@@ -181,35 +180,6 @@ def test_decode_windowed_raises_on_unconsumed_artificial_defects():
             break
     assert saw_defect_shot, ("no shot committed a boundary-crossing fault in "
                              "64 seeded shots; raise the shot count")
-
-
-# ------------------------- finding 10: cluster gap from window model + wrapper
-
-def test_cluster_gap_from_window_model_and_soft_output_decoder_path():
-    from decsim.detector_error_model import build_window_error_models
-    from decsim.soft_output import ClusterGapMetric, SoftOutputDecoder
-
-    circuit = _surface_circuit(rounds=3)
-    (model,) = build_window_error_models(circuit, [(1, 3, 3)])
-    metric = ClusterGapMetric.from_window_model(model)
-
-    empty = np.zeros(model.check.shape[0], dtype=np.uint8)
-    out = metric.evaluate(empty)
-    assert not hasattr(out, "logical_value")
-    assert out.gap > 0.0                        # confident on empty syndrome
-    single = empty.copy()
-    single[0] = 1
-    out_single = metric.evaluate(single)
-    assert out_single.gap >= 0.0                # finite, defined
-
-    # wrapper path: SoftOutputDecoder attaches the cluster gap to a result
-    base = _Decoder(10, logical=0)
-    wrapper = SoftOutputDecoder(base, ClusterGapMetric)
-    payload = SyndromePayload(0, 0, 1, bits=empty)
-    job = DecodeJob(op_id=0, window_id=0, n_rounds=3, dem=model,
-                    payloads=[payload], label="op0 W0")
-    result = wrapper.decode(job)
-    assert result.soft_output == out
 
 
 # ----------------------------------------- hidden assumption: >= threshold

@@ -1,7 +1,4 @@
-"""Soft-output metrics (SoftOutputMetric seam): a confidence ``g`` per decoding window.
-
-Interchangeable behind one interface: ComplementaryGapMetric (MWPM) and ClusterGapMetric (UF).
-"""
+"""Soft-output confidence for MWPM and Union-Find decoding windows."""
 # ref: Toshio et al. 2510.25222 Sec. II.B
 from typing import Protocol, runtime_checkable
 
@@ -19,14 +16,10 @@ class SoftOutputMetric(Protocol):
     def evaluate(self, syndrome) -> SoftOutput: ...
 
 
-from .cluster import (
-    ClusterGapMetric,
-    RECONSTRUCTED_CLUSTER_GAP_CORRECTED_SOURCE,
-    RECONSTRUCTED_CLUSTER_GAP_SOURCE,
-)
 from .complementary import (
     COMPLEMENTARY_GAP_SOURCE,
     ComplementaryGapMetric,
+    ComplementaryGapMetricFactory,
     dem_to_matrices,
 )
 from .decoder import SoftOutputDecoder
@@ -39,10 +32,8 @@ __all__ = [
     "SoftOutput",
     "SoftOutputMetric",
     "ComplementaryGapMetric",
+    "ComplementaryGapMetricFactory",
     "COMPLEMENTARY_GAP_SOURCE",
-    "ClusterGapMetric",
-    "RECONSTRUCTED_CLUSTER_GAP_SOURCE",
-    "RECONSTRUCTED_CLUSTER_GAP_CORRECTED_SOURCE",
     "dem_to_matrices",
     "SoftOutputDecoder",
     "UNION_FIND_CLUSTER_GAP_SOURCE",

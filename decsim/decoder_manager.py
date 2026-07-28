@@ -301,11 +301,14 @@ class DecoderManager:
             job = self._merge_strong_batch(queue)
             self.strong_running_rounds = job.n_rounds
             return job
-        return self.scheduler.pop(queue)
+        return self.scheduler.pop(queue, self.engine.now)
 
     def _merge_strong_batch(self, queue: list) -> DecodeJob:
         """Batch queued strong jobs (timing-only) into one decode."""
-        jobs = [self.scheduler.pop(queue) for _ in range(len(queue))]
+        jobs = [
+            self.scheduler.pop(queue, self.engine.now)
+            for _ in range(len(queue))
+        ]
         if len(jobs) > 1:
             for job in jobs:
                 has_model = job.dem is not None

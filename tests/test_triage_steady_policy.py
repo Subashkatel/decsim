@@ -23,7 +23,7 @@ def build(w_u, w_c):
     eng = Engine(verbose=False)
     manager = DecoderManager(
         eng, router=CodeRouter(default=PerRoundDecoder(tau_us=1.0)),
-        scheduler=WeightedUrgencyCostScheduler(eng, w_u=w_u, w_c=w_c),
+        scheduler=WeightedUrgencyCostScheduler(w_u=w_u, w_c=w_c),
         unit_pools={"default": 1})
     return eng, manager
 
@@ -43,9 +43,58 @@ def run_order(w_u, w_c, jobs):
 
 
 def test_weights_must_sum_to_one():
-    eng = Engine(verbose=False)
     with pytest.raises(ValueError, match="must be 1"):
-        WeightedUrgencyCostScheduler(eng, w_u=0.7, w_c=0.7)
+        WeightedUrgencyCostScheduler(w_u=0.7, w_c=0.7)
+
+
+def test_priority_uses_the_dispatch_tick_without_retaining_an_engine():
+    from decsim.message import DecodeJob
+
+    scheduler = WeightedUrgencyCostScheduler(w_u=1.0, w_c=0.0)
+    earlier_deadline = DecodeJob(
+        op_id=1,
+        window_id=0,
+        n_rounds=1,
+        deadline=11,
+    )
+    later_deadline = DecodeJob(
+        op_id=2,
+        window_id=0,
+        n_rounds=1,
+        deadline=20,
+    )
+    queue = [later_deadline, earlier_deadline]
+
+    assert scheduler.pop(queue, now_ticks=10) is earlier_deadline
+    assert not hasattr(scheduler, "engine")
+
+
+def test_decoder_manager_supplies_the_exact_tick_of_each_dispatch():
+    class RecordingScheduler:
+        def __init__(self):
+            self.dispatch_ticks = []
+
+        def insert(self, queue, job):
+            queue.append(job)
+
+        def pop(self, queue, now_ticks):
+            self.dispatch_ticks.append(now_ticks)
+            return queue.pop(0)
+
+    engine = Engine(verbose=False)
+    scheduler = RecordingScheduler()
+    manager = DecoderManager(
+        engine,
+        router=CodeRouter(default=PerRoundDecoder(tau_us=1.0)),
+        scheduler=scheduler,
+        unit_pools={"default": 1},
+    )
+    manager.submit_decode(5, lambda: None, label="first")
+    manager.submit_decode(1, lambda: None, label="second")
+
+    engine.run()
+
+    assert scheduler.dispatch_ticks == [0, us(5)]
 
 
 def test_pure_urgency_orders_by_nearest_deadline():

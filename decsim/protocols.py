@@ -243,12 +243,12 @@ class DecoderRouter(Protocol):
 @runtime_checkable
 class Scheduler(Protocol):
     """Port 11. Queue discipline for one decode lane (FIFO or EDF):
-    insert() places a job in the ready queue, pop() picks the next
-    job to dispatch."""
+    insert() places a job in the ready queue, and pop() picks the next job
+    using the dispatch owner's exact current tick."""
 
     def insert(self, queue: list, job: DecodeJob) -> None: ...
 
-    def pop(self, queue: list) -> DecodeJob: ...
+    def pop(self, queue: list, now_ticks: int) -> DecodeJob: ...
 
 
 @runtime_checkable

@@ -27,7 +27,7 @@ WS = 500_000
 
 class _FifoScheduler:
     def insert(self, queue, job): queue.append(job)
-    def pop(self, queue): return queue.pop(0)
+    def pop(self, queue, now_ticks): return queue.pop(0)
 
 
 class _Decoder:

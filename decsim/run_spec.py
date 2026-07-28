@@ -13,6 +13,7 @@ GateRounds + InfiniteFactory.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import functools
 import hashlib
@@ -20,6 +21,7 @@ import inspect
 import json
 import math
 from numbers import Integral
+from pathlib import Path
 import types
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -182,6 +184,8 @@ class _ComponentGraphEntry:
     parent_path: Optional[tuple[RunSeedPathSegment, ...]]
     edge_path: Optional[tuple[RunSeedPathSegment, ...]]
     component: Any
+    configuration_json: Optional[bytes]
+    configuration_status: str
 
 
 @dataclass(frozen=True)
@@ -427,7 +431,9 @@ class ResolvedRunManifest:
                         else _typed_path_json(component.edge_path)
                     ),
                     "implementation": component.implementation,
-                    "configuration": component.configuration,
+                    "configuration": _validated_json_value(
+                        component.configuration
+                    ),
                     "configuration_status": (
                         component.configuration_status
                     ),
@@ -1153,6 +1159,7 @@ class RunSpec:
             anchors=fixed_composition_anchors,
         )
         seed_plan = component_graph.seed_plan
+        resolved_components = _resolved_components(component_graph)
         reservations = _bind_run_seed_plan(seed_plan)
         seed_bindings = tuple(
             ResolvedSeedBinding(
@@ -1162,7 +1169,6 @@ class RunSpec:
             )
             for entry, reservation in zip(seed_plan, reservations)
         )
-        resolved_components = _resolved_components(component_graph)
         fixed_composition = _resolved_fixed_composition(
             fixed_composition_anchors
         )
@@ -1204,6 +1210,7 @@ class RunSpec:
                 operations=all_operations,
                 metrics=metrics,
             )
+            _validate_shipped_component_configuration(component_graph)
             manifest = ResolvedRunManifest(
                 schema_version=1,
                 root_seed=self._validated_root_seed(),
@@ -1910,6 +1917,61 @@ def _implementation_name(component) -> str:
     return f"{implementation.__module__}.{implementation.__qualname__}"
 
 
+def _is_shipped_component(component) -> bool:
+    source_path = inspect.getsourcefile(type(component))
+    if source_path is None:
+        return False
+    try:
+        Path(source_path).resolve().relative_to(
+            Path(__file__).resolve().parent
+        )
+    except ValueError:
+        return False
+    return True
+
+
+def _capture_component_configuration(component) -> tuple[Optional[bytes], str]:
+    from .protocols import RunManifestPart
+
+    if not isinstance(component, RunManifestPart):
+        return None, "opaque"
+    candidate = component.run_manifest_config()
+    if not isinstance(candidate, Mapping):
+        raise TypeError(
+            f"{type(component).__name__}.run_manifest_config() must return "
+            "a mapping"
+        )
+    copied = _validated_json_value(dict(candidate))
+    canonical_json = json.dumps(
+        copied,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    status = "declared" if _is_shipped_component(component) else "opaque"
+    return canonical_json, status
+
+
+def _validate_shipped_component_configuration(
+    graph: _ResolvedComponentGraph,
+) -> None:
+    for entry in graph.components:
+        if entry.configuration_status != "declared":
+            continue
+        current_json, current_status = _capture_component_configuration(
+            entry.component
+        )
+        if (
+            current_status != "declared"
+            or current_json != entry.configuration_json
+        ):
+            raise RuntimeError(
+                f"{type(entry.component).__name__} changed declared "
+                "configuration during the run"
+            )
+
+
 def _fixed_composition_anchors(**components):
     field_segment = lambda value: RunSeedPathSegment("field", value)
     return tuple(
@@ -1970,8 +2032,12 @@ def _resolved_components(
                 else _typed_path_records(entry.edge_path)
             ),
             implementation=_implementation_name(entry.component),
-            configuration=None,
-            configuration_status="opaque",
+            configuration=(
+                None
+                if entry.configuration_json is None
+                else json.loads(entry.configuration_json)
+            ),
+            configuration_status=entry.configuration_status,
         )
         for entry in graph.components
     )
@@ -2043,12 +2109,17 @@ def _materialize_component_graph(
             return
 
         canonical_paths[component_id] = component_path
+        configuration_json, configuration_status = (
+            _capture_component_configuration(component)
+        )
         components.append(
             _ComponentGraphEntry(
                 component_path=component_path,
                 parent_path=parent_path,
                 edge_path=edge_path,
                 component=component,
+                configuration_json=configuration_json,
+                configuration_status=configuration_status,
             )
         )
         active_ids.add(component_id)
@@ -2673,13 +2744,13 @@ def _validated_logical_bit(value) -> int:
 
 
 def _validated_json_value(value):
-    """Copy one value from the closed metric JSON domain."""
+    """Copy one value from the closed manifest JSON domain."""
     value_type = type(value)
     if value is None or value_type in (bool, int, str):
         return value
     if value_type is float:
         if not math.isfinite(value):
-            raise ValueError(f"metric floats must be finite; got {value!r}")
+            raise ValueError(f"manifest floats must be finite; got {value!r}")
         return value
     if value_type is list:
         return [_validated_json_value(item) for item in value]
@@ -2688,12 +2759,12 @@ def _validated_json_value(value):
         for key, item in value.items():
             if type(key) is not str:
                 raise TypeError(
-                    f"metric object keys must be exact strings; got {key!r}"
+                    f"manifest object keys must be exact strings; got {key!r}"
                 )
             copied[key] = _validated_json_value(item)
         return copied
     raise TypeError(
-        "metric values must use the closed JSON domain; "
+        "manifest values must use the closed JSON domain; "
         f"got {type(value).__name__}"
     )
 

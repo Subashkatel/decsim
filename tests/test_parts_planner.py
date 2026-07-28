@@ -1,9 +1,22 @@
 """Rounds policies: op-kinds, temporal d_m, validation, QLX pass-through."""
 import pytest
 
-from decsim.message import Operation, OpKind
-from decsim.planner import (CodeRounds, WindowPlanner, FixedRounds,
-                           GateRounds, PerOpRounds, TemporalRounds)
+from decsim.message import (
+    Operation,
+    OperationWindowPlan,
+    OpKind,
+    ResolvedCodeGeometry,
+    ResolvedOperationPlanning,
+    WindowGeometry,
+)
+from decsim.planner import (
+    CodeRounds,
+    FixedRounds,
+    GateRounds,
+    PerOpRounds,
+    TemporalRounds,
+    _materialize_execution_plan,
+)
 
 
 class _Code:
@@ -51,17 +64,45 @@ def test_per_op_passthrough_and_fallback():
     assert p.rounds_for(Operation(8, "y", (0,)), _Code()) == 11
 
 
-def test_planner_plans_windows_and_deps():
-    class _Scheme:
-        def plan_windows(self, op_id, rounds, code):
-            return [(1, 5, 10), (6, 10, 15)]
-    class _Layout:
-        def code_for_op(self, op): return _Code()
-        def spatial_nodes_for(self, op): return 25
-        def codes(self): return [_Code()]
+def test_materializer_uses_only_ledger_and_direct_operation_edges():
     a = Operation(0, "a", (0,), has_successor=True)
     b = Operation(1, "b", (0,), predecessors=(0,))
-    plan = WindowPlanner(_Scheme(), _Layout(), FixedRounds(10)).plan([a, b])
+    geometry = ResolvedCodeGeometry(
+        code_name="fake",
+        distance=5,
+        commit_round_count=5,
+        buffer_round_count=5,
+        minimum_leading_buffer_round_count=5,
+        minimum_trailing_buffer_round_count=5,
+        one_patch_spatial_node_count=25,
+        buffer_floor_override_active=False,
+    )
+    resolved = tuple(
+        ResolvedOperationPlanning(
+            operation_id=operation.id,
+            code_geometry=geometry,
+            round_count=10,
+            round_ticks=1,
+            spatial_node_count=25,
+        )
+        for operation in (a, b)
+    )
+    ledgers = tuple(
+        OperationWindowPlan(
+            operation_id=operation.id,
+            windows=(
+                WindowGeometry(1, 1, 5, 10),
+                WindowGeometry(6, 6, 10, 15),
+            ),
+            internal_dependencies=((0, 1),),
+            entry_window_indices=(0,),
+            exit_window_indices=(1,),
+            windowed=True,
+            batch_preceding_idle_rounds=False,
+        )
+        for operation in (a, b)
+    )
+    plan = _materialize_execution_plan((a, b), resolved, ledgers)
     assert plan.total_windows == 4
     assert plan.windows[(0, 1)].deps == [(0, 0)]                  # intra chain
     assert (0, 1) in plan.windows[(1, 0)].deps                    # cross-op entry<-exit

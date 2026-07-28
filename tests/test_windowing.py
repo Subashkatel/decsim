@@ -6,10 +6,14 @@ from decsim.config import us
 from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.layouts import UniformLayout
-from decsim.message import Operation
+from decsim.message import Operation, OperationWindowPlan, WindowGeometry
 from decsim.planner import WindowPlanner
 from decsim.planner import PerOpRounds
-from decsim.schemes import SlidingWindowScheme, ParallelWindowScheme
+from decsim.schemes import (
+    NaiveOnlineScheme,
+    ParallelWindowScheme,
+    SlidingWindowScheme,
+)
 from conftest import continuous_stream
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
@@ -20,6 +24,58 @@ def _memory_op(rounds_unused=None):
     op = Operation(0, "M(q0)", (0,), clifford=True)
     op.patches = (0,)
     return [op]
+
+
+def test_typed_scheme_ledgers_pin_mode_idle_policy_and_parallel_boundaries():
+    sliding = SlidingWindowScheme().plan_operation(
+        7, 5, commit_round_count=2, buffer_round_count=1,
+    )
+    assert sliding == OperationWindowPlan(
+        operation_id=7,
+        windows=(
+            WindowGeometry(1, 1, 2, 3),
+            WindowGeometry(3, 3, 4, 5),
+            WindowGeometry(5, 5, 5, 6),
+        ),
+        internal_dependencies=((0, 1), (1, 2)),
+        entry_window_indices=(0,),
+        exit_window_indices=(2,),
+        windowed=True,
+        batch_preceding_idle_rounds=False,
+    )
+
+    naive = NaiveOnlineScheme().plan_operation(
+        7, 5, commit_round_count=2, buffer_round_count=1,
+    )
+    assert naive.windows == (WindowGeometry(1, 1, 5, 5),)
+    assert naive.internal_dependencies == ()
+    assert naive.entry_window_indices == naive.exit_window_indices == (0,)
+    assert naive.windowed is False
+    assert naive.batch_preceding_idle_rounds is True
+
+    expected = {
+        1: ((), (0,), (0,)),
+        2: (((0, 1),), (0,), (1,)),
+        3: (((0, 1), (2, 1)), (0, 2), (1,)),
+        4: (((0, 1), (2, 1), (2, 3)), (0, 2), (1, 3)),
+        5: (
+            ((0, 1), (2, 1), (2, 3), (4, 3)),
+            (0, 2, 4),
+            (1, 3),
+        ),
+    }
+    for window_count, (edges, roots, sinks) in expected.items():
+        plan = ParallelWindowScheme().plan_operation(
+            7,
+            window_count,
+            commit_round_count=1,
+            buffer_round_count=1,
+        )
+        assert plan.internal_dependencies == edges
+        assert plan.entry_window_indices == roots
+        assert plan.exit_window_indices == sinks
+        assert plan.windowed is True
+        assert plan.batch_preceding_idle_rounds is False
 
 
 def _plan(scheme, ops, rounds_per_op, d=3):

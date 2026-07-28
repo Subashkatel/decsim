@@ -163,7 +163,7 @@ def test_custom_decision_rule_can_replace_the_threshold():
     """The keep-or-redecode decision is overridable: a subclass that never keeps the weak result
     sends every window to the strong decoder, regardless of the reported confidence."""
     class AlwaysUseStrong(Switching):
-        def keep_weak_result(self, result):
+        def keep_weak_result(self, result, job):
             return False
 
     res = _switch_run(AlwaysUseStrong(confidence_threshold=0.5), 0.0, 60)

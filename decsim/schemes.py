@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING
 
+from .message import OperationWindowPlan, WindowGeometry
+
 if TYPE_CHECKING:
     from .message import Operation, Window
     from .protocols import CodeModel, LayoutModel
@@ -23,6 +25,44 @@ class SlidingWindowScheme:
 
     def run_manifest_config(self):
         return {"kind": "sliding"}
+
+    def plan_operation(
+        self,
+        op_id: int,
+        round_count: int,
+        *,
+        commit_round_count: int,
+        buffer_round_count: int,
+    ) -> OperationWindowPlan:
+        window_count = max(1, math.ceil(round_count / commit_round_count))
+        windows = tuple(
+            WindowGeometry(
+                buffer_lo=window_index * commit_round_count + 1,
+                commit_lo=window_index * commit_round_count + 1,
+                commit_hi=min(
+                    (window_index + 1) * commit_round_count,
+                    round_count,
+                ),
+                buffer_hi=min(
+                    (window_index + 1) * commit_round_count,
+                    round_count,
+                )
+                + buffer_round_count,
+            )
+            for window_index in range(window_count)
+        )
+        return OperationWindowPlan(
+            operation_id=op_id,
+            windows=windows,
+            internal_dependencies=tuple(
+                (window_index, window_index + 1)
+                for window_index in range(window_count - 1)
+            ),
+            entry_window_indices=(0,),
+            exit_window_indices=(window_count - 1,),
+            windowed=True,
+            batch_preceding_idle_rounds=False,
+        )
 
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple[int, int, int]]:
@@ -85,6 +125,24 @@ class NaiveOnlineScheme(SlidingWindowScheme):
     def run_manifest_config(self):
         return {"kind": "naive_online"}
 
+    def plan_operation(
+        self,
+        op_id: int,
+        round_count: int,
+        *,
+        commit_round_count: int,
+        buffer_round_count: int,
+    ) -> OperationWindowPlan:
+        return OperationWindowPlan(
+            operation_id=op_id,
+            windows=(WindowGeometry(1, 1, round_count, round_count),),
+            internal_dependencies=(),
+            entry_window_indices=(0,),
+            exit_window_indices=(0,),
+            windowed=False,
+            batch_preceding_idle_rounds=True,
+        )
+
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple[int, int, int]]:
         """One batch window: commit every round, look ahead none."""
@@ -98,6 +156,59 @@ class ParallelWindowScheme(SlidingWindowScheme):
 
     def run_manifest_config(self):
         return {"kind": "parallel"}
+
+    def plan_operation(
+        self,
+        op_id: int,
+        round_count: int,
+        *,
+        commit_round_count: int,
+        buffer_round_count: int,
+    ) -> OperationWindowPlan:
+        window_count = max(1, math.ceil(round_count / commit_round_count))
+        windows = tuple(
+            WindowGeometry(
+                buffer_lo=max(
+                    1,
+                    window_index * commit_round_count + 1
+                    - buffer_round_count,
+                ),
+                commit_lo=window_index * commit_round_count + 1,
+                commit_hi=min(
+                    (window_index + 1) * commit_round_count,
+                    round_count,
+                ),
+                buffer_hi=min(
+                    (window_index + 1) * commit_round_count,
+                    round_count,
+                )
+                + buffer_round_count,
+            )
+            for window_index in range(window_count)
+        )
+        internal_dependencies = []
+        for odd_index in range(1, window_count, 2):
+            internal_dependencies.append((odd_index - 1, odd_index))
+            if odd_index + 1 < window_count:
+                internal_dependencies.append((odd_index + 1, odd_index))
+        edges = tuple(internal_dependencies)
+        destinations = {destination for _, destination in edges}
+        sources = {source for source, _ in edges}
+        return OperationWindowPlan(
+            operation_id=op_id,
+            windows=windows,
+            internal_dependencies=edges,
+            entry_window_indices=tuple(
+                index for index in range(window_count)
+                if index not in destinations
+            ),
+            exit_window_indices=tuple(
+                index for index in range(window_count)
+                if index not in sources
+            ),
+            windowed=True,
+            batch_preceding_idle_rounds=False,
+        )
 
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple[int, int, int, int]]:

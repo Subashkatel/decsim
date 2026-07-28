@@ -16,7 +16,14 @@ WindowPlanner.plan(ops) is the single owner of windowing resolution.
 
 from __future__ import annotations
 
-from .message import Operation, OpKind, Window, WindowPlan
+from .message import (
+    Operation,
+    OperationWindowPlan,
+    OpKind,
+    ResolvedOperationPlanning,
+    Window,
+    WindowPlan,
+)
 
 
 def _validated(value: int, source: str) -> int:
@@ -223,85 +230,183 @@ class WindowPlanner:
         for op_id, operation in operations.items():
             for predecessor_id in operation.predecessors:
                 successors[predecessor_id].append(op_id)
-        window_specs = {
-            op_id: self.scheme.plan_windows(
-                op_id, rounds_by_operation[op_id],
-                codes_by_operation[op_id])
-            for op_id, operation in operations.items()}
-        windows, operation_windows = self._materialize_windows(window_specs)
-        window_count = {op_id: len(window_specs[op_id]) for op_id in operations}
-        self._wire_dependencies(operations, windows, window_count)
         spatial_nodes = {
             op_id: self.layout.spatial_nodes_for(operation)
             for op_id, operation in operations.items()}
-        summary = self._summary(operations, rounds_by_operation, window_count)
-        return WindowPlan(windows=windows, window_count=window_count,
-                          op_windows=operation_windows, successors=successors,
-                          spatial_nodes=spatial_nodes,
-                          rounds_by_operation=rounds_by_operation,
-                          code_names={
-                              op_id: code.name
-                              for op_id, code in codes_by_operation.items()
-                          },
-                          total_windows=len(windows), summary=summary)
+        resolved_operations = tuple(
+            ResolvedOperationPlanning(
+                operation_id=operation.id,
+                code_geometry=_legacy_code_geometry(
+                    codes_by_operation[operation.id],
+                ),
+                round_count=rounds_by_operation[operation.id],
+                round_ticks=1,
+                spatial_node_count=spatial_nodes[operation.id],
+            )
+            for operation in ops
+        )
+        operation_window_plans = tuple(
+            self.scheme.plan_operation(
+                operation.id,
+                rounds_by_operation[operation.id],
+                commit_round_count=codes_by_operation[
+                    operation.id
+                ].commit_rounds(),
+                buffer_round_count=codes_by_operation[
+                    operation.id
+                ].buffer_rounds(),
+            )
+            for operation in ops
+        )
+        return _materialize_execution_plan(
+            tuple(ops),
+            resolved_operations,
+            operation_window_plans,
+        )
 
-    @staticmethod
-    def _materialize_windows(window_specs: dict) -> tuple:
-        windows: dict = {}
-        operation_windows: dict = {}
-        for operation_id, specs in window_specs.items():
-            for window_index, spec in enumerate(specs):
-                if len(spec) == 3:
-                    commit_lo, commit_hi, buffer_hi = spec
-                    buffer_lo = commit_lo
-                else:
-                    buffer_lo, commit_lo, commit_hi, buffer_hi = spec
-                windows[(operation_id, window_index)] = Window(
-                    op_id=operation_id, k=window_index, commit_lo=commit_lo,
-                    commit_hi=commit_hi, buffer_hi=buffer_hi,
-                    n_rounds=buffer_hi - buffer_lo + 1, buffer_lo=buffer_lo)
-                operation_windows.setdefault(operation_id, []).append(
-                    window_index)
-        return windows, operation_windows
 
-    def _wire_dependencies(self, operations: dict, windows: dict,
-                           window_count: dict) -> None:
-        wire = getattr(self.scheme, "wire_deps", None)
-        entry = getattr(self.scheme, "entry_windows", None)
-        exits = getattr(self.scheme, "exit_windows", None)
-        for operation_id, operation in operations.items():
-            op_windows = [windows[(operation_id, k)]
-                          for k in range(window_count[operation_id])]
-            if wire is not None:
-                wire(op_windows)
-            else:
-                for k in range(1, window_count[operation_id]):
-                    op_windows[k].deps.append((operation_id, k - 1))
-            entry_windows = entry(op_windows) if entry is not None \
-                else [op_windows[0]]
-            for entry_window in entry_windows:
-                for predecessor_id in operation.predecessors:
-                    predecessor_windows = [
-                        windows[(predecessor_id, k)]
-                        for k in range(window_count[predecessor_id])]
-                    exit_windows = exits(predecessor_windows) \
-                        if exits is not None else [predecessor_windows[-1]]
-                    for exit_window in exit_windows:
-                        entry_window.deps.append((predecessor_id, exit_window.k))
-        for window_key, window in windows.items():
-            window.deps_remaining = len(window.deps)
-            for dependency in window.deps:
-                windows[dependency].dependents.append(window_key)
+def _legacy_code_geometry(code):
+    """Temporary adapter removed when RunSpec becomes the sole resolver."""
+    from .message import ResolvedCodeGeometry
 
-    def _summary(self, operations: dict, rounds_by_operation: dict,
-                 window_count: dict) -> dict:
-        representative_code = self.layout.codes()[0]
-        first_operation_id = next(iter(operations), None)
-        return dict(
-            distance=representative_code.distance,
-            commit=representative_code.commit_rounds(),
-            buffer=representative_code.buffer_rounds(),
-            rounds_per_op=rounds_by_operation[first_operation_id]
-            if first_operation_id is not None else 0,
-            windows_per_op=window_count.get(first_operation_id, 0)
-            if first_operation_id is not None else 0)
+    lead, trail = code.buffering_floor()
+    return ResolvedCodeGeometry(
+        code_name=code.name,
+        distance=code.distance,
+        commit_round_count=code.commit_rounds(),
+        buffer_round_count=code.buffer_rounds(),
+        minimum_leading_buffer_round_count=lead,
+        minimum_trailing_buffer_round_count=trail,
+        one_patch_spatial_node_count=code.spatial_nodes(1),
+        buffer_floor_override_active=(
+            getattr(code, "buffer_rounds_override", None) is not None
+        ),
+    )
+
+
+def _materialize_execution_plan(
+    operations: tuple[Operation, ...],
+    resolved_operations: tuple[ResolvedOperationPlanning, ...],
+    operation_window_plans: tuple[OperationWindowPlan, ...],
+) -> WindowPlan:
+    """Materialize exactly the typed scheme ledgers and direct DAG edges."""
+    if not (
+        len(operations)
+        == len(resolved_operations)
+        == len(operation_window_plans)
+    ):
+        raise ValueError("operation planning inputs must have equal lengths")
+
+    windows = {}
+    op_windows = {}
+    window_count = {}
+    successors = {operation.id: [] for operation in operations}
+    spatial_nodes = {}
+    rounds_by_operation = {}
+    code_names = {}
+    windowed_by_operation = {}
+    batch_idle_by_operation = {}
+    plan_by_operation_id = {}
+
+    for operation, resolved, operation_plan in zip(
+        operations,
+        resolved_operations,
+        operation_window_plans,
+    ):
+        if (
+            operation.id != resolved.operation_id
+            or operation.id != operation_plan.operation_id
+        ):
+            raise ValueError("operation planning inputs must match by position")
+        operation_id = operation.id
+        if operation_id in plan_by_operation_id:
+            raise ValueError(f"duplicate operation id {operation_id}")
+        plan_by_operation_id[operation_id] = operation_plan
+        window_count[operation_id] = len(operation_plan.windows)
+        op_windows[operation_id] = list(range(len(operation_plan.windows)))
+        spatial_nodes[operation_id] = resolved.spatial_node_count
+        rounds_by_operation[operation_id] = resolved.round_count
+        code_names[operation_id] = resolved.code_geometry.code_name
+        windowed_by_operation[operation_id] = operation_plan.windowed
+        batch_idle_by_operation[operation_id] = (
+            operation_plan.batch_preceding_idle_rounds
+        )
+        for window_index, geometry in enumerate(operation_plan.windows):
+            windows[(operation_id, window_index)] = Window(
+                op_id=operation_id,
+                k=window_index,
+                commit_lo=geometry.commit_lo,
+                commit_hi=geometry.commit_hi,
+                buffer_hi=geometry.buffer_hi,
+                n_rounds=geometry.round_count,
+                buffer_lo=geometry.buffer_lo,
+            )
+        for source_index, destination_index in (
+            operation_plan.internal_dependencies
+        ):
+            windows[(operation_id, destination_index)].deps.append(
+                (operation_id, source_index)
+            )
+
+    for operation in operations:
+        destination_plan = plan_by_operation_id[operation.id]
+        for predecessor_id in operation.predecessors:
+            if predecessor_id not in plan_by_operation_id:
+                raise ValueError(
+                    f"operation {operation.id} has unknown predecessor "
+                    f"{predecessor_id}"
+                )
+            successors[predecessor_id].append(operation.id)
+            predecessor_plan = plan_by_operation_id[predecessor_id]
+            for source_index in predecessor_plan.exit_window_indices:
+                for destination_index in (
+                    destination_plan.entry_window_indices
+                ):
+                    windows[(operation.id, destination_index)].deps.append(
+                        (predecessor_id, source_index)
+                    )
+
+    for window_key, window in windows.items():
+        window.deps_remaining = len(window.deps)
+        for dependency in window.deps:
+            windows[dependency].dependents.append(window_key)
+
+    first_resolved = resolved_operations[0] if resolved_operations else None
+    summary = {
+        "distance": (
+            first_resolved.code_geometry.distance
+            if first_resolved is not None
+            else 0
+        ),
+        "commit": (
+            first_resolved.code_geometry.commit_round_count
+            if first_resolved is not None
+            else 0
+        ),
+        "buffer": (
+            first_resolved.code_geometry.buffer_round_count
+            if first_resolved is not None
+            else 0
+        ),
+        "rounds_per_op": (
+            first_resolved.round_count if first_resolved is not None else 0
+        ),
+        "windows_per_op": (
+            window_count[first_resolved.operation_id]
+            if first_resolved is not None
+            else 0
+        ),
+    }
+    return WindowPlan(
+        windows=windows,
+        window_count=window_count,
+        op_windows=op_windows,
+        successors=successors,
+        spatial_nodes=spatial_nodes,
+        rounds_by_operation=rounds_by_operation,
+        code_names=code_names,
+        total_windows=len(windows),
+        summary=summary,
+        windowed_by_operation=windowed_by_operation,
+        batch_preceding_idle_rounds_by_operation=batch_idle_by_operation,
+    )

@@ -10,9 +10,16 @@ from decsim.engine import Engine
 from decsim.layouts import UniformLayout
 from decsim.message import DecodeResult, Operation, RunSeedReservation
 from decsim.planner import FixedRounds, WindowPlanner
+from decsim.policies import Held, ExtendStream, SeparateDecodeJobs
 from decsim.run_spec import RunSpec, simulate
+from decsim.schedulers import (
+    EarliestDeadlineScheduler,
+    BufferExpiryDeadline,
+    ReactionPathDeadline,
+    WeightedUrgencyCostScheduler,
+)
 from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
-from decsim.switching import Switching
+from decsim.switching import Switching, ThresholdRegister
 
 
 class WrongBoundarySignature:
@@ -645,41 +652,34 @@ def test_all_operation_consuming_planning_ports_receive_frozen_views():
     assert scheme.data_complete_calls > 0
 
 
-def test_late_dynamic_stream_is_frozen_before_planning():
+def test_declared_dynamic_stream_is_frozen_before_planning():
     code = SurfaceCodeModel(3)
     layout = CircuitRejectingLayout(code)
     rounds = CircuitRejectingRounds(7)
+    caller_operation = Operation(
+        7,
+        "declared stream",
+        (0,),
+        circuit=object(),
+        feedback_boundary_mode=None,
+    )
     completed = RunSpec(
         ops=[],
+        dynamic_streams=[caller_operation],
         layout=layout,
         rounds_policy=rounds,
         decoder=StaticDecoder(),
         feedback_boundary_mode="measurement_closed",
     ).build()
-    caller_operation = Operation(
-        7,
-        "late stream",
-        (0,),
-        circuit=object(),
-        feedback_boundary_mode=None,
-    )
-    rounds_calls_before_registration = rounds.calls
+    operation_record = completed.manifest.to_json_value()["operations"][0]
 
-    completed.window_manager.register_dynamic_stream(
-        caller_operation,
-        code,
-    )
-
-    runtime_operation = completed.window_manager.ops[7]
-    planning_view = (
-        completed.window_manager._planning_view_by_operation_id[7]
-    )
-    assert runtime_operation is not caller_operation
-    assert runtime_operation.feedback_boundary_mode == "measurement_closed"
     assert caller_operation.feedback_boundary_mode is None
-    assert not hasattr(planning_view, "circuit")
-    assert planning_view.feedback_boundary_mode == "measurement_closed"
-    assert rounds.calls == rounds_calls_before_registration + 1
+    assert operation_record["feedback_boundary_mode"] is None
+    assert (
+        operation_record["effective_feedback_boundary_mode"]
+        == "measurement_closed"
+    )
+    assert operation_record["circuit"]["kind"] == "opaque_dormant"
 
 
 def test_run_uses_private_operation_copy_without_mutating_caller():
@@ -1246,6 +1246,149 @@ def test_component_graph_contains_every_resolved_singleton_root(
     assert "memory_model" not in singleton_fields
 
 
+def test_default_shipped_components_declare_their_effective_configuration():
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+    ).build()
+    components = completed.manifest.to_json_value()["components"]
+    opaque_paths = [
+        tuple(
+            (segment["kind"], segment["value"])
+            for segment in component["component_path"]
+        )
+        for component in components
+        if component["configuration_status"] == "opaque"
+    ]
+
+    assert opaque_paths == [
+        (
+            ("field", "decoder_router"),
+            ("field", "default"),
+        ),
+    ]
+    assert all(
+        component["configuration"] is not None
+        for component in components
+        if component["configuration_status"] == "declared"
+    )
+
+
+def test_nondefault_shipped_policies_declare_their_effective_configuration():
+    threshold_register = ThresholdRegister(
+        default=0.4,
+        per_code={"surface_d3": 0.35},
+    )
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        strategy=Switching(
+            confidence_threshold=0.45,
+            weak_keepup_ratio=0.4,
+            bulk_strong=True,
+            threshold_register=threshold_register,
+        ),
+        scheduler=EarliestDeadlineScheduler(),
+        deadline_policy=ReactionPathDeadline(slack_ticks=17),
+        boundary_policy=Held(),
+        idle_policy=ExtendStream(),
+    ).build()
+    components = {
+        tuple(
+            segment["value"]
+            for segment in component["component_path"]
+        ): component
+        for component in completed.manifest.to_json_value()["components"]
+    }
+
+    expected_configuration = {
+        ("strategy",): {
+            "kind": "switching",
+            "confidence_threshold": 0.45,
+            "run_both_at_once": False,
+            "weak_keepup_ratio": 0.4,
+            "bulk_strong": True,
+            "double_window": False,
+        },
+        ("strategy", "threshold_register"): {
+            "kind": "threshold_register",
+            "initial_default": 0.4,
+            "initial_per_code": {"surface_d3": 0.35},
+        },
+        ("scheduler",): {"kind": "earliest_deadline"},
+        ("deadline_policy",): {
+            "kind": "reaction_path",
+            "slack_ticks": 17,
+        },
+        ("boundary_policy",): {"kind": "held"},
+        ("idle_policy",): {"kind": "extend_stream"},
+    }
+    assert {
+        path: component["configuration"]
+        for path, component in components.items()
+        if path in expected_configuration
+    } == expected_configuration
+    assert all(
+        components[path]["configuration_status"] == "declared"
+        for path in expected_configuration
+    )
+
+
+def test_remaining_shipped_runtime_policies_have_closed_configuration():
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        scheduler=WeightedUrgencyCostScheduler(w_u=0.25, w_c=0.75),
+        deadline_policy=BufferExpiryDeadline(
+            capacity_rounds=40,
+            round_ticks=3,
+        ),
+        idle_policy=SeparateDecodeJobs(),
+    ).build()
+    components = {
+        tuple(
+            segment["value"]
+            for segment in component["component_path"]
+        ): component
+        for component in completed.manifest.to_json_value()["components"]
+    }
+
+    assert components[("scheduler",)]["configuration"] == {
+        "kind": "weighted_urgency_cost",
+        "urgency_weight": 0.25,
+        "cost_weight": 0.75,
+    }
+    assert components[("deadline_policy",)]["configuration"] == {
+        "kind": "buffer_expiry",
+        "capacity_rounds": 40,
+        "round_ticks": 3,
+    }
+    assert components[("idle_policy",)]["configuration"] == {
+        "kind": "separate_decode_jobs",
+    }
+    assert all(
+        components[path]["configuration_status"] == "declared"
+        for path in (
+            ("scheduler",),
+            ("deadline_policy",),
+            ("idle_policy",),
+        )
+    )
+
+
+def test_threshold_register_manifest_configuration_is_its_initial_state():
+    register = ThresholdRegister(
+        default=0.4,
+        per_code={"surface_d3": 0.35},
+    )
+    initial_configuration = register.run_manifest_config()
+
+    register.set("surface_d3", 0.8)
+    register.set("surface_d5", 0.6)
+
+    assert register.run_manifest_config() == initial_configuration
+
+
 def test_manifest_records_the_exact_fixed_composition_anchors():
     from decsim.payload_store import PayloadStore
 
@@ -1275,10 +1418,110 @@ def test_manifest_records_the_exact_fixed_composition_anchors():
     assert fixed_by_path[("fixed", "payload_store")]["implementation"] == (
         "decsim.payload_store.PayloadStore"
     )
+    assert fixed_by_path[("fixed", "engine")]["configuration"] == {
+        "kind": "engine",
+        "construction_guarded": True,
+        "log_sink": "none",
+    }
+    assert fixed_by_path[("fixed", "decoder_manager")][
+        "configuration"
+    ] == {
+        "kind": "decoder_manager",
+        "weak_strong_delay_ticks": (
+            completed.window_manager.links.ws.latency_ticks
+        ),
+        "log_name": "DecoderCluster",
+        "lane_policy": "none",
+    }
+    assert all(
+        record["configuration"] is not None
+        for record in manifest["fixed_composition"]
+    )
+    assert [
+        tuple(segment["value"] for segment in record["component_path"])
+        for record in manifest["contained_implementations"]
+    ] == [
+        ("fixed", "window_manager", "contained", "lifecycle"),
+        (
+            "fixed",
+            "window_manager",
+            "contained",
+            "speculative_recovery",
+        ),
+        ("controller", "contained", "links"),
+    ]
     assert isinstance(completed.window_manager.store, PayloadStore)
     assert completed.chip.source.cluster is completed.cluster
     assert completed.chip.frame is completed.orchestrator.frame
     assert completed.window_manager.links is completed.controller.links
+
+
+def test_manifest_has_the_complete_closed_effective_run_schema():
+    completed = RunSpec(
+        ops=[Operation(7, "memory", ("patch-a",))],
+        rounds_policy=FixedRounds(5),
+        decoder=StaticDecoder(),
+        seed=19,
+    ).build()
+    manifest = completed.manifest.to_json_value()
+
+    assert set(manifest) == {
+        "schema_version",
+        "root_seed",
+        "components",
+        "fixed_composition",
+        "contained_implementations",
+        "providers",
+        "code_selections",
+        "cadences",
+        "aliases",
+        "seed_bindings",
+        "operations",
+        "execution_plan",
+        "chip_load_plan",
+        "timing",
+        "links",
+        "resources",
+        "runtime_flags",
+        "software_context",
+        "assurance",
+        "primary_result_sha256",
+    }
+    assert manifest["root_seed"] == 19
+    assert [record["operation_id"] for record in manifest["operations"]] == [
+        {"kind": "integer", "value": "7", "items": None},
+    ]
+    assert manifest["operations"][0]["name"] == "memory"
+    assert manifest["operations"][0]["resolved_rounds"] == 5
+    assert manifest["execution_plan"]["planned_operation_ids"] == [
+        {"kind": "integer", "value": "7", "items": None},
+    ]
+    assert manifest["chip_load_plan"]["entries"][0][
+        "operation_id"
+    ] == {"kind": "integer", "value": "7", "items": None}
+    assert [record["name"] for record in manifest["links"]] == [
+        "qc",
+        "cd",
+        "dd",
+        "do",
+        "oc",
+        "cq",
+        "ws",
+    ]
+    assert manifest["runtime_flags"]["decoder_needs_hyperedges"] is False
+    assert manifest["assurance"]["executed_software_status"] == "unattested"
+
+
+def test_completed_diagnostic_handles_do_not_expose_executable_operations():
+    completed = RunSpec(
+        ops=[Operation(0, "memory", (0,))],
+        rounds_policy=FixedRounds(3),
+        decoder=StaticDecoder(),
+    ).build()
+
+    assert not hasattr(completed.chip, "ops")
+    assert not hasattr(completed.window_manager, "ops")
+    assert not hasattr(completed.cluster, "ops")
 
 
 def test_controller_port_requires_the_actual_retained_links():

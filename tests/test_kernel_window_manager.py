@@ -203,7 +203,7 @@ def test_default_boundary_revisions_replace_one_sources_contribution():
         ops=(0, 1),
     )
     source = rt.windows[(0, 0)]
-    operation = rt.ops[0]
+    operation = rt._ops[0]
 
     # The first scheduled message is stale before it arrives. Only the newer
     # revision releases the dependency and contributes a mask.

@@ -21,6 +21,9 @@ class SlidingWindowScheme:
     scheme_label = "sliding-window (serial commit/buffer chain)"
     windowed = True
 
+    def run_manifest_config(self):
+        return {"kind": "sliding"}
+
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple[int, int, int]]:
         """Lay out commit windows with a look-ahead buffer.
@@ -79,6 +82,9 @@ class NaiveOnlineScheme(SlidingWindowScheme):
     scheme_label = "naive online batch decode (no windowing)"
     windowed = False
 
+    def run_manifest_config(self):
+        return {"kind": "naive_online"}
+
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple[int, int, int]]:
         """One batch window: commit every round, look ahead none."""
@@ -89,6 +95,9 @@ class ParallelWindowScheme(SlidingWindowScheme):
     """Two-layer parallel windows with layer-B boundary dependencies."""
 
     scheme_label = "parallel A/B two-layer window (Skoric 2209.08552, Tan 2209.09219)"
+
+    def run_manifest_config(self):
+        return {"kind": "parallel"}
 
     def plan_windows(self, op_id: int, round_count: int,
                      code: CodeModel) -> list[tuple[int, int, int, int]]:

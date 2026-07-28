@@ -35,6 +35,13 @@ class ExecutionOrchestrator:
         self.controller = None
         self.decision_sink: Optional[Callable] = None
 
+    def run_manifest_config(self):
+        return {
+            "kind": "execution",
+            "history_size": self.history.maxlen,
+            "retain_all": self.retain_all,
+        }
+
     def run_seed_children(self):
         """Expose the retained frame that determines feedback behavior."""
         return (

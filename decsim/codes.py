@@ -29,6 +29,15 @@ class SurfaceCodeModel:
             if value is not None and value < 1:
                 raise ValueError(f"{label} must be a positive number of rounds; got {value}")
 
+    def run_manifest_config(self):
+        return {
+            "kind": "surface",
+            "distance": self.d,
+            "round_us": self.round_us,
+            "commit_rounds_override": self.commit_rounds_override,
+            "buffer_rounds_override": self.buffer_rounds_override,
+        }
+
     @property
     def name(self) -> str:
         """The code's human-readable name."""
@@ -89,6 +98,16 @@ class BBCodeModel:
     d: int = 12                      # code distance
     n_detectors: int = 936           # captured DEM detector count (see above)
     round_us: Optional[float] = None  # per-code round period; None = global cadence
+
+    def run_manifest_config(self):
+        return {
+            "kind": "bivariate_bicycle",
+            "n": self.n,
+            "k": self.k,
+            "distance": self.d,
+            "n_detectors": self.n_detectors,
+            "round_us": self.round_us,
+        }
 
     @property
     def name(self) -> str:

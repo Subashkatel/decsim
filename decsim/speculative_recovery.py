@@ -139,7 +139,7 @@ class SpeculativeRecovery:
         descendants = record["descendants"]
         descendant_set = set(descendants)
         source_window = runtime.windows[key]
-        source_op = runtime.ops[key[0]]
+        source_op = runtime._ops[key[0]]
 
         if result is not None and result.logical_observables is not None:
             runtime._replace_contribution_prediction(
@@ -220,7 +220,7 @@ class SpeculativeRecovery:
         )
         self._newly_unblocked_ops.difference_update(ready)
         for op_id in ready:
-            op = self.runtime.ops.get(op_id)
+            op = self.runtime._ops.get(op_id)
             if op is None:
                 continue
             self.runtime.release_stream_segments_at_commit(

@@ -120,7 +120,7 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
                         },
                         max_idle_rounds=max_idle,
                         gates_start_on_round_boundaries=boundaries)
-    gate.load(ops)
+    gate._load(ops)
     return eng, gate, cluster, factory
 
 

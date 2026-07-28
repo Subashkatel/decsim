@@ -91,6 +91,9 @@ class FixedRounds:
     def __init__(self, round_count: int):
         self.round_count = _validated(int(round_count), "FixedRounds")
 
+    def run_manifest_config(self):
+        return {"kind": "fixed", "round_count": self.round_count}
+
     def rounds_for(self, op, code) -> int:
         return self.round_count
 
@@ -104,6 +107,20 @@ class PerOpRounds:
             for op_id, r in dict(rounds_by_op).items()}
         self.fallback = fallback if fallback is not None else CodeRounds()
 
+    def run_manifest_config(self):
+        return {
+            "kind": "per_operation",
+            "rounds": [
+                {
+                    "operation_id": operation_id,
+                    "round_count": round_count,
+                }
+                for operation_id, round_count in sorted(
+                    self.rounds_by_op.items()
+                )
+            ],
+        }
+
     def rounds_for(self, op, code) -> int:
         if op.id in self.rounds_by_op:
             return self.rounds_by_op[op.id]
@@ -115,6 +132,9 @@ class CodeRounds:
 
     def __init__(self, scale: float = 1.0):
         self.scale = scale
+
+    def run_manifest_config(self):
+        return {"kind": "code", "scale": self.scale}
 
     def rounds_for(self, op, code) -> int:
         base = code.rounds_per_op() if hasattr(code, "rounds_per_op") \
@@ -128,6 +148,9 @@ class GateRounds:
 
     def __init__(self, merge_steps: int = 2):
         self.merge_steps = _validated(int(merge_steps), "GateRounds.merge_steps")
+
+    def run_manifest_config(self):
+        return {"kind": "gate", "merge_steps": self.merge_steps}
 
     def rounds_for(self, op, code) -> int:
         d = code.distance
@@ -148,6 +171,12 @@ class TemporalRounds:
     def __init__(self, d_m: int, base=None):
         self.d_m = _validated(int(d_m), "TemporalRounds.d_m")
         self.base = base if base is not None else GateRounds()
+
+    def run_manifest_config(self):
+        return {
+            "kind": "temporal",
+            "temporal_distance": self.d_m,
+        }
 
     def rounds_for(self, op, code) -> int:
         kind = getattr(op, "kind", OpKind.GENERIC)
@@ -170,6 +199,9 @@ class WindowPlanner:
             self.rounds_policy = rounds
         else:
             self.rounds_policy = FixedRounds(int(rounds))
+
+    def run_manifest_config(self):
+        return {"kind": "window"}
 
     def plan(self, ops: list[Operation]) -> WindowPlan:
         """Compute windows, dependencies, and job sizes for these operations."""

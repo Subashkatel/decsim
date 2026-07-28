@@ -23,6 +23,9 @@ class SoftOutputDecoder:
         self.metric_cls = metric_cls
         self._metrics: dict = {}
 
+    def run_manifest_config(self):
+        return {"kind": "soft_output"}
+
     def run_seed_children(self):
         """Expose the base decoder and confidence metric constructor."""
         return (

@@ -16,11 +16,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import functools
 import hashlib
+import importlib.metadata
+import importlib.util
 import inspect
 import json
 import math
 from numbers import Integral
 from pathlib import Path
+import sys
 import types
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
@@ -38,7 +41,7 @@ from .message import (
     is_stable_string,
     same_stable_identity,
 )
-from .config import TimingConfig, us
+from .config import TICKS_PER_US, TimingConfig, us
 
 if TYPE_CHECKING:
     from .protocols import (
@@ -111,6 +114,8 @@ class _RunOwnedWorkload:
     static_decode_operations: tuple[Operation, ...]
     dynamic_stream_operations: tuple[Operation, ...]
     planning_view_by_operation_id: dict[int, OperationPlanningView]
+    declared_view_by_operation_id: dict[int, OperationPlanningView]
+    memberships_by_operation_id: dict[int, tuple[tuple[str, int], ...]]
     source_circuit_by_operation_id: dict[int, Any]
 
     def planning_views(self, operations) -> tuple[OperationPlanningView, ...]:
@@ -124,6 +129,7 @@ class _RunOwnedWorkload:
 class _ResolvedExecutionPlanSpec:
     """Validated immutable copy of the one planner result."""
 
+    planned_operation_ids: tuple[int, ...]
     windows: tuple[WindowInfo, ...]
     window_count: tuple[tuple[int, int], ...]
     op_windows: tuple[tuple[int, tuple[int, ...]], ...]
@@ -529,6 +535,104 @@ class FixedCompositionRecord:
 
 
 @dataclass(frozen=True)
+class ContainedImplementationRecord:
+    """One fixed implementation privately owned by a containing component."""
+
+    component_path: tuple[TypedPathSegmentRecord, ...]
+    owner_path: tuple[TypedPathSegmentRecord, ...]
+    field_path: tuple[TypedPathSegmentRecord, ...]
+    implementation: str
+    configuration: Any
+
+
+class _CanonicalJsonRecord:
+    """Immutable storage shared by the closed compound manifest records."""
+
+    canonical_json: bytes
+
+    def to_json_value(self) -> dict:
+        return json.loads(self.canonical_json)
+
+    @classmethod
+    def freeze(cls, value: dict):
+        if type(value) is not dict:
+            raise TypeError(f"{cls.__name__} requires an exact dict")
+        detached = _validated_json_value(value)
+        return cls(
+            json.dumps(
+                detached,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+
+
+@dataclass(frozen=True)
+class ResolvedOperationRecord(_CanonicalJsonRecord):
+    """One complete immutable effective workload operation."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ResolvedExecutionPlanRecord(_CanonicalJsonRecord):
+    """The complete immutable plan consumed by the window runtime."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ChipLoadPlanRecord(_CanonicalJsonRecord):
+    """The immutable operation order and stream-offset load disposition."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class EffectiveTimingRecord(_CanonicalJsonRecord):
+    """Resolved run-wide time quantities with their explicit units."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ResolvedLinkRecord(_CanonicalJsonRecord):
+    """One actual controller link and its effective transport behavior."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class EffectiveResourceRecord(_CanonicalJsonRecord):
+    """Resolved decoder pools and component paths that own run resources."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class EffectiveRuntimeFlags(_CanonicalJsonRecord):
+    """Behavior-bearing scalar flags installed on runtime owners."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class SoftwareContextRecord(_CanonicalJsonRecord):
+    """Descriptive source-tree and dependency context for the completed run."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class AssuranceStatusRecord(_CanonicalJsonRecord):
+    """Independent, deliberately conservative provenance assurances."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
 class ProviderRecord:
     """Descriptive provenance and assurance for one direct provider."""
 
@@ -568,11 +672,21 @@ class ResolvedRunManifest:
     root_seed: Optional[int]
     components: tuple[ResolvedComponent, ...]
     fixed_composition: tuple[FixedCompositionRecord, ...]
+    contained_implementations: tuple[ContainedImplementationRecord, ...]
     providers: tuple[ProviderRecord, ...]
     code_selections: tuple[ResolvedCodeSelectionRecord, ...]
     cadences: tuple[ResolvedCadenceRecord, ...]
     aliases: tuple[ResolvedAlias, ...]
     seed_bindings: tuple[ResolvedSeedBinding, ...]
+    operations: tuple[ResolvedOperationRecord, ...]
+    execution_plan: ResolvedExecutionPlanRecord
+    chip_load_plan: ChipLoadPlanRecord
+    timing: EffectiveTimingRecord
+    links: tuple[ResolvedLinkRecord, ...]
+    resources: EffectiveResourceRecord
+    runtime_flags: EffectiveRuntimeFlags
+    software_context: SoftwareContextRecord
+    assurance: AssuranceStatusRecord
     primary_result_sha256: str
 
     def to_json_value(self) -> dict:
@@ -613,6 +727,18 @@ class ResolvedRunManifest:
                     "configuration": component.configuration,
                 }
                 for component in self.fixed_composition
+            ],
+            "contained_implementations": [
+                {
+                    "component_path": _typed_path_json(
+                        component.component_path
+                    ),
+                    "owner_path": _typed_path_json(component.owner_path),
+                    "field_path": _typed_path_json(component.field_path),
+                    "implementation": component.implementation,
+                    "configuration": component.configuration,
+                }
+                for component in self.contained_implementations
             ],
             "providers": [
                 {
@@ -671,6 +797,21 @@ class ResolvedRunManifest:
                 }
                 for binding in self.seed_bindings
             ],
+            "operations": [
+                operation.to_json_value()
+                for operation in self.operations
+            ],
+            "execution_plan": self.execution_plan.to_json_value(),
+            "chip_load_plan": self.chip_load_plan.to_json_value(),
+            "timing": self.timing.to_json_value(),
+            "links": [
+                link.to_json_value()
+                for link in self.links
+            ],
+            "resources": self.resources.to_json_value(),
+            "runtime_flags": self.runtime_flags.to_json_value(),
+            "software_context": self.software_context.to_json_value(),
+            "assurance": self.assurance.to_json_value(),
             "primary_result_sha256": self.primary_result_sha256,
         }
 
@@ -1306,6 +1447,22 @@ class RunSpec:
         execution_plan_summary = json.loads(
             execution_plan_spec.summary_json
         )
+        resolved_rounds_by_operation_id = dict(
+            execution_plan_spec.rounds_by_operation
+        )
+        for planning_view in planning_operations:
+            if planning_view.id in resolved_rounds_by_operation_id:
+                continue
+            round_count = planning.rounds_policy.rounds_for(
+                planning_view,
+                planning.code,
+            )
+            if type(round_count) is not int or round_count < 1:
+                raise TypeError(
+                    f"resolved rounds for operation {planning_view.id} "
+                    "must be a positive exact int"
+                )
+            resolved_rounds_by_operation_id[planning_view.id] = round_count
         check_window_size = getattr(strategy, "check_window_size", None)
         if check_window_size is not None:
             check_window_size(
@@ -1514,6 +1671,10 @@ class RunSpec:
         fixed_composition = _resolved_fixed_composition(
             fixed_composition_anchors
         )
+        contained_implementations = _resolved_contained_implementations(
+            window_manager,
+            controller,
+        )
         resolved_aliases = tuple(
             ResolvedAlias(
                 alias_path=_typed_path_records(alias.alias_path),
@@ -1540,7 +1701,7 @@ class RunSpec:
                 window_manager.register_dynamic_stream(stream, planning.code)
             for metric in metrics:
                 engine.add_metric(metric)
-            gate.load(ops)
+            gate._load(ops)
             engine._start_running()
             engine.run()
             pool.check_decode_work_settled()
@@ -1553,16 +1714,97 @@ class RunSpec:
                 metrics=metrics,
             )
             _validate_shipped_component_configuration(component_graph)
+            operation_records = _resolved_operation_records(
+                workload,
+                device=device,
+                resolved_rounds_by_operation_id=(
+                    resolved_rounds_by_operation_id
+                ),
+            )
+            execution_plan_record = _resolved_execution_plan_record(
+                execution_plan_spec,
+                resource_claims_by_operation_id=(
+                    resource_claims_by_operation_id
+                ),
+                dynamic_streams=dynamic_streams,
+                resolved_rounds_by_operation_id=(
+                    resolved_rounds_by_operation_id
+                ),
+                code=planning.code,
+                commit_origin=(
+                    "plan_summary"
+                    if "commit" in execution_plan_summary
+                    else "resolved_code_fallback"
+                ),
+                buffer_origin=(
+                    "plan_summary"
+                    if "buffer" in execution_plan_summary
+                    else "resolved_code_fallback"
+                ),
+            )
+            chip_load_plan_record = _chip_load_plan_record(
+                workload,
+                resolved_rounds_by_operation_id=(
+                    resolved_rounds_by_operation_id
+                ),
+                resource_claims_by_operation_id=(
+                    resource_claims_by_operation_id
+                ),
+            )
+            timing_record = _effective_timing_record(
+                self,
+                controller=controller,
+                code_cadence_plan=code_cadence_plan,
+            )
+            link_records = _resolved_link_records(
+                links,
+                value_origin=(
+                    "timing"
+                    if self.make_controller is None
+                    else "controller"
+                ),
+            )
+            resource_record = _effective_resource_record(
+                pool,
+                memory_model_present=self.memory_model is not None,
+            )
+            runtime_flags = _effective_runtime_flags(
+                engine=engine,
+                window_manager=window_manager,
+                pool=pool,
+                chip=gate,
+            )
+            software_context, source_tree_status = (
+                _software_context_record(resolved_components)
+            )
+            assurance = _assurance_status_record(
+                root_seed=self._validated_root_seed(),
+                resolved_components=resolved_components,
+                seed_bindings=seed_bindings,
+                source_tree_status=source_tree_status,
+                workload=workload,
+                device=device,
+            )
             manifest = ResolvedRunManifest(
                 schema_version=1,
                 root_seed=self._validated_root_seed(),
                 components=resolved_components,
                 fixed_composition=fixed_composition,
+                contained_implementations=contained_implementations,
                 providers=provider_records,
                 code_selections=code_cadence_plan.code_selections,
                 cadences=code_cadence_plan.cadences,
                 aliases=resolved_aliases,
                 seed_bindings=seed_bindings,
+                operations=operation_records,
+                execution_plan=execution_plan_record,
+                chip_load_plan=chip_load_plan_record,
+                timing=timing_record,
+                links=link_records,
+                resources=resource_record,
+                runtime_flags=runtime_flags,
+                software_context=software_context,
+                assurance=assurance,
                 primary_result_sha256=hashlib.sha256(
                     result.canonical_json_bytes(),
                 ).hexdigest(),
@@ -1907,6 +2149,25 @@ def _snapshot_run_workload(
     """Copy caller-owned workload state into one private run-owned snapshot."""
     clone_by_source_identity = {}
     source_circuit_by_operation_id = {}
+    declared_view_by_operation_id = {}
+    memberships_by_operation_id = {}
+    for role, operations in (
+        ("executable", executable_operations),
+        ("static_decode", static_decode_operations),
+        ("dynamic_stream", dynamic_stream_operations),
+    ):
+        for collection_index, operation in enumerate(operations):
+            memberships_by_operation_id.setdefault(
+                operation.id,
+                [],
+            ).append((role, collection_index))
+            declared_view_by_operation_id.setdefault(
+                operation.id,
+                OperationPlanningView.from_operation(
+                    operation,
+                    default_feedback_boundary_mode=None,
+                ),
+            )
 
     def clone(operation: Operation) -> Operation:
         source_identity = id(operation)
@@ -1969,6 +2230,11 @@ def _snapshot_run_workload(
         static_decode_operations=static_decode,
         dynamic_stream_operations=dynamic_streams,
         planning_view_by_operation_id=planning_views,
+        declared_view_by_operation_id=declared_view_by_operation_id,
+        memberships_by_operation_id={
+            operation_id: tuple(memberships)
+            for operation_id, memberships in memberships_by_operation_id.items()
+        },
         source_circuit_by_operation_id=source_circuit_by_operation_id,
     )
 
@@ -2179,6 +2445,7 @@ def _freeze_execution_plan(
         allow_nan=False,
     ).encode("utf-8")
     return _ResolvedExecutionPlanSpec(
+        planned_operation_ids=operation_ids,
         windows=tuple(frozen_windows),
         window_count=tuple(window_count),
         op_windows=tuple(op_windows),
@@ -2340,11 +2607,29 @@ def _fixed_composition_anchors(**components):
 def _resolved_fixed_composition(
     anchors,
 ) -> tuple[FixedCompositionRecord, ...]:
+    configurations = {
+        "engine": {
+            "kind": "engine",
+            "construction_guarded": True,
+            "log_sink": "none",
+        },
+        "payload_store": {"kind": "payload_store"},
+        "window_manager": {"kind": "window_manager"},
+        "decoder_manager": None,
+        "strategy_services": {"kind": "strategy_services"},
+        "cluster": {"kind": "cluster"},
+        "clocked_device": {"kind": "clocked_device"},
+        "chip": {"kind": "chip"},
+    }
     records = [
         FixedCompositionRecord(
             component_path=_typed_path_records(component_path),
             implementation=_implementation_name(component),
-            configuration=None,
+            configuration=_fixed_composition_configuration(
+                component_path[-1].value,
+                component,
+                configurations,
+            ),
         )
         for component_path, component in anchors
     ]
@@ -2355,6 +2640,795 @@ def _resolved_fixed_composition(
         )
     )
     return tuple(records)
+
+
+def _fixed_composition_configuration(name, component, configurations):
+    if name == "decoder_manager":
+        if component.lane_policy is not None:
+            raise ValueError(
+                "RunSpec DecoderManager lane_policy must be None"
+            )
+        return {
+            "kind": "decoder_manager",
+            "weak_strong_delay_ticks": component.ws_delay_ticks,
+            "log_name": component.log_name,
+            "lane_policy": "none",
+        }
+    try:
+        configuration = configurations[name]
+    except KeyError as error:
+        raise ValueError(
+            f"unknown fixed composition anchor {name!r}"
+        ) from error
+    return _validated_json_value(configuration)
+
+
+def _resolved_contained_implementations(
+    window_manager,
+    controller,
+) -> tuple[ContainedImplementationRecord, ...]:
+    field = lambda value: TypedPathSegmentRecord("field", value)
+    records = [
+        ContainedImplementationRecord(
+            component_path=(
+                field("fixed"),
+                field("window_manager"),
+                field("contained"),
+                field("lifecycle"),
+            ),
+            owner_path=(field("fixed"), field("window_manager")),
+            field_path=(field("lifecycle"),),
+            implementation=_implementation_name(window_manager.lifecycle),
+            configuration={"kind": "dynamic_windows"},
+        ),
+        ContainedImplementationRecord(
+            component_path=(
+                field("fixed"),
+                field("window_manager"),
+                field("contained"),
+                field("speculative_recovery"),
+            ),
+            owner_path=(field("fixed"), field("window_manager")),
+            field_path=(field("speculative_recovery"),),
+            implementation=_implementation_name(
+                window_manager.speculative_recovery
+            ),
+            configuration={"kind": "speculative_recovery"},
+        ),
+    ]
+    from .controllers import ModularController
+    if type(controller) is ModularController:
+        records.append(
+            ContainedImplementationRecord(
+                component_path=(
+                    field("controller"),
+                    field("contained"),
+                    field("links"),
+                ),
+                owner_path=(field("controller"),),
+                field_path=(field("links"),),
+                implementation=_implementation_name(controller.links),
+                configuration={"kind": "link_model"},
+            )
+        )
+    records.sort(
+        key=lambda record: b"".join(
+            _public_path_segment_bytes(segment)
+            for segment in record.component_path
+        )
+    )
+    return tuple(records)
+
+
+def _identity_json(identity) -> dict:
+    return StableIdentityRecord.from_identity(identity).to_json_value()
+
+
+def _optional_identity_json(identity):
+    return None if identity is None else _identity_json(identity)
+
+
+def _circuit_provenance_json(circuit, circuit_scope: str) -> dict:
+    if circuit is None:
+        return {
+            "kind": "none",
+            "format": None,
+            "canonical_text_sha256": None,
+            "stim_version": None,
+        }
+    try:
+        import stim
+    except ImportError:
+        stim = None
+    if stim is not None and type(circuit) is stim.Circuit:
+        canonical_text = str(circuit).encode("utf-8")
+        return {
+            "kind": "stim_circuit_text",
+            "format": "stim_circuit_text",
+            "canonical_text_sha256": hashlib.sha256(
+                canonical_text
+            ).hexdigest(),
+            "stim_version": stim.__version__,
+        }
+    if circuit_scope != "none":
+        raise TypeError(
+            "an active operation circuit must be an exact stim.Circuit"
+        )
+    return {
+        "kind": "opaque_dormant",
+        "format": None,
+        "canonical_text_sha256": None,
+        "stim_version": None,
+    }
+
+
+def _intrinsic_measurement_json(measurement):
+    if measurement is None:
+        return None
+    return {
+        "operation_id": _identity_json(measurement.operation_id),
+        "trajectory_id": _identity_json(measurement.trajectory_id),
+        "value": measurement.value,
+        "source": measurement.source,
+    }
+
+
+def _resolved_operation_records(
+    workload: _RunOwnedWorkload,
+    *,
+    device,
+    resolved_rounds_by_operation_id,
+) -> tuple[ResolvedOperationRecord, ...]:
+    private_by_id = {}
+    for operation in (
+        workload.executable_operations
+        + workload.static_decode_operations
+        + workload.dynamic_stream_operations
+    ):
+        private_by_id.setdefault(operation.id, operation)
+
+    records = []
+    for operation_id in sorted(private_by_id):
+        operation = private_by_id[operation_id]
+        declared = workload.declared_view_by_operation_id[operation_id]
+        initial_offset = declared.stream_offset
+        final_offset = operation.stream_offset
+        if declared.stream_id is None:
+            offset_resolution = "not_applicable"
+            initial_offset = None
+            final_offset = None
+        elif initial_offset is not None:
+            offset_resolution = "declared"
+        elif final_offset is not None:
+            offset_resolution = "runtime_reserved"
+        else:
+            offset_resolution = "resolved_at_load"
+
+        try:
+            resolved_rounds = resolved_rounds_by_operation_id[operation_id]
+        except KeyError as error:
+            raise ValueError(
+                f"operation {operation_id} has no resolved round count"
+            ) from error
+        record = {
+            "operation_id": _identity_json(operation_id),
+            "name": declared.name,
+            "qubits": [
+                _identity_json(identity)
+                for identity in declared.qubits
+            ],
+            "clifford": declared.clifford,
+            "circuit": _circuit_provenance_json(
+                workload.source_circuit_by_operation_id[operation_id],
+                device.operation_circuit_scope,
+            ),
+            "consumes_magic_state": declared.consumes_magic_state,
+            "patches": [
+                _identity_json(identity)
+                for identity in declared.patches
+            ],
+            "predecessors": [
+                _identity_json(identity)
+                for identity in declared.predecessors
+            ],
+            "has_successor": declared.has_successor,
+            "stream_id": _optional_identity_json(declared.stream_id),
+            "stream_offset": declared.stream_offset,
+            "blocked_by": _optional_identity_json(declared.blocked_by),
+            "feedback_boundary_mode": declared.feedback_boundary_mode,
+            "requires_result_return_to_chip": (
+                declared.requires_result_return_to_chip
+            ),
+            "requires_strong_commit": declared.requires_strong_commit,
+            "byproduct_pauli": declared.byproduct_pauli,
+            "measurement_basis": declared.measurement_basis,
+            "logical_observable_index": (
+                declared.logical_observable_index
+            ),
+            "intrinsic_measurement": _intrinsic_measurement_json(
+                declared.intrinsic_measurement
+            ),
+            "kind": declared.kind.name,
+            "memberships": [
+                {
+                    "role": role,
+                    "collection_index": collection_index,
+                }
+                for role, collection_index in (
+                    workload.memberships_by_operation_id[operation_id]
+                )
+            ],
+            "effective_needs_magic_state": operation.needs_magic_state,
+            "effective_feedback_boundary_mode": (
+                operation.feedback_boundary_mode
+            ),
+            "resolved_rounds": resolved_rounds,
+            "stream_offset_resolution": offset_resolution,
+            "initial_resolved_stream_offset": initial_offset,
+            "final_resolved_stream_offset": final_offset,
+        }
+        records.append(ResolvedOperationRecord.freeze(record))
+    return tuple(records)
+
+
+def _window_key_json(key) -> dict:
+    return {
+        "operation_id": _identity_json(key[0]),
+        "window_index": key[1],
+    }
+
+
+def _resource_claim_json(claim) -> dict:
+    identities = [
+        (StableIdentityRecord.from_identity(identity), identity)
+        for identity in claim.ids
+    ]
+    identities.sort(key=lambda item: item[0].canonical_bytes())
+    return {
+        "kind": claim.kind,
+        "ids": [
+            record.to_json_value()
+            for record, _identity in identities
+        ],
+    }
+
+
+def _resolved_execution_plan_record(
+    spec: _ResolvedExecutionPlanSpec,
+    *,
+    resource_claims_by_operation_id,
+    dynamic_streams,
+    resolved_rounds_by_operation_id,
+    code,
+    commit_origin,
+    buffer_origin,
+) -> ResolvedExecutionPlanRecord:
+    window_counts = dict(spec.window_count)
+    operation_windows = dict(spec.op_windows)
+    successors = dict(spec.successors)
+    spatial_nodes = dict(spec.spatial_nodes)
+    rounds = dict(spec.rounds_by_operation)
+    record = {
+        "planned_operation_ids": [
+            _identity_json(operation_id)
+            for operation_id in spec.planned_operation_ids
+        ],
+        "rounds_by_operation": [
+            {
+                "operation_id": _identity_json(operation_id),
+                "resolved_rounds": round_count,
+            }
+            for operation_id, round_count in sorted(rounds.items())
+        ],
+        "windows": [
+            {
+                "key": _window_key_json(window.key),
+                "buffer_lo": window.start_round,
+                "commit_lo": window.commit_lo,
+                "commit_hi": window.commit_hi,
+                "buffer_hi": window.buffer_hi,
+                "n_rounds": window.n_rounds,
+                "dependencies": [
+                    _window_key_json(key)
+                    for key in sorted(window.deps)
+                ],
+                "dependents": [
+                    _window_key_json(key)
+                    for key in sorted(window.dependents)
+                ],
+            }
+            for window in spec.windows
+        ],
+        "window_counts": [
+            {
+                "operation_id": _identity_json(operation_id),
+                "count": count,
+            }
+            for operation_id, count in sorted(window_counts.items())
+        ],
+        "operation_windows": [
+            {
+                "operation_id": _identity_json(operation_id),
+                "window_indexes": list(window_indexes),
+            }
+            for operation_id, window_indexes in sorted(
+                operation_windows.items()
+            )
+        ],
+        "successors": [
+            {
+                "operation_id": _identity_json(operation_id),
+                "successor_ids": [
+                    _identity_json(successor_id)
+                    for successor_id in sorted(successor_ids)
+                ],
+            }
+            for operation_id, successor_ids in sorted(successors.items())
+        ],
+        "spatial_nodes": [
+            {
+                "operation_id": _identity_json(operation_id),
+                "spatial_node_count": count,
+            }
+            for operation_id, count in sorted(spatial_nodes.items())
+        ],
+        "resource_claims": [
+            {
+                "operation_id": _identity_json(operation_id),
+                "claims": [
+                    _resource_claim_json(claim)
+                    for claim in resource_claims_by_operation_id[operation_id]
+                ],
+            }
+            for operation_id in sorted(resource_claims_by_operation_id)
+        ],
+        "total_windows": spec.total_windows,
+        "switching_window_validation": {
+            "commit_rounds": code.commit_rounds(),
+            "commit_origin": commit_origin,
+            "buffer_rounds": code.buffer_rounds(),
+            "buffer_origin": buffer_origin,
+        },
+        "dynamic_streams": [
+            {
+                "operation_id": _identity_json(operation.id),
+                "stream_id": _identity_json(operation.id),
+                "initial_offset": operation.stream_offset,
+                "declared_rounds": (
+                    resolved_rounds_by_operation_id[operation.id]
+                ),
+                "registration_index": index,
+                "feedback_boundary_mode": (
+                    operation.feedback_boundary_mode
+                ),
+                "planner_path": [
+                    {"kind": "field", "value": "planner"},
+                ],
+                "rounds_policy_path": [
+                    {"kind": "field", "value": "rounds_policy"},
+                ],
+            }
+            for index, operation in enumerate(dynamic_streams)
+        ],
+    }
+    return ResolvedExecutionPlanRecord.freeze(record)
+
+
+def _chip_load_plan_record(
+    workload: _RunOwnedWorkload,
+    *,
+    resolved_rounds_by_operation_id,
+    resource_claims_by_operation_id,
+) -> ChipLoadPlanRecord:
+    entries = []
+    shot_owner_by_key = {}
+    for operation in workload.executable_operations:
+        declared = workload.declared_view_by_operation_id[operation.id]
+        if declared.stream_id is None:
+            offset_resolution = "not_applicable"
+            initial_offset = None
+            final_offset = None
+        elif declared.stream_offset is not None:
+            offset_resolution = "declared"
+            initial_offset = declared.stream_offset
+            final_offset = operation.stream_offset
+        else:
+            offset_resolution = "runtime_reserved"
+            initial_offset = None
+            final_offset = operation.stream_offset
+        entries.append({
+            "operation_id": _identity_json(operation.id),
+            "resolved_rounds": (
+                resolved_rounds_by_operation_id[operation.id]
+            ),
+            "resource_claims": [
+                _resource_claim_json(claim)
+                for claim in resource_claims_by_operation_id[operation.id]
+            ],
+            "stream_offset_resolution": offset_resolution,
+            "initial_resolved_stream_offset": initial_offset,
+            "final_resolved_stream_offset": final_offset,
+        })
+        shot_key = (
+            operation.stream_id
+            if operation.stream_id is not None
+            else operation.id
+        )
+        shot_owner_by_key.setdefault(shot_key, operation.id)
+    shot_owners = [
+        (
+            StableIdentityRecord.from_identity(shot_key),
+            owner_operation_id,
+        )
+        for shot_key, owner_operation_id in shot_owner_by_key.items()
+    ]
+    shot_owners.sort(key=lambda item: item[0].canonical_bytes())
+    return ChipLoadPlanRecord.freeze({
+        "entries": entries,
+        "shot_owners": [
+            {
+                "shot_key": shot_key.to_json_value(),
+                "owner_operation_id": _identity_json(owner_operation_id),
+            }
+            for shot_key, owner_operation_id in shot_owners
+        ],
+    })
+
+
+def _effective_timing_record(
+    spec: RunSpec,
+    *,
+    controller,
+    code_cadence_plan,
+) -> EffectiveTimingRecord:
+    fallback_round_us = (
+        spec.round_us
+        if spec.round_us is not None
+        else spec.timing.round_us
+    )
+    fallback_origin = (
+        "run_spec"
+        if spec.round_us is not None
+        else "timing"
+    )
+    t_pack_ticks = getattr(
+        controller,
+        "t_pack",
+        spec.timing.ticks("t_pack"),
+    )
+    if type(t_pack_ticks) is not int or t_pack_ticks < 0:
+        raise TypeError(
+            "resolved controller t_pack must be a nonnegative exact int"
+        )
+    return EffectiveTimingRecord.freeze({
+        "ticks_per_us": TICKS_PER_US,
+        "round_ticks": us(fallback_round_us),
+        "round_us": float(fallback_round_us),
+        "round_origin": fallback_origin,
+        "t_pack_ticks": t_pack_ticks,
+        "t_pack_us": t_pack_ticks / TICKS_PER_US,
+    })
+
+
+def _resolved_link_records(
+    links,
+    *,
+    value_origin: str,
+) -> tuple[ResolvedLinkRecord, ...]:
+    records = []
+    for name in ("qc", "cd", "dd", "do", "oc", "cq", "ws"):
+        link = getattr(links, name)
+        records.append(ResolvedLinkRecord.freeze({
+            "name": name,
+            "latency_ticks": link.latency_ticks,
+            "latency_us": link.latency_ticks / TICKS_PER_US,
+            "bandwidth_bits_per_us": link.bandwidth_bits_per_us,
+            "serialize": link.serialize,
+            "value_origin": value_origin,
+        }))
+    return tuple(records)
+
+
+def _component_path_json(*parts: str) -> list[dict]:
+    return [
+        {"kind": "field", "value": part}
+        for part in parts
+    ]
+
+
+def _effective_resource_record(
+    pool,
+    *,
+    memory_model_present: bool,
+) -> EffectiveResourceRecord:
+    return EffectiveResourceRecord.freeze({
+        "code_path": _component_path_json("code"),
+        "unit_pools": [
+            {"name": name, "units": units}
+            for name, units in sorted(pool.unit_totals.items())
+        ],
+        "memory_model_path": (
+            _component_path_json("memory_model")
+            if memory_model_present
+            else None
+        ),
+        "device_path": _component_path_json("device"),
+        "controller_path": _component_path_json("controller"),
+        "orchestrator_path": _component_path_json("orchestrator"),
+        "factory_path": _component_path_json("magic_state_factory"),
+    })
+
+
+def _effective_runtime_flags(
+    *,
+    engine,
+    window_manager,
+    pool,
+    chip,
+) -> EffectiveRuntimeFlags:
+    return EffectiveRuntimeFlags.freeze({
+        "feedback_boundary_mode": (
+            window_manager.feedback_boundary_mode
+        ),
+        "gates_start_on_round_boundaries": (
+            chip.gates_start_on_round_boundaries
+        ),
+        "max_idle_rounds": chip.max_idle_rounds,
+        "decoder_bulk_strong": pool.bulk_strong,
+        "decoder_needs_hyperedges": window_manager.needs_hyperedges,
+        "switching_active": window_manager.switching_active,
+        "verbose": engine.verbose,
+    })
+
+
+def _origin_record(module_name: str, origin) -> dict:
+    if origin is None:
+        return {
+            "module_name": module_name,
+            "origin_kind": "unknown",
+            "origin": None,
+        }
+    if origin == "built-in":
+        kind = "built_in"
+    elif origin == "frozen":
+        kind = "frozen"
+    elif type(origin) is str:
+        suffix = Path(origin).suffix.lower()
+        if suffix in (".so", ".pyd", ".dll", ".dylib"):
+            kind = "native_extension"
+        elif suffix in (".py", ".pyw"):
+            kind = "python_file"
+        elif suffix:
+            kind = "loader"
+        else:
+            kind = "unknown"
+    else:
+        kind = "unknown"
+        origin = None
+    return {
+        "module_name": module_name,
+        "origin_kind": kind,
+        "origin": origin,
+    }
+
+
+def _source_tree_snapshot():
+    package_root = Path(__file__).resolve().parent
+    digest = hashlib.sha256(b"decsim.code-identity.v1")
+    included_paths = set()
+    complete = True
+    try:
+        candidates = sorted(
+            package_root.rglob("*"),
+            key=lambda path: path.relative_to(package_root).as_posix(),
+        )
+    except OSError:
+        return None, set(), False
+    for path in candidates:
+        relative = path.relative_to(package_root)
+        if "__pycache__" in relative.parts or path.suffix == ".pyc":
+            continue
+        try:
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(package_root)
+        except (OSError, ValueError):
+            complete = False
+            continue
+        if not resolved.is_file():
+            continue
+        try:
+            content = resolved.read_bytes()
+        except OSError:
+            complete = False
+            continue
+        relative_text = relative.as_posix()
+        encoded_path = relative_text.encode("utf-8")
+        digest.update(b"P")
+        digest.update(len(encoded_path).to_bytes(4, "big"))
+        digest.update(encoded_path)
+        digest.update(b"B")
+        digest.update(len(content).to_bytes(8, "big"))
+        digest.update(content)
+        included_paths.add(resolved)
+    return digest.hexdigest(), included_paths, complete
+
+
+def _loaded_decsim_module_records(package_root, included_paths):
+    records = []
+    complete = True
+    for module_name in sorted(
+        name
+        for name in sys.modules
+        if name == "decsim" or name.startswith("decsim.")
+    ):
+        module = sys.modules[module_name]
+        module_spec = getattr(module, "__spec__", None)
+        origin = (
+            None
+            if module_spec is None
+            else getattr(module_spec, "origin", None)
+        )
+        record = _origin_record(module_name, origin)
+        records.append(record)
+        if type(origin) is not str or origin in ("built-in", "frozen"):
+            complete = False
+            continue
+        try:
+            resolved = Path(origin).resolve(strict=True)
+            resolved.relative_to(package_root)
+        except (OSError, ValueError):
+            complete = False
+            continue
+        if resolved.suffix == ".pyc":
+            source_candidate = Path(importlib.util.source_from_cache(str(resolved)))
+            if source_candidate in included_paths:
+                record["origin_kind"] = "python_file"
+                record["origin"] = str(source_candidate)
+                continue
+        if resolved not in included_paths:
+            complete = False
+    return records, complete
+
+
+def _distribution_details(module_name):
+    distribution_name = {
+        "stim": "stim",
+        "numpy": "numpy",
+        "pymatching": "pymatching",
+        "ldpc": "ldpc",
+        "scipy": "scipy",
+    }.get(module_name)
+    if distribution_name is None:
+        return None, None
+    try:
+        version = importlib.metadata.version(distribution_name)
+    except importlib.metadata.PackageNotFoundError:
+        version = None
+    return distribution_name, version
+
+
+def _external_dependency_record(module_name):
+    module_spec = importlib.util.find_spec(module_name)
+    if module_spec is None:
+        origin = None
+        availability = "unavailable"
+    else:
+        origin = module_spec.origin
+        availability = "available"
+    distribution_name, distribution_version = _distribution_details(
+        module_name
+    )
+    origin_fields = _origin_record(module_name, origin)
+    return {
+        "module_name": module_name,
+        "distribution_name": distribution_name,
+        "distribution_version": distribution_version,
+        "availability": availability,
+        "origin_kind": origin_fields["origin_kind"],
+        "origin": origin_fields["origin"],
+    }
+
+
+def _selected_external_modules(resolved_components) -> tuple[str, ...]:
+    implementation_text = "\n".join(
+        component.implementation
+        for component in resolved_components
+    ).lower()
+    selected = set()
+    if "stim" in implementation_text:
+        selected.update(("stim", "numpy"))
+    if "pymatching" in implementation_text or "mwpm" in implementation_text:
+        selected.update(("pymatching", "numpy"))
+    if "bposd" in implementation_text or "belief" in implementation_text:
+        selected.update(("ldpc", "numpy", "scipy"))
+    return tuple(sorted(selected))
+
+
+def _software_context_record(
+    resolved_components,
+) -> tuple[SoftwareContextRecord, str]:
+    package_root = Path(__file__).resolve().parent
+    tree_digest, included_paths, tree_complete = _source_tree_snapshot()
+    loaded_modules, loaded_complete = _loaded_decsim_module_records(
+        package_root,
+        included_paths,
+    )
+    try:
+        distribution_version = importlib.metadata.version("decsim")
+    except importlib.metadata.PackageNotFoundError:
+        distribution_version = None
+    external_dependencies = [
+        _external_dependency_record(module_name)
+        for module_name in _selected_external_modules(resolved_components)
+    ]
+    status = (
+        "declared"
+        if tree_complete and loaded_complete and tree_digest is not None
+        else "partial"
+    )
+    return SoftwareContextRecord.freeze({
+        "decsim_distribution_version": distribution_version,
+        "decsim_source_tree_sha256": tree_digest,
+        "python_version": sys.version,
+        "loaded_decsim_modules": loaded_modules,
+        "external_dependencies": external_dependencies,
+    }), status
+
+
+def _assurance_status_record(
+    *,
+    root_seed,
+    resolved_components,
+    seed_bindings,
+    source_tree_status,
+    workload,
+    device,
+) -> AssuranceStatusRecord:
+    configuration_declared = all(
+        component.configuration_status == "declared"
+        for component in resolved_components
+    )
+    seed_coverage = (
+        "not_applicable"
+        if not seed_bindings
+        else (
+            "declared"
+            if all(
+                component.configuration_status == "declared"
+                for component in resolved_components
+            )
+            else "partial"
+        )
+    )
+    workload_declared = all(
+        _circuit_provenance_json(
+            circuit,
+            device.operation_circuit_scope,
+        )["kind"] != "opaque_dormant"
+        for circuit in workload.source_circuit_by_operation_id.values()
+    )
+    seed_replay_scope = (
+        "partial"
+        if seed_coverage == "partial"
+        else (
+            "root_seeded"
+            if root_seed is not None
+            else "local_or_entropy"
+        )
+    )
+    return AssuranceStatusRecord.freeze({
+        "component_configuration_status": (
+            "declared" if configuration_declared else "partial"
+        ),
+        "seed_coverage_status": seed_coverage,
+        "workload_provenance_status": (
+            "declared" if workload_declared else "partial"
+        ),
+        "source_tree_snapshot_status": source_tree_status,
+        "executed_software_status": "unattested",
+        "seed_replay_scope": seed_replay_scope,
+        "reproducibility_scope": "partial",
+    })
 
 
 def _public_path_segment_bytes(segment: TypedPathSegmentRecord) -> bytes:
@@ -2987,10 +4061,6 @@ class ClusterFacade:
 
     # metrics / summary surface (old DecoderCluster pass-throughs)
     @property
-    def code(self):
-        return self.window_manager.code
-
-    @property
     def links(self):
         return self.window_manager.links
 
@@ -3025,10 +4095,6 @@ class ClusterFacade:
     @property
     def buffer(self):
         return self.window_manager.buffer
-
-    @property
-    def ops(self):
-        return self.window_manager.ops
 
     @property
     def rounds_arrived(self):

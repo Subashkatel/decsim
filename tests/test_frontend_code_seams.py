@@ -296,7 +296,7 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
     assert isinstance(frontend.physical_frontend, PhysicalPatchIRFrontend)
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == ()
-    assert result.cluster.code is code
+    assert result.planning.code is code
     assert {job.code for job in decoder.jobs} == {code.name}
     assert {job.spatial_nodes for job in decoder.jobs} == {code.spatial_nodes(1)}
     assert len(result.cluster.committed_windows) == result.cluster.total_windows

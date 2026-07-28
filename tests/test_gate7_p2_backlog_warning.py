@@ -36,14 +36,38 @@ class FakeCluster:
     def __init__(self, per_op_patch: dict):
         self.ready = []
         self.pool_ready = {}
-        self.ops = {op: FakeOp((patch,))
-                    for op, patch in per_op_patch.items()}
-        self.rounds_arrived = {op: 0 for op in per_op_patch}
-        self.windows = {}
-        self.committed_windows = set()
+        self.window_manager = FakeWindowManager(per_op_patch)
+
+    @property
+    def rounds_arrived(self):
+        return self.window_manager.rounds_arrived
+
+    @property
+    def windows(self):
+        return self.window_manager.windows
+
+    @property
+    def committed_windows(self):
+        return self.window_manager.committed_windows
 
     def set_backlog(self, per_op: dict):
-        self.rounds_arrived.update(per_op)
+        self.window_manager.rounds_arrived.update(per_op)
+
+
+class FakeWindowManager:
+    """The actual owner of operation and window state consumed by the view."""
+
+    def __init__(self, per_op_patch: dict):
+        self._ops = {
+            operation_id: FakeOp((patch,))
+            for operation_id, patch in per_op_patch.items()
+        }
+        self.rounds_arrived = {
+            operation_id: 0
+            for operation_id in per_op_patch
+        }
+        self.windows = {}
+        self.committed_windows = set()
 
 
 class FakeEngine:

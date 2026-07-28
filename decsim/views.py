@@ -154,11 +154,11 @@ def backlog_view(cluster, include_rounds: bool = True) -> BacklogView:
         ready_jobs += sum(len(queue) for queue in pools.values())
 
     per_op, per_patch = [], {}
-    for op_id in (cluster.ops if include_rounds else ()):
+    for op_id in (cluster.window_manager._ops if include_rounds else ()):
         waiting = max(0, cluster.rounds_arrived.get(op_id, 0)
                       - _rounds_decoded(cluster, op_id))
         per_op.append((op_id, waiting))
-        patch = _patch_of(cluster.ops.get(op_id), op_id)
+        patch = _patch_of(cluster.window_manager._ops.get(op_id), op_id)
         per_patch[patch] = per_patch.get(patch, 0) + waiting
     return BacklogView(ready_jobs=ready_jobs,
                        per_lane=tuple(per_lane),
@@ -192,7 +192,7 @@ def reaction_view(gate) -> ReactionView:
         OpReactionInfo(op=op_id, name=op.name, blocked_by=op.blocked_by,
                        round_ticks=gate._round_ticks_for(op),
                        rounds=gate.cluster.rounds_for(op))
-        for op_id, op in sorted(gate.ops.items()))
+        for op_id, op in sorted(gate._ops.items()))
     return ReactionView(
         chip_done=gate.last_finish_time,
         fully_done=gate.engine.now,

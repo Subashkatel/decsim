@@ -740,6 +740,7 @@ def test_restart_owned_seam_requires_multi_range_device_capability():
     class SingleRangeOnlyDevice:
         def __init__(self):
             self._timing = TimingOnlyDevice()
+            self.operation_circuit_scope = "none"
 
         def __getattr__(self, name):
             if name == "strong_window_model_for_operation_with_exclusions":

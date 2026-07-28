@@ -191,7 +191,7 @@ def test_A4_serial_escalates_unsure_windows_and_counts_strong_needed():
     result flagged low-confidence (probability 1.0), strong_needed == total_windows. Serial mode
     never cancels (strong_cancelled == 0), and every window still commits exactly once."""
     res = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=60)
-    c = res["cluster"]
+    c = res.cluster
     assert c.total_windows > 0
     assert c.strong_needed == c.total_windows         # one escalation per window
     assert c.strong_cancelled == 0                    # serial never cancels
@@ -202,7 +202,7 @@ def test_A4_confident_weak_never_escalates():
     """A4: if the weak decoder is always confident (low-confidence probability 0.0), no window is
     escalated -- strong_needed == 0 and strong_cancelled == 0 -- yet every window still commits."""
     res = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds=60)
-    c = res["cluster"]
+    c = res.cluster
     assert c.total_windows > 0
     assert c.strong_needed == 0
     assert c.strong_cancelled == 0
@@ -214,7 +214,7 @@ def test_A4_strong_redo_size_is_commit_plus_two_buffers():
     commit + 2*buffer (= 3d when commit=buffer=d). Cross-check the policy's own formula against
     the public cluster geometry (commit / buffer) the run used."""
     res = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=60)
-    c = res["cluster"]
+    c = res.cluster
     assert (c.commit, c.buffer) == (D, D)             # default sliding scheme
     # Reconstruct the policy's redo size from the cluster's committed geometry and confirm 3d.
     from decsim.message import Window
@@ -237,7 +237,7 @@ def test_A5_parallel_starts_strong_everywhere_and_cancels_confident():
     # All-confident weak -> every strong job is cancelled.
     res = _switch_run(Switching(confidence_threshold=0.5, run_both_at_once=True), 0.0,
                       rounds=60, pools={"default": 1, "strong": 2})
-    c = res["cluster"]
+    c = res.cluster
     assert c.total_windows > 0
     assert c.strong_cancelled == c.total_windows      # every window's strong job halted
     assert c.strong_needed == 0
@@ -252,7 +252,7 @@ def test_A5_parallel_mixed_one_strong_job_per_window():
     must not perturb the committed-window count."""
     res = _switch_run(Switching(confidence_threshold=0.5, run_both_at_once=True), 0.4,
                       rounds=200, pools={"default": 1, "strong": 2})
-    c = res["cluster"]
+    c = res.cluster
     assert c.strong_cancelled > 0                      # some windows turned out confident
     assert c.strong_needed > 0                         # some genuinely escalated
     assert c.strong_cancelled + c.strong_needed == c.total_windows
@@ -296,7 +296,7 @@ def test_A6_bulk_strong_merges_outstanding_jobs_into_one_decode():
     res, samples = _strong_running_samples(
         Switching(confidence_threshold=0.5, bulk_strong=True), 1.0,
         rounds=120, tau_strong=10.0)
-    c = res["cluster"]
+    c = res.cluster
     assert c.total_windows > 0
     assert c.strong_needed == c.total_windows         # every window escalated -> heavy backlog
 
@@ -324,13 +324,13 @@ def test_A6_non_bulk_decodes_jobs_individually_not_in_one_batch():
         rounds=120, tau_strong=10.0)
 
     # both escalate exactly the same windows
-    assert res_bulk["cluster"].strong_needed == res_plain["cluster"].strong_needed > 0
+    assert res_bulk.cluster.strong_needed == res_plain.cluster.strong_needed > 0
     # plain serial never populates the bulk-batch counter; bulk drives it well past one job
     assert max(samples_plain) == 0
     assert max(samples_bulk) > 3 * D
     # both still commit every window
-    assert len(res_bulk["cluster"].committed_windows) == res_bulk["cluster"].total_windows
-    assert len(res_plain["cluster"].committed_windows) == res_plain["cluster"].total_windows
+    assert len(res_bulk.cluster.committed_windows) == res_bulk.cluster.total_windows
+    assert len(res_plain.cluster.committed_windows) == res_plain.cluster.total_windows
 
 
 # =====================================================================================
@@ -345,8 +345,8 @@ def test_A7_slower_strong_decoder_lengthens_escalated_windows():
     windows' strong-decode service time."""
     slow = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=30, tau_strong=20.0)
     fast = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=30, tau_strong=2.0)
-    assert slow["cluster"].strong_needed == fast["cluster"].strong_needed > 0
-    assert slow["engine"].now > fast["engine"].now
+    assert slow.cluster.strong_needed == fast.cluster.strong_needed > 0
+    assert slow.engine.now > fast.engine.now
 
 
 def test_A7_strong_latency_does_not_affect_an_all_confident_run():
@@ -356,8 +356,8 @@ def test_A7_strong_latency_does_not_affect_an_all_confident_run():
     escalated windows, that moves the clock."""
     slow = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds=30, tau_strong=20.0)
     fast = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds=30, tau_strong=2.0)
-    assert slow["cluster"].strong_needed == fast["cluster"].strong_needed == 0
-    assert slow["engine"].now == fast["engine"].now
+    assert slow.cluster.strong_needed == fast.cluster.strong_needed == 0
+    assert slow.engine.now == fast.engine.now
 
 
 # =====================================================================================

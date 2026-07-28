@@ -49,9 +49,9 @@ def test_reaction_time_is_pure_wait_in_rounds():
         ],
              ), verbose=False)
 
-    reaction = result["metrics"]["conditional_reaction_time"]
-    backlog_row = BacklogTrajectory(result["chip"]).rows()[0]
-    wait_rounds = backlog_row["wait"] / result["chip"].round_ticks
+    reaction = result.result.metric_values()["conditional_reaction_time"]
+    backlog_row = BacklogTrajectory(result.chip).rows()[0]
+    wait_rounds = backlog_row["wait"] / result.chip.round_ticks
 
     assert reaction["total_conditionals"] == 1
     assert reaction["released_conditionals"] == 1
@@ -72,7 +72,7 @@ def test_reaction_time_uses_all_conditionals_as_denominator():
         ],
              ), verbose=False)
 
-    reaction = result["metrics"]["conditional_reaction_time"]
+    reaction = result.result.metric_values()["conditional_reaction_time"]
     waits = reaction["conditioned_decode_wait_times"]
 
     assert reaction["success"] is True
@@ -94,7 +94,7 @@ def test_reaction_time_marks_threshold_divergence():
         ],
              ), verbose=False)
 
-    reaction = result["metrics"]["conditional_reaction_time"]
+    reaction = result.result.metric_values()["conditional_reaction_time"]
 
     assert reaction["success"] is False
     assert reaction["failed"] is True
@@ -123,9 +123,9 @@ def test_reaction_time_marks_idle_cap_failure():
         ],
              ), verbose=False)
 
-    reaction = result["metrics"]["conditional_reaction_time"]
+    reaction = result.result.metric_values()["conditional_reaction_time"]
 
-    assert result["chip"].idle_cap_hits
+    assert result.chip.idle_cap_hits
     assert reaction["success"] is False
     assert reaction["failed"] is True
     assert reaction["failure_reason"] == "idle-round cap reached"
@@ -145,10 +145,10 @@ def test_final_non_clifford_decode_does_not_return_to_chip_by_default():
                  decoder=PresetLatencyDecoder(2.0),
              ), verbose=False)
 
-    assert result["cluster"].windows[(0, 0)].t_done is not None
-    assert result["chip"].result_return_time_by_operation == {}
+    assert result.cluster.windows[(0, 0)].t_done is not None
+    assert result.chip.result_return_time_by_operation == {}
     assert not any("DISPATCH result return" in line
-                   for line in result["engine"].log_lines)
+                   for line in result.engine.log_lines)
 
 
 def test_explicit_result_return_to_chip_uses_feedback_links():
@@ -172,10 +172,10 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
                  decoder=PresetLatencyDecoder(2.0),
              ), verbose=False)
 
-    controller = result["controller"]
+    controller = result.controller
     window_done = max(
         window.t_done
-        for key, window in result["cluster"].windows.items()
+        for key, window in result.cluster.windows.items()
         if key[0] == 0
     )
     expected_return = (
@@ -185,13 +185,13 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
         + controller.links.cq.cost()
     )
 
-    assert result["chip"].decode_release_time == {}
-    assert result["chip"].result_return_time_by_operation[0] == expected_return
-    assert result["fully_done"] == expected_return
+    assert result.chip.decode_release_time == {}
+    assert result.chip.result_return_time_by_operation[0] == expected_return
+    assert result.result.fully_done_ticks == expected_return
     assert any("DISPATCH result return for op#0" in line
-               for line in result["engine"].log_lines)
+               for line in result.engine.log_lines)
     assert any("received result return for T0" in line
-               for line in result["engine"].log_lines)
+               for line in result.engine.log_lines)
 
 
 def test_naive_batch_decode_label_shows_absorbed_idle_rounds():
@@ -212,6 +212,6 @@ def test_naive_batch_decode_label_shows_absorbed_idle_rounds():
                  max_idle_rounds=1000,
              ), verbose=False)
 
-    assert result["cluster"].windows[(1, 0)].n_rounds > 27
+    assert result.cluster.windows[(1, 0)].n_rounds > 27
     assert any("T1 [whole op," in line and "idle + 27 body" in line
-               for line in result["engine"].log_lines)
+               for line in result.engine.log_lines)

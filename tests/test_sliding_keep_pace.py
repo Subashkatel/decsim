@@ -75,7 +75,7 @@ def _run_memory(tau_us, commit, buffer, n_windows=20):
             decoder=PerRoundDecoder(tau_us),
             make_controller=lambda e: ModularController(e, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False),
         ), verbose=False)
-    return r["cluster"], rounds
+    return r.cluster, rounds
 
 
 def _reference_finish_times(cluster, rounds, tau_us):

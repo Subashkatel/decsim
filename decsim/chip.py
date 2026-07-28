@@ -76,6 +76,11 @@ class Chip:
 
     # -------------------------------------------------------------- loading
 
+    @property
+    def workload_complete(self) -> bool:
+        """Whether every loaded operation body reached physical completion."""
+        return set(self.ops) == self.done_bodies
+
     def _round_ticks_from_code(self, code) -> int:
         """The code's own round period when it declares one, else the chip default."""
         round_us = getattr(code, "round_us", None)

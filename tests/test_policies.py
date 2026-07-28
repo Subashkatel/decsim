@@ -42,7 +42,7 @@ def test_reaction_path_deadline_beats_fifo_under_contention():
                              rounds_policy=FixedRounds(11),
                              decoder=PresetLatencyDecoder(5.0), scheduler=scheduler,
                              deadline_policy=deadline_policy), verbose=False)
-        return r["chip_done"]                  # ends with the blocked T's last round
+        return r.result.chip_done_ticks                  # ends with the blocked T's last round
 
     fifo = run()
     edf = run(scheduler=EarliestDeadlineScheduler(),
@@ -76,7 +76,7 @@ def test_custom_router_by_hint():
     r = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), num_units=2, d=3,
                          rounds_policy=FixedRounds(11), router=router,
                          decoder=weak), verbose=False)
-    assert r["fully_done"] > 0
+    assert r.result.fully_done_ticks > 0
 
 
 # ---- timing-level decoder switching (arXiv:2510.25222) ---------------------------------
@@ -113,7 +113,7 @@ def test_switching_decoder_end_to_end():
     r = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), num_units=2, d=3,
                          rounds_policy=FixedRounds(11), decoder=sw, seed=7),
                  verbose=False)
-    assert r["fully_done"] > 0                 # runs to completion with mixed latencies
+    assert r.result.fully_done_ticks > 0                 # runs to completion with mixed latencies
 
 
 def test_switching_decoder_run_seed_binding_replays_and_rejects_direct_use():
@@ -203,14 +203,14 @@ def test_code_round_time_overrides_global_cadence():
     r = simulate(RunSpec(ops=_memory_op(), num_units=1, code=slow,
                          rounds_policy=FixedRounds(5), round_us=1.1,
                          decoder=PresetLatencyDecoder(0.5)), verbose=False)
-    assert r["chip_done"] == 5 * us(2.0)       # the CODE's cadence, not the global
+    assert r.result.chip_done_ticks == 5 * us(2.0)       # the CODE's cadence, not the global
 
 
 def test_global_cadence_is_default():
     r = simulate(RunSpec(ops=_memory_op(), num_units=1, d=3,
                          rounds_policy=FixedRounds(5), round_us=1.1,
                          decoder=PresetLatencyDecoder(0.5)), verbose=False)
-    assert r["chip_done"] == 5 * us(1.1)
+    assert r.result.chip_done_ticks == 5 * us(1.1)
 
 
 # ---- idle-round decoding mode (arXiv:2511.10633: memory rounds need decoding) -----------
@@ -221,7 +221,7 @@ def test_idle_rounds_decoded_only_when_enabled():
                              rounds_policy=FixedRounds(11),
                              decoder=PresetLatencyDecoder(3.0),
                              idle_policy=from_mode(mode)), verbose=False)
-        return [l for l in r["engine"].log_lines if "mem(" in l]
+        return [l for l in r.engine.log_lines if "mem(" in l]
 
     assert run("ignore") == []                 # ignored idle rounds do not load the decoder
     assert len(run("separate_decode_jobs")) > 0

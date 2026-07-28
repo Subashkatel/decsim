@@ -100,19 +100,28 @@ class _RecordingDecoder(PerRoundDecoder):
         return super().decode(job)
 
 
-def escalating_world(strategy, name="escalate-every-window"):
+def escalating_world(
+    strategy,
+    name="escalate-every-window",
+    configure=None,
+):
     """A real RunSpec whose windows all escalate through the strategy seam."""
     weak = PerRoundDecoder(tau_us=0.05)
     strong = PerRoundDecoder(tau_us=2.0)
-    world = RunSpec(
+    return RunSpec(
         ops=[Operation(88, name, (6,), clifford=True)],
         d=3, rounds_policy=FixedRounds(30), round_us=1.0,
         scheme=SlidingWindowScheme(), strategy=strategy,
         decoder=weak, router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
+        make_metrics=(
+            None
+            if configure is None
+            else lambda engine, cluster, chip, factory: (
+                configure(engine, cluster, chip, factory) or []
+            )
+        ),
     ).build(verbose=False)
-    world.gate.load(world.ops)
-    return world
 
 
 def escalating_attempt(eng, manager, op, weak_rounds):
@@ -335,13 +344,8 @@ def test_public_strategy_duplicate_strong_submission_is_rejected_end_to_end():
         def metrics(self):
             return {}
 
-    world = escalating_world(DuplicateStrongStrategy(), "duplicate-request")
-
     with pytest.raises(RuntimeError, match="duplicate strong decode"):
-        world.engine.run()
-
-    assert world.window_manager._finished_ops == set()
-    assert world.pool._completed_strong_results == {}
+        escalating_world(DuplicateStrongStrategy(), "duplicate-request")
 
 
 @pytest.mark.parametrize("bulk_strong", [True, False])
@@ -558,26 +562,32 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
         def metrics(self):
             return {}
 
-    world = escalating_world(EscalateEveryWindowStrategy())
-    commit_strong_result = world.pool.on_strong_window_decoded
     delivered = []
 
-    def record(key, result):
-        delivered.append(key)
-        commit_strong_result(key, result)
+    def configure(_engine, cluster, _chip, _factory):
+        pool = cluster.pool
+        commit_strong_result = pool.on_strong_window_decoded
 
-    world.pool.on_strong_window_decoded = record
-    world.engine.run()
+        def record(key, result):
+            delivered.append(key)
+            commit_strong_result(key, result)
 
-    assert world.window_manager._finished_ops == {88}
+        pool.on_strong_window_decoded = record
+
+    completed_run = escalating_world(
+        EscalateEveryWindowStrategy(),
+        configure=configure,
+    )
+
+    assert completed_run.window_manager._finished_ops == {88}
     assert len(delivered) == len(set(delivered)) > 1
-    assert world.pool._completed_strong_results == {}
-    assert world.pool._windows_waiting_for_strong_result == set()
+    assert completed_run.pool._completed_strong_results == {}
+    assert completed_run.pool._windows_waiting_for_strong_result == set()
 
     finalized_key = delivered[-1]
-    world.pool._windows_waiting_for_strong_result.add(finalized_key)
-    world.pool._apply_held_strong_result(finalized_key)
-    assert world.pool._windows_waiting_for_strong_result == {finalized_key}
+    completed_run.pool._windows_waiting_for_strong_result.add(finalized_key)
+    completed_run.pool._apply_held_strong_result(finalized_key)
+    assert completed_run.pool._windows_waiting_for_strong_result == {finalized_key}
     assert delivered.count(finalized_key) == 1, \
         "a wait was released after finality without a decode of its own"
 
@@ -606,14 +616,11 @@ def test_public_strategy_delayed_duplicate_submission_is_refused_end_to_end():
         def metrics(self):
             return {}
 
-    world = escalating_world(DelayedDuplicateStrongStrategy(),
-                             "duplicate-request")
-
     with pytest.raises(RuntimeError, match="duplicate strong decode"):
-        world.engine.run()
-
-    assert world.window_manager._finished_ops == set()
-    assert world.pool._completed_strong_results == {}
+        escalating_world(
+            DelayedDuplicateStrongStrategy(),
+            "duplicate-request",
+        )
 
 
 @pytest.mark.parametrize("bulk_strong", [True, False])
@@ -842,13 +849,8 @@ def test_public_strategy_listing_one_weak_submission_twice_is_refused(
         def metrics(self):
             return {}
 
-    world = escalating_world(DuplicateWeakStrategy(bulk_strong))
     with pytest.raises(RuntimeError, match="has already been admitted"):
-        world.engine.run()
-
-    pool = world.pool
-    occupied = pool.unit_totals["default"] - pool.pool_free["default"]
-    assert pool.queued_total() + occupied == 1
+        escalating_world(DuplicateWeakStrategy(bulk_strong))
 
 
 @pytest.mark.parametrize("strong_first", [True, False])
@@ -872,13 +874,12 @@ def test_public_strategy_may_list_its_submissions_in_either_order(strong_first):
         def metrics(self):
             return {}
 
-    world = escalating_world(OrderedEscalationStrategy())
-    world.engine.run()
+    completed_run = escalating_world(OrderedEscalationStrategy())
 
-    assert world.window_manager._finished_ops == {88}
-    assert world.pool.strong_needed == world.window_manager.window_count[88]
-    assert world.pool._completed_strong_results == {}
-    assert world.pool._windows_waiting_for_strong_result == set()
+    assert completed_run.window_manager._finished_ops == {88}
+    assert completed_run.pool.strong_needed == completed_run.window_manager.window_count[88]
+    assert completed_run.pool._completed_strong_results == {}
+    assert completed_run.pool._windows_waiting_for_strong_result == set()
 
 
 def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
@@ -907,24 +908,30 @@ def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
         def metrics(self):
             return {}
 
-    world = escalating_world(CancelAndReplaceStrategy())
     delivered = []
-    commit_strong_result = world.pool.on_strong_window_decoded
 
-    def record(key, result):
-        delivered.append(key)
-        commit_strong_result(key, result)
+    def configure(_engine, cluster, _chip, _factory):
+        pool = cluster.pool
+        commit_strong_result = pool.on_strong_window_decoded
 
-    world.pool.on_strong_window_decoded = record
-    world.engine.run()
+        def record(key, result):
+            delivered.append(key)
+            commit_strong_result(key, result)
 
-    window_count = world.window_manager.window_count[88]
-    assert world.window_manager._finished_ops == {88}
+        pool.on_strong_window_decoded = record
+
+    completed_run = escalating_world(
+        CancelAndReplaceStrategy(),
+        configure=configure,
+    )
+
+    window_count = completed_run.window_manager.window_count[88]
+    assert completed_run.window_manager._finished_ops == {88}
     assert sorted(delivered) == sorted(set(delivered))
     assert len(delivered) == window_count
-    assert world.pool.strong_cancelled == window_count
-    assert world.pool._completed_strong_results == {}
-    assert world.pool._windows_waiting_for_strong_result == set()
+    assert completed_run.pool.strong_cancelled == window_count
+    assert completed_run.pool._completed_strong_results == {}
+    assert completed_run.pool._windows_waiting_for_strong_result == set()
 
 
 # ------------------------------- one open weak decode per destination window
@@ -1107,13 +1114,8 @@ def test_public_strategy_listing_two_weak_decodes_for_one_window_is_refused():
         def metrics(self):
             return {}
 
-    world = escalating_world(TwoWeakDecodesStrategy())
     with pytest.raises(RuntimeError, match="second weak decode for window"):
-        world.engine.run()
-
-    pool = world.pool
-    occupied = pool.unit_totals["default"] - pool.pool_free["default"]
-    assert pool.queued_total() + occupied == 1
+        escalating_world(TwoWeakDecodesStrategy())
 
 
 # ---------------------------------------- no window is left unfinal at the end

@@ -25,7 +25,7 @@ def _run(ops, **kw):
     kw.setdefault("d", 3)
     kw.setdefault("decoder", PresetLatencyDecoder(1.0))
     r = simulate(RunSpec(ops=ops, **kw), verbose=False)
-    return r["engine"].log_lines
+    return r.engine.log_lines
 
 
 def test_t_gate_waits_for_earlier_cnot_on_same_qubit():

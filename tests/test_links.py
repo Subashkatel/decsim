@@ -78,4 +78,4 @@ def test_wiring_threads_one_link_model_to_controller_and_cluster():
             rounds_policy=FixedRounds(11),
             decoder=PerRoundDecoder(tau_us=1.0),
         ), verbose=False)
-    assert r["controller"].links is r["cluster"].links
+    assert r.controller.links is r.cluster.links

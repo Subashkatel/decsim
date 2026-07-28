@@ -32,7 +32,7 @@ def _feedback_chain():
 
 def _reaction_rows(result):
     """Return conditional reaction rows for a completed run."""
-    return ConditionalReactionTime(result["chip"]).rows()
+    return ConditionalReactionTime(result.chip).rows()
 
 
 def test_trailing_buffer_boundary_keeps_existing_static_wait():
@@ -54,7 +54,7 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
     rows = _reaction_rows(result)
     assert len(rows) == 1
     assert rows[0]["wait_rounds"] == 5.0
-    assert result["cluster"].memory_rounds[0] >= 3
+    assert result.cluster.memory_rounds[0] >= 3
 
 
 def test_measurement_closed_boundary_removes_only_static_buffer_wait():
@@ -77,7 +77,7 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
     rows = _reaction_rows(result)
     assert len(rows) == 1
     assert rows[0]["wait_rounds"] == 2.0
-    assert result["cluster"].memory_rounds[0] < 3
+    assert result.cluster.memory_rounds[0] < 3
 
 
 def _live_stream_pair():
@@ -135,13 +135,13 @@ def test_measurement_closed_boundary_closes_live_stream_without_idle_buffer():
     trailing = _run_live_stream_pair("trailing_buffer")
     closed = _run_live_stream_pair("measurement_closed")
 
-    trailing_first, trailing_second = trailing["chip"].ops[1], trailing["chip"].ops[2]
-    closed_first, closed_second = closed["chip"].ops[1], closed["chip"].ops[2]
+    trailing_first, trailing_second = trailing.chip.ops[1], trailing.chip.ops[2]
+    closed_first, closed_second = closed.chip.ops[1], closed.chip.ops[2]
 
     assert trailing_second.stream_offset > trailing_first.stream_offset + 2
     assert closed_second.stream_offset == closed_first.stream_offset + 2
-    assert trailing["cluster"].rounds_arrived[0] > closed["cluster"].rounds_arrived[0]
-    assert len(closed["cluster"].committed_windows) == closed["cluster"].total_windows
+    assert trailing.cluster.rounds_arrived[0] > closed.cluster.rounds_arrived[0]
+    assert len(closed.cluster.committed_windows) == closed.cluster.total_windows
 
 
 def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
@@ -177,9 +177,9 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
                  seed=19,
              ), verbose=False)
 
-    assert result["cluster"].rounds_arrived[operations[0].id] == code.commit_rounds()
-    assert operations[0].id in result["cluster"].op_results
-    assert operations[1].id in result["chip"].decode_release_time
+    assert result.cluster.rounds_arrived[operations[0].id] == code.commit_rounds()
+    assert operations[0].id in result.cluster.op_results
+    assert operations[1].id in result.chip.decode_release_time
 
 
 def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():

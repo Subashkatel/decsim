@@ -102,8 +102,8 @@ def test_feedback_idle_rounds_extend_the_live_stream():
                  round_us=1.0,
              ), verbose=False)
 
-    cluster = result["cluster"]
-    chip = result["chip"]
+    cluster = result.cluster
+    chip = result.chip
     first, second = operations
 
     assert chip.done_bodies == {first.id, second.id}
@@ -135,7 +135,7 @@ def test_committed_stream_round_count_releases_blocked_operation_before_stream_r
                  round_us=1.0,
              ), verbose=False)
 
-    chip = result["chip"]
+    chip = result.chip
     first, second = operations
 
     assert second.id in chip.decode_release_time
@@ -169,9 +169,9 @@ def test_exact_live_segment_publishes_functional_vector_and_effect():
     ), verbose=False)
 
     first, second = operations
-    assert result["cluster"].op_results[first.id] == (1,)
-    assert result["chip"].applied_basis[second.id] == "X"
-    assert result["chip"].applied_frame_delta[second.id] != (0, 0)
+    assert result.cluster.op_results[first.id] == (1,)
+    assert result.chip.applied_basis[second.id] == "X"
+    assert result.chip.applied_frame_delta[second.id] != (0, 0)
 
 
 def test_functional_live_segment_rejects_contribution_boundary_crossing():
@@ -228,7 +228,7 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
                         num_units=1,
                         round_us=1.0,
                     ), verbose=False)
-    stream_round_count = timing_result["cluster"].rounds_arrived[timing_stream.id]
+    stream_round_count = timing_result.cluster.rounds_arrived[timing_stream.id]
 
     circuit = NoiseModel.circuit_level(0.003).circuit(
         distance=code.distance,
@@ -256,8 +256,8 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
                  seed=13,
              ), verbose=False)
 
-    cluster = result["cluster"]
-    chip = result["chip"]
+    cluster = result.cluster
+    chip = result.chip
     first, second = operations
 
     assert chip.done_bodies == {first.id, second.id}

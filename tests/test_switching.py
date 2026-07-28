@@ -76,7 +76,7 @@ def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=Non
 def _strong_backlog_peak(low_confidence_probability, rounds, seed=1):
     res = _switch_run(Switching(confidence_threshold=0.5), low_confidence_probability, rounds,
                       seed=seed, metrics=lambda e, c, ch, fa: [StrongDecoderBacklog(c)])
-    return res["metrics"]["strong_backlog"]["peak_jobs"]
+    return res.result.metric_values()["strong_backlog"]["peak_jobs"]
 
 
 class FixedLogicalDecoder:
@@ -168,7 +168,7 @@ def test_custom_decision_rule_can_replace_the_threshold():
             return False
 
     res = _switch_run(AlwaysUseStrong(confidence_threshold=0.5), 0.0, 60)
-    assert res["cluster"].strong_needed == res["cluster"].total_windows
+    assert res.cluster.strong_needed == res.cluster.total_windows
 
 
 def test_escalated_window_uses_strong_logical_result():
@@ -189,7 +189,7 @@ def test_escalated_window_uses_strong_logical_result():
               unit_pools={"default": 1, "strong": 1},
               seed=1,
           ), verbose=False)
-    cluster = res["cluster"]
+    cluster = res.cluster
     assert cluster.total_windows % 2 == 1
     assert cluster.strong_needed == cluster.total_windows
     assert cluster.op_results[0] == (1,)
@@ -213,7 +213,7 @@ def test_parallel_strong_result_can_finish_before_weak_decision():
               unit_pools={"default": 1, "strong": 1},
               seed=1,
           ), verbose=False)
-    assert res["cluster"].op_results[0] == (1,)
+    assert res.cluster.op_results[0] == (1,)
 
 
 def test_switching_requires_a_router_to_reach_the_strong_decoder():
@@ -320,11 +320,11 @@ def test_no_switching_matches_plain_sliding():
                 scheme=SlidingWindowScheme(),
                 decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US),
             ), verbose=False)
-    assert switched["cluster"].strong_needed == 0
-    assert switched["cluster"].strong_cancelled == 0
-    assert switched["engine"].now == plain["engine"].now
-    assert (len(switched["cluster"].committed_windows)
-            == len(plain["cluster"].committed_windows))
+    assert switched.cluster.strong_needed == 0
+    assert switched.cluster.strong_cancelled == 0
+    assert switched.engine.now == plain.engine.now
+    assert (len(switched.cluster.committed_windows)
+            == len(plain.cluster.committed_windows))
 
 
 # ---- Theorem 1 / Eq. 8: strong backlog bounded inside, divergent outside (serial) ----
@@ -368,9 +368,9 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
             ), verbose=False)
     double = _switch_run(Switching(confidence_threshold=0.5), rate, rounds,
                          metrics=lambda e, c, ch, fa: [DecodeBacklog(c)])
-    assert naive["metrics"]["decode_backlog"]["peak_rounds"] > 100
-    assert (double["metrics"]["decode_backlog"]["peak_rounds"]
-            < naive["metrics"]["decode_backlog"]["peak_rounds"] / 5)
+    assert naive.result.metric_values()["decode_backlog"]["peak_rounds"] > 100
+    assert (double.result.metric_values()["decode_backlog"]["peak_rounds"]
+            < naive.result.metric_values()["decode_backlog"]["peak_rounds"] / 5)
 
 
 # ---- run both at once (the paper's "both decode" mode, Sec III.A) --------------------
@@ -381,14 +381,14 @@ def test_run_both_at_once_starts_strong_every_window_and_cancels_confident_ones(
     cancelled or needed, and serial mode starts strong jobs ONLY on the windows that need them."""
     parallel = _switch_run(Switching(confidence_threshold=0.5, run_both_at_once=True), 0.3, 200,
                            pools={"default": 1, "strong": 2})
-    cp = parallel["cluster"]
+    cp = parallel.cluster
     assert cp.strong_cancelled > 0
     assert cp.strong_cancelled + cp.strong_needed == cp.total_windows   # one strong job per window
 
     serial = _switch_run(Switching(confidence_threshold=0.5), 0.3, 200,
                          pools={"default": 1, "strong": 2})
-    assert serial["cluster"].strong_cancelled == 0                      # serial never cancels
-    assert serial["cluster"].strong_needed == cp.strong_needed          # same windows need strong
+    assert serial.cluster.strong_cancelled == 0                      # serial never cancels
+    assert serial.cluster.strong_needed == cp.strong_needed          # same windows need strong
 
 
 def test_run_both_at_once_keeps_the_weak_stream_byte_identical_to_plain_sliding():
@@ -406,9 +406,9 @@ def test_run_both_at_once_keeps_the_weak_stream_byte_identical_to_plain_sliding(
                 scheme=SlidingWindowScheme(),
                 decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US),
             ), verbose=False)
-    weak_done = lambda r: [w.t_done for _, w in sorted(r["cluster"].windows.items())]
+    weak_done = lambda r: [w.t_done for _, w in sorted(r.cluster.windows.items())]
     assert weak_done(parallel) == weak_done(plain)
-    assert len(parallel["cluster"].committed_windows) == parallel["cluster"].total_windows
+    assert len(parallel.cluster.committed_windows) == parallel.cluster.total_windows
 
 
 # ---- backlog-vs-time trace: the metrics retain a series, not just a summary ----------
@@ -428,7 +428,7 @@ def test_strong_backlog_trace_is_a_step_series_matching_the_peak():
     assert [r["t"] for r in rows] == sorted(r["t"] for r in rows)  # non-decreasing in time
     assert all(rows[i]["jobs"] != rows[i - 1]["jobs"] for i in range(1, len(rows)))  # step trace
     assert all(r["rounds"] == r["jobs"] * 3 * D for r in rows)     # jobs -> rounds (commit+2*buffer)
-    assert max(r["jobs"] for r in rows) == res["metrics"]["strong_backlog"]["peak_jobs"]
+    assert max(r["jobs"] for r in rows) == res.result.metric_values()["strong_backlog"]["peak_jobs"]
 
 
 def test_decode_backlog_trace_tracks_the_rising_backlog():
@@ -514,7 +514,7 @@ def test_sampled_soft_output_uses_the_probability_for_callback():
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
           ), verbose=False)
-    assert res["cluster"].strong_needed == res["cluster"].total_windows
+    assert res.cluster.strong_needed == res.cluster.total_windows
 
 
 # ---- faithful double window (paper Sec. III C, Fig. 12) --------------------
@@ -622,7 +622,7 @@ def test_double_window_uses_the_interaction_region_plan():
     )
 
     assert interaction.calls == [(0, 2)]
-    assert result["cluster"].window_manager.absorbed_windows == {(0, 3)}
+    assert result.cluster.window_manager.absorbed_windows == {(0, 3)}
     assert [job.window_id for _, job in weak.starts] == [
         0, 1, 2, 4, 5, 6, 7, 8, 9,
     ]
@@ -657,32 +657,46 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
         probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0,
     )
     strong = FixedLogicalDecoder(logical_value=0)
-    world = RunSpec(
-        ops=[_memory_op()],
-        d=D,
-        rounds_policy=FixedRounds(21),
-        scheme=SlidingWindowScheme(),
-        strategy=Switching(confidence_threshold=0.5, double_window=True),
-        decoder=weak,
-        router=SwitchingRouter(weak, strong),
-        device=FailingDevice(),
-        unit_pools={"default": 1, "strong": 1},
-    ).build(verbose=False)
-    runtime = world.window_manager
-    restart = runtime.windows[(0, 5)]
-    before = {
-        "absorbed": set(runtime.absorbed_windows),
-        "deferred_strong": dict(runtime._deferred_strong),
-        "deferred_by_far": dict(runtime._deferred_by_far),
-        "restart_buffer_lo": restart.buffer_lo,
-        "restart_deps": list(restart.deps),
-        "restart_refs": list(runtime.store._leases[(restart.key)]),
-    }
-    world.gate.load(world.ops)
+    captured = {}
+
+    def configure(engine, cluster, _chip, _factory):
+        runtime = cluster.window_manager
+
+        def snapshot():
+            restart = runtime.windows[(0, 5)]
+            captured["runtime"] = runtime
+            captured["before"] = {
+                "absorbed": set(runtime.absorbed_windows),
+                "deferred_strong": dict(runtime._deferred_strong),
+                "deferred_by_far": dict(runtime._deferred_by_far),
+                "restart_buffer_lo": restart.buffer_lo,
+                "restart_deps": list(restart.deps),
+                "restart_refs": list(runtime.store._leases[(restart.key)]),
+            }
+
+        engine.schedule(0, snapshot, label="capture restart plan")
 
     with pytest.raises(RestartModelFailure, match="restart model"):
-        world.engine.run()
+        RunSpec(
+            ops=[_memory_op()],
+            d=D,
+            rounds_policy=FixedRounds(21),
+            scheme=SlidingWindowScheme(),
+            strategy=Switching(
+                confidence_threshold=0.5,
+                double_window=True,
+            ),
+            decoder=weak,
+            router=SwitchingRouter(weak, strong),
+            device=FailingDevice(),
+            unit_pools={"default": 1, "strong": 1},
+            make_metrics=lambda engine, cluster, chip, factory: (
+                configure(engine, cluster, chip, factory) or []
+            ),
+        ).build(verbose=False)
 
+    runtime = captured["runtime"]
+    restart = runtime.windows[(0, 5)]
     assert {
         "absorbed": runtime.absorbed_windows,
         "deferred_strong": runtime._deferred_strong,
@@ -690,7 +704,7 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
         "restart_buffer_lo": restart.buffer_lo,
         "restart_deps": restart.deps,
         "restart_refs": runtime.store._leases[restart.key],
-    } == before
+    } == captured["before"]
 
 
 def test_strong_decoder_result_identity_is_checked_before_finalization():
@@ -786,7 +800,7 @@ def test_double_window_retains_every_round_added_to_the_restart_buffer():
         window_interaction=EarlierRetainedRestart(),
     )
 
-    restart = result["cluster"].windows[(0, 4)]
+    restart = result.cluster.windows[(0, 4)]
     restart_job = next(
         job for _, job in weak.starts if job.window_id == restart.k)
     assert restart.start_round == 4
@@ -888,7 +902,7 @@ def test_double_window_slab_extends_forward_and_absorbs_the_weak_chain():
     7-15 (commit + two buffers FORWARD), the windows committing 10-12 and
     13-15 are never weak-decoded, and the weak chain restarts at W5."""
     res, weak, strong = _double_window_run(escalate_window=2)
-    runtime = res["cluster"].window_manager
+    runtime = res.cluster.window_manager
     (start_tick, job), = strong.starts
     assert job.strong_decode_for == (0, 2)
     assert (job.window.commit_lo, job.window.commit_hi) == (7, 15)
@@ -912,7 +926,7 @@ def test_double_window_restart_window_is_priced_for_its_widened_read():
     the one window the protocol deliberately enlarges, and charging it as an
     ordinary window understates the weak decoder exactly there."""
     res, weak, strong = _double_window_run(escalate_window=2)
-    runtime = res["cluster"].window_manager
+    runtime = res.cluster.window_manager
     (_, slab), = strong.starts
     restart = runtime.windows[(0, 5)]
 
@@ -950,7 +964,7 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
         unit_pools={"default": 1, "strong": 1},
         make_metrics=lambda e, c, ch, fa: env.update(engine=e) or [],
     ), verbose=False)
-    runtime = res["cluster"].window_manager
+    runtime = res.cluster.window_manager
     assert (runtime.commit, runtime.buffer) == (2, 3)   # r_com != r_buf
 
     (_, slab), = strong.starts
@@ -982,7 +996,7 @@ def test_double_window_restart_pricing_is_not_the_geometry_constant():
     is wrong even though every full-width fixture agrees with it. The
     invariant is the window's own extent."""
     res, weak, strong = _double_window_run(escalate_window=5, rounds=26)
-    runtime = res["cluster"].window_manager
+    runtime = res.cluster.window_manager
     (_, slab), = strong.starts
     restart = next(runtime.windows[k] for k in sorted(runtime.windows)
                    if runtime.windows[k].commit_lo > slab.window.commit_hi
@@ -1001,7 +1015,7 @@ def test_double_window_strong_waits_for_the_restart_windows_weak_commit():
     (W5's) weak decode commits the far-side boundary, plus the weak->strong
     hop. Without the gate the slab would start right after W2's outcome."""
     res, weak, strong = _double_window_run(escalate_window=2)
-    cluster = res["cluster"]
+    cluster = res.cluster
     w5 = cluster.windows[(0, 5)]
     (start_tick, job), = strong.starts
     assert w5.t_done is not None
@@ -1015,8 +1029,8 @@ def test_double_window_weak_pipeline_never_stalls_on_strong_work():
     fast, _, _ = _double_window_run(escalate_window=2, strong_tau=F_STRONG)
     slow, _, _ = _double_window_run(escalate_window=2,
                                     strong_tau=10 * F_STRONG)
-    assert {k: w.t_done for k, w in fast["cluster"].windows.items()} \
-        == {k: w.t_done for k, w in slow["cluster"].windows.items()}
+    assert {k: w.t_done for k, w in fast.cluster.windows.items()} \
+        == {k: w.t_done for k, w in slow.cluster.windows.items()}
 
 
 def test_double_window_last_window_uses_the_terminal_boundary():
@@ -1024,7 +1038,7 @@ def test_double_window_last_window_uses_the_terminal_boundary():
     window: the terminal time boundary already exists, so the slab is
     submitted at escalation without any extra wait."""
     res, weak, strong = _double_window_run(escalate_window=9)  # last of 10
-    cluster = res["cluster"]
+    cluster = res.cluster
     w9 = cluster.windows[(0, 9)]
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (28, 30)
@@ -1039,7 +1053,7 @@ def test_double_window_end_clamped_slab_absorbs_the_tail():
     """W8 (commit 25-27) escalates: the slab clamps to rounds 25-30,
     absorbs the final window, and needs no restart gate."""
     res, weak, strong = _double_window_run(escalate_window=8)
-    runtime = res["cluster"].window_manager
+    runtime = res.cluster.window_manager
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (25, 30)
     # 6 committed rounds, read with one buffer of leading context (22-30)
@@ -1047,7 +1061,7 @@ def test_double_window_end_clamped_slab_absorbs_the_tail():
     assert len({p.round_index for p in job.payloads}) == 9
     assert runtime.absorbed_windows == {(0, 9)}
     assert [j.window_id for _, j in weak.starts] == [0, 1, 2, 3, 4, 5, 6, 7, 8]
-    w8 = res["cluster"].windows[(0, 8)]
+    w8 = res.cluster.windows[(0, 8)]
     assert start_tick == w8.t_done + us(0.5)
 
 
@@ -1056,7 +1070,7 @@ def test_double_window_exactly_one_strong_job_per_escalation():
     registration for the same window is an illegal transition."""
     res, weak, strong = _double_window_run(escalate_window=2)
     assert len(strong.starts) == 1
-    runtime = res["cluster"].window_manager
+    runtime = res.cluster.window_manager
     runtime._deferred_strong[(0, 2)] = {"state": "waiting_far_boundary"}
     with pytest.raises(RuntimeError, match="duplicate strong escalation"):
         runtime.defer_strong_escalation(
@@ -1085,9 +1099,9 @@ def test_double_window_strong_result_owns_the_whole_slab():
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
           ), verbose=False)
-    assert res["cluster"].op_results[0] == (1,)
-    assert res["cluster"].strong_needed == 1
-    runtime = res["cluster"].window_manager
+    assert res.cluster.op_results[0] == (1,)
+    assert res.cluster.strong_needed == 1
+    runtime = res.cluster.window_manager
     contribution = runtime.logical_contributions[(0, 2)]
     assert (
         contribution.ownership_kind,
@@ -1215,12 +1229,12 @@ def test_double_window_terminal_slab_waits_for_its_final_rounds():
     W2's own weak decode finishes before rounds 13-14 are even generated.
     The slab must wait for them and then carry every slab round."""
     res, weak, strong = _double_window_run(escalate_window=2, rounds=14)
-    runtime = res["cluster"].window_manager
+    runtime = res.cluster.window_manager
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (7, 14)
     assert [payload.round_index for payload in job.payloads] \
         == list(range(4, 15))
-    w2 = res["cluster"].windows[(0, 2)]
+    w2 = res.cluster.windows[(0, 2)]
     assert start_tick > w2.t_done + us(0.5)   # NOT submitted at escalation
     # round 14 reaches the cluster at 14.0 (generation) + 2.15 (t_qc + t_cd);
     # the slab then crosses the weak->strong hop

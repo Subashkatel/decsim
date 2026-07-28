@@ -55,7 +55,7 @@ def _engine_failures(p: float, shots: int, seed0: int) -> int:
                   decoder=PyMatchingDecoder(_ZeroLatency()),
                   seed=seed0 + shot,
               ), verbose=False)
-        predicted = res["cluster"].op_results[1][0]
+        predicted = res.cluster.op_results[1][0]
         failures += int(predicted != int(device._truth[1][0]))
     return failures
 

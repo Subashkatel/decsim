@@ -62,7 +62,7 @@ def _run(latency_us, rounds):
               make_controller=_zero_link_controller,
               make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl), ReadyQueueStats(cl)],
           ), verbose=False)
-    m = res["metrics"]
+    m = res.result.metric_values()
     return m["decode_backlog"]["peak_rounds"], m["ready_queue"]["peak"]
 
 

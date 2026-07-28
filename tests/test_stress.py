@@ -70,7 +70,7 @@ class InvariantGuard:
 
 def _assert_clean(result, guard):
     """End-of-run invariants common to every stress scenario."""
-    cluster = result["cluster"]
+    cluster = result.cluster
     assert guard.violations == [], guard.violations[:5]
     assert guard.checks > 50, "the guard barely ran -- scenario was not a real stress"
     assert cluster.pool_free == cluster.unit_totals, "a unit was leaked or double-freed"
@@ -155,7 +155,7 @@ def test_high_switch_rate_stays_consistent():
                             pools={"default": 2, "strong": 2}, metrics_box=box)
     guard = box["g"]
     _assert_clean(result, guard)
-    assert result["cluster"].strong_needed > 50, "the run did not actually stress switching"
+    assert result.cluster.strong_needed > 50, "the run did not actually stress switching"
     assert guard.peak_busy.get("strong", 0) >= 1, "strong pool never ran a job"
 
 
@@ -167,7 +167,7 @@ def test_run_both_at_once_cancel_under_load_stays_consistent():
     result = _switching_run(0.1, rounds=300, patches=3, pools={"default": 2, "strong": 2},
                             switching=Switching(confidence_threshold=0.5, run_both_at_once=True),
                             metrics_box=box)
-    cluster = result["cluster"]
+    cluster = result.cluster
     _assert_clean(result, box["g"])
     assert cluster.strong_cancelled > 50, "the cancel path was barely exercised"
     assert cluster.strong_cancelled + cluster.strong_needed == cluster.total_windows
@@ -181,7 +181,7 @@ def test_switching_with_deadline_scheduler_stays_consistent():
                             pools={"default": 2, "strong": 1},
                             scheduler=EarliestDeadlineScheduler(), metrics_box=box)
     _assert_clean(result, box["g"])
-    assert result["cluster"].strong_needed > 0
+    assert result.cluster.strong_needed > 0
 
 
 def test_switching_stress_is_deterministic():
@@ -190,7 +190,7 @@ def test_switching_stress_is_deterministic():
     in a way that varies between runs."""
     a = _switching_run(0.5, rounds=250, patches=3, pools={"default": 2, "strong": 2})
     b = _switching_run(0.5, rounds=250, patches=3, pools={"default": 2, "strong": 2})
-    assert a["cluster"].op_results == b["cluster"].op_results
-    assert a["cluster"].strong_needed == b["cluster"].strong_needed
-    assert len(a["cluster"].committed_windows) == len(b["cluster"].committed_windows)
-    assert a["engine"].now == b["engine"].now
+    assert a.cluster.op_results == b.cluster.op_results
+    assert a.cluster.strong_needed == b.cluster.strong_needed
+    assert len(a.cluster.committed_windows) == len(b.cluster.committed_windows)
+    assert a.engine.now == b.engine.now

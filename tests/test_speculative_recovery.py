@@ -113,10 +113,10 @@ def test_interaction_invalidation_roots_expand_to_the_causal_replay_scope():
     held, _ = _deterministic_run(Held(), propagate=True, rounds=12)
 
     assert interaction.calls == [(0, 1)]
-    assert recovered["cluster"].op_results == held["cluster"].op_results
+    assert recovered.cluster.op_results == held.cluster.op_results
     assert weak.window_ids.count(2) == 2
     assert weak.window_ids.count(3) == 2
-    assert recovered["cluster"].window_manager.speculative_replays == 1
+    assert recovered.cluster.window_manager.speculative_replays == 1
 
 
 def test_interaction_cannot_invalidate_unrelated_finished_work():
@@ -178,8 +178,8 @@ def test_eager_boundary_disagreement_replays_the_transitive_weak_cone():
     recovered, weak = _deterministic_run(Eager())
     held, _ = _deterministic_run(Held())
 
-    runtime = recovered["cluster"].window_manager
-    assert runtime.op_results[0] == held["cluster"].op_results[0] == (0,)
+    runtime = recovered.cluster.window_manager
+    assert runtime.op_results[0] == held.cluster.op_results[0] == (0,)
     assert runtime.logical_contributions[
         (0, 2)
     ].logical_observables == (0,)
@@ -215,12 +215,12 @@ def test_a_replayed_window_re_escalates_whichever_order_it_is_submitted_in(
     baseline, _ = _deterministic_run(Eager(), uncertain=(1, 2),
                                      run_both_at_once=True)
 
-    runtime = ordered["cluster"].window_manager
-    assert runtime.op_results[0] == baseline["cluster"].op_results[0]
+    runtime = ordered.cluster.window_manager
+    assert runtime.op_results[0] == baseline.cluster.op_results[0]
     assert runtime.speculative_replays == \
-        baseline["cluster"].window_manager.speculative_replays
+        baseline.cluster.window_manager.speculative_replays
     assert runtime._finished_ops == {0}
-    assert ordered["cluster"].pool._completed_strong_results == {}
+    assert ordered.cluster.pool._completed_strong_results == {}
 
 
 @pytest.mark.parametrize("run_both_at_once", [True, False])
@@ -237,7 +237,22 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
     surfaces here as a failed run rather than as a stranded window.
     """
     weak = _WeakBoundaryDecoder((1, 2), ticks=1)
-    world = RunSpec(
+    weak_submissions = {}
+
+    def configure(_engine, cluster, _chip, _factory):
+        pool = cluster.pool
+        submit = pool.enqueue
+
+        def watch(job, delay_ticks=0):
+            assert delay_ticks == 0 or job.strong_decode_for is not None
+            if job.strong_decode_for is None:
+                key = (job.op_id, job.window_id)
+                weak_submissions[key] = weak_submissions.get(key, 0) + 1
+            submit(job, delay_ticks)
+
+        cluster.window_manager.submit_fn = watch
+
+    completed_run = RunSpec(
         ops=[Operation(0, "memory", (0,))],
         d=3,
         rounds_policy=FixedRounds(15),
@@ -248,27 +263,14 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
         decoder=weak,
         router=SwitchingRouter(weak, _CorrectingStrongDecoder()),
         unit_pools={"default": 1, "strong": 1},
+        make_metrics=lambda engine, cluster, chip, factory: (
+            configure(engine, cluster, chip, factory) or []
+        ),
     ).build(verbose=False)
 
-    pool = world.pool
-    submit = pool.enqueue
-    weak_submissions = {}
+    pool = completed_run.pool
 
-    def watch(job, delay_ticks=0):
-        # a weak submission enqueues on the spot, so a second one for a
-        # destination still decoding would be refused right here; only strong
-        # requests cross the weak->strong link
-        assert delay_ticks == 0 or job.strong_decode_for is not None
-        if job.strong_decode_for is None:
-            key = (job.op_id, job.window_id)
-            weak_submissions[key] = weak_submissions.get(key, 0) + 1
-        submit(job, delay_ticks)
-
-    world.window_manager.submit_fn = watch
-    world.gate.load(world.ops)
-    world.engine.run()
-
-    assert world.window_manager.speculative_replays > 0, \
+    assert completed_run.window_manager.speculative_replays > 0, \
         "no window was decoded twice, so the precondition was never exercised"
     assert max(weak_submissions.values()) > 1, \
         "no destination reached the pool twice, so the replay never re-decoded"
@@ -279,8 +281,8 @@ def test_overlapping_escalations_discard_stale_descendant_strong_result():
     recovered, weak = _deterministic_run(Eager(), uncertain=(1, 2))
     held, _ = _deterministic_run(Held(), uncertain=(1, 2))
 
-    runtime = recovered["cluster"].window_manager
-    assert runtime.op_results[0] == held["cluster"].op_results[0]
+    runtime = recovered.cluster.window_manager
+    assert runtime.op_results[0] == held.cluster.op_results[0]
     assert not runtime._pending_strong_windows
     assert runtime.speculative_replays == 2
     assert weak.window_ids.count(2) == 2
@@ -292,8 +294,8 @@ def test_leaf_escalation_wakes_an_ancestor_waiting_to_replay():
     recovered, _ = _deterministic_run(Eager(), uncertain=(1, 4))
     held, _ = _deterministic_run(Held(), uncertain=(1, 4))
 
-    runtime = recovered["cluster"].window_manager
-    assert runtime.op_results[0] == held["cluster"].op_results[0] == (0,)
+    runtime = recovered.cluster.window_manager
+    assert runtime.op_results[0] == held.cluster.op_results[0] == (0,)
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
     assert runtime._finished_ops == {0}
@@ -315,8 +317,8 @@ def test_agreeing_descendant_wakes_an_ancestor_waiting_to_replay():
     held, _ = _deterministic_run(
         Held(), uncertain=(1, 2), strong=_MixedStrongDecoder())
 
-    runtime = recovered["cluster"].window_manager
-    assert runtime.op_results[0] == held["cluster"].op_results[0]
+    runtime = recovered.cluster.window_manager
+    assert runtime.op_results[0] == held.cluster.op_results[0]
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
     assert runtime._finished_ops == {0}
@@ -354,8 +356,8 @@ def test_strong_can_add_a_defect_to_an_empty_weak_boundary():
             unit_pools={"default": 1, "strong": 1},
         ))
 
-    recovered = run(Eager())["cluster"].window_manager
-    held = run(Held())["cluster"].window_manager
+    recovered = run(Eager()).cluster.window_manager
+    held = run(Held()).cluster.window_manager
     assert recovered.op_results[0] == held.op_results[0] == (1,)
     assert recovered.logical_contributions[
         (0, 2)
@@ -367,7 +369,7 @@ def test_early_strong_correction_waits_for_inflight_weak_cone_then_replays():
     recovered, weak = _deterministic_run(
         Eager(), strong=_CorrectingStrongDecoder(ticks=1))
 
-    runtime = recovered["cluster"].window_manager
+    runtime = recovered.cluster.window_manager
     assert runtime.op_results[0] == (0,)
     assert runtime.speculative_replays == 1
     # The correction beats W2's original dispatch, so W2-W4 consume the
@@ -394,8 +396,8 @@ def test_parallel_early_and_same_tick_strong_results_recover_deterministically(
         strong=_CorrectingStrongDecoder(ticks=strong_ticks),
     )
 
-    runtime = recovered["cluster"].window_manager
-    assert runtime.op_results[0] == held["cluster"].op_results[0]
+    runtime = recovered.cluster.window_manager
+    assert runtime.op_results[0] == held.cluster.op_results[0]
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
     assert runtime._finished_ops == {0}
@@ -418,8 +420,8 @@ def test_replay_invalidates_an_inflight_descendant_boundary():
         rounds=12,
         timing=timing,
     )
-    runtime = eager["cluster"].window_manager
-    held_runtime = held["cluster"].window_manager
+    runtime = eager.cluster.window_manager
+    held_runtime = held.cluster.window_manager
 
     assert runtime.op_results[0] == held_runtime.op_results[0]
     assert runtime.logical_contributions == held_runtime.logical_contributions
@@ -483,8 +485,8 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
 
     eager, eager_weak = run(Eager())
     held, _ = run(Held())
-    runtime = eager["cluster"].window_manager
-    held_runtime = held["cluster"].window_manager
+    runtime = eager.cluster.window_manager
+    held_runtime = held.cluster.window_manager
 
     assert runtime.op_results == held_runtime.op_results
     assert all(window.deps_remaining == 0
@@ -503,12 +505,12 @@ def test_non_clifford_result_is_not_final_until_recovery_finishes():
     )
     recovered, _ = _deterministic_run(
         Eager(), operation=operation)
-    runtime = recovered["cluster"].window_manager
+    runtime = recovered.cluster.window_manager
 
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
     assert runtime._finished_ops == {0}
-    orchestrator = recovered["orchestrator"]
+    orchestrator = recovered.orchestrator
     assert orchestrator.stats["result_returns"] == 1
     assert orchestrator.history[-1]["t"] >= runtime.op_strong_commit_time[0]
 
@@ -525,7 +527,7 @@ def test_equal_strong_boundary_preserves_eager_progress_without_replay():
 
     recovered, weak = _deterministic_run(
         Eager(), strong=_AgreeingStrongDecoder())
-    runtime = recovered["cluster"].window_manager
+    runtime = recovered.cluster.window_manager
 
     assert runtime.speculative_replays == 0
     assert weak.window_ids == [0, 1, 2, 3, 4]
@@ -581,7 +583,7 @@ def test_static_operation_seam_replays_without_a_data_dependent_crash():
     )
 
     spec.validate()
-    runtime = simulate(spec)["cluster"].window_manager
+    runtime = simulate(spec).cluster.window_manager
     assert runtime._finished_ops == {0, 1}
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
@@ -654,8 +656,8 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
 
     eager, weak = run(Eager())
     held, _ = run(Held())
-    runtime = eager["cluster"].window_manager
-    held_runtime = held["cluster"].window_manager
+    runtime = eager.cluster.window_manager
+    held_runtime = held.cluster.window_manager
 
     assert runtime.speculative_replays == 1
     assert runtime.op_results[1] == held_runtime.op_results[1] == (0,)
@@ -663,13 +665,13 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
     assert sum(op_id == 1 and window_id == 0
                for op_id, window_id, _ in weak.calls) == 2
 
-    publications = [record for record in eager["orchestrator"].history
+    publications = [record for record in eager.orchestrator.history
                     if record["op_id"] == 1]
     assert len(publications) == 1
     assert publications[0]["logical_observables"] == (0,)
     assert publications[0]["t"] >= runtime.op_strong_commit_time[0]
-    assert eager["orchestrator"].frame.snapshot() == \
-        held["orchestrator"].frame.snapshot()
+    assert eager.orchestrator.frame.snapshot() == \
+        held.orchestrator.frame.snapshot()
 
 
 class _StreamWeakDecoder:
@@ -742,7 +744,31 @@ def _run_static_stream_recovery(policy, *, first_segment_rounds,
     feedback_consumer = Operation(
         3, "feedback-consumer", (1,), blocked_by=first_segment.id)
     weak = _StreamWeakDecoder(uncertain_windows)
-    world = RunSpec(
+    publication_states = []
+
+    def configure(engine, cluster, _chip, _factory):
+        runtime = cluster.window_manager
+        weak.window_manager = runtime
+        integrate = runtime.orchestrator.integrate
+
+        def record_segment_publication(operation, result):
+            if operation.id == first_segment.id:
+                publication_states.append({
+                    "t": engine.now,
+                    "committed": {
+                        index: runtime.windows[(0, index)].committed
+                        for index in range(5)
+                    },
+                    "decode_counts": {
+                        index: weak.calls.count((0, index))
+                        for index in range(5)
+                    },
+                })
+            integrate(operation, result)
+
+        runtime.orchestrator.integrate = record_segment_publication
+
+    completed_run = RunSpec(
         ops=[first_segment, second_segment, feedback_consumer],
         decode_ops=[stream, feedback_consumer],
         code=SurfaceCodeModel(d=3),
@@ -758,30 +784,11 @@ def _run_static_stream_recovery(policy, *, first_segment_rounds,
         decoder=weak,
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
+        make_metrics=lambda engine, cluster, chip, factory: (
+            configure(engine, cluster, chip, factory) or []
+        ),
     ).build(verbose=False)
-    weak.window_manager = world.window_manager
-    publication_states = []
-    integrate = world.orchestrator.integrate
-
-    def record_segment_publication(operation, result):
-        if operation.id == first_segment.id:
-            publication_states.append({
-                "t": world.engine.now,
-                "committed": {
-                    index: world.window_manager.windows[(0, index)].committed
-                    for index in range(5)
-                },
-                "decode_counts": {
-                    index: weak.calls.count((0, index))
-                    for index in range(5)
-                },
-            })
-        integrate(operation, result)
-
-    world.orchestrator.integrate = record_segment_publication
-    world.gate.load(world.ops)
-    world.engine.run()
-    return world, weak, publication_states
+    return completed_run, weak, publication_states
 
 
 def test_static_stream_segment_waits_for_its_corrected_replay_cone():
@@ -810,7 +817,7 @@ def test_static_stream_segment_waits_for_its_corrected_replay_cone():
     assert eager_publication_states[0]["committed"][2]
     assert eager_publication_states[0]["decode_counts"][2] == 2
     assert segment_publications[0]["t"] >= replay_done
-    assert eager.gate.op_start_time[3] >= replay_done
+    assert eager.chip.op_start_time[3] >= replay_done
     assert held_publication_states[0]["committed"][2]
     assert eager.orchestrator.frame.snapshot() == \
         held.orchestrator.frame.snapshot()
@@ -842,7 +849,7 @@ def test_overlapping_stream_roots_hold_segment_until_both_resolve():
     assert len(publications) == len(publication_states) == 1
     assert publications[0]["t"] >= replay_done
     assert publications[0]["t"] >= runtime.op_strong_commit_time[0]
-    assert eager.gate.op_start_time[3] >= replay_done
+    assert eager.chip.op_start_time[3] >= replay_done
     assert eager.orchestrator.frame.snapshot() == \
         held.orchestrator.frame.snapshot()
     assert not runtime.speculative_recovery.has_finality_blockers
@@ -914,7 +921,7 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
 
     for seed in range(500):
         eager, eager_device, eager_weak, eager_strong = run(Eager(), seed)
-        if eager["cluster"].window_manager.speculative_replays:
+        if eager.cluster.window_manager.speculative_replays:
             break
     else:
         pytest.fail("no real strong-boundary disagreement in seeds 0..499")
@@ -924,8 +931,8 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
     assert np.array_equal(eager_device._truth[0], held_device._truth[0])
 
     truth = int(eager_device._truth[0][0])
-    eager_prediction = eager["cluster"].op_results[0][0]
-    held_prediction = held["cluster"].op_results[0][0]
+    eager_prediction = eager.cluster.op_results[0][0]
+    held_prediction = held.cluster.op_results[0][0]
     assert eager_prediction == held_prediction
     # Truth is the observable sampled with these exact detector arrays, not a
     # strong-decoder result.  This compares the two policies' actual logical
@@ -938,4 +945,4 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
         result for job, result in zip(eager_weak.jobs, eager_weak.results)
         if (job.op_id, job.window_id) == strong_job.strong_decode_for)
     assert weak_result.boundary_defects != eager_strong.results[0].boundary_defects
-    assert eager["cluster"].window_manager.speculative_replays == 1
+    assert eager.cluster.window_manager.speculative_replays == 1

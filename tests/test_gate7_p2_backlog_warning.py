@@ -186,7 +186,7 @@ def _run_regime(tau_w_us, rounds=120):
             BacklogEarlyWarning(cl, round_ticks=us(1),
                                 window_ticks=us(10))],
           ), verbose=False)
-    return res["metrics"]["backlog_early_warning"]
+    return res.result.metric_values()["backlog_early_warning"]
 
 
 def test_engine_stable_regime_never_warns():

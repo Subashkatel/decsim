@@ -230,7 +230,7 @@ def test_run_spec_build_is_single_use_even_after_success():
     spec = RunSpec(ops=[], decoder=StaticDecoder())
     spec.build()
 
-    with pytest.raises(RuntimeError, match="already ready"):
+    with pytest.raises(RuntimeError, match="already complete"):
         spec.build()
 
 
@@ -245,6 +245,46 @@ def test_factory_cannot_drive_the_engine_before_seed_binding():
             decoder=StaticDecoder(),
             make_factory=malicious_factory,
         ).build()
+
+
+def test_metric_cannot_schedule_work_after_primary_drain():
+    class SchedulingMetric:
+        name = "scheduling_metric"
+
+        def __init__(self, engine):
+            self.engine = engine
+
+        def observe(self, engine):
+            return None
+
+        def result(self):
+            self.engine.schedule(0, lambda: None)
+            return {}
+
+    spec = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_metrics=lambda engine, _cluster, _chip, _factory: [
+            SchedulingMetric(engine),
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="finalizing"):
+        spec.build()
+    with pytest.raises(RuntimeError, match="already invalid"):
+        spec.build()
+
+
+def test_primary_result_freezes_logical_outputs_separately_from_diagnostics():
+    completed_run = RunSpec(
+        ops=[Operation(0, "memory", (0,))],
+        decoder=StaticDecoder(),
+        rounds_policy=FixedRounds(3),
+    ).build()
+
+    assert completed_run.result.logical_results() == {0: (0,)}
+    completed_run.window_manager.op_results[0] = (1,)
+    assert completed_run.result.logical_results() == {0: (0,)}
 
 
 @pytest.mark.parametrize(
@@ -617,17 +657,17 @@ def test_old_single_argument_cross_part_validator_is_rejected():
 
 
 def test_default_build_exposes_one_resolved_planning_identity():
-    world = RunSpec(
+    completed_run = RunSpec(
         ops=[Operation(0, "memory", (0,))],
         decoder=StaticDecoder(),
     ).build()
 
-    assert world.planning.code.distance == 3
-    assert world.window_manager.code is world.planning.code
-    assert world.window_manager.layout is world.planning.layout
-    assert world.window_manager.scheme is world.planning.scheme
-    assert world.window_manager.rounds_policy is world.planning.rounds_policy
-    assert world.cluster.planner is world.planning.planner
+    assert completed_run.planning.code.distance == 3
+    assert completed_run.window_manager.code is completed_run.planning.code
+    assert completed_run.window_manager.layout is completed_run.planning.layout
+    assert completed_run.window_manager.scheme is completed_run.planning.scheme
+    assert completed_run.window_manager.rounds_policy is completed_run.planning.rounds_policy
+    assert completed_run.cluster.planner is completed_run.planning.planner
 
 
 def test_legacy_boundary_policy_defaults_to_non_speculative_delivery():
@@ -638,7 +678,7 @@ def test_legacy_boundary_policy_defaults_to_non_speculative_delivery():
         boundary_policy=LegacyBoundaryPolicy(),
     ))
 
-    assert result["chip_done"] is not None
+    assert result.result.chip_done_ticks is not None
 
 
 def test_static_device_needs_only_static_run_capabilities():
@@ -649,7 +689,7 @@ def test_static_device_needs_only_static_run_capabilities():
         device=StaticOnlyDevice(),
     ))
 
-    assert result["chip_done"] is not None
+    assert result.result.chip_done_ticks is not None
 
 
 def test_switching_device_must_supply_the_selected_strong_model_capability():

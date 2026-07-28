@@ -1,9 +1,17 @@
 """Reaction gate kernel tests — each maps to Contract 3 rules."""
+from dataclasses import fields
+
 import pytest
 
 from decsim.engine import Engine
 from decsim.policies import Ignore, SeparateDecodeJobs, from_mode
-from decsim.message import Decision, FeedbackEffect, Operation, ResourceClaim
+from decsim.message import (
+    Decision,
+    FeedbackEffect,
+    Operation,
+    OperationPlanningView,
+    ResourceClaim,
+)
 from decsim.chip import Chip
 
 ROUND = 1_100_000
@@ -85,6 +93,13 @@ class _Factory:
             callback()
 
 
+def _planning_view(operation):
+    return OperationPlanningView(**{
+        item.name: getattr(operation, item.name)
+        for item in fields(OperationPlanningView)
+    })
+
+
 def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
           factory_delay=0):
     eng = Engine(verbose=False)
@@ -94,6 +109,10 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
                         controller=_Controller(), cluster=cluster,
                         factory=factory, round_ticks=ROUND, code_distance=3,
                         idle_policy=idle_policy or Ignore(),
+                        planning_view_by_operation_id={
+                            operation.id: _planning_view(operation)
+                            for operation in ops
+                        },
                         max_idle_rounds=max_idle,
                         gates_start_on_round_boundaries=boundaries)
     gate.load(ops)

@@ -104,6 +104,12 @@ class ReactionPathDeadline:
     def __init__(self, slack_ticks: int):
         self.slack_ticks = int(slack_ticks)
 
+    def run_manifest_config(self):
+        return {
+            "kind": "reaction_path",
+            "slack_ticks": self.slack_ticks,
+        }
+
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
         """Tight deadline on the reaction path; now + slack off it."""
         return now if on_reaction_path else now + self.slack_ticks
@@ -127,6 +133,13 @@ class BufferExpiryDeadline:
     def __init__(self, capacity_rounds: int, round_ticks: int):
         self.capacity_rounds = int(capacity_rounds)
         self.round_ticks = int(round_ticks)
+
+    def run_manifest_config(self):
+        return {
+            "kind": "buffer_expiry",
+            "capacity_rounds": self.capacity_rounds,
+            "round_ticks": self.round_ticks,
+        }
 
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
         """Expiry tick of the window's first buffered round."""

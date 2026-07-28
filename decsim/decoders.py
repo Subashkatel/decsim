@@ -133,6 +133,16 @@ class CodeRouter:
             for decoder in (self.default, *self.by_code.values())
         )
 
+    def run_manifest_config(self):
+        keys = sorted(
+            self.by_code,
+            key=lambda key: (key is not None, "" if key is None else key),
+        )
+        return {
+            "kind": "code_router",
+            "route_keys": keys,
+        }
+
     def run_seed_children(self):
         """Expose routed decoders under stable semantic paths."""
         children = [
@@ -173,6 +183,9 @@ class FunctionLatencyDecoder:
     def __init__(self, latency_us_for):
         self.latency_us_for = latency_us_for   # job -> microseconds
 
+    def run_manifest_config(self):
+        return {"kind": "function_latency"}
+
     def run_seed_children(self):
         """Expose the callback that controls simulated service time."""
         return (
@@ -199,6 +212,12 @@ class PresetLatencyDecoder(FunctionLatencyDecoder):
         self.latency_us = latency_us
         super().__init__(lambda job: self.latency_us)
 
+    def run_manifest_config(self):
+        return {
+            "kind": "preset_latency",
+            "latency_us": self.latency_us,
+        }
+
 
 class PerRoundDecoder(FunctionLatencyDecoder):
     """Timing-only decoder with linear cost per syndrome round:
@@ -207,6 +226,9 @@ class PerRoundDecoder(FunctionLatencyDecoder):
     def __init__(self, tau_us: float = 1.0):
         self.tau_us = tau_us
         super().__init__(lambda job: job.n_rounds * self.tau_us)
+
+    def run_manifest_config(self):
+        return {"kind": "per_round_latency", "tau_us": self.tau_us}
 
 
 class SwitchingDecoder(_RandomSeedConsumer):
@@ -228,6 +250,14 @@ class SwitchingDecoder(_RandomSeedConsumer):
         self.t_comm_weak = us(t_comm_weak_us)
         self._initialize_run_seed_state(seed)
         self.switches = 0                      # diagnostic: how many jobs escalated
+
+    def run_manifest_config(self):
+        return {
+            "kind": "sampled_switching",
+            "switch_probability": self.gamma_switch,
+            "handoff_ticks": self.handoff,
+            "weak_communication_ticks": self.t_comm_weak,
+        }
 
     def run_seed_children(self):
         """Expose both decoder tiers beneath this stochastic wrapper."""
@@ -278,6 +308,9 @@ class SwitchingRouter:
             _decoder_needs_hyperedges(decoder)
             for decoder in (weak, strong)
         )
+
+    def run_manifest_config(self):
+        return {"kind": "switching_router"}
 
     def run_seed_children(self):
         """Expose both routed decoder tiers."""
@@ -331,6 +364,12 @@ class SampledConfidenceDecoder(_RandomSeedConsumer):
         self.escalation_probability = escalation_probability
         self.probability_for = probability_for
         self._initialize_run_seed_state(seed)
+
+    def run_manifest_config(self):
+        return {
+            "kind": "sampled_confidence",
+            "base_escalation_probability": self.escalation_probability,
+        }
 
     def run_seed_children(self):
         """Expose the inner decoder and optional probability callback."""

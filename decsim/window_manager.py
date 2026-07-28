@@ -91,7 +91,7 @@ class WindowManager:
         self.store = store if store is not None else PayloadStore()
         self.lifecycle = DynamicWindows(self)
 
-        self.ops: dict[int, Operation] = {}
+        self._ops: dict[int, Operation] = {}
         self.rounds_arrived: dict[int, int] = {}
         self.memory_rounds: dict[int, int] = {}
         self.memory_rounds_total = 0
@@ -135,11 +135,11 @@ class WindowManager:
 
     def register_op(self, op: Operation) -> None:
         """Track an operation's rounds, payload RAM, and feedback role."""
-        if op.id not in self.ops:
+        if op.id not in self._ops:
             self.rounds_arrived[op.id] = 0
             self.memory_rounds[op.id] = 0
             self.store.register_op(op.id)
-        self.ops[op.id] = op
+        self._ops[op.id] = op
         if op.blocked_by is not None:
             self.blocking_ops.add(op.blocked_by)
 
@@ -164,7 +164,7 @@ class WindowManager:
                     ),
                 )
             )
-        self.ops[stream_id] = stream_op
+        self._ops[stream_id] = stream_op
         self.rounds_arrived.setdefault(stream_id, 0)
         self.memory_rounds.setdefault(stream_id, 0)
         self.store.register_op(stream_id)
@@ -227,7 +227,7 @@ class WindowManager:
         """Ask the syndrome source for per-window detector error models."""
         if self.syndrome_source is None:
             return
-        for op_id, op in self.ops.items():
+        for op_id, op in self._ops.items():
             keys = [(op_id, k) for k in self.op_windows.get(op_id, [])]
             wins = [self.windows[key] for key in keys]
             if not wins:
@@ -370,13 +370,13 @@ class WindowManager:
         if self.syndrome_source is None:
             return
         self.syndrome_source.validate_stream_length(
-            self.ops[stream_id], stream_round_count)
+            self._ops[stream_id], stream_round_count)
 
     # -------------------------------------------------------------- arrivals
 
     def on_syndrome_arrival(self, payload: SyndromePayload) -> None:
         """Store an arriving syndrome round and re-check affected windows."""
-        op = self.ops[payload.operation_id]
+        op = self._ops[payload.operation_id]
         self._store_payload(payload, op)
         self.lifecycle.maybe_update(op.id)
         self._check_deferred_strong_after_arrival(op.id)
@@ -405,7 +405,7 @@ class WindowManager:
         self.memory_rounds[op_id] += 1
         self.memory_rounds_total += 1
         self.engine.log("DecoderCluster",
-                        f"memory round for {self.ops[op_id].name} "
+                        f"memory round for {self._ops[op_id].name} "
                         f"(idle buffer rounds: {self.memory_rounds[op_id]})")
         for k in range(self.window_count[op_id]):
             self.check_window((op_id, k))
@@ -436,7 +436,7 @@ class WindowManager:
             return
         if window.t_data_complete is None:
             window.t_data_complete = self.engine.now
-        op = self.ops[window.op_id]
+        op = self._ops[window.op_id]
         if window.deps_remaining > 0:
             if not window.blocked_logged:
                 window.blocked_logged = True
@@ -444,7 +444,7 @@ class WindowManager:
         self._submit_window_decode(key, window, op)
 
     def _window_data_complete(self, w: Window) -> bool:
-        op = self.ops[w.op_id]
+        op = self._ops[w.op_id]
         succ_rounds = self._successor_rounds_available(w)
         round_count = self._effective_round_count_for_window(w.op_id, w)
         has_successor = op.has_successor and not self._window_has_closed_boundary(w)
@@ -472,7 +472,7 @@ class WindowManager:
     def _round_count_for_window(self, op_id, window: Optional[Window] = None) -> int:
         return self.lifecycle.round_count_for_window(
             op_id, window,
-            fallback_rounds=self.rounds_for(self.ops[op_id])
+            fallback_rounds=self.rounds_for(self._ops[op_id])
             if not self.lifecycle.has(op_id) else 0)
 
     def _effective_round_count_for_window(self, op_id,
@@ -492,7 +492,7 @@ class WindowManager:
         stream_boundary = self.lifecycle.closed_boundary_for_window(window)
         if stream_boundary is not None:
             return stream_boundary
-        op = self.ops[window.op_id]
+        op = self._ops[window.op_id]
         if op.feedback_boundary_mode != "measurement_closed":
             return None
         if op.id not in self.blocking_ops:
@@ -584,7 +584,7 @@ class WindowManager:
         """Build the two-sided strong re-decode job for an escalated window."""
         key = (weak_job.op_id, weak_job.window_id)
         weak_window = self.windows[key]
-        op = self.ops[weak_job.op_id]
+        op = self._ops[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
         dem = None
         if self.syndrome_source is not None:
@@ -658,7 +658,7 @@ class WindowManager:
             proposed_restart = deepcopy(self.windows[restart_key])
             proposed_restart.buffer_lo = plan.restart_buffer_lo
             restart_model = self._build_strong_window_model(
-                self.ops[op_id],
+                self._ops[op_id],
                 proposed_restart,
                 round_count,
                 restart_exclusions,
@@ -672,7 +672,7 @@ class WindowManager:
             n_rounds=plan.context_hi - plan.context_lo + 1,
         )
         strong_model = self._build_strong_window_model(
-            self.ops[op_id], slab, round_count, strong_exclusions)
+            self._ops[op_id], slab, round_count, strong_exclusions)
         guard_lease = None
         if restart_key is not None:
             guard_lease = (key, "restart-plan-guard")
@@ -1010,7 +1010,7 @@ class WindowManager:
         by the timing goldens — do not reorder."""
         key = (job.op_id, job.window_id)
         window = self.windows[key]
-        op = self.ops[job.op_id]
+        op = self._ops[job.op_id]
         self._commit_window(job, res, key, window, op)
         self.lifecycle.update_committed_round_count(op.id)
         boundary = self.window_interaction.boundary_from_result(res, None)
@@ -1262,7 +1262,7 @@ class WindowManager:
         to SpeculativeRecovery, which replays the affected static descendants.
         """
         window = self.windows[key]
-        op = self.ops[window.op_id]
+        op = self._ops[window.op_id]
         self.op_strong_commit_time[op.id] = max(
             self.op_strong_commit_time.get(op.id, 0), self.engine.now)
         if self.speculative_recovery.complete(key, result):
@@ -1276,7 +1276,7 @@ class WindowManager:
         if key in self._held_boundary:                        # Held: ship now
             src_op_id, boundary = self._held_boundary.pop(key)
             self._send_boundary(
-                window, self.ops[src_op_id],
+                window, self._ops[src_op_id],
                 self.window_interaction.boundary_from_result(result, boundary))
         self.speculative_recovery.after_commit()
         self.release_stream_segments_at_commit(
@@ -1364,7 +1364,7 @@ class WindowManager:
             latest_delivery_revision=self._boundary_delivery_versions.get(
                 delivery_key, 0),
             source_operation_round_count=self.rounds_for(
-                self.ops[source_key[0]]),
+                self._ops[source_key[0]]),
             dependency_released=True,
             payload=boundary,
         )
@@ -1395,7 +1395,7 @@ class WindowManager:
             latest_source_revision=self._boundary_versions.get(source_key, 0),
             latest_delivery_revision=self._boundary_delivery_versions.get(
                 delivery_key, 0),
-            source_operation_round_count=self.rounds_for(self.ops[src_op_id]),
+            source_operation_round_count=self.rounds_for(self._ops[src_op_id]),
             dependency_released=dependency_released,
             payload=defects,
         )
@@ -1468,7 +1468,7 @@ class WindowManager:
 
     def recheck_finalize(self, op_id) -> None:
         """Re-evaluate a gated op's finish check after its predicate flips."""
-        op = self.ops.get(op_id)
+        op = self._ops.get(op_id)
         if op is not None:
             self._finish_operation_if_ready(op)
 
@@ -1540,7 +1540,7 @@ class WindowManager:
                                           committed_round_count: int) -> None:
         """Deliver segment results whose full round range has committed
         (gated the same way as ops: no pending strong may still change it)."""
-        for operation in list(self.ops.values()):
+        for operation in list(self._ops.values()):
             if operation.stream_id != stream_id:
                 continue
             if operation.id not in self.blocking_ops:

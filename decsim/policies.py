@@ -18,6 +18,9 @@ class Eager:
 
     speculative = True
 
+    def run_manifest_config(self):
+        return {"kind": "eager"}
+
     def on_commit(self, window, final: bool) -> bool:
         return True
 
@@ -26,6 +29,9 @@ class Held:
     """Opt-in: ship only when the committing result is final."""
 
     speculative = False
+
+    def run_manifest_config(self):
+        return {"kind": "held"}
 
     def on_commit(self, window, final: bool) -> bool:
         return final
@@ -38,6 +44,9 @@ class Ignore:
 
     mode = "ignore"
 
+    def run_manifest_config(self):
+        return {"kind": "ignore"}
+
     def account(self, idle_rounds: int, op) -> None:
         pass
 
@@ -48,6 +57,9 @@ class ExtendStream:
 
     mode = "extend_stream"
 
+    def run_manifest_config(self):
+        return {"kind": "extend_stream"}
+
     def account(self, idle_rounds: int, op) -> None:
         pass
 
@@ -57,6 +69,9 @@ class SeparateDecodeJobs:
     region of idle rounds (mode 'separate_decode_jobs')."""
 
     mode = "separate_decode_jobs"
+
+    def run_manifest_config(self):
+        return {"kind": "separate_decode_jobs"}
 
     def account(self, idle_rounds: int, op) -> None:
         pass

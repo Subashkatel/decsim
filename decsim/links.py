@@ -29,6 +29,9 @@ class Link:
             raise ValueError(f"bandwidth_bits_per_us must be > 0 "
                              f"(got {self.bandwidth_bits_per_us})")
 
+    def run_manifest_config(self):
+        return {"kind": "link"}
+
     def cost(self, bits: Optional[int] = None, now: Optional[int] = None) -> int:
         """Return ticks from now until this message is delivered."""
         serialization = us(bits / self.bandwidth_bits_per_us) \

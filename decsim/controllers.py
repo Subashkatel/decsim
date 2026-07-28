@@ -23,6 +23,12 @@ class ModularController:
         self.log_syndromes = log_syndromes
         self._pending: dict = {}
 
+    def run_manifest_config(self):
+        return {
+            "kind": "modular",
+            "log_syndromes": self.log_syndromes,
+        }
+
     # ------------------------------------------------------- syndrome path
 
     def relay_syndrome(self, payload, deliver: Callable) -> None:

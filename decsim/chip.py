@@ -57,7 +57,7 @@ class Chip:
         self.max_idle_rounds = max_idle_rounds if max_idle_rounds is not None \
             else 100 * code_distance
 
-        self.ops: dict[int, Operation] = {}
+        self._ops: dict[int, Operation] = {}
         self._deps_remaining: dict[int, int] = {}
         self._op_successors: dict[int, list[int]] = {}
         self.busy_claims: dict[tuple, int] = {}       # (kind, id) -> op_id
@@ -87,7 +87,7 @@ class Chip:
     @property
     def workload_complete(self) -> bool:
         """Whether every loaded operation body reached physical completion."""
-        return set(self.ops) == self.done_bodies
+        return set(self._ops) == self.done_bodies
 
     def _round_ticks_for(self, operation: Operation) -> int:
         try:
@@ -105,10 +105,10 @@ class Chip:
                 f"patch {patch!r} has no resolved round cadence"
             ) from error
 
-    def load(self, ops: list[Operation]) -> None:
+    def _load(self, ops: list[Operation]) -> None:
         """Register operations, build dependencies, then start dependency roots."""
         for operation in ops:
-            self.ops[operation.id] = operation
+            self._ops[operation.id] = operation
             self.cluster.register_op(operation)
         for operation in ops:
             self._deps_remaining[operation.id] = len(operation.predecessors)
@@ -127,7 +127,7 @@ class Chip:
         for successor_id in self._op_successors[operation.id]:
             self._deps_remaining[successor_id] -= 1
             if self._deps_remaining[successor_id] == 0:
-                self._attempt_start(self.ops[successor_id])
+                self._attempt_start(self._ops[successor_id])
 
     def _attempt_start(self, operation: Operation) -> None:
         """Reserve resources and fetch the magic state while feedback may pend."""
@@ -159,7 +159,7 @@ class Chip:
             for rid in sorted(claim.ids, key=repr):
                 key = (claim.kind, rid)
                 if key in self.busy_claims:
-                    holder = self.ops[self.busy_claims[key]].name
+                    holder = self._ops[self.busy_claims[key]].name
                     raise RuntimeError(
                         f"{operation.name} and {holder} share qubit {rid} but "
                         f"have no dependency edge. The operation list is missing "
@@ -256,9 +256,9 @@ class Chip:
         self.engine.log("Chip", f"{operation.name} body done")
         self._free_resources(operation)
         self._release_successors(operation)
-        if len(self.done_bodies) == len(self.ops):
+        if len(self.done_bodies) == len(self._ops):
             self.engine.log("Chip",
-                            f"QPU finished. All {len(self.ops)} operations are "
+                            f"QPU finished. All {len(self._ops)} operations are "
                             f"physically complete; decoder may still be draining.")
         self._close_feedback_boundary_if_needed(operation)
         self._start_idle_stream_if_needed(operation)
@@ -277,7 +277,7 @@ class Chip:
                                            stream_round_count)
 
     def _seal_finished_streams_if_needed(self) -> None:
-        if len(self.done_bodies) != len(self.ops):
+        if len(self.done_bodies) != len(self._ops):
             return
         for stream_id, total_rounds in list(self.stream_next_round.items()):
             if not self.cluster.has_dynamic_stream(stream_id):
@@ -305,7 +305,7 @@ class Chip:
 
     def _has_waiting_blocked_successor(self, op_id: int) -> bool:
         for successor_id in self._op_successors[op_id]:
-            successor = self.ops[successor_id]
+            successor = self._ops[successor_id]
             if successor.blocked_by is None or successor.id in self.started:
                 continue
             if successor.id not in self.decode_released:
@@ -327,14 +327,14 @@ class Chip:
         self.idle_rounds_by_patch[patch] = \
             self.idle_rounds_by_patch.get(patch, 0) + 1
         self.idle_rounds_emitted += 1
-        self.idle_policy.account(1, self.ops[op_id])
+        self.idle_policy.account(1, self._ops[op_id])
         self._start_released_successors_on_boundary(op_id, patch)
         self._submit_idle_decode_if_due(op_id, patch, round_index)
         self.engine.schedule(
             self._round_ticks_for_patch(patch),
             lambda operation_id=op_id, patch_id=patch, done=round_index:
                 self._emit_idle_round(operation_id, patch_id, done + 1),
-            label=f"idle-tick({self.ops[op_id].name},{round_index + 1})")
+            label=f"idle-tick({self._ops[op_id].name},{round_index + 1})")
 
     def _idle_round_cap_reached(self, op_id: int, patch,
                                 round_index: int) -> bool:
@@ -346,7 +346,7 @@ class Chip:
             "round_index": round_index,
             "max_idle_rounds": self.max_idle_rounds})
         self.engine.log("Chip",
-                        f"WARNING: {self.ops[op_id].name} hit the idle-round cap "
+                        f"WARNING: {self._ops[op_id].name} hit the idle-round cap "
                         f"(max_idle_rounds={self.max_idle_rounds}) with its "
                         f"blocked successor still waiting. No more memory rounds "
                         f"will be emitted, so decoder load and backlog past this "
@@ -366,7 +366,7 @@ class Chip:
     def _relay_idle_round_to_live_stream(self, op_id: int, patch) -> bool:
         if self.idle_policy.mode != "extend_stream":
             return False
-        operation = self.ops[op_id]
+        operation = self._ops[op_id]
         stream_id = operation.stream_id
         if stream_id is None or not self.cluster.has_dynamic_stream(stream_id):
             return False
@@ -387,7 +387,7 @@ class Chip:
     def _start_released_successors_on_boundary(self, op_id: int, patch) -> None:
         if self.gates_start_on_round_boundaries:
             for successor_id in self._op_successors[op_id]:
-                successor = self.ops[successor_id]
+                successor = self._ops[successor_id]
                 if (successor.blocked_by is not None
                         and successor.id not in self.started
                         and successor.id in self.decode_released
@@ -405,7 +405,7 @@ class Chip:
                 code.commit_rounds() + code.buffer_rounds(),
                 on_done=lambda: None, code=code.name,
                 spatial_nodes=code.spatial_nodes(1),
-                label=f"mem({self.ops[op_id].name},r{round_index})")
+                label=f"mem({self._ops[op_id].name},r{round_index})")
 
     # ------------------------------------------------------------- decisions
 
@@ -422,7 +422,7 @@ class Chip:
             return
         operation_id = decision.target_operation_id
         self.result_return_time_by_operation[operation_id] = self.engine.now
-        target = self.ops[operation_id]
+        target = self._ops[operation_id]
         detail = "timing-only" if effect is None \
             else (
                 f"observable {effect.logical_observable_index}, "
@@ -435,7 +435,7 @@ class Chip:
 
     def _release_blocked_operation(self, decision: Decision) -> None:
         operation_id = decision.target_operation_id
-        target = self.ops[operation_id]
+        target = self._ops[operation_id]
         effect = decision.effect
         if effect is not None:
             self._consume_effect(target, effect)

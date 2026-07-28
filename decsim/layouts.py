@@ -15,6 +15,9 @@ class UniformLayout:
     def __init__(self, code: CodeModel):
         self.code = code
 
+    def run_manifest_config(self):
+        return {"kind": "uniform"}
+
     @property
     def name(self) -> str:
         return f"uniform[{self.code.name}]"

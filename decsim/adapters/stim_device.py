@@ -27,6 +27,76 @@ class StimDevice:
 
     operation_circuit_scope = "per_operation"
 
+    @staticmethod
+    def _manifest_identity(value):
+        if type(value) is int:
+            return {"kind": "integer", "value": str(value), "items": None}
+        if type(value) is str:
+            return {"kind": "string", "value": value, "items": None}
+        if type(value) is tuple:
+            return {
+                "kind": "tuple",
+                "value": None,
+                "items": [
+                    StimDevice._manifest_identity(item)
+                    for item in value
+                ],
+            }
+        raise TypeError(
+            "StimDevice detector-round keys must use stable built-in "
+            "int, str, or recursive tuple identities"
+        )
+
+    @staticmethod
+    def _manifest_identity_bytes(value):
+        if type(value) is int:
+            encoded = str(value).encode("ascii")
+            return b"I" + len(encoded).to_bytes(8, "big") + encoded
+        if type(value) is str:
+            encoded = value.encode("utf-8")
+            return b"S" + len(encoded).to_bytes(8, "big") + encoded
+        if type(value) is tuple:
+            encoded_items = []
+            for item in value:
+                encoded = StimDevice._manifest_identity_bytes(item)
+                encoded_items.append(
+                    len(encoded).to_bytes(8, "big") + encoded
+                )
+            return (
+                b"T"
+                + len(encoded_items).to_bytes(8, "big")
+                + b"".join(encoded_items)
+            )
+        raise TypeError(
+            "StimDevice detector-round keys must use stable built-in "
+            "int, str, or recursive tuple identities"
+        )
+
+    def run_manifest_config(self):
+        rows = []
+        for shot_key, detector_rounds in (
+            self._detector_rounds_override.items()
+        ):
+            identity = self._manifest_identity(shot_key)
+            rows.append((
+                self._manifest_identity_bytes(shot_key),
+                {
+                    "shot_key": identity,
+                    "detector_rounds": [
+                        {"detector": detector, "round": round_index}
+                        for detector, round_index in sorted(
+                            detector_rounds.items()
+                        )
+                    ],
+                },
+            ))
+        rows.sort(key=lambda item: item[0])
+        return {
+            "kind": "stim",
+            "operation_circuit_scope": self.operation_circuit_scope,
+            "detector_rounds": [row for _key, row in rows],
+        }
+
     def __init__(
         self,
         seed: Optional[Integral] = None,

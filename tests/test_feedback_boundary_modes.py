@@ -135,11 +135,23 @@ def test_measurement_closed_boundary_closes_live_stream_without_idle_buffer():
     trailing = _run_live_stream_pair("trailing_buffer")
     closed = _run_live_stream_pair("measurement_closed")
 
-    trailing_first, trailing_second = trailing.chip.ops[1], trailing.chip.ops[2]
-    closed_first, closed_second = closed.chip.ops[1], closed.chip.ops[2]
+    trailing_operations = {
+        int(record["operation_id"]["value"]): record
+        for record in trailing.manifest.to_json_value()["operations"]
+    }
+    closed_operations = {
+        int(record["operation_id"]["value"]): record
+        for record in closed.manifest.to_json_value()["operations"]
+    }
 
-    assert trailing_second.stream_offset > trailing_first.stream_offset + 2
-    assert closed_second.stream_offset == closed_first.stream_offset + 2
+    assert (
+        trailing_operations[2]["final_resolved_stream_offset"]
+        > trailing_operations[1]["final_resolved_stream_offset"] + 2
+    )
+    assert (
+        closed_operations[2]["final_resolved_stream_offset"]
+        == closed_operations[1]["final_resolved_stream_offset"] + 2
+    )
     assert trailing.cluster.rounds_arrived[0] > closed.cluster.rounds_arrived[0]
     assert len(closed.cluster.committed_windows) == closed.cluster.total_windows
 

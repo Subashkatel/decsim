@@ -23,6 +23,9 @@ class DefaultWindowInteraction:
     state.
     """
 
+    def run_manifest_config(self):
+        return {"kind": "default_defect_mask"}
+
     def initial_boundary_state(self, window):
         return _DefectBoundaryState()
 

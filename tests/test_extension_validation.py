@@ -22,7 +22,7 @@ from decsim.metrics import (
     WindowLatencyBreakdown,
 )
 from decsim.planner import FixedRounds
-from decsim.policies import Held, ExtendStream, SeparateDecodeJobs
+from decsim.policies import Eager, Held, ExtendStream, SeparateDecodeJobs
 from decsim.run_spec import RunSpec, simulate
 from decsim.schedulers import (
     EarliestDeadlineScheduler,
@@ -30,8 +30,12 @@ from decsim.schedulers import (
     ReactionPathDeadline,
     WeightedUrgencyCostScheduler,
 )
-from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
-from decsim.switching import Switching, ThresholdRegister
+from decsim.schemes import (
+    NaiveOnlineScheme,
+    ParallelWindowScheme,
+    SlidingWindowScheme,
+)
+from decsim.switching import Baseline, Switching, ThresholdRegister
 
 
 class WrongBoundarySignature:
@@ -230,6 +234,40 @@ class CircuitRejectingScheme(SlidingWindowScheme):
             operation=operation,
             **kwargs,
         )
+
+
+class UnenteredCustomScheme:
+    def __init__(self):
+        self.calls = []
+
+    def plan_operation(
+        self,
+        operation_id,
+        round_count,
+        *,
+        commit_round_count,
+        buffer_round_count,
+    ):
+        self.calls.append("plan_operation")
+        raise AssertionError("custom scheme behavior was entered")
+
+    def data_complete(
+        self,
+        window,
+        *,
+        rounds_arrived,
+        successor_rounds,
+        memory_rounds,
+        round_count,
+        has_successor,
+        operation,
+    ):
+        self.calls.append("data_complete")
+        raise AssertionError("custom scheme behavior was entered")
+
+    def validate_buffer(self, geometry):
+        self.calls.append("validate_buffer")
+        raise AssertionError("custom scheme behavior was entered")
 
 
 class EngineBoundFactory:
@@ -578,6 +616,107 @@ def test_all_operation_consuming_planning_ports_receive_frozen_views():
     assert rounds.calls == 1
     assert scheme.plan_calls == [(0, 3, 3, 3)]
     assert scheme.data_complete_calls > 0
+
+
+@pytest.mark.parametrize(
+    "scheme_kind",
+    ["naive", "parallel", "sliding_subclass", "custom"],
+)
+def test_non_sliding_weak_keepup_rejects_before_behavior_entry(scheme_kind):
+    class SlidingSubclass(SlidingWindowScheme):
+        pass
+
+    class UnenteredLayout(UniformLayout):
+        def __init__(self):
+            super().__init__(SurfaceCodeModel(3))
+            self.calls = []
+
+        def codes(self):
+            self.calls.append("codes")
+            raise AssertionError("layout behavior was entered")
+
+    schemes = {
+        "naive": NaiveOnlineScheme(),
+        "parallel": ParallelWindowScheme(),
+        "sliding_subclass": SlidingSubclass(),
+        "custom": UnenteredCustomScheme(),
+    }
+    scheme = schemes[scheme_kind]
+    frontend = StaticFrontend([Operation(7, "memory", (0,))])
+    layout = UnenteredLayout()
+    provider_calls = []
+
+    with pytest.raises(ValueError, match="weak_keepup_ratio.*Sliding"):
+        RunSpec(
+            frontend=frontend,
+            layout=layout,
+            scheme=scheme,
+            strategy=Switching(
+                confidence_threshold=0.5,
+                weak_keepup_ratio=0.7,
+            ),
+            make_controller=lambda engine: provider_calls.append(engine),
+        ).build()
+
+    assert frontend.calls == 0
+    assert layout.calls == []
+    assert provider_calls == []
+    if isinstance(scheme, UnenteredCustomScheme):
+        assert scheme.calls == []
+
+
+@pytest.mark.parametrize(
+    "scheme",
+    [
+        NaiveOnlineScheme(),
+        ParallelWindowScheme(),
+        type("SlidingSubclass", (SlidingWindowScheme,), {})(),
+        UnenteredCustomScheme(),
+    ],
+)
+def test_none_weak_keepup_ratio_does_not_restrict_scheme_shape(scheme):
+    Switching(
+        confidence_threshold=0.5,
+        weak_keepup_ratio=None,
+    ).validate_declared_run(
+        scheme=scheme,
+        boundary_policy=Eager(),
+        has_dynamic_streams=False,
+        static_decode_plan_selected=False,
+        has_frontend=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("decode_operations", "expected_selected"),
+    [
+        (None, False),
+        ([], True),
+        ([Operation(7, "decode", (0,))], True),
+    ],
+)
+def test_static_decode_plan_selection_distinguishes_none_from_empty(
+    decode_operations,
+    expected_selected,
+):
+    class RecordingBaseline(Baseline):
+        def __init__(self):
+            self.selected_values = []
+
+        def validate_declared_run(self, **arguments):
+            self.selected_values.append(
+                arguments["static_decode_plan_selected"]
+            )
+            return super().validate_declared_run(**arguments)
+
+    strategy = RecordingBaseline()
+    RunSpec(
+        ops=[],
+        decode_ops=decode_operations,
+        strategy=strategy,
+    ).validate()
+
+    assert strategy.selected_values == [expected_selected]
 
 
 def test_declared_dynamic_stream_is_frozen_before_planning():

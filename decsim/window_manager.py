@@ -715,13 +715,27 @@ class WindowManager:
 
     # ------------------------------------------------------------ job build
 
+    def _deadline_for_window(self, op: Operation, window: Window) -> int:
+        """Stamp one window, copying retained start-round provenance when present."""
+        if window.t_first_round is None:
+            first_round_tick = self.store.round_complete_tick(
+                window.op_id,
+                window.start_round,
+            )
+            if first_round_tick is not None:
+                window.t_first_round = first_round_tick
+        return self.deadline_policy.deadline(
+            op,
+            window,
+            self.engine.now,
+            on_reaction_path=(op.id in self.blocking_ops),
+        )
+
     def _submit_window_decode(self, key: tuple, window: Window,
                               op: Operation) -> None:
         """Build the weak job, ask the strategy, and enqueue its submissions."""
+        deadline = self._deadline_for_window(op, window)
         window.t_queued = self.engine.now
-        deadline = self.deadline_policy.deadline(
-            op, window, self.engine.now,
-            on_reaction_path=(op.id in self.blocking_ops))
         job = DecodeJob(
                         op_id=window.op_id, window_id=window.k,
                         n_rounds=(
@@ -793,6 +807,7 @@ class WindowManager:
         weak_window = self.windows[key]
         op = self._ops[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
+        deadline = self._deadline_for_window(op, strong_window)
         dem = None
         if self.syndrome_source is not None:
             dem = self.syndrome_source.strong_window_model_for_operation(
@@ -802,7 +817,7 @@ class WindowManager:
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
             n_rounds=round_count, ready_time=self.engine.now,
-            deadline=self.engine.now, label=label, hint="strong",
+            deadline=deadline, label=label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=self._assemble_payloads(strong_window),
             attempt=1, window=strong_window, strong_decode_for=key)
@@ -1201,6 +1216,8 @@ class WindowManager:
         key = pending.key
         weak_job = pending.weak_job
         slab = pending.strong_window
+        op = self._ops[key[0]]
+        deadline = self._deadline_for_window(op, slab)
         dem = pending.strong_model
         payloads = self._assemble_payloads(slab)
         covered = {payload.round_index for payload in payloads}
@@ -1215,7 +1232,7 @@ class WindowManager:
         return DecodeJob(
             op_id=key[0], window_id=key[1],
             n_rounds=slab.n_rounds,
-            ready_time=self.engine.now, deadline=self.engine.now,
+            ready_time=self.engine.now, deadline=deadline,
             label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,

@@ -23,6 +23,7 @@ from decsim.message import (
     WindowPlan,
 )
 from decsim.protocols import Directive, OutcomeDirective, Submission
+from decsim.schedulers import BufferExpiryDeadline
 from decsim.window_manager import LogicalContribution, WindowManager
 from decsim.window_interactions import DefaultWindowInteraction
 
@@ -86,7 +87,14 @@ def _planning_view(operation):
     })
 
 
-def _runtime(boundary=None, strategy=None, ops=(0,), deps=(), blocking=()):
+def _runtime(
+    boundary=None,
+    strategy=None,
+    ops=(0,),
+    deps=(),
+    blocking=(),
+    deadline_policy=None,
+):
     eng = Engine(verbose=False)
     fb = _Feedback()
     runtime_operations = {
@@ -130,7 +138,8 @@ def _runtime(boundary=None, strategy=None, ops=(0,), deps=(), blocking=()):
     rt = WindowManager(eng, scheme=_Scheme(), code_geometry=geometry,
                        resolved_operations=resolved_operations,
                        resolved_patches=resolved_patches,
-                       deadline_policy=_Deadline(), links=_Links(),
+                       deadline_policy=deadline_policy or _Deadline(),
+                       links=_Links(),
                        orchestrator=fb, boundary_policy=boundary or _Eager(),
                        window_interaction=DefaultWindowInteraction(),
                        planning_view_by_operation_id={
@@ -411,7 +420,36 @@ def test_strong_job_two_sided_context_contract_2b6():
     w = strong.window
     assert (w.buffer_lo, w.commit_lo, w.commit_hi, w.buffer_hi) == (1, 1, 3, 6)
     assert strong.hint == "strong" and strong.attempt == 1
-    assert strong.strong_decode_for == (0, 0) and strong.deadline == eng.now
+    assert strong.strong_decode_for == (0, 0)
+    assert strong.window.t_first_round == rt.store.round_complete_tick(0, 1)
+    assert strong.deadline == eng.now + 1_000
+
+
+def test_strong_buffer_expiry_uses_the_context_start_round_arrival():
+    policy = BufferExpiryDeadline(capacity_rounds=40, round_ticks=10)
+    eng, rt, _, submitted = _runtime(deadline_policy=policy)
+    eng.now = 17
+    _feed_rounds(rt, 0, 6)
+    weak, _ = submitted[0]
+
+    strong = rt.make_strong_decode_job(weak, round_count=9, label="strong")
+
+    assert strong.window.t_first_round == 17
+    assert strong.deadline == 17 + 40 * 10
+
+
+def test_strong_job_rejects_missing_context_start_provenance(monkeypatch):
+    policy = BufferExpiryDeadline(capacity_rounds=40, round_ticks=10)
+    _, rt, _, submitted = _runtime(deadline_policy=policy)
+    _feed_rounds(rt, 0, 6)
+    weak, _ = submitted[0]
+    monkeypatch.setattr(rt.store, "round_complete_tick", lambda *_args: None)
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"window \(0, 0\).*arrival provenance is missing",
+    ):
+        rt.make_strong_decode_job(weak, round_count=9, label="strong")
 
 
 def test_logical_contributions_xor_vectors_over_exact_round_coverage():

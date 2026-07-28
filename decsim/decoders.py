@@ -33,15 +33,6 @@ SAMPLED_CONFIDENCE_SOURCE = SoftOutputSource(
     references=("controlled Bernoulli experimental input",),
 )
 
-SAMPLED_SWITCHING_SOURCE = SoftOutputSource(
-    method="sampled_switching_path",
-    cluster_origin="synthetic",
-    growth_schedule="bernoulli_per_job",
-    gap_units="branch_marker",
-    correction="none",
-    references=("controlled Bernoulli timing-path input",),
-)
-
 if TYPE_CHECKING:
     from .protocols import Decoder
 
@@ -255,10 +246,11 @@ class SwitchingDecoder(_RandomSeedConsumer):
     """Naive serial weak/strong switch: one job pays weak, handoff, and
     strong latency back-to-back on the SAME unit.
 
-    This is the timing-level baseline for switching A/B studies. Unlike
-    the routed path (SwitchingRouter + Switching strategy), the strong
-    decode here is not a separate job, so it cannot queue for or contend
-    over strong units."""
+    This is the timing-only baseline for switching A/B studies. It produces no
+    correction, logical prediction, boundary data, or confidence. Unlike the
+    functional routed path (SwitchingRouter + Switching strategy), the strong
+    decode here is not a separate job, so it cannot queue for or contend over
+    strong units."""
 
     def __init__(self, weak: "Decoder", strong: "Decoder", gamma_switch: float,
                  handoff_us: float = 0.5, seed: Optional[int] = None,
@@ -273,11 +265,11 @@ class SwitchingDecoder(_RandomSeedConsumer):
 
     def run_manifest_config(self):
         return {
-            "kind": "sampled_switching",
+            "kind": "sampled_inline_switching_timing",
             "switch_probability": self.gamma_switch,
             "handoff_ticks": self.handoff,
             "weak_communication_ticks": self.t_comm_weak,
-            "confidence_source": SAMPLED_SWITCHING_SOURCE.manifest_value(),
+            "timing_path_source": "bernoulli_per_job",
         }
 
     def run_seed_children(self):
@@ -294,14 +286,10 @@ class SwitchingDecoder(_RandomSeedConsumer):
         )
 
     def latency(self, job: DecodeJob) -> int:
-        """Weak latency, plus handoff and strong latency when a switch is sampled.
-
-        Sampling happens HERE, and the job is marked via job.hint so that
-        decode() later follows the same weak/strong path it was priced for."""
+        """Weak latency, plus handoff and strong latency on a timing switch."""
         latency_ticks = self.t_comm_weak + self.weak.latency(job)
         self._mark_stochastic_use()
         if self._rng.random() < self.gamma_switch:
-            job.hint = "strong"
             self.switches += 1
             # 2x: the handoff is a round trip (syndrome over to the strong
             # decoder, result back)
@@ -309,20 +297,8 @@ class SwitchingDecoder(_RandomSeedConsumer):
         return latency_ticks
 
     def decode(self, job: DecodeJob) -> DecodeResult:
-        """Decode through the path sampled by latency()."""
-        if job.hint == "strong":
-            result = self.strong.decode(job)
-            result.soft_output = SoftOutput(
-                gap=0.0,
-                source=SAMPLED_SWITCHING_SOURCE,
-            )
-        else:
-            result = self.weak.decode(job)
-            result.soft_output = SoftOutput(
-                gap=1.0,
-                source=SAMPLED_SWITCHING_SOURCE,
-            )
-        return result
+        """Return the identity-only result of this timing baseline."""
+        return DecodeResult(job.op_id, job.window_id)
 
 
 class SwitchingRouter:

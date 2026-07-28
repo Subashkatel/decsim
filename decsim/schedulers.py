@@ -88,13 +88,13 @@ class WeightedUrgencyCostScheduler:
 
 
 class EnqueueTimeDeadline:
-    """Default policy where every job deadline is its enqueue time."""
+    """Default deadline at window-job construction/logical admission."""
 
     def run_manifest_config(self):
         return {"kind": "enqueue_time"}
 
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
-        """Return the enqueue time (all jobs equally urgent)."""
+        """Return the policy-stamp tick (all newly built jobs equally urgent)."""
         return now
 
 
@@ -126,8 +126,8 @@ class BufferExpiryDeadline:
     ones (their data expires sooner) — the opposite of uniform slack.
 
     Pure buffer semantics: on_reaction_path is ignored here (reaction
-    tightening stays ReactionPathDeadline's job). Windows without an
-    arrival stamp fall back to now + capacity_rounds * round_ticks.
+    tightening stays ReactionPathDeadline's job). A window without its
+    first-round arrival stamp cannot define a buffer-expiry deadline.
     """
 
     def __init__(self, capacity_rounds: int, round_ticks: int):
@@ -144,8 +144,12 @@ class BufferExpiryDeadline:
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
         """Expiry tick of the window's first buffered round."""
         first = getattr(window, "t_first_round", None)
-        base = now if first is None else first
-        return base + self.capacity_rounds * self.round_ticks
+        if first is None:
+            raise RuntimeError(
+                f"cannot stamp buffer-expiry deadline for window {window.key}: "
+                "first-round arrival provenance is missing"
+            )
+        return first + self.capacity_rounds * self.round_ticks
 
 
 class ReservedCapacityLanes:

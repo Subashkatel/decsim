@@ -564,6 +564,42 @@ class OperationPlanningView:
     intrinsic_measurement: Optional[IntrinsicMeasurement]
     kind: OpKind
 
+    @classmethod
+    def from_operation(
+        cls,
+        operation: Operation,
+        *,
+        default_feedback_boundary_mode: str = "trailing_buffer",
+    ) -> "OperationPlanningView":
+        """Freeze an operation while excluding its executable circuit."""
+        return cls(
+            id=operation.id,
+            name=operation.name,
+            qubits=tuple(operation.qubits),
+            clifford=operation.clifford,
+            consumes_magic_state=operation.consumes_magic_state,
+            patches=tuple(operation.patches),
+            predecessors=tuple(operation.predecessors),
+            has_successor=operation.has_successor,
+            stream_id=operation.stream_id,
+            stream_offset=operation.stream_offset,
+            blocked_by=operation.blocked_by,
+            feedback_boundary_mode=(
+                operation.feedback_boundary_mode
+                if operation.feedback_boundary_mode is not None
+                else default_feedback_boundary_mode
+            ),
+            requires_result_return_to_chip=(
+                operation.requires_result_return_to_chip
+            ),
+            requires_strong_commit=operation.requires_strong_commit,
+            byproduct_pauli=operation.byproduct_pauli,
+            measurement_basis=operation.measurement_basis,
+            logical_observable_index=operation.logical_observable_index,
+            intrinsic_measurement=operation.intrinsic_measurement,
+            kind=operation.kind,
+        )
+
     @property
     def needs_magic_state(self) -> bool:
         if self.consumes_magic_state is not None:

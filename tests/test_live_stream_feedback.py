@@ -104,9 +104,13 @@ def test_feedback_idle_rounds_extend_the_live_stream():
 
     cluster = result.cluster
     chip = result.chip
-    first, second = operations
+    caller_first, caller_second = operations
+    first = chip.ops[caller_first.id]
+    second = chip.ops[caller_second.id]
 
     assert chip.done_bodies == {first.id, second.id}
+    assert caller_first.stream_offset is None
+    assert caller_second.stream_offset is None
     assert first.stream_offset == 0
     assert second.stream_offset is not None
     assert second.stream_offset > rounds[first.id]
@@ -258,9 +262,13 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
 
     cluster = result.cluster
     chip = result.chip
-    first, second = operations
+    caller_first, caller_second = operations
+    first = chip.ops[caller_first.id]
+    second = chip.ops[caller_second.id]
 
     assert chip.done_bodies == {first.id, second.id}
+    assert caller_first.stream_offset is None
+    assert caller_second.stream_offset is None
     assert second.stream_offset is not None
     assert second.stream_offset > rounds[first.id]
     assert cluster.rounds_arrived[stream.id] == second.stream_offset + rounds[second.id]

@@ -25,13 +25,13 @@ handler. Invariants to know before editing:
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Callable, Optional
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecodeResult,
-                      Operation, SeamFaultOwner, StrongRegionPlan, Window,
-                      WindowInfo, WindowPlan)
+                      Operation, OperationPlanningView, SeamFaultOwner,
+                      StrongRegionPlan, Window, WindowInfo, WindowPlan)
 from .payload_store import PayloadStore
 from .dynamic_windows import DynamicWindows
 from .protocols import MultiFaultExclusionSyndromeDevice
@@ -56,6 +56,7 @@ class WindowManager:
                  deadline_policy, links, orchestrator, boundary_policy,
                  window_interaction,
                  planning_view_by_operation_id,
+                 feedback_boundary_mode: str = "trailing_buffer",
                  syndrome_source=None, switching_active: bool = False,
                  store: Optional[PayloadStore] = None):
         self.engine = engine
@@ -71,6 +72,7 @@ class WindowManager:
         self._planning_view_by_operation_id = dict(
             planning_view_by_operation_id
         )
+        self.feedback_boundary_mode = feedback_boundary_mode
         self.syndrome_source = syndrome_source
         #: retains rounds for possible strong re-decodes (today: switching set).
         self.switching_active = switching_active
@@ -143,7 +145,25 @@ class WindowManager:
 
     def register_dynamic_stream(self, stream_op: Operation, code) -> None:
         """Register a stream whose windows are created at runtime."""
+        resolved_feedback_mode = (
+            stream_op.feedback_boundary_mode
+            if stream_op.feedback_boundary_mode is not None
+            else self.feedback_boundary_mode
+        )
+        stream_op = replace(
+            stream_op,
+            feedback_boundary_mode=resolved_feedback_mode,
+        )
         stream_id = stream_op.id
+        if stream_id not in self._planning_view_by_operation_id:
+            self._planning_view_by_operation_id[stream_id] = (
+                OperationPlanningView.from_operation(
+                    stream_op,
+                    default_feedback_boundary_mode=(
+                        self.feedback_boundary_mode
+                    ),
+                )
+            )
         self.ops[stream_id] = stream_op
         self.rounds_arrived.setdefault(stream_id, 0)
         self.memory_rounds.setdefault(stream_id, 0)

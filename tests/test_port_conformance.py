@@ -73,7 +73,7 @@ def test_wired_world_parts_satisfy_their_ports(completed_run):
         (completed_run.window_manager.boundary_policy, protocols.BoundaryPolicy),  # port 16
         (completed_run.window_manager.window_interaction,
          protocols.WindowInteraction),                         # port 21
-        (completed_run.cluster.planner, protocols.ExecutionPlanner),     # port 7
+        (completed_run.planning.planner, protocols.ExecutionPlanner),     # port 7
         (completed_run.pool, protocols.ResourcePool),                    # port 12
         (completed_run.pool.scheduler, protocols.Scheduler),             # port 11
         (completed_run.chip.idle_policy, protocols.IdlePolicy),          # port 17
@@ -81,7 +81,8 @@ def test_wired_world_parts_satisfy_their_ports(completed_run):
         (completed_run.controller, protocols.Controller),                 # port 14
         (completed_run.orchestrator, protocols.Orchestrator),          # port 15
         (completed_run.factory, protocols.MagicStateFactory),                      # port 19
-        (completed_run.cluster.strategy, protocols.DecodingStrategy),    # port 10
+        (completed_run.window_manager.strategy,
+         protocols.DecodingStrategy),                                   # port 10
     ]
     for part, port in checks:
         assert isinstance(part, port), \
@@ -186,7 +187,7 @@ def _resolved_types(completed_run):
         "window_interaction": type(completed_run.window_manager.window_interaction),
         "idle": type(completed_run.chip.idle_policy),
         "scheduler": type(completed_run.pool.scheduler),
-        "strategy": type(completed_run.cluster.strategy),
+        "strategy": type(completed_run.window_manager.strategy),
         "orchestrator": type(completed_run.orchestrator),
         "factory": type(completed_run.factory),
         "source": type(completed_run.chip.source),

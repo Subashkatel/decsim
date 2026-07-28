@@ -757,8 +757,35 @@ class RunSpec:
             planning.layout,
         )
 
-        engine = Engine(verbose=verbose, construction_guarded=True)
         strategy = self.strategy if self.strategy is not None else Baseline()
+        decode_plan_operations = self._decode_plan_operations(
+            ops,
+            decode_operations,
+            dynamic_streams,
+            static_decode_selected=self.decode_ops is not None,
+        )
+        planned_operations = (
+            ops
+            if decode_plan_operations is None
+            else decode_plan_operations
+        )
+        execution_plan = planning.planner.plan(
+            list(workload.planning_views(planned_operations))
+        )
+        check_window_size = getattr(strategy, "check_window_size", None)
+        if check_window_size is not None:
+            check_window_size(
+                execution_plan.summary.get(
+                    "commit",
+                    planning.code.commit_rounds(),
+                ),
+                execution_plan.summary.get(
+                    "buffer",
+                    planning.code.buffer_rounds(),
+                ),
+            )
+
+        engine = Engine(verbose=verbose, construction_guarded=True)
         scheduler = self.scheduler if self.scheduler is not None \
             else FifoScheduler()
         deadline_policy = self.deadline_policy if self.deadline_policy is not None \
@@ -824,15 +851,6 @@ class RunSpec:
             window_manager,
             pool,
             planning.layout,
-            planning.planner,
-            strategy,
-            self._decode_plan_operations(
-                ops,
-                decode_operations,
-                dynamic_streams,
-                static_decode_selected=self.decode_ops is not None,
-            ),
-            workload,
         )
 
         factory = self.make_factory(engine, cluster) \
@@ -912,7 +930,9 @@ class RunSpec:
                         op.id,
                         op.blocked_by,
                     )
-            cluster.prepare(ops)
+            for operation in planned_operations:
+                cluster.register_op(operation)
+            window_manager.load_execution_plan(execution_plan)
             for stream in dynamic_streams:
                 window_manager.register_dynamic_stream(stream, planning.code)
             for metric in metrics:
@@ -1750,57 +1770,14 @@ class ClusterFacade:
     """The 'cluster' read surface chip/factory/metrics code expects,
     backed by the new window_manager + pool."""
 
-    def __init__(self, window_manager, pool, layout, planner, strategy,
-                 decode_plan_ops, workload):
+    def __init__(self, window_manager, pool, layout):
         self.window_manager = window_manager
         self.pool = pool
         self.layout = layout
-        self.planner = planner
-        self.strategy = strategy
-        self._decode_plan_ops = decode_plan_ops
-        self._decode_planning_views = (
-            None
-            if decode_plan_ops is None
-            else workload.planning_views(decode_plan_ops)
-        )
-        self._workload = workload
-        self._registered_ops: list = []
 
     # chip-side surface
     def register_op(self, op) -> None:
         self.window_manager.register_op(op)
-        self._registered_ops.append(op)
-
-    def prepare(self, ops) -> None:
-        """Compile-time plan handoff: register the planned ops and load the
-        window plan. Costs zero ticks."""
-        planned = self._decode_plan_ops if self._decode_plan_ops is not None \
-            else list(ops)
-        for op in planned:
-            self.register_op(op)
-        planning_views = (
-            self._decode_planning_views
-            if self._decode_planning_views is not None
-            else self._workload.planning_views(planned)
-        )
-        self.build_windows(planning_views)
-
-    def build_windows(self, planning_views=None) -> None:
-        if self.window_manager._windows_built:
-            return
-        if planning_views is None:
-            planned = (
-                self._decode_plan_ops
-                if self._decode_plan_ops is not None
-                else self._registered_ops
-            )
-            planning_views = self._workload.planning_views(planned)
-        plan = self.planner.plan(list(planning_views))
-        check = getattr(self.strategy, "check_window_size", None)
-        if check is not None:
-            check(plan.summary.get("commit", self.window_manager.commit),
-                  plan.summary.get("buffer", self.window_manager.buffer))
-        self.window_manager.load_execution_plan(plan)
 
     def rounds_for(self, op) -> int:
         return self.window_manager.rounds_for(op)

@@ -223,6 +223,7 @@ def test_planner_parameter_swaps_the_planning_algorithm():
             decoder=PerRoundDecoder(tau_us=1.0),
         ), verbose=False)
     assert planner.calls == 1                  # OUR planner produced the plan
-    assert r.cluster.planner is planner
+    assert r.planning.planner is planner
+    assert not hasattr(r.cluster, "planner")
     assert r.cluster.scheme is planner.scheme
     assert r.result.fully_done_ticks > 0

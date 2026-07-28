@@ -105,7 +105,6 @@ class Chip:
         for operation in ops:
             for predecessor_id in operation.predecessors:
                 self._op_successors[predecessor_id].append(operation.id)
-        self.cluster.build_windows()
         for operation in ops:
             if self._deps_remaining[operation.id] == 0:
                 self._attempt_start(operation)

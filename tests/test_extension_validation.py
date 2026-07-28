@@ -923,7 +923,10 @@ def test_default_build_exposes_one_resolved_planning_identity():
     assert completed_run.window_manager.layout is completed_run.planning.layout
     assert completed_run.window_manager.scheme is completed_run.planning.scheme
     assert completed_run.window_manager.rounds_policy is completed_run.planning.rounds_policy
-    assert completed_run.cluster.planner is completed_run.planning.planner
+    assert not hasattr(completed_run.cluster, "planner")
+    assert not hasattr(completed_run.cluster, "strategy")
+    assert not hasattr(completed_run.cluster, "prepare")
+    assert not hasattr(completed_run.cluster, "build_windows")
 
 
 def test_legacy_boundary_policy_defaults_to_non_speculative_delivery():

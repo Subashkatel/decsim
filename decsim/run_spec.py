@@ -26,6 +26,7 @@ from typing import Any, Callable, Optional, TYPE_CHECKING
 from .message import (
     IntrinsicMeasurement,
     Operation,
+    OperationPlanningView,
     RunSeedChild,
     RunSeedPathSegment,
     RunSeedReservation,
@@ -95,6 +96,23 @@ class ResolvedPlanningParts:
     scheme: "DecodingScheme"
     rounds_policy: "RoundsPolicy"
     planner: "ExecutionPlanner"
+
+
+@dataclass
+class _RunOwnedWorkload:
+    """Private executable operations and their circuit-free planning views."""
+
+    executable_operations: tuple[Operation, ...]
+    static_decode_operations: tuple[Operation, ...]
+    dynamic_stream_operations: tuple[Operation, ...]
+    planning_view_by_operation_id: dict[int, OperationPlanningView]
+    source_circuit_by_operation_id: dict[int, Any]
+
+    def planning_views(self, operations) -> tuple[OperationPlanningView, ...]:
+        return tuple(
+            self.planning_view_by_operation_id[operation.id]
+            for operation in operations
+        )
 
 
 @dataclass(frozen=True)
@@ -309,10 +327,18 @@ class RunSpec:
     def validate(self) -> None:
         """Cross-part validation before any build."""
         planning = self._validate_configuration()
-        operations = list(self.ops or [])
-        operations.extend(self.decode_ops or [])
-        operations.extend(self.dynamic_streams or [])
-        self._validate_layout_selection(planning, operations)
+        workload = _snapshot_run_workload(
+            list(self.ops or []),
+            list(self.decode_ops or []),
+            list(self.dynamic_streams or []),
+            self.feedback_boundary_mode,
+        )
+        planning_operations = workload.planning_views(
+            workload.executable_operations
+            + workload.static_decode_operations
+            + workload.dynamic_stream_operations
+        )
+        self._validate_layout_selection(planning, planning_operations)
 
     def _validate_configuration(self) -> ResolvedPlanningParts:
         """Validate configuration-only state and resolve planning once."""
@@ -434,6 +460,24 @@ class RunSpec:
 
     def _validate_device_capabilities(self, device_protocol) -> None:
         """Check only device methods reachable in this run configuration."""
+        if self.device is not None:
+            missing = object()
+            circuit_scope = inspect.getattr_static(
+                self.device,
+                "operation_circuit_scope",
+                missing,
+            )
+            if circuit_scope is missing or type(circuit_scope) is not str:
+                raise TypeError(
+                    "device does not satisfy SyndromeDevice: "
+                    "operation_circuit_scope must be a stored exact string: "
+                    "'none' or 'per_operation'"
+                )
+            if circuit_scope not in ("none", "per_operation"):
+                raise ValueError(
+                    "device operation_circuit_scope must be 'none' or "
+                    f"'per_operation'; got {circuit_scope!r}"
+                )
         methods = [
             "begin_operation",
             "round_payloads",
@@ -578,7 +622,9 @@ class RunSpec:
             # measurement-closed streams that need no trailing buffer.
             planning.scheme.validate_buffer(planning.code)
 
-        probe = Operation(-1, "probe", (0,))
+        probe = _planning_view_from_operation(
+            Operation(-1, "probe", (0,))
+        )
         round_count = planning.rounds_policy.rounds_for(
             probe,
             planning.code,
@@ -672,10 +718,14 @@ class RunSpec:
         from .window_manager import WindowManager
         from .window_interactions import DefaultWindowInteraction
 
-        ops = self.frontend.build() if self.frontend is not None else self.ops
+        source_operations = (
+            self.frontend.build()
+            if self.frontend is not None
+            else self.ops
+        )
         if self.frontend is not None:
             _validate_run_workload_identity(
-                list(ops),
+                list(source_operations),
                 list(self.decode_ops or []),
                 list(self.dynamic_streams or []),
             )
@@ -684,16 +734,28 @@ class RunSpec:
                              list(self.decode_ops or [])
                              + list(self.dynamic_streams or []))
             _validate_operation_graph(
-                ops, validate_blockers=True,
+                source_operations, validate_blockers=True,
                 external_blocker_ids=auxiliary_ids)
-        self._apply_feedback_boundary_default(ops)
+        workload = _snapshot_run_workload(
+            list(source_operations),
+            list(self.decode_ops or []),
+            list(self.dynamic_streams or []),
+            self.feedback_boundary_mode,
+        )
+        ops = list(workload.executable_operations)
+        decode_operations = list(workload.static_decode_operations)
+        dynamic_streams = list(workload.dynamic_stream_operations)
 
         all_operations = list(ops)
-        all_operations.extend(self.decode_ops or [])
-        all_operations.extend(self.dynamic_streams or [])
+        all_operations.extend(decode_operations)
+        all_operations.extend(dynamic_streams)
+        planning_operations = workload.planning_views(all_operations)
         self._validate_operation_feedback_contracts(all_operations)
-        self._validate_layout_selection(planning, all_operations)
-        _validate_program_order(ops, planning.layout)
+        self._validate_layout_selection(planning, planning_operations)
+        _validate_program_order(
+            workload.planning_views(ops),
+            planning.layout,
+        )
 
         engine = Engine(verbose=verbose, construction_guarded=True)
         strategy = self.strategy if self.strategy is not None else Baseline()
@@ -710,6 +772,7 @@ class RunSpec:
         )
         idle_policy = self.idle_policy if self.idle_policy is not None else Ignore()
         device = self.device if self.device is not None else TimingOnlyDevice()
+        _install_private_execution_circuits(workload, device)
         decoder = self.decoder
         if decoder is None:
             raise ValueError("RunSpec.decoder is required (a Decoder part), "
@@ -763,7 +826,13 @@ class RunSpec:
             planning.layout,
             planning.planner,
             strategy,
-            self._decode_plan_operations(ops),
+            self._decode_plan_operations(
+                ops,
+                decode_operations,
+                dynamic_streams,
+                static_decode_selected=self.decode_ops is not None,
+            ),
+            workload,
         )
 
         factory = self.make_factory(engine, cluster) \
@@ -844,7 +913,7 @@ class RunSpec:
                         op.blocked_by,
                     )
             cluster.prepare(ops)
-            for stream in (self.dynamic_streams or []):
+            for stream in dynamic_streams:
                 window_manager.register_dynamic_stream(stream, planning.code)
             for metric in metrics:
                 engine.add_metric(metric)
@@ -945,13 +1014,6 @@ class RunSpec:
             )
         return tuple(roots)
 
-    def _apply_feedback_boundary_default(self, ops) -> None:
-        operations = list(ops) + list(self.decode_ops or []) \
-            + list(self.dynamic_streams or [])
-        for operation in operations:
-            if operation.feedback_boundary_mode is None:
-                operation.feedback_boundary_mode = self.feedback_boundary_mode
-
     @staticmethod
     def _validate_operation_feedback_contracts(operations) -> None:
         for operation in operations:
@@ -1001,13 +1063,20 @@ class RunSpec:
                     f"operation {operation.id} intrinsic_measurement "
                     f"trajectory_id does not match")
 
-    def _decode_plan_operations(self, ops):
+    @staticmethod
+    def _decode_plan_operations(
+        ops,
+        decode_operations,
+        dynamic_streams,
+        *,
+        static_decode_selected,
+    ):
         """Operations that receive compile-time decode windows (wiring parity)."""
-        if self.decode_ops is not None:
-            return self.decode_ops
-        if not self.dynamic_streams:
+        if static_decode_selected:
+            return decode_operations
+        if not dynamic_streams:
             return None
-        dynamic_ids = {stream.id for stream in self.dynamic_streams}
+        dynamic_ids = {stream.id for stream in dynamic_streams}
         return [op for op in ops if op.stream_id not in dynamic_ids]
 
 
@@ -1156,6 +1225,165 @@ def _validate_run_workload_identity(
                 f"operation {operation.id} stream_id {stream_id} does not "
                 "name a declared stream owner"
             )
+
+
+def _snapshot_run_workload(
+    executable_operations,
+    static_decode_operations,
+    dynamic_stream_operations,
+    feedback_boundary_mode: str,
+) -> _RunOwnedWorkload:
+    """Copy caller-owned workload state into one private run-owned snapshot."""
+    clone_by_source_identity = {}
+    source_circuit_by_operation_id = {}
+
+    def clone(operation: Operation) -> Operation:
+        source_identity = id(operation)
+        existing = clone_by_source_identity.get(source_identity)
+        if existing is not None:
+            return existing
+        private_operation = Operation(
+            id=operation.id,
+            name=operation.name,
+            qubits=tuple(operation.qubits),
+            clifford=operation.clifford,
+            circuit=None,
+            consumes_magic_state=operation.consumes_magic_state,
+            patches=tuple(operation.patches),
+            predecessors=tuple(operation.predecessors),
+            has_successor=operation.has_successor,
+            stream_id=operation.stream_id,
+            stream_offset=operation.stream_offset,
+            blocked_by=operation.blocked_by,
+            feedback_boundary_mode=(
+                operation.feedback_boundary_mode
+                if operation.feedback_boundary_mode is not None
+                else feedback_boundary_mode
+            ),
+            requires_result_return_to_chip=(
+                operation.requires_result_return_to_chip
+            ),
+            requires_strong_commit=operation.requires_strong_commit,
+            byproduct_pauli=operation.byproduct_pauli,
+            measurement_basis=operation.measurement_basis,
+            logical_observable_index=operation.logical_observable_index,
+            intrinsic_measurement=operation.intrinsic_measurement,
+            kind=operation.kind,
+        )
+        clone_by_source_identity[source_identity] = private_operation
+        source_circuit_by_operation_id[operation.id] = operation.circuit
+        return private_operation
+
+    executable = tuple(clone(operation) for operation in executable_operations)
+    static_decode = tuple(
+        clone(operation)
+        for operation in static_decode_operations
+    )
+    dynamic_streams = tuple(
+        clone(operation)
+        for operation in dynamic_stream_operations
+    )
+    planning_views = {}
+    for operation in (
+        executable
+        + static_decode
+        + dynamic_streams
+    ):
+        planning_views.setdefault(
+            operation.id,
+            _planning_view_from_operation(operation),
+        )
+    return _RunOwnedWorkload(
+        executable_operations=executable,
+        static_decode_operations=static_decode,
+        dynamic_stream_operations=dynamic_streams,
+        planning_view_by_operation_id=planning_views,
+        source_circuit_by_operation_id=source_circuit_by_operation_id,
+    )
+
+
+def _planning_view_from_operation(
+    operation: Operation,
+) -> OperationPlanningView:
+    """Freeze every logical operation field while excluding its circuit."""
+    return OperationPlanningView(
+        id=operation.id,
+        name=operation.name,
+        qubits=operation.qubits,
+        clifford=operation.clifford,
+        consumes_magic_state=operation.consumes_magic_state,
+        patches=operation.patches,
+        predecessors=operation.predecessors,
+        has_successor=operation.has_successor,
+        stream_id=operation.stream_id,
+        stream_offset=operation.stream_offset,
+        blocked_by=operation.blocked_by,
+        feedback_boundary_mode=(
+            operation.feedback_boundary_mode
+            if operation.feedback_boundary_mode is not None
+            else "trailing_buffer"
+        ),
+        requires_result_return_to_chip=(
+            operation.requires_result_return_to_chip
+        ),
+        requires_strong_commit=operation.requires_strong_commit,
+        byproduct_pauli=operation.byproduct_pauli,
+        measurement_basis=operation.measurement_basis,
+        logical_observable_index=operation.logical_observable_index,
+        intrinsic_measurement=operation.intrinsic_measurement,
+        kind=operation.kind,
+    )
+
+
+def _install_private_execution_circuits(
+    workload: _RunOwnedWorkload,
+    device,
+) -> None:
+    """Install only device-reachable, independently reconstructed circuits."""
+    circuit_scope = device.operation_circuit_scope
+    if circuit_scope not in ("none", "per_operation"):
+        raise ValueError(
+            "device operation_circuit_scope must be 'none' or "
+            f"'per_operation'; got {circuit_scope!r}"
+        )
+    if circuit_scope == "none":
+        return
+
+    nonempty_circuits = [
+        circuit
+        for circuit in workload.source_circuit_by_operation_id.values()
+        if circuit is not None
+    ]
+    if not nonempty_circuits:
+        return
+    try:
+        import stim
+    except ImportError as error:
+        raise RuntimeError(
+            "active operation circuits require the stim package"
+        ) from error
+
+    private_operation_by_id = {
+        operation.id: operation
+        for operation in (
+            workload.executable_operations
+            + workload.static_decode_operations
+            + workload.dynamic_stream_operations
+        )
+    }
+    for operation_id, source_circuit in (
+        workload.source_circuit_by_operation_id.items()
+    ):
+        if source_circuit is None:
+            continue
+        if type(source_circuit) is not stim.Circuit:
+            raise TypeError(
+                f"operation {operation_id} has an active circuit that is "
+                "not an exact stim.Circuit"
+            )
+        private_operation_by_id[operation_id].circuit = stim.Circuit(
+            str(source_circuit)
+        )
 
 
 def _materialize_run_seed_plan(
@@ -1523,13 +1751,19 @@ class ClusterFacade:
     backed by the new window_manager + pool."""
 
     def __init__(self, window_manager, pool, layout, planner, strategy,
-                 decode_plan_ops):
+                 decode_plan_ops, workload):
         self.window_manager = window_manager
         self.pool = pool
         self.layout = layout
         self.planner = planner
         self.strategy = strategy
         self._decode_plan_ops = decode_plan_ops
+        self._decode_planning_views = (
+            None
+            if decode_plan_ops is None
+            else workload.planning_views(decode_plan_ops)
+        )
+        self._workload = workload
         self._registered_ops: list = []
 
     # chip-side surface
@@ -1544,14 +1778,24 @@ class ClusterFacade:
             else list(ops)
         for op in planned:
             self.register_op(op)
-        self.build_windows()
+        planning_views = (
+            self._decode_planning_views
+            if self._decode_planning_views is not None
+            else self._workload.planning_views(planned)
+        )
+        self.build_windows(planning_views)
 
-    def build_windows(self) -> None:
+    def build_windows(self, planning_views=None) -> None:
         if self.window_manager._windows_built:
             return
-        planned = self._decode_plan_ops if self._decode_plan_ops is not None \
-            else self._registered_ops
-        plan = self.planner.plan(list(planned))
+        if planning_views is None:
+            planned = (
+                self._decode_plan_ops
+                if self._decode_plan_ops is not None
+                else self._registered_ops
+            )
+            planning_views = self._workload.planning_views(planned)
+        plan = self.planner.plan(list(planning_views))
         check = getattr(self.strategy, "check_window_size", None)
         if check is not None:
             check(plan.summary.get("commit", self.window_manager.commit),

@@ -1,5 +1,7 @@
-import pytest
+from dataclasses import FrozenInstanceError, fields
+
 import numpy as np
+import pytest
 
 from decsim.decoders import PerRoundDecoder
 from decsim.devices import TimingOnlyDevice
@@ -26,11 +28,26 @@ class LegacyBoundaryPolicy:
 
 
 class StaticOnlyDevice:
+    operation_circuit_scope = "none"
+
     def begin_operation(self, operation):
         return None
 
     def round_payloads(self, operation, round_index):
         return TimingOnlyDevice().round_payloads(operation, round_index)
+
+    def window_models_for_operation(
+        self, operation, windows, round_count, *, belief_matching=False,
+    ):
+        return []
+
+
+class MissingCircuitScopeDevice:
+    def begin_operation(self, operation):
+        return None
+
+    def round_payloads(self, operation, round_index):
+        return []
 
     def window_models_for_operation(
         self, operation, windows, round_count, *, belief_matching=False,
@@ -90,6 +107,30 @@ class RecordingPlanner:
             self.layout,
             self.rounds_policy,
         ).plan(operations)
+
+
+class PlanningViewRecordingPlanner(RecordingPlanner):
+    def __init__(self, scheme, layout, rounds_policy):
+        super().__init__(scheme, layout, rounds_policy)
+        self.operations = ()
+
+    def plan(self, operations):
+        self.operations = tuple(operations)
+        return super().plan(operations)
+
+
+class CircuitRecordingTimingDevice(TimingOnlyDevice):
+    operation_circuit_scope = "none"
+
+    def __init__(self):
+        self.circuits_seen = []
+
+    def begin_operation(self, operation):
+        self.circuits_seen.append(operation.circuit)
+
+
+class CircuitRecordingActiveDevice(CircuitRecordingTimingDevice):
+    operation_circuit_scope = "per_operation"
 
 
 class StaticFrontend:
@@ -279,6 +320,102 @@ def test_descriptor_backed_planner_child_rejects_without_descriptor_entry(
         getattr(spec, entrypoint)()
 
     assert planner.layout_entries == 0
+
+
+def test_planner_receives_frozen_circuit_free_operation_view():
+    layout = UniformLayout(SurfaceCodeModel(3))
+    planner = PlanningViewRecordingPlanner(
+        SlidingWindowScheme(),
+        layout,
+        FixedRounds(3),
+    )
+    RunSpec(
+        ops=[Operation(0, "memory", (0,), circuit=object())],
+        planner=planner,
+        decoder=StaticDecoder(),
+    ).build()
+
+    assert len(planner.operations) == 1
+    planning_operation = planner.operations[0]
+    assert not hasattr(planning_operation, "circuit")
+    with pytest.raises(FrozenInstanceError):
+        planning_operation.name = "mutated"
+
+
+def test_planning_view_fields_are_exactly_operation_fields_without_circuit():
+    from decsim.message import OperationPlanningView
+
+    operation_fields = {item.name for item in fields(Operation)}
+    planning_fields = {item.name for item in fields(OperationPlanningView)}
+
+    assert planning_fields == operation_fields - {"circuit"}
+
+
+def test_run_uses_private_operation_copy_without_mutating_caller():
+    caller_operation = Operation(
+        0,
+        "memory",
+        (0,),
+        circuit=object(),
+        feedback_boundary_mode=None,
+    )
+    device = CircuitRecordingTimingDevice()
+
+    RunSpec(
+        ops=[caller_operation],
+        device=device,
+        decoder=StaticDecoder(),
+        feedback_boundary_mode="measurement_closed",
+    ).build()
+
+    assert caller_operation.feedback_boundary_mode is None
+    assert caller_operation.circuit is not None
+    assert device.circuits_seen == [None]
+
+
+def test_device_without_circuit_scope_rejects_during_validation():
+    spec = RunSpec(
+        ops=[],
+        device=MissingCircuitScopeDevice(),
+        decoder=StaticDecoder(),
+    )
+
+    with pytest.raises(
+        TypeError,
+        match=r"device.*operation_circuit_scope.*stored.*none.*per_operation",
+    ):
+        spec.validate()
+
+
+def test_active_stim_circuit_is_reconstructed_for_private_execution():
+    stim = pytest.importorskip("stim")
+    caller_circuit = stim.Circuit("X 0")
+    device = CircuitRecordingActiveDevice()
+
+    RunSpec(
+        ops=[Operation(0, "memory", (0,), circuit=caller_circuit)],
+        device=device,
+        decoder=StaticDecoder(),
+    ).build()
+
+    assert len(device.circuits_seen) == 1
+    private_circuit = device.circuits_seen[0]
+    assert type(private_circuit) is stim.Circuit
+    assert private_circuit is not caller_circuit
+    assert str(private_circuit) == str(caller_circuit)
+
+
+def test_active_custom_circuit_rejects_before_device_entry():
+    device = CircuitRecordingActiveDevice()
+
+    with pytest.raises(TypeError, match="not an exact stim.Circuit"):
+        RunSpec(
+            ops=[Operation(0, "memory", (0,), circuit=object())],
+            device=device,
+            decoder=StaticDecoder(),
+        ).build()
+
+    assert device.circuits_seen == []
 
 
 def test_run_root_binds_nested_consumers_by_stable_semantic_path():

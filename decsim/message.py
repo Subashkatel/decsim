@@ -536,3 +536,34 @@ class Operation:
         if self.consumes_magic_state is not None:
             return self.consumes_magic_state
         return not self.clifford
+
+
+@dataclass(frozen=True)
+class OperationPlanningView:
+    """Immutable operation configuration visible to planning collaborators."""
+
+    id: int
+    name: str
+    qubits: tuple
+    clifford: bool
+    consumes_magic_state: Optional[bool]
+    patches: tuple
+    predecessors: tuple
+    has_successor: bool
+    stream_id: Optional[int]
+    stream_offset: Optional[int]
+    blocked_by: Optional[int]
+    feedback_boundary_mode: str
+    requires_result_return_to_chip: bool
+    requires_strong_commit: bool
+    byproduct_pauli: str
+    measurement_basis: str
+    logical_observable_index: Optional[int]
+    intrinsic_measurement: Optional[IntrinsicMeasurement]
+    kind: OpKind
+
+    @property
+    def needs_magic_state(self) -> bool:
+        if self.consumes_magic_state is not None:
+            return self.consumes_magic_state
+        return not self.clifford

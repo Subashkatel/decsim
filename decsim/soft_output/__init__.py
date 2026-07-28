@@ -19,15 +19,26 @@ class SoftOutputMetric(Protocol):
     def evaluate(self, syndrome) -> SoftOutput: ...
 
 
-from .cluster import ClusterGapMetric
-from .complementary import ComplementaryGapMetric, dem_to_matrices
+from .cluster import (
+    ClusterGapMetric,
+    RECONSTRUCTED_CLUSTER_GAP_CORRECTED_SOURCE,
+    RECONSTRUCTED_CLUSTER_GAP_SOURCE,
+)
+from .complementary import (
+    COMPLEMENTARY_GAP_SOURCE,
+    ComplementaryGapMetric,
+    dem_to_matrices,
+)
 from .decoder import SoftOutputDecoder
 
 __all__ = [
     "SoftOutput",
     "SoftOutputMetric",
     "ComplementaryGapMetric",
+    "COMPLEMENTARY_GAP_SOURCE",
     "ClusterGapMetric",
+    "RECONSTRUCTED_CLUSTER_GAP_SOURCE",
+    "RECONSTRUCTED_CLUSTER_GAP_CORRECTED_SOURCE",
     "dem_to_matrices",
     "SoftOutputDecoder",
 ]

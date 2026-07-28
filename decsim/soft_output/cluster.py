@@ -5,13 +5,35 @@ import heapq
 import math
 from typing import TYPE_CHECKING
 
-from ..message import SoftOutput
+from ..message import SoftOutput, SoftOutputSource
 
 if TYPE_CHECKING:
     import stim
     from ..detector_error_model import WindowErrorModel
 
 _CITATION = "Meister/Pattison/Preskill arXiv:2405.07433 Def. 9, Alg. 2; Thm. 13"
+
+RECONSTRUCTED_CLUSTER_GAP_SOURCE = SoftOutputSource(
+    method="cluster_gap",
+    cluster_origin="reconstructed",
+    growth_schedule="simultaneous_weighted_balls",
+    gap_units="log_likelihood_weight",
+    correction="none",
+    references=(
+        "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
+    ),
+)
+
+RECONSTRUCTED_CLUSTER_GAP_CORRECTED_SOURCE = SoftOutputSource(
+    method="cluster_gap",
+    cluster_origin="reconstructed",
+    growth_schedule="simultaneous_weighted_balls",
+    gap_units="log_likelihood_weight",
+    correction="duality_gap_corrected",
+    references=(
+        "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
+    ),
+)
 
 BOUNDARY = -1
 _EPS = 1e-9
@@ -304,13 +326,18 @@ class ClusterGapMetric:
         bits = np.asarray(syndrome, dtype=np.uint8).ravel()
         syndrome_set = {int(i) for i in np.nonzero(bits)[0]}
         phi, _cluster_of, _fill, _qw, dual_mass = self._gap(syndrome_set)
-        prediction, w_min = self._matching.decode(bits, return_weight=True)
-        pred = int(prediction[0]) if np.size(prediction) else 0
+        _prediction, w_min = self._matching.decode(bits, return_weight=True)
         gap = phi
+        source = RECONSTRUCTED_CLUSTER_GAP_SOURCE
         if robust:
             gap = phi - max(0.0, float(w_min) - dual_mass)
-        return SoftOutput(logical_value=pred, gap=float(max(0.0, gap)),
-                          w_min=float(w_min), w_comp=float(dual_mass))
+            source = RECONSTRUCTED_CLUSTER_GAP_CORRECTED_SOURCE
+        return SoftOutput(
+            gap=float(max(0.0, gap)),
+            source=source,
+            w_min=float(w_min),
+            w_comp=float(dual_mass),
+        )
 
     def trace(self, syndrome) -> dict:
         """Diagnostic dump for one syndrome: clusters, zeroed/frontier edges, g_cluster."""

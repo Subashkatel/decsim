@@ -88,14 +88,14 @@ def test_switching_decoder_latency_mix():
     job = DecodeJob(0, 0, 6)
     never = SwitchingDecoder(weak, strong, gamma_switch=0.0, handoff_us=0.5)
     assert never.latency(job) == us(1.0) and job.hint is None
-    assert never.decode(job).soft_output == 1.0
+    assert never.decode(job).soft_output.gap == 1.0
 
     job2 = DecodeJob(0, 0, 6)
     always = SwitchingDecoder(weak, strong, gamma_switch=1.0, handoff_us=0.5)
     # weak decode + two handoffs (decoder->decoder messaging) + strong decode
     assert always.latency(job2) == us(1.0) + 2 * us(0.5) + us(10.0)
     assert job2.hint == "strong" and always.switches == 1
-    assert always.decode(job2).soft_output == 0.0
+    assert always.decode(job2).soft_output.gap == 0.0
 
 
 def test_switching_decoder_charges_t_comm_weak_on_every_path():
@@ -170,10 +170,10 @@ def test_sampled_confidence_run_seed_binding_and_explicit_conflict():
     first = build()
     second = build()
     assert [
-        first.decode(DecodeJob(0, window_id, 3)).soft_output
+        first.decode(DecodeJob(0, window_id, 3)).soft_output.gap
         for window_id in range(12)
     ] == [
-        second.decode(DecodeJob(0, window_id, 3)).soft_output
+        second.decode(DecodeJob(0, window_id, 3)).soft_output.gap
         for window_id in range(12)
     ]
 

@@ -44,7 +44,7 @@ def test_complementary_gap_is_real_valued_not_a_flag():
         so = metric.evaluate(det[i])
         assert isinstance(so, SoftOutput)
         assert so.gap >= 0.0
-        assert so.logical_value in (0, 1)
+        assert not hasattr(so, "logical_value")
         gaps.append(so.gap)
     gaps = np.asarray(gaps)
     assert len(np.unique(np.round(gaps, 6))) > 10   # many distinct values, not {0,1}
@@ -55,11 +55,13 @@ def test_low_gap_shots_are_error_prone():
     """corr(g, error) < 0: small gap = low confidence = more logical errors."""
     dem, det, obs = _sample(_memory_circuit(3, 5e-3), 5000, seed=5)
     metric = ComplementaryGapMetric.from_dem(dem)
+    matching = pymatching.Matching.from_detector_error_model(dem)
     gaps = np.empty(len(det)); errs = np.empty(len(det))
     for i in range(len(det)):
         so = metric.evaluate(det[i])
+        prediction = matching.decode(det[i])
         gaps[i] = so.gap
-        errs[i] = so.logical_value ^ int(obs[i, 0])
+        errs[i] = int(prediction[0]) ^ int(obs[i, 0])
     assert errs.sum() > 0
     assert np.corrcoef(gaps, errs)[0, 1] < 0
 

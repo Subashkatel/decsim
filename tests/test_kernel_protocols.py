@@ -216,6 +216,7 @@ def test_decoder_wrappers_expose_children_and_behavior_callbacks():
 def test_devices_and_switching_expose_circuit_scope_and_behavior_children():
     from decsim.adapters.stim_device import StimDevice
     from decsim.codes import SurfaceCodeModel
+    from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE
     from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
     from decsim.switching import Switching, ThresholdRegister
 
@@ -233,8 +234,15 @@ def test_devices_and_switching_expose_circuit_scope_and_behavior_children():
     }
     assert TimingOnlyDevice.operation_circuit_scope == "none"
 
-    register = ThresholdRegister(default=0.5)
-    switching = Switching(0.5, threshold_register=register)
+    register = ThresholdRegister(
+        default=0.5,
+        expected_source=SAMPLED_CONFIDENCE_SOURCE,
+    )
+    switching = Switching(
+        0.5,
+        SAMPLED_CONFIDENCE_SOURCE,
+        threshold_register=register,
+    )
     assert _seed_child_paths(switching) == {
         (("field", "threshold_register"),): register,
     }

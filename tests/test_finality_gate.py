@@ -9,7 +9,12 @@ part opts in. All scenarios are real end-to-end simulations.
 import pytest
 
 from decsim.policies import Held
-from decsim.decoders import PerRoundDecoder, SampledConfidenceDecoder, SwitchingRouter
+from decsim.decoders import (
+    PerRoundDecoder,
+    SAMPLED_CONFIDENCE_SOURCE,
+    SampledConfidenceDecoder,
+    SwitchingRouter,
+)
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import Operation
 from decsim.planner import FixedRounds
@@ -123,7 +128,7 @@ def test_gate_finalize_releases_after_strong_commit():
         ops=_blocked_pair(),
         d=3,
         rounds_policy=FixedRounds(11),
-        strategy=Switching(confidence_threshold=0.5),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
         unit_pools={"default": 1, "strong": 1},
         boundary_policy=Held(),

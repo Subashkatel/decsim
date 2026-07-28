@@ -1,7 +1,7 @@
 """The data-path decoder emits a REAL soft output, not the 0/1 Bernoulli flag.
 
-`SoftOutputDecoder` wraps any base decoder and attaches the real complementary
-gap to `DecodeResult.soft_output`, computed on the SAME window decode graph the
+`SoftOutputDecoder` wraps any base decoder and attaches typed complementary
+confidence to `DecodeResult.soft_output`, computed on the SAME window decode graph the
 hard decoder uses. Validated in naive (single-window) mode, where the window
 carries the observable (Toshio et al. 2510.25222; see decsim.soft_output).
 """
@@ -80,8 +80,8 @@ def test_engine_emits_real_soft_output_not_flag():
             seed=4 + shot,
         )
         assert decoder.last_soft is not None
-        assert decoder.last_soft >= 0.0
-        softs.append(decoder.last_soft)
+        assert decoder.last_soft.gap >= 0.0
+        softs.append(decoder.last_soft.gap)
     assert set(np.round(softs, 6)) - {0.0, 1.0}          # not just the old path flag
     assert len(np.unique(np.round(softs, 6))) > 5
 
@@ -130,7 +130,7 @@ def test_engine_soft_output_is_error_predictive():
             seed=15 + shot,
         )
         truth = int(device._truth[1][0])
-        gaps.append(decoder.last_soft)
+        gaps.append(decoder.last_soft.gap)
         errs.append(decoded[0] ^ truth)
     gaps, errs = np.asarray(gaps), np.asarray(errs)
     assert errs.sum() > 0

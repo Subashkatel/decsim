@@ -19,8 +19,28 @@ from .message import (
     RunSeedChild,
     RunSeedPathSegment,
     RunSeedReservation,
+    SoftOutput,
+    SoftOutputSource,
 )
 from .config import us
+
+SAMPLED_CONFIDENCE_SOURCE = SoftOutputSource(
+    method="sampled_confidence",
+    cluster_origin="synthetic",
+    growth_schedule="bernoulli_per_window",
+    gap_units="branch_marker",
+    correction="none",
+    references=("controlled Bernoulli experimental input",),
+)
+
+SAMPLED_SWITCHING_SOURCE = SoftOutputSource(
+    method="sampled_switching_path",
+    cluster_origin="synthetic",
+    growth_schedule="bernoulli_per_job",
+    gap_units="branch_marker",
+    correction="none",
+    references=("controlled Bernoulli timing-path input",),
+)
 
 if TYPE_CHECKING:
     from .protocols import Decoder
@@ -257,6 +277,7 @@ class SwitchingDecoder(_RandomSeedConsumer):
             "switch_probability": self.gamma_switch,
             "handoff_ticks": self.handoff,
             "weak_communication_ticks": self.t_comm_weak,
+            "confidence_source": SAMPLED_SWITCHING_SOURCE.manifest_value(),
         }
 
     def run_seed_children(self):
@@ -291,10 +312,16 @@ class SwitchingDecoder(_RandomSeedConsumer):
         """Decode through the path sampled by latency()."""
         if job.hint == "strong":
             result = self.strong.decode(job)
-            result.soft_output = 0.0
+            result.soft_output = SoftOutput(
+                gap=0.0,
+                source=SAMPLED_SWITCHING_SOURCE,
+            )
         else:
             result = self.weak.decode(job)
-            result.soft_output = 1.0
+            result.soft_output = SoftOutput(
+                gap=1.0,
+                source=SAMPLED_SWITCHING_SOURCE,
+            )
         return result
 
 
@@ -349,10 +376,11 @@ class SampledConfidenceDecoder(_RandomSeedConsumer):
 
     Timing-only decoders produce no syndrome data, so there is nothing to
     compute a real confidence from; this wrapper asserts one as an
-    experimental input. After the inner (weak) decode, a seeded coin sets
-    ``result.soft_output``: 0.0 with ``escalation_probability`` (low
-    confidence — the Switching strategy escalates the window), else 1.0
-    (keep the weak result). ``probability_for`` replaces the flat rate
+    experimental input. After the inner (weak) decode, a seeded coin sets a
+    typed branch-marker confidence: gap 0.0 with
+    ``escalation_probability`` (low confidence — the Switching strategy
+    escalates the window), else gap 1.0 (keep the weak result).
+    ``probability_for`` replaces the flat rate
     with a per-job function (see switch_probability_per_round). Latency
     passes through to the inner decoder unchanged. Swap in a real
     soft-output decoder and the downstream pipeline behaves identically."""
@@ -369,6 +397,7 @@ class SampledConfidenceDecoder(_RandomSeedConsumer):
         return {
             "kind": "sampled_confidence",
             "base_escalation_probability": self.escalation_probability,
+            "confidence_source": SAMPLED_CONFIDENCE_SOURCE.manifest_value(),
         }
 
     def run_seed_children(self):
@@ -400,8 +429,15 @@ class SampledConfidenceDecoder(_RandomSeedConsumer):
         else:
             escalation_probability = self.escalation_probability
         self._mark_stochastic_use()
-        result.soft_output = 0.0 if self._rng.random() < escalation_probability \
+        confidence_gap = (
+            0.0
+            if self._rng.random() < escalation_probability
             else 1.0
+        )
+        result.soft_output = SoftOutput(
+            gap=confidence_gap,
+            source=SAMPLED_CONFIDENCE_SOURCE,
+        )
         return result
 
 

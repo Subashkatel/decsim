@@ -13,6 +13,7 @@ from decsim import protocols
 from decsim.policies import Eager, Held
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
+                             SAMPLED_CONFIDENCE_SOURCE,
                              SampledConfidenceDecoder, SwitchingRouter)
 from decsim.engine import Engine
 from decsim.factories import (DistillationFactory, DistillLevel,
@@ -104,7 +105,7 @@ def test_every_shipped_part_family_satisfies_its_port():
         protocols.Decoder: [PerRoundDecoder(0.5), PresetLatencyDecoder(1.0),
                         SampledConfidenceDecoder(PerRoundDecoder(1.0), 0.5)],  # 8
         protocols.DecodingStrategy: [Baseline(),
-                                 Switching(confidence_threshold=0.5)],  # 10
+                                 Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5)],  # 10
         protocols.Scheduler: [FifoScheduler(), EarliestDeadlineScheduler()],  # 11
         protocols.DeadlinePolicy: [EnqueueTimeDeadline(),
                                ReactionPathDeadline(slack_ticks=100)],  # 13
@@ -251,7 +252,7 @@ def test_strategy_switch_moves_only_the_strategy():
         )
 
     base = make_spec(Baseline())
-    swapped = make_spec(Switching(confidence_threshold=0.5))
+    swapped = make_spec(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5))
     base.validate(), swapped.validate()
     before, after = (_resolved_types(base.build()),
                      _resolved_types(swapped.build()))

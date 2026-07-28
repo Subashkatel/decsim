@@ -9,7 +9,7 @@ import pytest
 
 from decsim.config import us
 from decsim.decoders import (PerRoundDecoder, SampledConfidenceDecoder,
-                             SwitchingRouter)
+                             SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter)
 from decsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
 from decsim.message import Operation
 from decsim.metrics import (BacklogTrajectory, ConditionalReactionTime,
@@ -68,7 +68,7 @@ def test_metric_numbers_switching_pools():
                            rounds_policy=FixedRounds(11), d=3,
                            router=SwitchingRouter(weak, strong),
                            unit_pools={"default": 1, "strong": 1},
-                           strategy=Switching(confidence_threshold=0.5),
+                           strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
                            make_metrics=_switch_metrics,
                            seed=SEED))
     assert res.result.metric_values()["strong_backlog"]["peak_jobs"] >= 1
@@ -117,7 +117,7 @@ def test_backlog_window_truth_strong_views_populated_by_real_run():
     weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.6)
     res = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), d=3,
                            rounds_policy=FixedRounds(11),
-                           strategy=Switching(confidence_threshold=0.5),
+                           strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
                            router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
                            unit_pools={"default": 1, "strong": 1},
                            make_metrics=with_strong,

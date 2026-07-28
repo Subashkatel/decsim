@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
+import math
+from numbers import Real
 from typing import Any, Callable, Optional
 
 
@@ -603,6 +605,96 @@ class StrongRegionPlan:
 
 # ------------------------------------------------------------------- decode
 
+@dataclass(frozen=True)
+class SoftOutputSource:
+    """Exact provenance required to interpret one confidence threshold."""
+
+    method: str
+    cluster_origin: str
+    growth_schedule: str
+    gap_units: str
+    correction: str
+    references: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        string_fields = (
+            ("method", self.method),
+            ("cluster_origin", self.cluster_origin),
+            ("growth_schedule", self.growth_schedule),
+            ("gap_units", self.gap_units),
+            ("correction", self.correction),
+        )
+        for field_name, value in string_fields:
+            if type(value) is not str:
+                raise TypeError(
+                    f"soft-output source {field_name} must be an exact string"
+                )
+            if not value or not is_stable_string(value):
+                raise ValueError(
+                    f"soft-output source {field_name} must be a nonempty "
+                    "Unicode-scalar string"
+                )
+        if type(self.references) is not tuple:
+            raise TypeError("soft-output source references must be an exact tuple")
+        if not self.references:
+            raise ValueError("soft-output source references must be nonempty")
+        for reference in self.references:
+            if type(reference) is not str:
+                raise TypeError(
+                    "soft-output source references must be exact strings"
+                )
+            if not reference or not is_stable_string(reference):
+                raise ValueError(
+                    "soft-output source references must be nonempty "
+                    "Unicode-scalar strings"
+                )
+
+    def manifest_value(self) -> dict:
+        """Return the complete JSON-safe confidence interpretation."""
+        return {
+            "method": self.method,
+            "cluster_origin": self.cluster_origin,
+            "growth_schedule": self.growth_schedule,
+            "gap_units": self.gap_units,
+            "correction": self.correction,
+            "references": list(self.references),
+        }
+
+
+@dataclass(frozen=True)
+class SoftOutput:
+    """One nonnegative confidence gap with immutable interpretation."""
+
+    gap: float
+    source: SoftOutputSource
+    w_min: Optional[float] = None
+    w_comp: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, SoftOutputSource):
+            raise TypeError("soft output source must be a SoftOutputSource")
+        if isinstance(self.gap, bool) or not isinstance(self.gap, Real):
+            raise TypeError("soft output gap must be a real number")
+        normalized_gap = float(self.gap)
+        if math.isnan(normalized_gap) or normalized_gap < 0:
+            raise ValueError(
+                "soft output gap must be nonnegative or positive infinity"
+            )
+        object.__setattr__(self, "gap", normalized_gap)
+        for field_name in ("w_min", "w_comp"):
+            value = getattr(self, field_name)
+            if value is None:
+                continue
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise TypeError(
+                    f"soft output {field_name} must be a real number or None"
+                )
+            normalized_value = float(value)
+            if math.isnan(normalized_value):
+                raise ValueError(f"soft output {field_name} cannot be NaN")
+            object.__setattr__(self, field_name, normalized_value)
+
+
 @dataclass
 class DecodeJob:
     """One unit of decoder work."""
@@ -641,7 +733,8 @@ class DecodeResult:
     correction: Optional[Any] = None         # correction operator (None = timing-only)
     logical_observables: Optional[tuple[int, ...]] = None
     # Complete predicted logical-observable vector; None is timing-only.
-    soft_output: Optional[float] = None      # decoder confidence; below the Switching threshold escalates
+    soft_output: Optional["SoftOutput"] = None
+    # Typed decoder confidence; below a source-compatible threshold escalates.
     boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
 
@@ -652,17 +745,6 @@ class DecodeOutcome:
 
     job: DecodeJob
     result: DecodeResult
-
-
-@dataclass
-class SoftOutput:
-    """Soft-output confidence for one window; a smaller gap means the
-    decoder is less sure of its logical value."""
-
-    logical_value: int    # predicted logical bit from the best decoding
-    gap: float            # confidence, e.g. complementary gap |w_comp - w_min|
-    w_min: float = 0.0    # weight of the unconstrained min-weight decoding
-    w_comp: float = 0.0   # weight of the best decoding forced to the other class
 
 
 # ---------------------------------------------------------------- resources

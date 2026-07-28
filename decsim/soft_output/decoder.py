@@ -1,4 +1,4 @@
-"""Decoder wrapper that attaches a soft-output confidence ``g`` to each committed window."""
+"""Attach a typed confidence record to each committed decoder window."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 
 class SoftOutputDecoder:
-    """Wrap a base decoder and attach a soft output ``g`` for observable-bearing windows only."""
+    """Attach one configured metric's confidence without changing hard output."""
 
     def __init__(self, base: "Decoder", metric_cls):
         self.base = base
@@ -48,7 +48,7 @@ class SoftOutputDecoder:
         result = self.base.decode(job)
         metric = self._metric_for(job.dem)
         if metric is not None:
-            result.soft_output = metric.evaluate(payload_syndrome(job)).gap
+            result.soft_output = metric.evaluate(payload_syndrome(job))
         return result
 
     def _metric_for(self, model):

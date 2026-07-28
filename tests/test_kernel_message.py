@@ -1,10 +1,13 @@
 """Kernel domain model: typed records, PauliFrame purity, no rollback fields."""
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from decsim.message import (Decision, DecodeJob, DecodeOutcome,
                             DecodeResult, FeedbackEffect,
                             IntrinsicMeasurement, OpKind, Operation,
-                            ResourceClaim, SyndromePayload, Window, WindowGraph)
+                            ResourceClaim, SoftOutput, SoftOutputSource,
+                            SyndromePayload, Window, WindowGraph)
 from decsim.pauli_frame import PauliFrame
 
 
@@ -68,6 +71,64 @@ def test_outcome_claim_decision_shapes():
     )
     d = Decision(4, effect)
     assert d.releases_operation and d.effect is effect
+
+
+def _confidence_source(**changes):
+    fields = {
+        "method": "cluster_gap",
+        "cluster_origin": "union_find_decoder",
+        "growth_schedule": "meister_uniform_fair",
+        "gap_units": "graph_edges",
+        "correction": "none",
+        "references": (
+            "arXiv:1709.06218v3 Algorithm 1",
+            "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
+        ),
+    }
+    fields.update(changes)
+    return SoftOutputSource(**fields)
+
+
+def test_soft_output_has_immutable_confidence_provenance_and_no_prediction():
+    source = _confidence_source()
+    confidence = SoftOutput(gap=2.5, source=source)
+    result = DecodeResult(
+        op_id=1,
+        window_id=0,
+        logical_observables=(1,),
+        soft_output=confidence,
+    )
+
+    assert result.logical_observables == (1,)
+    assert confidence.gap == 2.5
+    assert confidence.source is source
+    assert confidence.w_min is None
+    assert confidence.w_comp is None
+    assert not hasattr(confidence, "logical_value")
+    with pytest.raises(FrozenInstanceError):
+        confidence.gap = 1.0
+
+
+@pytest.mark.parametrize(
+    ("changes", "error"),
+    [
+        ({"method": ""}, ValueError),
+        ({"cluster_origin": 1}, TypeError),
+        ({"references": []}, TypeError),
+        ({"references": ()}, ValueError),
+        ({"references": ("valid", "")}, ValueError),
+    ],
+)
+def test_soft_output_source_rejects_missing_or_unstable_provenance(
+        changes, error):
+    with pytest.raises(error):
+        _confidence_source(**changes)
+
+
+@pytest.mark.parametrize("gap", [True, -1.0, float("nan")])
+def test_soft_output_rejects_invalid_gap(gap):
+    with pytest.raises((TypeError, ValueError)):
+        SoftOutput(gap=gap, source=_confidence_source())
 
 
 @pytest.mark.parametrize(

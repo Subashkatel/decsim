@@ -3,7 +3,7 @@ from dataclasses import fields
 import numpy as np
 import pytest
 
-from decsim.decoders import PerRoundDecoder
+from decsim.decoders import PerRoundDecoder, SAMPLED_CONFIDENCE_SOURCE
 from decsim.devices import TimingOnlyDevice
 from decsim.codes import SurfaceCodeModel
 from decsim.engine import Engine
@@ -652,6 +652,7 @@ def test_non_sliding_weak_keepup_rejects_before_behavior_entry(scheme_kind):
             layout=layout,
             scheme=scheme,
             strategy=Switching(
+                expected_source=SAMPLED_CONFIDENCE_SOURCE,
                 confidence_threshold=0.5,
                 weak_keepup_ratio=0.7,
             ),
@@ -676,6 +677,7 @@ def test_non_sliding_weak_keepup_rejects_before_behavior_entry(scheme_kind):
 )
 def test_none_weak_keepup_ratio_does_not_restrict_scheme_shape(scheme):
     Switching(
+        expected_source=SAMPLED_CONFIDENCE_SOURCE,
         confidence_threshold=0.5,
         weak_keepup_ratio=None,
     ).validate_declared_run(
@@ -1413,13 +1415,15 @@ def test_default_shipped_components_declare_their_effective_configuration():
 def test_nondefault_shipped_policies_declare_their_effective_configuration():
     threshold_register = ThresholdRegister(
         default=0.4,
+        expected_source=SAMPLED_CONFIDENCE_SOURCE,
         per_code={"surface_d3": 0.35},
     )
     completed = RunSpec(
         ops=[],
         decoder=StaticDecoder(),
         strategy=Switching(
-            confidence_threshold=0.45,
+            expected_source=SAMPLED_CONFIDENCE_SOURCE,
+            confidence_threshold=0.4,
             weak_keepup_ratio=0.4,
             bulk_strong=True,
             threshold_register=threshold_register,
@@ -1440,7 +1444,9 @@ def test_nondefault_shipped_policies_declare_their_effective_configuration():
     expected_configuration = {
         ("strategy",): {
             "kind": "switching",
-            "confidence_threshold": 0.45,
+            "confidence_threshold": 0.4,
+            "expected_source": SAMPLED_CONFIDENCE_SOURCE.manifest_value(),
+            "threshold_register_installed": True,
             "run_both_at_once": False,
             "weak_keepup_ratio": 0.4,
             "bulk_strong": True,
@@ -1448,8 +1454,11 @@ def test_nondefault_shipped_policies_declare_their_effective_configuration():
         },
         ("strategy", "threshold_register"): {
             "kind": "threshold_register",
-            "initial_default": 0.4,
-            "initial_per_code": {"surface_d3": 0.35},
+            "default_threshold": 0.4,
+            "per_code_thresholds": [
+                {"code": "surface_d3", "threshold": 0.35},
+            ],
+            "expected_source": SAMPLED_CONFIDENCE_SOURCE.manifest_value(),
         },
         ("scheduler",): {"kind": "earliest_deadline"},
         ("deadline_policy",): {
@@ -1515,6 +1524,7 @@ def test_remaining_shipped_runtime_policies_have_closed_configuration():
 def test_threshold_register_manifest_configuration_is_its_initial_state():
     register = ThresholdRegister(
         default=0.4,
+        expected_source=SAMPLED_CONFIDENCE_SOURCE,
         per_code={"surface_d3": 0.35},
     )
     initial_configuration = register.run_manifest_config()
@@ -2496,7 +2506,7 @@ def test_switching_device_must_supply_the_selected_strong_model_capability():
     spec = RunSpec(
         ops=[Operation(0, "memory", (0,))],
         decoder=StaticDecoder(),
-        strategy=Switching(confidence_threshold=0.5),
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         device=StaticOnlyDevice(),
     )
 

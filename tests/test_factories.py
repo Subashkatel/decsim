@@ -269,6 +269,97 @@ def test_single_level_factory_rejects_invalid_manifest_domains(field, value):
         DistillationFactory(Engine(verbose=False), **kwargs)
 
 
+def test_multi_level_factory_declares_timing_and_yield_without_aliases():
+    engine = Engine(verbose=False)
+    caller_levels = [
+        DistillLevel(units=2, d=3, O=5, P=1),
+        DistillLevel(units=1, d=7, O=2, P=0.75),
+    ]
+    factory = MultiLevelDistillationFactory(
+        engine,
+        caller_levels,
+        W_ticks=11,
+        M=13,
+        N=2,
+        prep_units=4,
+        prep_O=6,
+        prep_d=3,
+        prep_P=0.5,
+        decode_service=None,
+        corr_rounds=9,
+        n_corr=0,
+        production="demand",
+        buffer_capacity=5,
+    )
+
+    expected = {
+        "kind": "multi_level",
+        "levels": [
+            {
+                "units": 2,
+                "distance": 3,
+                "physical_time_multiplier": 5,
+                "success_probability": 1.0,
+            },
+            {
+                "units": 1,
+                "distance": 7,
+                "physical_time_multiplier": 2,
+                "success_probability": 0.75,
+            },
+        ],
+        "window_ticks": 11,
+        "input_states_per_round": 13,
+        "output_states_per_round": 2,
+        "preparation_units": 4,
+        "preparation_steps": 6,
+        "preparation_distance": 3,
+        "preparation_success_probability": 0.5,
+        "preparation_time_ticks": 198,
+        "level_timing": [
+            {"level": 1, "round_time_ticks": 165},
+            {"level": 2, "round_time_ticks": 154},
+        ],
+        "corr_rounds": 9,
+        "n_corr": 0,
+        "production": "demand",
+        "buffer_capacity": 5,
+    }
+    assert factory.run_manifest_config() == expected
+    assert "output_count" not in repr(factory.run_manifest_config())
+
+    caller_levels[0].O = 99
+    caller_levels[1].P = 0
+    assert factory.run_manifest_config() == expected
+    assert factory.round_time == {1: 165, 2: 154}
+
+
+def test_multi_level_O_changes_timing_while_N_changes_only_yield():
+    def configuration(*, multiplier, output_states):
+        return MultiLevelDistillationFactory(
+            Engine(verbose=False),
+            [DistillLevel(units=1, d=3, O=multiplier)],
+            W_ticks=7,
+            M=5,
+            N=output_states,
+        ).run_manifest_config()
+
+    baseline = configuration(multiplier=2, output_states=1)
+    timing_changed = configuration(multiplier=4, output_states=1)
+    yield_changed = configuration(multiplier=2, output_states=3)
+
+    assert timing_changed["level_timing"] != baseline["level_timing"]
+    assert (
+        timing_changed["output_states_per_round"]
+        == baseline["output_states_per_round"]
+    )
+    assert yield_changed["level_timing"] == baseline["level_timing"]
+    assert (
+        yield_changed["output_states_per_round"]
+        != baseline["output_states_per_round"]
+    )
+
+
 def test_continuous_requires_capacity():
     eng = Engine(verbose=False)
     with pytest.raises(ValueError):

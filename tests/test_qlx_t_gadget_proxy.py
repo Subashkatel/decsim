@@ -10,12 +10,13 @@ T layer on the 225 data qubits. The `tsim` sampler package is not
 available (PyPI 'tsim' 0.1.0 is an empty placeholder), so the true
 non-Clifford circuit cannot be sampled here. DECLARED PROXY SCOPE:
 removing that one T layer yields a valid stim circuit with the
-IDENTICAL detector/observable structure — the decoding problem decsim
-sees is unchanged. These tests therefore validate decsim's windowed
-decoding of the QLX T-gadget's syndrome stream (geometry, rounds,
-window slicing, observable wiring), NOT the non-Clifford error
-dynamics through the T layer. Claim-level qualifier mandatory wherever
-this is cited (ledger row to say "stabilizer-proxy").
+IDENTICAL detector/observable structure. These tests validate that
+stabilizer proxy's structure, rounds, observable wiring, and explicit
+rejection of its detectorless-logical DEM. They do NOT validate
+successful window slicing or decoding, and do NOT validate the
+non-Clifford error dynamics through the T layer. Claim-level qualifier
+mandatory wherever this is cited (ledger row to say
+"stabilizer-proxy, decoder-domain rejection").
 """
 import pathlib
 import re

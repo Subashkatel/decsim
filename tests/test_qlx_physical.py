@@ -12,7 +12,11 @@ generate_qlx_fixtures.py + dump_decoder_params.py):
   * mem_surface_walker_dem.txt — the analytic walker DEM
   * mem_surface_twin.json — QLX digital-twin reference (ler, det_rate)
 
-Claim level: WHOLE-PROGRAM physical + per-window slicing equivalence.
+Claim level: WHOLE-PROGRAM artifact, detector-bijection, and global-twin
+evidence, plus explicit decoder-domain rejection. The emitted fixture
+contains a detectorless logical mechanism, so it supports neither
+per-window decode-equivalence nor full-engine decoding-success claims.
+Nonvacuous detectable decoding evidence is in test_qlx_walker_dem_decode.py.
 No per-operation claim is made (compound feedback-bearing programs remain
 a QLX exporter boundary — see docs/validation/QLX_UTILIZATION_AND_GAP_
 ANALYSIS.md §5).

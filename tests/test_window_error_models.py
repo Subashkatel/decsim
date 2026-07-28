@@ -465,6 +465,45 @@ def test_belief_converter_matches_upstream_on_unambiguous_identities():
 
 
 @pytest.mark.parametrize(
+    "fixture_name",
+    [
+        "rsc-d3-r6-p0.005.stim",
+        "rsc-d5-r10-p0.005.stim",
+    ],
+)
+def test_belief_converter_matches_upstream_on_frozen_surface_fixtures(
+    fixture_name,
+):
+    from beliefmatching.belief_matching import (
+        detector_error_model_to_check_matrices,
+    )
+
+    fixture_path = pathlib.Path(__file__).parent / "data" / fixture_name
+    circuit = stim.Circuit(fixture_path.read_text())
+    dem = circuit.detector_error_model(decompose_errors=True)
+    check, obs, h_check, priors, h2e = _belief_converter_matrices(dem)
+    upstream = detector_error_model_to_check_matrices(dem)
+
+    upstream_check = upstream.check_matrix.toarray()
+    upstream_edge_check = upstream.edge_check_matrix.toarray()
+    upstream_edge_observables = upstream.edge_observables_matrix.toarray()
+    upstream_h2e = upstream.hyperedge_to_edge_matrix.toarray()
+    assert np.array_equal(
+        (upstream_edge_check @ upstream_h2e) % 2,
+        upstream_check,
+    )
+    assert np.array_equal(check, upstream_edge_check)
+    assert np.array_equal(obs, upstream_edge_observables)
+    assert np.array_equal(h_check, upstream_check)
+    assert np.array_equal(priors, upstream.priors)
+    assert np.array_equal(h2e, upstream_h2e)
+    assert np.array_equal(
+        (obs @ h2e) % 2,
+        upstream.observables_matrix.toarray(),
+    )
+
+
+@pytest.mark.parametrize(
     "instructions",
     [
         "error(0.1) D0\nerror(0.2) D0 L0",

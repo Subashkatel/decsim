@@ -25,7 +25,14 @@ def matching_window_decoder():
     def decode(model: "WindowErrorModel", syndrome):
         matching = cache.get(id(model))
         if matching is None:
+            from ..detector_error_model import validate_graphlike_matrices
             from .weights import matching_weights
+
+            validate_graphlike_matrices(
+                model.check,
+                model.obs,
+                location="PyMatching window model",
+            )
             matching = pymatching.Matching.from_check_matrix(
                 model.check, weights=matching_weights(model.priors))
             cache[id(model)] = matching

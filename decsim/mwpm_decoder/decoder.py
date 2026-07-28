@@ -62,6 +62,13 @@ class PyMatchingDecoder:
         entry = self._matchings.get(id(model))
         matching = entry[1] if entry is not None and entry[0]() is model else None
         if matching is None:
+            from ..detector_error_model import validate_graphlike_matrices
+
+            validate_graphlike_matrices(
+                model.check,
+                model.obs,
+                location="PyMatching window model",
+            )
             matching = pymatching.Matching.from_check_matrix(
                 model.check, weights=self._weights_for(model))
             self._matchings[id(model)] = (weakref.ref(model), matching)

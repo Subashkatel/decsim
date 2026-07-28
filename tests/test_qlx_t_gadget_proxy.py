@@ -65,10 +65,8 @@ def _detector_rounds(circuit) -> dict:
 
 
 def test_windowed_decode_equals_global_on_t_gadget_proxy():
-    """decsim's window slicer must reproduce global MWPM bit-for-bit on
-    the QLX T-gadget syndrome stream (coordinate-less detectors -> the
-    Gate-2 detector_rounds override path)."""
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    """The G9 proxy evidence is preserved, but its invalid DEM is rejected."""
+    from decsim.detector_error_model import build_window_error_models
 
     _, _, proxy = load_proxy()
     circuit = stim.Circuit(proxy)
@@ -83,22 +81,12 @@ def test_windowed_decode_equals_global_on_t_gadget_proxy():
     pred_global = matching.decode_batch(dets)[:, 0].astype(np.uint8)
 
     plan = [(1, 3, 5), (4, 5, 6), (6, total_rounds, total_rounds)]
-    models = build_window_error_models(circuit, plan,
-                                       detector_rounds=rounds_of)
-    matchings = [pymatching.Matching.from_check_matrix(
-        np.asarray(m.check),
-        weights=np.log((1 - np.asarray(m.priors)) / np.asarray(m.priors)),
-        faults_matrix=np.eye(np.asarray(m.check).shape[1], dtype=np.uint8))
-        for m in models]   # per-column selections (see walker test note)
-
-    def decode_window(model, syndrome):
-        return matchings[models.index(model)].decode(syndrome)
-
-    disagreements = sum(
-        int(decode_windowed(models, dets[s], decode_window)[0]
-            != pred_global[s])
-        for s in range(SHOTS))
-    assert disagreements == 0
+    with pytest.raises(ValueError, match="detectorless logical"):
+        build_window_error_models(
+            circuit,
+            plan,
+            detector_rounds=rounds_of,
+        )
 
     # Noise-content reality check (QLX emission gap G9): the tsim path
     # emitted ONLY the bitflip noise (mz/mr) and dropped the idle

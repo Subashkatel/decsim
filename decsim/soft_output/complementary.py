@@ -25,39 +25,45 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
     """Flatten a decomposed DEM into ``(H[det x err], O[obs x err], weights=ln((1-p)/p))``."""
     import numpy as np
 
+    from ..detector_error_model import (
+        canonical_error_instructions,
+        validate_graphlike_fault,
+    )
+
     num_det = dem.num_detectors
     num_obs = dem.num_observables
     h_cols: list = []
     o_cols: list = []
     weights: list = []
 
-    def flush(dets, obs, weight) -> None:
-        if not dets and not obs:
-            return
+    def append_component(dets, obs, weight) -> None:
         hcol = np.zeros(num_det, dtype=np.uint8)
-        hcol[dets] = 1
+        hcol[list(dets)] = 1
         ocol = np.zeros(num_obs, dtype=np.uint8)
-        ocol[obs] = 1
+        ocol[list(obs)] = 1
         h_cols.append(hcol)
         o_cols.append(ocol)
         weights.append(weight)
 
-    for instr in dem.flattened():
-        if instr.type != "error":
-            continue
-        prob = instr.args_copy()[0]
+    for record in canonical_error_instructions(dem):
+        prob = record.probability
         weight = float(np.log((1 - prob) / prob)) if 0 < prob < 1 else 50.0
-        dets: list = []
-        obs: list = []
-        for target in instr.targets_copy():
-            if target.is_separator():
-                flush(dets, obs, weight)
-                dets, obs = [], []
-            elif target.is_relative_detector_id():
-                dets.append(target.val)
-            elif target.is_logical_observable_id():
-                obs.append(target.val)
-        flush(dets, obs, weight)
+        for component in record.components:
+            fault = validate_graphlike_fault(
+                component.detectors,
+                component.logical_observables,
+                location=(
+                    f"error {record.error_ordinal} component "
+                    f"{component.component_ordinal}"
+                ),
+            )
+            assert fault is not None
+            detectors, logical_observables = fault
+            append_component(
+                detectors,
+                logical_observables,
+                weight,
+            )
 
     h = np.array(h_cols, dtype=np.uint8).T if h_cols else np.zeros((num_det, 0), np.uint8)
     o = np.array(o_cols, dtype=np.uint8).T if o_cols else np.zeros((num_obs, 0), np.uint8)
@@ -81,9 +87,16 @@ class ComplementaryGapMetric:
         import numpy as np
         import pymatching
 
+        from ..detector_error_model import validate_graphlike_matrices
+
         self.check = np.asarray(check, dtype=np.uint8)
         self.obs = np.asarray(obs, dtype=np.uint8)
         self.weights = np.asarray(weights, dtype=float)
+        validate_graphlike_matrices(
+            self.check,
+            self.obs,
+            location="complementary-gap model",
+        )
         if self.obs.shape[0] != 1:
             raise ValueError(
                 "the complementary gap is defined for one observable; got "

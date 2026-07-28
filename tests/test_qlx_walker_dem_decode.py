@@ -95,7 +95,18 @@ def test_windowed_tracks_global_on_walker_dem_samples():
 
     dem = walker_dem()
     rounds_of = detector_rounds()
-    det_sets, obs_sets, priors = detector_error_model_to_faults(dem)
+    detectable_dem = stim.DetectorErrorModel()
+    for instruction in dem.flattened():
+        if instruction.type != "error":
+            continue
+        if any(
+            target.is_relative_detector_id()
+            for target in instruction.targets_copy()
+        ):
+            detectable_dem.append(instruction)
+    det_sets, obs_sets, priors = detector_error_model_to_faults(
+        detectable_dem
+    )
     # The walker DEM carries hyperedge mechanisms (Y errors, 3-4
     # detectors) WITHOUT decomposition hints (G9 sub-gap: EmitDEM emits
     # no `^` decompositions). A matching decoder is a graph decoder, so
@@ -111,7 +122,7 @@ def test_windowed_tracks_global_on_walker_dem_samples():
         det_sets=det_sets, obs_sets=obs_sets, priors=priors,
         n_obs=1, round_of=rounds_of, fault_rounds=fault_rounds,
         pos_of=_detector_position_in_round(rounds_of),
-        belief_matching=False, h_det_sets=None, h_priors=None,
+        belief_matching=False, h_priors=None,
         hyperedge_to_edge_map=None)
     # ownership must tile over DETECTABLE faults: detector-less
     # mechanisms (undetectable logical flips, e.g. "error(p) L0") touch

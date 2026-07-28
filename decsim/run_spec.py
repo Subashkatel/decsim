@@ -36,6 +36,7 @@ from .message import (
     WindowInfo,
     WindowPlan,
     is_stable_identity,
+    is_stable_string,
     same_stable_identity,
 )
 from .config import TimingConfig, us
@@ -362,6 +363,147 @@ class TypedPathSegmentRecord:
 
 
 @dataclass(frozen=True)
+class StableIdentityRecord:
+    """One recursive, collision-free public workload identity."""
+
+    kind: str
+    value: Optional[str]
+    items: Optional[tuple["StableIdentityRecord", ...]]
+
+    def __post_init__(self) -> None:
+        if self.kind == "integer":
+            if type(self.value) is not str or self.items is not None:
+                raise TypeError(
+                    "integer identity records require a decimal string and "
+                    "items=None"
+                )
+            digits = (
+                self.value[1:]
+                if self.value.startswith("-")
+                else self.value
+            )
+            if (
+                not digits
+                or not digits.isascii()
+                or not digits.isdigit()
+                or (len(digits) > 1 and digits.startswith("0"))
+                or self.value == "-0"
+                or self.value.startswith("+")
+            ):
+                raise ValueError(
+                    "integer identity values must be canonical decimal strings"
+                )
+            return
+        if self.kind == "string":
+            if not is_stable_string(self.value) or self.items is not None:
+                raise TypeError(
+                    "string identity records require a Unicode scalar string "
+                    "and items=None"
+                )
+            return
+        if self.kind == "tuple":
+            if self.value is not None or type(self.items) is not tuple:
+                raise TypeError(
+                    "tuple identity records require value=None and tuple items"
+                )
+            if not all(
+                type(item) is StableIdentityRecord
+                for item in self.items
+            ):
+                raise TypeError(
+                    "tuple identity items must be exact StableIdentityRecord "
+                    "values"
+                )
+            return
+        raise ValueError(f"unknown stable identity kind {self.kind!r}")
+
+    @classmethod
+    def from_identity(cls, identity) -> "StableIdentityRecord":
+        if type(identity) is int:
+            return cls("integer", str(identity), None)
+        if is_stable_string(identity):
+            return cls("string", identity, None)
+        if type(identity) is tuple and all(
+            is_stable_identity(item) for item in identity
+        ):
+            return cls(
+                "tuple",
+                None,
+                tuple(cls.from_identity(item) for item in identity),
+            )
+        raise TypeError(
+            "stable identities are exact int, Unicode scalar str, or "
+            "recursive tuples"
+        )
+
+    def to_identity(self):
+        if self.kind == "integer":
+            return int(self.value)
+        if self.kind == "string":
+            return self.value
+        return tuple(item.to_identity() for item in self.items)
+
+    def canonical_bytes(self) -> bytes:
+        if self.kind == "integer":
+            encoded = self.value.encode("ascii")
+            return b"I" + len(encoded).to_bytes(8, "big") + encoded
+        if self.kind == "string":
+            encoded = self.value.encode("utf-8")
+            return b"S" + len(encoded).to_bytes(8, "big") + encoded
+        encoded_items = []
+        for item in self.items:
+            encoded = item.canonical_bytes()
+            encoded_items.append(
+                len(encoded).to_bytes(8, "big") + encoded
+            )
+        return (
+            b"T"
+            + len(encoded_items).to_bytes(8, "big")
+            + b"".join(encoded_items)
+        )
+
+    def to_json_value(self) -> dict:
+        return {
+            "kind": self.kind,
+            "value": self.value,
+            "items": (
+                None
+                if self.items is None
+                else [item.to_json_value() for item in self.items]
+            ),
+        }
+
+
+@dataclass(frozen=True)
+class ResolvedCodeSelectionRecord:
+    """The one code path selected for an operation or patch consumer."""
+
+    consumer_kind: str
+    consumer_identity: StableIdentityRecord
+    code_path: tuple[TypedPathSegmentRecord, ...]
+
+
+@dataclass(frozen=True)
+class ResolvedCadenceRecord:
+    """One consumer's exact executable round cadence and winning source."""
+
+    consumer_kind: str
+    consumer_identity: StableIdentityRecord
+    code_path: tuple[TypedPathSegmentRecord, ...]
+    round_ticks: int
+    origin: str
+
+
+@dataclass(frozen=True)
+class _ResolvedCodeCadencePlan:
+    code_selections: tuple[ResolvedCodeSelectionRecord, ...]
+    cadences: tuple[ResolvedCadenceRecord, ...]
+    round_ticks_by_operation_id: tuple[tuple[int, int], ...]
+    round_ticks_by_patch: tuple[tuple[Any, int], ...]
+    round_ticks: int
+
+
+@dataclass(frozen=True)
 class ResolvedComponent:
     """One canonical externally variable behavior component."""
 
@@ -407,6 +549,8 @@ class ResolvedRunManifest:
     root_seed: Optional[int]
     components: tuple[ResolvedComponent, ...]
     fixed_composition: tuple[FixedCompositionRecord, ...]
+    code_selections: tuple[ResolvedCodeSelectionRecord, ...]
+    cadences: tuple[ResolvedCadenceRecord, ...]
     aliases: tuple[ResolvedAlias, ...]
     seed_bindings: tuple[ResolvedSeedBinding, ...]
     primary_result_sha256: str
@@ -449,6 +593,28 @@ class ResolvedRunManifest:
                     "configuration": component.configuration,
                 }
                 for component in self.fixed_composition
+            ],
+            "code_selections": [
+                {
+                    "consumer_kind": record.consumer_kind,
+                    "consumer_identity": (
+                        record.consumer_identity.to_json_value()
+                    ),
+                    "code_path": _typed_path_json(record.code_path),
+                }
+                for record in self.code_selections
+            ],
+            "cadences": [
+                {
+                    "consumer_kind": record.consumer_kind,
+                    "consumer_identity": (
+                        record.consumer_identity.to_json_value()
+                    ),
+                    "code_path": _typed_path_json(record.code_path),
+                    "round_ticks": record.round_ticks,
+                    "origin": record.origin,
+                }
+                for record in self.cadences
             ],
             "aliases": [
                 {
@@ -875,11 +1041,37 @@ class RunSpec:
             )
             part.validate(self, planning)
 
-    @staticmethod
     def _validate_layout_selection(
+        self,
         planning: ResolvedPlanningParts,
         operations,
-    ) -> None:
+    ) -> _ResolvedCodeCadencePlan:
+        code_round_us = getattr(planning.code, "round_us", None)
+        if code_round_us is not None:
+            round_us = code_round_us
+            cadence_origin = "code.round_us"
+        elif self.round_us is not None:
+            round_us = self.round_us
+            cadence_origin = "run_spec.round_us"
+        else:
+            round_us = self.timing.round_us
+            cadence_origin = "timing.round_us"
+        if (
+            type(round_us) not in (int, float)
+            or not math.isfinite(round_us)
+            or round_us <= 0
+        ):
+            raise ValueError(
+                "resolved round_us must be a positive finite built-in number"
+            )
+        round_ticks = us(round_us)
+        if type(round_ticks) is not int or round_ticks < 1:
+            raise ValueError(
+                "resolved round cadence must be at least one tick"
+            )
+
+        operation_records = {}
+        patch_records_by_bytes = {}
         for operation in operations:
             selected_code = planning.layout.code_for_op(operation)
             if selected_code is not planning.code:
@@ -887,6 +1079,10 @@ class RunSpec:
                     f"layout {planning.layout!r} operation {operation.id} "
                     f"selected {selected_code!r}, but resolved "
                     f"planning/runtime code is {planning.code!r}")
+            operation_records.setdefault(
+                operation.id,
+                StableIdentityRecord.from_identity(operation.id),
+            )
 
             patch_ids = operation.patches
             if not patch_ids:
@@ -901,6 +1097,59 @@ class RunSpec:
                         f"selected {selected_code!r} in "
                         f"operation {operation.id}, but resolved "
                         f"planning/runtime code is {planning.code!r}")
+                patch_record = StableIdentityRecord.from_identity(patch_id)
+                patch_records_by_bytes.setdefault(
+                    patch_record.canonical_bytes(),
+                    (patch_id, patch_record),
+                )
+
+        code_path = (TypedPathSegmentRecord("field", "code"),)
+        ordered_consumers = [
+            ("operation", operation_id, identity_record)
+            for operation_id, identity_record in operation_records.items()
+        ]
+        ordered_consumers.sort(
+            key=lambda item: item[2].canonical_bytes()
+        )
+        ordered_patches = [
+            ("patch", patch_id, identity_record)
+            for patch_id, identity_record in patch_records_by_bytes.values()
+        ]
+        ordered_patches.sort(
+            key=lambda item: item[2].canonical_bytes()
+        )
+        ordered_consumers.extend(ordered_patches)
+        code_selections = tuple(
+            ResolvedCodeSelectionRecord(
+                consumer_kind=consumer_kind,
+                consumer_identity=identity_record,
+                code_path=code_path,
+            )
+            for consumer_kind, _identity, identity_record in ordered_consumers
+        )
+        cadences = tuple(
+            ResolvedCadenceRecord(
+                consumer_kind=record.consumer_kind,
+                consumer_identity=record.consumer_identity,
+                code_path=record.code_path,
+                round_ticks=round_ticks,
+                origin=cadence_origin,
+            )
+            for record in code_selections
+        )
+        return _ResolvedCodeCadencePlan(
+            code_selections=code_selections,
+            cadences=cadences,
+            round_ticks_by_operation_id=tuple(
+                (operation_id, round_ticks)
+                for operation_id in sorted(operation_records)
+            ),
+            round_ticks_by_patch=tuple(
+                (patch_id, round_ticks)
+                for _, patch_id, _record in ordered_patches
+            ),
+            round_ticks=round_ticks,
+        )
 
     # ---------------------------------------------------------------- build
 
@@ -971,7 +1220,10 @@ class RunSpec:
         all_operations.extend(dynamic_streams)
         planning_operations = workload.planning_views(all_operations)
         self._validate_operation_feedback_contracts(all_operations)
-        self._validate_layout_selection(planning, planning_operations)
+        code_cadence_plan = self._validate_layout_selection(
+            planning,
+            planning_operations,
+        )
         resource_claims_by_operation_id = _validate_program_order(
             workload.planning_views(ops),
             planning.layout,
@@ -1091,13 +1343,16 @@ class RunSpec:
         _validate_shipped_factory_decode_service(factory, cluster)
         source = ClockedDevice(engine, device, controller, cluster,
                                window_manager.rounds_for)
-        round_us = self.round_us if self.round_us is not None \
-            else self.timing.round_us
         gate = Chip(
             engine, source=source, controller=controller, cluster=cluster,
-            factory=factory, round_ticks=us(round_us),
+            factory=factory, round_ticks=code_cadence_plan.round_ticks,
             code_distance=planning.code.distance, idle_policy=idle_policy,
-            operation_code=planning.code,
+            round_ticks_by_operation_id=dict(
+                code_cadence_plan.round_ticks_by_operation_id
+            ),
+            round_ticks_by_patch=dict(
+                code_cadence_plan.round_ticks_by_patch
+            ),
             resource_claims_by_operation_id=(
                 resource_claims_by_operation_id
             ),
@@ -1216,6 +1471,8 @@ class RunSpec:
                 root_seed=self._validated_root_seed(),
                 components=resolved_components,
                 fixed_composition=fixed_composition,
+                code_selections=code_cadence_plan.code_selections,
+                cadences=code_cadence_plan.cadences,
                 aliases=resolved_aliases,
                 seed_bindings=seed_bindings,
                 primary_result_sha256=hashlib.sha256(
@@ -1401,12 +1658,7 @@ class RunSpec:
 
 
 def _is_runtime_identity(value) -> bool:
-    value_type = type(value)
-    if value_type is int or value_type is str:
-        return True
-    if value_type is tuple:
-        return all(_is_runtime_identity(item) for item in value)
-    return False
+    return is_stable_identity(value)
 
 
 def _validate_run_workload_identity(
@@ -2745,28 +2997,49 @@ def _validated_logical_bit(value) -> int:
 
 def _validated_json_value(value):
     """Copy one value from the closed manifest JSON domain."""
-    value_type = type(value)
-    if value is None or value_type in (bool, int, str):
-        return value
-    if value_type is float:
-        if not math.isfinite(value):
-            raise ValueError(f"manifest floats must be finite; got {value!r}")
-        return value
-    if value_type is list:
-        return [_validated_json_value(item) for item in value]
-    if value_type is dict:
-        copied = {}
-        for key, item in value.items():
-            if type(key) is not str:
+    active_container_ids = set()
+
+    def copy_validated(candidate):
+        value_type = type(candidate)
+        if candidate is None or value_type in (bool, int):
+            return candidate
+        if value_type is str:
+            if not is_stable_string(candidate):
                 raise TypeError(
-                    f"manifest object keys must be exact strings; got {key!r}"
+                    "manifest strings must contain only Unicode scalar values"
                 )
-            copied[key] = _validated_json_value(item)
-        return copied
-    raise TypeError(
-        "manifest values must use the closed JSON domain; "
-        f"got {type(value).__name__}"
-    )
+            return candidate
+        if value_type is float:
+            if not math.isfinite(candidate):
+                raise ValueError(
+                    f"manifest floats must be finite; got {candidate!r}"
+                )
+            return candidate
+        if value_type not in (list, dict):
+            raise TypeError(
+                "manifest values must use the closed JSON domain; "
+                f"got {value_type.__name__}"
+            )
+        candidate_id = id(candidate)
+        if candidate_id in active_container_ids:
+            raise ValueError("manifest values cannot contain recursive containers")
+        active_container_ids.add(candidate_id)
+        try:
+            if value_type is list:
+                return [copy_validated(item) for item in candidate]
+            copied = {}
+            for key, item in candidate.items():
+                if not is_stable_string(key):
+                    raise TypeError(
+                        "manifest object keys must be Unicode scalar strings; "
+                        f"got {key!r}"
+                    )
+                copied[key] = copy_validated(item)
+            return copied
+        finally:
+            active_container_ids.remove(candidate_id)
+
+    return copy_validated(value)
 
 
 def simulate(run: RunSpec, verbose: bool = False) -> CompletedRun:

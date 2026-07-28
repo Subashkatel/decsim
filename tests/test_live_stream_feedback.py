@@ -10,6 +10,7 @@ from decsim.codes import SurfaceCodeModel
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.message import DecodeResult, Operation
+from decsim.layouts import UniformLayout
 from decsim.planner import PerOpRounds
 from decsim.schemes import SlidingWindowScheme
 from decsim.run_spec import RunSpec, simulate
@@ -118,6 +119,46 @@ def test_feedback_idle_rounds_extend_the_live_stream():
     assert cluster.committed_stream_round_count(stream.id) == cluster.rounds_arrived[stream.id]
     assert cluster.window_count[stream.id] > 1
     assert len(cluster.committed_windows) == cluster.total_windows
+
+
+def test_feedback_idle_rounds_use_frozen_patch_cadence():
+    class FreezeDetectingLayout(UniformLayout):
+        def __init__(self, code):
+            super().__init__(code)
+            self.patch_selection_calls = 0
+
+        def code_for_patch(self, patch_id):
+            self.patch_selection_calls += 1
+            if self.patch_selection_calls > 3:
+                raise AssertionError(
+                    "runtime consulted the live patch selector"
+                )
+            return self.code
+
+    stream, operations = _live_stream_pair()
+    code = SurfaceCodeModel(
+        d=3,
+        round_us=1.0,
+        commit_rounds_override=2,
+        buffer_rounds_override=1,
+    )
+    layout = FreezeDetectingLayout(code)
+    rounds = {operations[0].id: 2, operations[1].id: 2}
+
+    result = simulate(RunSpec(
+        ops=operations,
+        dynamic_streams=[stream],
+        idle_policy=from_mode("extend_stream"),
+        device=TimingOnlyDevice(),
+        layout=layout,
+        rounds_policy=PerOpRounds(rounds),
+        scheme=SlidingWindowScheme(),
+        decoder=PresetLatencyDecoder(2.0),
+        num_units=1,
+    ))
+
+    assert result.chip.idle_rounds_emitted > 0
+    assert layout.patch_selection_calls == 3
 
 
 def test_committed_stream_round_count_releases_blocked_operation_before_stream_result():

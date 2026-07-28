@@ -2,7 +2,7 @@
 # TESTS FOR ENGINE
 #==================================================================
 import pytest
-from decsim.engine import Engine
+from decsim.engine import Engine, SimulationFailed
 
 def test_engine():
     eng = Engine(verbose=False)
@@ -70,3 +70,18 @@ def test_same_tick_fifo_order():
     eng.schedule(3, lambda: fired.append(3))
     eng.run()
     assert fired == [1, 2, 3]        # same tick fires in insertion order
+
+
+def test_invalid_engine_preserves_and_chains_its_first_failure():
+    engine = Engine(verbose=False)
+    first_failure = ValueError("first failure")
+    engine._invalidate(first_failure)
+    engine._invalidate(RuntimeError("later failure"))
+
+    assert engine._failure_cause is first_failure
+    with pytest.raises(SimulationFailed) as run_failure:
+        engine.run()
+    assert run_failure.value.__cause__ is first_failure
+    with pytest.raises(SimulationFailed) as schedule_failure:
+        engine.schedule(0, lambda: None)
+    assert schedule_failure.value.__cause__ is first_failure

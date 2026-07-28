@@ -99,7 +99,16 @@ def test_round_arriving_after_op_completed_fails_loudly():
     committed) means the device emitted more rounds than planned -- the cluster must
     say so, not die on a KeyError or corrupt the running counter."""
     import pytest
-    from decsim.message import SyndromePayload
+    from decsim.message import (
+        RetainedSyndromeFragment,
+        SyndromePayload,
+        SyndromeRoundPacket,
+    )
     cluster, _ = _run(three_cnot_circuit())               # run to completion
+    payload = SyndromePayload(0, 0, 99)
     with pytest.raises(RuntimeError, match="syndrome RAM was freed"):
-        cluster.on_syndrome_arrival(SyndromePayload(0, 0, 99))
+        cluster.on_syndrome_arrival(SyndromeRoundPacket(
+            operation_id=0,
+            round_index=99,
+            fragments=(RetainedSyndromeFragment.from_payload(payload),),
+        ))

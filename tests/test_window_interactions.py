@@ -58,7 +58,10 @@ class RichBoundaryInteraction:
     def apply_boundary(self, state, window, payload, round_key):
         if not state or round_key != window.commit_lo:
             return payload
-        return replace(payload, bits=(sum(state),))
+        encoded_confidence = tuple(
+            int(bit) for bit in format(sum(state), "b")
+        )
+        return replace(payload, bits=encoded_confidence)
 
     def invalidated_windows(self, source_key, windows):
         return []
@@ -85,7 +88,7 @@ def test_custom_interaction_controls_rich_boundary_handoff_end_to_end():
 
     assert result.cluster.window_manager.window_interaction is interaction
     assert decoder.first_round_bits[0] is None
-    assert decoder.first_round_bits[1] == (7,)
+    assert decoder.first_round_bits[1] == (1, 1, 1)
     assert result.cluster.payloads_held == 0
 
 

@@ -16,7 +16,9 @@ from decsim.message import (
     ResolvedCodeGeometry,
     ResolvedOperationPlanning,
     ResolvedPatchPlanning,
+    RetainedSyndromeFragment,
     SyndromePayload,
+    SyndromeRoundPacket,
     Window,
     WindowPlan,
 )
@@ -167,7 +169,64 @@ def _runtime(boundary=None, strategy=None, ops=(0,), deps=(), blocking=()):
 
 def _feed_rounds(rt, op_id, n):
     for r in range(1, n + 1):
-        rt.on_syndrome_arrival(SyndromePayload(op_id, 0, r))
+        rt.on_syndrome_arrival(SyndromeRoundPacket(
+            operation_id=op_id,
+            round_index=r,
+            fragments=(RetainedSyndromeFragment.from_payload(
+                SyndromePayload(op_id, 0, r)
+            ),),
+        ))
+
+
+def test_decoder_assembly_uses_structural_patch_order_not_transport_order():
+    def independent_bytes(identity):
+        if type(identity) is int:
+            payload = str(identity).encode("ascii")
+            return b"I" + len(payload).to_bytes(8, "big") + payload
+        if type(identity) is str:
+            payload = identity.encode("utf-8")
+            return b"S" + len(payload).to_bytes(8, "big") + payload
+        items = tuple(independent_bytes(item) for item in identity)
+        return (
+            b"T"
+            + len(items).to_bytes(8, "big")
+            + b"".join(len(item).to_bytes(8, "big") + item for item in items)
+        )
+
+    patch_ids = (2, "2", (), (2, "north"), ("gross", (5, "north")))
+    expected_order = tuple(sorted(patch_ids, key=independent_bytes))
+
+    def assembled_order(order):
+        engine, runtime, _, submitted = _runtime()
+        for round_index in range(1, 7):
+            fragments = tuple(
+                RetainedSyndromeFragment(
+                    operation_id=0,
+                    patch_id=patch_id,
+                    round_index=round_index,
+                    bits=(position & 1,),
+                    code=None,
+                    size_bits=1,
+                )
+                for position, patch_id in enumerate(order)
+            )
+            engine.now = 7 if round_index == 1 else 100 + round_index
+            runtime.on_syndrome_arrival(SyndromeRoundPacket(
+                operation_id=0,
+                round_index=round_index,
+                fragments=fragments,
+            ))
+        job, _ = submitted[0]
+        return (
+            tuple(fragment.patch_id for fragment in job.payloads[:5]),
+            job.window.t_first_round,
+        )
+
+    forward = assembled_order(patch_ids)
+    reverse = assembled_order(tuple(reversed(patch_ids)))
+
+    assert forward == (expected_order, 7)
+    assert reverse == (expected_order, 7)
 
 
 def test_not_ready_until_data_and_deps():
@@ -310,7 +369,38 @@ def test_late_round_after_op_freed_raises():
     rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(0,)))
     eng.run()
     with pytest.raises(RuntimeError, match="syndrome RAM was freed"):
-        rt.on_syndrome_arrival(SyndromePayload(0, 0, 7))
+        rt.on_syndrome_arrival(SyndromeRoundPacket(
+            operation_id=0,
+            round_index=7,
+            fragments=(RetainedSyndromeFragment.from_payload(
+                SyndromePayload(0, 0, 7)
+            ),),
+        ))
+
+
+def test_packet_operation_and_round_limit_reject_before_storage_mutates():
+    _, runtime, _, _ = _runtime()
+
+    with pytest.raises(ValueError, match="unknown syndrome operation"):
+        runtime.on_syndrome_arrival(SyndromeRoundPacket(
+            operation_id="unknown",
+            round_index=1,
+            fragments=(RetainedSyndromeFragment.from_payload(
+                SyndromePayload("unknown", 0, 1)
+            ),),
+        ))
+
+    with pytest.raises(ValueError, match="round limit 6"):
+        runtime.on_syndrome_arrival(SyndromeRoundPacket(
+            operation_id=0,
+            round_index=7,
+            fragments=(RetainedSyndromeFragment.from_payload(
+                SyndromePayload(0, 0, 7)
+            ),),
+        ))
+
+    assert runtime.rounds_arrived[0] == 0
+    assert runtime.store.fragments(0, 7) is None
 
 
 def test_strong_job_two_sided_context_contract_2b6():

@@ -30,8 +30,9 @@ from types import MappingProxyType
 from typing import Callable, Optional
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecodeResult,
-                      Operation, SeamFaultOwner,
-                      StrongRegionPlan, Window, WindowInfo, WindowPlan)
+                      Operation, SeamFaultOwner, SyndromeRoundPacket,
+                      StrongRegionPlan, Window, WindowInfo, WindowPlan,
+                      stable_identity_order_key)
 from .payload_store import PayloadStore
 from .dynamic_windows import DynamicWindows
 from .protocols import MultiFaultExclusionSyndromeDevice
@@ -395,30 +396,49 @@ class WindowManager:
 
     # -------------------------------------------------------------- arrivals
 
-    def on_syndrome_arrival(self, payload: SyndromePayload) -> None:
-        """Store an arriving syndrome round and re-check affected windows."""
-        op = self._ops[payload.operation_id]
-        self._store_payload(payload, op)
+    def on_syndrome_arrival(self, packet: SyndromeRoundPacket) -> None:
+        """Retain one complete syndrome round and re-check affected windows."""
+        if type(packet) is not SyndromeRoundPacket:
+            raise TypeError("window manager requires a SyndromeRoundPacket")
+        try:
+            op = self._ops[packet.operation_id]
+        except KeyError as error:
+            raise ValueError(
+                f"unknown syndrome operation {packet.operation_id!r}"
+            ) from error
+        self._store_payload(packet, op)
         self.lifecycle.maybe_update(op.id)
         self._check_deferred_strong_after_arrival(op.id)
         self.check_windows_for_operation(op.id)
         for predecessor_id in op.predecessors:
             self.check_windows_for_operation(predecessor_id)
 
-    def _store_payload(self, payload: SyndromePayload, op: Operation) -> None:
+    def _store_payload(
+        self,
+        packet: SyndromeRoundPacket,
+        op: Operation,
+    ) -> None:
         if not self.store.has_op(op.id):
             raise RuntimeError(
-                f"round {payload.round_index} of {op.name} arrived after the op's "
+                f"round {packet.round_index} of {op.name} arrived after the op's "
                 f"last window committed and its syndrome RAM was freed. The device "
                 f"emitted more rounds than the execution plan expects.")
-        self.store.store(op.id, payload.round_index, payload,
-                         fragment_index=payload.patch_id)
-        fragments = self.store.fragments(op.id, payload.round_index)
-        if len(fragments) >= payload.n_fragments:
-            self.rounds_arrived[op.id] = max(self.rounds_arrived[op.id],
-                                             payload.round_index)
+        round_limit = self.lifecycle.arrival_round_limit(
+            op.id,
+            fallback_rounds=self.rounds_for(op),
+        )
+        if round_limit is not None and packet.round_index > round_limit:
+            raise ValueError(
+                f"round {packet.round_index} of {op.name} exceeds the device "
+                f"round limit {round_limit}"
+            )
+        self.store.store_round(packet, completion_tick=self.engine.now)
+        self.rounds_arrived[op.id] = max(
+            self.rounds_arrived[op.id],
+            packet.round_index,
+        )
         self.engine.log("DecoderCluster",
-                        f"round {payload.round_index} of {op.name} arrived "
+                        f"round {packet.round_index} of {op.name} arrived "
                         f"(op now has rounds 1..{self.rounds_arrived[op.id]})")
 
     def on_memory_round(self, op_id: int) -> None:
@@ -457,7 +477,10 @@ class WindowManager:
             return
         if (window.t_first_round is None
                 and self.rounds_arrived[window.op_id] >= window.start_round):
-            window.t_first_round = self.engine.now
+            window.t_first_round = self.store.round_complete_tick(
+                window.op_id,
+                window.start_round,
+            )
         if not self._window_data_complete(window):
             return
         if window.t_data_complete is None:
@@ -582,9 +605,14 @@ class WindowManager:
             if frags is not None:
                 payloads += [
                     self.window_interaction.apply_boundary(
-                        w.boundary_in, window_info, frags[patch_id],
+                        w.boundary_in, window_info, fragment,
                         round_index)
-                    for patch_id in sorted(frags)
+                    for fragment in sorted(
+                        frags,
+                        key=lambda item: stable_identity_order_key(
+                            item.patch_id
+                        ),
+                    )
                 ]
         overflow = w.buffer_hi - operation_rounds
         if overflow > 0:
@@ -594,9 +622,14 @@ class WindowManager:
                     if frags is not None:
                         payloads += [
                             self.window_interaction.apply_boundary(
-                                w.boundary_in, window_info, frags[patch_id],
+                                w.boundary_in, window_info, fragment,
                                 operation_rounds + round_index)
-                            for patch_id in sorted(frags)]
+                            for fragment in sorted(
+                                frags,
+                                key=lambda item: stable_identity_order_key(
+                                    item.patch_id
+                                ),
+                            )]
         return payloads
 
     # ------------------------------------------------------------ strong jobs

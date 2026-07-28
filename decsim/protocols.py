@@ -20,7 +20,8 @@ from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
                       DecodeOutcome, DecodeResult, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
-                      StrongRegionPlan, Window, WindowInfo)
+                      StrongRegionPlan, SyndromePayload, SyndromeRoundPacket,
+                      Window, WindowInfo)
 
 
 # ------------------------------------------------------ run seed capabilities
@@ -442,7 +443,11 @@ class Controller(Protocol):
 
     links: Any
 
-    def relay_syndrome(self, payload, deliver: Callable) -> None: ...
+    def relay_syndrome(
+        self,
+        payload: SyndromePayload,
+        deliver: Callable[[SyndromeRoundPacket], None],
+    ) -> None: ...
 
     def relay_instruction(self, decision, deliver: Callable) -> None: ...
 

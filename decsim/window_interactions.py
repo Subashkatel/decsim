@@ -102,9 +102,9 @@ class DefaultWindowInteraction:
         if mask is None:
             return payload
         bits = (
-            [int(bit) for bit in mask]
+            tuple(int(bit) for bit in mask)
             if payload.bits is None
-            else self._xor_mask(payload.bits, mask)
+            else tuple(self._xor_mask(payload.bits, mask))
         )
         return replace(payload, bits=bits)
 

@@ -65,10 +65,12 @@ def test_packing_does_not_reserve_the_serialized_link_early():
     ctrl = ModularController(eng, links=links, log_syndromes=False,
                              t_pack=us(1.0))
     arrivals = []
+    def deliver_packed(packet):
+        arrivals.append(("packed", eng.now))
     for patch in (0, 1):
         fragment = SyndromePayload(0, patch, 1, n_fragments=2, size_bits=500)
         eng.schedule(0, lambda p=fragment: ctrl.relay_syndrome(
-            p, lambda q: arrivals.append(("packed", eng.now))))
+            p, deliver_packed))
     whole = SyndromePayload(1, 2, 1, size_bits=500)
     eng.schedule(0, lambda: ctrl.relay_syndrome(
         whole, lambda q: arrivals.append(("whole", eng.now))))
@@ -77,7 +79,7 @@ def test_packing_does_not_reserve_the_serialized_link_early():
     # the packed 1000-bit round then transmits from 1 to 2 us
     assert ("whole", us(0.5)) in arrivals
     assert [a for a in arrivals if a[0] == "packed"] == \
-        [("packed", us(2.0))] * 2
+        [("packed", us(2.0))]
 
 
 # ------------------------------------- finding 16: decoder cache leaks

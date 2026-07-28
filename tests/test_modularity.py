@@ -11,7 +11,9 @@ from decsim.message import (
     Decision,
     Operation,
     OperationWindowPlan,
+    RetainedSyndromeFragment,
     SyndromePayload,
+    SyndromeRoundPacket,
     WindowGeometry,
 )
 from decsim.planner import FixedRounds
@@ -152,7 +154,12 @@ class MyController:
         self.engine = engine
         self.links = LinkModel()
     def relay_syndrome(self, payload, deliver):
-        self.engine.schedule(us(0.1), lambda: deliver(payload))
+        packet = SyndromeRoundPacket(
+            operation_id=payload.operation_id,
+            round_index=payload.round_index,
+            fragments=(RetainedSyndromeFragment.from_payload(payload),),
+        )
+        self.engine.schedule(us(0.1), lambda: deliver(packet))
     def relay_instruction(self, decision, deliver):
         self.engine.schedule(us(0.1), lambda: deliver(decision))
 

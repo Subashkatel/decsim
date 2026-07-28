@@ -4,11 +4,14 @@
 # forwards batched packets to the decoders -- so a round arriving in fragments
 # (possibly at different times) must ship as ONE packet after its last fragment.
 #==================================================================
+import pytest
+import numpy as np
+
 from decsim.config import us
 from decsim.controllers import ModularController
 from decsim.engine import Engine
 from decsim.links import Link, LinkModel
-from decsim.message import SyndromePayload
+from decsim.message import SyndromePayload, SyndromeRoundPacket
 
 
 def _frag(patch, n=2):
@@ -19,24 +22,28 @@ def test_staggered_fragments_ship_as_one_packet_after_the_last():
     eng = Engine(verbose=False)
     ctrl = ModularController(eng, log_syndromes=False)
     arrivals = []
-    deliver = lambda p: arrivals.append((eng.now, p.patch_id))
+    deliver = lambda packet: arrivals.append((
+        eng.now,
+        tuple(fragment.patch_id for fragment in packet.fragments),
+    ))
     # the device emits the round in two chunks, 0.4 us apart (staggered readout)
     eng.schedule(0, lambda: ctrl.relay_syndrome(_frag(0), deliver))
     eng.schedule(us(0.4), lambda: ctrl.relay_syndrome(_frag(1), deliver))
     eng.run()
     # both fragments arrive TOGETHER, one t_qc + t_cd after the LAST chunk left the chip
     expected = us(0.4) + us(0.15) + us(2.0)
-    assert arrivals == [(expected, 0), (expected, 1)]
+    assert arrivals == [(expected, (0, 1))]
 
 
 def test_packaging_cost_is_priced_per_packet():
     eng = Engine(verbose=False)
     ctrl = ModularController(eng, log_syndromes=False, t_pack=us(0.3))
     arrivals = []
-    eng.schedule(0, lambda: ctrl.relay_syndrome(_frag(0), lambda p: arrivals.append(eng.now)))
-    eng.schedule(0, lambda: ctrl.relay_syndrome(_frag(1), lambda p: arrivals.append(eng.now)))
+    deliver = lambda packet: arrivals.append(eng.now)
+    eng.schedule(0, lambda: ctrl.relay_syndrome(_frag(0), deliver))
+    eng.schedule(0, lambda: ctrl.relay_syndrome(_frag(1), deliver))
     eng.run()
-    assert arrivals == [us(0.15) + us(0.3) + us(2.0)] * 2
+    assert arrivals == [us(0.15) + us(0.3) + us(2.0)]
 
 
 def test_whole_round_payloads_take_the_original_path():
@@ -45,9 +52,170 @@ def test_whole_round_payloads_take_the_original_path():
     ctrl = ModularController(eng, log_syndromes=False, t_pack=us(9.9))
     arrivals = []
     eng.schedule(0, lambda: ctrl.relay_syndrome(_frag(0, n=1),
-                                                lambda p: arrivals.append(eng.now)))
+                                                lambda packet: arrivals.append(eng.now)))
     eng.run()
     assert arrivals == [us(0.15) + us(2.0)]
+
+
+def test_controller_copies_mixed_identity_fragments_into_one_packet():
+    eng = Engine(verbose=False)
+    ctrl = ModularController(eng, log_syndromes=False)
+    delivered = []
+    deliver = lambda packet: delivered.append(packet)
+    identities = (2, "2", (), (2, "north"), ("gross", (5, "north")))
+    mutable_bits = [[index & 1, (index + 1) & 1]
+                    for index in range(len(identities))]
+
+    for patch_id, bits in zip(identities, mutable_bits):
+        ctrl.relay_syndrome(
+            SyndromePayload(
+                operation_id=("operation", 3),
+                patch_id=patch_id,
+                round_index=1,
+                n_fragments=len(identities),
+                bits=bits,
+                code="surface",
+                size_bits=2,
+            ),
+            deliver,
+        )
+    for bits in mutable_bits:
+        bits[:] = [1, 1]
+
+    eng.run()
+
+    assert len(delivered) == 1
+    packet = delivered[0]
+    assert type(packet) is SyndromeRoundPacket
+    assert packet.operation_id == ("operation", 3)
+    assert packet.round_index == 1
+    assert tuple(fragment.patch_id for fragment in packet.fragments) == identities
+    assert tuple(fragment.bits for fragment in packet.fragments) == (
+        (0, 1),
+        (1, 0),
+        (0, 1),
+        (1, 0),
+        (0, 1),
+    )
+
+
+def test_controller_rejects_invalid_fragment_before_packet_state_mutates():
+    eng = Engine(verbose=False)
+    ctrl = ModularController(eng, log_syndromes=False)
+    payload = SyndromePayload(
+        operation_id=0,
+        patch_id=0,
+        round_index=True,
+        n_fragments=1,
+    )
+
+    with pytest.raises(TypeError, match="round_index"):
+        ctrl.relay_syndrome(payload, lambda packet: None)
+
+    assert ctrl._pending == {}
+    assert ctrl._completed_rounds == set()
+
+
+class _IntegerSubclass(int):
+    pass
+
+
+class _StringSubclass(str):
+    pass
+
+
+class _HostileIdentity:
+    def __eq__(self, other):
+        raise AssertionError("hostile equality must not run")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("operation_id", True),
+        ("operation_id", "\ud800"),
+        ("operation_id", (0, _HostileIdentity())),
+        ("patch_id", False),
+        ("patch_id", ("north", "\udfff")),
+        ("round_index", True),
+        ("round_index", 1.0),
+        ("round_index", np.int64(1)),
+        ("round_index", _IntegerSubclass(1)),
+        ("round_index", 0),
+        ("round_index", -1),
+        ("n_fragments", True),
+        ("n_fragments", 1.0),
+        ("n_fragments", np.int64(1)),
+        ("n_fragments", _IntegerSubclass(1)),
+        ("n_fragments", 0),
+        ("n_fragments", -1),
+        ("size_bits", True),
+        ("size_bits", 1.0),
+        ("size_bits", np.int64(1)),
+        ("size_bits", _IntegerSubclass(1)),
+        ("size_bits", -1),
+        ("code", ""),
+        ("code", "\ud800"),
+        ("code", 3),
+        ("code", _StringSubclass("surface")),
+        ("bits", np.array([[True]], dtype=bool)),
+        ("bits", np.array([1], dtype=np.uint8)),
+        ("bits", [0, 2]),
+        ("bits", b"\x00"),
+    ],
+)
+def test_controller_fragment_ingress_is_exact_and_non_mutating(field, value):
+    engine = Engine(verbose=False)
+    controller = ModularController(engine, log_syndromes=False)
+    payload = SyndromePayload(0, 0, 1)
+    setattr(payload, field, value)
+
+    with pytest.raises((TypeError, ValueError)):
+        controller.relay_syndrome(payload, lambda packet: None)
+
+    assert controller._pending == {}
+    assert controller._completed_rounds == set()
+    assert engine._event_queue == []
+
+
+def test_controller_rejects_duplicate_count_sink_and_late_fragments():
+    engine = Engine(verbose=False)
+    controller = ModularController(engine, links=LinkModel(qc=0, cd=0),
+                                   log_syndromes=False)
+    delivered = []
+    deliver = delivered.append
+
+    controller.relay_syndrome(_frag("north"), deliver)
+    engine.run()
+    assert len(controller._pending[(0, 1)].fragments) == 1
+
+    controller.relay_syndrome(_frag("north"), deliver)
+    with pytest.raises(ValueError, match="duplicate"):
+        engine.run()
+    assert len(controller._pending[(0, 1)].fragments) == 1
+
+    controller.relay_syndrome(
+        SyndromePayload(0, "south", 1, n_fragments=3),
+        deliver,
+    )
+    with pytest.raises(ValueError, match="same count"):
+        engine.run()
+    assert len(controller._pending[(0, 1)].fragments) == 1
+
+    controller.relay_syndrome(_frag("south"), lambda packet: None)
+    with pytest.raises(ValueError, match="delivery sink"):
+        engine.run()
+    assert len(controller._pending[(0, 1)].fragments) == 1
+
+    controller.relay_syndrome(_frag("south"), deliver)
+    engine.run()
+    assert len(delivered) == 1
+    assert (0, 1) in controller._completed_rounds
+
+    controller.relay_syndrome(_frag("late"), deliver)
+    with pytest.raises(ValueError, match="already completed"):
+        engine.run()
+    assert len(delivered) == 1
 
 
 #------------------------------------------------------------------
@@ -108,9 +276,10 @@ def test_packed_fragments_are_priced_by_their_total_bits():
     links = LinkModel(qc=Link(0), cd=Link(0, bandwidth_bits_per_us=1000))
     ctrl = ModularController(eng, links=links, log_syndromes=False)
     arrivals = []
+    deliver = lambda packet: arrivals.append(eng.now)
     for patch, bits in ((0, 400), (1, 600)):
         payload = SyndromePayload(0, patch, 1, n_fragments=2, size_bits=bits)
         eng.schedule(0, lambda p=payload: ctrl.relay_syndrome(
-            p, lambda q: arrivals.append(eng.now)))
+            p, deliver))
     eng.run()
-    assert arrivals == [us(1.0)] * 2
+    assert arrivals == [us(1.0)]

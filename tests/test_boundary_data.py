@@ -106,7 +106,8 @@ def test_timing_only_payload_becomes_defect_mask():
 
 
 def test_per_patch_fragments_gate_round_arrival():
-    # a round with n_fragments=2 only counts as arrived once BOTH patches are in
+    # The controller is the sole fragment-completion owner; the manager sees
+    # exactly one complete round after both patch fragments arrive.
     class SilentDevice(TimingOnlyDevice):
         def round_payloads(self, operation, round_index):
             return []
@@ -114,17 +115,35 @@ def test_per_patch_fragments_gate_round_arrival():
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     op.patches = (0, 1)
     observed = []
+    controllers = []
+
+    def make_controller(engine):
+        controller = ModularController(
+            engine,
+            links=LinkModel(qc=0, cd=0),
+            log_syndromes=False,
+        )
+        controllers.append(controller)
+        return controller
 
     def install_probe(engine, cluster, _chip, _factory):
         def probe():
-            cluster.on_syndrome_arrival(
+            deliver = cluster.on_syndrome_arrival
+            controllers[0].relay_syndrome(
                 SyndromePayload(0, 0, 1, n_fragments=2),
+                deliver,
             )
             observed.append(cluster.rounds_arrived[0])
-            cluster.on_syndrome_arrival(
+            controllers[0].relay_syndrome(
                 SyndromePayload(0, 1, 1, n_fragments=2),
+                deliver,
             )
             observed.append(cluster.rounds_arrived[0])
+            engine.schedule(
+                1,
+                lambda: observed.append(cluster.rounds_arrived[0]),
+                label="observe complete packet",
+            )
 
         engine.schedule(0, probe, label="fragment arrival probe")
         return []
@@ -136,10 +155,11 @@ def test_per_patch_fragments_gate_round_arrival():
         decoder=PresetLatencyDecoder(1.0),
         num_units=1,
         device=SilentDevice(),
+        make_controller=make_controller,
         make_metrics=install_probe,
     ).build()
 
-    assert observed == [0, 1]
+    assert observed == [0, 0, 1]
 
 
 def test_per_patch_device_end_to_end():

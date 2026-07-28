@@ -7,9 +7,42 @@ live in links.py.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .links import LinkModel
+from .message import (
+    RetainedSyndromeFragment,
+    SyndromeRoundPacket,
+    same_stable_identity,
+)
+
+
+def _delivery_sink_identity(deliver: Callable) -> tuple:
+    if not callable(deliver):
+        raise TypeError("syndrome delivery sink must be callable")
+    receiver = getattr(deliver, "__self__", None)
+    function = getattr(deliver, "__func__", None)
+    if receiver is not None and function is not None:
+        return ("bound", receiver, function)
+    return ("callable", deliver)
+
+
+def _same_delivery_sink(left: tuple, right: tuple) -> bool:
+    return (
+        len(left) == len(right)
+        and left[0] == right[0]
+        and all(left_item is right_item
+                for left_item, right_item in zip(left[1:], right[1:]))
+    )
+
+
+@dataclass
+class _PendingSyndromeRound:
+    fragment_count: int
+    sink_identity: tuple
+    deliver: Callable
+    fragments: list[RetainedSyndromeFragment] = field(default_factory=list)
 
 
 class ModularController:
@@ -22,6 +55,7 @@ class ModularController:
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes
         self._pending: dict = {}
+        self._completed_rounds: set = set()
 
     def run_manifest_config(self):
         return {
@@ -33,50 +67,79 @@ class ModularController:
 
     def relay_syndrome(self, payload, deliver: Callable) -> None:
         """Chip -> controller (t_qc) -> decoder (t_cd), buffering fragments."""
-        if payload.n_fragments == 1:
-            self.engine.schedule(
-                self._cost("qc", bits=payload.size_bits),
-                lambda: self._forward_whole_round(payload, deliver),
-                label="chip->controller")
-            return
+        if type(payload.n_fragments) is not int:
+            raise TypeError("n_fragments must be an exact built-in int")
+        if payload.n_fragments < 1:
+            raise ValueError("n_fragments must be at least one")
+        fragment = RetainedSyndromeFragment.from_payload(payload)
+        sink_identity = _delivery_sink_identity(deliver)
         self.engine.schedule(self._cost("qc", bits=payload.size_bits),
-                             lambda: self._receive_fragment(payload, deliver),
+                             lambda: self._receive_fragment(
+                                 fragment,
+                                 payload.n_fragments,
+                                 sink_identity,
+                                 deliver,
+                             ),
                              label="chip->controller")
 
-    def _forward_whole_round(self, payload, deliver: Callable) -> None:
-        if self.log_syndromes:
-            self.engine.log("Controller",
-                            f"received round {payload.round_index} of "
-                            f"op#{payload.operation_id} from chip (t_qc); "
-                            f"forwarding to decoder (t_cd)")
-        self.engine.schedule(self._cost("cd", bits=payload.size_bits),
-                             lambda: deliver(payload),
-                             label="controller->decoder")
+    def _receive_fragment(
+        self,
+        fragment: RetainedSyndromeFragment,
+        fragment_count: int,
+        sink_identity: tuple,
+        deliver: Callable,
+    ) -> None:
+        round_key = (fragment.operation_id, fragment.round_index)
+        if round_key in self._completed_rounds:
+            raise ValueError(f"syndrome round {round_key!r} already completed")
+        pending = self._pending.get(round_key)
+        if pending is None:
+            pending = _PendingSyndromeRound(
+                fragment_count=fragment_count,
+                sink_identity=sink_identity,
+                deliver=deliver,
+            )
+        else:
+            if fragment_count != pending.fragment_count:
+                raise ValueError("all fragments must declare the same count")
+            if not _same_delivery_sink(sink_identity, pending.sink_identity):
+                raise ValueError("all fragments must share one delivery sink")
+        if any(
+            same_stable_identity(fragment.patch_id, candidate.patch_id)
+            for candidate in pending.fragments
+        ):
+            raise ValueError("duplicate syndrome patch identity")
+        if len(pending.fragments) >= pending.fragment_count:
+            raise ValueError("too many distinct syndrome fragments")
 
-    def _receive_fragment(self, payload, deliver: Callable) -> None:
-        round_key = (payload.operation_id, payload.round_index)
-        fragments = self._pending.setdefault(round_key, [])
-        fragments.append((payload, deliver))
-        if len(fragments) < payload.n_fragments:
+        if round_key not in self._pending:
+            self._pending[round_key] = pending
+        pending.fragments.append(fragment)
+        if len(pending.fragments) < pending.fragment_count:
             if self.log_syndromes:
                 self.engine.log("Controller",
-                                f"buffered fragment {len(fragments)}/"
-                                f"{payload.n_fragments} of round "
-                                f"{payload.round_index} of "
-                                f"op#{payload.operation_id} (waiting for the rest)")
+                                f"buffered fragment {len(pending.fragments)}/"
+                                f"{pending.fragment_count} of round "
+                                f"{fragment.round_index} of "
+                                f"op#{fragment.operation_id} (waiting for the rest)")
             return
+        packet = SyndromeRoundPacket(
+            operation_id=fragment.operation_id,
+            round_index=fragment.round_index,
+            fragments=tuple(pending.fragments),
+        )
         del self._pending[round_key]
+        self._completed_rounds.add(round_key)
         if self.log_syndromes:
             self.engine.log("Controller",
-                            f"round {payload.round_index} of "
-                            f"op#{payload.operation_id} complete "
-                            f"({payload.n_fragments} fragments); packaging and "
-                            f"forwarding one packet to decoder (t_pack + t_cd)")
-        packet = tuple(fragments)
-        fragment_sizes = [fragment.size_bits for fragment, _ in packet]
+                            f"round {fragment.round_index} of "
+                            f"op#{fragment.operation_id} complete "
+                            f"({pending.fragment_count} fragments); forwarding "
+                            f"one packet to decoder")
+        fragment_sizes = [item.size_bits for item in packet.fragments]
         packet_bits = sum(fragment_sizes) \
             if all(size is not None for size in fragment_sizes) else None
-        if self.t_pack:
+        if pending.fragment_count > 1 and self.t_pack:
             # Packing happens off the wire: elapse t_pack as its own event, then
             # arbitrate the cd bus at the real transmit time. Pricing the wire at
             # now+t_pack while a single next_free_tick tracks the bus cannot model
@@ -84,21 +147,25 @@ class ModularController:
             # that is ready during the [now, now+t_pack] packing gap.
             self.engine.schedule(
                 self.t_pack,
-                lambda: self._transmit_fragment_packet(packet, packet_bits),
+                lambda: self._transmit_round_packet(
+                    packet,
+                    packet_bits,
+                    pending.deliver,
+                ),
                 label="controller pack")
         else:
-            self._transmit_fragment_packet(packet, packet_bits)
+            self._transmit_round_packet(packet, packet_bits, pending.deliver)
 
-    def _transmit_fragment_packet(self, packet: tuple, packet_bits) -> None:
+    def _transmit_round_packet(
+        self,
+        packet: SyndromeRoundPacket,
+        packet_bits,
+        deliver: Callable,
+    ) -> None:
         """Send a packed round over the cd wire, arbitrating the bus at now."""
         self.engine.schedule(self._cost("cd", bits=packet_bits),
-                             lambda: self._deliver_fragment_packet(packet),
+                             lambda: deliver(packet),
                              label="controller->decoder packet")
-
-    @staticmethod
-    def _deliver_fragment_packet(fragments: tuple) -> None:
-        for payload, deliver in fragments:
-            deliver(payload)
 
     # ------------------------------------------------------- decision path
 

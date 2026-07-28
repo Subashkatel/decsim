@@ -122,10 +122,24 @@ def test_held_early_strong_discarded_on_confident_weak():
 # ------------------------------------------------- finding 8: strict replace
 
 def test_payload_store_replace_strictly_frees_dropped_rounds():
+    from decsim.message import (
+        RetainedSyndromeFragment,
+        SyndromePayload,
+        SyndromeRoundPacket,
+    )
+
     ps = PayloadStore()
     ps.register_op(0)
     for r in (1, 2, 3):
-        ps.store(0, r, payload=f"round{r}")
+        payload = SyndromePayload(0, 0, r)
+        ps.store_round(
+            SyndromeRoundPacket(
+                operation_id=0,
+                round_index=r,
+                fragments=(RetainedSyndromeFragment.from_payload(payload),),
+            ),
+            completion_tick=r,
+        )
     ps.lease("L", [(0, 1), (0, 2), (0, 3)])
     assert ps.payloads_held == 3
     ps.replace("L", [(0, 3)])

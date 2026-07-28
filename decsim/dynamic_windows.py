@@ -65,6 +65,19 @@ class DynamicWindows:
         stream_state = self._streams.get(op_id)
         return stream_state is None or stream_state["sealed"]
 
+    def arrival_round_limit(
+        self,
+        op_id,
+        fallback_rounds: int,
+    ) -> Optional[int]:
+        """Maximum legal device round, or None for an open unbounded stream."""
+        stream_state = self._streams.get(op_id)
+        if stream_state is None:
+            return fallback_rounds
+        if stream_state["sealed"]:
+            return stream_state["sealed_round_count"]
+        return stream_state["source_round_limit"]
+
     # ---------------------------------------------------------------- grow
 
     def grow(self, stream_id, rounds_to_plan: Optional[int] = None) -> None:

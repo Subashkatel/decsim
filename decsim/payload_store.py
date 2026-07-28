@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import Optional
 
+from .message import SyndromeRoundPacket
+
 
 class PayloadStore:
     """Refcounted retained syndrome rounds, keyed (op_id, round_index).
@@ -22,8 +24,9 @@ class PayloadStore:
     The default (None) is an unbounded in-memory dict."""
 
     def __init__(self, memory_model=None) -> None:
-        # op_id -> round_index -> {fragment_index: payload}
+        # op_id -> round_index -> one complete immutable packet
         self._payloads: dict = {}
+        self._round_complete_ticks: dict[tuple, int] = {}
         self._round_refs: dict[tuple, int] = {}
         self._leases: dict = {}          # lease_id -> list[(op_id, round)]
         self.memory_model = memory_model
@@ -33,7 +36,7 @@ class PayloadStore:
     # ------------------------------------------------------------- op scope
 
     def register_op(self, op_id) -> None:
-        """Open an op's payload storage; rounds arrive via store()."""
+        """Open an op's payload storage; rounds arrive via store_round()."""
         self._payloads.setdefault(op_id, {})
 
     def has_op(self, op_id) -> bool:
@@ -44,38 +47,71 @@ class PayloadStore:
         """Free an op's entire payload RAM at op finish (parity :967-969)."""
         freed = self._payloads.pop(op_id, None)
         if freed:
-            self.payloads_held -= sum(len(frags) for frags in freed.values())
+            self.payloads_held -= sum(
+                len(packet.fragments) for packet in freed.values()
+            )
             if self.memory_model is not None:
-                for round_index, frags in freed.items():
-                    for fragment_index in frags:
+                for round_index, packet in freed.items():
+                    for fragment in packet.fragments:
                         self.memory_model.evict((op_id, round_index,
-                                                 fragment_index))
+                                                 fragment.patch_id))
+            for round_index in freed:
+                self._round_complete_ticks.pop((op_id, round_index), None)
 
     # ------------------------------------------------------------- storage
 
-    def store(self, op_id, round_index: int, payload,
-              fragment_index: int = 0) -> None:
-        """Retain one arrived payload fragment.
-
-        A round with no live lease is stored anyway; callers only receive
-        rounds that some window plans to read, so refcounts exist by then."""
-        rounds = self._payloads.setdefault(op_id, {})
-        fragments = rounds.setdefault(round_index, {})
-        if fragment_index not in fragments:
-            self.payloads_held += 1
-        fragments[fragment_index] = payload
+    def store_round(
+        self,
+        packet: SyndromeRoundPacket,
+        completion_tick: int,
+    ) -> None:
+        """Retain one complete immutable round and its decoder-arrival tick."""
+        if type(packet) is not SyndromeRoundPacket:
+            raise TypeError("store_round requires an exact SyndromeRoundPacket")
+        if type(completion_tick) is not int:
+            raise TypeError("completion_tick must be an exact built-in int")
+        if completion_tick < 0:
+            raise ValueError("completion_tick must be nonnegative")
+        if packet.operation_id not in self._payloads:
+            raise RuntimeError(
+                f"operation {packet.operation_id!r} payload storage is not open"
+            )
+        rounds = self._payloads[packet.operation_id]
+        if packet.round_index in rounds:
+            raise ValueError(
+                f"syndrome round {(packet.operation_id, packet.round_index)!r} "
+                "is already retained"
+            )
+        rounds[packet.round_index] = packet
+        self._round_complete_ticks[
+            (packet.operation_id, packet.round_index)
+        ] = completion_tick
+        self.payloads_held += len(packet.fragments)
         if self.memory_model is not None:
-            self.memory_model.store((op_id, round_index, fragment_index), payload)
+            for fragment in packet.fragments:
+                self.memory_model.store(
+                    (
+                        packet.operation_id,
+                        packet.round_index,
+                        fragment.patch_id,
+                    ),
+                    fragment,
+                )
         self.peak_payloads = max(self.peak_payloads, self.payloads_held)
 
-    def fragments(self, op_id, round_index: int) -> Optional[dict]:
+    def fragments(self, op_id, round_index: int) -> Optional[tuple]:
         """The retained fragments of one round (None if absent/freed)."""
-        return self._payloads.get(op_id, {}).get(round_index)
+        packet = self._payloads.get(op_id, {}).get(round_index)
+        return None if packet is None else packet.fragments
+
+    def round_complete_tick(self, op_id, round_index: int) -> Optional[int]:
+        """The exact decoder-arrival tick for a retained complete round."""
+        return self._round_complete_ticks.get((op_id, round_index))
 
     def replay(self, round_keys) -> list:
         """Assemble retained payloads for a task rebuild, in round order.
 
-        Returns [(op_id, round_index, {frag: payload}), ...]; missing rounds
+        Returns [(op_id, round_index, fragments), ...]; missing rounds
         are skipped (parity with _assemble_payloads' .get chain)."""
         out = []
         for op_id, round_index in round_keys:
@@ -123,10 +159,13 @@ class PayloadStore:
         if self._round_refs[round_key] > 0:
             return
         round_op, round_no = round_key
-        fragments = self._payloads.get(round_op, {}).pop(round_no, None)
-        if fragments is not None:
-            self.payloads_held -= len(fragments)
+        packet = self._payloads.get(round_op, {}).pop(round_no, None)
+        if packet is not None:
+            self.payloads_held -= len(packet.fragments)
             if self.memory_model is not None:
-                for fragment_index in fragments:
-                    self.memory_model.evict((round_op, round_no, fragment_index))
+                for fragment in packet.fragments:
+                    self.memory_model.evict(
+                        (round_op, round_no, fragment.patch_id)
+                    )
+            self._round_complete_ticks.pop((round_op, round_no), None)
         self._round_refs.pop(round_key, None)

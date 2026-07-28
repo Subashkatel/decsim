@@ -372,7 +372,7 @@ class Chip:
     def _relay_idle_round(self, op_id: int, patch, round_index: int) -> None:
         if self._relay_idle_round_to_live_stream(op_id, patch):
             return
-        payload = SyndromePayload(op_id, patch, round_index)
+        payload = SyndromePayload(("idle", op_id, patch), patch, round_index)
         self.controller.relay_syndrome(
             payload,
             lambda p, source_op_id=op_id:

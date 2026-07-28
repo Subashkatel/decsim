@@ -211,6 +211,116 @@ class SyndromePayload:
             raise ValueError(f"n_fragments must be >= 1 (got {self.n_fragments})")
 
 
+def _retained_bits(bits: Any) -> Optional[tuple[int, ...]]:
+    if bits is None:
+        return None
+    if type(bits) is list or type(bits) is tuple:
+        if not all(
+            type(bit) is bool or (type(bit) is int and bit in (0, 1))
+            for bit in bits
+        ):
+            raise TypeError("syndrome bits must contain only exact binary values")
+        return tuple(int(bit) for bit in bits)
+
+    import numpy as np
+
+    if (
+        type(bits) is np.ndarray
+        and bits.ndim == 1
+        and bits.dtype == np.dtype(bool)
+    ):
+        return tuple(int(bit) for bit in bits)
+    raise TypeError(
+        "syndrome bits must be None, an exact binary list/tuple, or an "
+        "exact one-dimensional NumPy boolean array"
+    )
+
+
+@dataclass(frozen=True)
+class RetainedSyndromeFragment:
+    """One validated immutable fragment retained after controller ingress."""
+
+    operation_id: Any
+    patch_id: Any
+    round_index: int
+    bits: Optional[tuple[int, ...]]
+    code: Optional[str]
+    size_bits: Optional[int]
+
+    def __post_init__(self) -> None:
+        if not is_stable_identity(self.operation_id):
+            raise TypeError("operation_id must be a stable identity")
+        if not is_stable_identity(self.patch_id):
+            raise TypeError("patch_id must be a stable identity")
+        if type(self.round_index) is not int:
+            raise TypeError("round_index must be an exact built-in int")
+        if self.round_index < 1:
+            raise ValueError("round_index must be at least one")
+        if self.bits is not None and (
+            type(self.bits) is not tuple
+            or any(type(bit) is not int or bit not in (0, 1)
+                   for bit in self.bits)
+        ):
+            raise TypeError("retained bits must be an exact tuple of binary ints")
+        if self.code is not None:
+            if not is_stable_string(self.code):
+                raise TypeError("code must be a Unicode scalar built-in string")
+            if not self.code:
+                raise ValueError("code must be nonempty when supplied")
+        if self.size_bits is not None:
+            if type(self.size_bits) is not int:
+                raise TypeError("size_bits must be an exact built-in int")
+            if self.size_bits < 0:
+                raise ValueError("size_bits must be nonnegative")
+
+    @classmethod
+    def from_payload(cls, payload: SyndromePayload) -> "RetainedSyndromeFragment":
+        return cls(
+            operation_id=payload.operation_id,
+            patch_id=payload.patch_id,
+            round_index=payload.round_index,
+            bits=_retained_bits(payload.bits),
+            code=payload.code,
+            size_bits=payload.size_bits,
+        )
+
+
+@dataclass(frozen=True)
+class SyndromeRoundPacket:
+    """One complete immutable syndrome round in transport-arrival order."""
+
+    operation_id: Any
+    round_index: int
+    fragments: tuple[RetainedSyndromeFragment, ...]
+
+    def __post_init__(self) -> None:
+        if not is_stable_identity(self.operation_id):
+            raise TypeError("packet operation_id must be a stable identity")
+        if type(self.round_index) is not int:
+            raise TypeError("packet round_index must be an exact built-in int")
+        if self.round_index < 1:
+            raise ValueError("packet round_index must be at least one")
+        if (
+            type(self.fragments) is not tuple
+            or not self.fragments
+            or any(type(fragment) is not RetainedSyndromeFragment
+                   for fragment in self.fragments)
+        ):
+            raise TypeError(
+                "packet fragments must be a nonempty tuple of retained fragments"
+            )
+        seen_patch_ids = []
+        for fragment in self.fragments:
+            if not same_stable_identity(fragment.operation_id, self.operation_id):
+                raise ValueError("packet fragments must share operation identity")
+            if fragment.round_index != self.round_index:
+                raise ValueError("packet fragments must share round_index")
+            if any(same_stable_identity(fragment.patch_id, seen)
+                   for seen in seen_patch_ids):
+                raise ValueError("packet patch identities must be distinct")
+            seen_patch_ids.append(fragment.patch_id)
+
+
 # ------------------------------------------------------------------ windows
 
 @dataclass

@@ -13,6 +13,8 @@ from decsim.layouts import UniformLayout
 from decsim.codes import SurfaceCodeModel
 from decsim.run_spec import RunSpec, simulate
 from decsim.decoders import PerRoundDecoder
+from decsim.links import LinkModel
+from decsim.pauli_frame import PauliFrame
 
 
 # ---- a researcher's from-scratch stack: no defaults, port surface only ----
@@ -109,7 +111,9 @@ class MyRouter:
         return self.decoder
 
 class MyController:
-    def __init__(self, engine): self.engine = engine
+    def __init__(self, engine):
+        self.engine = engine
+        self.links = LinkModel()
     def relay_syndrome(self, payload, deliver):
         self.engine.schedule(us(0.1), lambda: deliver(payload))
     def relay_instruction(self, decision, deliver):
@@ -120,6 +124,7 @@ class MyOrchestrator:
     def __init__(self):
         self.blocked = {}; self.controller = None; self.sink = None
         self.integrated = 0
+        self.frame = PauliFrame()
     def connect(self, controller, decision_sink):
         self.controller = controller; self.sink = decision_sink
     def register_blocked_operation(self, blocked_op_id, blocking_op_id):

@@ -67,7 +67,7 @@ def test_soft_output_decoder_requires_a_configured_metric_factory():
 
 
 def test_soft_output_decoder_releases_metrics_for_dead_window_models():
-    from decsim.message import SoftOutput
+    from decsim.message import DecodeJob, DecodeResult, SoftOutput
     from decsim.soft_output import COMPLEMENTARY_GAP_SOURCE
 
     class Model:
@@ -75,6 +75,11 @@ def test_soft_output_decoder_releases_metrics_for_dead_window_models():
             self.obs = np.array([[1]], dtype=np.uint8)
 
     class Metric:
+        def __init__(self, model):
+            # A configured metric may retain what its factory receives. The
+            # wrapper must not extend that ownership to the decoder lifetime.
+            self.model = model
+
         def evaluate(self, syndrome):
             return SoftOutput(
                 gap=1.0,
@@ -84,8 +89,13 @@ def test_soft_output_decoder_releases_metrics_for_dead_window_models():
     class MetricFactory:
         source = COMPLEMENTARY_GAP_SOURCE
 
+        def __init__(self):
+            self.metric_references = []
+
         def from_window_model(self, model):
-            return Metric()
+            metric = Metric(model)
+            self.metric_references.append(weakref.ref(metric))
+            return metric
 
         def run_manifest_config(self):
             return {
@@ -93,22 +103,35 @@ def test_soft_output_decoder_releases_metrics_for_dead_window_models():
                 "source": self.source.manifest_value(),
             }
 
-    decoder = SoftOutputDecoder(object(), MetricFactory())
+    class BaseDecoder:
+        def decode(self, job):
+            return DecodeResult(job.op_id, job.window_id)
+
+    metric_factory = MetricFactory()
+    decoder = SoftOutputDecoder(BaseDecoder(), metric_factory)
     models = [Model() for _ in range(256)]
-    metrics = [decoder._metric_for(model) for model in models]
     model_references = [weakref.ref(model) for model in models]
-    metric_references = [weakref.ref(metric) for metric in metrics]
 
-    assert len(decoder._metrics) == 256
-    assert decoder._metric_for(models[0]) is metrics[0]
+    for operation_id, model in enumerate(models):
+        job = DecodeJob(
+            op_id=operation_id,
+            window_id=0,
+            n_rounds=1,
+            dem=model,
+        )
+        result = decoder.decode(job)
+        assert result.soft_output is not None
 
+    del job, model, result
     models.clear()
-    metrics.clear()
     gc.collect()
 
     assert all(reference() is None for reference in model_references)
-    assert all(reference() is None for reference in metric_references)
-    assert decoder._metrics == {}
+    assert all(
+        reference() is None
+        for reference in metric_factory.metric_references
+    )
+    assert not hasattr(decoder, "_metrics")
 
 
 class _ZeroLatency:

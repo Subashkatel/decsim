@@ -168,6 +168,11 @@ class SeedConsumingProviderOwner:
         raise AssertionError("pre-binding provider must not be called")
 
 
+class PlainControllerProvider:
+    def __init__(self, engine):
+        self.engine = engine
+
+
 class DescriptorPlanner:
     scheme = SlidingWindowScheme()
     rounds_policy = FixedRounds(3)
@@ -249,6 +254,15 @@ def test_bound_provider_seed_consumer_rejects_before_signature_or_entry(
         getattr(spec, entrypoint)()
 
     assert owner.entries == 0
+
+
+def test_plain_class_controller_provider_is_accepted_without_instantiation():
+    spec = RunSpec(
+        ops=[],
+        make_controller=PlainControllerProvider,
+    )
+
+    spec.validate()
 
 
 @pytest.mark.parametrize("entrypoint", ["validate", "build"])

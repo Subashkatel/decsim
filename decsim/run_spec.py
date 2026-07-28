@@ -1493,11 +1493,15 @@ def _scan_prebinding_provider(component_path: str, provider) -> None:
         _reject_static_seed_consumer(component_path, provider.__func__)
         _reject_static_seed_consumer(component_path, provider.__self__)
         return
+    if provider_type is type:
+        # Instance seed capabilities belong to the runtime object returned by
+        # construction; that object joins the later binding transaction.
+        return
     if (
         provider_type is functools.partial
         or provider_type is types.BuiltinFunctionType
         or provider_type is types.BuiltinMethodType
-        or provider_type is type
+        or isinstance(provider, type)
     ):
         raise TypeError(
             f"{component_path} has unsupported provider shape "

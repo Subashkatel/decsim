@@ -32,7 +32,11 @@ class TimingOnlyDevice:
 
     operation_circuit_scope = "none"
 
-    def begin_operation(self, op: Operation) -> None:
+    def begin_operation(
+        self,
+        op: Operation,
+        resolved_round_count: int,
+    ) -> None:
         return None
 
     def round_payloads(self, op: Operation, round_index: int) -> list:
@@ -87,16 +91,28 @@ class ClockedDevice:
     def start(self, operation, round_ticks: int,
               on_body_done: Callable) -> None:
         """Begin an operation's stream: round 1 fires one round-tick from now."""
-        self.device.begin_operation(operation)
+        total_rounds = self.rounds_for(operation)
+        self.device.begin_operation(operation, total_rounds)
         self.engine.schedule(
             round_ticks,
-            lambda: self._round(operation, 1, round_ticks, on_body_done),
+            lambda: self._round(
+                operation,
+                1,
+                total_rounds,
+                round_ticks,
+                on_body_done,
+            ),
             label=f"round1({operation.name})")
 
-    def _round(self, operation, round_index: int, round_ticks: int,
-               on_body_done: Callable) -> None:
+    def _round(
+        self,
+        operation,
+        round_index: int,
+        total_rounds: int,
+        round_ticks: int,
+        on_body_done: Callable,
+    ) -> None:
         """Emit one round; the final round triggers body-done in this event."""
-        total_rounds = self.rounds_for(operation)
         payloads = self.device.round_payloads(operation, round_index)
         self.engine.log("Chip", f"{operation.name} fires round "
                                 f"{round_index}/{total_rounds}")
@@ -104,8 +120,13 @@ class ClockedDevice:
         if round_index < total_rounds:
             self.engine.schedule(
                 round_ticks,
-                lambda: self._round(operation, round_index + 1, round_ticks,
-                                    on_body_done),
+                lambda: self._round(
+                    operation,
+                    round_index + 1,
+                    total_rounds,
+                    round_ticks,
+                    on_body_done,
+                ),
                 label=f"round{round_index + 1}({operation.name})")
         else:
             on_body_done(operation)
@@ -216,7 +237,11 @@ class SyndromeBitDevice:
             self._pending_run_seed = None
             self._run_seed_claimed = True
 
-    def begin_operation(self, op: Operation) -> None:
+    def begin_operation(
+        self,
+        op: Operation,
+        resolved_round_count: int,
+    ) -> None:
         """Nothing to set up."""
         return None
 

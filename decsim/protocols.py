@@ -235,6 +235,8 @@ class Decoder(Protocol):
 class DecoderRouter(Protocol):
     """Port 9. Selects a decoder for each job."""
 
+    needs_hyperedges: bool
+
     def route(self, job: DecodeJob) -> Decoder: ...
 
 
@@ -343,7 +345,7 @@ class SyndromeDevice(Protocol):
 
     operation_circuit_scope: str
 
-    def begin_operation(self, op) -> None: ...
+    def begin_operation(self, op, resolved_round_count: int) -> None: ...
 
     def round_payloads(self, op, round_index: int) -> list: ...
 
@@ -401,6 +403,7 @@ class Orchestrator(Protocol):
     """Port 15. Turns final decoded measurements into Decisions (the Pauli
     byproduct / S-gate algebra) and releases the operations they block."""
 
+    engine: Any
     frame: Any
 
     def connect(self, controller, decision_sink: Callable) -> None: ...

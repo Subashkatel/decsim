@@ -112,7 +112,7 @@ def escalating_world(
         ops=[Operation(88, name, (6,), clifford=True)],
         d=3, rounds_policy=FixedRounds(30), round_us=1.0,
         scheme=SlidingWindowScheme(), strategy=strategy,
-        decoder=weak, router=SwitchingRouter(weak, strong),
+        router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
         make_metrics=(
             None
@@ -1145,7 +1145,7 @@ def test_a_run_that_leaves_a_window_waiting_for_a_strong_result_fails():
         d=3, rounds_policy=FixedRounds(30), round_us=1.0,
         scheme=SlidingWindowScheme(),
         strategy=AwaitWithoutRequestingStrategy(),
-        decoder=weak, router=SwitchingRouter(weak, PerRoundDecoder(tau_us=2.0)),
+        router=SwitchingRouter(weak, PerRoundDecoder(tau_us=2.0)),
         unit_pools={"default": 1, "strong": 1},
     )
     with pytest.raises(RuntimeError, match="waiting for a strong result"):

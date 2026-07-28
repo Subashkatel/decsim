@@ -47,14 +47,19 @@ def _memory_ops(n=1):
 
 def _run(ops, emit, device=None, seed=0):
     dec = DefectEmittingDecoder(emit)
+    code_selection = (
+        {"code": device.code}
+        if type(device) is SyndromeBitDevice
+        else {"d": 3}
+    )
     simulate(RunSpec(
         ops=ops,
         num_units=2,
-        d=3,
         rounds_policy=FixedRounds(11),
         decoder=dec,
         device=device,
         seed=seed,
+        **code_selection,
     ), verbose=False)
     return dec.seen
 
@@ -141,13 +146,14 @@ def test_per_patch_device_end_to_end():
     # a 2-patch op with a per-patch device: every decoded round carries BOTH fragments
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     dec = DefectEmittingDecoder(emit=False)
+    code = SurfaceCodeModel(d=3)
     simulate(RunSpec(
         ops=CircuitFrontend([op]).build(),
         num_units=1,
-        d=3,
+        code=code,
         rounds_policy=FixedRounds(11),
         decoder=dec,
-        device=SyndromeBitDevice(SurfaceCodeModel(d=3), per_patch=True),
+        device=SyndromeBitDevice(code, per_patch=True),
         seed=3,
     ), verbose=False)
     w0_rounds = {(r, p) for (_, k, _, r, p) in dec.seen if k == 0}

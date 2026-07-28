@@ -97,7 +97,7 @@ def test_stim_device_round_alignment():
     circuit = _circuit()
     device = StimDevice(seed=3)
     op = Operation(id=1, name="memory", qubits=(0,), clifford=True, circuit=circuit)
-    device.begin_operation(op)
+    device.begin_operation(op, ROUNDS)
     coords = circuit.get_detector_coordinates()
     layer = {}
     for det, c in coords.items():

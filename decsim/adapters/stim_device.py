@@ -5,12 +5,10 @@ from __future__ import annotations
 import hashlib
 from numbers import Integral
 import threading
-from typing import Callable, Optional
+from typing import Optional
 
 from ..message import (
     Operation,
-    RunSeedChild,
-    RunSeedPathSegment,
     RunSeedReservation,
     SyndromePayload,
 )
@@ -29,9 +27,11 @@ class StimDevice:
 
     operation_circuit_scope = "per_operation"
 
-    def __init__(self, seed: Optional[Integral] = None,
-                 rounds_for: Optional[Callable[[Operation], int]] = None,
-                 detector_rounds: Optional[dict] = None):
+    def __init__(
+        self,
+        seed: Optional[Integral] = None,
+        detector_rounds: Optional[dict] = None,
+    ):
         """Configure Stim sampling and optional detector-round overrides.
 
         ``detector_rounds`` maps an operation or stream identity to
@@ -48,7 +48,6 @@ class StimDevice:
         self._pending_run_seed = None
         self._run_seed_claimed = False
         self._stochastic_use_started = False
-        self._rounds_for = rounds_for
         self._detector_rounds_override = {
             key: dict(rounds_map)
             for key, rounds_map in (detector_rounds or {}).items()}
@@ -57,17 +56,6 @@ class StimDevice:
         self._truth: dict = {}
         self._by_round: dict = {}
         self._stream_models: dict = {}
-
-    def run_seed_children(self):
-        """Expose the optional callback that resolves operation rounds."""
-        if self._rounds_for is None:
-            return ()
-        return (
-            RunSeedChild(
-                (RunSeedPathSegment("field", "rounds_for"),),
-                self._rounds_for,
-            ),
-        )
 
     def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
         """Prepare a run-root binding without changing active sampling state."""
@@ -195,8 +183,19 @@ class StimDevice:
         ).digest()
         return int.from_bytes(digest, "big")
 
-    def begin_operation(self, op: Operation) -> None:
+    def begin_operation(
+        self,
+        op: Operation,
+        resolved_round_count: int,
+    ) -> None:
         """Sample one fresh shot, or reuse the stream shot for later segments."""
+        if (
+            type(resolved_round_count) is not int
+            or resolved_round_count < 1
+        ):
+            raise ValueError(
+                "resolved_round_count must be a positive built-in int"
+            )
         key = self._key(op)
         if self._seed is not None:
             self._validate_sample_key(key)
@@ -226,8 +225,11 @@ class StimDevice:
         buckets: dict[int, list[int]] = {}
         if override is not None:
             max_round = max(override.values(), default=0)
-            round_count = self._rounds_for(op) if self._rounds_for is not None \
-                else max_round
+            round_count = (
+                max_round
+                if op.stream_id is not None
+                else resolved_round_count
+            )
             for detector_index, detector_round in override.items():
                 buckets.setdefault(
                     min(detector_round, round_count), []).append(detector_index)
@@ -235,8 +237,11 @@ class StimDevice:
             coords = op.circuit.get_detector_coordinates()
             max_time_coordinate = max(
                 (int(c[-1]) for c in coords.values()), default=0)
-            round_count = self._rounds_for(op) if self._rounds_for is not None \
-                else max_time_coordinate
+            round_count = (
+                max_time_coordinate
+                if op.stream_id is not None
+                else resolved_round_count
+            )
             for detector_index, coordinate in coords.items():
                 detector_round = int(coordinate[-1]) + 1
                 buckets.setdefault(

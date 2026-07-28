@@ -245,7 +245,6 @@ def test_strategy_switch_moves_only_the_strategy():
             ops=_ops(),
             d=3,
             rounds_policy=FixedRounds(11),
-            decoder=weak,
             router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
             unit_pools={"default": 1, "strong": 1},
             strategy=strategy,

@@ -1,4 +1,6 @@
 """Port protocols are runtime-checkable and the seam types carry the contract."""
+import pytest
+
 from decsim.message import DecodeJob, DecodeOutcome, DecodeResult, Window
 from decsim.protocols import (BoundaryPolicy, DecodingStrategy, Directive,
                           OutcomeDirective, RoundsPolicy, StrategyServices,
@@ -168,12 +170,11 @@ def test_devices_and_switching_expose_circuit_scope_and_behavior_children():
     from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
     from decsim.switching import Switching, ThresholdRegister
 
-    rounds_for = lambda operation: 3
-    stim_device = StimDevice(rounds_for=rounds_for)
+    stim_device = StimDevice()
     assert stim_device.operation_circuit_scope == "per_operation"
-    assert _seed_child_paths(stim_device) == {
-        (("field", "rounds_for"),): rounds_for,
-    }
+    assert not hasattr(stim_device, "run_seed_children")
+    with pytest.raises(TypeError, match="rounds_for"):
+        StimDevice(rounds_for=lambda operation: 3)
 
     code = SurfaceCodeModel(d=3)
     bit_device = SyndromeBitDevice(code)

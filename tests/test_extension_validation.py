@@ -30,7 +30,7 @@ class LegacyBoundaryPolicy:
 class StaticOnlyDevice:
     operation_circuit_scope = "none"
 
-    def begin_operation(self, operation):
+    def begin_operation(self, operation, resolved_round_count):
         return None
 
     def round_payloads(self, operation, round_index):
@@ -43,7 +43,7 @@ class StaticOnlyDevice:
 
 
 class MissingCircuitScopeDevice:
-    def begin_operation(self, operation):
+    def begin_operation(self, operation, resolved_round_count):
         return None
 
     def round_payloads(self, operation, round_index):
@@ -127,7 +127,7 @@ class CircuitRecordingTimingDevice(TimingOnlyDevice):
     def __init__(self):
         self.circuits_seen = []
 
-    def begin_operation(self, operation):
+    def begin_operation(self, operation, resolved_round_count):
         self.circuits_seen.append(operation.circuit)
 
 
@@ -356,6 +356,195 @@ def test_plain_class_controller_provider_is_accepted_without_instantiation():
     spec.validate()
 
 
+def test_orchestrator_provider_receives_the_exact_run_engine():
+    from decsim.orchestrators import ExecutionOrchestrator
+
+    engines = []
+
+    def make_orchestrator(engine):
+        engines.append(engine)
+        return ExecutionOrchestrator(engine)
+
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_orchestrator=make_orchestrator,
+    ).build()
+
+    assert engines == [completed.engine]
+    assert completed.orchestrator.engine is completed.engine
+    provider = next(
+        record
+        for record in completed.manifest.to_json_value()["providers"]
+        if record["component_path"] == [
+            {"kind": "field", "value": "make_orchestrator"},
+        ]
+    )
+    assert provider["provider_kind"] == "function"
+    assert provider["closure_status"] == "present"
+    assert provider["assurance"] == "partial_unattested_callable_state"
+
+
+def test_bound_provider_receiver_is_recorded_as_a_component():
+    class MetricProviderOwner:
+        def run_manifest_config(self):
+            return {"identity": "metric-provider-owner"}
+
+        def make_metrics(self, engine, cluster, chip, factory):
+            return []
+
+    owner = MetricProviderOwner()
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_metrics=owner.make_metrics,
+    ).build()
+    manifest = completed.manifest.to_json_value()
+
+    receiver = next(
+        component
+        for component in manifest["components"]
+        if component["component_path"] == [
+            {"kind": "field", "value": "make_metrics"},
+        ]
+    )
+    assert receiver["configuration"] == {
+        "identity": "metric-provider-owner",
+    }
+    provider = next(
+        record
+        for record in manifest["providers"]
+        if record["component_path"] == [
+            {"kind": "field", "value": "make_metrics"},
+        ]
+    )
+    assert provider["provider_kind"] == "bound_method"
+    assert provider["assurance"] == "partial_unattested_callable_state"
+
+
+def test_router_owns_the_frozen_hyperedge_requirement():
+    from decsim.decoders import CodeRouter
+
+    class HyperedgeDecoder(StaticDecoder):
+        needs_hyperedges = True
+
+    router = CodeRouter(
+        default=StaticDecoder(),
+        by_code={"surface": HyperedgeDecoder()},
+    )
+
+    completed = RunSpec(ops=[], router=router).build()
+
+    assert router.needs_hyperedges is True
+    assert completed.window_manager.needs_hyperedges is True
+
+
+def test_device_receives_the_exact_frozen_operation_round_count():
+    class RoundRecordingDevice(TimingOnlyDevice):
+        def __init__(self):
+            self.received = []
+
+        def begin_operation(self, operation, resolved_round_count):
+            self.received.append((operation.id, resolved_round_count))
+
+    device = RoundRecordingDevice()
+    RunSpec(
+        ops=[Operation(9, "memory", (0,))],
+        rounds_policy=FixedRounds(7),
+        decoder=StaticDecoder(),
+        device=device,
+    ).build()
+
+    assert device.received == [(9, 7)]
+
+
+def test_syndrome_bit_device_must_share_the_exact_resolved_code():
+    from decsim.devices import SyndromeBitDevice
+
+    canonical_code = SurfaceCodeModel(d=3)
+    equal_but_distinct_code = SurfaceCodeModel(d=3)
+
+    with pytest.raises(
+        ValueError,
+        match="SyndromeBitDevice.code must be the exact resolved run code",
+    ):
+        RunSpec(
+            ops=[],
+            code=canonical_code,
+            decoder=StaticDecoder(),
+            device=SyndromeBitDevice(equal_but_distinct_code),
+        ).build()
+
+    completed = RunSpec(
+        ops=[],
+        code=canonical_code,
+        decoder=StaticDecoder(),
+        device=SyndromeBitDevice(canonical_code),
+    ).build()
+    assert completed.planning.code is canonical_code
+
+
+def test_router_requires_a_stored_exact_hyperedge_requirement():
+    class PropertyRouter:
+        @property
+        def needs_hyperedges(self):
+            raise AssertionError("router property was evaluated")
+
+        def route(self, job):
+            return StaticDecoder()
+
+    with pytest.raises(
+        TypeError,
+        match="needs_hyperedges must be a stored exact bool",
+    ):
+        RunSpec(ops=[], router=PropertyRouter()).validate()
+
+
+@pytest.mark.parametrize("companion", ["decoder", "decoders"])
+def test_supplied_router_is_exclusive_with_decoder_topology(companion):
+    from decsim.decoders import CodeRouter
+
+    decoder = StaticDecoder()
+    kwargs = {companion: decoder if companion == "decoder" else {"x": decoder}}
+
+    with pytest.raises(
+        ValueError,
+        match="router is exclusive with decoder and decoders",
+    ):
+        RunSpec(
+            ops=[],
+            router=CodeRouter(decoder),
+            **kwargs,
+        ).validate()
+
+
+@pytest.mark.parametrize("provider_kind", ["callable_instance", "partial"])
+def test_unsupported_provider_wrappers_reject_before_entry(provider_kind):
+    import functools
+
+    entries = []
+
+    class CallableProvider:
+        def __call__(self, engine):
+            entries.append(engine)
+            raise AssertionError("unsupported provider entered")
+
+    def provider_function(engine):
+        entries.append(engine)
+        raise AssertionError("unsupported provider entered")
+
+    provider = (
+        CallableProvider()
+        if provider_kind == "callable_instance"
+        else functools.partial(provider_function)
+    )
+    spec = RunSpec(ops=[], make_controller=provider)
+
+    with pytest.raises(TypeError, match="unsupported provider shape"):
+        spec.validate()
+    assert entries == []
+
+
 @pytest.mark.parametrize("entrypoint", ["validate", "build"])
 def test_descriptor_backed_planner_child_rejects_without_descriptor_entry(
     entrypoint,
@@ -580,7 +769,6 @@ def test_run_root_binds_nested_consumers_by_stable_semantic_path():
     surface = SeedRecordingDecoder()
     RunSpec(
         ops=[],
-        decoder=default,
         router=CodeRouter(default, {"surface": surface}),
         seed=7,
     ).build()
@@ -608,7 +796,6 @@ def test_component_graph_records_shared_decoder_alias_once():
     shared = SeedRecordingDecoder()
     completed = RunSpec(
         ops=[],
-        decoder=shared,
         router=CodeRouter(
             default=shared,
             by_code={"surface": shared},
@@ -648,6 +835,8 @@ def test_component_graph_records_shared_decoder_alias_once():
         ("field", 1, TypeError),
         ("string_key", 1, TypeError),
         ("none_key", "none", ValueError),
+        ("field", "\ud800", ValueError),
+        ("string_key", "\udfff", TypeError),
         ("integer_key", 0, TypeError),
         ("integer_key", "", ValueError),
         ("integer_key", "01", ValueError),
@@ -685,6 +874,46 @@ def test_public_typed_path_segment_has_an_exact_two_key_wire_form():
         {"kind": "integer_key", "value": "-9"},
         {"kind": "integer_key", "value": "0"},
     ]
+
+
+def test_static_manifest_strings_reject_surrogates_before_execution(
+    monkeypatch,
+):
+    from decsim.engine import Engine as RuntimeEngine
+
+    engine_started = False
+    original_start = RuntimeEngine._start_running
+
+    def record_start(engine):
+        nonlocal engine_started
+        engine_started = True
+        return original_start(engine)
+
+    monkeypatch.setattr(RuntimeEngine, "_start_running", record_start)
+
+    with pytest.raises(TypeError, match="operation name.*Unicode scalar"):
+        RunSpec(
+            ops=[Operation(0, "\ud800", (0,))],
+            decoder=StaticDecoder(),
+        ).build()
+
+    class InvalidNameMetric:
+        name = "\udfff"
+
+        def observe(self, view):
+            return None
+
+        def result(self):
+            return None
+
+    with pytest.raises(TypeError, match="metric.*Unicode scalar"):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            make_metrics=lambda *_args: [InvalidNameMetric()],
+        ).build()
+
+    assert not engine_started
 
 
 def test_stable_identity_record_round_trips_structured_patch_keys():
@@ -755,6 +984,78 @@ def test_manifest_json_validator_rejects_surrogates_and_hostile_containers():
 
     value = {"\N{GRINNING FACE}": ["\\ud800"]}
     assert _validated_json_value(value) == value
+
+
+def test_declared_configuration_rejects_dict_subclass_without_traversal():
+    from decsim.run_spec import _capture_component_configuration
+
+    class HostileDict(dict):
+        def __iter__(self):
+            raise AssertionError("hostile configuration was iterated")
+
+        def items(self):
+            raise AssertionError("hostile configuration was traversed")
+
+    class ConfiguredPart:
+        def run_manifest_config(self):
+            return HostileDict(mode="hostile")
+
+    with pytest.raises(TypeError, match="exact built-in dict"):
+        _capture_component_configuration(ConfiguredPart())
+
+
+@pytest.mark.parametrize(
+    "invalid_result",
+    [
+        {"value": "\ud800"},
+        {"\udfff": "value"},
+        {"nested": [{"value": ["\ud800"]}]},
+    ],
+)
+def test_invalid_metric_json_fails_sealed_finalization_without_publication(
+    invalid_result,
+):
+    class InvalidMetric:
+        name = "invalid-json"
+
+        def observe(self, view):
+            return None
+
+        def result(self):
+            return invalid_result
+
+    spec = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_metrics=lambda *_args: [InvalidMetric()],
+    )
+
+    with pytest.raises(TypeError, match="Unicode scalar"):
+        spec.build()
+    with pytest.raises(RuntimeError, match="already invalid"):
+        spec.build()
+
+
+def test_non_bmp_metric_json_is_frozen_before_result_digest():
+    value = {"\N{GRINNING FACE}": ["\N{ROCKET}"]}
+
+    class UnicodeMetric:
+        name = "unicode"
+
+        def observe(self, view):
+            return None
+
+        def result(self):
+            return value
+
+    completed = RunSpec(
+        ops=[],
+        decoder=StaticDecoder(),
+        make_metrics=lambda *_args: [UnicodeMetric()],
+    ).build()
+
+    assert completed.result.metric_values() == {"unicode": value}
+    assert completed.manifest.primary_result_sha256
 
 
 @pytest.mark.parametrize(
@@ -1011,7 +1312,7 @@ def test_orchestrator_port_requires_the_actual_retained_frame():
         RunSpec(
             ops=[],
             decoder=StaticDecoder(),
-            orchestrator=MissingFrameOrchestrator(),
+            make_orchestrator=lambda _engine: MissingFrameOrchestrator(),
         ).build()
 
 
@@ -1211,7 +1512,10 @@ def test_manifest_configuration_rejects_non_mapping_before_seed_reservation():
         def shutdown(self):
             return None
 
-    with pytest.raises(TypeError, match=r"run_manifest_config.*mapping"):
+    with pytest.raises(
+        TypeError,
+        match=r"run_manifest_config.*exact built-in dict",
+    ):
         RunSpec(
             ops=[],
             decoder=StaticDecoder(),
@@ -1229,7 +1533,6 @@ def test_run_seed_reservation_failure_cancels_prior_leaves_without_committing():
     failing = SeedRecordingDecoder(fail_reservation=True)
     spec = RunSpec(
         ops=[],
-        decoder=acquired,
         router=CodeRouter(
             default=failing,
             by_code={"surface": acquired},
@@ -1753,7 +2056,6 @@ def test_switching_device_must_supply_the_selected_strong_model_capability():
         ("rounds_policy", "RoundsPolicy"),
         ("planner", "ExecutionPlanner"),
         ("idle_policy", "IdlePolicy"),
-        ("orchestrator", "Orchestrator"),
         ("device", "SyndromeDevice"),
         ("memory_model", "MemoryModel"),
         ("window_interaction", "WindowInteraction"),

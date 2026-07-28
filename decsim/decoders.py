@@ -128,6 +128,10 @@ class CodeRouter:
                 "CodeRouter keys must be exact built-in str or None; "
                 f"got {invalid_keys[0]!r}"
             )
+        self.needs_hyperedges = any(
+            _decoder_needs_hyperedges(decoder)
+            for decoder in (self.default, *self.by_code.values())
+        )
 
     def run_seed_children(self):
         """Expose routed decoders under stable semantic paths."""
@@ -270,6 +274,10 @@ class SwitchingRouter:
     def __init__(self, weak: "Decoder", strong: "Decoder"):
         self.weak = weak
         self.strong = strong
+        self.needs_hyperedges = any(
+            _decoder_needs_hyperedges(decoder)
+            for decoder in (weak, strong)
+        )
 
     def run_seed_children(self):
         """Expose both routed decoder tiers."""
@@ -287,6 +295,19 @@ class SwitchingRouter:
     def route(self, job: DecodeJob):
         """Strong decoder for escalated jobs, weak decoder for everything else."""
         return self.strong if job.hint == "strong" else self.weak
+
+
+def _decoder_needs_hyperedges(decoder) -> bool:
+    """Resolve a decoder's optional model requirement at router construction."""
+    missing = object()
+    requirement = getattr(type(decoder), "needs_hyperedges", missing)
+    if requirement is missing:
+        requirement = getattr(decoder, "needs_hyperedges", False)
+    if type(requirement) is not bool:
+        raise TypeError(
+            f"{type(decoder).__name__}.needs_hyperedges must be an exact bool"
+        )
+    return requirement
 
 
 class SampledConfidenceDecoder(_RandomSeedConsumer):

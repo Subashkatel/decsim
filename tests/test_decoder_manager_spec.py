@@ -49,7 +49,6 @@ def _switch_run(switching, low_confidence_probability, *, rounds=60, tau_weak=0.
                round_us=TAU,
                scheme=SlidingWindowScheme(),
                strategy=switching,
-               decoder=weak,
                router=SwitchingRouter(weak, strong),
                unit_pools=pools or {"default": 1, "strong": 1},
                make_metrics=make_metrics,

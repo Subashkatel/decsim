@@ -47,7 +47,6 @@ class SoftOutputDecoder:
             )
         self.base = base
         self.metric_cls = metric_cls
-        self._metrics: dict = {}
 
     def run_manifest_config(self):
         return {
@@ -81,9 +80,7 @@ class SoftOutputDecoder:
         return result
 
     def _metric_for(self, model):
-        """Return a cached metric for this window model, or None without observable."""
-        import weakref
-
+        """Build this decode's metric, or return None without an observable."""
         import numpy as np
 
         if model is None or getattr(model, "obs", None) is None:
@@ -91,17 +88,4 @@ class SoftOutputDecoder:
         obs = np.asarray(model.obs)
         if obs.shape[0] != 1 or not obs.any():
             return None
-        entry = self._metrics.get(id(model))
-        metric = entry[1] if entry is not None and entry[0]() is model else None
-        if metric is None:
-            metric = self.metric_cls.from_window_model(model)
-            model_identity = id(model)
-
-            def discard_dead_model(reference) -> None:
-                current = self._metrics.get(model_identity)
-                if current is not None and current[0] is reference:
-                    del self._metrics[model_identity]
-
-            reference = weakref.ref(model, discard_dead_model)
-            self._metrics[model_identity] = (reference, metric)
-        return metric
+        return self.metric_cls.from_window_model(model)

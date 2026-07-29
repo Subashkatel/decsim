@@ -113,3 +113,6 @@ class Experiment:
 
     def sha256(self) -> str:
         return hashlib.sha256(self.canonical_bytes()).hexdigest()
+
+    def config_sha256(self, configuration) -> str:
+        return _sha256(configuration)

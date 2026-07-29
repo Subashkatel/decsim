@@ -1,13 +1,21 @@
 """Fast offline window decoding without the event engine."""
 
 from dataclasses import dataclass
+from pathlib import Path
 
 from decsim.detector_error_model import (
     build_window_error_models,
     decode_windowed,
 )
 
-from .harness import Batch, sample_batch_sha256
+from .harness import Batch, offline_batch_seed, sample_batch_sha256
+from .results import (
+    ChunkResult,
+    canonical_chunk_csv,
+    publish_immutable,
+    read_chunk_csv,
+    reduce_chunks,
+)
 
 
 @dataclass(frozen=True)
@@ -77,3 +85,61 @@ class OfflineBatchDecoder:
             accepted_logical_failures=failures,
             window_attempts=batch.shots * len(self.window_models),
         )
+
+
+def run_offline_experiment(
+    decoder,
+    experiment,
+    sample_plan,
+    configuration,
+    batches,
+    output_directory,
+):
+    """Run missing offline batches, publish them once, and reduce exact counts."""
+    experiment_sha256 = experiment.sha256()
+    config_id = experiment.config_sha256(configuration)
+    directory = (
+        Path(output_directory)
+        / experiment_sha256
+        / "scientific"
+        / "chunks"
+        / config_id
+    )
+    rows = []
+    for batch in batches:
+        path = directory / f"{batch.index}.csv"
+        if path.exists():
+            row = read_chunk_csv(path)
+        else:
+            decoded = decoder.run(
+                batch,
+                offline_batch_seed(
+                    experiment.experiment_seed,
+                    sample_plan.sample_set_id,
+                    batch.index,
+                ),
+            )
+            row = ChunkResult(
+                schema_version=1,
+                experiment_id=experiment.experiment_id,
+                experiment_sha256=experiment_sha256,
+                config_id=config_id,
+                sample_set_id=sample_plan.sample_set_id,
+                sample_batch_sha256=decoded.sample_batch_sha256,
+                batch_index=batch.index,
+                first_shot_index=batch.first_shot,
+                requested_shots=batch.shots,
+                attempted_shots=decoded.attempted_shots,
+                primary_failures=decoded.primary_failures,
+                accepted_shots=decoded.accepted_shots,
+                accepted_logical_failures=decoded.accepted_logical_failures,
+                backend_low_confidence=0,
+                backend_nonconverged=0,
+                backend_invalid_correction=0,
+                backend_empty_model_unsatisfiable=0,
+                backend_error=0,
+                window_attempts=decoded.window_attempts,
+            )
+            publish_immutable(path, canonical_chunk_csv([row]))
+        rows.append(row)
+    return reduce_chunks(rows)

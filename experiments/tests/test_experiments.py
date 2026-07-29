@@ -18,7 +18,11 @@ from experiments.harness import (
     offline_batch_seed,
     sample_batch_sha256,
 )
-from experiments.decoding import OfflineBatchDecoder
+from experiments.decoding import (
+    DecodedBatch,
+    OfflineBatchDecoder,
+    run_offline_experiment,
+)
 
 
 def _chunk(batch_index=0, first_shot_index=0, requested_shots=3, **changes):
@@ -262,3 +266,62 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
     decoder.run(exact_batches(7, 4)[1], seed + 1)
     assert counted.sampler_compiles == 3
     assert set(model_ids) == {id(model) for model in decoder.window_models}
+
+
+def test_offline_experiment_writes_chunks_and_resumes_without_redecoding(tmp_path):
+    experiment = Experiment(
+        experiment_id="offline-smoke",
+        experiment_seed=7,
+        configurations=({"decoder": "test"},),
+        sampling={"batch_shots": 4, "max_shots": 7},
+        stopping={"method": "fixed"},
+        dependencies={},
+        repository_revision="e4d0700",
+    )
+    plan = SamplePlan.create(
+        experiment.experiment_id,
+        experiment.experiment_seed,
+        {"circuit_sha256": "c" * 64, "batch_shots": 4},
+    )
+
+    class FakeDecoder:
+        def __init__(self):
+            self.calls = []
+
+        def run(self, batch, seed):
+            self.calls.append((batch.index, seed))
+            return DecodedBatch(
+                batch=batch,
+                sample_batch_sha256=f"{batch.index + 1:064x}",
+                attempted_shots=batch.shots,
+                primary_failures=batch.index,
+                accepted_shots=batch.shots,
+                accepted_logical_failures=batch.index,
+                window_attempts=batch.shots * 2,
+            )
+
+    decoder = FakeDecoder()
+    batches = exact_batches(7, 4)
+    summary = run_offline_experiment(
+        decoder,
+        experiment,
+        plan,
+        {"decoder": "test"},
+        batches,
+        tmp_path,
+    )
+
+    assert summary.attempted_shots == 7
+    assert summary.primary_failures == 1
+    assert len(decoder.calls) == 2
+    assert len(list(tmp_path.rglob("*.csv"))) == 2
+
+    assert run_offline_experiment(
+        decoder,
+        experiment,
+        plan,
+        {"decoder": "test"},
+        batches,
+        tmp_path,
+    ) == summary
+    assert len(decoder.calls) == 2

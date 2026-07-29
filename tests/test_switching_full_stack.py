@@ -22,6 +22,7 @@ pytest.importorskip("pymatching")
 from decsim.adapters.stim_device import StimDevice
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter
+from decsim.detector_error_model import FaultRepresentation
 from decsim.message import Operation, SeamFaultOwner
 from decsim.mwpm_decoder import PyMatchingDecoder, UnweightedPyMatchingDecoder
 from decsim.planner import FixedRounds
@@ -49,6 +50,7 @@ class _Recording:
 
     def __init__(self, inner):
         self.inner = inner
+        self.fault_model_requirement = inner.fault_model_requirement
         self.jobs = []
         self.results = []
 
@@ -331,21 +333,25 @@ def test_double_window_seam_models_are_decodable_and_partition_ownership(
 
     coords = circuit.get_detector_coordinates()
 
-    def column_rounds(dem, column):
-        rows = np.nonzero(dem.check[:, column])[0]
-        return {int(coords[dem.detector_ids[row]][-1]) + 1 for row in rows}
+    def column_rounds(model, faults, column):
+        rows = np.nonzero(faults.check[:, column])[0]
+        return {int(coords[model.detector_ids[row]][-1]) + 1 for row in rows}
 
     restart_dem, slab_dem = restart_job.dem, slab_job.dem
-    restart_owned = np.nonzero(restart_dem.owned)[0]
+    restart_faults = restart_dem.require_faults(FaultRepresentation.GRAPHLIKE)
+    slab_faults = slab_dem.require_faults(FaultRepresentation.GRAPHLIKE)
+    restart_owned = np.nonzero(restart_faults.owned)[0]
     assert restart_owned.size
     restart_seam_owned = any(
-        {slab_hi, slab_hi + 1} <= column_rounds(restart_dem, column)
+        {slab_hi, slab_hi + 1} <= column_rounds(
+            restart_dem, restart_faults, column
+        )
         for column in restart_owned
     )
 
     slab_seam_owned = False
-    for column in np.nonzero(slab_dem.owned)[0]:
-        fault_rounds = column_rounds(slab_dem, column)
+    for column in np.nonzero(slab_faults.owned)[0]:
+        fault_rounds = column_rounds(slab_dem, slab_faults, column)
         assert min(fault_rounds) >= slab_lo      # owns nothing pre-slab
         if {slab_hi, slab_hi + 1} <= fault_rounds:
             slab_seam_owned = True

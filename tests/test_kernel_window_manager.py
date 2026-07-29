@@ -10,6 +10,7 @@ import pytest
 from conftest import fixed_latency_links
 
 from decsim.engine import Engine
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import (
     DecodeJob,
     DecodeResult,
@@ -141,7 +142,10 @@ def _runtime(
                        planning_view_by_operation_id={
                            op_id: _planning_view(operation)
                            for op_id, operation in runtime_operations.items()
-                       })
+                       },
+                       fault_model_requirement_for=(
+                           lambda _code: NO_FAULT_MODEL_REQUIRED
+                       ))
     rt.strategy = strategy or _RecordingStrategy()
     rt.services = object()
     submitted = []

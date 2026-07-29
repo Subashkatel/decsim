@@ -7,6 +7,7 @@ from decsim.config import us
 from decsim.controllers import ModularController
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.layouts import UniformLayout
 from decsim.message import DecodeResult, Operation
 from decsim.planner import FixedRounds
@@ -161,6 +162,8 @@ class BBCodeISAToPhysicalIRFrontend:
 
 class RecordingDecoder:
     """Fixed-latency decoder that records job sizing."""
+
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
 
     def __init__(self):
         self.jobs = []

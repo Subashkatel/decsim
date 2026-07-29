@@ -27,6 +27,7 @@ from decsim.codes import SurfaceCodeModel
 from conftest import fixed_latency_link_config
 from decsim.config import us
 from decsim.controllers import ModularController
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import DecodeBacklog
 from decsim.schemes import SlidingWindowScheme
@@ -40,6 +41,8 @@ GEN_US = N_COM * ROUND_US    # window generation period
 
 
 class _FixedLatencyDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, latency_us):
         self._t = us(latency_us)
 

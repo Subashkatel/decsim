@@ -19,6 +19,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from decsim.codes import SurfaceCodeModel
 from decsim.config import TimingConfig, us
 from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import DecodeResult, Operation, SoftOutput
 from decsim.planner import FixedRounds, PerOpRounds
 from decsim.policies import Eager, Held
@@ -30,6 +31,8 @@ from decsim.window_interactions import DefaultWindowInteraction
 
 class _WeakBoundaryDecoder:
     """Make W1 uncertain and make W2's logical bit depend on W1's boundary."""
+
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, uncertain=(1,), ticks=1, propagate=False):
         self.window_ids = []
@@ -64,6 +67,8 @@ class _WeakBoundaryDecoder:
 
 class _CorrectingStrongDecoder:
     """Retract W1's weak boundary after the downstream weak chain has run."""
+
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, ticks=10_000_000):
         self.ticks = ticks
@@ -139,6 +144,8 @@ def test_interaction_cannot_invalidate_unrelated_finished_work():
             return [(1, 0)] if source_key == (0, 0) else []
 
     class OrderedWeakDecoder:
+        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
         def __init__(self):
             self.payload_counts = []
 
@@ -438,6 +445,8 @@ def test_replay_invalidates_an_inflight_descendant_boundary():
 def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
     """A restored merge parent cannot also arrive through its old callback."""
     class _MergeWeakDecoder:
+        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
         def __init__(self):
             self.calls = []
 
@@ -459,6 +468,8 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
             )
 
     class _MergeStrongDecoder:
+        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
         def latency(self, job):
             return 1_000
 
@@ -600,6 +611,8 @@ def test_static_operation_seam_replays_without_a_data_dependent_crash():
 def test_cross_operation_result_is_published_only_after_ancestor_recovery():
     """A provisional seam may be consumed, but its result must not escape."""
     class _CrossOperationWeakDecoder:
+        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
         def __init__(self):
             self.calls = []
 
@@ -634,6 +647,8 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
             )
 
     class _LateEmptyBoundaryStrongDecoder:
+        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
         def latency(self, job):
             return 100_000_000
 
@@ -685,6 +700,8 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
 
 
 class _StreamWeakDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, uncertain_windows):
         self.uncertain_windows = set(uncertain_windows)
         self.calls = []
@@ -721,6 +738,8 @@ class _StreamWeakDecoder:
 
 
 class _StreamStrongDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, *, agreeing_windows=(), latency_by_window=None):
         self.agreeing_windows = set(agreeing_windows)
         self.latency_by_window = dict(latency_by_window or {})
@@ -887,6 +906,7 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
     class _Recording:
         def __init__(self, inner):
             self.inner = inner
+            self.fault_model_requirement = inner.fault_model_requirement
             self.jobs = []
             self.results = []
 

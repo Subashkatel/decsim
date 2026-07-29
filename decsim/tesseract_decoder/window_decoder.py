@@ -17,7 +17,6 @@ from ..adapters.window_decode_results import (
     decoder_configuration_fingerprint,
     empty_fault_model_outcome,
     fault_model_fingerprint,
-    validate_backend_outcome,
 )
 from ..detector_error_model import (
     FaultRepresentation,
@@ -399,19 +398,12 @@ class TesseractWindowDecoder:
                 coordinates,
                 self._effective_seed,
             )
-            outcome = empty_fault_model_outcome(
+            return empty_fault_model_outcome(
                 physical_faults,
                 syndrome_array,
                 decoder_configuration_fingerprint=
                     configuration_fingerprint,
             )
-            validate_backend_outcome(
-                outcome,
-                model,
-                physical_faults,
-                syndrome_array,
-            )
-            return outcome
 
         try:
             compiled = self._compiled_decoder(model, physical_faults)
@@ -422,7 +414,7 @@ class TesseractWindowDecoder:
                 model,
                 physical_faults.check.shape[0],
             )
-            outcome = _failed_outcome(
+            return _failed_outcome(
                 status=BackendDecodeStatus.BACKEND_ERROR,
                 reason=BackendFailureReason.UPSTREAM_EXCEPTION,
                 physical_faults=physical_faults,
@@ -431,13 +423,6 @@ class TesseractWindowDecoder:
                     self._effective_seed,
                 ),
             )
-            validate_backend_outcome(
-                outcome,
-                model,
-                physical_faults,
-                syndrome_array,
-            )
-            return outcome
 
         try:
             selected_error_indices = tuple(
@@ -449,20 +434,13 @@ class TesseractWindowDecoder:
                 compiled.backend_decoder.low_confidence_flag
             )
         except Exception:
-            outcome = _failed_outcome(
+            return _failed_outcome(
                 status=BackendDecodeStatus.BACKEND_ERROR,
                 reason=BackendFailureReason.UPSTREAM_EXCEPTION,
                 physical_faults=physical_faults,
                 configuration_fingerprint=
                     compiled.configuration_fingerprint,
             )
-            validate_backend_outcome(
-                outcome,
-                model,
-                physical_faults,
-                syndrome_array,
-            )
-            return outcome
 
         correction, invalid_reason = self._correction_from_error_indices(
             selected_error_indices,
@@ -521,12 +499,6 @@ class TesseractWindowDecoder:
                     decoder_configuration_fingerprint=
                         compiled.configuration_fingerprint,
                 )
-        validate_backend_outcome(
-            outcome,
-            model,
-            physical_faults,
-            syndrome_array,
-        )
         return outcome
 
     def _resolved_detector_order_seed(self) -> int:

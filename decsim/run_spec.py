@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-import hashlib
 import math
 from numbers import Integral
 from typing import Any, Callable, Optional, TYPE_CHECKING
@@ -28,15 +27,14 @@ from .message import (
     ResolvedCodeSpatialProfile,
     ResolvedOperationPlanning,
     ResolvedPatchPlanning,
-    RunSeedChild,
     RunSeedPathSegment,
-    RunSeedReservation,
     is_stable_identity,
     is_stable_string,
     same_stable_identity,
     stable_identity_bytes,
 )
 from .config import TimingConfig, us
+from .seeding import bind_run_seed
 
 if TYPE_CHECKING:
     from .planner import _ResolvedExecutionPlanSpec
@@ -48,23 +46,6 @@ if TYPE_CHECKING:
     )
 
 FEEDBACK_BOUNDARY_MODES = ("trailing_buffer", "measurement_closed")
-RUN_SEED_NAMESPACE = b"decsim.run-seed.v1"
-def _derive_run_component_seed(
-    root_seed: int,
-    component_path: tuple[RunSeedPathSegment, ...],
-) -> int:
-    """Derive one stable unsigned-64-bit component seed."""
-    encoded_path = b"".join(
-        segment.canonical_bytes()
-        for segment in component_path
-    )
-    digest = hashlib.blake2b(
-        RUN_SEED_NAMESPACE
-        + root_seed.to_bytes(8, "big")
-        + encoded_path,
-        digest_size=8,
-    ).digest()
-    return int.from_bytes(digest, "big")
 
 
 @dataclass(frozen=True)
@@ -94,15 +75,6 @@ class _RunOwnedWorkload:
             self.planning_view_by_operation_id[operation.id]
             for operation in operations
         )
-
-
-@dataclass(frozen=True)
-class _RunSeedPlanEntry:
-    """One canonical stochastic leaf in a frozen run component graph."""
-
-    component_path: tuple[RunSeedPathSegment, ...]
-    component: Any
-    derived_seed: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -910,11 +882,7 @@ class RunSpec:
             metrics=metric_bindings,
             workload=workload,
         )
-        seed_plan = _collect_seed_plan(
-            seed_roots,
-            self._validated_root_seed(),
-        )
-        _bind_run_seed_plan(seed_plan)
+        bind_run_seed(self._validated_root_seed(), seed_roots)
 
         try:
             orchestrator.connect(controller, gate.on_decision)
@@ -1417,131 +1385,6 @@ def _install_private_execution_circuits(
         private_operation_by_id[operation_id].circuit = stim.Circuit(
             str(source_circuit)
         )
-
-
-def _collect_seed_plan(roots, root_seed: Optional[int]):
-    """Discover stochastic components once in deterministic semantic order."""
-    from .protocols import RunSeedComposite, RunSeedConsumer
-
-    canonical_paths = {}
-    active_ids = set()
-    seen_paths = set()
-    plan = []
-
-    def encoded(path):
-        return b"".join(segment.canonical_bytes() for segment in path)
-
-    def walk(path, component):
-        path_bytes = encoded(path)
-        if path_bytes in seen_paths:
-            raise ValueError(f"duplicate component path {_render_run_seed_path(path)}")
-        seen_paths.add(path_bytes)
-
-        component_id = id(component)
-        if component_id in active_ids:
-            first_path = canonical_paths[component_id]
-            raise ValueError(
-                "component cycle from "
-                f"{_render_run_seed_path(path)} to "
-                f"{_render_run_seed_path(first_path)}"
-            )
-        if component_id in canonical_paths:
-            return
-        canonical_paths[component_id] = path
-
-        active_ids.add(component_id)
-        try:
-            if isinstance(component, RunSeedConsumer):
-                plan.append(_RunSeedPlanEntry(
-                    component_path=path,
-                    component=component,
-                    derived_seed=(
-                        None
-                        if root_seed is None
-                        else _derive_run_component_seed(root_seed, path)
-                    ),
-                ))
-            if not isinstance(component, RunSeedComposite):
-                return
-
-            children = []
-            child_paths = set()
-            for child in component.run_seed_children():
-                if type(child) is not RunSeedChild:
-                    raise TypeError(
-                        f"{type(component).__name__}.run_seed_children() "
-                        "must yield exact RunSeedChild values"
-                    )
-                child_path = encoded(child.relative_path)
-                if child_path in child_paths:
-                    raise ValueError(
-                        "duplicate run-seed child path beneath "
-                        f"{_render_run_seed_path(path)}"
-                    )
-                child_paths.add(child_path)
-                children.append((child_path, child))
-            for _, child in sorted(children, key=lambda item: item[0]):
-                walk(path + child.relative_path, child.child)
-        finally:
-            active_ids.remove(component_id)
-
-    ordered_roots = sorted(
-        ((encoded(path), path, component) for path, component in roots),
-        key=lambda item: item[0],
-    )
-    for _, path, component in ordered_roots:
-        walk(path, component)
-    return tuple(plan)
-
-
-def _bind_run_seed_plan(plan: tuple[_RunSeedPlanEntry, ...]) -> None:
-    """Reserve all seeds, cancel on failure, then commit the whole plan."""
-    acquired = []
-    try:
-        for entry in plan:
-            reservation = entry.component.reserve_run_seed(entry.derived_seed)
-            if type(reservation) is not RunSeedReservation:
-                raise TypeError(
-                    f"{type(entry.component).__name__}.reserve_run_seed() "
-                    "must return an exact RunSeedReservation"
-                )
-            if entry.derived_seed is not None and (
-                reservation.proposed_seed_source != "derived"
-                or reservation.proposed_seed != entry.derived_seed
-            ):
-                raise ValueError(
-                    f"{type(entry.component).__name__}.reserve_run_seed() "
-                    "disagrees with the run seed at "
-                    f"{_render_run_seed_path(entry.component_path)}"
-                )
-            if entry.derived_seed is None and (
-                reservation.proposed_seed_source
-                not in ("explicit_local", "entropy")
-            ):
-                raise ValueError(
-                    f"{type(entry.component).__name__}.reserve_run_seed() "
-                    "must choose explicit_local or entropy without a run seed"
-                )
-            acquired.append((entry.component, reservation))
-    except BaseException:
-        for component, reservation in reversed(acquired):
-            component.cancel_run_seed(reservation)
-        raise
-
-    for component, reservation in acquired:
-        component.commit_run_seed(reservation)
-
-
-def _render_run_seed_path(path: tuple[RunSeedPathSegment, ...]) -> str:
-    parts = []
-    for segment in path:
-        if segment.kind == "none_key":
-            parts.append("[None]")
-        elif segment.kind in ("string_key", "integer_key"):
-            parts.append(f"[{segment.value!r}]")
-        else:
-            parts.append(segment.value)
-    return ".".join(parts)
 
 
 def _single_layout_code(layout, owner_name: str):

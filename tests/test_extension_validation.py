@@ -630,7 +630,7 @@ def test_active_custom_circuit_rejects_before_device_entry():
 def test_run_root_binds_nested_consumers_by_stable_semantic_path():
     from decsim.decoders import CodeRouter
     from decsim.message import RunSeedPathSegment
-    from decsim.run_spec import _derive_run_component_seed
+    from decsim.seeding import derive_component_seed
 
     default = SeedRecordingDecoder()
     surface = SeedRecordingDecoder()
@@ -650,11 +650,25 @@ def test_run_root_binds_nested_consumers_by_stable_semantic_path():
         RunSeedPathSegment("string_key", "surface"),
     )
     assert [item.proposed_seed for item in default.committed] == [
-        _derive_run_component_seed(7, default_path),
+        derive_component_seed(7, default_path),
     ]
     assert [item.proposed_seed for item in surface.committed] == [
-        _derive_run_component_seed(7, surface_path),
+        derive_component_seed(7, surface_path),
     ]
+
+
+def test_shared_seed_consumer_is_bound_once_by_its_first_semantic_path():
+    from decsim.decoders import CodeRouter
+
+    shared = SeedRecordingDecoder()
+    RunSpec(
+        ops=[],
+        router=CodeRouter(shared, {"surface": shared}),
+        seed=7,
+    ).build()
+
+    assert len(shared.reserved) == 1
+    assert shared.committed == shared.reserved
 
 
 def test_surrogate_code_units_are_not_stable_identities():
@@ -1052,14 +1066,14 @@ def test_run_component_seed_derivation_matches_frozen_golden_vectors(
     expected,
 ):
     from decsim.message import RunSeedPathSegment
-    from decsim.run_spec import _derive_run_component_seed
+    from decsim.seeding import derive_component_seed
 
     path = tuple(
         RunSeedPathSegment(kind, value)
         for kind, value in path_parts
     )
 
-    assert _derive_run_component_seed(root_seed, path) == expected
+    assert derive_component_seed(root_seed, path) == expected
 
 
 def test_integer_seed_path_rejects_bool_and_non_integer_values():

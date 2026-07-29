@@ -1,6 +1,34 @@
 """Shared test helpers."""
 
+from dataclasses import replace
+
+from decsim.links import LinkConfig, LinkModelConfig, LinkPath
 from decsim.message import Operation
+
+
+def fixed_latency_link_config(**path_latency_ticks):
+    """Build isolated fixed-latency channels for tests, zero by default."""
+    unknown = set(path_latency_ticks) - {path.value for path in LinkPath}
+    if unknown:
+        raise ValueError(f"unknown link paths: {sorted(unknown)}")
+    reference = LinkModelConfig.reference_fixed_latency_profile()
+    edges = {}
+    for path in LinkPath:
+        edge = getattr(reference, path.value)
+        channel = LinkConfig(
+            path_latency_ticks.get(path.value, 0),
+            None,
+            "test fixed latency",
+        )
+        edges[path.value] = replace(edge, channel=channel)
+    return LinkModelConfig(
+        **edges,
+        profile_name="test_fixed_latency",
+    )
+
+
+def fixed_latency_links(**path_latency_ticks):
+    return fixed_latency_link_config(**path_latency_ticks).resolve()
 
 
 def trace_time(lines, needle):

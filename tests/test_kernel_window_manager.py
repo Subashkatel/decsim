@@ -7,6 +7,8 @@ from dataclasses import fields
 
 import pytest
 
+from conftest import fixed_latency_links
+
 from decsim.engine import Engine
 from decsim.message import (
     DecodeJob,
@@ -29,16 +31,6 @@ from decsim.window_interactions import DefaultWindowInteraction
 
 T_DD = 500_000
 T_DO = 1_000_000
-
-
-class _Link:
-    def __init__(self, ticks): self._t = ticks
-    def cost(self): return self._t
-
-
-class _Links:
-    dd = _Link(T_DD)
-    do = _Link(T_DO)
 
 
 class _Scheme:
@@ -139,7 +131,11 @@ def _runtime(
                        resolved_operations=resolved_operations,
                        resolved_patches=resolved_patches,
                        deadline_policy=deadline_policy or _Deadline(),
-                       links=_Links(),
+                       links=fixed_latency_links(
+                           dd=T_DD,
+                           do=T_DO,
+                           wdo=T_DO,
+                       ),
                        orchestrator=fb, boundary_policy=boundary or _Eager(),
                        window_interaction=DefaultWindowInteraction(),
                        planning_view_by_operation_id={
@@ -267,7 +263,7 @@ def test_eager_ships_weak_boundary_unconditionally_contract_1_2():
                                         boundary_defects={7: [1, 0, 1]}))
     dep = rt.windows[(1, 0)]
     assert dep.deps_remaining == 1                # not yet: travels t_dd
-    eng.run(until=T_DD)
+    eng.run(until=T_DO + T_DD)
     assert dep.deps_remaining == 0                # Eager shipped despite pending strong
     assert dep.boundary_in == {1: [1, 0, 1]}      # src round 7 - rounds_for(6) -> dep round 1
 
@@ -280,7 +276,7 @@ def test_boundary_shift_rule_contract_1_3():
     # src round 3 -> dep round -3 dropped
     rt.on_decode_done(job, DecodeResult(0, 0, boundary_defects={
         7: [1], 8: [1, 1], 3: [1, 1, 1]}))
-    eng.run(until=T_DD)
+    eng.run(until=T_DO + T_DD)
     dep = rt.windows[(1, 0)]
     assert set(dep.boundary_in) == {1, 2}
 
@@ -322,6 +318,7 @@ def test_strong_revises_logical_only_contract_1_4():
     rt.on_strong_decode_done((0, 0), DecodeResult(
         0, 0, logical_observables=(0,),
                                                   boundary_defects={7: [1, 1]}))
+    eng.run(until=eng.now + T_DO)
     assert rt.logical_contributions[(0, 0)].logical_observables == (0,)
     assert rt.windows[(1, 0)].boundary_in == dep_boundary_before  # untouched
     assert rt.op_strong_commit_time[0] == eng.now

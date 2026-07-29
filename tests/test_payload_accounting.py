@@ -59,7 +59,8 @@ def test_per_window_release_holds_only_the_live_set():
     of scaling with the operation length (the per-op resident upper bound)."""
     from decsim.config import us
     from decsim.codes import SurfaceCodeModel
-    from decsim.controllers import ModularController, LinkModel
+    from conftest import fixed_latency_link_config
+    from decsim.controllers import ModularController
     from decsim.message import DecodeResult, Operation
     from decsim.schemes import SlidingWindowScheme
 
@@ -70,8 +71,8 @@ def test_per_window_release_holds_only_the_live_set():
             return DecodeResult(job.op_id, job.window_id,
                                 logical_observables=(0,))
 
-    def _links(engine):
-        return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+    def _links(engine, links):
+        return ModularController(engine, links=links, log_syndromes=False)
 
     def peak_for(rounds):
         op = Operation(0, "mem", (0,), clifford=True, patches=(0,))
@@ -83,6 +84,7 @@ def test_per_window_release_holds_only_the_live_set():
                   decoder=_Dec(),
                   scheme=SlidingWindowScheme(),
                   code=SurfaceCodeModel(d=3),
+                  links=fixed_latency_link_config(),
                   make_controller=_links,
               ), verbose=False)
         c = res.cluster

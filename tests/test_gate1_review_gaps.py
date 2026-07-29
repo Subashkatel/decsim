@@ -72,6 +72,10 @@ class _RuntimeStub:
         self.commits.append((job.op_id, job.window_id, job.awaiting_strong_result))
     def on_strong_decode_done(self, key, result):
         self.strong_commits.append(key)
+    def prepare_strong_selection(self, weak_job, serial_submission):
+        if serial_submission is not None:
+            self.pool.enqueue(serial_submission.job, WS)
+        return WS
 
 
 def _window():
@@ -83,8 +87,8 @@ def _pool(strategy, weak, strong):
     rt = _RuntimeStub()
     pool = DecoderManager(eng, router=_Router(weak, strong),
                           scheduler=_FifoScheduler(),
-                          unit_pools={"default": 1, "strong": 1},
-                          ws_delay_ticks=WS)
+                          unit_pools={"default": 1, "strong": 1})
+    rt.pool = pool
     pool.strategy = strategy
     pool.services = StrategyServicesImpl(eng, rt, pool)
     pool.on_window_decoded = rt.on_decode_done

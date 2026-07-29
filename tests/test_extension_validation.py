@@ -318,8 +318,9 @@ class SeedConsumingProviderOwner:
 
 
 class PlainControllerProvider:
-    def __init__(self, engine):
+    def __init__(self, engine, links):
         self.engine = engine
+        self.links = links
 
 
 @pytest.mark.parametrize("seed", [True, 1.0, "1", object()])
@@ -656,7 +657,9 @@ def test_non_sliding_weak_keepup_rejects_before_behavior_entry(scheme_kind):
                 confidence_threshold=0.5,
                 weak_keepup_ratio=0.7,
             ),
-            make_controller=lambda engine: provider_calls.append(engine),
+            make_controller=lambda engine, links: provider_calls.append(
+                (engine, links)
+            ),
         ).build()
 
     assert frontend.calls == 0
@@ -1127,7 +1130,7 @@ def test_non_bmp_metric_json_is_frozen_before_result_digest():
     ).build()
 
     assert completed.result.metric_values() == {"unicode": value}
-    assert completed.result.to_json_value()["schema_version"] == 2
+    assert completed.result.to_json_value()["schema_version"] == 3
     assert completed.result.to_json_value()["metric_results"] == [{
         "name": "unicode",
         "result_schema_version": 1,
@@ -1821,9 +1824,6 @@ def test_manifest_records_the_exact_fixed_composition_anchors():
         "configuration"
     ] == {
         "kind": "decoder_manager",
-        "weak_strong_delay_ticks": (
-            completed.window_manager.links.ws.latency_ticks
-        ),
         "log_name": "DecoderCluster",
         "lane_policy": "none",
     }
@@ -1874,14 +1874,14 @@ def test_manifest_has_the_complete_closed_effective_run_schema():
         "execution_plan",
         "chip_load_plan",
         "timing",
-        "links",
+        "link_topology",
         "resources",
         "runtime_flags",
         "software_context",
         "assurance",
         "primary_result_sha256",
     }
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 3
     assert manifest["root_seed"] == 19
     assert [record["operation_id"] for record in manifest["operations"]] == [
         {"kind": "integer", "value": "7", "items": None},
@@ -1945,14 +1945,16 @@ def test_manifest_has_the_complete_closed_effective_run_schema():
         "t_pack_ticks",
         "t_pack_us",
     }
-    assert [record["name"] for record in manifest["links"]] == [
+    assert manifest["link_topology"]["path_order"] == [
         "qc",
-        "cd",
+        "cwd",
+        "wsd",
+        "csd",
+        "wdo",
         "dd",
         "do",
         "oc",
         "cq",
-        "ws",
     ]
     assert manifest["runtime_flags"]["decoder_needs_hyperedges"] is False
     assert manifest["assurance"]["executed_software_status"] == "unattested"
@@ -2012,7 +2014,7 @@ def test_controller_port_requires_the_actual_retained_links():
         RunSpec(
             ops=[],
             decoder=StaticDecoder(),
-            make_controller=lambda _engine: MissingLinksController(),
+            make_controller=lambda _engine, _links: MissingLinksController(),
         ).build()
 
 
@@ -2211,7 +2213,7 @@ def test_provider_failure_invalidates_the_root_engine_before_any_event_runs():
     sentinel_events = []
     originating_failure = RuntimeError("controller construction failed")
 
-    def failing_controller(engine):
+    def failing_controller(engine, _links):
         captured_engines.append(engine)
         engine.schedule(0, lambda: sentinel_events.append("ran"))
         raise originating_failure
@@ -2775,7 +2777,7 @@ def test_frontend_and_named_decoders_are_validated_too():
 @pytest.mark.parametrize(
     ("field", "value", "arity"),
     [
-        ("make_controller", lambda: None, 1),
+        ("make_controller", lambda: None, 2),
         ("make_factory", lambda: None, 2),
         ("make_metrics", lambda: None, 4),
     ],
@@ -2795,7 +2797,7 @@ def test_supplied_factories_must_accept_the_documented_arguments(
 @pytest.mark.parametrize(
     ("field", "factory", "port"),
     [
-        ("make_controller", lambda engine: object(), "Controller"),
+        ("make_controller", lambda engine, links: object(), "Controller"),
         ("make_factory", lambda engine, cluster: object(), "MagicStateFactory"),
         (
             "make_metrics",

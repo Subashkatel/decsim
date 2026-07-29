@@ -26,6 +26,7 @@ from decsim.run_spec import RunSpec
 ROUND_US = 1.1          # today's TimingConfig round clock
 COMMIT = 3              # d=3 surface code: commit_rounds == d
 WINDOW_US = COMMIT * ROUND_US   # inter-arrival time of decode windows
+RESULT_AND_BOUNDARY_US = 1.0 + 0.5  # WDO plus sequential DD handoff
 
 
 def _memory_op(rounds):
@@ -45,7 +46,9 @@ def _run(rho, rounds):
 
     res = simulate(RunSpec(ops=_memory_op(rounds), d=3,
                            rounds_policy=FixedRounds(rounds),
-                           decoder=PresetLatencyDecoder(rho * WINDOW_US),
+                           decoder=PresetLatencyDecoder(
+                               rho * WINDOW_US - RESULT_AND_BOUNDARY_US
+                           ),
                            num_units=1, make_metrics=make_metrics))
     return res, backlog["m"]
 

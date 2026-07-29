@@ -40,20 +40,21 @@ def _chain(k):
 #==================================================================
 
 T_DD_US = 0.5      # boundary-handoff hop between consecutive windows
+T_WDO_US = 1.0     # accepted weak result before boundary publication
 
 def _backlog_run(rho, rounds):
     """Sliding windows on one unit decode STRICTLY in sequence — "sliding
     window decoding is inherently sequential" (Skoric §I.B p. 2): window k+1
     needs window k's committed boundary (artificial) defects (+t_dd hop), so
-    the service cycle per window is E[S] + t_dd and
-    ρ = (E[S] + t_dd) / (commit·t_round)."""
+    the service cycle per window is E[S] + t_wdo + t_dd and
+    ρ = (E[S] + t_wdo + t_dd) / (commit·t_round)."""
     backlog = {}
 
     def make_metrics(engine, cluster, chip, factory):
         backlog["m"] = DecodeBacklog(cluster)
         return [backlog["m"]]
 
-    service_us = rho * COMMIT * ROUND_US - T_DD_US
+    service_us = rho * COMMIT * ROUND_US - T_WDO_US - T_DD_US
     res = simulate(RunSpec(ops=_memory_op(rounds), d=D,
                            rounds_policy=FixedRounds(rounds),
                            round_us=ROUND_US, num_units=1,
@@ -139,8 +140,9 @@ def test_gidney_ekera_reaction_limited_runtime_within_15_percent():
     within ±15% — the tolerance QLX validates its own Ekerå–Håstad
     runtimes at."""
     from decsim.schemes import NaiveOnlineScheme
+    from decsim.links import LinkModelConfig
     k, rounds, decode_us = 6, 11, 5.0
-    t = TimingConfig()
+    links = LinkModelConfig.reference_fixed_latency_profile()
     res = simulate(RunSpec(ops=_chain(k), d=D,
                            rounds_policy=FixedRounds(rounds),
                            round_us=ROUND_US, num_units=1,
@@ -149,8 +151,14 @@ def test_gidney_ekera_reaction_limited_runtime_within_15_percent():
     gate = res.chip
 
     body = rounds * us(ROUND_US)
-    reaction = (t.ticks("t_qc") + t.ticks("t_cd") + us(decode_us)
-                + t.ticks("t_do") + t.ticks("t_oc") + t.ticks("t_cq"))
+    reaction = (
+        links.qc.channel.propagation_latency_ticks
+        + links.cwd.channel.propagation_latency_ticks
+        + us(decode_us)
+        + links.wdo.channel.propagation_latency_ticks
+        + links.oc.channel.propagation_latency_ticks
+        + links.cq.channel.propagation_latency_ticks
+    )
     period = body + reaction
 
     releases = [gate.decode_release_time[i] for i in range(1, k)]
@@ -159,6 +167,8 @@ def test_gidney_ekera_reaction_limited_runtime_within_15_percent():
         assert measured == pytest.approx(period, rel=0.15)
     # the LAST layer releases no successor, so its return hops never happen:
     # total = k*period - (t_oc + t_cq)   (Codex re-derivation, exact)
-    total = k * period - (t.ticks("t_oc") + t.ticks("t_cq"))
+    total = k * period - (
+        links.oc.channel.propagation_latency_ticks
+        + links.cq.channel.propagation_latency_ticks
+    )
     assert res.result.fully_done_ticks == pytest.approx(total, rel=0.15)
-

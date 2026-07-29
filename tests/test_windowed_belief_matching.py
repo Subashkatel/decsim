@@ -101,7 +101,8 @@ def test_engine_belief_matching_matches_offline():
     runtime decoder drops into the scheme machinery: pick a scheme, route to belief-matching,
     end to end -- the cluster auto-builds hyperedge DEMs via needs_hyperedges."""
     from decsim.message import Operation
-    from decsim.controllers import ModularController, LinkModel
+    from conftest import fixed_latency_link_config
+    from decsim.controllers import ModularController
     from decsim.adapters.stim_device import StimDevice
     from decsim.detector_error_model import build_window_error_models
     from decsim.belief_matching_decoder import (BeliefMatchingDecoder,
@@ -117,8 +118,8 @@ def test_engine_belief_matching_matches_offline():
         def latency(self, job):
             return 1
 
-    def _zero_links(engine):
-        return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+    def _zero_links(engine, links):
+        return ModularController(engine, links=links, log_syndromes=False)
 
     coords = circuit.get_detector_coordinates()
     folded = {det: min(int(c[-1]) + 1, R) for det, c in coords.items()}
@@ -146,6 +147,7 @@ def test_engine_belief_matching_matches_offline():
                   scheme=SlidingWindowScheme(),
                   device=device,
                   decoder=BeliefMatchingDecoder(_ZeroLat()),
+                  links=fixed_latency_link_config(),
                   make_controller=_zero_links,
                   seed=17 + s,
               ), verbose=False)

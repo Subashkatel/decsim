@@ -118,7 +118,7 @@ class OutcomeDirective:
 @runtime_checkable
 class StrategyServices(Protocol):
     """What the core offers a strategy inside its hooks: the clock, strong-job
-    construction/cancellation, and the weak->strong link delay."""
+    construction/cancellation, and strong-result selection transport."""
 
     @property
     def now(self) -> int: ...
@@ -136,7 +136,9 @@ class StrategyServices(Protocol):
 
     def cancel_strong(self, key: tuple) -> None: ...
 
-    def ws_delay(self) -> int: ...
+    def prepare_strong_selection(
+        self, weak_job: DecodeJob, serial_submission: Optional[Submission],
+    ) -> int: ...
 
 
 @runtime_checkable
@@ -438,9 +440,8 @@ class MultiFaultExclusionSyndromeDevice(Protocol):
 
 @runtime_checkable
 class Controller(Protocol):
-    """Port 14. Delivers messages across the classical network one named
-    hop at a time (edges qc, cd, dd, do, oc, cq, ws — priced by
-    TimingConfig)."""
+    """Port 14. Reserves and delivers QC/CWD and OC/CQ reaction-path hops
+    through the exact run-owned semantic link fabric."""
 
     links: Any
 

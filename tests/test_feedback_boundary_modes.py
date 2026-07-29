@@ -2,8 +2,10 @@
 
 import pytest
 
+from conftest import fixed_latency_link_config
+
 from decsim.codes import SurfaceCodeModel
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.frontends.circuit import CircuitFrontend
@@ -16,9 +18,9 @@ from decsim.planner import FixedRounds
 from decsim.policies import from_mode
 
 
-def _zero_link_controller(engine):
+def _zero_link_controller(engine, links):
     """Controller whose fabric links take no simulated time."""
-    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+    return ModularController(engine, links=links, log_syndromes=False)
 
 
 def _feedback_chain():
@@ -45,6 +47,7 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
                  code=SurfaceCodeModel(d=3),
                  scheme=SlidingWindowScheme(),
                  decoder=PresetLatencyDecoder(2.0),
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
                  make_metrics=lambda _engine, _cluster, chip, _factory: [
             ConditionalReactionTime(chip)
@@ -67,6 +70,7 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
                  code=SurfaceCodeModel(d=3),
                  scheme=SlidingWindowScheme(),
                  decoder=PresetLatencyDecoder(2.0),
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
                  make_metrics=lambda _engine, _cluster, chip, _factory: [
             ConditionalReactionTime(chip)
@@ -125,6 +129,7 @@ def _run_live_stream_pair(mode: str):
                decoder=PresetLatencyDecoder(0.0),
                num_units=1,
                round_us=1.0,
+               links=fixed_latency_link_config(),
                make_controller=_zero_link_controller,
                feedback_boundary_mode=mode,
            ), verbose=False)
@@ -184,6 +189,7 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
                  num_units=1,
                  rounds_policy=FixedRounds(code.commit_rounds()),
                  round_us=1.0,
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
                  feedback_boundary_mode="measurement_closed",
                  seed=19,
@@ -227,6 +233,7 @@ def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
             decoder=PyMatchingDecoder(PresetLatencyDecoder(0.0)),
             num_units=1,
             round_us=1.0,
+            links=fixed_latency_link_config(),
             make_controller=_zero_link_controller,
             feedback_boundary_mode="measurement_closed",
             seed=19,

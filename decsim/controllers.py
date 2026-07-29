@@ -10,11 +10,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from .links import LinkModel
+from .links import (
+    LinkModel,
+    LinkModelConfig,
+    LinkPath,
+    TrafficAttribution,
+)
 from .message import (
     RetainedSyndromeFragment,
     SyndromeRoundPacket,
     same_stable_identity,
+    stable_identity_order_key,
 )
 
 
@@ -51,7 +57,11 @@ class ModularController:
     def __init__(self, engine, links: Optional[LinkModel] = None,
                  t_pack: int = 0, log_syndromes: bool = True):
         self.engine = engine
-        self.links = links if links is not None else LinkModel()
+        self.links = (
+            links
+            if links is not None
+            else LinkModelConfig.reference_fixed_latency_profile().resolve()
+        )
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes
         self._pending: dict = {}
@@ -74,7 +84,15 @@ class ModularController:
         fragment_count = payload.n_fragments
         fragment = RetainedSyndromeFragment.from_payload(payload)
         sink_identity = _delivery_sink_identity(deliver)
-        self.engine.schedule(self._cost("qc", bits=payload.size_bits),
+        attribution = self._round_attribution(
+            fragment.operation_id,
+            (fragment.patch_id,),
+            fragment.round_index,
+        )
+        self.engine.schedule(self._reserve(
+                                 LinkPath.QC,
+                                 payload_bits=payload.size_bits,
+                                 attribution=attribution),
                              lambda: self._receive_fragment(
                                  fragment,
                                  fragment_count,
@@ -164,7 +182,15 @@ class ModularController:
         deliver: Callable,
     ) -> None:
         """Send a packed round over the cd wire, arbitrating the bus at now."""
-        self.engine.schedule(self._cost("cd", bits=packet_bits),
+        attribution = self._round_attribution(
+            packet.operation_id,
+            tuple(fragment.patch_id for fragment in packet.fragments),
+            packet.round_index,
+        )
+        self.engine.schedule(self._reserve(
+                                 LinkPath.CWD,
+                                 payload_bits=packet_bits,
+                                 attribution=attribution),
                              lambda: deliver(packet),
                              label="controller->decoder packet")
 
@@ -172,6 +198,14 @@ class ModularController:
 
     def relay_instruction(self, decision, deliver: Callable) -> None:
         """Orchestrator -> controller (t_oc) -> chip (t_cq)."""
+        attribution = TrafficAttribution(
+            operation_id=decision.target_operation_id,
+            patch_ids=(),
+            window_id=None,
+            round_lo=None,
+            round_hi=None,
+        )
+
         def at_controller():
             instruction = "release instruction" if decision.releases_operation \
                 else "result return instruction"
@@ -179,22 +213,66 @@ class ModularController:
                             f"received {instruction} for "
                             f"op#{decision.target_operation_id} from "
                             f"orchestrator (t_oc); forwarding to chip (t_cq)")
-            self.engine.schedule(self._cost("cq"),
+            self.engine.schedule(self._reserve(
+                                     LinkPath.CQ,
+                                     payload_bits=None,
+                                     attribution=attribution),
                                  lambda: deliver(decision),
                                  label="controller->chip")
-        self.engine.schedule(self._cost("oc"), at_controller,
+        self.engine.schedule(self._reserve(
+                                 LinkPath.OC,
+                                 payload_bits=None,
+                                 attribution=attribution), at_controller,
                              label="orchestrator->controller")
 
     # -------------------------------------------------- generic port surface
 
-    def send(self, edge: str, payload, deliver: Callable, now: int) -> None:
+    def send(
+        self,
+        path: LinkPath,
+        payload,
+        deliver: Callable,
+        now: int,
+        attribution: TrafficAttribution,
+    ) -> None:
         """Generic Transport.send over a named edge (port 14)."""
-        self.engine.schedule(self._cost(
-                                 edge, bits=getattr(payload, "size_bits", None),
-                                 now=now),
-                             lambda: deliver(payload), label=f"send:{edge}")
+        if now != self.engine.now:
+            raise ValueError("controller sends reserve at the current engine tick")
+        self.engine.schedule(
+            self._reserve(
+                path,
+                payload_bits=getattr(payload, "size_bits", None),
+                attribution=attribution,
+            ),
+            lambda: deliver(payload),
+            label=f"send:{path.value}",
+        )
 
-    def _cost(self, edge: str, *, bits=None, now=None) -> int:
-        """Price one transmission without dropping bandwidth/queueing inputs."""
-        link = getattr(self.links, edge)
-        return link.cost(bits=bits, now=self.engine.now if now is None else now)
+    def _reserve(
+        self,
+        path: LinkPath,
+        *,
+        payload_bits,
+        attribution: TrafficAttribution,
+    ) -> int:
+        reservation = self.links.reserve(
+            path,
+            payload_bits=payload_bits,
+            now_ticks=self.engine.now,
+            attribution=attribution,
+        )
+        return reservation.total_delay_ticks
+
+    @staticmethod
+    def _round_attribution(
+        operation_id,
+        patch_ids: tuple,
+        round_index: int,
+    ) -> TrafficAttribution:
+        return TrafficAttribution(
+            operation_id=operation_id,
+            patch_ids=tuple(sorted(patch_ids, key=stable_identity_order_key)),
+            window_id=None,
+            round_lo=round_index,
+            round_hi=round_index,
+        )

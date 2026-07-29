@@ -39,13 +39,12 @@ class DecoderManager:
 
     def __init__(self, engine, *, router, scheduler,
                  unit_pools: Optional[dict] = None, num_units: int = 1,
-                 ws_delay_ticks: int = 0, bulk_strong: bool = False,
+                 bulk_strong: bool = False,
                  lane_policy=None, log_name: str = "DecoderCluster"):
         self.engine = engine
         self.router = router
         self.scheduler = scheduler
         self.lane_policy = lane_policy
-        self.ws_delay_ticks = ws_delay_ticks
         self.bulk_strong = bulk_strong
         self.log_name = log_name
 
@@ -82,6 +81,7 @@ class DecoderManager:
         # runtime submits the rest of the attempt's work and the strategy
         # returns its directive.
         self._running_strong_decodes: dict[tuple, DecodeJob] = {}
+        self._windows_waiting_for_strong_selection: set[tuple] = set()
         self._windows_waiting_for_strong_result: set[tuple] = set()
         self._completed_strong_results: dict[tuple, DecodeResult] = {}
         # Destinations whose weak decode is admitted and has not yet produced
@@ -203,6 +203,7 @@ class DecoderManager:
         the destination is waiting for one now, or its weak decode is open and
         its directive may still ask for one."""
         return (key in self._windows_waiting_for_strong_result
+                or key in self._windows_waiting_for_strong_selection
                 or key in self._unresolved_weak_decodes)
 
     def _enqueue_now(self, job: DecodeJob) -> None:
@@ -397,19 +398,29 @@ class DecoderManager:
             self.cancel_strong(key)                # no-op unless one is live/held
         if awaiting:
             self.strong_needed += 1
-            # applying the directive is one transition: the demand is
-            # registered, then the replacement the directive carries is
-            # enqueued, and no reader runs between the two
-            self._windows_waiting_for_strong_result.add(key)
-            if directive.extra is not None:        # serial redo, after ws
-                self.enqueue(directive.extra.job, directive.extra.delay_ticks)
+            self._windows_waiting_for_strong_selection.add(key)
+            selection_delay = self.services.prepare_strong_selection(
+                job,
+                directive.extra,
+            )
+            self.engine.schedule(
+                selection_delay,
+                lambda destination=key: self._select_strong_result(destination),
+                label=f"select strong result {key}",
+            )
         job.awaiting_strong_result = awaiting      # BEFORE the commit callback
         if self.on_window_decoded is None:
             raise RuntimeError("DecoderManager has no window completion callback")
         self.on_window_decoded(job, result)
-        if awaiting:
-            self._apply_held_strong_result(key)    # early strong, same tick
         self.try_dispatch()
+
+    def _select_strong_result(self, key: tuple) -> None:
+        """Make one strong completion eligible only after WSD delivery."""
+        if key not in self._windows_waiting_for_strong_selection:
+            return
+        self._windows_waiting_for_strong_selection.remove(key)
+        self._windows_waiting_for_strong_result.add(key)
+        self._apply_held_strong_result(key)
 
     def _resolve_weak_decode(self, key: tuple) -> None:
         """This destination's weak decode has produced its directive, so it
@@ -603,6 +614,8 @@ class DecoderManager:
             state: sorted(keys) for state, keys in (
                 ("waiting for a strong result",
                  self._windows_waiting_for_strong_result),
+                ("waiting for strong selection",
+                 self._windows_waiting_for_strong_selection),
                 ("holding an unclaimed strong result",
                  self._completed_strong_results),
                 ("still holding a strong request", self._running_strong_decodes),
@@ -647,5 +660,9 @@ class StrategyServicesImpl:
     def cancel_strong(self, key: tuple) -> None:
         self._pool.cancel_strong(key)
 
-    def ws_delay(self) -> int:
-        return self._pool.ws_delay_ticks
+    def prepare_strong_selection(self, weak_job: DecodeJob,
+                                 serial_submission) -> int:
+        return self._runtime.prepare_strong_selection(
+            weak_job,
+            serial_submission,
+        )

@@ -197,6 +197,7 @@ class PrimaryRunResult:
     chip_done_ticks: int
     fully_done_ticks: int
     operation_results: tuple[LogicalOperationResult, ...]
+    link_traffic: "LinkTrafficRecord"
     metric_results: tuple[MetricResultRecord, ...]
 
     def logical_results(self) -> dict[int, tuple[int, ...]]:
@@ -236,6 +237,7 @@ class PrimaryRunResult:
                 }
                 for record in self.operation_results
             ],
+            "link_traffic": self.link_traffic.to_json_value(),
             "metric_results": [
                 {
                     "name": record.name,
@@ -543,8 +545,15 @@ class EffectiveTimingRecord(_CanonicalJsonRecord):
 
 
 @dataclass(frozen=True)
-class ResolvedLinkRecord(_CanonicalJsonRecord):
-    """One actual controller link and its effective transport behavior."""
+class ResolvedLinkTopologyRecord(_CanonicalJsonRecord):
+    """Exact immutable resolved semantic/physical link topology."""
+
+    canonical_json: bytes = field(repr=False)
+
+
+@dataclass(frozen=True)
+class LinkTrafficRecord(_CanonicalJsonRecord):
+    """Exact immutable core traffic snapshot from the primary drain."""
 
     canonical_json: bytes = field(repr=False)
 
@@ -627,7 +636,7 @@ class ResolvedRunManifest:
     execution_plan: ResolvedExecutionPlanRecord
     chip_load_plan: ChipLoadPlanRecord
     timing: EffectiveTimingRecord
-    links: tuple[ResolvedLinkRecord, ...]
+    link_topology: ResolvedLinkTopologyRecord
     resources: EffectiveResourceRecord
     runtime_flags: EffectiveRuntimeFlags
     software_context: SoftwareContextRecord
@@ -749,10 +758,7 @@ class ResolvedRunManifest:
             "execution_plan": self.execution_plan.to_json_value(),
             "chip_load_plan": self.chip_load_plan.to_json_value(),
             "timing": self.timing.to_json_value(),
-            "links": [
-                link.to_json_value()
-                for link in self.links
-            ],
+            "link_topology": self.link_topology.to_json_value(),
             "resources": self.resources.to_json_value(),
             "runtime_flags": self.runtime_flags.to_json_value(),
             "software_context": self.software_context.to_json_value(),
@@ -814,9 +820,10 @@ class RunSpec:
     # environment
     timing: TimingConfig = field(default_factory=TimingConfig)
     round_us: Optional[float] = None          # overrides timing.round_us
+    links: Optional[Any] = None               # reusable LinkModelConfig
     device: Optional[Any] = None              # default TimingOnlyDevice
     memory_model: Optional[Any] = None        # port 18; default unbounded
-    make_controller: Optional[Callable] = None  # (engine) -> Controller (port 14)
+    make_controller: Optional[Callable] = None  # (engine, links) -> Controller
     make_factory: Optional[Callable] = None   # (engine, cluster) -> factory
     make_metrics: Optional[Callable] = None   # (engine, cluster, gate, factory)
     make_orchestrator: Optional[Callable] = None  # (engine) -> Orchestrator
@@ -962,6 +969,10 @@ class RunSpec:
     def _validate_supplied_parts(self) -> None:
         """Validate every externally supplied part against its public port."""
         from . import protocols
+        from .links import LinkModelConfig
+
+        if self.links is not None and type(self.links) is not LinkModelConfig:
+            raise TypeError("links must be an exact LinkModelConfig")
 
         if self.router is not None and (
             self.decoder is not None or self.decoders
@@ -1004,7 +1015,7 @@ class RunSpec:
         for name, decoder in self.decoders.items():
             _validate_protocol_part(
                 f"decoders[{name!r}]", decoder, protocols.Decoder)
-        _validate_callable_arity("make_controller", self.make_controller, 1)
+        _validate_callable_arity("make_controller", self.make_controller, 2)
         _validate_callable_arity("make_factory", self.make_factory, 2)
         _validate_callable_arity("make_metrics", self.make_metrics, 4)
         _validate_callable_arity(
@@ -1398,7 +1409,8 @@ class RunSpec:
         from .schedulers import EnqueueTimeDeadline, FifoScheduler
         from .devices import ClockedDevice, TimingOnlyDevice
         from .switching import Baseline
-        from .controllers import ModularController, LinkModel
+        from .controllers import ModularController
+        from .links import LinkModelConfig
         from .window_manager import WindowManager
         from .window_interactions import DefaultWindowInteraction
 
@@ -1532,10 +1544,19 @@ class RunSpec:
             else ExecutionOrchestrator(engine)
         )
 
-        controller = self.make_controller(engine) \
+        link_config = (
+            self.links
+            if self.links is not None
+            else LinkModelConfig.reference_fixed_latency_profile()
+        )
+        links = link_config.resolve()
+        controller = self.make_controller(engine, links) \
             if self.make_controller is not None \
-            else ModularController(engine, links=LinkModel.from_timing(self.timing),
-                              t_pack=self.timing.ticks("t_pack"))
+            else ModularController(
+                engine,
+                links=links,
+                t_pack=self.timing.ticks("t_pack"),
+            )
         from .protocols import (
             Controller,
             MagicStateFactory,
@@ -1553,9 +1574,11 @@ class RunSpec:
                 "the RunSpec build"
             )
         _validate_protocol_part("controller", controller, Controller)
-        # the whole fabric shares the controller's LinkModel: the window
-        # manager's dd/do hops ride the same links a custom controller set
-        links = controller.links
+        if controller.links is not links:
+            raise ValueError(
+                "controller must retain the exact RunSpec-resolved link fabric"
+            )
+        # One resolved fabric is shared by every reaction-path participant.
 
         store = PayloadStore(memory_model=self.memory_model)
         window_manager = WindowManager(
@@ -1577,7 +1600,6 @@ class RunSpec:
             engine, router=router, scheduler=scheduler,
             unit_pools=self.unit_pools,
             num_units=self.num_units if self.num_units is not None else 1,
-            ws_delay_ticks=links.ws.cost(),
             bulk_strong=getattr(strategy, "bulk_strong", False))
         services = StrategyServicesImpl(engine, window_manager, pool)
         window_manager.strategy = strategy
@@ -1674,7 +1696,6 @@ class RunSpec:
             idle_policy=idle_policy,
             orchestrator=orchestrator,
             controller=controller,
-            links=links,
             metrics=metric_bindings,
             workload=workload,
         )
@@ -1755,6 +1776,7 @@ class RunSpec:
                 window_manager=window_manager,
                 operations=all_operations,
                 metric_bindings=metric_bindings,
+                links=links,
             )
             _validate_shipped_component_configuration(component_graph)
             operation_records = _resolved_operation_records(
@@ -1786,13 +1808,14 @@ class RunSpec:
                 self,
                 controller=controller,
             )
-            link_records = _resolved_link_records(
-                links,
-                value_origin=(
-                    "timing"
-                    if self.make_controller is None
-                    else "controller"
-                ),
+            link_topology = ResolvedLinkTopologyRecord.freeze(
+                links.topology_json_value(
+                    controller_link_integration_assurance=(
+                        "shipped_controller"
+                        if self.make_controller is None
+                        else "custom_controller_unverified"
+                    ),
+                )
             )
             resource_record = _effective_resource_record(
                 pool,
@@ -1816,7 +1839,7 @@ class RunSpec:
                 device=device,
             )
             manifest = ResolvedRunManifest(
-                schema_version=2,
+                schema_version=3,
                 root_seed=self._validated_root_seed(),
                 components=resolved_components,
                 fixed_composition=fixed_composition,
@@ -1830,7 +1853,7 @@ class RunSpec:
                 execution_plan=execution_plan_record,
                 chip_load_plan=chip_load_plan_record,
                 timing=timing_record,
-                links=link_records,
+                link_topology=link_topology,
                 resources=resource_record,
                 runtime_flags=runtime_flags,
                 software_context=software_context,
@@ -1874,7 +1897,6 @@ class RunSpec:
         idle_policy,
         orchestrator,
         controller,
-        links,
         metrics,
         workload,
     ):
@@ -1908,16 +1930,6 @@ class RunSpec:
         if self.memory_model is not None:
             roots.append(
                 ((field_segment("memory_model"),), self.memory_model)
-            )
-        for link_name in ("qc", "cd", "dd", "do", "oc", "cq", "ws"):
-            roots.append(
-                (
-                    (
-                        field_segment("controller_links"),
-                        field_segment(link_name),
-                    ),
-                    getattr(links, link_name),
-                )
             )
         for binding in metrics:
             roots.append(
@@ -2467,7 +2479,6 @@ def _fixed_composition_configuration(name, component, configurations):
             )
         return {
             "kind": "decoder_manager",
-            "weak_strong_delay_ticks": component.ws_delay_ticks,
             "log_name": component.log_name,
             "lane_policy": "none",
         }
@@ -2936,25 +2947,6 @@ def _effective_timing_record(
         "t_pack_ticks": t_pack_ticks,
         "t_pack_us": t_pack_ticks / TICKS_PER_US,
     })
-
-
-def _resolved_link_records(
-    links,
-    *,
-    value_origin: str,
-) -> tuple[ResolvedLinkRecord, ...]:
-    records = []
-    for name in ("qc", "cd", "dd", "do", "oc", "cq", "ws"):
-        link = getattr(links, name)
-        records.append(ResolvedLinkRecord.freeze({
-            "name": name,
-            "latency_ticks": link.latency_ticks,
-            "latency_us": link.latency_ticks / TICKS_PER_US,
-            "bandwidth_bits_per_us": link.bandwidth_bits_per_us,
-            "serialize": link.serialize,
-            "value_origin": value_origin,
-        }))
-    return tuple(records)
 
 
 def _component_path_json(*parts: str) -> list[dict]:
@@ -4015,6 +4007,7 @@ def _capture_primary_run_result(
     window_manager,
     operations,
     metric_bindings,
+    links,
 ) -> PrimaryRunResult:
     """Validate and freeze the result while scheduling is sealed."""
     operation_by_id = {}
@@ -4067,7 +4060,7 @@ def _capture_primary_run_result(
     if not gate.workload_complete:
         raise RuntimeError("primary run ended before the chip workload completed")
     return PrimaryRunResult(
-        schema_version=2,
+        schema_version=3,
         terminal_status="complete",
         event_queue_empty=True,
         decode_work_settled=True,
@@ -4075,6 +4068,7 @@ def _capture_primary_run_result(
         chip_done_ticks=gate.last_finish_time,
         fully_done_ticks=engine.now,
         operation_results=tuple(operation_results),
+        link_traffic=LinkTrafficRecord.freeze(links.traffic_json_value()),
         metric_results=tuple(metric_results),
     )
 

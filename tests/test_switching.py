@@ -455,9 +455,9 @@ def test_run_both_at_once_starts_strong_every_window_and_cancels_confident_ones(
     assert serial.cluster.strong_needed == cp.strong_needed          # same windows need strong
 
 
-def test_run_both_at_once_keeps_the_weak_stream_byte_identical_to_plain_sliding():
-    """With the strong decoder on its own pool, cancelling its jobs never perturbs the weak stream:
-    the weak windows commit at exactly the same times as plain sliding, and every window commits once."""
+def test_run_both_at_once_keeps_the_weak_decode_work_identical_to_plain_sliding():
+    """A separate strong pool leaves weak compute unchanged; selected transport may
+    shift later readiness because unconfident WSD and accepted WDO are different paths."""
     rounds = 90
     parallel = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True), 1.0, rounds,
                            pools={"default": 1, "strong": 1})
@@ -470,8 +470,11 @@ def test_run_both_at_once_keeps_the_weak_stream_byte_identical_to_plain_sliding(
                 scheme=SlidingWindowScheme(),
                 decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US),
             ), verbose=False)
-    weak_done = lambda r: [w.t_done for _, w in sorted(r.cluster.windows.items())]
-    assert weak_done(parallel) == weak_done(plain)
+    weak_durations = lambda r: [
+        w.t_done - w.t_dispatch
+        for _, w in sorted(r.cluster.windows.items())
+    ]
+    assert weak_durations(parallel) == weak_durations(plain)
     assert len(parallel.cluster.committed_windows) == parallel.cluster.total_windows
 
 
@@ -1142,7 +1145,7 @@ def test_double_window_strong_waits_for_the_restart_windows_weak_commit():
     w5 = cluster.windows[(0, 5)]
     (start_tick, job), = strong.starts
     assert w5.t_done is not None
-    assert start_tick == w5.t_done + us(0.5)
+    assert start_tick == w5.t_done + us(3.0)
     assert cluster.window_manager.pending_escalations == {}
 
 
@@ -1168,7 +1171,7 @@ def test_double_window_last_window_uses_the_terminal_boundary():
     # clamped r_strong is 3 committed rounds; the decoder reads 25-30
     assert job.n_rounds == 6
     assert len({p.round_index for p in job.payloads}) == 6
-    assert start_tick == w9.t_done + us(0.5)
+    assert start_tick == w9.t_done + us(2.0)
     assert cluster.window_manager.absorbed_windows == set()
 
 
@@ -1185,7 +1188,7 @@ def test_double_window_end_clamped_slab_absorbs_the_tail():
     assert runtime.absorbed_windows == {(0, 9)}
     assert [j.window_id for _, j in weak.starts] == [0, 1, 2, 3, 4, 5, 6, 7, 8]
     w8 = res.cluster.windows[(0, 8)]
-    assert start_tick == w8.t_done + us(0.5)
+    assert start_tick == w8.t_done + us(2.0)
 
 
 def test_double_window_exactly_one_strong_job_per_escalation():
@@ -1256,6 +1259,7 @@ def _pending_escalation(key, phase):
             n_rounds=12,
         ),
         strong_model=None,
+        wsd_arrival_ticks=0,
         phase=phase,
     )
 
@@ -1537,7 +1541,7 @@ def test_double_window_terminal_slab_waits_for_its_final_rounds():
     w2 = res.cluster.windows[(0, 2)]
     assert start_tick > w2.t_done + us(0.5)   # NOT submitted at escalation
     # round 14 reaches the cluster at 14.0 (generation) + 2.15 (t_qc + t_cd);
-    # the slab then crosses the weak->strong hop
-    assert start_tick == us(14.0 + 2.15 + 0.5)
+    # the slab then crosses the controller-to-strong data path
+    assert start_tick == us(14.0 + 2.15 + 2.0)
     assert runtime.absorbed_windows == {(0, 3), (0, 4)}
     assert runtime.pending_escalations == {}

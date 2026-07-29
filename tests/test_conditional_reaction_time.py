@@ -180,9 +180,9 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
     )
     expected_return = (
         window_done
-        + controller.links.do.cost()
-        + controller.links.oc.cost()
-        + controller.links.cq.cost()
+        + us(1.0)   # WDO: accepted weak window result
+        + us(4.0)   # OC: orchestrator instruction
+        + us(0.15)  # CQ: controller-to-QPU instruction
     )
 
     assert result.chip.decode_release_time == {}

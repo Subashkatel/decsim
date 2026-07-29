@@ -259,7 +259,7 @@ class Switching:
             strong = services.make_strong_job(
                 job, self.strong_redo_rounds(job.window),
                 getattr(job, "strong_label", f"strong({job.label})"))
-            extra = Submission(strong, delay_ticks=services.ws_delay())
+            extra = Submission(strong)
         return OutcomeDirective(Directive.AWAIT_STRONG, extra=extra)
 
     def metrics(self) -> dict:

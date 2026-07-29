@@ -63,15 +63,26 @@ class _EscalateThenAdopt:
         return OutcomeDirective(Directive.AWAIT_STRONG)
 
 
-def build(bulk_strong=True, decoder=None, ws_delay_ticks=0):
+class _ImmediateSelectionServices:
+    def __init__(self, manager):
+        self.manager = manager
+
+    def prepare_strong_selection(self, weak_job, serial_submission):
+        if serial_submission is not None:
+            self.manager.enqueue(serial_submission.job)
+        return 0
+
+
+def build(bulk_strong=True, decoder=None):
     eng = Engine(verbose=False)
     if decoder is None:
         decoder = PerRoundDecoder(tau_us=1.0)
     manager = DecoderManager(
         eng, router=CodeRouter(default=decoder),
-        scheduler=FifoScheduler(), ws_delay_ticks=ws_delay_ticks,
+        scheduler=FifoScheduler(),
         unit_pools={"default": 1, "strong": 1}, bulk_strong=bulk_strong)
     manager.strategy = _NullStrategy()
+    manager.services = _ImmediateSelectionServices(manager)
     results = []
     manager.on_strong_window_decoded = \
         lambda key, res: results.append((eng.now, key))
@@ -154,7 +165,7 @@ def test_bulk_merge_delivers_every_key_and_frees_units():
 
 
 def test_strong_handoff_changes_readiness_without_renewing_deadline():
-    eng, manager, _ = build(ws_delay_ticks=us(2))
+    eng, manager, _ = build()
     job = strong_job(2, 5)
     job.deadline = us(99)
 
@@ -170,7 +181,7 @@ def test_in_transit_strong_snapshot_never_consults_prospective_lane_policy():
         def pool_for(self, job):
             raise AssertionError("measurement must not route in-transit work")
 
-    eng, manager, _ = build(ws_delay_ticks=us(2))
+    eng, manager, _ = build()
     manager.lane_policy = RaisingLanePolicy()
     job = strong_job(2, 5)
     job.hint = None
@@ -671,10 +682,9 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
         "a wait was released after finality without a decode of its own"
 
 
-def test_public_strategy_delayed_duplicate_submission_is_refused_end_to_end():
-    """The same public seam with the second submission handed over the
-    weak->strong link: the refusal happens at submission, so no run reaches
-    finality on a stale result."""
+def test_public_strategy_cannot_supply_a_strong_transport_delay():
+    """The fabric exclusively owns strong transport; strategy delays are not a
+    compatibility path around WSD/CSD reservation."""
 
     class DelayedDuplicateStrongStrategy(Baseline):
         bulk_strong = True
@@ -695,7 +705,7 @@ def test_public_strategy_delayed_duplicate_submission_is_refused_end_to_end():
         def metrics(self):
             return {}
 
-    with pytest.raises(RuntimeError, match="duplicate strong decode"):
+    with pytest.raises(ValueError, match="owned by the link fabric"):
         escalating_world(
             DelayedDuplicateStrongStrategy(),
             "duplicate-request",
@@ -1295,7 +1305,7 @@ def test_a_request_cancelled_across_the_link_is_refused_and_replaced(
     """The other direction. This job was admitted, so it is spent for good even
     though it never reached a unit and carries no cancelled flag; only a fresh
     replacement may take the destination's next result."""
-    eng, manager, results = build(bulk_strong=bulk_strong, ws_delay_ticks=30)
+    eng, manager, results = build(bulk_strong=bulk_strong)
     manager.strategy = _EscalateThenAdopt()
     manager.on_window_decoded = lambda job, result: None
     manager.enqueue(weak_job(5, 2, "w5"))

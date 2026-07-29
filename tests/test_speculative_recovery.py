@@ -12,10 +12,12 @@ import sys
 
 import pytest
 
+from conftest import fixed_latency_link_config
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.codes import SurfaceCodeModel
-from decsim.config import TimingConfig
+from decsim.config import TimingConfig, us
 from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter
 from decsim.message import DecodeResult, Operation, SoftOutput
 from decsim.planner import FixedRounds, PerOpRounds
@@ -77,7 +79,7 @@ class _CorrectingStrongDecoder:
 
 def _deterministic_run(boundary_policy, *, uncertain=(1,), strong=None,
                        run_both_at_once=False, weak_ticks=1, operation=None,
-                       propagate=False, rounds=15, timing=None,
+                       propagate=False, rounds=15, links=None,
                        window_interaction=None, strategy=None):
     weak = _WeakBoundaryDecoder(
         uncertain, ticks=weak_ticks, propagate=propagate)
@@ -95,7 +97,7 @@ def _deterministic_run(boundary_policy, *, uncertain=(1,), strong=None,
         window_interaction=window_interaction,
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
-        timing=timing if timing is not None else TimingConfig(),
+        links=links,
     ))
     return result, weak
 
@@ -172,7 +174,7 @@ def test_interaction_cannot_invalidate_unrelated_finished_work():
             window_interaction=UnrelatedFinishedTarget(),
             router=SwitchingRouter(weak, _CorrectingStrongDecoder(ticks=10)),
             unit_pools={"default": 2, "strong": 1},
-            timing=TimingConfig(t_dd_us=0.0, t_ws_us=0.0),
+            links=fixed_latency_link_config(dd=0, wsd=0),
         ))
 
     assert weak.payload_counts == [(1, 0, 3), (0, 0, 3)]
@@ -407,20 +409,20 @@ def test_parallel_early_and_same_tick_strong_results_recover_deterministically(
 
 def test_replay_invalidates_an_inflight_descendant_boundary():
     """A reset W2 cannot release W3 with its obsolete outbound boundary."""
-    timing = TimingConfig(t_dd_us=0.5, t_ws_us=0.5)
+    links = fixed_latency_link_config(dd=us(0.5), wsd=us(0.5))
     eager, weak = _deterministic_run(
         Eager(),
         strong=_CorrectingStrongDecoder(ticks=2_900_000),
         propagate=True,
         rounds=12,
-        timing=timing,
+        links=links,
     )
     held, _ = _deterministic_run(
         Held(),
         strong=_CorrectingStrongDecoder(ticks=2_900_000),
         propagate=True,
         rounds=12,
-        timing=timing,
+        links=links,
     )
     runtime = eager.cluster.window_manager
     held_runtime = held.cluster.window_manager
@@ -483,7 +485,7 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
             boundary_policy=policy,
             router=SwitchingRouter(weak, _MergeStrongDecoder()),
             unit_pools={"default": 1, "strong": 1},
-            timing=TimingConfig(t_dd_us=0.5, t_ws_us=0.0),
+            links=fixed_latency_link_config(dd=us(0.5), wsd=0),
         ))
         return result, weak
 

@@ -34,6 +34,7 @@ from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecodeResult,
                       Operation, SeamFaultOwner, SyndromeRoundPacket,
                       StrongRegionPlan, Window, WindowInfo, WindowPlan,
                       is_stable_identity, stable_identity_order_key)
+from .links import LinkPath, TrafficAttribution
 from .payload_store import PayloadStore
 from .dynamic_windows import DynamicWindows
 from .protocols import MultiFaultExclusionSyndromeDevice
@@ -80,6 +81,7 @@ class _PendingEscalation:
     resolved_region: _ResolvedStrongRegion
     strong_window: Window
     strong_model: object
+    wsd_arrival_ticks: int
     phase: _EscalationPhase
 
 
@@ -771,7 +773,14 @@ class WindowManager:
         window.queued = True
         for submission in self.strategy.on_window_ready(window, job,
                                                         self.services):
-            self.submit_fn(submission.job, submission.delay_ticks)
+            if submission.job.strong_decode_for is None:
+                self.submit_fn(submission.job, submission.delay_ticks)
+            else:
+                if submission.delay_ticks != 0:
+                    raise ValueError(
+                        "strong transport delay is owned by the link fabric"
+                    )
+                self._submit_strong_with_csd(submission.job)
 
     # ------------------------------------------------------- payload assembly
 
@@ -812,6 +821,139 @@ class WindowManager:
                                 ),
                             )]
         return payloads
+
+    @staticmethod
+    def _job_payload_bits(job: DecodeJob) -> Optional[int]:
+        sizes = [payload.size_bits for payload in (job.payloads or ())]
+        if not all(size is not None for size in sizes):
+            return None
+        return sum(sizes)
+
+    @staticmethod
+    def _job_attribution(job: DecodeJob) -> TrafficAttribution:
+        patches = {}
+        for payload in job.payloads or ():
+            patch_id = payload.patch_id
+            patches[stable_identity_order_key(patch_id)] = patch_id
+        patch_ids = tuple(patches[key] for key in sorted(patches))
+        window = job.window
+        if window is None:
+            raise RuntimeError("window-scoped transport requires a DecodeJob window")
+        return TrafficAttribution(
+            operation_id=job.op_id,
+            patch_ids=patch_ids,
+            window_id=job.window_id,
+            round_lo=(
+                window.commit_lo
+                if window.buffer_lo is None
+                else window.buffer_lo
+            ),
+            round_hi=(
+                window.commit_hi
+                if window.buffer_hi is None
+                else window.buffer_hi
+            ),
+        )
+
+    @staticmethod
+    def _window_attribution(
+        window: Window,
+        op: Operation,
+    ) -> TrafficAttribution:
+        return TrafficAttribution(
+            operation_id=op.id,
+            patch_ids=tuple(sorted(
+                op.patches,
+                key=stable_identity_order_key,
+            )),
+            window_id=window.k,
+            round_lo=(
+                window.commit_lo
+                if window.buffer_lo is None
+                else window.buffer_lo
+            ),
+            round_hi=(
+                window.commit_hi
+                if window.buffer_hi is None
+                else window.buffer_hi
+            ),
+        )
+
+    def _window_link_arrival(
+        self,
+        path: LinkPath,
+        window: Window,
+        op: Operation,
+    ) -> int:
+        reservation = self.links.reserve(
+            path,
+            payload_bits=None,
+            now_ticks=self.engine.now,
+            attribution=self._window_attribution(window, op),
+        )
+        return self.engine.now + reservation.total_delay_ticks
+
+    def _link_arrival(
+        self,
+        path: LinkPath,
+        job: DecodeJob,
+        *,
+        payload_bits: Optional[int],
+    ) -> int:
+        reservation = self.links.reserve(
+            path,
+            payload_bits=payload_bits,
+            now_ticks=self.engine.now,
+            attribution=self._job_attribution(job),
+        )
+        return self.engine.now + reservation.total_delay_ticks
+
+    def _submit_strong_with_csd(
+        self,
+        strong_job: DecodeJob,
+        *,
+        wsd_arrival_ticks: Optional[int] = None,
+    ) -> int:
+        csd_arrival_ticks = self._link_arrival(
+            LinkPath.CSD,
+            strong_job,
+            payload_bits=self._job_payload_bits(strong_job),
+        )
+        ready_ticks = (
+            csd_arrival_ticks
+            if wsd_arrival_ticks is None
+            else max(csd_arrival_ticks, wsd_arrival_ticks)
+        )
+        self.submit_fn(strong_job, ready_ticks - self.engine.now)
+        return csd_arrival_ticks
+
+    def prepare_strong_selection(
+        self,
+        weak_job: DecodeJob,
+        serial_submission,
+    ) -> int:
+        """Reserve real input legs and return WSD selection-delivery delay."""
+        key = (weak_job.op_id, weak_job.window_id)
+        pending = self._escalations.peek_key(key)
+        if serial_submission is not None:
+            wsd_arrival_ticks = self._link_arrival(
+                LinkPath.WSD,
+                weak_job,
+                payload_bits=None,
+            )
+            self._submit_strong_with_csd(
+                serial_submission.job,
+                wsd_arrival_ticks=wsd_arrival_ticks,
+            )
+            return wsd_arrival_ticks - self.engine.now
+        if pending is not None:
+            return max(0, pending.wsd_arrival_ticks - self.engine.now)
+        wsd_arrival_ticks = self._link_arrival(
+            LinkPath.WSD,
+            weak_job,
+            payload_bits=None,
+        )
+        return wsd_arrival_ticks - self.engine.now
 
     # ------------------------------------------------------------ strong jobs
 
@@ -933,6 +1075,11 @@ class WindowManager:
             self.store.lease(
                 guard_lease, resolved_region.restart_read_keys)
         try:
+            wsd_arrival_ticks = self._link_arrival(
+                LinkPath.WSD,
+                weak_job,
+                payload_bits=None,
+            )
             self._install_strong_slab_ownership(key, resolved_region)
             phase = (
                 _EscalationPhase.WAITING_TERMINAL_DATA
@@ -946,6 +1093,7 @@ class WindowManager:
                 resolved_region=resolved_region,
                 strong_window=slab,
                 strong_model=strong_model,
+                wsd_arrival_ticks=wsd_arrival_ticks,
                 phase=phase,
             )
             if restart_key is None:
@@ -1261,7 +1409,10 @@ class WindowManager:
         strong_job = self._build_pending_strong_job(pending)
         self.services.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_far(far_boundary_key, pending)
-        self.submit_fn(strong_job, self.services.ws_delay())
+        self._submit_strong_with_csd(
+            strong_job,
+            wsd_arrival_ticks=pending.wsd_arrival_ticks,
+        )
         self.store.release((pending.key, "strong"))
         self.engine.log(
             "DecoderCluster",
@@ -1277,7 +1428,10 @@ class WindowManager:
         strong_job = self._build_pending_strong_job(pending)
         self.services.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_terminal(operation_id, pending)
-        self.submit_fn(strong_job, self.services.ws_delay())
+        self._submit_strong_with_csd(
+            strong_job,
+            wsd_arrival_ticks=pending.wsd_arrival_ticks,
+        )
         self.store.release((pending.key, "strong"))
         self.engine.log(
             "DecoderCluster",
@@ -1312,8 +1466,26 @@ class WindowManager:
     # ---------------------------------------------------------------- commit
 
     def on_decode_done(self, job: DecodeJob, res: DecodeResult) -> None:
-        """Commit a finished window decode. The step order below is frozen
-        by the timing goldens — do not reorder."""
+        """Publish an accepted weak result only after its WDO transfer."""
+        window = self.windows[(job.op_id, job.window_id)]
+        window.t_done = self.engine.now
+        if job.awaiting_strong_result:
+            self._commit_decode_done(job, res)
+            return
+        op = self._ops[job.op_id]
+        delivery_ticks = self._window_link_arrival(
+            LinkPath.WDO,
+            window,
+            op,
+        )
+        self.engine.schedule(
+            delivery_ticks - self.engine.now,
+            lambda: self._commit_decode_done(job, res),
+            label=f"weak result {op.name}W{window.k}->orchestrator",
+        )
+
+    def _commit_decode_done(self, job: DecodeJob, res: DecodeResult) -> None:
+        """Commit after weak result transport, or provisionally on escalation."""
         key = (job.op_id, job.window_id)
         window = self.windows[key]
         op = self._ops[job.op_id]
@@ -1336,7 +1508,8 @@ class WindowManager:
     def _commit_window(self, job: DecodeJob, res: DecodeResult, key: tuple,
                        window: Window, op: Operation) -> None:
         window.committed = True
-        window.t_done = self.engine.now
+        if window.t_done is None:
+            window.t_done = self.engine.now
         self.committed_windows.add(key)
         self._committed_per_op[op.id] = self._committed_per_op.get(op.id, 0) + 1
         self.engine.log("DecoderCluster",
@@ -1562,7 +1735,26 @@ class WindowManager:
             self._pending_strong_per_op.get(op_id, 0) + 1
 
     def on_strong_decode_done(self, key: tuple, result: DecodeResult) -> None:
-        """Finalize a weak-committed window with the strong result.
+        """Publish an accepted strong result only after its DO transfer."""
+        window = self.windows[key]
+        op = self._ops[window.op_id]
+        delivery_ticks = self._window_link_arrival(
+            LinkPath.DO,
+            window,
+            op,
+        )
+        self.engine.schedule(
+            delivery_ticks - self.engine.now,
+            lambda: self._commit_strong_decode_done(key, result),
+            label=f"strong result {op.name}W{window.k}->orchestrator",
+        )
+
+    def _commit_strong_decode_done(
+        self,
+        key: tuple,
+        result: DecodeResult,
+    ) -> None:
+        """Finalize a weak-committed window with the delivered strong result.
 
         Held ships the strong boundary now. Eager delegates a boundary change
         to SpeculativeRecovery, which replays the affected static descendants.
@@ -1648,8 +1840,14 @@ class WindowManager:
         self._committed_boundaries[source_key] = boundary
         for dep_key, delivery_key, delivery_version in deliveries:
             self._boundary_delivery_versions[delivery_key] = delivery_version
+            reservation = self.links.reserve(
+                LinkPath.DD,
+                payload_bits=None,
+                now_ticks=self.engine.now,
+                attribution=self._window_attribution(window, op),
+            )
             self.engine.schedule(
-                self.links.dd.cost(),
+                reservation.total_delay_ticks,
                 lambda dk=dep_key, so=op.id, bd=boundary,
                        sk=source_key, v=version, dv=delivery_version:
                     self._receive_boundary(dk, so, bd, sk, v, dv),
@@ -1780,8 +1978,7 @@ class WindowManager:
 
     def _finish_operation_if_ready(self, op: Operation) -> None:
         """Deliver an op result once every window is committed, no strong
-        redo or speculative ancestor is pending, and the stream is sealed;
-        delivery costs t_do."""
+        redo or speculative ancestor is pending, and the stream is sealed."""
         if op.id in self._finished_ops:
             return
         if self._pending_strong_per_op.get(op.id, 0) > 0:
@@ -1794,9 +1991,7 @@ class WindowManager:
         if (self._committed_per_op.get(op.id, 0) == self.window_count[op.id]
                 and self.lifecycle.sealed(op.id)):
             self._finished_ops.add(op.id)
-            self.engine.schedule(self.links.do.cost(),
-                                 lambda: self._deliver_result(op),
-                                 label=f"result->orch({op.name})")
+            self._deliver_result(op)
             self.store.free_op(op.id)
 
     def finish_workload_if_ready(self) -> None:
@@ -1874,18 +2069,14 @@ class WindowManager:
             else:
                 self.op_results[operation.id] = logical_observables
             self.lifecycle.segment_results_sent.add(operation.id)
-            self.engine.schedule(
-                self.links.do.cost(),
-                lambda op=operation, prediction=logical_observables:
-                self.orchestrator.integrate(
-                    op,
-                    DecodeResult(
-                        op.id,
-                        -1,
-                        logical_observables=prediction,
-                    ),
+            self.orchestrator.integrate(
+                operation,
+                DecodeResult(
+                    operation.id,
+                    -1,
+                    logical_observables=logical_observables,
                 ),
-                label=f"result->orch({operation.name})")
+            )
 
     def _segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
         for key in self._pending_strong_windows:

@@ -9,12 +9,14 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import pytest
 
+from conftest import fixed_latency_link_config
+
 stim = pytest.importorskip("stim")
 np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
 from decsim.message import Operation
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
@@ -41,8 +43,8 @@ def _single_payload(device, operation, round_index):
     return payloads[0]
 
 
-def _zero_link_controller(engine):
-    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+def _zero_link_controller(engine, links):
+    return ModularController(engine, links=links, log_syndromes=False)
 
 
 def _circuit():
@@ -345,6 +347,7 @@ def test_blocked_successor_waits_for_real_pymatching_result():
               scheme=SlidingWindowScheme(),
               device=device,
               decoder=decoder,
+              links=fixed_latency_link_config(),
               make_controller=_zero_link_controller,
               seed=23,
           ), verbose=False)

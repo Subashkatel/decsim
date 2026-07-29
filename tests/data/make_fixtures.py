@@ -26,8 +26,14 @@ import stim
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
-from decsim.detector_error_model import (build_window_error_models,  # noqa: E402
-                                                 decode_windowed)
+from decsim.detector_error_model import (  # noqa: E402
+    FaultRepresentation,
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    LINKED_FAULT_MODELS_REQUIRED,
+    PHYSICAL_FAULT_MODEL_REQUIRED,
+    build_window_error_models,
+    decode_windowed,
+)
 from decsim.belief_matching_decoder import belief_matching_window_decoder    # noqa: E402
 from decsim.mwpm_decoder import matching_window_decoder                       # noqa: E402
 
@@ -59,8 +65,19 @@ def _sliding_plan(n_rounds, commit, buffer):
     return plan
 
 
-def _windowed_fails(models, inner, dets, obs, n):
-    return sum(int(decode_windowed(models, dets[i], inner)[0] != obs[i, 0]) for i in range(n))
+def _windowed_fails(models, inner, dets, obs, n, representation):
+    return sum(
+        int(
+            decode_windowed(
+                models,
+                dets[i],
+                inner,
+                selected_fault_representation=representation,
+            )[0]
+            != obs[i, 0]
+        )
+        for i in range(n)
+    )
 
 
 def main():
@@ -85,11 +102,21 @@ def main():
             "num_detectors": circ.num_detectors, "plan": plan,
             "global_mwpm_fails": int((gm.decode_batch(dets)[:, 0] != obs[:, 0]).sum()),
             "windowed_mwpm_fails": _windowed_fails(
-                build_window_error_models(circ, plan), matching_window_decoder(),
-                dets, obs, sc["n"]),
+                build_window_error_models(
+                    circ,
+                    plan,
+                    fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+                ),
+                matching_window_decoder(),
+                dets, obs, sc["n"], FaultRepresentation.GRAPHLIKE),
             "windowed_bm_fails": _windowed_fails(
-                build_window_error_models(circ, plan, belief_matching=True),
-                belief_matching_window_decoder(), dets, obs, nb),
+                build_window_error_models(
+                    circ,
+                    plan,
+                    fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+                ),
+                belief_matching_window_decoder(), dets, obs, nb,
+                FaultRepresentation.GRAPHLIKE),
         }
         golden["scenarios"][sc["name"]] = g
         print(sc["name"], g)
@@ -116,8 +143,12 @@ def _bb_fixture(golden):
 
     rounds = {d: d // BB["checks_per_round"] + 1 for d in range(circ.num_detectors)}
     plan = [tuple(w) for w in BB["plan"]]
-    models = build_window_error_models(circ, plan, decompose_errors=False,
-                                       detector_rounds=rounds)
+    models = build_window_error_models(
+        circ,
+        plan,
+        detector_rounds=rounds,
+        fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
+    )
     inner = bposd_window_decoder()
     # whole-history BP-OSD for the windowed==global consistency anchor
     dem = circ.detector_error_model(decompose_errors=False)
@@ -134,7 +165,12 @@ def _bb_fixture(golden):
                         osd_order=0)
     wf = gf = agree = 0
     for s in range(BB["n"]):
-        pw = decode_windowed(models, dets[s], inner)
+        pw = decode_windowed(
+            models,
+            dets[s],
+            inner,
+            selected_fault_representation=FaultRepresentation.PHYSICAL,
+        )
         pg = (O @ gdec.decode(dets[s])) % 2
         wf += int(not np.array_equal(pw, obs[s]))
         gf += int(not np.array_equal(pg, obs[s]))

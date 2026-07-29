@@ -15,7 +15,10 @@ def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,
     cache: dict = {}
 
     def decode(model: "WindowErrorModel", syndrome):
-        decoder = cache.get(id(model))
+        from ..detector_error_model import FaultRepresentation
+
+        faults = model.require_faults(FaultRepresentation.PHYSICAL)
+        decoder = cache.get(id(faults))
         if decoder is None:
             import weakref
 
@@ -24,20 +27,20 @@ def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,
             from scipy.sparse import csr_matrix
 
             validate_placed_fault_matrices(
-                model.check,
-                model.obs,
+                faults.check,
+                faults.observables,
                 location="BP-OSD window model",
             )
-            decoder = BpOsdDecoder(csr_matrix(model.check),
-                                   error_channel=list(model.priors),
+            decoder = BpOsdDecoder(csr_matrix(faults.check),
+                                   error_channel=list(faults.priors),
                                    max_iter=max_iter, bp_method=bp_method,
                                    schedule=schedule, osd_method=osd_method,
                                    osd_order=osd_order)
-            cache[id(model)] = decoder
+            cache[id(faults)] = decoder
             # id() values are recycled by CPython; evict on GC so a fresh model
             # cannot alias a dead one's key and receive a stale decoder (mirrors
             # the MWPM inner decoder's guard).
-            weakref.finalize(model, cache.pop, id(model), None)
+            weakref.finalize(faults, cache.pop, id(faults), None)
         return decoder.decode(syndrome)
 
     return decode

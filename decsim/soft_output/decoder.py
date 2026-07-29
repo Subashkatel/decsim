@@ -11,6 +11,7 @@ from ..message import (
     RunSeedPathSegment,
     SoftOutputSource,
 )
+from ..detector_error_model import DecoderFaultModelRequirement
 
 if TYPE_CHECKING:
     from ..protocols import Decoder
@@ -40,8 +41,29 @@ class SoftOutputDecoder:
             raise TypeError(
                 "configured metric factory must build from a window model"
             )
+        try:
+            base_requirement = base.fault_model_requirement
+            metric_requirement = metric_cls.fault_model_requirement
+        except AttributeError as error:
+            raise TypeError(
+                "base decoder and metric factory must declare "
+                "fault_model_requirement"
+            ) from error
+        if not isinstance(base_requirement, DecoderFaultModelRequirement):
+            raise TypeError(
+                "base decoder fault_model_requirement must be a "
+                "DecoderFaultModelRequirement"
+            )
+        if not isinstance(metric_requirement, DecoderFaultModelRequirement):
+            raise TypeError(
+                "metric factory fault_model_requirement must be a "
+                "DecoderFaultModelRequirement"
+            )
         self.base = base
         self.metric_cls = metric_cls
+        self.fault_model_requirement = base_requirement.joined(
+            metric_requirement
+        )
 
     def run_seed_children(self):
         """Expose the base decoder and configured confidence builder."""
@@ -71,10 +93,12 @@ class SoftOutputDecoder:
     def _metric_for(self, model):
         """Build this decode's metric, or return None without an observable."""
         import numpy as np
+        from ..detector_error_model import FaultRepresentation
 
-        if model is None or getattr(model, "obs", None) is None:
+        if model is None:
             return None
-        obs = np.asarray(model.obs)
+        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        obs = np.asarray(faults.observables)
         if obs.shape[0] != 1 or not obs.any():
             return None
         return self.metric_cls.from_window_model(model)

@@ -15,6 +15,10 @@ from ..message import (
     RunSeedChild,
     RunSeedPathSegment,
 )
+from ..detector_error_model import (
+    FaultRepresentation,
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+)
 
 if TYPE_CHECKING:
     from ..protocols import Decoder
@@ -22,6 +26,8 @@ if TYPE_CHECKING:
 
 class PyMatchingDecoder:
     """Decode one window with PyMatching and report simulated latency separately."""
+
+    fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
 
     def __init__(self, latency_model: Decoder):
         self.latency_model = latency_model
@@ -45,35 +51,36 @@ class PyMatchingDecoder:
         model = job.dem
         if model is None:
             return DecodeResult(job.op_id, job.window_id)
-        matching = self._matching_for_model(model)
+        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        matching = self._matching_for_model(faults)
         syndrome = payload_syndrome(job)
-        check_syndrome_size(job, syndrome, model)
+        check_syndrome_size(job, syndrome, faults)
         selected = matching.decode(syndrome)
-        return result_from_selected_faults(job, model, selected)
+        return result_from_selected_faults(job, model, faults, selected)
 
-    def _matching_for_model(self, model):
+    def _matching_for_model(self, faults):
         """Return a cached matching graph for this window model."""
         import weakref
         import pymatching
 
-        entry = self._matchings.get(id(model))
-        matching = entry[1] if entry is not None and entry[0]() is model else None
+        entry = self._matchings.get(id(faults))
+        matching = entry[1] if entry is not None and entry[0]() is faults else None
         if matching is None:
             from ..detector_error_model import validate_graphlike_matrices
 
             validate_graphlike_matrices(
-                model.check,
-                model.obs,
+                faults.check,
+                faults.observables,
                 location="PyMatching window model",
             )
             matching = pymatching.Matching.from_check_matrix(
-                model.check, weights=self._weights_for(model))
-            self._matchings[id(model)] = (weakref.ref(model), matching)
+                faults.check, weights=self._weights_for(faults))
+            self._matchings[id(faults)] = (weakref.ref(faults), matching)
         return matching
 
-    def _weights_for(self, model):
+    def _weights_for(self, faults):
         from .weights import matching_weights
-        return matching_weights(model.priors)
+        return matching_weights(faults.priors)
 
 
 class UnweightedPyMatchingDecoder(PyMatchingDecoder):
@@ -83,6 +90,6 @@ class UnweightedPyMatchingDecoder(PyMatchingDecoder):
     support): at circuit-level noise it decodes measurably worse than
     weighted MWPM because hook-error paths are no longer penalized."""
 
-    def _weights_for(self, model):
+    def _weights_for(self, faults):
         import numpy as np
-        return np.ones(len(model.priors))
+        return np.ones(len(faults.priors))

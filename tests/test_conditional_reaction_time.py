@@ -2,6 +2,7 @@
 
 from decsim.config import us
 from decsim.decoders import PresetLatencyDecoder
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import BacklogTrajectory, ConditionalReactionTime
@@ -12,6 +13,8 @@ from decsim.planner import FixedRounds
 
 class _FixedLatency:
     """Timing decoder with a fixed service time."""
+
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, latency_us):
         self.latency_ticks = us(latency_us)

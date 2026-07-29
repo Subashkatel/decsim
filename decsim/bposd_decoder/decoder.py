@@ -10,6 +10,10 @@ from ..adapters.window_decode_results import (
     result_from_selected_faults,
 )
 from ..message import DecodeResult, RunSeedChild, RunSeedPathSegment
+from ..detector_error_model import (
+    FaultRepresentation,
+    PHYSICAL_FAULT_MODEL_REQUIRED,
+)
 from .window_decoder import bposd_window_decoder
 
 if TYPE_CHECKING:
@@ -19,6 +23,8 @@ if TYPE_CHECKING:
 
 class BPOSDDecoder:
     """Decode one window with BP-OSD and report simulated latency separately."""
+
+    fault_model_requirement = PHYSICAL_FAULT_MODEL_REQUIRED
 
     def __init__(self, latency_model: "Decoder", max_iter: int = 2, osd_order: int = 0,
                  bp_method: str = "product_sum", schedule: str = "serial",
@@ -51,7 +57,8 @@ class BPOSDDecoder:
         model = job.dem
         if model is None:
             return DecodeResult(job.op_id, job.window_id)
+        faults = model.require_faults(FaultRepresentation.PHYSICAL)
         syndrome = payload_syndrome(job)
-        check_syndrome_size(job, syndrome, model)
+        check_syndrome_size(job, syndrome, faults)
         selected = self._inner(model, syndrome)
-        return result_from_selected_faults(job, model, selected)
+        return result_from_selected_faults(job, model, faults, selected)

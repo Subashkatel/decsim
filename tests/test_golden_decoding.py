@@ -20,8 +20,14 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 pytest.importorskip("ldpc")
 
-from decsim.detector_error_model import (build_window_error_models,  # noqa: E402
-                                                 decode_windowed)
+from decsim.detector_error_model import (  # noqa: E402
+    FaultRepresentation,
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    LINKED_FAULT_MODELS_REQUIRED,
+    PHYSICAL_FAULT_MODEL_REQUIRED,
+    build_window_error_models,
+    decode_windowed,
+)
 from decsim.belief_matching_decoder import belief_matching_window_decoder    # noqa: E402
 from decsim.mwpm_decoder import matching_window_decoder                       # noqa: E402
 
@@ -29,8 +35,19 @@ DATA = pathlib.Path(__file__).resolve().parent / "data"
 GOLDEN = json.loads((DATA / "golden_decoding.json").read_text())
 
 
-def _windowed_fails(models, inner, dets, obs, n):
-    return sum(int(decode_windowed(models, dets[i], inner)[0] != obs[i, 0]) for i in range(n))
+def _windowed_fails(models, inner, representation, dets, obs, n):
+    return sum(
+        int(
+            decode_windowed(
+                models,
+                dets[i],
+                inner,
+                selected_fault_representation=representation,
+            )[0]
+            != obs[i, 0]
+        )
+        for i in range(n)
+    )
 
 
 def _names(kind):
@@ -53,22 +70,52 @@ def test_golden_decoding(name):
     assert gm_fails == g["global_mwpm_fails"]
 
     # windowed MWPM -- exact reproduction
-    wm_fails = _windowed_fails(build_window_error_models(circ, plan),
-                               matching_window_decoder(), dets, obs, g["n"])
+    wm_fails = _windowed_fails(
+        build_window_error_models(
+            circ,
+            plan,
+            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        ),
+        matching_window_decoder(),
+        FaultRepresentation.GRAPHLIKE,
+        dets,
+        obs,
+        g["n"],
+    )
     assert wm_fails == g["windowed_mwpm_fails"]
 
     # windowed belief-matching -- exact reproduction (on the frozen subset, BP is slow)
     nb = g["bm_subset"]
-    bm_fails = _windowed_fails(build_window_error_models(circ, plan, belief_matching=True),
-                               belief_matching_window_decoder(), dets, obs, nb)
+    bm_fails = _windowed_fails(
+        build_window_error_models(
+            circ,
+            plan,
+            fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+        ),
+        belief_matching_window_decoder(),
+        FaultRepresentation.GRAPHLIKE,
+        dets,
+        obs,
+        nb,
+    )
     assert bm_fails == g["windowed_bm_fails"]
 
     # CONSISTENCY anchors (relative -> robust):
     #  - windowed MWPM tracks global MWPM (Skoric/Tan; exact at buffer=d for these sizes)
     assert abs(wm_fails - gm_fails) <= max(2, int(0.01 * g["n"]))
     #  - belief-matching is at least as accurate as MWPM on the same frozen subset
-    mwpm_sub = _windowed_fails(build_window_error_models(circ, plan),
-                               matching_window_decoder(), dets, obs, nb)
+    mwpm_sub = _windowed_fails(
+        build_window_error_models(
+            circ,
+            plan,
+            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        ),
+        matching_window_decoder(),
+        FaultRepresentation.GRAPHLIKE,
+        dets,
+        obs,
+        nb,
+    )
     assert bm_fails <= mwpm_sub + max(2, int(0.01 * nb))
 
 
@@ -90,8 +137,12 @@ def test_golden_bposd(name):
 
     rounds = {d: d // g["checks_per_round"] + 1 for d in range(circ.num_detectors)}
     plan = [tuple(w) for w in g["plan"]]
-    models = build_window_error_models(circ, plan, decompose_errors=False,
-                                       detector_rounds=rounds)
+    models = build_window_error_models(
+        circ,
+        plan,
+        detector_rounds=rounds,
+        fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
+    )
     inner = bposd_window_decoder()
     dem = circ.detector_error_model(decompose_errors=False)
     det_sets, obs_sets, priors = detector_error_model_to_faults(dem)
@@ -107,7 +158,12 @@ def test_golden_bposd(name):
                         osd_order=0)
     wf = gf = agree = 0
     for s in range(g["n"]):
-        pw = decode_windowed(models, dets[s], inner)
+        pw = decode_windowed(
+            models,
+            dets[s],
+            inner,
+            selected_fault_representation=FaultRepresentation.PHYSICAL,
+        )
         pg = (O @ gdec.decode(dets[s])) % 2
         wf += int(not np.array_equal(pw, obs[s]))
         gf += int(not np.array_equal(pg, obs[s]))

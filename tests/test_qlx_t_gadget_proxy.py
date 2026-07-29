@@ -67,7 +67,10 @@ def _detector_rounds(circuit) -> dict:
 
 def test_windowed_decode_equals_global_on_t_gadget_proxy():
     """The G9 proxy evidence is preserved, but its invalid DEM is rejected."""
-    from decsim.detector_error_model import build_window_error_models
+    from decsim.detector_error_model import (
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+    )
 
     _, _, proxy = load_proxy()
     circuit = stim.Circuit(proxy)
@@ -87,6 +90,7 @@ def test_windowed_decode_equals_global_on_t_gadget_proxy():
             circuit,
             plan,
             detector_rounds=rounds_of,
+            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         )
 
     # Noise-content reality check (QLX emission gap G9): the tsim path

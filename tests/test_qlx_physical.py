@@ -194,7 +194,10 @@ def test_windowed_decode_equals_global_on_qlx_circuit(
     G9 leaves a detectorless logical mechanism in this fixture. Global
     PyMatching silently omits it, but decsim must not discard that identity.
     """
-    from decsim.detector_error_model import build_window_error_models
+    from decsim.detector_error_model import (
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+    )
 
     dets, truth = sampled
     matching = pymatching.Matching.from_detector_error_model(
@@ -207,6 +210,7 @@ def test_windowed_decode_equals_global_on_qlx_circuit(
             circuit,
             plan,
             detector_rounds=detector_rounds,
+            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         )
 
     fails = int((pred_global != truth).sum())

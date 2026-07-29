@@ -31,6 +31,7 @@ from decsim.decoders import (
     SwitchingRouter,
     switch_probability_per_round,
 )
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import TimingOnlyDevice
 from decsim.message import (DecodeJob, DecodeResult, Operation,
                             ResolvedCodeGeometry,
@@ -111,6 +112,8 @@ def _strong_backlog_peak(low_confidence_probability, rounds, seed=1):
 
 class FixedLogicalDecoder:
     """Small test decoder with fixed timing and fixed logical output."""
+
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, logical_value: int, tau_us: float = 0.01):
         self.logical_value = logical_value
@@ -624,6 +627,7 @@ class _DispatchRecorder:
         self.inner = inner
         self.env = env
         self.starts = []
+        self.fault_model_requirement = inner.fault_model_requirement
 
     def latency(self, job):
         self.starts.append((self.env["engine"].now, job))
@@ -714,7 +718,7 @@ def test_double_window_uses_the_interaction_region_plan():
             self.exclusions = []
 
         def strong_window_model_for_operation(
-            self, op, window, round_count, *, belief_matching=False,
+            self, op, window, round_count, *, fault_model_requirement,
             exclude_faults_touching=None,
         ):
             if exclude_faults_touching is not None:
@@ -775,7 +779,7 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
 
     class FailingDevice(TimingOnlyDevice):
         def strong_window_model_for_operation(
-            self, op, window, round_count, *, belief_matching=False,
+            self, op, window, round_count, *, fault_model_requirement,
             exclude_faults_touching=None,
         ):
             raise RestartModelFailure("injected restart model failure")
@@ -875,7 +879,7 @@ def test_restart_owned_seam_requires_multi_range_device_capability():
             return getattr(self._timing, name)
 
         def strong_window_model_for_operation(
-            self, op, window, round_count, *, belief_matching=False,
+            self, op, window, round_count, *, fault_model_requirement,
             exclude_faults_touching=None,
         ):
             return None

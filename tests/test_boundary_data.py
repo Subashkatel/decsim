@@ -9,6 +9,7 @@ from decsim.config import us
 from conftest import fixed_latency_link_config
 from decsim.controllers import ModularController
 from decsim.decoders import PresetLatencyDecoder
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.engine import Engine
 from decsim.frontends.circuit import CircuitFrontend
@@ -25,6 +26,8 @@ class DefectEmittingDecoder:
     """Records every payload each window's decode sees, and (optionally) emits a fixed
     artificial-defect mask at the round just past its commit region -- the place crossing
     chains put defects (arXiv:2209.08552 Fig. 2)."""
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, emit: bool):
         self.emit = emit
         self.seen = {}   # (job_op, window, payload_op, round, patch) -> bits tuple

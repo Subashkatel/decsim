@@ -36,7 +36,12 @@ stim = pytest.importorskip("stim")
 np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
-from decsim.detector_error_model import build_window_error_models, decode_windowed
+from decsim.detector_error_model import (
+    FaultRepresentation,
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    build_window_error_models,
+    decode_windowed,
+)
 from decsim.mwpm_decoder import matching_window_decoder
 from decsim.codes import SurfaceCodeModel
 from decsim.schemes import SlidingWindowScheme
@@ -90,7 +95,11 @@ def graphs():
             buffer_round_count=D,
         ).windows
     ]
-    models = build_window_error_models(noisy, plan)
+    models = build_window_error_models(
+        noisy,
+        plan,
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
     coords = {i: tuple(c) for i, c in clean.get_detector_coordinates().items()}
     return matching, models, coords
 
@@ -109,7 +118,12 @@ def test_bulk_data_x_fires_exactly_the_two_diagonal_z_checks(graphs):
     assert _fired(dets, coords) == [(2.0, 2.0, 3.0), (4.0, 4.0, 3.0)]
     assert obs == 0
     assert int(matching.decode(dets)[0]) == 0
-    assert int(decode_windowed(models, dets, matching_window_decoder())[0]) == 0
+    assert int(decode_windowed(
+        models,
+        dets,
+        matching_window_decoder(),
+        selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+    )[0]) == 0
 
 
 def test_corner_data_x_fires_one_check_and_flips_the_logical(graphs):
@@ -119,7 +133,12 @@ def test_corner_data_x_fires_one_check_and_flips_the_logical(graphs):
     assert obs == 1, "(1,1) is on the logical-Z support"
     assert int(matching.decode(dets)[0]) == 1, \
         "MWPM must match the lone defect to the boundary through (1,1)"
-    assert int(decode_windowed(models, dets, matching_window_decoder())[0]) == 1
+    assert int(decode_windowed(
+        models,
+        dets,
+        matching_window_decoder(),
+        selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+    )[0]) == 1
 
 
 def test_measurement_error_fires_the_same_check_in_consecutive_rounds(graphs):
@@ -128,4 +147,9 @@ def test_measurement_error_fires_the_same_check_in_consecutive_rounds(graphs):
     assert _fired(dets, coords) == [(2.0, 2.0, 3.0), (2.0, 2.0, 4.0)]
     assert obs == 0
     assert int(matching.decode(dets)[0]) == 0
-    assert int(decode_windowed(models, dets, matching_window_decoder())[0]) == 0
+    assert int(decode_windowed(
+        models,
+        dets,
+        matching_window_decoder(),
+        selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+    )[0]) == 0

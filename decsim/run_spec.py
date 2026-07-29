@@ -230,6 +230,7 @@ class RunSpec:
             orchestrator=orchestrator, boundary_policy=boundary_policy,
             window_interaction=window_interaction,
             planning_view_by_operation_id=view_by_id,
+            fault_model_requirement_for=router.fault_model_requirement_for,
             feedback_boundary_mode=self.feedback_boundary_mode,
             syndrome_source=device,
             store=PayloadStore(memory_model=self.memory_model),
@@ -243,7 +244,6 @@ class RunSpec:
         window_manager.strategy = strategy
         window_manager.services = services
         window_manager.submit_fn = decoder_manager.enqueue
-        window_manager.needs_hyperedges = router.needs_hyperedges
         decoder_manager.strategy = strategy
         decoder_manager.services = services
         decoder_manager.on_window_decoded = window_manager.on_decode_done

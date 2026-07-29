@@ -231,6 +231,7 @@ class WindowManager:
                  deadline_policy, links, orchestrator, boundary_policy,
                  window_interaction,
                  planning_view_by_operation_id,
+                 fault_model_requirement_for,
                  feedback_boundary_mode: str = "trailing_buffer",
                  syndrome_source=None, switching_active: bool = False,
                  store: Optional[PayloadStore] = None):
@@ -253,6 +254,9 @@ class WindowManager:
         self._planning_view_by_operation_id = MappingProxyType(
             dict(planning_view_by_operation_id)
         )
+        if not callable(fault_model_requirement_for):
+            raise TypeError("fault_model_requirement_for must be callable")
+        self._fault_model_requirement_for_code = fault_model_requirement_for
         self.feedback_boundary_mode = feedback_boundary_mode
         self.syndrome_source = syndrome_source
         #: retains rounds for possible strong re-decodes (today: switching set).
@@ -262,7 +266,6 @@ class WindowManager:
         self.strategy = None
         self.services = None
         self.submit_fn: Optional[Callable] = None    # (job, delay_ticks) -> None
-        self.needs_hyperedges = False
         self.on_workload_complete: Optional[Callable[[], None]] = None
 
         self.store = store if store is not None else PayloadStore()
@@ -304,6 +307,13 @@ class WindowManager:
         self._batch_preceding_idle_rounds_by_operation = {}
 
     # ---------------------------------------------------------- registration
+
+    def _fault_model_requirement(self, operation: Operation):
+        """Resolve the decoder views for this operation's frozen code."""
+        resolved = self._resolved_operations[operation.id]
+        return self._fault_model_requirement_for_code(
+            resolved.code_geometry.code_name
+        )
 
     def register_op(self, op: Operation) -> None:
         """Track an operation's rounds, payload RAM, and feedback role."""
@@ -359,7 +369,7 @@ class WindowManager:
         if self.syndrome_source is not None:
             source_round_limit = self.syndrome_source.register_dynamic_stream(
                 stream_op, self.rounds_for(stream_op),
-                belief_matching=self.needs_hyperedges)
+                fault_model_requirement=self._fault_model_requirement(stream_op))
         self.lifecycle.register(
             stream_op,
             commit_round_count=(
@@ -425,7 +435,7 @@ class WindowManager:
                 continue
             models = self.syndrome_source.window_models_for_operation(
                 op, wins, self.rounds_for(op),
-                belief_matching=self.needs_hyperedges)
+                fault_model_requirement=self._fault_model_requirement(op))
             if not models:
                 continue
             for key, model in zip(keys, models):
@@ -970,7 +980,7 @@ class WindowManager:
             dem = self.syndrome_source.strong_window_model_for_operation(
                 op, strong_window,
                 self._round_count_for_window(op.id, strong_window),
-                belief_matching=self.needs_hyperedges)
+                fault_model_requirement=self._fault_model_requirement(op))
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
             n_rounds=round_count, ready_time=self.engine.now,
@@ -1302,7 +1312,7 @@ class WindowManager:
             exclusion = fault_exclusions[0] if fault_exclusions else None
             return self.syndrome_source.strong_window_model_for_operation(
                 operation, window, round_count,
-                belief_matching=self.needs_hyperedges,
+                fault_model_requirement=self._fault_model_requirement(operation),
                 exclude_faults_touching=exclusion,
             )
         if not isinstance(
@@ -1320,7 +1330,7 @@ class WindowManager:
         )
         return builder(
             operation, window, round_count,
-            belief_matching=self.needs_hyperedges,
+            fault_model_requirement=self._fault_model_requirement(operation),
             fault_exclusion_ranges=fault_exclusions,
         )
 

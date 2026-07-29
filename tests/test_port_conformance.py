@@ -31,7 +31,7 @@ from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
 from decsim.schemes import (NaiveOnlineScheme, ParallelWindowScheme,
                             SlidingWindowScheme)
 from decsim.switching import Baseline, Switching
-from decsim.soft_output import UnionFindDecoder
+from decsim.union_find_decoder import UnionFindDecoder
 from decsim.window_interactions import DefaultWindowInteraction
 
 

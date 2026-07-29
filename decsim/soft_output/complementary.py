@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..message import SoftOutput, SoftOutputSource
+from ..detector_error_model import GRAPHLIKE_FAULT_MODEL_REQUIRED
 
 if TYPE_CHECKING:
     import stim
@@ -116,7 +117,14 @@ class ComplementaryGapMetric:
     @classmethod
     def from_window_model(cls, model: "WindowErrorModel") -> "ComplementaryGapMetric":
         """Build the metric from a decsim WindowErrorModel (check/obs/priors)."""
-        return cls(model.check, model.obs, _weights_from_priors(model.priors))
+        from ..detector_error_model import FaultRepresentation
+
+        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        return cls(
+            faults.check,
+            faults.observables,
+            _weights_from_priors(faults.priors),
+        )
 
     def evaluate(self, syndrome) -> SoftOutput:
         """Return the :class:`SoftOutput` (logical value + gap) for one syndrome."""
@@ -140,6 +148,7 @@ class ComplementaryGapMetricFactory:
     """Stateless complementary-gap builder used by ``SoftOutputDecoder``."""
 
     source = COMPLEMENTARY_GAP_SOURCE
+    fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
 
     def from_window_model(
         self,

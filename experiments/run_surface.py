@@ -76,37 +76,45 @@ class _SurfaceMwpmFactory:
 
 def run_surface_configuration(configuration, output_directory):
     """Run or resume one fixed-shot weak-MWPM accuracy configuration."""
-    circuit = _circuit(configuration)
-    experiment_id = configuration.get("experiment_id", "surface-weak-mwpm")
+    workers = configuration.get("workers", 1)
+    scientific_configuration = dict(configuration)
+    scientific_configuration.pop("workers", None)
+    circuit = _circuit(scientific_configuration)
+    experiment_id = scientific_configuration.get(
+        "experiment_id", "surface-weak-mwpm"
+    )
     experiment = Experiment(
         experiment_id=experiment_id,
-        experiment_seed=configuration["seed"],
-        configurations=(configuration,),
+        experiment_seed=scientific_configuration["seed"],
+        configurations=(scientific_configuration,),
         sampling={
-            "batch_shots": configuration["batch_shots"],
-            "max_shots": configuration["shots"],
+            "batch_shots": scientific_configuration["batch_shots"],
+            "max_shots": scientific_configuration["shots"],
         },
         stopping={"method": "fixed"},
     )
     sample_plan = SamplePlan.create(
         experiment_id,
-        configuration["seed"],
+        scientific_configuration["seed"],
         {
             "circuit_sha256": hashlib.sha256(
                 str(circuit).encode("utf-8")
             ).hexdigest(),
-            "shots": configuration["shots"],
-            "batch_shots": configuration["batch_shots"],
+            "shots": scientific_configuration["shots"],
+            "batch_shots": scientific_configuration["batch_shots"],
         },
     )
     return run_offline_parallel(
-        _SurfaceMwpmFactory(configuration),
+        _SurfaceMwpmFactory(scientific_configuration),
         experiment,
         sample_plan,
-        configuration,
-        exact_batches(configuration["shots"], configuration["batch_shots"]),
+        scientific_configuration,
+        exact_batches(
+            scientific_configuration["shots"],
+            scientific_configuration["batch_shots"],
+        ),
         output_directory,
-        workers=configuration.get("workers", 1),
+        workers=workers,
     )
 
 

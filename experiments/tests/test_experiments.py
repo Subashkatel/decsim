@@ -13,6 +13,7 @@ from experiments.results import (
     publish_immutable,
     reduce_chunks,
 )
+from experiments.plotting import _binomial_interval, plot_logical_error_rate
 from experiments.harness import (
     Experiment,
     SamplePlan,
@@ -409,3 +410,31 @@ def test_slurm_array_maps_one_index_to_one_configuration(tmp_path):
 
     assert completed.stdout.strip() == "--config second.json"
     assert "%" not in script.read_text()
+
+
+def test_ler_plot_writes_figure_and_plain_language_card(tmp_path):
+    pytest.importorskip("matplotlib")
+    pytest.importorskip("scipy")
+    output = tmp_path / "surface_ler.png"
+    rows = [
+        {"distance": 3, "physical_error_rate": 0.001, "failures": 3, "shots": 10_000},
+        {"distance": 3, "physical_error_rate": 0.003, "failures": 20, "shots": 10_000},
+        {"distance": 5, "physical_error_rate": 0.001, "failures": 0, "shots": 10_000},
+        {"distance": 5, "physical_error_rate": 0.003, "failures": 4, "shots": 10_000},
+    ]
+
+    plot_logical_error_rate(rows, output, title="Offline weak-decoder baseline")
+
+    assert output.stat().st_size > 1_000
+    card = output.with_suffix(".md").read_text()
+    assert "physical error rate" in card.lower()
+    assert "logical error rate" in card.lower()
+    assert "10,000" in card
+    assert "offline" in card.lower()
+
+
+def test_zero_failure_interval_matches_closed_form():
+    lower, upper = _binomial_interval(0, 10_000)
+
+    assert lower == 0
+    assert upper == pytest.approx(1 - 0.025 ** (1 / 10_000))

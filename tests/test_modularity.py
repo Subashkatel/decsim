@@ -243,7 +243,7 @@ def test_every_seam_accepts_a_from_scratch_implementation():
             make_controller=MyController,
             make_orchestrator=make_orchestrator,
             make_factory=make_factory,
-            make_metrics=lambda e, cl, ch, f: [metric],
+            make_metrics=lambda e, wm, dm, ch, f: [metric],
         ), verbose=False)
     factory = built_factories[0]
     orchestrator = orchestrators[0]

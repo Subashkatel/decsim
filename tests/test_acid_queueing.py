@@ -40,8 +40,8 @@ def _run(rho, rounds):
     inter-arrival), backlog sampled every event by DecodeBacklog."""
     backlog = {}
 
-    def make_metrics(engine, cluster, chip, factory):
-        backlog["m"] = DecodeBacklog(cluster)
+    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+        backlog["m"] = DecodeBacklog(window_manager, decoder_manager)
         return [backlog["m"]]
 
     res = simulate(RunSpec(ops=_memory_op(rounds), d=3,

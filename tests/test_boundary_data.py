@@ -127,22 +127,22 @@ def test_per_patch_fragments_gate_round_arrival():
         controllers.append(controller)
         return controller
 
-    def install_probe(engine, cluster, _chip, _factory):
+    def install_probe(engine, window_manager, decoder_manager, _chip, _factory):
         def probe():
-            deliver = cluster.on_syndrome_arrival
+            deliver = window_manager.on_syndrome_arrival
             controllers[0].relay_syndrome(
                 SyndromePayload(0, 0, 1, n_fragments=2),
                 deliver,
             )
-            observed.append(cluster.rounds_arrived[0])
+            observed.append(window_manager.rounds_arrived[0])
             controllers[0].relay_syndrome(
                 SyndromePayload(0, 1, 1, n_fragments=2),
                 deliver,
             )
-            observed.append(cluster.rounds_arrived[0])
+            observed.append(window_manager.rounds_arrived[0])
             engine.schedule(
                 1,
-                lambda: observed.append(cluster.rounds_arrived[0]),
+                lambda: observed.append(window_manager.rounds_arrived[0]),
                 label="observe complete packet",
             )
 

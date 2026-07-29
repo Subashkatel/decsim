@@ -89,7 +89,7 @@ def test_units_conserved_for_inline_switching_timing_paths():
                              rounds_policy=FixedRounds(11), decoder=sw,
                              unit_pools={"default": 2, "strong": 1},
                              seed=seed), verbose=False)
-        cluster = r.cluster
+        cluster = r.decoder_manager
         assert cluster.pool_free == cluster.unit_totals, \
             f"seed {seed}: a unit leaked into the wrong pool"
 

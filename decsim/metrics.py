@@ -54,15 +54,15 @@ class DecoderUtilization:
     name = "decoder_utilization"
     result_schema_version = 1
 
-    def __init__(self, cluster):
-        self.cluster = cluster
+    def __init__(self, decoder_manager):
+        self.decoder_manager = decoder_manager
         self._topology = None
         self._aggregate = _StepIntegral()
         self._per_pool = {}
 
     def observe(self, engine: "Engine") -> None:
         """Add the busy level held since the last event, then re-sample it."""
-        view = utilization_view(self.cluster)
+        view = utilization_view(self.decoder_manager)
         topology = tuple((name, total) for name, _, total in view.per_pool)
         if self._topology is None:
             self._topology = topology
@@ -99,14 +99,14 @@ class ReadyQueueStats:
     name = "ready_queue"
     result_schema_version = 1
 
-    def __init__(self, cluster):
-        self.cluster = cluster
+    def __init__(self, decoder_manager):
+        self.decoder_manager = decoder_manager
         self._integral = _StepIntegral()
         self.peak = 0
 
     def observe(self, engine: "Engine") -> None:
         """Accumulate time-weighted queue length and track the peak."""
-        view = backlog_view(self.cluster, include_rounds=False)
+        view = backlog_view(None, self.decoder_manager, include_rounds=False)
         self._integral.observe(engine.now, view.ready_jobs)
         self.peak = max(self.peak, view.ready_jobs)
 
@@ -123,8 +123,8 @@ class WindowLatencyBreakdown:
     name = "window_latency"
     result_schema_version = 1
 
-    def __init__(self, cluster):
-        self.cluster = cluster
+    def __init__(self, window_manager):
+        self.window_manager = window_manager
 
     def observe(self, engine: "Engine") -> None:
         """Nothing to sample (event-driven; the cluster stamps the windows)."""
@@ -132,7 +132,7 @@ class WindowLatencyBreakdown:
 
     def rows(self) -> list:
         """One record per fully-decoded window: op, window index, and the four stages."""
-        view = window_latency_view(self.cluster)
+        view = window_latency_view(self.window_manager)
         return [{
             "op": row.op,
             "window": row.window,
@@ -165,15 +165,16 @@ class DecodeBacklog:
     name = "decode_backlog"
     result_schema_version = 1
 
-    def __init__(self, cluster):
-        self.cluster = cluster
+    def __init__(self, window_manager, decoder_manager):
+        self.window_manager = window_manager
+        self.decoder_manager = decoder_manager
         self._integral = _StepIntegral()
         self.peak = 0
         self.trace = []
 
     def observe(self, engine: "Engine") -> None:
         """Sample the backlog and update peak, average, and trace."""
-        view = backlog_view(self.cluster)
+        view = backlog_view(self.window_manager, self.decoder_manager)
         self._integral.observe(engine.now, view.total_rounds)
         self.peak = max(self.peak, view.total_rounds)
         if not self.trace or self.trace[-1][1] != view.total_rounds:
@@ -211,9 +212,11 @@ class BacklogEarlyWarning:
     name = "backlog_early_warning"
     result_schema_version = 1
 
-    def __init__(self, cluster, round_ticks: int, window_ticks: int,
+    def __init__(self, window_manager, decoder_manager,
+                 round_ticks: int, window_ticks: int,
                  threshold_f: float = 0.1, consecutive: int = 2):
-        self.cluster = cluster
+        self.window_manager = window_manager
+        self.decoder_manager = decoder_manager
         self.round_ticks = int(round_ticks)
         self.window_ticks = int(window_ticks)
         self.threshold_f = float(threshold_f)
@@ -239,7 +242,7 @@ class BacklogEarlyWarning:
         boundary counts in the ENDING bin; bins strictly before now use
         the value held since the previous event.
         """
-        view = backlog_view(self.cluster)
+        view = backlog_view(self.window_manager, self.decoder_manager)
         if self._last_view is None:
             self._bin_start = engine.now
             self._start_backlog = view.total_rounds
@@ -386,8 +389,9 @@ class StrongDecoderBacklog:
         "in_transit", "queued", "running",
     )
 
-    def __init__(self, cluster):
-        self.cluster = cluster
+    def __init__(self, window_manager, decoder_manager):
+        self.window_manager = window_manager
+        self.decoder_manager = decoder_manager
         self.peak_jobs = 0
         self.peak_full_input_rounds = 0
         self._jobs = _StepIntegral()
@@ -396,7 +400,7 @@ class StrongDecoderBacklog:
 
     def observe(self, engine: "Engine") -> None:
         """Sample outstanding strong work and update peak, average, and trace."""
-        view = strong_work_view(self.cluster)
+        view = strong_work_view(self.window_manager, self.decoder_manager)
         self._jobs.observe(engine.now, view.total_jobs)
         self._rounds.observe(engine.now, view.total_full_input_rounds)
         self.peak_jobs = max(self.peak_jobs, view.total_jobs)
@@ -422,7 +426,7 @@ class StrongDecoderBacklog:
 
     def result(self) -> dict:
         """Peak and time-average outstanding strong jobs."""
-        view = strong_work_view(self.cluster)
+        view = strong_work_view(self.window_manager, self.decoder_manager)
         return {
             "observation_span_ticks": self._jobs.span_ticks,
             "peak_jobs": self.peak_jobs,

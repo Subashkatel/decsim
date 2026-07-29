@@ -52,14 +52,14 @@ def _stalls(res):
 
 def test_geometric_escalation_statistics_over_seeds():
     """The fraction of escalation-free chains matches (1-p)^W within 3σ."""
-    windows = _run_chain(0.0, seed=0).cluster.total_windows   # W, measured
+    windows = _run_chain(0.0, seed=0).window_manager.total_windows   # W, measured
     assert windows >= K                        # at least one window per layer
 
     clean = 0
     for seed in range(N_CHAINS):
         res = _run_chain(P_ESCALATE, seed=seed)
         assert len(_stalls(res)) == K - 1      # every layer released
-        clean += not res.cluster.op_strong_commit_time
+        clean += not res.window_manager.op_strong_commit_time
     q = (1 - P_ESCALATE) ** windows
     sigma = (N_CHAINS * q * (1 - q)) ** 0.5
     assert abs(clean - N_CHAINS * q) <= 3 * sigma
@@ -75,7 +75,7 @@ def test_escalated_chains_stall_longer_on_lambda_eff():
         # total idle rounds EMITTED; the per-patch counter is consumed by the
         # released successor at start (Contract 3.6), so read the run total
         idle = res.chip.idle_rounds_emitted
-        if res.cluster.op_strong_commit_time:
+        if res.window_manager.op_strong_commit_time:
             hot_stalls += stalls
             hot_idle.append(idle)
         else:

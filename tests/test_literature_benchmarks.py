@@ -50,8 +50,8 @@ def _backlog_run(rho, rounds):
     ρ = (E[S] + t_wdo + t_dd) / (commit·t_round)."""
     backlog = {}
 
-    def make_metrics(engine, cluster, chip, factory):
-        backlog["m"] = DecodeBacklog(cluster)
+    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+        backlog["m"] = DecodeBacklog(window_manager, decoder_manager)
         return [backlog["m"]]
 
     service_us = rho * COMMIT * ROUND_US - T_WDO_US - T_DD_US

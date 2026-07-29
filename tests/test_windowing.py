@@ -145,7 +145,7 @@ def _plan(scheme, ops, rounds_per_op, d=3):
         ),
         tuple(resolved),
         tuple(ledgers),
-    ).materialize()
+    )
 
 
 def _max_window_depth(plan):
@@ -262,7 +262,7 @@ def test_timing_only_stream_runs_through_normal_parallel_scheme():
               scheme=ParallelWindowScheme(),
               decoder=PresetLatencyDecoder(0.1),
           ), verbose=False)
-    cluster = res.cluster
+    cluster = res.window_manager
     assert cluster.window_count[stream_op.id] == plan.window_count[stream_op.id]
     assert all(seg.id not in cluster.window_count for seg in segments)
     assert len(cluster.committed_windows) == cluster.total_windows
@@ -292,7 +292,7 @@ def test_short_successor_closes_cross_operation_buffer():
                  scheme=SlidingWindowScheme(),
                  decoder=PresetLatencyDecoder(0.1),
              ), verbose=False)
-    cluster = result.cluster
+    cluster = result.window_manager
 
     assert len(cluster.committed_windows) == cluster.total_windows
     assert cluster.payloads_held == 0
@@ -340,7 +340,7 @@ def test_backlog_sweep_parallel_vs_sequential():
                 decoder=PresetLatencyDecoder(10.0),
                 scheme=scheme,
             ), verbose=False)
-        peak_q = max((q for _, q in r.cluster.queue_log), default=0)
+        peak_q = max((q for _, q in r.decoder_manager.queue_log), default=0)
         return r.result.fully_done_ticks, peak_q
 
     seq = {u: run(SlidingWindowScheme(), u) for u in (1, 2, 4)}

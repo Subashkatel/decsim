@@ -117,10 +117,10 @@ def test_interaction_invalidation_roots_expand_to_the_causal_replay_scope():
     held, _ = _deterministic_run(Held(), propagate=True, rounds=12)
 
     assert interaction.calls == [(0, 1)]
-    assert recovered.cluster.op_results == held.cluster.op_results
+    assert recovered.window_manager.op_results == held.window_manager.op_results
     assert weak.window_ids.count(2) == 2
     assert weak.window_ids.count(3) == 2
-    assert recovered.cluster.window_manager.speculative_replays == 1
+    assert recovered.window_manager.speculative_replays == 1
 
 
 def test_interaction_cannot_invalidate_unrelated_finished_work():
@@ -184,8 +184,8 @@ def test_eager_boundary_disagreement_replays_the_transitive_weak_cone():
     recovered, weak = _deterministic_run(Eager())
     held, _ = _deterministic_run(Held())
 
-    runtime = recovered.cluster.window_manager
-    assert runtime.op_results[0] == held.cluster.op_results[0] == (0,)
+    runtime = recovered.window_manager
+    assert runtime.op_results[0] == held.window_manager.op_results[0] == (0,)
     assert runtime.logical_contributions[
         (0, 2)
     ].logical_observables == (0,)
@@ -221,12 +221,12 @@ def test_a_replayed_window_re_escalates_whichever_order_it_is_submitted_in(
     baseline, _ = _deterministic_run(Eager(), uncertain=(1, 2),
                                      run_both_at_once=True)
 
-    runtime = ordered.cluster.window_manager
-    assert runtime.op_results[0] == baseline.cluster.op_results[0]
+    runtime = ordered.window_manager
+    assert runtime.op_results[0] == baseline.window_manager.op_results[0]
     assert runtime.speculative_replays == \
-        baseline.cluster.window_manager.speculative_replays
+        baseline.window_manager.speculative_replays
     assert runtime._finished_ops == {0}
-    assert ordered.cluster.pool._completed_strong_results == {}
+    assert ordered.decoder_manager._completed_strong_results == {}
 
 
 @pytest.mark.parametrize("run_both_at_once", [True, False])
@@ -245,8 +245,7 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
     weak = _WeakBoundaryDecoder((1, 2), ticks=1)
     weak_submissions = {}
 
-    def configure(_engine, cluster, _chip, _factory):
-        pool = cluster.pool
+    def configure(_engine, window_manager, pool, _chip, _factory):
         submit = pool.enqueue
 
         def watch(job, delay_ticks=0):
@@ -256,7 +255,7 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
                 weak_submissions[key] = weak_submissions.get(key, 0) + 1
             submit(job, delay_ticks)
 
-        cluster.window_manager.submit_fn = watch
+        window_manager.submit_fn = watch
 
     completed_run = RunSpec(
         ops=[Operation(0, "memory", (0,))],
@@ -268,12 +267,14 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
         boundary_policy=Eager(),
         router=SwitchingRouter(weak, _CorrectingStrongDecoder()),
         unit_pools={"default": 1, "strong": 1},
-        make_metrics=lambda engine, cluster, chip, factory: (
-            configure(engine, cluster, chip, factory) or []
+        make_metrics=lambda engine, window_manager, decoder_manager, chip, factory: (
+            configure(
+                engine, window_manager, decoder_manager, chip, factory
+            ) or []
         ),
     ).build(verbose=False)
 
-    pool = completed_run.pool
+    pool = completed_run.decoder_manager
 
     assert completed_run.window_manager.speculative_replays > 0, \
         "no window was decoded twice, so the precondition was never exercised"
@@ -286,8 +287,8 @@ def test_overlapping_escalations_discard_stale_descendant_strong_result():
     recovered, weak = _deterministic_run(Eager(), uncertain=(1, 2))
     held, _ = _deterministic_run(Held(), uncertain=(1, 2))
 
-    runtime = recovered.cluster.window_manager
-    assert runtime.op_results[0] == held.cluster.op_results[0]
+    runtime = recovered.window_manager
+    assert runtime.op_results[0] == held.window_manager.op_results[0]
     assert not runtime._pending_strong_windows
     assert runtime.speculative_replays == 2
     assert weak.window_ids.count(2) == 2
@@ -299,8 +300,8 @@ def test_leaf_escalation_wakes_an_ancestor_waiting_to_replay():
     recovered, _ = _deterministic_run(Eager(), uncertain=(1, 4))
     held, _ = _deterministic_run(Held(), uncertain=(1, 4))
 
-    runtime = recovered.cluster.window_manager
-    assert runtime.op_results[0] == held.cluster.op_results[0] == (0,)
+    runtime = recovered.window_manager
+    assert runtime.op_results[0] == held.window_manager.op_results[0] == (0,)
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
     assert runtime._finished_ops == {0}
@@ -322,8 +323,8 @@ def test_agreeing_descendant_wakes_an_ancestor_waiting_to_replay():
     held, _ = _deterministic_run(
         Held(), uncertain=(1, 2), strong=_MixedStrongDecoder())
 
-    runtime = recovered.cluster.window_manager
-    assert runtime.op_results[0] == held.cluster.op_results[0]
+    runtime = recovered.window_manager
+    assert runtime.op_results[0] == held.window_manager.op_results[0]
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
     assert runtime._finished_ops == {0}
@@ -360,8 +361,8 @@ def test_strong_can_add_a_defect_to_an_empty_weak_boundary():
             unit_pools={"default": 1, "strong": 1},
         ))
 
-    recovered = run(Eager()).cluster.window_manager
-    held = run(Held()).cluster.window_manager
+    recovered = run(Eager()).window_manager
+    held = run(Held()).window_manager
     assert recovered.op_results[0] == held.op_results[0] == (1,)
     assert recovered.logical_contributions[
         (0, 2)
@@ -373,7 +374,7 @@ def test_early_strong_correction_waits_for_inflight_weak_cone_then_replays():
     recovered, weak = _deterministic_run(
         Eager(), strong=_CorrectingStrongDecoder(ticks=1))
 
-    runtime = recovered.cluster.window_manager
+    runtime = recovered.window_manager
     assert runtime.op_results[0] == (0,)
     assert runtime.speculative_replays == 1
     # The correction beats W2's original dispatch, so W2-W4 consume the
@@ -400,8 +401,8 @@ def test_parallel_early_and_same_tick_strong_results_recover_deterministically(
         strong=_CorrectingStrongDecoder(ticks=strong_ticks),
     )
 
-    runtime = recovered.cluster.window_manager
-    assert runtime.op_results[0] == held.cluster.op_results[0]
+    runtime = recovered.window_manager
+    assert runtime.op_results[0] == held.window_manager.op_results[0]
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
     assert runtime._finished_ops == {0}
@@ -424,8 +425,8 @@ def test_replay_invalidates_an_inflight_descendant_boundary():
         rounds=12,
         links=links,
     )
-    runtime = eager.cluster.window_manager
-    held_runtime = held.cluster.window_manager
+    runtime = eager.window_manager
+    held_runtime = held.window_manager
 
     assert runtime.op_results[0] == held_runtime.op_results[0]
     assert runtime.logical_contributions == held_runtime.logical_contributions
@@ -491,8 +492,8 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
 
     eager, eager_weak = run(Eager())
     held, _ = run(Held())
-    runtime = eager.cluster.window_manager
-    held_runtime = held.cluster.window_manager
+    runtime = eager.window_manager
+    held_runtime = held.window_manager
 
     assert runtime.op_results == held_runtime.op_results
     assert all(window.deps_remaining == 0
@@ -511,7 +512,7 @@ def test_non_clifford_result_is_not_final_until_recovery_finishes():
     )
     recovered, _ = _deterministic_run(
         Eager(), operation=operation)
-    runtime = recovered.cluster.window_manager
+    runtime = recovered.window_manager
 
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
@@ -533,7 +534,7 @@ def test_equal_strong_boundary_preserves_eager_progress_without_replay():
 
     recovered, weak = _deterministic_run(
         Eager(), strong=_AgreeingStrongDecoder())
-    runtime = recovered.cluster.window_manager
+    runtime = recovered.window_manager
 
     assert runtime.speculative_replays == 0
     assert weak.window_ids == [0, 1, 2, 3, 4]
@@ -550,7 +551,7 @@ def test_dynamic_streams_reject_eager_speculative_recovery():
             dynamic_streams=[stream],
             strategy=strategy,
             decoder=_WeakBoundaryDecoder(),
-        ).validate()
+        ).build()
 
     RunSpec(
         ops=[Operation(0, "driver", (1,))],
@@ -558,7 +559,7 @@ def test_dynamic_streams_reject_eager_speculative_recovery():
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         boundary_policy=Held(),
         decoder=_WeakBoundaryDecoder(),
-    ).validate()
+    ).build()
 
 
 def test_static_operation_seam_replays_without_a_data_dependent_crash():
@@ -590,8 +591,7 @@ def test_static_operation_seam_replays_without_a_data_dependent_crash():
         unit_pools={"default": 1, "strong": 1},
     )
 
-    spec.validate()
-    runtime = simulate(spec).cluster.window_manager
+    runtime = simulate(spec).window_manager
     assert runtime._finished_ops == {0, 1}
     assert runtime.speculative_replays == 1
     assert not runtime._pending_strong_windows
@@ -666,8 +666,8 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
 
     eager, weak = run(Eager())
     held, _ = run(Held())
-    runtime = eager.cluster.window_manager
-    held_runtime = held.cluster.window_manager
+    runtime = eager.window_manager
+    held_runtime = held.window_manager
 
     assert runtime.speculative_replays == 1
     assert runtime.op_results[1] == held_runtime.op_results[1] == (0,)
@@ -759,8 +759,7 @@ def _run_static_stream_recovery(policy, *, first_segment_rounds,
     weak = _StreamWeakDecoder(uncertain_windows)
     publication_states = []
 
-    def configure(engine, cluster, _chip, _factory):
-        runtime = cluster.window_manager
+    def configure(engine, runtime, _decoder_manager, _chip, _factory):
         weak.window_manager = runtime
         integrate = runtime.orchestrator.integrate
 
@@ -796,8 +795,10 @@ def _run_static_stream_recovery(policy, *, first_segment_rounds,
         boundary_policy=policy,
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
-        make_metrics=lambda engine, cluster, chip, factory: (
-            configure(engine, cluster, chip, factory) or []
+        make_metrics=lambda engine, window_manager, decoder_manager, chip, factory: (
+            configure(
+                engine, window_manager, decoder_manager, chip, factory
+            ) or []
         ),
     ).build(verbose=False)
     return completed_run, weak, publication_states
@@ -932,7 +933,7 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
 
     for seed in range(500):
         eager, eager_device, eager_weak, eager_strong = run(Eager(), seed)
-        if eager.cluster.window_manager.speculative_replays:
+        if eager.window_manager.speculative_replays:
             break
     else:
         pytest.fail("no real strong-boundary disagreement in seeds 0..499")
@@ -942,8 +943,8 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
     assert np.array_equal(eager_device._truth[0], held_device._truth[0])
 
     truth = int(eager_device._truth[0][0])
-    eager_prediction = eager.cluster.op_results[0][0]
-    held_prediction = held.cluster.op_results[0][0]
+    eager_prediction = eager.window_manager.op_results[0][0]
+    held_prediction = held.window_manager.op_results[0][0]
     assert eager_prediction == held_prediction
     # Truth is the observable sampled with these exact detector arrays, not a
     # strong-decoder result.  This compares the two policies' actual logical
@@ -956,4 +957,4 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
         result for job, result in zip(eager_weak.jobs, eager_weak.results)
         if (job.op_id, job.window_id) == strong_job.strong_decode_for)
     assert weak_result.boundary_defects != eager_strong.results[0].boundary_defects
-    assert eager.cluster.window_manager.speculative_replays == 1
+    assert eager.window_manager.speculative_replays == 1

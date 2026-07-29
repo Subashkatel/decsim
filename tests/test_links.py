@@ -260,7 +260,7 @@ def test_wiring_threads_one_link_model_to_controller_and_cluster():
             rounds_policy=FixedRounds(11),
             decoder=PerRoundDecoder(tau_us=1.0),
         ), verbose=False)
-    assert r.controller.links is r.cluster.links
+    assert r.controller.links is r.window_manager.links
 
 
 def test_finite_aggregate_link_reserves_one_fifo_by_hand():
@@ -353,7 +353,7 @@ def test_selected_result_lifecycles_are_mutually_exclusive_end_to_end():
         path: _path_counts(parallel_confident)[path]
         for path in ("wsd", "csd", "wdo", "do")
     } == {"wsd": 0, "csd": 1, "wdo": 1, "do": 0}
-    assert parallel_confident.pool.strong_cancelled == 1
+    assert parallel_confident.decoder_manager.strong_cancelled == 1
 
 
 def test_double_window_reserves_wsd_at_decision_and_csd_when_slab_exists():

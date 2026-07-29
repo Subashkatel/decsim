@@ -63,7 +63,7 @@ def test_valid_dag_still_plans():
 def test_unknown_blocked_by_is_rejected_at_validate():
     op = Operation(0, "op0", (0,), blocked_by=42)
     with pytest.raises(ValueError) as err:
-        RunSpec(ops=[op]).validate()
+        RunSpec(ops=[op]).build()
     message = str(err.value)
     assert "0" in message and "42" in message
 
@@ -71,7 +71,11 @@ def test_unknown_blocked_by_is_rejected_at_validate():
 def test_blocked_by_may_name_a_declared_decode_stream():
     stream = Operation(42, "stream", (0,))
     op = Operation(0, "op0", (0,), blocked_by=42)
-    RunSpec(ops=[op], dynamic_streams=[stream]).validate()   # must not raise
+    _validate_operation_graph(
+        [op],
+        validate_blockers=True,
+        external_blocker_ids=[stream.id],
+    )
 
 
 def test_duplicate_ids_within_dynamic_streams_are_rejected():
@@ -80,7 +84,7 @@ def test_duplicate_ids_within_dynamic_streams_are_rejected():
     spec = RunSpec(ops=[Operation(0, "op0", (0,))],
                    dynamic_streams=[first, second])
     with pytest.raises(ValueError) as err:
-        spec.validate()
+        spec.build()
     message = str(err.value)
     assert "42" in message and "dynamic_streams" in message
 
@@ -91,42 +95,33 @@ def test_duplicate_ids_within_decode_ops_are_rejected():
     spec = RunSpec(ops=[Operation(0, "op0", (0,))],
                    decode_ops=[first, second])
     with pytest.raises(ValueError) as err:
-        spec.validate()
+        spec.build()
     message = str(err.value)
     assert "42" in message and "decode_ops" in message
 
 
 def test_direct_operation_rejects_non_exact_logical_observable_index():
-    operation = Operation(
-        0,
-        "op0",
-        (0,),
-        logical_observable_index=True,
-    )
-
     with pytest.raises(TypeError, match="logical_observable_index"):
-        RunSpec(ops=[operation]).validate()
+        Operation(0, "op0", (0,), logical_observable_index=True)
 
 
 def test_intrinsic_measurement_must_match_operation_and_stream_identity():
-    operation = Operation(
-        3,
-        "op3",
-        (0,),
-        stream_id=3,
-        intrinsic_measurement=IntrinsicMeasurement(
-            operation_id=3,
-            trajectory_id=4,
-            value=0,
-            source="controlled fixture",
-        ),
-    )
-
     with pytest.raises(ValueError, match="trajectory_id"):
-        RunSpec(ops=[operation]).validate()
+        Operation(
+            3,
+            "op3",
+            (0,),
+            stream_id=3,
+            intrinsic_measurement=IntrinsicMeasurement(
+                operation_id=3,
+                trajectory_id=4,
+                value=0,
+                source="controlled fixture",
+            ),
+        )
 
 
-def test_run_spec_rejects_tuple_stream_identity_even_if_intrinsic_type_allows_it():
+def test_run_spec_rejects_stream_identity_without_a_declared_owner():
     operation = Operation(
         3,
         "op3",
@@ -140,8 +135,8 @@ def test_run_spec_rejects_tuple_stream_identity_even_if_intrinsic_type_allows_it
         ),
     )
 
-    with pytest.raises(TypeError, match="stream_id.*exact built-in int"):
-        RunSpec(ops=[operation]).validate()
+    with pytest.raises(ValueError, match="does not name a declared stream owner"):
+        RunSpec(ops=[operation]).build()
 
 
 @pytest.mark.parametrize("operation_id", [True, 1.0, np.int64(1), "1"])
@@ -149,7 +144,7 @@ def test_run_spec_requires_exact_integer_operation_ids(operation_id):
     with pytest.raises(TypeError, match="operation id.*exact built-in int"):
         RunSpec(
             ops=[Operation(operation_id, "invalid identity", (0,))],
-        ).validate()
+        ).build()
 
 
 @pytest.mark.parametrize(
@@ -160,7 +155,7 @@ def test_run_spec_rejects_runtime_key_collisions_in_qubit_identities(qubits):
     with pytest.raises(TypeError, match="qubits.*stable built-in"):
         RunSpec(
             ops=[Operation(0, "invalid resources", qubits)],
-        ).validate()
+        ).build()
 
 
 def test_distinct_objects_cannot_share_an_id_across_workload_roles():
@@ -171,13 +166,14 @@ def test_distinct_objects_cannot_share_an_id_across_workload_roles():
         RunSpec(
             ops=[executable],
             decode_ops=[decode_owner],
-        ).validate()
+        ).build()
 
 
 def test_same_object_may_have_executable_and_static_decode_membership():
-    operation = Operation(7, "shared owner", (0,))
+    from decsim.planner import _validate_workload_identity
 
-    RunSpec(ops=[operation], decode_ops=[operation]).validate()
+    operation = Operation(7, "shared owner", (0,))
+    _validate_workload_identity([operation], [operation], [])
 
 
 def test_executable_and_dynamic_stream_membership_cannot_alias():
@@ -187,7 +183,7 @@ def test_executable_and_dynamic_stream_membership_cannot_alias():
         ValueError,
         match="ops and dynamic_streams",
     ):
-        RunSpec(ops=[operation], dynamic_streams=[operation]).validate()
+        RunSpec(ops=[operation], dynamic_streams=[operation]).build()
 
 
 def test_stream_reference_must_name_a_declared_stream_owner():
@@ -199,7 +195,7 @@ def test_stream_reference_must_name_a_declared_stream_owner():
     )
 
     with pytest.raises(ValueError, match="stream_id 99.*declared stream owner"):
-        RunSpec(ops=[operation]).validate()
+        RunSpec(ops=[operation]).build()
 
 
 class _InvalidFeedbackFrontend:

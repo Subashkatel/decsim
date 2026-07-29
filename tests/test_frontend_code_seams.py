@@ -204,8 +204,8 @@ def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():
     assert isinstance(frontend, P.InputFrontend)
     assert frontend.operations[1].predecessors == (10,)
     assert frontend.operations[2].predecessors == (11,)
-    assert result.cluster.window_count == {10: 1, 11: 1, 12: 1}
-    assert result.chip.decode_release_time[12] >= result.cluster.windows[(11, 0)].t_done
+    assert result.window_manager.window_count == {10: 1, 11: 1, 12: 1}
+    assert result.chip.decode_release_time[12] >= result.window_manager.windows[(11, 0)].t_done
     assert result.result.fully_done_ticks > 0
 
 
@@ -238,7 +238,7 @@ def test_lattice_surgery_ir_can_lower_to_physical_ir_then_run():
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == (1,)
     assert frontend.operations[2].blocked_by == 1
-    assert result.chip.decode_release_time[2] >= result.cluster.windows[(1, 0)].t_done
+    assert result.chip.decode_release_time[2] >= result.window_manager.windows[(1, 0)].t_done
 
 
 def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
@@ -265,13 +265,13 @@ def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
 
     assert isinstance(frontend, P.InputFrontend)
     assert isinstance(code, P.CodeModel)
-    assert result.planning.layout is layout
+    assert result.window_manager._code_geometry.code_name == code.name
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == ()
     assert {job.code for job in decoder.jobs} == {code.name}
     assert {job.spatial_nodes for job in decoder.jobs} == {code.spatial_nodes(1)}
     assert all(job.payloads for job in decoder.jobs)
-    assert len(result.cluster.committed_windows) == result.cluster.total_windows
+    assert len(result.window_manager.committed_windows) == result.window_manager.total_windows
 
 
 def test_bb_code_isa_can_lower_to_physical_ir_then_run():
@@ -301,7 +301,7 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
     assert isinstance(frontend.physical_frontend, PhysicalPatchIRFrontend)
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == ()
-    assert result.planning.code is code
+    assert result.window_manager._code_geometry.code_name == code.name
     assert {job.code for job in decoder.jobs} == {code.name}
     assert {job.spatial_nodes for job in decoder.jobs} == {code.spatial_nodes(1)}
-    assert len(result.cluster.committed_windows) == result.cluster.total_windows
+    assert len(result.window_manager.committed_windows) == result.window_manager.total_windows

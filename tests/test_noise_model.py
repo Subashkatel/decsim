@@ -155,4 +155,4 @@ def test_runs_through_full_engine():
               decoder=PyMatchingDecoder(_ZeroLatency()),
               seed=1,
           ), verbose=False)
-    assert 1 in res.cluster.op_results        # produced a real logical value
+    assert 1 in res.window_manager.op_results        # produced a real logical value

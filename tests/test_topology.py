@@ -72,7 +72,7 @@ def _first_round_arrival(t_qc, t_cwd):
               links=_links(t_qc=t_qc, t_cwd=t_cwd),
               make_controller=_controller,
           ), verbose=False)
-    return res.cluster.windows[(0, 0)].t_first_round
+    return res.window_manager.windows[(0, 0)].t_first_round
 
 
 def test_forward_latency_is_additive_and_split_invariant():
@@ -106,7 +106,7 @@ def _decode_release(t_wdo, t_oc, t_cq):
               links=_links(t_wdo=t_wdo, t_oc=t_oc, t_cq=t_cq),
               make_controller=_controller,
           ), verbose=False)
-    return res.chip.decode_release_time[1], res.cluster.windows[(0, 0)].t_done
+    return res.chip.decode_release_time[1], res.window_manager.windows[(0, 0)].t_done
 
 
 def test_feedback_latency_is_additive_and_split_invariant():

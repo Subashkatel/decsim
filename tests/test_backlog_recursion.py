@@ -57,7 +57,7 @@ def _simulate(f, scheme):
             scheme=scheme,
             decoder=PerRoundDecoder(f * TAU_GEN_US),
             max_idle_rounds=100_000,
-            make_metrics=lambda e, c, ch, fa: [BacklogTrajectory(ch)],
+            make_metrics=lambda e, wm, dm, ch, fa: [BacklogTrajectory(ch)],
         ), verbose=False)
     return BacklogTrajectory(r.chip).rows()
 
@@ -153,7 +153,7 @@ def test_round_grid_mode_matches_the_strict_recursion_exactly():
                 max_idle_rounds=100_000,
                 gates_start_on_round_boundaries=True,
             ), verbose=False)
-        windows = r.cluster.windows
+        windows = r.window_manager.windows
         seg = ROP                                     # gate 0 absorbed no idle rounds
         assert windows[(0, 0)].n_rounds == seg
         assert windows[(0, 0)].batched_preceding_idle_round_count == 0

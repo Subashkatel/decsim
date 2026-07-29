@@ -60,9 +60,10 @@ def bind_run_seed(root_seed, roots) -> None:
         finally:
             active.remove(identity)
 
-    for _, path, component in sorted(
+    ordered_roots = (
         (encoded(path), path, component) for path, component in roots
-    ):
+    )
+    for _, path, component in sorted(ordered_roots, key=lambda item: item[0]):
         walk(path, component)
 
     acquired = []

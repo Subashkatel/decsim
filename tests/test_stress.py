@@ -44,25 +44,28 @@ class InvariantGuard:
     name = "invariants"
     result_schema_version = 1
 
-    def __init__(self, cluster):
-        self.cluster = cluster
+    def __init__(self, window_manager, decoder_manager):
+        self.window_manager = window_manager
+        self.decoder_manager = decoder_manager
         self.violations = []
         self.checks = 0
         self.peak_busy = {}
 
     def observe(self, engine):
-        cluster = self.cluster
+        window_manager = self.window_manager
+        decoder_manager = self.decoder_manager
         now = engine.now
-        for pool, total in cluster.unit_totals.items():
-            free = cluster.pool_free[pool]
+        for pool, total in decoder_manager.unit_totals.items():
+            free = decoder_manager.pool_free[pool]
             if not 0 <= free <= total:
                 self.violations.append(f"t={now}: pool {pool!r} free={free} outside [0,{total}]")
             busy = total - free
             self.peak_busy[pool] = max(self.peak_busy.get(pool, 0), busy)
-        if cluster.payloads_held < 0:
-            self.violations.append(f"t={now}: payloads_held={cluster.payloads_held} < 0")
-        for op_id, committed in cluster.window_manager._committed_per_op.items():
-            planned = cluster.window_count.get(op_id, 0)
+        if window_manager.payloads_held < 0:
+            self.violations.append(
+                f"t={now}: payloads_held={window_manager.payloads_held} < 0")
+        for op_id, committed in window_manager._committed_per_op.items():
+            planned = window_manager.window_count.get(op_id, 0)
             if committed > planned:
                 self.violations.append(
                     f"t={now}: op {op_id} committed {committed} windows > planned {planned} "
@@ -76,14 +79,15 @@ class InvariantGuard:
 
 def _assert_clean(result, guard):
     """End-of-run invariants common to every stress scenario."""
-    cluster = result.cluster
+    window_manager = result.window_manager
+    decoder_manager = result.decoder_manager
     assert guard.violations == [], guard.violations[:5]
     assert guard.checks > 50, "the guard barely ran -- scenario was not a real stress"
-    assert cluster.pool_free == cluster.unit_totals, "a unit was leaked or double-freed"
-    assert len(cluster.committed_windows) == cluster.total_windows, "not every window committed"
-    assert sum(cluster.window_manager._committed_per_op.values()) == cluster.total_windows, "double commit"
-    assert cluster.payloads_held == 0, "syndrome RAM not fully freed"
-    assert all(not rounds for rounds in cluster.store._payloads.values()), "syndrome RAM leaked"
+    assert decoder_manager.pool_free == decoder_manager.unit_totals, "a unit was leaked or double-freed"
+    assert len(window_manager.committed_windows) == window_manager.total_windows, "not every window committed"
+    assert sum(window_manager._committed_per_op.values()) == window_manager.total_windows, "double commit"
+    assert window_manager.payloads_held == 0, "syndrome RAM not fully freed"
+    assert all(not rounds for rounds in window_manager.store._payloads.values()), "syndrome RAM leaked"
 
 
 def _independent_patches(n):
@@ -103,7 +107,7 @@ def test_many_patches_few_units_stays_consistent():
                  round_us=TAU,
                  scheme=SlidingWindowScheme(),
                  decoder=PerRoundDecoder(3.0),
-                 make_metrics=lambda e, c, ch, fa: [guard_box.setdefault("g", InvariantGuard(c))],
+                 make_metrics=lambda e, wm, dm, ch, fa: [guard_box.setdefault("g", InvariantGuard(wm, dm))],
              ), verbose=False)
     guard = guard_box["g"]
     _assert_clean(result, guard)
@@ -122,7 +126,7 @@ def test_parallel_scheme_under_load_stays_consistent():
                  round_us=TAU,
                  scheme=ParallelWindowScheme(),
                  decoder=PerRoundDecoder(12.0),
-                 make_metrics=lambda e, c, ch, fa: [guard_box.setdefault("g", InvariantGuard(c))],
+                 make_metrics=lambda e, wm, dm, ch, fa: [guard_box.setdefault("g", InvariantGuard(wm, dm))],
              ), verbose=False)
     guard = guard_box["g"]
     _assert_clean(result, guard)
@@ -147,7 +151,7 @@ def _switching_run(low_confidence_probability, rounds, patches, pools, seed=3,
                unit_pools=pools,
                scheduler=scheduler,
                seed=seed,
-               make_metrics=lambda e, c, ch, fa: [metrics_box.setdefault("g", InvariantGuard(c))]
+               make_metrics=lambda e, wm, dm, ch, fa: [metrics_box.setdefault("g", InvariantGuard(wm, dm))]
                      if metrics_box is not None else [],
            ), verbose=False)
 
@@ -160,7 +164,7 @@ def test_high_switch_rate_stays_consistent():
                             pools={"default": 2, "strong": 2}, metrics_box=box)
     guard = box["g"]
     _assert_clean(result, guard)
-    assert result.cluster.strong_needed > 50, "the run did not actually stress switching"
+    assert result.decoder_manager.strong_needed > 50, "the run did not actually stress switching"
     assert guard.peak_busy.get("strong", 0) >= 1, "strong pool never ran a job"
 
 
@@ -172,10 +176,11 @@ def test_run_both_at_once_cancel_under_load_stays_consistent():
     result = _switching_run(0.1, rounds=300, patches=3, pools={"default": 2, "strong": 2},
                             switching=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True),
                             metrics_box=box)
-    cluster = result.cluster
+    cluster = result.decoder_manager
     _assert_clean(result, box["g"])
     assert cluster.strong_cancelled > 50, "the cancel path was barely exercised"
-    assert cluster.strong_cancelled + cluster.strong_needed == cluster.total_windows
+    assert (cluster.strong_cancelled + cluster.strong_needed
+            == result.window_manager.total_windows)
 
 
 def test_switching_with_deadline_scheduler_stays_consistent():
@@ -186,7 +191,7 @@ def test_switching_with_deadline_scheduler_stays_consistent():
                             pools={"default": 2, "strong": 1},
                             scheduler=EarliestDeadlineScheduler(), metrics_box=box)
     _assert_clean(result, box["g"])
-    assert result.cluster.strong_needed > 0
+    assert result.decoder_manager.strong_needed > 0
 
 
 def test_switching_stress_is_deterministic():
@@ -195,7 +200,7 @@ def test_switching_stress_is_deterministic():
     in a way that varies between runs."""
     a = _switching_run(0.5, rounds=250, patches=3, pools={"default": 2, "strong": 2})
     b = _switching_run(0.5, rounds=250, patches=3, pools={"default": 2, "strong": 2})
-    assert a.cluster.op_results == b.cluster.op_results
-    assert a.cluster.strong_needed == b.cluster.strong_needed
-    assert len(a.cluster.committed_windows) == len(b.cluster.committed_windows)
+    assert a.window_manager.op_results == b.window_manager.op_results
+    assert a.decoder_manager.strong_needed == b.decoder_manager.strong_needed
+    assert len(a.window_manager.committed_windows) == len(b.window_manager.committed_windows)
     assert a.engine.now == b.engine.now

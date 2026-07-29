@@ -105,7 +105,7 @@ def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=Non
 
 def _strong_backlog_peak(low_confidence_probability, rounds, seed=1):
     res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), low_confidence_probability, rounds,
-                      seed=seed, metrics=lambda e, c, ch, fa: [StrongDecoderBacklog(c)])
+                      seed=seed, metrics=lambda e, wm, dm, ch, fa: [StrongDecoderBacklog(wm, dm)])
     return res.result.metric_values()["strong_backlog"]["peak_jobs"]
 
 
@@ -236,7 +236,7 @@ def test_custom_decision_rule_can_replace_the_threshold():
         0.0,
         60,
     )
-    assert res.cluster.strong_needed == res.cluster.total_windows
+    assert res.decoder_manager.strong_needed == res.window_manager.total_windows
 
 
 def test_escalated_window_uses_strong_logical_result():
@@ -256,10 +256,9 @@ def test_escalated_window_uses_strong_logical_result():
               unit_pools={"default": 1, "strong": 1},
               seed=1,
           ), verbose=False)
-    cluster = res.cluster
-    assert cluster.total_windows % 2 == 1
-    assert cluster.strong_needed == cluster.total_windows
-    assert cluster.op_results[0] == (1,)
+    assert res.window_manager.total_windows % 2 == 1
+    assert res.decoder_manager.strong_needed == res.window_manager.total_windows
+    assert res.window_manager.op_results[0] == (1,)
 
 
 def test_parallel_strong_result_can_finish_before_weak_decision():
@@ -279,7 +278,7 @@ def test_parallel_strong_result_can_finish_before_weak_decision():
               unit_pools={"default": 1, "strong": 1},
               seed=1,
           ), verbose=False)
-    assert res.cluster.op_results[0] == (1,)
+    assert res.window_manager.op_results[0] == (1,)
 
 
 def test_switching_requires_a_router_to_reach_the_strong_decoder():
@@ -384,11 +383,11 @@ def test_no_switching_matches_plain_sliding():
                 scheme=SlidingWindowScheme(),
                 decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US),
             ), verbose=False)
-    assert switched.cluster.strong_needed == 0
-    assert switched.cluster.strong_cancelled == 0
+    assert switched.decoder_manager.strong_needed == 0
+    assert switched.decoder_manager.strong_cancelled == 0
     assert switched.engine.now == plain.engine.now
-    assert (len(switched.cluster.committed_windows)
-            == len(plain.cluster.committed_windows))
+    assert (len(switched.window_manager.committed_windows)
+            == len(plain.window_manager.committed_windows))
 
 
 # ---- Theorem 1 / Eq. 8: strong backlog bounded inside, divergent outside (serial) ----
@@ -427,11 +426,11 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
                 round_us=TAU_GEN_US,
                 scheme=SlidingWindowScheme(),
                 decoder=naive_decoder,
-                make_metrics=lambda e, c, ch, fa: [DecodeBacklog(c)],
+                make_metrics=lambda e, wm, dm, ch, fa: [DecodeBacklog(wm, dm)],
                 seed=1,
             ), verbose=False)
     double = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), rate, rounds,
-                         metrics=lambda e, c, ch, fa: [DecodeBacklog(c)])
+                         metrics=lambda e, wm, dm, ch, fa: [DecodeBacklog(wm, dm)])
     assert naive.result.metric_values()["decode_backlog"]["peak_rounds"] > 100
     assert (double.result.metric_values()["decode_backlog"]["peak_rounds"]
             < naive.result.metric_values()["decode_backlog"]["peak_rounds"] / 5)
@@ -445,14 +444,14 @@ def test_run_both_at_once_starts_strong_every_window_and_cancels_confident_ones(
     cancelled or needed, and serial mode starts strong jobs ONLY on the windows that need them."""
     parallel = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True), 0.3, 200,
                            pools={"default": 1, "strong": 2})
-    cp = parallel.cluster
+    cp, windows = parallel.decoder_manager, parallel.window_manager.total_windows
     assert cp.strong_cancelled > 0
-    assert cp.strong_cancelled + cp.strong_needed == cp.total_windows   # one strong job per window
+    assert cp.strong_cancelled + cp.strong_needed == windows   # one strong job per window
 
     serial = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 0.3, 200,
                          pools={"default": 1, "strong": 2})
-    assert serial.cluster.strong_cancelled == 0                      # serial never cancels
-    assert serial.cluster.strong_needed == cp.strong_needed          # same windows need strong
+    assert serial.decoder_manager.strong_cancelled == 0                      # serial never cancels
+    assert serial.decoder_manager.strong_needed == cp.strong_needed          # same windows need strong
 
 
 def test_run_both_at_once_keeps_the_weak_decode_work_identical_to_plain_sliding():
@@ -472,10 +471,10 @@ def test_run_both_at_once_keeps_the_weak_decode_work_identical_to_plain_sliding(
             ), verbose=False)
     weak_durations = lambda r: [
         w.t_done - w.t_dispatch
-        for _, w in sorted(r.cluster.windows.items())
+        for _, w in sorted(r.window_manager.windows.items())
     ]
     assert weak_durations(parallel) == weak_durations(plain)
-    assert len(parallel.cluster.committed_windows) == parallel.cluster.total_windows
+    assert len(parallel.window_manager.committed_windows) == parallel.window_manager.total_windows
 
 
 # ---- backlog-vs-time trace: the metrics retain a series, not just a summary ----------
@@ -483,8 +482,8 @@ def test_run_both_at_once_keeps_the_weak_decode_work_identical_to_plain_sliding(
 def test_strong_backlog_trace_is_a_step_series_matching_the_peak():
     """The strong trace is ordered and its exact job/round peaks reconcile."""
     captured = {}
-    def metrics(e, c, ch, fa):
-        m = StrongDecoderBacklog(c)
+    def metrics(e, wm, dm, ch, fa):
+        m = StrongDecoderBacklog(wm, dm)
         captured["m"] = m
         return [m]
     res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 6 * GAMMA_BOUND, 600, metrics=metrics)
@@ -515,8 +514,8 @@ def test_decode_backlog_trace_tracks_the_rising_backlog():
     """DecodeBacklog keeps a time series too: under a too-slow naive (inline) decoder the backlog
     rises, so rows() is a non-empty step series whose largest value matches result()['peak_rounds']."""
     captured = {}
-    def metrics(e, c, ch, fa):
-        m = DecodeBacklog(c)
+    def metrics(e, wm, dm, ch, fa):
+        m = DecodeBacklog(wm, dm)
         captured["m"] = m
         return [m]
     naive_decoder = SwitchingDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
@@ -603,7 +602,7 @@ def test_sampled_soft_output_uses_the_probability_for_callback():
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
           ), verbose=False)
-    assert res.cluster.strong_needed == res.cluster.total_windows
+    assert res.decoder_manager.strong_needed == res.window_manager.total_windows
 
 
 # ---- faithful double window (paper Sec. III C, Fig. 12) --------------------
@@ -647,11 +646,11 @@ def _double_window_run(
         else 0.0), env)
     strong = _DispatchRecorder(PerRoundDecoder(strong_tau * TAU_GEN_US), env)
 
-    def make_metrics(engine, cluster, chip, factory):
+    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
         env["engine"] = engine
         if metrics is None:
             return []
-        return metrics(engine, cluster, chip, factory)
+        return metrics(engine, window_manager, decoder_manager, chip, factory)
 
     res = simulate(RunSpec(
               ops=[_memory_op()],
@@ -676,8 +675,8 @@ def test_double_window_backlog_records_pending_assignment_before_admission():
     its far boundary, before the decoder manager owns the admitted job."""
     captured = {}
 
-    def make_metrics(engine, cluster, chip, factory):
-        metric = StrongDecoderBacklog(cluster)
+    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+        metric = StrongDecoderBacklog(window_manager, decoder_manager)
         captured["metric"] = metric
         return [metric]
 
@@ -752,7 +751,7 @@ def test_double_window_uses_the_interaction_region_plan():
     )
 
     assert interaction.calls == [(0, 2)]
-    assert result.cluster.window_manager.absorbed_windows == {(0, 3)}
+    assert result.window_manager.absorbed_windows == {(0, 3)}
     assert [job.window_id for _, job in weak.starts] == [
         0, 1, 2, 4, 5, 6, 7, 8, 9,
     ]
@@ -789,8 +788,7 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
     strong = FixedLogicalDecoder(logical_value=0)
     captured = {}
 
-    def configure(engine, cluster, _chip, _factory):
-        runtime = cluster.window_manager
+    def configure(engine, runtime, _decoder_manager, _chip, _factory):
 
         def snapshot():
             restart = runtime.windows[(0, 5)]
@@ -819,8 +817,10 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
             router=SwitchingRouter(weak, strong),
             device=FailingDevice(),
             unit_pools={"default": 1, "strong": 1},
-            make_metrics=lambda engine, cluster, chip, factory: (
-                configure(engine, cluster, chip, factory) or []
+            make_metrics=lambda engine, window_manager, decoder_manager, chip, factory: (
+                configure(
+                    engine, window_manager, decoder_manager, chip, factory
+                ) or []
             ),
         ).build(verbose=False)
 
@@ -923,7 +923,7 @@ def test_double_window_retains_every_round_added_to_the_restart_buffer():
         window_interaction=EarlierRetainedRestart(),
     )
 
-    restart = result.cluster.windows[(0, 4)]
+    restart = result.window_manager.windows[(0, 4)]
     restart_job = next(
         job for _, job in weak.starts if job.window_id == restart.k)
     assert restart.start_round == 4
@@ -1015,7 +1015,7 @@ def test_double_window_slab_extends_forward_and_absorbs_the_weak_chain():
     7-15 (commit + two buffers FORWARD), the windows committing 10-12 and
     13-15 are never weak-decoded, and the weak chain restarts at W5."""
     res, weak, strong = _double_window_run(escalate_window=2)
-    runtime = res.cluster.window_manager
+    runtime = res.window_manager
     (start_tick, job), = strong.starts
     assert job.strong_decode_for == (0, 2)
     assert (job.window.commit_lo, job.window.commit_hi) == (7, 15)
@@ -1039,7 +1039,7 @@ def test_double_window_restart_window_is_priced_for_its_widened_read():
     the one window the protocol deliberately enlarges, and charging it as an
     ordinary window understates the weak decoder exactly there."""
     res, weak, strong = _double_window_run(escalate_window=2)
-    runtime = res.cluster.window_manager
+    runtime = res.window_manager
     (_, slab), = strong.starts
     restart = runtime.windows[(0, 5)]
 
@@ -1075,9 +1075,9 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True),
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
-        make_metrics=lambda e, c, ch, fa: env.update(engine=e) or [],
+        make_metrics=lambda e, wm, dm, ch, fa: env.update(engine=e) or [],
     ), verbose=False)
-    runtime = res.cluster.window_manager
+    runtime = res.window_manager
     commit = runtime._code_geometry.commit_round_count
     buffer = runtime._code_geometry.buffer_round_count
     assert (commit, buffer) == (2, 3)   # r_com != r_buf
@@ -1119,7 +1119,7 @@ def test_double_window_restart_pricing_is_not_the_geometry_constant():
     is wrong even though every full-width fixture agrees with it. The
     invariant is the window's own extent."""
     res, weak, strong = _double_window_run(escalate_window=5, rounds=26)
-    runtime = res.cluster.window_manager
+    runtime = res.window_manager
     (_, slab), = strong.starts
     restart = next(runtime.windows[k] for k in sorted(runtime.windows)
                    if runtime.windows[k].commit_lo > slab.window.commit_hi
@@ -1141,12 +1141,12 @@ def test_double_window_strong_waits_for_the_restart_windows_weak_commit():
     (W5's) weak decode commits the far-side boundary, plus the weak->strong
     hop. Without the gate the slab would start right after W2's outcome."""
     res, weak, strong = _double_window_run(escalate_window=2)
-    cluster = res.cluster
+    cluster = res.window_manager
     w5 = cluster.windows[(0, 5)]
     (start_tick, job), = strong.starts
     assert w5.t_done is not None
     assert start_tick == w5.t_done + us(3.0)
-    assert cluster.window_manager.pending_escalations == {}
+    assert cluster.pending_escalations == {}
 
 
 def test_double_window_weak_pipeline_never_stalls_on_strong_work():
@@ -1155,8 +1155,8 @@ def test_double_window_weak_pipeline_never_stalls_on_strong_work():
     fast, _, _ = _double_window_run(escalate_window=2, strong_tau=F_STRONG)
     slow, _, _ = _double_window_run(escalate_window=2,
                                     strong_tau=10 * F_STRONG)
-    assert {k: w.t_done for k, w in fast.cluster.windows.items()} \
-        == {k: w.t_done for k, w in slow.cluster.windows.items()}
+    assert {k: w.t_done for k, w in fast.window_manager.windows.items()} \
+        == {k: w.t_done for k, w in slow.window_manager.windows.items()}
 
 
 def test_double_window_last_window_uses_the_terminal_boundary():
@@ -1164,7 +1164,7 @@ def test_double_window_last_window_uses_the_terminal_boundary():
     window: the terminal time boundary already exists, so the slab is
     submitted at escalation without any extra wait."""
     res, weak, strong = _double_window_run(escalate_window=9)  # last of 10
-    cluster = res.cluster
+    cluster = res.window_manager
     w9 = cluster.windows[(0, 9)]
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (28, 30)
@@ -1172,14 +1172,14 @@ def test_double_window_last_window_uses_the_terminal_boundary():
     assert job.n_rounds == 6
     assert len({p.round_index for p in job.payloads}) == 6
     assert start_tick == w9.t_done + us(2.0)
-    assert cluster.window_manager.absorbed_windows == set()
+    assert cluster.absorbed_windows == set()
 
 
 def test_double_window_end_clamped_slab_absorbs_the_tail():
     """W8 (commit 25-27) escalates: the slab clamps to rounds 25-30,
     absorbs the final window, and needs no restart gate."""
     res, weak, strong = _double_window_run(escalate_window=8)
-    runtime = res.cluster.window_manager
+    runtime = res.window_manager
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (25, 30)
     # 6 committed rounds, read with one buffer of leading context (22-30)
@@ -1187,7 +1187,7 @@ def test_double_window_end_clamped_slab_absorbs_the_tail():
     assert len({p.round_index for p in job.payloads}) == 9
     assert runtime.absorbed_windows == {(0, 9)}
     assert [j.window_id for _, j in weak.starts] == [0, 1, 2, 3, 4, 5, 6, 7, 8]
-    w8 = res.cluster.windows[(0, 8)]
+    w8 = res.window_manager.windows[(0, 8)]
     assert start_tick == w8.t_done + us(2.0)
 
 
@@ -1196,7 +1196,7 @@ def test_double_window_exactly_one_strong_job_per_escalation():
     registration for the same window is an illegal transition."""
     res, weak, strong = _double_window_run(escalate_window=2)
     assert len(strong.starts) == 1
-    runtime = res.cluster.window_manager
+    runtime = res.window_manager
     pending = runtime._escalations.peek_far((0, 4))
     assert pending is None
     frozen = runtime.pending_escalations
@@ -1390,9 +1390,9 @@ def test_double_window_strong_result_owns_the_whole_slab():
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
           ), verbose=False)
-    assert res.cluster.op_results[0] == (1,)
-    assert res.cluster.strong_needed == 1
-    runtime = res.cluster.window_manager
+    assert res.window_manager.op_results[0] == (1,)
+    assert res.decoder_manager.strong_needed == 1
+    runtime = res.window_manager
     contribution = runtime.logical_contributions[(0, 2)]
     assert (
         contribution.ownership_kind,
@@ -1513,18 +1513,18 @@ def test_double_window_rejects_unsupported_runspec_shapes():
                 round_us=TAU_GEN_US, strategy=strategy)
     with pytest.raises(ValueError, match="Held"):
         RunSpec(ops=[_memory_op()], scheme=SlidingWindowScheme(),
-                boundary_policy=Held(), **base).validate()
+                boundary_policy=Held(), **base).build()
     with pytest.raises(ValueError, match="SlidingWindowScheme"):
         RunSpec(ops=[_memory_op()], scheme=ParallelWindowScheme(),
-                **base).validate()
+                **base).build()
     with pytest.raises(ValueError, match="dynamic_streams"):
         RunSpec(ops=[_memory_op()],
                 dynamic_streams=[Operation(7, "stream", (1,))],
-                **base).validate()
+                **base).build()
     chained = [Operation(0, "a", (0,), has_successor=True),
                Operation(1, "b", (1,), predecessors=(0,))]
     with pytest.raises(ValueError, match="single-patch"):
-        RunSpec(ops=chained, **base).validate()
+        RunSpec(ops=chained, **base).build()
 
 
 def test_double_window_terminal_slab_waits_for_its_final_rounds():
@@ -1533,12 +1533,12 @@ def test_double_window_terminal_slab_waits_for_its_final_rounds():
     W2's own weak decode finishes before rounds 13-14 are even generated.
     The slab must wait for them and then carry every slab round."""
     res, weak, strong = _double_window_run(escalate_window=2, rounds=14)
-    runtime = res.cluster.window_manager
+    runtime = res.window_manager
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (7, 14)
     assert [payload.round_index for payload in job.payloads] \
         == list(range(4, 15))
-    w2 = res.cluster.windows[(0, 2)]
+    w2 = res.window_manager.windows[(0, 2)]
     assert start_tick > w2.t_done + us(0.5)   # NOT submitted at escalation
     # round 14 reaches the cluster at 14.0 (generation) + 2.15 (t_qc + t_cd);
     # the slab then crosses the controller-to-strong data path

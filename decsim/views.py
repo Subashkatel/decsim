@@ -1,11 +1,10 @@
 """Typed read-only metric views (spec §8.9).
 
 Frozen snapshot dataclasses + the builders that populate them. Metrics
-consume these views instead of reaching into live window_manager objects; the
+consume these views instead of reaching through a combined facade; the
 engine invokes Metric.observe(...) only between events, so every
 snapshot is taken at a consistent instant (principle 7: no mid-mutation
-reads). The builders read the shared cluster/gate metric surface, so
-they read the shared cluster surface (ClusterFacade).
+reads). Each builder receives the state owners it actually consumes.
 """
 
 from __future__ import annotations
@@ -114,26 +113,27 @@ class StrongWorkView:
 
 # ---------------------------------------------------------------- builders
 
-def utilization_view(cluster) -> UtilizationView:
-    """Snapshot decoder occupancy from the cluster metric surface."""
-    totals = getattr(cluster, "unit_totals", None)
+def utilization_view(decoder_manager) -> UtilizationView:
+    """Snapshot decoder occupancy."""
+    totals = getattr(decoder_manager, "unit_totals", None)
     if totals is None:
-        busy = cluster.num_units - cluster.free_units
-        return UtilizationView(busy, cluster.num_units,
-                               (("", busy, cluster.num_units),))
+        busy = decoder_manager.num_units - decoder_manager.free_units
+        return UtilizationView(busy, decoder_manager.num_units,
+                               (("", busy, decoder_manager.num_units),))
     total = sum(totals.values())
-    busy = total - sum(cluster.pool_free.values())
+    busy = total - sum(decoder_manager.pool_free.values())
     per_pool = tuple(
-        (name, totals[name] - cluster.pool_free.get(name, 0), totals[name])
+        (name, totals[name] - decoder_manager.pool_free.get(name, 0), totals[name])
         for name in sorted(totals))
     return UtilizationView(busy, total, per_pool)
 
 
-def _rounds_decoded(cluster, op_id) -> int:
+def _rounds_decoded(window_manager, op_id) -> int:
     """Rounds decoded in an unbroken prefix from round 1."""
     committed_ranges = sorted(
-        (cluster.windows[key].commit_lo, cluster.windows[key].commit_hi)
-        for key in cluster.committed_windows
+        (window_manager.windows[key].commit_lo,
+         window_manager.windows[key].commit_hi)
+        for key in window_manager.committed_windows
         if key[0] == op_id)
     decoded = 0
     for start_round, end_round in committed_ranges:
@@ -153,13 +153,14 @@ def _patch_of(op, op_id):
     return op_id
 
 
-def backlog_view(cluster, include_rounds: bool = True) -> BacklogView:
+def backlog_view(window_manager, decoder_manager,
+                 include_rounds: bool = True) -> BacklogView:
     """Snapshot job queues + per-op/per-patch/system syndrome backlog.
 
     include_rounds=False skips the (comparatively costly) rounds scan for
     per-event observers that only need the job-queue depths."""
-    pools = getattr(cluster, "pool_ready", None)
-    ready_jobs = len(cluster.ready)
+    pools = getattr(decoder_manager, "pool_ready", None)
+    ready_jobs = len(decoder_manager.ready)
     per_lane = [("", ready_jobs)]
     if pools is not None:
         per_lane += [(lane, len(queue)) for lane, queue in sorted(pools.items())]
@@ -167,13 +168,13 @@ def backlog_view(cluster, include_rounds: bool = True) -> BacklogView:
 
     per_op, per_patch = [], {}
     for op_id in sorted(
-        (cluster.window_manager._ops if include_rounds else ()),
+        (window_manager._ops if include_rounds else ()),
         key=stable_identity_order_key,
     ):
-        waiting = max(0, cluster.rounds_arrived.get(op_id, 0)
-                      - _rounds_decoded(cluster, op_id))
+        waiting = max(0, window_manager.rounds_arrived.get(op_id, 0)
+                      - _rounds_decoded(window_manager, op_id))
         per_op.append((op_id, waiting))
-        patch = _patch_of(cluster.window_manager._ops.get(op_id), op_id)
+        patch = _patch_of(window_manager._ops.get(op_id), op_id)
         per_patch[patch] = per_patch.get(patch, 0) + waiting
     return BacklogView(ready_jobs=ready_jobs,
                        per_lane=tuple(per_lane),
@@ -185,11 +186,11 @@ def backlog_view(cluster, include_rounds: bool = True) -> BacklogView:
                        total_rounds=sum(w for _, w in per_op))
 
 
-def window_latency_view(cluster) -> WindowLatencyView:
+def window_latency_view(window_manager) -> WindowLatencyView:
     """Snapshot the per-window stage decomposition (fully-decoded only)."""
     rows = []
     for (op_id, window_index), window in sorted(
-        cluster.windows.items(),
+        window_manager.windows.items(),
         key=lambda item: stable_identity_order_key(item[0]),
     ):
         stamps = (window.t_first_round, window.t_data_complete,
@@ -231,7 +232,7 @@ def reaction_view(gate) -> ReactionView:
         ops=ops)
 
 
-def truth_view(cluster, device) -> TruthView:
+def truth_view(window_manager, device) -> TruthView:
     """Snapshot sampled truth (device) next to published predictions."""
     truth = getattr(device, "_truth", {}) or {}
     observables = tuple(sorted(
@@ -242,16 +243,16 @@ def truth_view(cluster, device) -> TruthView:
         key=lambda item: stable_identity_order_key(item[0]),
     ))
     predictions = tuple(sorted(
-        cluster.op_results.items(),
+        window_manager.op_results.items(),
         key=lambda item: stable_identity_order_key(item[0]),
     ))
     return TruthView(observables=observables, predictions=predictions)
 
 
-def strong_work_view(cluster) -> StrongWorkView:
+def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
     """Compose exact global strong work from its two lifecycle owners."""
-    pending = cluster.pending_strong_work_snapshot()
-    admitted = cluster.admitted_strong_work_snapshot()
+    pending = window_manager.pending_strong_work_snapshot()
+    admitted = decoder_manager.admitted_strong_work_snapshot()
     pending_keys = {key for key, _, _ in pending}
     admitted_keys = {key for keys, _, _ in admitted for key in keys}
     overlap = pending_keys & admitted_keys
@@ -281,5 +282,5 @@ def strong_work_view(cluster) -> StrongWorkView:
         total_full_input_rounds=sum(
             value.full_input_rounds for value in phases.values()
         ),
-        strong_needed=cluster.strong_needed,
+        strong_needed=decoder_manager.strong_needed,
     )

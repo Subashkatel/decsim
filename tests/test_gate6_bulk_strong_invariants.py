@@ -129,8 +129,10 @@ def escalating_world(
         make_metrics=(
             None
             if configure is None
-            else lambda engine, cluster, chip, factory: (
-                configure(engine, cluster, chip, factory) or []
+            else lambda engine, window_manager, decoder_manager, chip, factory: (
+                configure(
+                    engine, window_manager, decoder_manager, chip, factory
+                ) or []
             )
         ),
     ).build(verbose=False)
@@ -654,8 +656,7 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
 
     delivered = []
 
-    def configure(_engine, cluster, _chip, _factory):
-        pool = cluster.pool
+    def configure(_engine, _window_manager, pool, _chip, _factory):
         commit_strong_result = pool.on_strong_window_decoded
 
         def record(key, result):
@@ -671,13 +672,13 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
 
     assert completed_run.window_manager._finished_ops == {88}
     assert len(delivered) == len(set(delivered)) > 1
-    assert completed_run.pool._completed_strong_results == {}
-    assert completed_run.pool._windows_waiting_for_strong_result == set()
+    assert completed_run.decoder_manager._completed_strong_results == {}
+    assert completed_run.decoder_manager._windows_waiting_for_strong_result == set()
 
     finalized_key = delivered[-1]
-    completed_run.pool._windows_waiting_for_strong_result.add(finalized_key)
-    completed_run.pool._apply_held_strong_result(finalized_key)
-    assert completed_run.pool._windows_waiting_for_strong_result == {finalized_key}
+    completed_run.decoder_manager._windows_waiting_for_strong_result.add(finalized_key)
+    completed_run.decoder_manager._apply_held_strong_result(finalized_key)
+    assert completed_run.decoder_manager._windows_waiting_for_strong_result == {finalized_key}
     assert delivered.count(finalized_key) == 1, \
         "a wait was released after finality without a decode of its own"
 
@@ -966,9 +967,9 @@ def test_public_strategy_may_list_its_submissions_in_either_order(strong_first):
     completed_run = escalating_world(OrderedEscalationStrategy())
 
     assert completed_run.window_manager._finished_ops == {88}
-    assert completed_run.pool.strong_needed == completed_run.window_manager.window_count[88]
-    assert completed_run.pool._completed_strong_results == {}
-    assert completed_run.pool._windows_waiting_for_strong_result == set()
+    assert completed_run.decoder_manager.strong_needed == completed_run.window_manager.window_count[88]
+    assert completed_run.decoder_manager._completed_strong_results == {}
+    assert completed_run.decoder_manager._windows_waiting_for_strong_result == set()
 
 
 def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
@@ -999,8 +1000,7 @@ def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
 
     delivered = []
 
-    def configure(_engine, cluster, _chip, _factory):
-        pool = cluster.pool
+    def configure(_engine, _window_manager, pool, _chip, _factory):
         commit_strong_result = pool.on_strong_window_decoded
 
         def record(key, result):
@@ -1018,9 +1018,9 @@ def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
     assert completed_run.window_manager._finished_ops == {88}
     assert sorted(delivered) == sorted(set(delivered))
     assert len(delivered) == window_count
-    assert completed_run.pool.strong_cancelled == window_count
-    assert completed_run.pool._completed_strong_results == {}
-    assert completed_run.pool._windows_waiting_for_strong_result == set()
+    assert completed_run.decoder_manager.strong_cancelled == window_count
+    assert completed_run.decoder_manager._completed_strong_results == {}
+    assert completed_run.decoder_manager._windows_waiting_for_strong_result == set()
 
 
 # ------------------------------- one open weak decode per destination window

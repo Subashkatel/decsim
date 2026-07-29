@@ -62,7 +62,7 @@ def _run(latency_us, rounds):
               code=SurfaceCodeModel(d=D),
               links=fixed_latency_link_config(),
               make_controller=_zero_link_controller,
-              make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl), ReadyQueueStats(cl)],
+              make_metrics=lambda e, wm, dm, ch, f: [DecodeBacklog(wm, dm), ReadyQueueStats(dm)],
           ), verbose=False)
     m = res.result.metric_values()
     return m["decode_backlog"]["peak_rounds"], m["ready_queue"]["peak_jobs"]

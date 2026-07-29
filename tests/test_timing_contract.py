@@ -50,11 +50,11 @@ def test_wall_clock_decode_work_does_not_advance_simulated_service_time():
               decoder=decoder,
               links=fixed_latency_link_config(),
               make_controller=_zero_link_controller,
-              make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
+              make_metrics=lambda e, wm, dm, ch, f: [WindowLatencyBreakdown(wm)],
           ), verbose=False)
     elapsed = time.perf_counter() - t0
 
-    row = WindowLatencyBreakdown(res.cluster).rows()[0]
+    row = WindowLatencyBreakdown(res.window_manager).rows()[0]
     assert decoder.calls == 1
     assert elapsed >= decoder.sleep_s
     assert row["service"] == us(1.0)
@@ -81,7 +81,7 @@ def test_blocked_operation_waits_for_modeled_decode_time_not_wall_clock_runtime(
               make_controller=_zero_link_controller,
           ), verbose=False)
 
-    first_window = res.cluster.windows[(0, 0)]
+    first_window = res.window_manager.windows[(0, 0)]
     assert first_window.t_done - first_window.t_dispatch == us(1.0)
     assert res.chip.decode_release_time[1] == first_window.t_done
     assert trace_time(res.engine.log_lines, "START T1") == (

@@ -56,8 +56,8 @@ def test_gate_finalize_holds_nonfinal_decision():
     down at the idle cap instead of steering B from a non-final frame."""
     captured = {}
 
-    def configure(_engine, cluster, chip, _factory):
-        runtime = cluster.window_manager
+    def configure(_engine, window_manager, _decoder_manager, chip, _factory):
+        runtime = window_manager
         captured["orchestrator"] = runtime.orchestrator
         captured["chip"] = chip
         runtime.gate_finalize(
@@ -74,8 +74,8 @@ def test_gate_finalize_holds_nonfinal_decision():
             num_units=2,
             boundary_policy=Held(),
             max_idle_rounds=20,
-            make_metrics=lambda engine, cluster, chip, factory: (
-                configure(engine, cluster, chip, factory) or []
+            make_metrics=lambda engine, window_manager, decoder_manager, chip, factory: (
+                configure(engine, window_manager, decoder_manager, chip, factory) or []
             ),
         ).build()
     assert not captured["orchestrator"].history         # invariant #1 held
@@ -87,8 +87,8 @@ def test_recheck_finalize_publishes_after_predicate_flips():
     """A part whose predicate flips outside commit/strong events re-drives the
     finish check via recheck_finalize and the held publication proceeds."""
     adopted = {"final": False}
-    def configure(engine, cluster, _chip, _factory):
-        runtime = cluster.window_manager
+    def configure(engine, window_manager, _decoder_manager, _chip, _factory):
+        runtime = window_manager
         runtime.gate_finalize(0, lambda op: adopted["final"])
 
         def make_final():
@@ -104,8 +104,8 @@ def test_recheck_finalize_publishes_after_predicate_flips():
         decoder=PerRoundDecoder(0.5),
         num_units=2,
         max_idle_rounds=20,
-        make_metrics=lambda engine, cluster, chip, factory: (
-            configure(engine, cluster, chip, factory) or []
+        make_metrics=lambda engine, window_manager, decoder_manager, chip, factory: (
+            configure(engine, window_manager, decoder_manager, chip, factory) or []
         ),
     ).build()
     assert len(_decisions(completed_run)) == 1                 # published once, final
@@ -117,8 +117,8 @@ def test_gate_finalize_releases_after_strong_commit():
     stamps op_strong_commit_time, the predicate turns true inside the normal
     strong-completion path, and the (now final) Decision releases B."""
     weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 1.0)
-    def configure(_engine, cluster, _chip, _factory):
-        runtime = cluster.window_manager
+    def configure(_engine, window_manager, _decoder_manager, _chip, _factory):
+        runtime = window_manager
         runtime.gate_finalize(
             0,
             lambda op: op.id in runtime.op_strong_commit_time,
@@ -133,8 +133,8 @@ def test_gate_finalize_releases_after_strong_commit():
         unit_pools={"default": 1, "strong": 1},
         boundary_policy=Held(),
         seed=7,
-        make_metrics=lambda engine, cluster, chip, factory: (
-            configure(engine, cluster, chip, factory) or []
+        make_metrics=lambda engine, window_manager, decoder_manager, chip, factory: (
+            configure(engine, window_manager, decoder_manager, chip, factory) or []
         ),
     ).build()
     assert 0 in completed_run.window_manager.op_strong_commit_time

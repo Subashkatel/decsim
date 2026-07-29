@@ -37,16 +37,15 @@ def test_clocked_device_relay_does_not_mutate_source_fragment_counts():
         def relay_syndrome(self, payload, deliver):
             self.payloads.append(payload)
 
-    class Cluster:
-        def on_syndrome_arrival(self, packet):
-            raise AssertionError("recording controller must not deliver")
+    def on_syndrome_arrival(packet):
+        raise AssertionError("recording controller must not deliver")
 
     controller = RecordingController()
     clocked = ClockedDevice(
         engine=None,
         device=None,
         controller=controller,
-        cluster=Cluster(),
+        on_syndrome_arrival=on_syndrome_arrival,
         round_count_by_operation_id={},
     )
     source_payloads = [

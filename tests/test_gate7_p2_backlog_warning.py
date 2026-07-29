@@ -88,7 +88,7 @@ def make(cluster, **kw):
     args = dict(round_ticks=us(1), window_ticks=us(10),
                 threshold_f=0.1, consecutive=2)
     args.update(kw)
-    return BacklogEarlyWarning(cluster, **args)
+    return BacklogEarlyWarning(cluster.window_manager, cluster, **args)
 
 
 def test_slope_arithmetic_and_no_warning_when_flat():
@@ -207,9 +207,9 @@ def _run_regime(tau_w_us, rounds=120):
               make_controller=lambda e, links: ModularController(
             e, links=links,
             log_syndromes=False),
-              make_metrics=lambda e, cl, ch, f: [
-            DecodeBacklog(cl),
-            BacklogEarlyWarning(cl, round_ticks=us(1),
+              make_metrics=lambda e, wm, dm, ch, f: [
+            DecodeBacklog(wm, dm),
+            BacklogEarlyWarning(wm, dm, round_ticks=us(1),
                                 window_ticks=us(10))],
           ), verbose=False)
     return res.result.metric_values()["backlog_early_warning"]

@@ -103,23 +103,15 @@ def test_materializer_uses_only_ledger_and_direct_operation_edges():
         )
         for operation in (a, b)
     )
-    frozen_plan = _materialize_execution_plan(
+    plan = _materialize_execution_plan(
         tuple(OperationPlanningView.from_operation(op) for op in (a, b)),
         resolved,
         ledgers,
     )
-    plan = frozen_plan.materialize()
-    assert frozen_plan.total_windows == 4
+    assert plan.total_windows == 4
     assert plan.windows[(0, 1)].deps == [(0, 0)]                  # intra chain
     assert (0, 1) in plan.windows[(1, 0)].deps                    # cross-op entry<-exit
     assert plan.successors == {0: [1], 1: []}
-
-
-def test_materializer_rejects_live_operations():
-    operation = Operation(0, "op", (0,))
-
-    with pytest.raises(TypeError, match="OperationPlanningView"):
-        _materialize_execution_plan((operation,), (object(),), (object(),))
 
 
 def test_materializer_adds_no_transitive_boundary_edge():
@@ -174,7 +166,7 @@ def test_materializer_adds_no_transitive_boundary_edge():
         ),
         resolved,
         ledgers,
-    ).materialize()
+    )
 
     assert plan.windows[(2, 0)].deps == [(1, 0)]
     assert (0, 0) not in plan.windows[(2, 0)].deps

@@ -111,7 +111,7 @@ def test_real_soft_output_escalation_reaches_the_strong_path():
         assert job.hint == "strong"
         wj = weak_by_win[job.window_id]
         assert len(job.dem.detector_ids) >= len(wj.dem.detector_ids)
-    assert 0 in res.cluster.op_results   # a real logical verdict exists
+    assert 0 in res.window_manager.op_results   # a real logical verdict exists
 
 
 def test_escalation_rate_is_monotone_in_the_threshold():
@@ -148,7 +148,7 @@ def test_never_escalating_matches_weak_only():
                                   ComplementaryGapMetricFactory()),
                    seed=7,
                ), verbose=False)
-    assert res_sw.cluster.op_results[0] == res_weak.cluster.op_results[0]
+    assert res_sw.window_manager.op_results[0] == res_weak.window_manager.op_results[0]
 
 
 def test_weak_strong_pair_has_real_accuracy_separation():
@@ -195,8 +195,8 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
     device = StimDevice()
     res, weak, strong = _run(threshold=threshold, rounds=rounds,
                              double_window=True, device=device)
-    cluster = res.cluster
-    runtime = cluster.window_manager
+    cluster = res.window_manager
+    runtime = cluster
     assert strong.jobs, "no window escalated at the calibrated mid threshold"
 
     escalated = set()
@@ -270,8 +270,8 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
     assert not strong_calm.jobs
     res_serial, _, strong_serial = _run(threshold=0.0, rounds=rounds)
     assert not strong_serial.jobs
-    assert res_calm.cluster.op_results[0] \
-        == res_serial.cluster.op_results[0]
+    assert res_calm.window_manager.op_results[0] \
+        == res_serial.window_manager.op_results[0]
 
 
 @pytest.mark.parametrize(
@@ -362,6 +362,6 @@ def test_double_window_seam_models_are_decodable_and_partition_ownership(
     for key, value in weak_values.items():
         if key not in {(0, 2), (0, 3), (0, 4)}:
             expected ^= value
-    runtime = result.cluster.window_manager
+    runtime = result.window_manager
     assert runtime.op_results[0] == (expected,)
     assert runtime.payloads_held == 0

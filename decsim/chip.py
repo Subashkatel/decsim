@@ -4,7 +4,7 @@ This is the control half of the QPU seam. The other half — the clocked
 per-op syndrome stream — is the Source (devices.py): the gate calls
 ``source.start(op)`` and hears ``on_body_done(op)`` back in the same event
 as the op's final round. Everything pluggable arrives injected: idle
-policy, controller relay, cluster facade, factory, source.
+policy, controller relay, window manager, decoder service, factory, source.
 
 Behavior frozen by the timing goldens:
   - any Decision(releases_operation=True) releases the waiting op,
@@ -12,7 +12,7 @@ Behavior frozen by the timing goldens:
   - while an op waits for feedback, idle rounds are emitted on the round
     clock (capped, 100*d by default), counted per qubit set, and at the
     next op's begin folded into its first window via
-    cluster.prepend_idle_rounds.
+    window_manager.prepend_idle_rounds.
   - the magic-state wait overlaps the feedback wait: an op starts once both
     are clear; the two waits never add.
   - resource reservation uses typed ResourceClaims; the default layout
@@ -32,7 +32,8 @@ from .pauli_frame import PauliFrame
 class Chip:
     """Gate operation starts on body deps + magic states + feedback finality."""
 
-    def __init__(self, engine, *, source, controller, cluster, factory,
+    def __init__(self, engine, *, source, controller, window_manager,
+                 decode_service, factory,
                  round_ticks: int, code_geometry, resolved_operations,
                  resolved_patches, idle_policy,
                  resource_claims_by_operation_id,
@@ -42,7 +43,8 @@ class Chip:
         self.engine = engine
         self.source = source
         self.controller = controller
-        self.cluster = cluster
+        self.window_manager = window_manager
+        self.decode_service = decode_service
         self.factory = factory
         self.round_ticks = round_ticks
         self._code_geometry = code_geometry
@@ -123,7 +125,7 @@ class Chip:
         """Register operations, build dependencies, then start dependency roots."""
         for operation in ops:
             self._ops[operation.id] = operation
-            self.cluster.register_op(operation)
+            self.window_manager.register_op(operation)
         for operation in ops:
             self._deps_remaining[operation.id] = len(operation.predecessors)
             self._op_successors[operation.id] = []
@@ -220,7 +222,7 @@ class Chip:
         self.op_start_time[operation.id] = self.engine.now
         idle_rounds = self._consume_idle_rounds(operation)
         if idle_rounds:
-            self.cluster.prepend_idle_rounds(operation.id, idle_rounds)
+            self.window_manager.prepend_idle_rounds(operation.id, idle_rounds)
         self._reserve_stream_rounds(operation)
         kind = "Clifford" if operation.clifford else "non-Clifford"
         release_note = "" if operation.blocked_by is None \
@@ -289,16 +291,18 @@ class Chip:
             return
         stream_round_count = operation.stream_offset \
             + self._round_count_for(operation)
-        self.cluster.close_stream_boundary(operation.stream_id,
-                                           stream_round_count)
+        self.window_manager.close_stream_boundary(
+            operation.stream_id,
+            stream_round_count,
+        )
 
     def _seal_finished_streams_if_needed(self) -> None:
         if len(self.done_bodies) != len(self._ops):
             return
         for stream_id, total_rounds in list(self.stream_next_round.items()):
-            if not self.cluster.has_dynamic_stream(stream_id):
+            if not self.window_manager.has_dynamic_stream(stream_id):
                 continue
-            self.cluster.seal_stream(stream_id, total_rounds)
+            self.window_manager.seal_stream(stream_id, total_rounds)
 
     # --------------------------------------------------------- idle emission
 
@@ -377,14 +381,17 @@ class Chip:
         self.controller.relay_syndrome(
             payload,
             lambda p, source_op_id=op_id:
-                self.cluster.on_memory_round(source_op_id))
+                self.window_manager.on_memory_round(source_op_id))
 
     def _relay_idle_round_to_live_stream(self, op_id: int, patch) -> bool:
         if self.idle_policy.mode != "extend_stream":
             return False
         operation = self._ops[op_id]
         stream_id = operation.stream_id
-        if stream_id is None or not self.cluster.has_dynamic_stream(stream_id):
+        if (
+            stream_id is None
+            or not self.window_manager.has_dynamic_stream(stream_id)
+        ):
             return False
         global_round = self.stream_next_round.get(stream_id, 0) + 1
         self.stream_next_round[stream_id] = global_round
@@ -401,8 +408,10 @@ class Chip:
                 payload,
                 n_fragments=fragment_count,
             )
-            self.controller.relay_syndrome(relayed_payload,
-                                           self.cluster.on_syndrome_arrival)
+            self.controller.relay_syndrome(
+                relayed_payload,
+                self.window_manager.on_syndrome_arrival,
+            )
 
     def _start_released_successors_on_boundary(self, op_id: int, patch) -> None:
         if self.gates_start_on_round_boundaries:
@@ -422,7 +431,7 @@ class Chip:
         patch_record = self._resolved_patches[patch]
         geometry = patch_record.code_geometry
         if round_index % geometry.commit_round_count == 0:
-            self.cluster.submit_decode(
+            self.decode_service.submit_decode(
                 geometry.commit_round_count + geometry.buffer_round_count,
                 on_done=lambda: None,
                 code=geometry.code_name,

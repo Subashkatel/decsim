@@ -68,7 +68,7 @@ def _run(latency_us, rounds):
               code=SurfaceCodeModel(d=D),
               links=fixed_latency_link_config(),
               make_controller=_zero_link_controller,
-              make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl)],
+              make_metrics=lambda e, wm, dm, ch, f: [DecodeBacklog(wm, dm)],
           ), verbose=False)
     drain_rounds = (res.result.fully_done_ticks - res.result.chip_done_ticks) / us(ROUND_US)
     peak = res.result.metric_values()["decode_backlog"]["peak_rounds"]

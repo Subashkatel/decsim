@@ -187,6 +187,10 @@ class Engine:
             raise RuntimeError(
                 f"engine cannot run while {self._phase}"
             )
+        if until is not None and until < self.now:
+            raise ValueError(
+                f"run limit {until} is before current simulation time {self.now}"
+            )
         self._observe_metrics()
         while self._event_queue:
             next_event_time = self._event_queue[0].time

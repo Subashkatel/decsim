@@ -226,7 +226,7 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
         "repetition_code:memory",
         distance=3,
         rounds=6,
-        after_clifford_depolarization=0.01,
+        after_clifford_depolarization=0.05,
     )
     layers = 1 + max(
         int(coordinates[-1])
@@ -266,7 +266,8 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_representation=FaultRepresentation.GRAPHLIKE,
     )
-    first = exact_batches(7, 4)[0]
+    batches = exact_batches(103, 100)
+    first = batches[0]
     seed = 19
     result = decoder.run(first, seed)
 
@@ -292,7 +293,7 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
     assert set(model_ids) == {id(model) for model in decoder.window_models}
 
     assert decoder.run(first, seed) == result
-    decoder.run(exact_batches(7, 4)[1], seed + 1)
+    decoder.run(batches[1], seed + 1)
     assert counted.sampler_compiles == 3
     assert set(model_ids) == {id(model) for model in decoder.window_models}
 

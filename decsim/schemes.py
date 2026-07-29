@@ -25,9 +25,6 @@ class SlidingWindowScheme:
     """Serial commit and look-ahead buffer windows."""
 
     scheme_label = "sliding-window (serial commit/buffer chain)"
-    def run_manifest_config(self):
-        return {"kind": "sliding"}
-
     def plan_operation(
         self,
         op_id: int,
@@ -116,9 +113,6 @@ class NaiveOnlineScheme(SlidingWindowScheme):
 
     scheme_label = "naive online batch decode (no windowing)"
 
-    def run_manifest_config(self):
-        return {"kind": "naive_online"}
-
     def plan_operation(
         self,
         op_id: int,
@@ -149,9 +143,6 @@ class ParallelWindowScheme(SlidingWindowScheme):
     """Two-layer parallel windows with layer-B boundary dependencies."""
 
     scheme_label = "parallel A/B two-layer window (Skoric 2209.08552, Tan 2209.09219)"
-
-    def run_manifest_config(self):
-        return {"kind": "parallel"}
 
     def plan_operation(
         self,

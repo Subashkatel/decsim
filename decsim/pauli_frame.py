@@ -20,9 +20,6 @@ class PauliFrame:
         self.x: dict = {}
         self.z: dict = {}
 
-    def run_manifest_config(self):
-        return {"kind": "pauli_frame"}
-
     def accumulate(self, qubit, *, x: int = 0, z: int = 0) -> None:
         """XOR an X/Z correction into one qubit's frame (Pauli corrections commute)."""
         if x:

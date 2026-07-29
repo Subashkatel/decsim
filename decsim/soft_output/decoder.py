@@ -19,9 +19,8 @@ if TYPE_CHECKING:
 class SoftOutputDecoder:
     """Attach one configured metric's confidence without changing hard output.
 
-    ``metric_cls`` is the stable component-graph field name. Its value is a
-    configured factory instance declaring ``source``,
-    ``run_manifest_config()``, and ``from_window_model(model)``.
+    ``metric_cls`` is a configured factory instance declaring ``source`` and
+    ``from_window_model(model)``.
     """
 
     def __init__(self, base: "Decoder", metric_cls):
@@ -41,18 +40,8 @@ class SoftOutputDecoder:
             raise TypeError(
                 "configured metric factory must build from a window model"
             )
-        if not callable(getattr(metric_cls, "run_manifest_config", None)):
-            raise TypeError(
-                "configured metric factory must declare run configuration"
-            )
         self.base = base
         self.metric_cls = metric_cls
-
-    def run_manifest_config(self):
-        return {
-            "kind": "soft_output",
-            "metric_source": self.metric_cls.source.manifest_value(),
-        }
 
     def run_seed_children(self):
         """Expose the base decoder and configured confidence builder."""

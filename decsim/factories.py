@@ -177,9 +177,6 @@ class InfiniteFactory:
     def __init__(self, engine: Engine):
         self.engine = engine
 
-    def run_manifest_config(self):
-        return {"kind": "infinite"}
-
     def request(self, op_id: int, callback: Callable[[], None]) -> "Ticket":
         """Deliver instantly."""
         callback()
@@ -248,21 +245,6 @@ class DistillationFactory(_RandomSeedConsumer):
                 self.decode_service,
             ),
         )
-
-    def run_manifest_config(self):
-        return {
-            "kind": "single_level",
-            "num_units": self.num_units,
-            "cycle_ticks": self.cycle_ticks,
-            "corr_rounds": self.corr_rounds,
-            "n_corr": self.n_corr,
-            "return_ticks": self.return_ticks,
-            "success_probability": self.p_success,
-            "initial_store": self._initial_store,
-            "production": self.production,
-            "buffer_capacity": self.buffer_capacity,
-            "trace_capacity": 4096,
-        }
 
     def _init_runtime_state(self, initial_store: int) -> None:
         """Initialize queues, counters, and bounded trace storage."""
@@ -479,39 +461,6 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
                 self.decode_service,
             ),
         )
-
-    def run_manifest_config(self):
-        return {
-            "kind": "multi_level",
-            "levels": [
-                {
-                    "units": level.units,
-                    "distance": level.d,
-                    "physical_time_multiplier": level.O,
-                    "success_probability": level.P,
-                }
-                for level in self.levels
-            ],
-            "window_ticks": self._window_ticks,
-            "input_states_per_round": self.M,
-            "output_states_per_round": self.N,
-            "preparation_units": self.prep_units,
-            "preparation_steps": self._prep_O,
-            "preparation_distance": self._prep_d,
-            "preparation_success_probability": self.prep_P,
-            "preparation_time_ticks": self.prep_time,
-            "level_timing": [
-                {
-                    "level": level,
-                    "round_time_ticks": self.round_time[level],
-                }
-                for level in range(1, self.L + 1)
-            ],
-            "corr_rounds": self.corr_rounds,
-            "n_corr": self.n_corr,
-            "production": self.production,
-            "buffer_capacity": self.buffer_capacity,
-        }
 
     def _init_multilevel_state(self, W_ticks: int) -> None:
         """Initialize buffers, busy counts, counters, and round times."""

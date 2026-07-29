@@ -72,31 +72,6 @@ class StimDevice:
             "int, str, or recursive tuple identities"
         )
 
-    def run_manifest_config(self):
-        rows = []
-        for shot_key, detector_rounds in (
-            self._detector_rounds_override.items()
-        ):
-            identity = self._manifest_identity(shot_key)
-            rows.append((
-                self._manifest_identity_bytes(shot_key),
-                {
-                    "shot_key": identity,
-                    "detector_rounds": [
-                        {"detector": detector, "round": round_index}
-                        for detector, round_index in sorted(
-                            detector_rounds.items()
-                        )
-                    ],
-                },
-            ))
-        rows.sort(key=lambda item: item[0])
-        return {
-            "kind": "stim",
-            "operation_circuit_scope": self.operation_circuit_scope,
-            "detector_rounds": [row for _key, row in rows],
-        }
-
     def __init__(
         self,
         seed: Optional[Integral] = None,

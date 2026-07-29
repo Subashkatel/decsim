@@ -321,7 +321,7 @@ def _switching_run(*, low_confidence_probability, run_both_at_once=False,
 
 
 def _path_counts(completed) -> dict:
-    traffic = completed.result.link_traffic.to_json_value()
+    traffic = completed.result.link_traffic
     return {
         edge["path"]: edge["counters"]["transfer_count"]
         for edge in traffic["semantic_edges"]
@@ -363,7 +363,7 @@ def test_double_window_reserves_wsd_at_decision_and_csd_when_slab_exists():
         rounds=14,
         probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0,
     )
-    transfers = completed.result.link_traffic.to_json_value()["transfers"]
+    transfers = completed.result.link_traffic["transfers"]
     selected = [
         transfer
         for transfer in transfers
@@ -410,7 +410,7 @@ def test_serial_wsd_and_csd_contend_when_bound_to_one_physical_fifo():
         low_confidence_probability=1.0,
         links=config,
     )
-    transfers = completed.result.link_traffic.to_json_value()["transfers"]
+    transfers = completed.result.link_traffic["transfers"]
     wsd, csd = [
         transfer
         for transfer in transfers

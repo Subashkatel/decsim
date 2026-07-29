@@ -196,7 +196,7 @@ def test_factory_correction_service_presence_matches_correction_count(
     assert construct(None, 0).run_seed_children() == ()
 
 
-def test_single_level_factory_declares_immutable_effective_configuration():
+def test_single_level_factory_delivers_initial_stock_immediately():
     engine = Engine(verbose=False)
     factory = DistillationFactory(
         engine,
@@ -212,26 +212,10 @@ def test_single_level_factory_declares_immutable_effective_configuration():
         buffer_capacity=4,
     )
 
-    expected = {
-        "kind": "single_level",
-        "num_units": 2,
-        "cycle_ticks": 17,
-        "corr_rounds": 3,
-        "n_corr": 0,
-        "return_ticks": 5,
-        "success_probability": 1.0,
-        "initial_store": 1,
-        "production": "demand",
-        "buffer_capacity": 4,
-        "trace_capacity": 4096,
-    }
-    assert factory.run_manifest_config() == expected
-
     delivered = []
     factory.request(0, lambda: delivered.append(engine.now))
     engine.run()
     assert delivered == [0]
-    assert factory.run_manifest_config() == expected
 
 
 @pytest.mark.parametrize(
@@ -250,7 +234,7 @@ def test_single_level_factory_declares_immutable_effective_configuration():
         ("production", "free"),
     ],
 )
-def test_single_level_factory_rejects_invalid_manifest_domains(field, value):
+def test_single_level_factory_rejects_invalid_values(field, value):
     kwargs = {
         "num_units": 1,
         "cycle_ticks": 1,
@@ -269,7 +253,7 @@ def test_single_level_factory_rejects_invalid_manifest_domains(field, value):
         DistillationFactory(Engine(verbose=False), **kwargs)
 
 
-def test_multi_level_factory_declares_timing_and_yield_without_aliases():
+def test_multi_level_factory_copies_levels_and_resolves_timing():
     engine = Engine(verbose=False)
     caller_levels = [
         DistillLevel(units=2, d=3, O=5, P=1),
@@ -292,72 +276,35 @@ def test_multi_level_factory_declares_timing_and_yield_without_aliases():
         buffer_capacity=5,
     )
 
-    expected = {
-        "kind": "multi_level",
-        "levels": [
-            {
-                "units": 2,
-                "distance": 3,
-                "physical_time_multiplier": 5,
-                "success_probability": 1.0,
-            },
-            {
-                "units": 1,
-                "distance": 7,
-                "physical_time_multiplier": 2,
-                "success_probability": 0.75,
-            },
-        ],
-        "window_ticks": 11,
-        "input_states_per_round": 13,
-        "output_states_per_round": 2,
-        "preparation_units": 4,
-        "preparation_steps": 6,
-        "preparation_distance": 3,
-        "preparation_success_probability": 0.5,
-        "preparation_time_ticks": 198,
-        "level_timing": [
-            {"level": 1, "round_time_ticks": 165},
-            {"level": 2, "round_time_ticks": 154},
-        ],
-        "corr_rounds": 9,
-        "n_corr": 0,
-        "production": "demand",
-        "buffer_capacity": 5,
-    }
-    assert factory.run_manifest_config() == expected
-    assert "output_count" not in repr(factory.run_manifest_config())
+    assert factory.round_time == {1: 165, 2: 154}
+    assert factory.N == 2
 
     caller_levels[0].O = 99
     caller_levels[1].P = 0
-    assert factory.run_manifest_config() == expected
+    assert factory.levels[0].O == 5
+    assert factory.levels[1].P == 0.75
     assert factory.round_time == {1: 165, 2: 154}
 
 
 def test_multi_level_O_changes_timing_while_N_changes_only_yield():
     def configuration(*, multiplier, output_states):
-        return MultiLevelDistillationFactory(
+        factory = MultiLevelDistillationFactory(
             Engine(verbose=False),
             [DistillLevel(units=1, d=3, O=multiplier)],
             W_ticks=7,
             M=5,
             N=output_states,
-        ).run_manifest_config()
+        )
+        return factory.round_time, factory.N
 
     baseline = configuration(multiplier=2, output_states=1)
     timing_changed = configuration(multiplier=4, output_states=1)
     yield_changed = configuration(multiplier=2, output_states=3)
 
-    assert timing_changed["level_timing"] != baseline["level_timing"]
-    assert (
-        timing_changed["output_states_per_round"]
-        == baseline["output_states_per_round"]
-    )
-    assert yield_changed["level_timing"] == baseline["level_timing"]
-    assert (
-        yield_changed["output_states_per_round"]
-        != baseline["output_states_per_round"]
-    )
+    assert timing_changed[0] != baseline[0]
+    assert timing_changed[1] == baseline[1]
+    assert yield_changed[0] == baseline[0]
+    assert yield_changed[1] != baseline[1]
 
 
 def test_continuous_requires_capacity():

@@ -27,9 +27,6 @@ class PyMatchingDecoder:
         self.latency_model = latency_model
         self._matchings: dict = {}
 
-    def run_manifest_config(self):
-        return {"kind": "pymatching", "weighted": True}
-
     def run_seed_children(self):
         """Expose the latency model that controls simulated service time."""
         return (
@@ -85,9 +82,6 @@ class UnweightedPyMatchingDecoder(PyMatchingDecoder):
     A deliberately COARSE weak tier (a hardware matcher without weighted-edge
     support): at circuit-level noise it decodes measurably worse than
     weighted MWPM because hook-error paths are no longer penalized."""
-
-    def run_manifest_config(self):
-        return {"kind": "pymatching", "weighted": False}
 
     def _weights_for(self, model):
         import numpy as np

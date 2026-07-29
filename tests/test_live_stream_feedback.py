@@ -106,24 +106,18 @@ def test_feedback_idle_rounds_extend_the_live_stream():
     cluster = result.cluster
     chip = result.chip
     caller_first, caller_second = operations
-    operation_records = {
-        int(record["operation_id"]["value"]): record
-        for record in result.manifest.to_json_value()["operations"]
-    }
-    first = operation_records[caller_first.id]
-    second = operation_records[caller_second.id]
+    offsets = result.result.stream_offsets()
+    first_offset = offsets[caller_first.id]
+    second_offset = offsets[caller_second.id]
 
     assert chip.done_bodies == {caller_first.id, caller_second.id}
     assert caller_first.stream_offset is None
     assert caller_second.stream_offset is None
-    assert first["final_resolved_stream_offset"] == 0
-    assert second["final_resolved_stream_offset"] is not None
-    assert (
-        second["final_resolved_stream_offset"]
-        > rounds[caller_first.id]
-    )
+    assert first_offset == 0
+    assert second_offset is not None
+    assert second_offset > rounds[caller_first.id]
     assert cluster.rounds_arrived[stream.id] == (
-        second["final_resolved_stream_offset"] + rounds[caller_second.id]
+        second_offset + rounds[caller_second.id]
     )
     assert cluster.committed_stream_round_count(stream.id) == cluster.rounds_arrived[stream.id]
     assert cluster.window_count[stream.id] > 1
@@ -313,22 +307,15 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
     cluster = result.cluster
     chip = result.chip
     caller_first, caller_second = operations
-    operation_records = {
-        int(record["operation_id"]["value"]): record
-        for record in result.manifest.to_json_value()["operations"]
-    }
-    second = operation_records[caller_second.id]
+    second_offset = result.result.stream_offsets()[caller_second.id]
 
     assert chip.done_bodies == {caller_first.id, caller_second.id}
     assert caller_first.stream_offset is None
     assert caller_second.stream_offset is None
-    assert second["final_resolved_stream_offset"] is not None
-    assert (
-        second["final_resolved_stream_offset"]
-        > rounds[caller_first.id]
-    )
+    assert second_offset is not None
+    assert second_offset > rounds[caller_first.id]
     assert cluster.rounds_arrived[stream.id] == (
-        second["final_resolved_stream_offset"] + rounds[caller_second.id]
+        second_offset + rounds[caller_second.id]
     )
     assert cluster.rounds_arrived[stream.id] == stream_round_count
     assert cluster.committed_stream_round_count(stream.id) == cluster.rounds_arrived[stream.id]

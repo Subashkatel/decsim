@@ -21,9 +21,7 @@ def test_syndrome_round_matches_todays_payload_shape():
         SyndromePayload(operation_id=1, patch_id=0, round_index=1, n_fragments=0)
 
 
-def test_stable_identity_bytes_define_the_manifest_compatible_total_order():
-    from decsim.run_spec import StableIdentityRecord
-
+def test_stable_identity_bytes_define_a_reproducible_total_order():
     def independent_bytes(identity):
         if type(identity) is int:
             payload = str(identity).encode("ascii")
@@ -60,13 +58,6 @@ def test_stable_identity_bytes_define_the_manifest_compatible_total_order():
         identities,
         key=independent_bytes,
     )
-    assert all(
-        StableIdentityRecord.from_identity(identity).canonical_bytes()
-        == expected[identity]
-        for identity in identities
-    )
-
-
 @pytest.mark.parametrize("identity", [True, 1.0, "\ud800", (1, object())])
 def test_stable_identity_bytes_reject_values_outside_the_exact_domain(identity):
     with pytest.raises(TypeError, match="stable identities"):

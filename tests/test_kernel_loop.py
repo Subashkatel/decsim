@@ -1,5 +1,4 @@
 """End-to-end simulate() smoke tests (real engine, real parts, fake decoder)."""
-import hashlib
 
 import pytest
 
@@ -41,7 +40,7 @@ def test_completed_run_replaces_the_ambiguous_world_name():
     assert not hasattr(run_spec_module, "World")
 
 
-def test_completed_run_manifest_and_result_are_canonical_and_replayable():
+def test_completed_run_is_replayable():
     def run():
         return simulate(RunSpec(
             ops=_two_op_clifford(),
@@ -54,13 +53,7 @@ def test_completed_run_manifest_and_result_are_canonical_and_replayable():
     first = run()
     second = run()
 
-    assert first.result.canonical_json_bytes() == \
-        second.result.canonical_json_bytes()
-    assert first.manifest.to_json() == second.manifest.to_json()
-    assert first.manifest.primary_result_sha256 == \
-        hashlib.sha256(
-            first.result.canonical_json_bytes(),
-        ).hexdigest()
+    assert first.result == second.result
 
 
 def test_simulate_blocked_t_reaction_path():

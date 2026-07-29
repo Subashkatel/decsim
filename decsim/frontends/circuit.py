@@ -120,9 +120,6 @@ class CircuitFrontend:
         self.operations = operations
         self.qubit_to_patch = qubit_to_patch
 
-    def run_manifest_config(self):
-        return {"kind": "operation_list"}
-
     def build(self) -> list[Operation]:
         """Return operations with patch-order dependencies filled in."""
         return _wire_circuit(self.operations, self.qubit_to_patch)
@@ -214,9 +211,6 @@ class SurgeryIRFrontend:
         """Store source text and the optional qubit-to-patch map."""
         self.text = text
         self.qubit_to_patch = qubit_to_patch
-
-    def run_manifest_config(self):
-        return {"kind": "surgery_ir"}
 
     def build(self) -> list[Operation]:
         """Parse text gates and lower them into wired operations."""

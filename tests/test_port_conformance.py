@@ -138,11 +138,6 @@ def test_strategy_services_satisfy_their_seam(completed_run):
 def test_strong_backlog_is_global_and_has_no_pool_compatibility_argument(
     completed_run,
 ):
-    metric = StrongDecoderBacklog(completed_run.cluster)
-    assert metric.run_manifest_config() == {
-        "kind": "strong_backlog",
-        "result_schema_version": 1,
-    }
     with pytest.raises(TypeError, match="unexpected keyword argument 'pool'"):
         StrongDecoderBacklog(completed_run.cluster, pool="strong")
 

@@ -80,13 +80,6 @@ class RunSeedComposite(Protocol):
     def run_seed_children(self) -> Iterable[RunSeedChild]: ...
 
 
-@runtime_checkable
-class RunManifestPart(Protocol):
-    """A component that declares JSON-safe effective configuration."""
-
-    def run_manifest_config(self) -> Mapping[str, Any]: ...
-
-
 # --------------------------------------------------------------- strategy seam
 
 @dataclass

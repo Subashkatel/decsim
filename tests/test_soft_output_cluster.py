@@ -247,18 +247,6 @@ def test_union_find_decoder_publishes_actual_cluster_source_and_manifest():
         gap=0.0,
         source=UNION_FIND_CLUSTER_GAP_SOURCE,
     )
-    assert decoder.run_manifest_config() == {
-        "algorithm": "union_find",
-        "growth_schedule": "meister_uniform_fair",
-        "edge_geometry": "unit_graph_edges",
-        "cluster_origin": "union_find_decoder",
-        "correction": "completed_growth_edge_peeling",
-        "confidence_method": "cluster_gap",
-        "gap_units": "graph_edges",
-        "graph_domain": "one_or_two_detectors",
-        "confidence_observable_count": 1,
-        "logical_search": "global_odd_parity_closed_walk",
-    }
     child = decoder.run_seed_children()
     assert len(child) == 1
     assert child[0].relative_path[0].value == "latency_model"

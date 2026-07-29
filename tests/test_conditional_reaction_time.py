@@ -43,7 +43,7 @@ def test_reaction_time_is_pure_wait_in_rounds():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip),
             BacklogTrajectory(chip),
         ],
@@ -67,7 +67,7 @@ def test_reaction_time_uses_all_conditionals_as_denominator():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
              ), verbose=False)
@@ -89,7 +89,7 @@ def test_reaction_time_marks_threshold_divergence():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip, divergence_threshold_rounds=0.5)
         ],
              ), verbose=False)
@@ -118,7 +118,7 @@ def test_reaction_time_marks_idle_cap_failure():
                  scheme=NaiveOnlineScheme(),
                  decoder=_FixedLatency(50.0),
                  max_idle_rounds=1,
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
              ), verbose=False)
@@ -145,7 +145,7 @@ def test_final_non_clifford_decode_does_not_return_to_chip_by_default():
                  decoder=PresetLatencyDecoder(2.0),
              ), verbose=False)
 
-    assert result.cluster.windows[(0, 0)].t_done is not None
+    assert result.window_manager.windows[(0, 0)].t_done is not None
     assert result.chip.result_return_time_by_operation == {}
     assert not any("DISPATCH result return" in line
                    for line in result.engine.log_lines)
@@ -175,7 +175,7 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
     controller = result.controller
     window_done = max(
         window.t_done
-        for key, window in result.cluster.windows.items()
+        for key, window in result.window_manager.windows.items()
         if key[0] == 0
     )
     expected_return = (
@@ -212,7 +212,7 @@ def test_naive_batch_decode_label_shows_absorbed_idle_rounds():
                  max_idle_rounds=1000,
              ), verbose=False)
 
-    window = result.cluster.windows[(1, 0)]
+    window = result.window_manager.windows[(1, 0)]
     assert window.n_rounds == 27
     assert window.batched_preceding_idle_round_count > 0
     assert any("T1 [whole op," in line and "idle + 27 body" in line

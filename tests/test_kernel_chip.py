@@ -110,7 +110,8 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
         buffer_floor_override_active=False,
     )
     gate = Chip(eng, source=_Source(eng, cluster),
-                        controller=_Controller(), cluster=cluster,
+                        controller=_Controller(), window_manager=cluster,
+                        decode_service=cluster,
                         factory=factory, round_ticks=ROUND,
                         code_geometry=geometry,
                         resolved_operations=tuple(

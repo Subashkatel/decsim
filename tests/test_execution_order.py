@@ -82,11 +82,10 @@ def test_brickwork_with_t_keeps_program_order():
 def test_unwired_conflicting_ops_fail_loudly():
     """The busy_qubits invariant: ops sharing a qubit WITHOUT a dependency edge
     (someone skipped _wire_circuit) must raise, not silently serialize or overlap.
-    Enforced statically at build time (_validate_program_order), so it fails
-    deterministically — not only when the schedule makes the holders collide."""
+    Enforced by the chip's live resource owner before either operation starts."""
     ops = [Operation(0, "A:X(q0)", (0,), clifford=True),
            Operation(1, "B:X(q0)", (0,), clifford=True)]   # deliberately NOT wired
-    with pytest.raises(ValueError, match="share"):
+    with pytest.raises(RuntimeError, match="share"):
         simulate(RunSpec(ops=ops, num_units=1, d=3, rounds_policy=FixedRounds(11),
                          decoder=PresetLatencyDecoder(1.0)), verbose=False)
 

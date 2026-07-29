@@ -66,7 +66,7 @@ def _run_engine_shot(circuit, device, decoder, *, seed):
               decoder=decoder,
               seed=seed,
           ), verbose=False)
-    return res.cluster.op_results[1]
+    return res.window_manager.op_results[1]
 
 
 def test_window_adapter_preserves_every_logical_observable_row():
@@ -142,7 +142,7 @@ def test_same_seed_double_run_is_bit_identical():
                       decoder=PyMatchingDecoder(_ZeroLatency()),
                       seed=100 + shot,
                   ), verbose=False)
-            results.append((res.cluster.op_results[1],
+            results.append((res.window_manager.op_results[1],
                             res.result.chip_done_ticks, res.result.fully_done_ticks,
                             device._dets[1].tobytes()))
         return results
@@ -247,7 +247,7 @@ def test_parallel_engine_matches_global_decode_on_real_syndromes():
         )
         syndrome = device._dets[1]
         nonzero_syndrome_count += int(np.any(syndrome))
-        assert result.cluster.op_results[1] == (
+        assert result.window_manager.op_results[1] == (
             int(global_matching.decode(syndrome)[0]),
         )
 
@@ -355,14 +355,14 @@ def test_blocked_successor_waits_for_real_pymatching_result():
     # every window was decoded before op0's result integrated, and the
     # integrated value is the XOR-accumulated per-window logical value
     assert set(decoder.seen) >= {(0, k) for k in range(window_count)}
-    assert res.cluster.op_results[0] == decoder.accumulated[0]
+    assert res.window_manager.op_results[0] == decoder.accumulated[0]
 
     global_m = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
-    assert res.cluster.op_results[0] == (
+    assert res.window_manager.op_results[0] == (
         int(global_m.decode(device._dets[0])[0]),
     )
-    assert res.chip.decode_release_time[1] == res.cluster.windows[(0, window_count - 1)].t_done
+    assert res.chip.decode_release_time[1] == res.window_manager.windows[(0, window_count - 1)].t_done
     assert res.chip.decode_release_time[1] <= res.chip.body_done_time[1]
 
 
@@ -379,5 +379,5 @@ def test_timing_only_ops_still_run():
               scheme=SlidingWindowScheme(),
               decoder=PyMatchingDecoder(_ZeroLatency()),
           ), verbose=False)
-    assert res.cluster.op_results == {}        # no logical value, but it completed
-    assert len(res.cluster.committed_windows) == res.cluster.total_windows
+    assert res.window_manager.op_results == {}        # no logical value, but it completed
+    assert len(res.window_manager.committed_windows) == res.window_manager.total_windows

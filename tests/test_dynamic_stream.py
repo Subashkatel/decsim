@@ -66,7 +66,7 @@ def test_runtime_built_windows_equal_global_per_shot():
             device,
             seed=11 + shot,
         )
-        pe = res.cluster.op_results[stream_op.id][0]
+        pe = res.window_manager.op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         t = int(device._truth[stream_op.id][0])
         agree += (pe == pg); eng_err += (pe != t); glob_err += (pg != t)
@@ -86,7 +86,7 @@ def test_runtime_window_count_and_geometry_match_static_plan():
         StimDevice(),
         seed=2,
     )
-    cluster = res.cluster
+    cluster = res.window_manager
     static = SlidingWindowScheme().plan_operation(
         0,
         R,
@@ -133,5 +133,5 @@ def test_dynamic_matches_static_decode_unit_per_shot():
                  decoder=PyMatchingDecoder(_ZeroLatency()),
                  seed=9 + shot,
              ), verbose=False)
-        assert rd.cluster.op_results[stream_d.id] == \
-               rs.cluster.op_results[stream_s.id]
+        assert rd.window_manager.op_results[stream_d.id] == \
+               rs.window_manager.op_results[stream_s.id]

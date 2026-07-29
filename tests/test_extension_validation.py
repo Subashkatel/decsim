@@ -331,7 +331,7 @@ def test_run_seed_rejects_non_integral_values_before_build(seed):
         TypeError,
         match=r"seed.*64-bit unsigned integer or None",
     ):
-        spec.validate()
+        spec.build()
 
 
 @pytest.mark.parametrize("seed", [-1, 1 << 64])
@@ -342,7 +342,7 @@ def test_run_seed_rejects_values_outside_unsigned_64_bit_domain(seed):
         ValueError,
         match=r"seed.*0.*2\*\*64",
     ):
-        spec.validate()
+        spec.build()
 
 
 @pytest.mark.parametrize(
@@ -350,7 +350,7 @@ def test_run_seed_rejects_values_outside_unsigned_64_bit_domain(seed):
     [None, 0, (1 << 64) - 1, np.int64(7), np.uint64(7)],
 )
 def test_run_seed_accepts_none_and_unsigned_integral_values(seed):
-    RunSpec(ops=[], seed=seed).validate()
+    RunSpec(ops=[], seed=seed).build()
 
 
 def test_plain_class_controller_provider_is_accepted_without_instantiation():
@@ -359,7 +359,7 @@ def test_plain_class_controller_provider_is_accepted_without_instantiation():
         make_controller=PlainControllerProvider,
     )
 
-    spec.validate()
+    spec.build()
 
 
 def test_router_owns_the_frozen_hyperedge_requirement():
@@ -421,7 +421,7 @@ def test_syndrome_bit_device_must_share_the_exact_resolved_code():
         decoder=StaticDecoder(),
         device=SyndromeBitDevice(canonical_code),
     ).build()
-    assert completed.planning.code is canonical_code
+    assert completed.window_manager._code_geometry.distance == canonical_code.distance
 
 
 @pytest.mark.parametrize("companion", ["decoder", "decoders"])
@@ -439,7 +439,7 @@ def test_supplied_router_is_exclusive_with_decoder_topology(companion):
             ops=[],
             router=CodeRouter(decoder),
             **kwargs,
-        ).validate()
+        ).build()
 
 
 def test_planning_view_fields_are_exactly_operation_fields_without_circuit():
@@ -471,56 +471,6 @@ def test_all_operation_consuming_planning_ports_receive_frozen_views():
     assert rounds.calls == 1
     assert scheme.plan_calls == [(0, 3, 3, 3)]
     assert scheme.data_complete_calls > 0
-
-
-@pytest.mark.parametrize(
-    "scheme_kind",
-    ["naive", "parallel", "sliding_subclass", "custom"],
-)
-def test_non_sliding_weak_keepup_rejects_before_behavior_entry(scheme_kind):
-    class SlidingSubclass(SlidingWindowScheme):
-        pass
-
-    class UnenteredLayout(UniformLayout):
-        def __init__(self):
-            super().__init__(SurfaceCodeModel(3))
-            self.calls = []
-
-        def codes(self):
-            self.calls.append("codes")
-            raise AssertionError("layout behavior was entered")
-
-    schemes = {
-        "naive": NaiveOnlineScheme(),
-        "parallel": ParallelWindowScheme(),
-        "sliding_subclass": SlidingSubclass(),
-        "custom": UnenteredCustomScheme(),
-    }
-    scheme = schemes[scheme_kind]
-    frontend = StaticFrontend([Operation(7, "memory", (0,))])
-    layout = UnenteredLayout()
-    provider_calls = []
-
-    with pytest.raises(ValueError, match="weak_keepup_ratio.*Sliding"):
-        RunSpec(
-            frontend=frontend,
-            layout=layout,
-            scheme=scheme,
-            strategy=Switching(
-                expected_source=SAMPLED_CONFIDENCE_SOURCE,
-                confidence_threshold=0.5,
-                weak_keepup_ratio=0.7,
-            ),
-            make_controller=lambda engine, links: provider_calls.append(
-                (engine, links)
-            ),
-        ).build()
-
-    assert frontend.calls == 0
-    assert layout.calls == []
-    assert provider_calls == []
-    if isinstance(scheme, UnenteredCustomScheme):
-        assert scheme.calls == []
 
 
 @pytest.mark.parametrize(
@@ -573,7 +523,8 @@ def test_static_decode_plan_selection_distinguishes_none_from_empty(
         ops=[],
         decode_ops=decode_operations,
         strategy=strategy,
-    ).validate()
+        decoder=StaticDecoder(),
+    ).build()
 
     assert strategy.selected_values == [expected_selected]
 
@@ -611,7 +562,7 @@ def test_device_without_circuit_scope_rejects_during_validation():
         ValueError,
         match=r"device operation_circuit_scope.*none.*per_operation",
     ):
-        spec.validate()
+        spec.build()
 
 
 def test_active_custom_circuit_rejects_before_device_entry():
@@ -659,6 +610,8 @@ def test_run_root_binds_nested_consumers_by_stable_semantic_path():
 
 def test_shared_seed_consumer_is_bound_once_by_its_first_semantic_path():
     from decsim.decoders import CodeRouter
+    from decsim.message import RunSeedPathSegment
+    from decsim.seeding import derive_component_seed
 
     shared = SeedRecordingDecoder()
     RunSpec(
@@ -669,6 +622,11 @@ def test_shared_seed_consumer_is_bound_once_by_its_first_semantic_path():
 
     assert len(shared.reserved) == 1
     assert shared.committed == shared.reserved
+    assert shared.committed[0].proposed_seed == derive_component_seed(7, (
+        RunSeedPathSegment("field", "decoder_router"),
+        RunSeedPathSegment("field", "by_code"),
+        RunSeedPathSegment("string_key", "surface"),
+    ))
 
 
 def test_surrogate_code_units_are_not_stable_identities():
@@ -821,25 +779,25 @@ def test_completed_diagnostic_handles_do_not_expose_executable_operations():
 
     assert not hasattr(completed.chip, "ops")
     assert not hasattr(completed.window_manager, "ops")
-    assert not hasattr(completed.cluster, "ops")
+    assert not hasattr(completed.decoder_manager, "ops")
 
 
-def test_factory_decode_service_is_the_fixed_cluster_alias():
+def test_factory_decode_service_is_the_run_decoder_manager():
     from decsim.factories import DistillationFactory
 
     completed = RunSpec(
         ops=[],
         decoder=StaticDecoder(),
-        make_factory=lambda engine, cluster: DistillationFactory(
+        make_factory=lambda engine, decoder_manager: DistillationFactory(
             engine,
             num_units=1,
             cycle_ticks=1,
-            decode_service=cluster,
+            decode_service=decoder_manager,
             corr_rounds=1,
             n_corr=1,
         ),
     ).build()
-    assert completed.factory.decode_service is completed.cluster
+    assert completed.factory.decode_service is completed.decoder_manager
 
 
 def test_factory_rejects_a_foreign_correction_decode_service():
@@ -848,7 +806,7 @@ def test_factory_rejects_a_foreign_correction_decode_service():
     foreign_service = object()
     with pytest.raises(
         ValueError,
-        match=r"DistillationFactory.*decode_service.*run-owned cluster",
+        match=r"DistillationFactory.*decode_service.*run-owned",
     ):
         RunSpec(
             ops=[],
@@ -974,7 +932,7 @@ def test_metric_cannot_schedule_work_after_primary_drain():
     spec = RunSpec(
         ops=[],
         decoder=StaticDecoder(),
-        make_metrics=lambda engine, _cluster, _chip, _factory: [
+        make_metrics=lambda engine, _wm, _dm, _chip, _factory: [
             SchedulingMetric(engine),
         ],
     )
@@ -1110,7 +1068,7 @@ def test_run_spec_rejects_multiple_explicit_code_sources(
         ValueError,
         match=rf"multiple code sources.*{first_field}.*{second_field}",
     ):
-        spec.validate()
+        spec.build()
 
 
 @pytest.mark.parametrize("operation_source", [
@@ -1199,31 +1157,7 @@ def test_layout_must_declare_exactly_one_resolved_code(declared_codes):
         ValueError,
         match=rf"layout.*exactly one.*got {len(declared_codes)}",
     ):
-        RunSpec(ops=[], layout=layout).validate()
-
-
-def test_layout_selection_is_validated_before_engine_construction(monkeypatch):
-    declared_code = SurfaceCodeModel(d=3)
-    selected_code = SurfaceCodeModel(d=5)
-    layout = SelectorLayout(
-        declared_code,
-        operation_code=selected_code,
-    )
-
-    def fail_if_engine_is_constructed(*args, **kwargs):
-        raise AssertionError("explicit validation must not construct an engine")
-
-    monkeypatch.setattr(
-        "decsim.engine.Engine",
-        fail_if_engine_is_constructed,
-    )
-
-    with pytest.raises(ValueError, match=r"layout.*operation 21"):
-        RunSpec(
-            ops=[Operation(21, "invalid selection", (0,))],
-            layout=layout,
-            decoder=StaticDecoder(),
-        ).validate()
+        RunSpec(ops=[], layout=layout).build()
 
 
 def test_layout_selection_failure_invalidates_the_root_engine(monkeypatch):
@@ -1277,23 +1211,6 @@ def test_factory_builder_result_must_use_the_run_engine():
     assert len(run_engines) == 1
     assert run_engines[0] is not foreign_engine
     assert run_engines[0]._event_queue == []
-
-
-def test_default_build_exposes_one_resolved_planning_identity():
-    completed_run = RunSpec(
-        ops=[Operation(0, "memory", (0,))],
-        decoder=StaticDecoder(),
-    ).build()
-
-    assert completed_run.planning.code.distance == 3
-    assert completed_run.window_manager.scheme is completed_run.planning.scheme
-    assert not hasattr(completed_run.window_manager, "code")
-    assert not hasattr(completed_run.window_manager, "layout")
-    assert not hasattr(completed_run.window_manager, "rounds_policy")
-    assert not hasattr(completed_run.cluster, "planner")
-    assert not hasattr(completed_run.cluster, "strategy")
-    assert not hasattr(completed_run.cluster, "prepare")
-    assert not hasattr(completed_run.cluster, "build_windows")
 
 
 def test_legacy_boundary_policy_defaults_to_non_speculative_delivery():

@@ -35,15 +35,17 @@ def t_then_blocked_t():
     ]).build()
 
 
-def _full_metrics(engine, cluster, chip, factory):
-    return [DecoderUtilization(cluster), ReadyQueueStats(cluster),
-            WindowLatencyBreakdown(cluster), DecodeBacklog(cluster),
+def _full_metrics(engine, window_manager, decoder_manager, chip, factory):
+    return [DecoderUtilization(decoder_manager), ReadyQueueStats(decoder_manager),
+            WindowLatencyBreakdown(window_manager),
+            DecodeBacklog(window_manager, decoder_manager),
             BacklogTrajectory(chip), ConditionalReactionTime(chip)]
 
 
-def _switch_metrics(engine, cluster, chip, factory):
-    return _full_metrics(engine, cluster, chip, factory) + [
-        StrongDecoderBacklog(cluster)]
+def _switch_metrics(engine, window_manager, decoder_manager, chip, factory):
+    return _full_metrics(
+        engine, window_manager, decoder_manager, chip, factory
+    ) + [StrongDecoderBacklog(window_manager, decoder_manager)]
 
 
 #==================================================================
@@ -114,8 +116,8 @@ def test_reaction_view_populated_by_real_run():
 
 
 def test_backlog_window_truth_strong_views_populated_by_real_run():
-    def with_strong(engine, cluster, chip, factory):
-        return [StrongDecoderBacklog(cluster)]
+    def with_strong(engine, window_manager, decoder_manager, chip, factory):
+        return [StrongDecoderBacklog(window_manager, decoder_manager)]
 
     weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.6)
     res = simulate(RunSpec(ops=cnot_plus_two_t_circuit(), d=3,
@@ -125,25 +127,26 @@ def test_backlog_window_truth_strong_views_populated_by_real_run():
                            unit_pools={"default": 1, "strong": 1},
                            make_metrics=with_strong,
                            seed=SEED))
-    cluster = res.cluster
+    window_manager = res.window_manager
+    decoder_manager = res.decoder_manager
 
-    util = utilization_view(cluster)
+    util = utilization_view(decoder_manager)
     assert util.total_units == 2 and util.busy_units == 0     # end of run: idle
     assert dict((p, (b, t)) for p, b, t in util.per_pool) == {
         "default": (0, 1), "strong": (0, 1)}
 
-    backlog = backlog_view(cluster)
+    backlog = backlog_view(window_manager, decoder_manager)
     assert backlog.total_rounds == sum(w for _, w in backlog.per_op_rounds)
     assert backlog.total_rounds == sum(w for _, w in backlog.per_patch_rounds)
     assert dict(backlog.per_lane)[""] == 0                    # queues drained
 
-    latency = window_latency_view(cluster)
-    assert len(latency.rows) == cluster.total_windows
+    latency = window_latency_view(window_manager)
+    assert len(latency.rows) == window_manager.total_windows
     for row in latency.rows:
         assert row.total == (row.buffer_fill + row.dep_block
                              + row.queue_wait + row.service)
 
-    strong = strong_work_view(cluster)
+    strong = strong_work_view(window_manager, decoder_manager)
     assert strong.total_jobs == 0
     assert strong.total_full_input_rounds == 0
 
@@ -181,4 +184,4 @@ def test_runspec_default_resolves_gate_rounds():
     spec = RunSpec(ops=t_then_blocked_t(), decoder=PerRoundDecoder(0.5))
     assert spec.rounds_policy is None          # RunSpec resolves in build()
     completed_run = spec.build()
-    assert isinstance(completed_run.planning.rounds_policy, GateRounds)
+    assert completed_run.window_manager._resolved_operations[0].round_count == 3

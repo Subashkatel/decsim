@@ -49,7 +49,7 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
                  decoder=PresetLatencyDecoder(2.0),
                  links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
              ), verbose=False)
@@ -57,7 +57,7 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
     rows = _reaction_rows(result)
     assert len(rows) == 1
     assert rows[0]["wait_rounds"] == 5.0
-    assert result.cluster.memory_rounds[0] >= 3
+    assert result.window_manager.memory_rounds[0] >= 3
 
 
 def test_measurement_closed_boundary_removes_only_static_buffer_wait():
@@ -72,7 +72,7 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
                  decoder=PresetLatencyDecoder(2.0),
                  links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
                  feedback_boundary_mode="measurement_closed",
@@ -81,7 +81,7 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
     rows = _reaction_rows(result)
     assert len(rows) == 1
     assert rows[0]["wait_rounds"] == 2.0
-    assert result.cluster.memory_rounds[0] < 3
+    assert result.window_manager.memory_rounds[0] < 3
 
 
 def _live_stream_pair():
@@ -149,8 +149,8 @@ def test_measurement_closed_boundary_closes_live_stream_without_idle_buffer():
     assert (
         closed_offsets[2] == closed_offsets[1] + 2
     )
-    assert trailing.cluster.rounds_arrived[0] > closed.cluster.rounds_arrived[0]
-    assert len(closed.cluster.committed_windows) == closed.cluster.total_windows
+    assert trailing.window_manager.rounds_arrived[0] > closed.window_manager.rounds_arrived[0]
+    assert len(closed.window_manager.committed_windows) == closed.window_manager.total_windows
 
 
 def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
@@ -187,8 +187,8 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
                  seed=19,
              ), verbose=False)
 
-    assert result.cluster.rounds_arrived[operations[0].id] == code.commit_rounds()
-    assert operations[0].id in result.cluster.op_results
+    assert result.window_manager.rounds_arrived[operations[0].id] == code.commit_rounds()
+    assert operations[0].id in result.window_manager.op_results
     assert operations[1].id in result.chip.decode_release_time
 
 

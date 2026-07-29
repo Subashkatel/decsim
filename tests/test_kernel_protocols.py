@@ -109,27 +109,6 @@ def test_run_seed_consumer_documents_the_failure_free_commit_phase():
     assert "exact pending reservation" in cancel_contract
 
 
-def test_readme_planning_surface_matches_the_public_run_spec():
-    from dataclasses import fields
-    from pathlib import Path
-
-    from decsim.run_spec import ResolvedPlanningParts, RunSpec
-
-    readme = (Path(__file__).parents[1] / "README.md").read_text()
-    run_spec_fields = {item.name for item in fields(RunSpec)}
-    planning_fields = {
-        item.name for item in fields(ResolvedPlanningParts)
-    }
-
-    assert "planner" not in run_spec_fields
-    assert planning_fields == {"code", "layout", "scheme", "rounds_policy"}
-    assert "`planner=`" not in readme
-    for field_name in ("layout", "scheme", "rounds_policy"):
-        assert f"`{field_name}=`" in readme
-    for field_name in planning_fields:
-        assert f"`completed_run.planning.{field_name}`" in readme
-
-
 def _seed_child_paths(component):
     return {
         tuple((segment.kind, segment.value) for segment in child.relative_path):

@@ -85,10 +85,10 @@ def test_custom_interaction_controls_rich_boundary_handoff_end_to_end():
         window_interaction=interaction,
     ))
 
-    assert result.cluster.window_manager.window_interaction is interaction
+    assert result.window_manager.window_interaction is interaction
     assert decoder.first_round_bits[0] is None
     assert decoder.first_round_bits[1] == (1, 1, 1)
-    assert result.cluster.payloads_held == 0
+    assert result.window_manager.payloads_held == 0
 
 
 def test_decoder_result_identity_is_rejected_before_interaction_or_commit():
@@ -132,12 +132,12 @@ def test_duplicate_decoder_completion_is_rejected_before_callback():
         decoder=decoder,
     ).build()
     completed_job = decoder.jobs[0]
-    free_before = dict(completed_run.pool.pool_free)
+    free_before = dict(completed_run.decoder_manager.pool_free)
 
     with pytest.raises(RuntimeError, match="duplicate decoder completion"):
-        completed_run.pool._on_decode_done(completed_job)
+        completed_run.decoder_manager._on_decode_done(completed_job)
 
-    assert completed_run.pool.pool_free == free_before
+    assert completed_run.decoder_manager.pool_free == free_before
 
 
 def test_duplicate_boundary_targets_are_rejected_before_delivery():
@@ -184,8 +184,8 @@ class _OrderedBoundaryDecoder:
 
 
 def _independent_operations(interaction, *, slow_source=False, capture=None):
-    def capture_runtime(_engine, cluster, _chip, _factory):
-        capture["runtime"] = cluster.window_manager
+    def capture_runtime(_engine, window_manager, decoder_manager, _chip, _factory):
+        capture["runtime"] = window_manager
         return []
 
     return RunSpec(
@@ -250,8 +250,8 @@ def test_rejected_boundary_update_cannot_mutate_aliased_state():
 
     captured = {}
 
-    def capture_runtime(_engine, cluster, _chip, _factory):
-        captured["runtime"] = cluster.window_manager
+    def capture_runtime(_engine, window_manager, decoder_manager, _chip, _factory):
+        captured["runtime"] = window_manager
         return []
 
     with pytest.raises(RuntimeError, match="rejected boundary"):

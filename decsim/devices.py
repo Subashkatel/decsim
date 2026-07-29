@@ -88,13 +88,13 @@ class ClockedDevice:
         engine,
         device,
         controller,
-        cluster,
+        on_syndrome_arrival,
         round_count_by_operation_id,
     ):
         self.engine = engine
         self.device = device            # round_payloads / begin_operation / ...
         self.controller = controller    # relay path (t_qc + t_cd)
-        self.cluster = cluster          # on_syndrome_arrival sink
+        self.on_syndrome_arrival = on_syndrome_arrival
         self._round_count_by_operation_id = MappingProxyType(
             dict(round_count_by_operation_id)
         )
@@ -155,8 +155,10 @@ class ClockedDevice:
                 payload,
                 n_fragments=fragment_count,
             )
-            self.controller.relay_syndrome(relayed_payload,
-                                           self.cluster.on_syndrome_arrival)
+            self.controller.relay_syndrome(
+                relayed_payload,
+                self.on_syndrome_arrival,
+            )
 
     def idle_round_payloads(self, operation, stream_id, global_round, patch):
         """Idle-round payloads for extend_stream mode (delegates to the device)."""

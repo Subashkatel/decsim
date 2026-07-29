@@ -233,15 +233,14 @@ def test_invalid_identity_is_rejected_before_cached_sampler_lookup():
         R1,
     )
 
-    colliding_bool = Operation(
-        2,
-        "boolean",
-        (0,),
-        circuit=circ,
-        stream_id=True,
-    )
-    with pytest.raises(TypeError, match="stream_id must be an int or str"):
-        device.begin_operation(colliding_bool, R1)
+    with pytest.raises(TypeError, match="stream_id must be a stable"):
+        Operation(
+            2,
+            "boolean",
+            (0,),
+            circuit=circ,
+            stream_id=True,
+        )
 
 
 def test_unseeded_sampling_keeps_stim_owned_identity_behavior():

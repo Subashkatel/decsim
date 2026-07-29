@@ -469,38 +469,6 @@ class ResolvedCodeGeometry:
 
 
 @dataclass(frozen=True)
-class ResolvedCodeSpatialProfile:
-    """One base code-size result for each consumed patch cardinality."""
-
-    entries: tuple[tuple[int, int], ...]
-
-    def __post_init__(self) -> None:
-        if type(self.entries) is not tuple or not self.entries:
-            raise TypeError("spatial profile entries must be a nonempty tuple")
-        previous = 0
-        for entry in self.entries:
-            if type(entry) is not tuple or len(entry) != 2:
-                raise TypeError("spatial profile entries must be exact pairs")
-            patch_count, node_count = entry
-            _exact_positive_int(patch_count, "spatial profile patch_count")
-            _exact_positive_int(node_count, "spatial profile node_count")
-            if patch_count <= previous:
-                raise ValueError(
-                    "spatial profile patch counts must be unique and ascending"
-                )
-            previous = patch_count
-        if self.entries[0][0] != 1:
-            raise ValueError("spatial profile must contain patch count 1")
-
-    def for_patch_count(self, patch_count: int) -> int:
-        _exact_positive_int(patch_count, "patch_count")
-        for candidate, node_count in self.entries:
-            if candidate == patch_count:
-                return node_count
-        raise KeyError(f"patch count {patch_count} was not resolved")
-
-
-@dataclass(frozen=True)
 class ResolvedOperationPlanning:
     """Exact immutable planning/control facts for one operation."""
 
@@ -684,7 +652,6 @@ class WindowPlan:
     total_windows: int
     windowed_by_operation: dict
     batch_preceding_idle_rounds_by_operation: dict
-    summary: dict = field(default_factory=dict)   # printable planning stats
 
 
 # ------------------------------------------------------ window interaction
@@ -1031,6 +998,58 @@ class Operation:
     logical_observable_index: Optional[int] = None
     intrinsic_measurement: Optional[IntrinsicMeasurement] = None
     kind: OpKind = OpKind.GENERIC     # rounds-policy vocabulary (see OpKind)
+
+    def __post_init__(self) -> None:
+        """Keep the identities used as runtime keys exact and reproducible."""
+        if type(self.id) is not int:
+            raise TypeError("operation id must be an exact built-in int")
+        for field_name in ("qubits", "patches"):
+            identities = getattr(self, field_name)
+            if type(identities) is not tuple or not all(
+                is_stable_identity(identity) for identity in identities
+            ):
+                raise TypeError(
+                    f"operation {self.id} {field_name} must contain stable "
+                    "built-in identities")
+        if type(self.predecessors) is not tuple or any(
+            type(predecessor) is not int for predecessor in self.predecessors
+        ):
+            raise TypeError(
+                f"operation {self.id} predecessors must contain exact "
+                "built-in int operation ids")
+        if self.blocked_by is not None and type(self.blocked_by) is not int:
+            raise TypeError(
+                f"operation {self.id} blocked_by must be an exact built-in "
+                "int operation id or None")
+        if self.stream_id is not None and not is_stable_identity(self.stream_id):
+            raise TypeError(
+                f"operation {self.id} stream_id must be a stable built-in "
+                "identity or None")
+        if self.logical_observable_index is not None:
+            if type(self.logical_observable_index) is not int:
+                raise TypeError(
+                    f"operation {self.id} logical_observable_index must be "
+                    "an exact int")
+            if self.logical_observable_index < 0:
+                raise ValueError(
+                    f"operation {self.id} logical_observable_index must be "
+                    "nonnegative")
+        measurement = self.intrinsic_measurement
+        if measurement is None:
+            return
+        if type(measurement) is not IntrinsicMeasurement:
+            raise TypeError(
+                f"operation {self.id} intrinsic_measurement must be "
+                "IntrinsicMeasurement")
+        trajectory_id = self.stream_id if self.stream_id is not None else self.id
+        if not same_stable_identity(measurement.operation_id, self.id):
+            raise ValueError(
+                f"operation {self.id} intrinsic_measurement operation_id "
+                "does not match")
+        if not same_stable_identity(measurement.trajectory_id, trajectory_id):
+            raise ValueError(
+                f"operation {self.id} intrinsic_measurement trajectory_id "
+                "does not match")
 
     @property
     def needs_magic_state(self) -> bool:

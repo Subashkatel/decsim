@@ -81,7 +81,7 @@ def test_continuous_idle_decode_equals_global_per_shot():
                   decoder=PyMatchingDecoder(_ZeroLatency()),
                   seed=17 + shot,
               ), verbose=False)
-        pe = res.cluster.op_results[stream_op.id][0]
+        pe = res.window_manager.op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         t = int(device._truth[stream_op.id][0])
         agree += (pe == pg); eng_err += (pe != t); glob_err += (pg != t)
@@ -118,7 +118,7 @@ def test_idle_stretch_decoded_by_runtime_builder_equals_global():
                   decoder=PyMatchingDecoder(_ZeroLatency()),
                   seed=21 + shot,
               ), verbose=False)
-        pe = res.cluster.op_results[stream_op.id][0]
+        pe = res.window_manager.op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         agree += (pe == pg)
     assert agree >= 0.98 * shots                      # idle rounds decoded at runtime track global
@@ -139,7 +139,7 @@ def test_a_window_commits_inside_the_idle_stretch():
               decoder=PyMatchingDecoder(_ZeroLatency()),
               seed=3,
           ), verbose=False)
-    cluster = res.cluster
+    cluster = res.window_manager
     lo, hi = OP_A + 1, OP_A + IDLE
     inside = [w for (op, k), w in cluster.windows.items()
               if op == stream_op.id and w.commit_lo >= lo and w.commit_hi <= hi]

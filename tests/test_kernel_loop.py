@@ -22,7 +22,7 @@ def test_simulate_two_clifford_ops_end_to_end():
     assert isinstance(res, CompletedRun)
     assert res.result.chip_done_ticks == 22 * 1_100_000            # 2 ops x 11 rounds, serial
     assert res.result.fully_done_ticks > res.result.chip_done_ticks          # decode + delivery tail
-    assert set(res.cluster.op_results) <= {0, 1}
+    assert set(res.window_manager.op_results) <= {0, 1}
     assert res.chip.body_done_time[1] == res.result.chip_done_ticks
     assert res.result.terminal_status == "complete"
     assert res.result.event_queue_empty
@@ -65,21 +65,18 @@ def test_simulate_blocked_t_reaction_path():
     gate = res.chip
     assert 1 in gate.decode_released                     # Decision released B
     assert gate.decode_release_time[1] > gate.body_done_time[0]
-    assert res.cluster.memory_rounds_total > 0        # idle rounds while blocked
+    assert res.window_manager.memory_rounds_total > 0        # idle rounds while blocked
 
 
-def test_runspec_validation():
+def test_runspec_build_contracts():
     with pytest.raises(ValueError, match="exactly one"):
-        RunSpec().validate()
+        RunSpec().build()
     with pytest.raises(ValueError, match="decoder"):
         RunSpec(ops=_two_op_clifford()).build()
-    spec = RunSpec(ops=_two_op_clifford(), decoder=PerRoundDecoder(0.5))
-    spec.validate()                                      # defaults are coherent
+    RunSpec(ops=[], decoder=PerRoundDecoder(0.5)).build()
 
 
-def test_build_runs_validate_first():
-    """build() enforces validate() (Codex review finding): an invalid
-    feedback_boundary_mode must raise at build, not silently misbehave."""
+def test_build_rejects_invalid_feedback_boundary_mode():
     import pytest as _pytest
     from decsim.planner import FixedRounds
     from decsim.run_spec import RunSpec
@@ -88,7 +85,7 @@ def test_build_runs_validate_first():
                 feedback_boundary_mode="bogus").build()
 
 
-def test_validate_rejects_ambiguous_stream_configs():
+def test_build_rejects_ambiguous_stream_configs():
     """Codex API review: an op in decode_ops AND dynamic_streams raised a
     duplicate-lease crash deep in PayloadStore; now a clear validate error."""
     import pytest as _pytest

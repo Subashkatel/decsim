@@ -84,7 +84,7 @@ def _run_memory(tau_us, commit, buffer, n_windows=20):
             make_controller=lambda e, links: ModularController(
                 e, links=links, log_syndromes=False),
         ), verbose=False)
-    return r.cluster, rounds
+    return r.window_manager, rounds
 
 
 def _reference_finish_times(cluster, rounds, tau_us):

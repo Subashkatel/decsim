@@ -148,7 +148,7 @@ def test_switching_strong_jobs_keep_their_policy_deadline(switching):
         job for job in scheduler.insertions
         if job.strong_decode_for is not None
     ]
-    assert len(strong_jobs) == execution.cluster.strong_needed
+    assert len(strong_jobs) == execution.decoder_manager.strong_needed
     assert strong_jobs
     for job in strong_jobs:
         assert job.window.t_first_round is not None

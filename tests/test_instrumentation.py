@@ -16,10 +16,10 @@ def test_window_latency_breakdown_stages():
             d=3,
             rounds_policy=FixedRounds(11),
             decoder=PresetLatencyDecoder(1.0),
-            make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
+            make_metrics=lambda e, wm, dm, ch, f: [WindowLatencyBreakdown(wm)],
         ), verbose=False)
     breakdown = r.result.metric_values()["window_latency"]
-    rows = WindowLatencyBreakdown(r.cluster).rows()
+    rows = WindowLatencyBreakdown(r.window_manager).rows()
     # every window decoded: 3 ops x ceil(11/3) = 12 windows
     assert breakdown["total"]["n"] == 12 and len(rows) == 12
     for row in rows:
@@ -41,7 +41,7 @@ def test_breakdown_separates_queue_wait_from_dep_block():
             d=3,
             rounds_policy=FixedRounds(11),
             decoder=PresetLatencyDecoder(5.0),
-            make_metrics=lambda e, cl, ch, f: [WindowLatencyBreakdown(cl)],
+            make_metrics=lambda e, wm, dm, ch, f: [WindowLatencyBreakdown(wm)],
         ), verbose=False)
     assert r.result.metric_values()["window_latency"]["queue_wait"]["max"] > 0
 
@@ -60,7 +60,7 @@ def test_backlog_trajectory_measures_the_blocked_t_gate():
             d=3,
             rounds_policy=FixedRounds(11),
             decoder=PresetLatencyDecoder(1.0),
-            make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+            make_metrics=lambda e, wm, dm, ch, f: [BacklogTrajectory(ch)],
         ), verbose=False)
     res = r.result.metric_values()["backlog_trajectory"]
     rows = BacklogTrajectory(r.chip).rows()
@@ -85,7 +85,7 @@ def test_backlog_trajectory_registration_changes_nothing():
                   d=3,
                   rounds_policy=FixedRounds(11),
                   decoder=PresetLatencyDecoder(1.0),
-                  make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+                  make_metrics=lambda e, wm, dm, ch, f: [BacklogTrajectory(ch)],
               ), verbose=False)
     assert bare.engine.log_lines == metered.engine.log_lines
 
@@ -102,7 +102,7 @@ def test_backlog_grows_when_the_decoder_is_too_slow():
                 d=3,
                 rounds_policy=FixedRounds(11),
                 decoder=PresetLatencyDecoder(lat),
-                make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+                make_metrics=lambda e, wm, dm, ch, f: [BacklogTrajectory(ch)],
             ), verbose=False)
         waits[lat] = r.result.metric_values()["backlog_trajectory"]["max_wait"]
     assert waits[50.0] > waits[1.0]
@@ -126,7 +126,7 @@ def test_backlog_rows_cover_fan_out_gating():
             d=3,
             rounds_policy=FixedRounds(11),
             decoder=PresetLatencyDecoder(1.0),
-            make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+            make_metrics=lambda e, wm, dm, ch, f: [BacklogTrajectory(ch)],
         ), verbose=False)
     rows = BacklogTrajectory(r.chip).rows()
     assert len(rows) == 2
@@ -150,7 +150,7 @@ def test_backlog_rounds_use_the_ops_own_cadence():
             rounds_policy=FixedRounds(11),
             code=fast,
             decoder=PresetLatencyDecoder(1.0),
-            make_metrics=lambda e, cl, ch, f: [BacklogTrajectory(ch)],
+            make_metrics=lambda e, wm, dm, ch, f: [BacklogTrajectory(ch)],
         ), verbose=False)
     row = BacklogTrajectory(r.chip).rows()[0]
     assert row["backlog_rounds"] == row["wait"] / us(0.5) + 11

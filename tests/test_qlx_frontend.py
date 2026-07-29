@@ -121,7 +121,7 @@ def test_end_to_end_timing_run_through_the_engine(program):
           ), verbose=False)
     assert res.result.chip_done_ticks >= 120 * 1_000_000   # >= the 120-round distill
     assert res.result.fully_done_ticks >= res.result.chip_done_ticks
-    cluster = res.cluster
+    cluster = res.window_manager
     assert len(cluster.committed_windows) == cluster.total_windows, \
         "not every QLX-derived window was decoded and committed"
 

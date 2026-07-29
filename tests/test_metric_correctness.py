@@ -102,8 +102,8 @@ def test_decode_backlog_summary_is_consistent_with_its_own_trace():
     Overloaded regime (f = 2) so the backlog is genuinely nonzero."""
     captured = []
 
-    def make_metrics(engine, cluster, chip, factory):
-        metric = DecodeBacklog(cluster)
+    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+        metric = DecodeBacklog(window_manager, decoder_manager)
         captured.append(metric)
         return [metric]
 

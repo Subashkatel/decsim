@@ -35,11 +35,10 @@ Planning inputs have exclusive ownership. Supply at most one of `d=`,
 `code=`, or `layout=`; omitting all three selects distance 3. Select window
 layout and operation-round behavior directly with `scheme=` and
 `rounds_policy=`. Custom magic-state factories use
-`make_factory(engine, cluster)` so the returned factory is bound to the
-event engine the run drives. A `CompletedRun` exposes the exact selections as
-`completed_run.planning.code`, `completed_run.planning.layout`,
-`completed_run.planning.scheme`, and
-`completed_run.planning.rounds_policy`.
+`make_factory(engine, decoder_manager)` so correction jobs share the run's
+decoder service. A `CompletedRun` exposes the scientific result and the
+runtime owners used by experiments: `window_manager`, `decoder_manager`,
+`chip`, `orchestrator`, `factory`, and `controller`.
 
 Custom stochastic runtime parts participate in run-level seeding through
 `RunSeedConsumer` in

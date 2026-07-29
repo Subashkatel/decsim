@@ -176,7 +176,9 @@ class Engine:
         """Run until the event queue is empty or the optional time limit is reached.
 
         Events at exactly ``until`` still fire; if later events remain, the
-        clock is left at ``until`` so a follow-up run() resumes from there."""
+        clock is left at ``until`` so a follow-up run() resumes from there.
+        A limit before the current clock raises ``ValueError`` without
+        changing simulation state."""
         self._raise_if_failed("run")
         if self._phase == "construction":
             raise RuntimeError(

@@ -117,6 +117,20 @@ def test_metric_observes_registration_run_entry_and_clock_only_boundary():
     assert metric.observed_ticks == [0, 0, 10]
 
 
+def test_run_rejects_a_time_limit_before_the_current_clock():
+    engine = Engine(verbose=False)
+    fired = []
+    engine.schedule(20, lambda: fired.append(engine.now))
+    engine.run(until=10)
+
+    with pytest.raises(ValueError, match="before current simulation time"):
+        engine.run(until=5)
+
+    assert engine.now == 10
+    engine.run()
+    assert fired == [20]
+
+
 def test_metric_registration_is_rejected_mid_action_before_observation():
     engine = Engine(verbose=False)
     attempted = _RecordingMetric()

@@ -1,6 +1,8 @@
 """Fast offline window decoding without the event engine."""
 
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 from decsim.detector_error_model import (
@@ -87,6 +89,47 @@ class OfflineBatchDecoder:
         )
 
 
+def _chunk_row(decoded, experiment, sample_plan, experiment_sha256, config_id):
+    batch = decoded.batch
+    return ChunkResult(
+        schema_version=1,
+        experiment_id=experiment.experiment_id,
+        experiment_sha256=experiment_sha256,
+        config_id=config_id,
+        sample_set_id=sample_plan.sample_set_id,
+        sample_batch_sha256=decoded.sample_batch_sha256,
+        batch_index=batch.index,
+        first_shot_index=batch.first_shot,
+        requested_shots=batch.shots,
+        attempted_shots=decoded.attempted_shots,
+        primary_failures=decoded.primary_failures,
+        accepted_shots=decoded.accepted_shots,
+        accepted_logical_failures=decoded.accepted_logical_failures,
+        backend_low_confidence=0,
+        backend_nonconverged=0,
+        backend_invalid_correction=0,
+        backend_empty_model_unsatisfiable=0,
+        backend_error=0,
+        window_attempts=decoded.window_attempts,
+    )
+
+
+def _result_directory(output_directory, experiment_sha256, config_id):
+    return (
+        Path(output_directory)
+        / experiment_sha256
+        / "scientific"
+        / "chunks"
+        / config_id
+    )
+
+
+def _publish_row(directory, row):
+    path = directory / f"{row.batch_index}.csv"
+    publish_immutable(path, canonical_chunk_csv([row]))
+    return row
+
+
 def run_offline_experiment(
     decoder,
     experiment,
@@ -98,13 +141,7 @@ def run_offline_experiment(
     """Run missing offline batches, publish them once, and reduce exact counts."""
     experiment_sha256 = experiment.sha256()
     config_id = experiment.config_sha256(configuration)
-    directory = (
-        Path(output_directory)
-        / experiment_sha256
-        / "scientific"
-        / "chunks"
-        / config_id
-    )
+    directory = _result_directory(output_directory, experiment_sha256, config_id)
     rows = []
     for batch in batches:
         path = directory / f"{batch.index}.csv"
@@ -119,27 +156,84 @@ def run_offline_experiment(
                     batch.index,
                 ),
             )
-            row = ChunkResult(
-                schema_version=1,
-                experiment_id=experiment.experiment_id,
-                experiment_sha256=experiment_sha256,
-                config_id=config_id,
-                sample_set_id=sample_plan.sample_set_id,
-                sample_batch_sha256=decoded.sample_batch_sha256,
-                batch_index=batch.index,
-                first_shot_index=batch.first_shot,
-                requested_shots=batch.shots,
-                attempted_shots=decoded.attempted_shots,
-                primary_failures=decoded.primary_failures,
-                accepted_shots=decoded.accepted_shots,
-                accepted_logical_failures=decoded.accepted_logical_failures,
-                backend_low_confidence=0,
-                backend_nonconverged=0,
-                backend_invalid_correction=0,
-                backend_empty_model_unsatisfiable=0,
-                backend_error=0,
-                window_attempts=decoded.window_attempts,
+            row = _publish_row(
+                directory,
+                _chunk_row(
+                    decoded,
+                    experiment,
+                    sample_plan,
+                    experiment_sha256,
+                    config_id,
+                ),
             )
-            publish_immutable(path, canonical_chunk_csv([row]))
         rows.append(row)
     return reduce_chunks(rows)
+
+
+_worker_decoder = None
+
+
+def _start_worker(decoder_factory):
+    global _worker_decoder
+    _worker_decoder = decoder_factory()
+
+
+def _run_worker(task):
+    batch, seed = task
+    return _worker_decoder.run(batch, seed)
+
+
+def run_offline_parallel(
+    decoder_factory,
+    experiment,
+    sample_plan,
+    configuration,
+    batches,
+    output_directory,
+    *,
+    workers=4,
+):
+    """Decode missing batches in bounded processes; publish in the parent."""
+    batches = tuple(sorted(batches, key=lambda batch: batch.index))
+    experiment_sha256 = experiment.sha256()
+    config_id = experiment.config_sha256(configuration)
+    directory = _result_directory(output_directory, experiment_sha256, config_id)
+    missing = [
+        batch for batch in batches
+        if not (directory / f"{batch.index}.csv").exists()
+    ]
+    if missing:
+        allocated = int(os.environ.get("SLURM_CPUS_PER_TASK", workers))
+        worker_count = min(workers, allocated, len(missing))
+        tasks = [
+            (
+                batch,
+                offline_batch_seed(
+                    experiment.experiment_seed,
+                    sample_plan.sample_set_id,
+                    batch.index,
+                ),
+            )
+            for batch in missing
+        ]
+        with ProcessPoolExecutor(
+            max_workers=worker_count,
+            initializer=_start_worker,
+            initargs=(decoder_factory,),
+        ) as pool:
+            decoded_batches = pool.map(_run_worker, tasks)
+            for decoded in decoded_batches:
+                _publish_row(
+                    directory,
+                    _chunk_row(
+                        decoded,
+                        experiment,
+                        sample_plan,
+                        experiment_sha256,
+                        config_id,
+                    ),
+                )
+    return reduce_chunks(
+        read_chunk_csv(directory / f"{batch.index}.csv")
+        for batch in batches
+    )

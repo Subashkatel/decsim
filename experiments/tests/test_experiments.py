@@ -22,6 +22,7 @@ from experiments.decoding import (
     DecodedBatch,
     OfflineBatchDecoder,
     run_offline_experiment,
+    run_offline_parallel,
 )
 
 
@@ -49,6 +50,25 @@ def _chunk(batch_index=0, first_shot_index=0, requested_shots=3, **changes):
     )
     values.update(changes)
     return ChunkResult(**values)
+
+
+class _DeterministicOfflineDecoder:
+    def run(self, batch, seed):
+        return DecodedBatch(
+            batch=batch,
+            sample_batch_sha256=hashlib.sha256(
+                f"{batch.index}:{seed}".encode()
+            ).hexdigest(),
+            attempted_shots=batch.shots,
+            primary_failures=batch.index % 2,
+            accepted_shots=batch.shots,
+            accepted_logical_failures=batch.index % 2,
+            window_attempts=batch.shots * 2,
+        )
+
+
+def _deterministic_offline_decoder():
+    return _DeterministicOfflineDecoder()
 
 
 def test_chunk_csv_is_canonical_and_contains_no_operational_fields():
@@ -325,3 +345,47 @@ def test_offline_experiment_writes_chunks_and_resumes_without_redecoding(tmp_pat
         tmp_path,
     ) == summary
     assert len(decoder.calls) == 2
+
+
+def test_parallel_offline_run_matches_one_worker_byte_for_byte(tmp_path):
+    experiment = Experiment(
+        experiment_id="parallel-smoke",
+        experiment_seed=11,
+        configurations=({"decoder": "test"},),
+        sampling={"batch_shots": 3, "max_shots": 10},
+        stopping={"method": "fixed"},
+        dependencies={},
+        repository_revision="7ae515f",
+    )
+    plan = SamplePlan.create(
+        experiment.experiment_id,
+        experiment.experiment_seed,
+        {"circuit_sha256": "d" * 64, "batch_shots": 3},
+    )
+    batches = exact_batches(10, 3)
+    one = tmp_path / "one"
+    two = tmp_path / "two"
+
+    summary_one = run_offline_parallel(
+        _deterministic_offline_decoder,
+        experiment,
+        plan,
+        {"decoder": "test"},
+        batches,
+        one,
+        workers=1,
+    )
+    summary_two = run_offline_parallel(
+        _deterministic_offline_decoder,
+        experiment,
+        plan,
+        {"decoder": "test"},
+        reversed(batches),
+        two,
+        workers=2,
+    )
+
+    assert summary_one == summary_two
+    one_chunks = sorted(path.read_bytes() for path in one.rglob("*.csv"))
+    two_chunks = sorted(path.read_bytes() for path in two.rglob("*.csv"))
+    assert one_chunks == two_chunks

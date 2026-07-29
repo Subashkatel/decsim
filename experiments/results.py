@@ -92,6 +92,22 @@ def canonical_chunk_csv(rows) -> bytes:
     return stream.getvalue().encode("utf-8")
 
 
+def read_chunk_csv(path) -> ChunkResult:
+    with Path(path).open(newline="", encoding="utf-8") as source:
+        row, = csv.DictReader(source)
+    integer_fields = {
+        "schema_version",
+        "batch_index",
+        "first_shot_index",
+        "requested_shots",
+        *_COUNT_FIELDS,
+    }
+    return ChunkResult(**{
+        name: int(value) if name in integer_fields else value
+        for name, value in row.items()
+    })
+
+
 def publish_immutable(destination, content: bytes) -> bool:
     """Publish once; return false only for an existing byte-identical shard."""
     if type(content) is not bytes:

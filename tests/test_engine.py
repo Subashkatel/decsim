@@ -18,6 +18,11 @@ class _RecordingMetric:
     def result(self):
         return list(self.observed_ticks)
 
+
+class _EqualMetricName(str):
+    """Wrong identity type that compares equal to the frozen metric name."""
+
+
 def test_engine():
     eng = Engine(verbose=False)
     order = []
@@ -153,8 +158,16 @@ def test_nested_initial_registration_is_atomic_and_guard_cleans_up():
     assert nested.observed_ticks == []
 
 
-@pytest.mark.parametrize("field,value", [("name", "changed"),
-                                         ("result_schema_version", 2)])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("name", "changed"),
+        ("name", _EqualMetricName("recording")),
+        ("result_schema_version", 2),
+        ("result_schema_version", True),
+        ("result_schema_version", 1.0),
+    ],
+)
 def test_initial_identity_mutation_never_appends(field, value):
     engine = Engine(verbose=False)
 

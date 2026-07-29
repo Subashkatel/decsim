@@ -633,7 +633,7 @@ class _DispatchRecorder:
 
 def _double_window_run(
     escalate_window, rounds=30, strong_tau=F_STRONG,
-    window_interaction=None, device=None,
+    window_interaction=None, device=None, metrics=None,
 ):
     """One memory op on sliding d/d windows; exactly the window with index
     escalate_window reports low confidence (deterministic, no sampling)."""
@@ -643,6 +643,13 @@ def _double_window_run(
         probability_for=lambda job: 1.0 if job.window_id == escalate_window
         else 0.0), env)
     strong = _DispatchRecorder(PerRoundDecoder(strong_tau * TAU_GEN_US), env)
+
+    def make_metrics(engine, cluster, chip, factory):
+        env["engine"] = engine
+        if metrics is None:
+            return []
+        return metrics(engine, cluster, chip, factory)
+
     res = simulate(RunSpec(
               ops=[_memory_op()],
               num_units=1,
@@ -656,9 +663,47 @@ def _double_window_run(
               window_interaction=window_interaction,
               device=device,
               unit_pools={"default": 1, "strong": 1},
-              make_metrics=lambda e, c, ch, fa: env.update(engine=e) or [],
+              make_metrics=make_metrics,
           ), verbose=False)
     return res, weak, strong
+
+
+def test_double_window_backlog_records_pending_assignment_before_admission():
+    """The real metric sees one exact 15-round strong slab while it waits for
+    its far boundary, before the decoder manager owns the admitted job."""
+    captured = {}
+
+    def make_metrics(engine, cluster, chip, factory):
+        metric = StrongDecoderBacklog(cluster)
+        captured["metric"] = metric
+        return [metric]
+
+    result, _, strong = _double_window_run(
+        escalate_window=2,
+        metrics=make_metrics,
+    )
+
+    waiting_rows = [
+        row for row in captured["metric"].rows()
+        if row["waiting_far_boundary_jobs"] > 0
+    ]
+    assert waiting_rows == [{
+        "t_ticks": 14_750_000,
+        "waiting_far_boundary_jobs": 1,
+        "waiting_far_boundary_full_input_rounds": 15,
+        "waiting_terminal_data_jobs": 0,
+        "waiting_terminal_data_full_input_rounds": 0,
+        "in_transit_jobs": 0,
+        "in_transit_full_input_rounds": 0,
+        "queued_jobs": 0,
+        "queued_full_input_rounds": 0,
+        "running_jobs": 0,
+        "running_full_input_rounds": 0,
+        "total_jobs": 1,
+        "total_full_input_rounds": 15,
+    }]
+    assert strong.starts[0][1].n_rounds == 15
+    assert result.result.metric_values()["strong_backlog"]["peak_jobs"] == 1
 
 
 def test_double_window_uses_the_interaction_region_plan():

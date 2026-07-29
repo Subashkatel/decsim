@@ -293,11 +293,9 @@ def test_A6_bulk_strong_merges_outstanding_jobs_into_one_decode():
     """A6 (bulk decoding; arXiv:2510.25222 Sec IV, the NEW feature). In serial mode with
     switch_bulk_strong=True, a backed-up strong pool merges ALL its queued re-decode jobs into ONE
     decode whose round count is the sum of the merged jobs' rounds. With every window escalated and
-    a slow strong decoder, the strong pool backs up, so strong_running_rounds takes values that are
-    INTEGER MULTIPLES of the per-job redo (3d) and exceeds a single job's 3d -- proving >1 job ran
-    in one merged batch -- and returns to 0 after the run. The merged batch's latency is
-    proportional to its round count (one big decode), so the few large batches in bulk mode are far
-    fewer step-changes than per-job decoding would produce."""
+    a slow strong decoder, the admitted-work snapshot exposes one running physical job whose exact
+    input-round count can exceed an individual job. The merged batch's latency is proportional to
+    that literal round count, and the admitted-work snapshot is empty after completion."""
     res, samples = _strong_running_samples(
         Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, bulk_strong=True), 1.0,
         rounds=120, tau_strong=10.0)
@@ -315,9 +313,9 @@ def test_A6_bulk_strong_merges_outstanding_jobs_into_one_decode():
 
 def test_A6_non_bulk_decodes_jobs_individually_not_in_one_batch():
     """A6 (contrast). WITHOUT bulk_strong (plain serial), the strong pool processes re-decodes one
-    job at a time: strong_running_rounds is the bulk-dispatch counter and stays 0 throughout, while
-    the SAME workload under bulk_strong drives that counter to a large merged value. Same windows
-    escalate either way; bulk merges them, non-bulk does not."""
+    physical job at a time, so its admitted running round count remains the size of one submitted
+    input. The same workload under bulk_strong produces a larger merged physical job. The same
+    windows escalate either way; only the compute grouping differs."""
     res_bulk, samples_bulk = _strong_running_samples(
         Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, bulk_strong=True), 1.0,
         rounds=120, tau_strong=10.0)

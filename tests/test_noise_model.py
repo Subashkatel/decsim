@@ -69,7 +69,12 @@ def test_high_p_saturates_at_coin_flip_and_windows_survive_dense_syndromes():
     The same shots are also the dense-syndrome case (detection density ~0.5,
     merged DEM priors approaching the p=0.5 weight boundary): the windowed
     slicer must decode them and saturate identically, not crash or diverge."""
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+        decode_windowed,
+    )
     from decsim.mwpm_decoder import matching_window_decoder
     from decsim.codes import SurfaceCodeModel
     from decsim.schemes import SlidingWindowScheme
@@ -85,12 +90,31 @@ def test_high_p_saturates_at_coin_flip_and_windows_survive_dense_syndromes():
 
     n_layers = 1 + max(int(cc[-1])
                        for cc in c.get_detector_coordinates().values())
-    plan = SlidingWindowScheme().plan_windows(0, n_layers, SurfaceCodeModel(d=3))
-    models = build_window_error_models(c, plan)
+    plan = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in SlidingWindowScheme().plan_operation(
+            0,
+            n_layers,
+            commit_round_count=3,
+            buffer_round_count=3,
+        ).windows
+    ]
+    models = build_window_error_models(
+        c,
+        plan,
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
     decode = matching_window_decoder()
     global_pred = matcher.decode_batch(dets)[:500, 0]
     windowed_pred = np.array([
-        int(decode_windowed(models, dets[k], decode)[0]) for k in range(500)])
+        int(decode_windowed(
+            models,
+            dets[k],
+            decode,
+            selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+        )[0])
+        for k in range(500)
+    ])
     w_fail = windowed_pred != obs[:500, 0]
     w_ler = float(w_fail.mean())
     assert 0.4 < w_ler < 0.6, f"windowed saturation broken: {w_ler}"
@@ -140,11 +164,11 @@ def test_runs_through_full_engine():
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=D,
               rounds_policy=FixedRounds(R),
               code=SurfaceCodeModel(d=D),
               scheme=SlidingWindowScheme(),
-              device=StimDevice(seed=1),
+              device=StimDevice(),
               decoder=PyMatchingDecoder(_ZeroLatency()),
+              seed=1,
           ), verbose=False)
-    assert 1 in res["cluster"].op_results        # produced a real logical value
+    assert 1 in res.window_manager.op_results        # produced a real logical value

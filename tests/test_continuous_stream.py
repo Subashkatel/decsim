@@ -41,22 +41,22 @@ def _agreement(segment_rounds, shots, seed=11):
     segments, stream_op, rounds_map = continuous_stream(circ, segment_rounds, patch=0, base_id=0)
     gm = pymatching.Matching.from_detector_error_model(
         circ.detector_error_model(decompose_errors=True))
-    device = StimDevice(seed=seed)
     agree = eng_err = glob_err = 0
     last = None
-    for _ in range(shots):
+    for shot in range(shots):
+        device = StimDevice()
         res = simulate(RunSpec(
                   ops=segments,
                   decode_ops=[stream_op],
                   device=device,
                   num_units=4,
-                  d=D,
                   rounds_policy=PerOpRounds(rounds_map),
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),
                   decoder=PyMatchingDecoder(_ZeroLatency()),
+                  seed=seed + shot,
               ), verbose=False)
-        pe = int(res["cluster"].op_results.get(stream_op.id, 0))
+        pe = res.window_manager.op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         t = int(device._truth[stream_op.id][0])
         agree += (pe == pg); eng_err += (pe != t); glob_err += (pg != t)
@@ -77,7 +77,7 @@ def test_three_segment_stream_equals_global_per_shot():
 
 def test_stream_is_the_decode_unit_and_a_window_spans_the_seam():
     _, _, _, res, stream_op = _agreement([12, 12], shots=1)
-    cluster = res["cluster"]
+    cluster = res.window_manager
     # the STREAM (id 0) is windowed; the scheduling segments (ids 1, 2) are not
     assert stream_op.id in cluster.window_count and cluster.window_count[stream_op.id] > 0
     assert 1 not in cluster.window_count and 2 not in cluster.window_count

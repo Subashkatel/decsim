@@ -4,22 +4,145 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
+import math
+import random
+import threading
 from typing import Callable, Optional, TYPE_CHECKING
 
 from .config import fmt
 from .engine import Engine
+from .message import RunSeedChild, RunSeedPathSegment, RunSeedReservation
 
 if TYPE_CHECKING:
     from .protocols import ResourcePool as DecodeService
 
 
+class _RandomSeedConsumer:
+    """Leaf-owned atomic run-seed state for random.Random factory models."""
+
+    def _initialize_run_seed_state(self, seed: Optional[int]) -> None:
+        self._explicit_seed = seed
+        self._rng = random.Random(seed)
+        self._run_seed_lock = threading.Lock()
+        self._pending_run_seed = None
+        self._run_seed_claimed = False
+        self._stochastic_use_started = False
+
+    def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
+        component_name = type(self).__name__
+        if seed is not None and (
+            type(seed) is not int or not 0 <= seed < (1 << 64)
+        ):
+            raise TypeError(
+                f"{component_name} run root must be an unsigned 64-bit "
+                f"built-in integer or None; got {seed!r}"
+            )
+        with self._run_seed_lock:
+            if self._stochastic_use_started:
+                raise ValueError(
+                    f"{component_name} was already used and cannot be rebound"
+                )
+            if self._run_seed_claimed:
+                raise ValueError(
+                    f"{component_name} is already claimed by a built run"
+                )
+            if self._pending_run_seed is not None:
+                raise ValueError(
+                    f"{component_name} already has a pending run-seed "
+                    "reservation"
+                )
+            if seed is not None and self._explicit_seed is not None:
+                raise ValueError(
+                    f"{component_name} has an explicit seed that conflicts "
+                    f"with numeric run root {seed}"
+                )
+            if seed is not None:
+                seed_source = "derived"
+                effective_seed = seed
+            elif self._explicit_seed is not None:
+                if type(self._explicit_seed) is not int:
+                    raise TypeError(
+                        f"{component_name} explicit seed must be a built-in "
+                        "integer for run provenance"
+                    )
+                seed_source = "explicit_local"
+                effective_seed = self._explicit_seed
+            else:
+                seed_source = "entropy"
+                effective_seed = None
+            reservation = RunSeedReservation(
+                proposed_seed_source=seed_source,
+                proposed_seed=effective_seed,
+                prepared_state=random.Random(effective_seed),
+            )
+            self._pending_run_seed = reservation
+            return reservation
+
+    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
+        with self._run_seed_lock:
+            if self._pending_run_seed is reservation:
+                self._pending_run_seed = None
+
+    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
+        with self._run_seed_lock:
+            if self._pending_run_seed is not reservation:
+                raise ValueError(
+                    f"{type(self).__name__} can commit only its exact pending "
+                    "run-seed reservation"
+                )
+            self._rng = reservation.prepared_state
+            self._pending_run_seed = None
+            self._run_seed_claimed = True
+
+    def _mark_stochastic_use(self) -> None:
+        with self._run_seed_lock:
+            if self._pending_run_seed is not None:
+                raise RuntimeError(
+                    f"{type(self).__name__} cannot draw while a run-seed "
+                    "reservation is pending"
+                )
+            self._stochastic_use_started = True
+
+
 def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -> None:
     """Validate the factory production mode and buffer setting."""
+    if type(production) is not str:
+        raise TypeError("production must be a built-in str")
     if production not in ("demand", "continuous"):
         raise ValueError(
             f"production must be 'demand' or 'continuous' (got {production!r})")
-    if production == "continuous" and (buffer_capacity is None or buffer_capacity < 1):
+    if buffer_capacity is not None and (
+        type(buffer_capacity) is not int or buffer_capacity < 1
+    ):
+        raise TypeError("buffer_capacity must be a positive built-in int or None")
+    if production == "continuous" and buffer_capacity is None:
         raise ValueError("continuous production needs buffer_capacity >= 1")
+
+
+def _validate_exact_integer(name: str, value, *, minimum: int) -> int:
+    if type(value) is not int or value < minimum:
+        relation = "positive" if minimum == 1 else "nonnegative"
+        raise TypeError(f"{name} must be a {relation} built-in int")
+    return value
+
+
+def _validate_probability(name: str, value) -> float:
+    if type(value) not in (int, float):
+        raise TypeError(f"{name} must be a built-in int or float")
+    normalized = float(value)
+    if not math.isfinite(normalized) or not 0.0 <= normalized <= 1.0:
+        raise ValueError(f"{name} must be finite and in [0, 1]")
+    return normalized
+
+
+def _validate_correction_decode_service(decode_service, n_corr: int) -> None:
+    """Require one unambiguous correction-service disposition."""
+    if type(n_corr) is not int or n_corr < 0:
+        raise TypeError("n_corr must be a nonnegative built-in int")
+    if n_corr == 0 and decode_service is not None:
+        raise ValueError("decode_service must be None when n_corr is zero")
+    if n_corr > 0 and decode_service is None:
+        raise ValueError("decode_service is required when n_corr is positive")
 
 
 @dataclass
@@ -68,17 +191,33 @@ class InfiniteFactory:
         return None
 
 
-class DistillationFactory:
+class DistillationFactory(_RandomSeedConsumer):
     """Single-level magic-state factory with optional continuous production."""
 
     def __init__(self, engine: Engine, num_units: int, cycle_ticks: int,
                  decode_service: "DecodeService", corr_rounds: int, n_corr: int = 11,
-                 return_ticks: int = 0, p_success: float = 1.0, seed: int = 0,
+                 return_ticks: int = 0, p_success: float = 1.0,
+                 seed: Optional[int] = None,
                  initial_store: int = 0, production: str = "demand",
                  buffer_capacity: Optional[int] = None):
-        import random
-
         _validate_production_mode(production, buffer_capacity)
+        _validate_correction_decode_service(decode_service, n_corr)
+        num_units = _validate_exact_integer(
+            "num_units", num_units, minimum=1
+        )
+        cycle_ticks = _validate_exact_integer(
+            "cycle_ticks", cycle_ticks, minimum=0
+        )
+        corr_rounds = _validate_exact_integer(
+            "corr_rounds", corr_rounds, minimum=0
+        )
+        return_ticks = _validate_exact_integer(
+            "return_ticks", return_ticks, minimum=0
+        )
+        initial_store = _validate_exact_integer(
+            "initial_store", initial_store, minimum=0
+        )
+        p_success = _validate_probability("p_success", p_success)
         self.engine = engine
         self.num_units = num_units
         self.cycle_ticks = cycle_ticks
@@ -87,13 +226,25 @@ class DistillationFactory:
         self.n_corr = n_corr
         self.return_ticks = return_ticks
         self.p_success = p_success
-        self.rng = random.Random(seed)
+        self._initialize_run_seed_state(seed)
         self.production = production
         self.buffer_capacity = buffer_capacity
+        self._initial_store = initial_store
         self._init_runtime_state(initial_store)
 
         if production == "continuous":
             self.engine.schedule(0, self._maybe_start, label="factory_start")
+
+    def run_seed_children(self):
+        """Expose the active correction service that affects completion."""
+        if self.decode_service is None:
+            return ()
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "decode_service"),),
+                self.decode_service,
+            ),
+        )
 
     def _init_runtime_state(self, initial_store: int) -> None:
         """Initialize queues, counters, and bounded trace storage."""
@@ -131,7 +282,8 @@ class DistillationFactory:
     def _attempt_done(self) -> None:
         """A distillation attempt finished; on success, queue its correction decode."""
         self.busy_units -= 1
-        if self.rng.random() < self.p_success:
+        self._mark_stochastic_use()
+        if self._rng.random() < self.p_success:
             self.in_flight += 1
             self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
             trace = StateTrace(state_id=self._next_state_id,
@@ -140,14 +292,24 @@ class DistillationFactory:
                                t_corr_submit=self.engine.now)
             self._next_state_id += 1
             remaining = {"n": self.n_corr, "trace": trace}
-            self.engine.log("Factory",
-                            f"a unit distilled a state; submitting {self.n_corr} "
-                            f"correction-qubit decode jobs to the cluster (parallel)")
-            for _ in range(self.n_corr):
-                self.decode_service.submit_decode(
-                    self.corr_rounds,
-                    on_done=lambda rem=remaining: self._corr_done(rem),
-                    label="MSF-corr")
+            if self.n_corr:
+                self.engine.log("Factory",
+                                f"a unit distilled a state; submitting {self.n_corr} "
+                                f"correction-qubit decode jobs to the cluster (parallel)")
+                for _ in range(self.n_corr):
+                    self.decode_service.submit_decode(
+                        self.corr_rounds,
+                        on_done=lambda rem=remaining: self._corr_done(rem),
+                        label="MSF-corr")
+            else:
+                # No correction decodes to wait on: release after physical
+                # distillation instead of hanging forever (parity with the
+                # multi-level factory's `and self.n_corr` guard).
+                trace.t_corr_done = self.engine.now
+                self.engine.schedule(
+                    self.return_ticks,
+                    lambda t=trace: self._release(t),
+                    label="distill_release")
         else:
             self.engine.log("Factory", "a unit's distillation DISCARDED, retrying")
         self._maybe_start()                    # keep going only if demand remains
@@ -219,36 +381,86 @@ class DistillLevel:
     P: float = 1.0
 
 
-class MultiLevelDistillationFactory:
+class MultiLevelDistillationFactory(_RandomSeedConsumer):
     """Multi-level pull-driven magic-state factory."""
 
     def __init__(self, engine: Engine, levels: list[DistillLevel], *,
                  W_ticks: int, M: int = 15, N: int = 1,
                  prep_units: int = 1, prep_O: int = 2, prep_d: int = 3, prep_P: float = 1.0,
                  decode_service: Optional["DecodeService"] = None,
-                 corr_rounds: int = 0, n_corr: int = 0, seed: int = 0,
+                 corr_rounds: int = 0, n_corr: int = 0,
+                 seed: Optional[int] = None,
                  production: str = "demand", buffer_capacity: Optional[int] = None):
-        import random
-
         _validate_production_mode(production, buffer_capacity)
+        _validate_correction_decode_service(decode_service, n_corr)
+        if type(levels) is not list or not levels:
+            raise TypeError("levels must be a nonempty built-in list")
+        validated_levels = []
+        for index, level in enumerate(levels):
+            if type(level) is not DistillLevel:
+                raise TypeError(
+                    f"levels[{index}] must be an exact DistillLevel"
+                )
+            validated_levels.append(
+                DistillLevel(
+                    units=_validate_exact_integer(
+                        f"levels[{index}].units", level.units, minimum=1
+                    ),
+                    d=_validate_exact_integer(
+                        f"levels[{index}].d", level.d, minimum=1
+                    ),
+                    O=_validate_exact_integer(
+                        f"levels[{index}].O", level.O, minimum=0
+                    ),
+                    P=_validate_probability(
+                        f"levels[{index}].P", level.P
+                    ),
+                )
+            )
+        W_ticks = _validate_exact_integer("W_ticks", W_ticks, minimum=0)
+        M = _validate_exact_integer("M", M, minimum=1)
+        N = _validate_exact_integer("N", N, minimum=1)
+        prep_units = _validate_exact_integer(
+            "prep_units", prep_units, minimum=1
+        )
+        prep_O = _validate_exact_integer("prep_O", prep_O, minimum=0)
+        prep_d = _validate_exact_integer("prep_d", prep_d, minimum=1)
+        prep_P = _validate_probability("prep_P", prep_P)
+        corr_rounds = _validate_exact_integer(
+            "corr_rounds", corr_rounds, minimum=0
+        )
         self.production = production
         self.buffer_capacity = buffer_capacity
         self.engine = engine
-        self.levels = levels
-        self.L = len(levels)
+        self.levels = tuple(validated_levels)
+        self.L = len(self.levels)
         self.M = M
         self.N = N
         self.prep_units = prep_units
         self.prep_time = prep_O * prep_d * W_ticks
         self.prep_P = prep_P
+        self._window_ticks = W_ticks
+        self._prep_O = prep_O
+        self._prep_d = prep_d
         self.decode_service = decode_service
         self.corr_rounds = corr_rounds
         self.n_corr = n_corr
-        self.rng = random.Random(seed)
+        self._initialize_run_seed_state(seed)
         self._init_multilevel_state(W_ticks)
 
         if production == "continuous":
             self.engine.schedule(0, self._drive, label="factory_start")
+
+    def run_seed_children(self):
+        """Expose the active correction service that affects completion."""
+        if self.decode_service is None:
+            return ()
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "decode_service"),),
+                self.decode_service,
+            ),
+        )
 
     def _init_multilevel_state(self, W_ticks: int) -> None:
         """Initialize buffers, busy counts, counters, and round times."""
@@ -408,7 +620,8 @@ class MultiLevelDistillationFactory:
         round_state["done"] = True
         level = round_state["level"]
         self.busy[level] -= 1
-        if self.rng.random() < self.levels[level - 1].P:
+        self._mark_stochastic_use()
+        if self._rng.random() < self.levels[level - 1].P:
             self.buffer[level] += self.N
             self.produced[level] += self.N
             destination = "final state to core buffer" if level == self.L \
@@ -427,10 +640,10 @@ class MultiLevelDistillationFactory:
     def _prep_done(self) -> None:
         """A level-0 prepared state is ready; add it to the buffer."""
         self.busy[0] -= 1
-        if self.rng.random() < self.prep_P:
+        self._mark_stochastic_use()
+        if self._rng.random() < self.prep_P:
             self.buffer[0] += 1
             self.produced[0] += 1
         else:
             self.failures[0] += 1
         self._drive()
-

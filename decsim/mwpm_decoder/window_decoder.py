@@ -23,13 +23,23 @@ def matching_window_decoder():
     cache: dict = {}
 
     def decode(model: "WindowErrorModel", syndrome):
-        matching = cache.get(id(model))
+        from ..detector_error_model import FaultRepresentation
+
+        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        matching = cache.get(id(faults))
         if matching is None:
+            from ..detector_error_model import validate_graphlike_matrices
             from .weights import matching_weights
+
+            validate_graphlike_matrices(
+                faults.check,
+                faults.observables,
+                location="PyMatching window model",
+            )
             matching = pymatching.Matching.from_check_matrix(
-                model.check, weights=matching_weights(model.priors))
-            cache[id(model)] = matching
-            weakref.finalize(model, cache.pop, id(model), None)
+                faults.check, weights=matching_weights(faults.priors))
+            cache[id(faults)] = matching
+            weakref.finalize(faults, cache.pop, id(faults), None)
         return matching.decode(syndrome)
 
     return decode

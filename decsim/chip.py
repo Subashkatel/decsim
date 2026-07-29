@@ -4,7 +4,7 @@ This is the control half of the QPU seam. The other half — the clocked
 per-op syndrome stream — is the Source (devices.py): the gate calls
 ``source.start(op)`` and hears ``on_body_done(op)`` back in the same event
 as the op's final round. Everything pluggable arrives injected: idle
-policy, controller relay, cluster facade, factory, source.
+policy, controller relay, window manager, decoder service, factory, source.
 
 Behavior frozen by the timing goldens:
   - any Decision(releases_operation=True) releases the waiting op,
@@ -12,7 +12,7 @@ Behavior frozen by the timing goldens:
   - while an op waits for feedback, idle rounds are emitted on the round
     clock (capped, 100*d by default), counted per qubit set, and at the
     next op's begin folded into its first window via
-    cluster.prepend_idle_rounds.
+    window_manager.prepend_idle_rounds.
   - the magic-state wait overlaps the feedback wait: an op starts once both
     are clear; the two waits never add.
   - resource reservation uses typed ResourceClaims; the default layout
@@ -21,35 +21,51 @@ Behavior frozen by the timing goldens:
 
 from __future__ import annotations
 
+from dataclasses import replace
+from types import MappingProxyType
 from typing import Optional
 
-from .message import Decision, Operation, SyndromePayload
+from .message import Decision, FeedbackEffect, Operation, SyndromePayload
 from .pauli_frame import PauliFrame
-from .config import us
 
 
 class Chip:
     """Gate operation starts on body deps + magic states + feedback finality."""
 
-    def __init__(self, engine, *, source, controller, cluster, factory,
-                 round_ticks: int, code_distance: int, idle_policy,
+    def __init__(self, engine, *, source, controller, window_manager,
+                 decode_service, factory,
+                 round_ticks: int, code_geometry, resolved_operations,
+                 resolved_patches, idle_policy,
+                 resource_claims_by_operation_id,
                  max_idle_rounds: Optional[int] = None,
                  gates_start_on_round_boundaries: bool = False,
                  frame: Optional[PauliFrame] = None):
         self.engine = engine
         self.source = source
         self.controller = controller
-        self.cluster = cluster
+        self.window_manager = window_manager
+        self.decode_service = decode_service
         self.factory = factory
         self.round_ticks = round_ticks
-        self.code_distance = code_distance
+        self._code_geometry = code_geometry
         self.idle_policy = idle_policy
+        self._resolved_operations = MappingProxyType({
+            operation.operation_id: operation
+            for operation in resolved_operations
+        })
+        self._resolved_patches = MappingProxyType({
+            patch.patch_identity: patch
+            for patch in resolved_patches
+        })
+        self._resource_claims_by_operation_id = MappingProxyType(
+            dict(resource_claims_by_operation_id)
+        )
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
         self.frame = frame if frame is not None else PauliFrame()
         self.max_idle_rounds = max_idle_rounds if max_idle_rounds is not None \
-            else 100 * code_distance
+            else 100 * code_geometry.distance
 
-        self.ops: dict[int, Operation] = {}
+        self._ops: dict[int, Operation] = {}
         self._deps_remaining: dict[int, int] = {}
         self._op_successors: dict[int, list[int]] = {}
         self.busy_claims: dict[tuple, int] = {}       # (kind, id) -> op_id
@@ -76,31 +92,46 @@ class Chip:
 
     # -------------------------------------------------------------- loading
 
-    def _round_ticks_from_code(self, code) -> int:
-        """The code's own round period when it declares one, else the chip default."""
-        round_us = getattr(code, "round_us", None)
-        return us(round_us) if round_us is not None else self.round_ticks
+    @property
+    def workload_complete(self) -> bool:
+        """Whether every loaded operation body reached physical completion."""
+        return set(self._ops) == self.done_bodies
 
     def _round_ticks_for(self, operation: Operation) -> int:
-        return self._round_ticks_from_code(
-            self.cluster.layout.code_for_op(operation))
+        try:
+            return self._resolved_operations[operation.id].round_ticks
+        except KeyError as error:
+            raise ValueError(
+                f"operation {operation.id} has no resolved round cadence"
+            ) from error
 
     def _round_ticks_for_patch(self, patch) -> int:
-        return self._round_ticks_from_code(
-            self.cluster.layout.code_for_patch(patch))
+        try:
+            return self._resolved_patches[patch].round_ticks
+        except KeyError as error:
+            raise ValueError(
+                f"patch {patch!r} has no resolved round cadence"
+            ) from error
 
-    def load(self, ops: list[Operation]) -> None:
+    def _round_count_for(self, operation: Operation) -> int:
+        try:
+            return self._resolved_operations[operation.id].round_count
+        except KeyError as error:
+            raise ValueError(
+                f"operation {operation.id} has no resolved round count"
+            ) from error
+
+    def _load(self, ops: list[Operation]) -> None:
         """Register operations, build dependencies, then start dependency roots."""
         for operation in ops:
-            self.ops[operation.id] = operation
-            self.cluster.register_op(operation)
+            self._ops[operation.id] = operation
+            self.window_manager.register_op(operation)
         for operation in ops:
             self._deps_remaining[operation.id] = len(operation.predecessors)
             self._op_successors[operation.id] = []
         for operation in ops:
             for predecessor_id in operation.predecessors:
                 self._op_successors[predecessor_id].append(operation.id)
-        self.cluster.build_windows()
         for operation in ops:
             if self._deps_remaining[operation.id] == 0:
                 self._attempt_start(operation)
@@ -112,7 +143,7 @@ class Chip:
         for successor_id in self._op_successors[operation.id]:
             self._deps_remaining[successor_id] -= 1
             if self._deps_remaining[successor_id] == 0:
-                self._attempt_start(self.ops[successor_id])
+                self._attempt_start(self._ops[successor_id])
 
     def _attempt_start(self, operation: Operation) -> None:
         """Reserve resources and fetch the magic state while feedback may pend."""
@@ -140,11 +171,11 @@ class Chip:
                     f"{operation.name} lists qubit {qubit} more than "
                     f"once: {operation.qubits}")
             seen.add(qubit)
-        for claim in self.cluster.layout.resources_for(operation):
+        for claim in self._resource_claims(operation):
             for rid in sorted(claim.ids, key=repr):
                 key = (claim.kind, rid)
                 if key in self.busy_claims:
-                    holder = self.ops[self.busy_claims[key]].name
+                    holder = self._ops[self.busy_claims[key]].name
                     raise RuntimeError(
                         f"{operation.name} and {holder} share qubit {rid} but "
                         f"have no dependency edge. The operation list is missing "
@@ -153,9 +184,17 @@ class Chip:
                 self.busy_claims[key] = operation.id
 
     def _free_resources(self, operation: Operation) -> None:
-        for claim in self.cluster.layout.resources_for(operation):
+        for claim in self._resource_claims(operation):
             for rid in claim.ids:
                 self.busy_claims.pop((claim.kind, rid), None)
+
+    def _resource_claims(self, operation: Operation):
+        try:
+            return self._resource_claims_by_operation_id[operation.id]
+        except KeyError as error:
+            raise ValueError(
+                f"operation {operation.id} has no resolved resource claims"
+            ) from error
 
     def _on_state_ready(self, operation: Operation) -> None:
         self.state_ready.add(operation.id)
@@ -183,7 +222,7 @@ class Chip:
         self.op_start_time[operation.id] = self.engine.now
         idle_rounds = self._consume_idle_rounds(operation)
         if idle_rounds:
-            self.cluster.prepend_idle_rounds(operation.id, idle_rounds)
+            self.window_manager.prepend_idle_rounds(operation.id, idle_rounds)
         self._reserve_stream_rounds(operation)
         kind = "Clifford" if operation.clifford else "non-Clifford"
         release_note = "" if operation.blocked_by is None \
@@ -211,7 +250,9 @@ class Chip:
                 f"{operation.name} starts at stream round "
                 f"{operation.stream_offset + 1}, but stream {stream_id!r} has "
                 f"already reserved through round {next_round}")
-        operation_end = operation.stream_offset + self.cluster.rounds_for(operation)
+        operation_end = operation.stream_offset + self._round_count_for(
+            operation
+        )
         self.stream_next_round[stream_id] = max(next_round, operation_end)
 
     def _patch_for_operation(self, operation: Operation):
@@ -233,9 +274,9 @@ class Chip:
         self.engine.log("Chip", f"{operation.name} body done")
         self._free_resources(operation)
         self._release_successors(operation)
-        if len(self.done_bodies) == len(self.ops):
+        if len(self.done_bodies) == len(self._ops):
             self.engine.log("Chip",
-                            f"QPU finished. All {len(self.ops)} operations are "
+                            f"QPU finished. All {len(self._ops)} operations are "
                             f"physically complete; decoder may still be draining.")
         self._close_feedback_boundary_if_needed(operation)
         self._start_idle_stream_if_needed(operation)
@@ -249,17 +290,19 @@ class Chip:
         if operation.stream_id is None:
             return
         stream_round_count = operation.stream_offset \
-            + self.cluster.rounds_for(operation)
-        self.cluster.close_stream_boundary(operation.stream_id,
-                                           stream_round_count)
+            + self._round_count_for(operation)
+        self.window_manager.close_stream_boundary(
+            operation.stream_id,
+            stream_round_count,
+        )
 
     def _seal_finished_streams_if_needed(self) -> None:
-        if len(self.done_bodies) != len(self.ops):
+        if len(self.done_bodies) != len(self._ops):
             return
         for stream_id, total_rounds in list(self.stream_next_round.items()):
-            if not self.cluster.has_dynamic_stream(stream_id):
+            if not self.window_manager.has_dynamic_stream(stream_id):
                 continue
-            self.cluster.seal_stream(stream_id, total_rounds)
+            self.window_manager.seal_stream(stream_id, total_rounds)
 
     # --------------------------------------------------------- idle emission
 
@@ -282,7 +325,7 @@ class Chip:
 
     def _has_waiting_blocked_successor(self, op_id: int) -> bool:
         for successor_id in self._op_successors[op_id]:
-            successor = self.ops[successor_id]
+            successor = self._ops[successor_id]
             if successor.blocked_by is None or successor.id in self.started:
                 continue
             if successor.id not in self.decode_released:
@@ -304,14 +347,14 @@ class Chip:
         self.idle_rounds_by_patch[patch] = \
             self.idle_rounds_by_patch.get(patch, 0) + 1
         self.idle_rounds_emitted += 1
-        self.idle_policy.account(1, self.ops[op_id])
+        self.idle_policy.account(1, self._ops[op_id])
         self._start_released_successors_on_boundary(op_id, patch)
         self._submit_idle_decode_if_due(op_id, patch, round_index)
         self.engine.schedule(
             self._round_ticks_for_patch(patch),
             lambda operation_id=op_id, patch_id=patch, done=round_index:
                 self._emit_idle_round(operation_id, patch_id, done + 1),
-            label=f"idle-tick({self.ops[op_id].name},{round_index + 1})")
+            label=f"idle-tick({self._ops[op_id].name},{round_index + 1})")
 
     def _idle_round_cap_reached(self, op_id: int, patch,
                                 round_index: int) -> bool:
@@ -323,7 +366,7 @@ class Chip:
             "round_index": round_index,
             "max_idle_rounds": self.max_idle_rounds})
         self.engine.log("Chip",
-                        f"WARNING: {self.ops[op_id].name} hit the idle-round cap "
+                        f"WARNING: {self._ops[op_id].name} hit the idle-round cap "
                         f"(max_idle_rounds={self.max_idle_rounds}) with its "
                         f"blocked successor still waiting. No more memory rounds "
                         f"will be emitted, so decoder load and backlog past this "
@@ -334,18 +377,21 @@ class Chip:
     def _relay_idle_round(self, op_id: int, patch, round_index: int) -> None:
         if self._relay_idle_round_to_live_stream(op_id, patch):
             return
-        payload = SyndromePayload(op_id, patch, round_index)
+        payload = SyndromePayload(("idle", op_id, patch), patch, round_index)
         self.controller.relay_syndrome(
             payload,
             lambda p, source_op_id=op_id:
-                self.cluster.on_memory_round(source_op_id))
+                self.window_manager.on_memory_round(source_op_id))
 
     def _relay_idle_round_to_live_stream(self, op_id: int, patch) -> bool:
         if self.idle_policy.mode != "extend_stream":
             return False
-        operation = self.ops[op_id]
+        operation = self._ops[op_id]
         stream_id = operation.stream_id
-        if stream_id is None or not self.cluster.has_dynamic_stream(stream_id):
+        if (
+            stream_id is None
+            or not self.window_manager.has_dynamic_stream(stream_id)
+        ):
             return False
         global_round = self.stream_next_round.get(stream_id, 0) + 1
         self.stream_next_round[stream_id] = global_round
@@ -356,15 +402,21 @@ class Chip:
 
     def relay_syndrome_payloads(self, payloads) -> None:
         """Send all fragments from one syndrome round through the controller."""
+        fragment_count = len(payloads)
         for payload in payloads:
-            payload.n_fragments = len(payloads)
-            self.controller.relay_syndrome(payload,
-                                           self.cluster.on_syndrome_arrival)
+            relayed_payload = replace(
+                payload,
+                n_fragments=fragment_count,
+            )
+            self.controller.relay_syndrome(
+                relayed_payload,
+                self.window_manager.on_syndrome_arrival,
+            )
 
     def _start_released_successors_on_boundary(self, op_id: int, patch) -> None:
         if self.gates_start_on_round_boundaries:
             for successor_id in self._op_successors[op_id]:
-                successor = self.ops[successor_id]
+                successor = self._ops[successor_id]
                 if (successor.blocked_by is not None
                         and successor.id not in self.started
                         and successor.id in self.decode_released
@@ -376,54 +428,85 @@ class Chip:
                                    round_index: int) -> None:
         if self.idle_policy.mode != "separate_decode_jobs":
             return
-        code = self.cluster.layout.code_for_patch(patch)
-        if round_index % code.commit_rounds() == 0:
-            self.cluster.submit_decode(
-                code.commit_rounds() + code.buffer_rounds(),
-                on_done=lambda: None, code=code.name,
-                spatial_nodes=code.spatial_nodes(1),
-                label=f"mem({self.ops[op_id].name},r{round_index})")
+        patch_record = self._resolved_patches[patch]
+        geometry = patch_record.code_geometry
+        if round_index % geometry.commit_round_count == 0:
+            self.decode_service.submit_decode(
+                geometry.commit_round_count + geometry.buffer_round_count,
+                on_done=lambda: None,
+                code=geometry.code_name,
+                spatial_nodes=patch_record.spatial_node_count,
+                label=f"mem({self._ops[op_id].name},r{round_index})")
 
     # ------------------------------------------------------------- decisions
 
     def on_decision(self, decision: Decision) -> None:
         """Receive feedback from the controller. Release is unconditional
         on releases_operation=True."""
+        effect = decision.effect
+        if effect is not None and type(effect) is not FeedbackEffect:
+            raise TypeError(
+                f"decision for operation {decision.target_operation_id} "
+                "effect must be FeedbackEffect or None")
         if decision.releases_operation:
             self._release_blocked_operation(decision)
             return
         operation_id = decision.target_operation_id
         self.result_return_time_by_operation[operation_id] = self.engine.now
-        target = self.ops[operation_id]
-        self.engine.log("Chip", f"received result return for {target.name}: "
-                                f"basis '{decision.basis}'")
+        target = self._ops[operation_id]
+        detail = "timing-only" if effect is None \
+            else (
+                f"observable {effect.logical_observable_index}, "
+                f"basis '{effect.basis}'"
+            )
+        self.engine.log(
+            "Chip",
+            f"received result return for {target.name}: {detail}",
+        )
 
     def _release_blocked_operation(self, decision: Decision) -> None:
         operation_id = decision.target_operation_id
-        target = self.ops[operation_id]
-        self._consume_decision(target, decision)
+        target = self._ops[operation_id]
+        effect = decision.effect
+        if effect is not None:
+            self._consume_effect(target, effect)
         self.decode_released.add(operation_id)
         self.decode_release_time[operation_id] = self.engine.now
-        self.engine.log(
-            "Chip",
-            f"CONSUMED decision for {target.name}: measure basis "
-            f"'{decision.basis}', frame byproduct '{decision.pauli}'"
-            f"{' + S' if decision.apply_s else ''} on qubits {target.qubits}"
-            f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
-            f"successor steered, now trying to start")
+        if effect is None:
+            self.engine.log(
+                "Chip",
+                f"CONSUMED timing-only release for {target.name}"
+                f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
+                "no basis or frame effect, now trying to start",
+            )
+        else:
+            self.engine.log(
+                "Chip",
+                f"CONSUMED decision for {target.name}: observable "
+                f"{effect.logical_observable_index}, measure basis "
+                f"'{effect.basis}', frame byproduct '{effect.pauli}'"
+                f"{' + S' if effect.apply_s else ''} on qubits "
+                f"{target.qubits}"
+                f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
+                "successor steered, now trying to start",
+            )
         self._maybe_begin(target)
 
-    def _consume_decision(self, target: Operation, decision: Decision) -> None:
+    def _consume_effect(
+        self,
+        target: Operation,
+        effect: FeedbackEffect,
+    ) -> None:
         op_id = target.id
-        self.applied_basis[op_id] = decision.basis
-        self.applied_pauli[op_id] = decision.pauli
-        self.applied_s[op_id] = bool(decision.apply_s)
+        self.applied_basis[op_id] = effect.basis
+        self.applied_pauli[op_id] = effect.pauli
+        self.applied_s[op_id] = effect.apply_s
         primary = target.qubits[0] if target.qubits else None
         x_before = self.frame.x_of(primary) if primary is not None else 0
         z_before = self.frame.z_of(primary) if primary is not None else 0
         for qubit in target.qubits:
-            self.frame.apply_pauli(qubit, decision.pauli)
-            if decision.apply_s:
+            self.frame.apply_pauli(qubit, effect.pauli)
+            if effect.apply_s:
                 self.frame.apply_s(qubit)
         delta = (0, 0) if primary is None else (
             self.frame.x_of(primary) ^ x_before,

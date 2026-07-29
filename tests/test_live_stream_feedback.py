@@ -9,7 +9,8 @@ import pytest
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
-from decsim.message import Operation
+from decsim.message import DecodeResult, Operation
+from decsim.layouts import UniformLayout
 from decsim.planner import PerOpRounds
 from decsim.schemes import SlidingWindowScheme
 from decsim.run_spec import RunSpec, simulate
@@ -71,6 +72,18 @@ class _RecordingDecoder:
         return self.inner.decode(job)
 
 
+class _FunctionalDecoder:
+    def latency(self, job):
+        return 0
+
+    def decode(self, job):
+        return DecodeResult(
+            job.op_id,
+            job.window_id,
+            logical_observables=(1,),
+        )
+
+
 def test_feedback_idle_rounds_extend_the_live_stream():
     """Feedback idle rounds become real stream rounds in extend_stream mode."""
     stream, operations = _live_stream_pair()
@@ -90,18 +103,65 @@ def test_feedback_idle_rounds_extend_the_live_stream():
                  round_us=1.0,
              ), verbose=False)
 
-    cluster = result["cluster"]
-    chip = result["chip"]
-    first, second = operations
+    cluster = result.window_manager
+    chip = result.chip
+    caller_first, caller_second = operations
+    offsets = result.result.stream_offsets()
+    first_offset = offsets[caller_first.id]
+    second_offset = offsets[caller_second.id]
 
-    assert chip.done_bodies == {first.id, second.id}
-    assert first.stream_offset == 0
-    assert second.stream_offset is not None
-    assert second.stream_offset > rounds[first.id]
-    assert cluster.rounds_arrived[stream.id] == second.stream_offset + rounds[second.id]
+    assert chip.done_bodies == {caller_first.id, caller_second.id}
+    assert caller_first.stream_offset is None
+    assert caller_second.stream_offset is None
+    assert first_offset == 0
+    assert second_offset is not None
+    assert second_offset > rounds[caller_first.id]
+    assert cluster.rounds_arrived[stream.id] == (
+        second_offset + rounds[caller_second.id]
+    )
     assert cluster.committed_stream_round_count(stream.id) == cluster.rounds_arrived[stream.id]
     assert cluster.window_count[stream.id] > 1
     assert len(cluster.committed_windows) == cluster.total_windows
+
+
+def test_feedback_idle_rounds_use_frozen_patch_cadence():
+    class FreezeDetectingLayout(UniformLayout):
+        def __init__(self, code):
+            super().__init__(code)
+            self.patch_selection_calls = 0
+
+        def code_for_patch(self, patch_id):
+            self.patch_selection_calls += 1
+            if self.patch_selection_calls > 1:
+                raise AssertionError(
+                    "runtime consulted the live patch selector"
+                )
+            return self.code
+
+    stream, operations = _live_stream_pair()
+    code = SurfaceCodeModel(
+        d=3,
+        round_us=1.0,
+        commit_rounds_override=2,
+        buffer_rounds_override=1,
+    )
+    layout = FreezeDetectingLayout(code)
+    rounds = {operations[0].id: 2, operations[1].id: 2}
+
+    result = simulate(RunSpec(
+        ops=operations,
+        dynamic_streams=[stream],
+        idle_policy=from_mode("extend_stream"),
+        device=TimingOnlyDevice(),
+        layout=layout,
+        rounds_policy=PerOpRounds(rounds),
+        scheme=SlidingWindowScheme(),
+        decoder=PresetLatencyDecoder(2.0),
+        num_units=1,
+    ))
+
+    assert result.chip.idle_rounds_emitted > 0
+    assert layout.patch_selection_calls == 1
 
 
 def test_committed_stream_round_count_releases_blocked_operation_before_stream_result():
@@ -123,12 +183,70 @@ def test_committed_stream_round_count_releases_blocked_operation_before_stream_r
                  round_us=1.0,
              ), verbose=False)
 
-    chip = result["chip"]
+    chip = result.chip
     first, second = operations
 
     assert second.id in chip.decode_release_time
     assert chip.decode_release_time[second.id] >= chip.body_done_time[first.id]
     assert chip.decode_release_time[second.id] < chip.body_done_time[second.id]
+
+
+def test_exact_live_segment_publishes_functional_vector_and_effect():
+    stream, operations = _live_stream_pair()
+    code = SurfaceCodeModel(
+        d=3,
+        commit_rounds_override=2,
+        buffer_rounds_override=1,
+    )
+    rounds = {
+        operations[0].id: 2,
+        operations[1].id: 2,
+    }
+
+    result = simulate(RunSpec(
+        ops=operations,
+        dynamic_streams=[stream],
+        idle_policy=from_mode("extend_stream"),
+        device=TimingOnlyDevice(),
+        code=code,
+        rounds_policy=PerOpRounds(rounds),
+        scheme=SlidingWindowScheme(),
+        decoder=_FunctionalDecoder(),
+        num_units=1,
+        round_us=1.0,
+    ), verbose=False)
+
+    first, second = operations
+    assert result.window_manager.op_results[first.id] == (1,)
+    assert result.chip.applied_basis[second.id] == "X"
+    assert result.chip.applied_frame_delta[second.id] != (0, 0)
+
+
+def test_functional_live_segment_rejects_contribution_boundary_crossing():
+    stream, operations = _live_stream_pair()
+    code = SurfaceCodeModel(
+        d=3,
+        commit_rounds_override=3,
+        buffer_rounds_override=1,
+    )
+    rounds = {
+        operations[0].id: 2,
+        operations[1].id: 2,
+    }
+
+    with pytest.raises(RuntimeError, match="functional.*boundary"):
+        simulate(RunSpec(
+            ops=operations,
+            dynamic_streams=[stream],
+            idle_policy=from_mode("extend_stream"),
+            device=TimingOnlyDevice(),
+            code=code,
+            rounds_policy=PerOpRounds(rounds),
+            scheme=SlidingWindowScheme(),
+            decoder=_FunctionalDecoder(),
+            num_units=1,
+            round_us=1.0,
+        ), verbose=False)
 
 
 def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
@@ -158,7 +276,7 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
                         num_units=1,
                         round_us=1.0,
                     ), verbose=False)
-    stream_round_count = timing_result["cluster"].rounds_arrived[timing_stream.id]
+    stream_round_count = timing_result.window_manager.rounds_arrived[timing_stream.id]
 
     circuit = NoiseModel.circuit_level(0.003).circuit(
         distance=code.distance,
@@ -176,23 +294,29 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
                  ops=operations,
                  dynamic_streams=[stream],
                  idle_policy=from_mode("extend_stream"),
-                 device=StimDevice(seed=13),
+                 device=StimDevice(),
                  code=code,
                  rounds_policy=PerOpRounds(rounds),
                  scheme=SlidingWindowScheme(),
                  decoder=decoder,
                  num_units=1,
                  round_us=1.0,
+                 seed=13,
              ), verbose=False)
 
-    cluster = result["cluster"]
-    chip = result["chip"]
-    first, second = operations
+    cluster = result.window_manager
+    chip = result.chip
+    caller_first, caller_second = operations
+    second_offset = result.result.stream_offsets()[caller_second.id]
 
-    assert chip.done_bodies == {first.id, second.id}
-    assert second.stream_offset is not None
-    assert second.stream_offset > rounds[first.id]
-    assert cluster.rounds_arrived[stream.id] == second.stream_offset + rounds[second.id]
+    assert chip.done_bodies == {caller_first.id, caller_second.id}
+    assert caller_first.stream_offset is None
+    assert caller_second.stream_offset is None
+    assert second_offset is not None
+    assert second_offset > rounds[caller_first.id]
+    assert cluster.rounds_arrived[stream.id] == (
+        second_offset + rounds[caller_second.id]
+    )
     assert cluster.rounds_arrived[stream.id] == stream_round_count
     assert cluster.committed_stream_round_count(stream.id) == cluster.rounds_arrived[stream.id]
     assert stream.id in cluster.op_results
@@ -224,11 +348,12 @@ def test_real_syndrome_live_stream_rejects_inexact_circuit_length():
             ops=operations,
             dynamic_streams=[stream],
             idle_policy=from_mode("extend_stream"),
-            device=StimDevice(seed=17),
+            device=StimDevice(),
             code=code,
             rounds_policy=PerOpRounds(rounds),
             scheme=SlidingWindowScheme(),
             decoder=PyMatchingDecoder(PresetLatencyDecoder(2.0)),
             num_units=1,
             round_us=1.0,
+            seed=17,
         ), verbose=False)

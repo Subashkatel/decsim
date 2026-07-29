@@ -2,8 +2,10 @@
 
 import pytest
 
+from conftest import fixed_latency_link_config
+
 from decsim.codes import SurfaceCodeModel
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.frontends.circuit import CircuitFrontend
@@ -16,9 +18,9 @@ from decsim.planner import FixedRounds
 from decsim.policies import from_mode
 
 
-def _zero_link_controller(engine):
+def _zero_link_controller(engine, links):
     """Controller whose fabric links take no simulated time."""
-    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+    return ModularController(engine, links=links, log_syndromes=False)
 
 
 def _feedback_chain():
@@ -32,7 +34,7 @@ def _feedback_chain():
 
 def _reaction_rows(result):
     """Return conditional reaction rows for a completed run."""
-    return ConditionalReactionTime(result["chip"]).rows()
+    return ConditionalReactionTime(result.chip).rows()
 
 
 def test_trailing_buffer_boundary_keeps_existing_static_wait():
@@ -40,14 +42,14 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
     result = simulate(RunSpec(
                  ops=_feedback_chain(),
                  num_units=1,
-                 d=3,
                  rounds_policy=FixedRounds(3),
                  round_us=1.0,
                  code=SurfaceCodeModel(d=3),
                  scheme=SlidingWindowScheme(),
                  decoder=PresetLatencyDecoder(2.0),
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
              ), verbose=False)
@@ -55,7 +57,7 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
     rows = _reaction_rows(result)
     assert len(rows) == 1
     assert rows[0]["wait_rounds"] == 5.0
-    assert result["cluster"].memory_rounds[0] >= 3
+    assert result.window_manager.memory_rounds[0] >= 3
 
 
 def test_measurement_closed_boundary_removes_only_static_buffer_wait():
@@ -63,14 +65,14 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
     result = simulate(RunSpec(
                  ops=_feedback_chain(),
                  num_units=1,
-                 d=3,
                  rounds_policy=FixedRounds(3),
                  round_us=1.0,
                  code=SurfaceCodeModel(d=3),
                  scheme=SlidingWindowScheme(),
                  decoder=PresetLatencyDecoder(2.0),
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
                  feedback_boundary_mode="measurement_closed",
@@ -79,7 +81,7 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
     rows = _reaction_rows(result)
     assert len(rows) == 1
     assert rows[0]["wait_rounds"] == 2.0
-    assert result["cluster"].memory_rounds[0] < 3
+    assert result.window_manager.memory_rounds[0] < 3
 
 
 def _live_stream_pair():
@@ -127,6 +129,7 @@ def _run_live_stream_pair(mode: str):
                decoder=PresetLatencyDecoder(0.0),
                num_units=1,
                round_us=1.0,
+               links=fixed_latency_link_config(),
                make_controller=_zero_link_controller,
                feedback_boundary_mode=mode,
            ), verbose=False)
@@ -137,13 +140,17 @@ def test_measurement_closed_boundary_closes_live_stream_without_idle_buffer():
     trailing = _run_live_stream_pair("trailing_buffer")
     closed = _run_live_stream_pair("measurement_closed")
 
-    trailing_first, trailing_second = trailing["chip"].ops[1], trailing["chip"].ops[2]
-    closed_first, closed_second = closed["chip"].ops[1], closed["chip"].ops[2]
+    trailing_offsets = trailing.result.stream_offsets()
+    closed_offsets = closed.result.stream_offsets()
 
-    assert trailing_second.stream_offset > trailing_first.stream_offset + 2
-    assert closed_second.stream_offset == closed_first.stream_offset + 2
-    assert trailing["cluster"].rounds_arrived[0] > closed["cluster"].rounds_arrived[0]
-    assert len(closed["cluster"].committed_windows) == closed["cluster"].total_windows
+    assert (
+        trailing_offsets[2] > trailing_offsets[1] + 2
+    )
+    assert (
+        closed_offsets[2] == closed_offsets[1] + 2
+    )
+    assert trailing.window_manager.rounds_arrived[0] > closed.window_manager.rounds_arrived[0]
+    assert len(closed.window_manager.committed_windows) == closed.window_manager.total_windows
 
 
 def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
@@ -167,20 +174,22 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
 
     result = simulate(RunSpec(
                  ops=operations,
-                 device=StimDevice(seed=19),
+                 device=StimDevice(),
                  code=code,
                  scheme=SlidingWindowScheme(),
                  decoder=PyMatchingDecoder(PresetLatencyDecoder(0.0)),
                  num_units=1,
                  rounds_policy=FixedRounds(code.commit_rounds()),
                  round_us=1.0,
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
                  feedback_boundary_mode="measurement_closed",
+                 seed=19,
              ), verbose=False)
 
-    assert result["cluster"].rounds_arrived[operations[0].id] == code.commit_rounds()
-    assert operations[0].id in result["cluster"].op_results
-    assert operations[1].id in result["chip"].decode_release_time
+    assert result.window_manager.rounds_arrived[operations[0].id] == code.commit_rounds()
+    assert operations[0].id in result.window_manager.op_results
+    assert operations[1].id in result.chip.decode_release_time
 
 
 def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
@@ -209,13 +218,15 @@ def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
             ops=operations,
             dynamic_streams=[stream],
             idle_policy=from_mode("extend_stream"),
-            device=StimDevice(seed=19),
+            device=StimDevice(),
             code=code,
             rounds_policy=PerOpRounds(rounds),
             scheme=SlidingWindowScheme(),
             decoder=PyMatchingDecoder(PresetLatencyDecoder(0.0)),
             num_units=1,
             round_us=1.0,
+            links=fixed_latency_link_config(),
             make_controller=_zero_link_controller,
             feedback_boundary_mode="measurement_closed",
+            seed=19,
         ), verbose=False)

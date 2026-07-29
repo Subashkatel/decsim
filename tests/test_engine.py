@@ -2,7 +2,26 @@
 # TESTS FOR ENGINE
 #==================================================================
 import pytest
-from decsim.engine import Engine
+from decsim.engine import Engine, SimulationFailed
+
+
+class _RecordingMetric:
+    name = "recording"
+    result_schema_version = 1
+
+    def __init__(self):
+        self.observed_ticks = []
+
+    def observe(self, engine):
+        self.observed_ticks.append(engine.now)
+
+    def result(self):
+        return list(self.observed_ticks)
+
+
+class _EqualMetricName(str):
+    """Wrong identity type that compares equal to the frozen metric name."""
+
 
 def test_engine():
     eng = Engine(verbose=False)
@@ -70,3 +89,93 @@ def test_same_tick_fifo_order():
     eng.schedule(3, lambda: fired.append(3))
     eng.run()
     assert fired == [1, 2, 3]        # same tick fires in insertion order
+
+
+def test_invalid_engine_preserves_and_chains_its_first_failure():
+    engine = Engine(verbose=False)
+    first_failure = ValueError("first failure")
+    engine._invalidate(first_failure)
+    engine._invalidate(RuntimeError("later failure"))
+
+    assert engine._failure_cause is first_failure
+    with pytest.raises(SimulationFailed) as run_failure:
+        engine.run()
+    assert run_failure.value.__cause__ is first_failure
+    with pytest.raises(SimulationFailed) as schedule_failure:
+        engine.schedule(0, lambda: None)
+    assert schedule_failure.value.__cause__ is first_failure
+
+
+def test_metric_observes_registration_run_entry_and_clock_only_boundary():
+    engine = Engine(verbose=False)
+    metric = _RecordingMetric()
+    engine.add_metric(metric)
+    engine.schedule(20, lambda: None)
+
+    engine.run(until=10)
+
+    assert metric.observed_ticks == [0, 0, 10]
+
+
+def test_metric_registration_is_rejected_mid_action_before_observation():
+    engine = Engine(verbose=False)
+    attempted = _RecordingMetric()
+    states = []
+
+    def action():
+        states.append("before")
+        with pytest.raises(RuntimeError, match="stable boundary"):
+            engine.add_metric(attempted)
+        states.append("after")
+
+    engine.schedule(0, action)
+    engine.run()
+
+    assert states == ["before", "after"]
+    assert attempted.observed_ticks == []
+    assert attempted not in engine.metrics
+
+
+def test_nested_initial_registration_is_atomic_and_guard_cleans_up():
+    engine = Engine(verbose=False)
+    nested = _RecordingMetric()
+
+    class Outer(_RecordingMetric):
+        name = "outer"
+
+        def observe(self, observed_engine):
+            with pytest.raises(RuntimeError, match="stable boundary"):
+                observed_engine.add_metric(nested)
+            super().observe(observed_engine)
+
+    outer = Outer()
+    engine.add_metric(outer)
+    later = _RecordingMetric()
+    later.name = "later"
+    engine.add_metric(later)
+
+    assert engine.metrics == [outer, later]
+    assert nested.observed_ticks == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("name", "changed"),
+        ("name", _EqualMetricName("recording")),
+        ("result_schema_version", 2),
+        ("result_schema_version", True),
+        ("result_schema_version", 1.0),
+    ],
+)
+def test_initial_identity_mutation_never_appends(field, value):
+    engine = Engine(verbose=False)
+
+    class Mutating(_RecordingMetric):
+        def observe(self, observed_engine):
+            setattr(self, field, value)
+
+    metric = Mutating()
+    with pytest.raises(RuntimeError, match="identity changed"):
+        engine.add_metric(metric)
+    assert engine.metrics == []

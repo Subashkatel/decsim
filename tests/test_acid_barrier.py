@@ -13,6 +13,7 @@ must terminate at max_idle_rounds.
 import pytest
 
 from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
+                             SAMPLED_CONFIDENCE_SOURCE,
                              SampledConfidenceDecoder, SwitchingRouter)
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.run_spec import simulate
@@ -34,31 +35,31 @@ def _chain():
 
 
 def _run_chain(p_escalate, seed, **overrides):
-    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), p_escalate, seed=seed)
+    weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), p_escalate)
     return simulate(RunSpec(
         ops=_chain(), d=3, rounds_policy=FixedRounds(11),
-        strategy=Switching(confidence_threshold=0.5),
-        decoder=weak, router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
-        unit_pools={"default": 1, "strong": 1}, **overrides))
+        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
+        router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
+        unit_pools={"default": 1, "strong": 1}, seed=seed, **overrides))
 
 
 def _stalls(res):
     """Inter-barrier stalls: layer i's release wait after layer i-1's body."""
-    gate = res["chip"]
+    gate = res.chip
     return [gate.decode_release_time[i] - gate.body_done_time[i - 1]
             for i in range(1, K) if i in gate.decode_release_time]
 
 
 def test_geometric_escalation_statistics_over_seeds():
     """The fraction of escalation-free chains matches (1-p)^W within 3σ."""
-    windows = _run_chain(0.0, seed=0)["cluster"].total_windows   # W, measured
+    windows = _run_chain(0.0, seed=0).window_manager.total_windows   # W, measured
     assert windows >= K                        # at least one window per layer
 
     clean = 0
     for seed in range(N_CHAINS):
         res = _run_chain(P_ESCALATE, seed=seed)
         assert len(_stalls(res)) == K - 1      # every layer released
-        clean += not res["cluster"].op_strong_commit_time
+        clean += not res.window_manager.op_strong_commit_time
     q = (1 - P_ESCALATE) ** windows
     sigma = (N_CHAINS * q * (1 - q)) ** 0.5
     assert abs(clean - N_CHAINS * q) <= 3 * sigma
@@ -73,8 +74,8 @@ def test_escalated_chains_stall_longer_on_lambda_eff():
         stalls = _stalls(res)
         # total idle rounds EMITTED; the per-patch counter is consumed by the
         # released successor at start (Contract 3.6), so read the run total
-        idle = res["chip"].idle_rounds_emitted
-        if res["cluster"].op_strong_commit_time:
+        idle = res.chip.idle_rounds_emitted
+        if res.window_manager.op_strong_commit_time:
             hot_stalls += stalls
             hot_idle.append(idle)
         else:
@@ -93,7 +94,7 @@ def test_idle_emission_terminates_at_max_idle_rounds():
     res = simulate(RunSpec(ops=_chain(), d=3, rounds_policy=FixedRounds(11),
                            decoder=PresetLatencyDecoder(1e5), num_units=1,
                            max_idle_rounds=cap))
-    gate = res["chip"]
+    gate = res.chip
     assert len(gate.idle_cap_hits) == K - 1            # every blocked layer capped
     assert gate.idle_rounds_emitted == (K - 1) * cap   # emission stopped exactly there
     assert len(_stalls(res)) == K - 1                  # decode returns still release

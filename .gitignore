@@ -50,3 +50,14 @@ benchmarks/out/
 
 # Scratch extraction areas (re-extractable from archived artifacts)
 experiments/scratch*/
+
+# Verification, review, and audit write-ups are private working notes.
+# They live in the sandbox alongside the repo, never in the package.
+/*_REPORT.md
+/*_REVIEW.md
+/AUDIT_*.md
+/VERIFY_*.md
+/REVIEW_*.md
+/HANDOFF_*.md
+/DESIGN_*.md
+/*.html

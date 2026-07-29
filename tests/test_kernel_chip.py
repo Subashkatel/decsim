@@ -3,10 +3,32 @@ import pytest
 
 from decsim.engine import Engine
 from decsim.policies import Ignore, SeparateDecodeJobs, from_mode
-from decsim.message import Decision, Operation, ResourceClaim
+from decsim.message import (
+    Decision,
+    FeedbackEffect,
+    Operation,
+    ResolvedCodeGeometry,
+    ResolvedOperationPlanning,
+    ResolvedPatchPlanning,
+    ResourceClaim,
+    SyndromePayload,
+)
 from decsim.chip import Chip
 
 ROUND = 1_100_000
+
+
+def _effect(*, decoded=0, correction=0, basis="Z", pauli="I",
+            apply_s=False):
+    return FeedbackEffect(
+        logical_observable_index=0,
+        decoded_value=decoded,
+        intrinsic_measurement=None,
+        correction_value=correction,
+        basis=basis,
+        pauli=pauli,
+        apply_s=apply_s,
+    )
 
 
 class _Code:
@@ -30,7 +52,6 @@ class _Cluster:
     def __init__(self):
         self.registered, self.prepended, self.memory, self.decodes = [], [], [], []
     def register_op(self, op): self.registered.append(op.id)
-    def build_windows(self): pass
     def rounds_for(self, op): return 4
     def prepend_idle_rounds(self, op_id, n): self.prepended.append((op_id, n))
     def on_memory_round(self, op_id): self.memory.append(op_id)
@@ -78,13 +99,58 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
     eng = Engine(verbose=False)
     cluster = _Cluster()
     factory = _Factory(factory_delay, eng)
+    geometry = ResolvedCodeGeometry(
+        code_name="fake",
+        distance=3,
+        commit_round_count=3,
+        buffer_round_count=3,
+        minimum_leading_buffer_round_count=3,
+        minimum_trailing_buffer_round_count=3,
+        one_patch_spatial_node_count=9,
+        buffer_floor_override_active=False,
+    )
     gate = Chip(eng, source=_Source(eng, cluster),
-                        controller=_Controller(), cluster=cluster,
-                        factory=factory, round_ticks=ROUND, code_distance=3,
+                        controller=_Controller(), window_manager=cluster,
+                        decode_service=cluster,
+                        factory=factory, round_ticks=ROUND,
+                        code_geometry=geometry,
+                        resolved_operations=tuple(
+                            ResolvedOperationPlanning(
+                                operation_id=operation.id,
+                                code_geometry=geometry,
+                                round_count=4,
+                                round_ticks=ROUND,
+                                spatial_node_count=9,
+                            )
+                            for operation in ops
+                        ),
+                        resolved_patches=tuple(
+                            ResolvedPatchPlanning(
+                                patch_identity=patch,
+                                code_geometry=geometry,
+                                round_ticks=ROUND,
+                                spatial_node_count=9,
+                            )
+                            for patch in {
+                                patch
+                                for operation in ops
+                                for patch in (
+                                    operation.patches
+                                    if operation.patches
+                                    else operation.qubits or (0,)
+                                )
+                            }
+                        ),
                         idle_policy=idle_policy or Ignore(),
+                        resource_claims_by_operation_id={
+                            operation.id: tuple(
+                                cluster.layout.resources_for(operation)
+                            )
+                            for operation in ops
+                        },
                         max_idle_rounds=max_idle,
                         gates_start_on_round_boundaries=boundaries)
-    gate.load(ops)
+    gate._load(ops)
     return eng, gate, cluster, factory
 
 
@@ -95,12 +161,42 @@ def _blocked_pair(**succ_kw):
     return [a, b]
 
 
+def test_chip_live_stream_relay_does_not_mutate_source_fragment_counts():
+    class RecordingController:
+        def __init__(self):
+            self.payloads = []
+
+        def relay_syndrome(self, payload, deliver):
+            self.payloads.append(payload)
+
+    _, gate, _, _ = _gate([Operation(0, "memory", (0, 1))])
+    controller = RecordingController()
+    gate.controller = controller
+    source_payloads = [
+        SyndromePayload("stream", "north", 1),
+        SyndromePayload("stream", "south", 1),
+    ]
+
+    gate.relay_syndrome_payloads(source_payloads)
+
+    assert [payload.n_fragments for payload in source_payloads] == [1, 1]
+    assert [payload.n_fragments for payload in controller.payloads] == [2, 2]
+    assert all(
+        relayed is not source
+        for relayed, source in zip(controller.payloads, source_payloads)
+    )
+
+
 def test_release_unconditional_on_decision_contract_3_4():
     ops = _blocked_pair(requires_strong_commit=True)
     eng, gate, cluster, factory = _gate(ops)
     eng.run()                                    # A finishes; B blocked, idling
     assert 1 not in gate.started
-    gate.on_decision(Decision(1, "Z", pauli="X", strong_committed=False))
+    gate.on_decision(Decision(
+        1,
+        _effect(decoded=1, correction=1, basis="X", pauli="X"),
+        strong_committed=False,
+    ))
     eng.run()
     assert 1 in gate.decode_released and 1 in gate.started   # weak Decision released it
     assert gate.frame.x_of(0) == 1               # byproduct folded into the frame
@@ -127,7 +223,7 @@ def _deliver_decision_late(eng, gate, at_ticks, hop_ticks=ROUND // 2):
     scheduled for the same time (Contract 3 rule 7's real ordering)."""
     eng.schedule(at_ticks - hop_ticks,
                  lambda: eng.schedule(hop_ticks,
-                                      lambda: gate.on_decision(Decision(1, "Z"))))
+                                      lambda: gate.on_decision(Decision(1))))
 
 
 def test_idle_tie_beats_release_contract_3_7():
@@ -168,7 +264,7 @@ def test_magic_wait_overlaps_feedback_wait():
 def test_round_boundary_start_snaps():
     eng, gate, cluster, _ = _gate(_blocked_pair(), boundaries=True)
     # release mid-round: at 5.5 rounds
-    eng.schedule(int(5.5 * ROUND), lambda: gate.on_decision(Decision(1, "Z")))
+    eng.schedule(int(5.5 * ROUND), lambda: gate.on_decision(Decision(1)))
     eng.run()
     assert gate.op_start_time[1] == 6 * ROUND    # snapped to next idle boundary
 
@@ -192,3 +288,46 @@ def test_from_mode_validates():
     assert from_mode("ignore").mode == "ignore"
     with pytest.raises(ValueError):
         from_mode("bogus")
+
+
+def test_timing_only_release_changes_no_functional_state():
+    eng, gate, _, _ = _gate(_blocked_pair())
+    eng.run()
+    frame_before = gate.frame.snapshot()
+
+    gate.on_decision(Decision(1, effect=None))
+
+    assert 1 in gate.decode_released
+    assert gate.frame.snapshot() == frame_before
+    assert gate.applied_basis == {}
+    assert gate.applied_pauli == {}
+    assert gate.applied_s == {}
+    assert gate.applied_frame_delta == {}
+
+
+def test_nonreleasing_functional_return_is_transport_only():
+    op = Operation(
+        0,
+        "A",
+        (0,),
+        requires_result_return_to_chip=True,
+    )
+    eng, gate, _, _ = _gate([op])
+    eng.run()
+    effect = _effect(
+        decoded=1,
+        correction=1,
+        basis="X",
+        pauli="X",
+        apply_s=True,
+    )
+    frame_before = gate.frame.snapshot()
+
+    gate.on_decision(Decision(0, effect, releases_operation=False))
+
+    assert gate.result_return_time_by_operation[0] == eng.now
+    assert gate.frame.snapshot() == frame_before
+    assert gate.decode_release_time == {}
+    assert gate.applied_basis == {}
+    assert gate.applied_pauli == {}
+    assert gate.applied_s == {}

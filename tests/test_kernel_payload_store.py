@@ -1,12 +1,50 @@
 """Payload store: refcounted retention, idempotent release, replay, peak accounting."""
 import pytest
 
+from decsim.message import RetainedSyndromeFragment, SyndromeRoundPacket
 from decsim.payload_store import PayloadStore
 
 
+def _packet(op_id, round_index, fragments=((0, (0,)),)):
+    return SyndromeRoundPacket(
+        operation_id=op_id,
+        round_index=round_index,
+        fragments=tuple(
+            RetainedSyndromeFragment(
+                operation_id=op_id,
+                patch_id=patch_id,
+                round_index=round_index,
+                bits=bits,
+                code=None,
+                size_bits=len(bits),
+            )
+            for patch_id, bits in fragments
+        ),
+    )
+
+
+def test_store_retains_one_complete_packet_and_its_exact_tick():
+    store = PayloadStore()
+    store.register_op(("operation", 1))
+    packet = _packet(
+        ("operation", 1),
+        3,
+        (("north", (0, 1)), ((2, "south"), (1, 0))),
+    )
+
+    store.store_round(packet, completion_tick=91)
+
+    assert store.fragments(("operation", 1), 3) == packet.fragments
+    assert store.round_complete_tick(("operation", 1), 3) == 91
+    assert store.payloads_held == 2
+    with pytest.raises(ValueError, match="already retained"):
+        store.store_round(packet, completion_tick=92)
+
+
 def _store_rounds(ps, op_id, rounds):
+    ps.register_op(op_id)
     for r in rounds:
-        ps.store(op_id, r, payload=f"p{op_id}.{r}")
+        ps.store_round(_packet(op_id, r), completion_tick=r)
 
 
 def test_weak_release_frees_unshared_rounds():
@@ -53,9 +91,12 @@ def test_replay_skips_missing_rounds():
 def test_peak_and_fragment_accounting():
     ps = PayloadStore()
     ps.lease("w0", [(0, 1)])
-    ps.store(0, 1, "a", fragment_index=0)
-    ps.store(0, 1, "b", fragment_index=1)     # second fragment of same round
-    ps.store(0, 1, "b2", fragment_index=1)    # overwrite: not double-counted
+    ps.register_op(0)
+    packet = _packet(0, 1, ((0, (0,)), (1, (1,))))
+    ps.store_round(packet, completion_tick=1)
+    assert ps.payloads_held == 2 and ps.peak_payloads == 2
+    with pytest.raises(ValueError, match="already retained"):
+        ps.store_round(packet, completion_tick=2)
     assert ps.payloads_held == 2 and ps.peak_payloads == 2
     ps.release("w0")
     assert ps.payloads_held == 0 and ps.peak_payloads == 2

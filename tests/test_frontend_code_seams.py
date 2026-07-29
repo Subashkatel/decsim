@@ -1,9 +1,10 @@
 """Frontend and code-model seams for external IR adapters."""
 
 from decsim import protocols as P
+from conftest import fixed_latency_link_config
 from decsim.codes import BBCodeModel, SurfaceCodeModel
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.layouts import UniformLayout
@@ -169,11 +170,12 @@ class RecordingDecoder:
 
     def decode(self, job):
         self.jobs.append(job)
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
-def _zero_link_controller(engine):
-    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+def _zero_link_controller(engine, links):
+    return ModularController(engine, links=links, log_syndromes=False)
 
 
 def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():
@@ -195,15 +197,16 @@ def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():
                  rounds_policy=FixedRounds(3),
                  device=TimingOnlyDevice(),
                  decoder=PresetLatencyDecoder(0.1),
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
              ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
     assert frontend.operations[1].predecessors == (10,)
     assert frontend.operations[2].predecessors == (11,)
-    assert result["cluster"].window_count == {10: 1, 11: 1, 12: 1}
-    assert result["chip"].decode_release_time[12] >= result["cluster"].windows[(11, 0)].t_done
-    assert result["fully_done"] > 0
+    assert result.window_manager.window_count == {10: 1, 11: 1, 12: 1}
+    assert result.chip.decode_release_time[12] >= result.window_manager.windows[(11, 0)].t_done
+    assert result.result.fully_done_ticks > 0
 
 
 def test_lattice_surgery_ir_can_lower_to_physical_ir_then_run():
@@ -225,6 +228,7 @@ def test_lattice_surgery_ir_can_lower_to_physical_ir_then_run():
                  rounds_policy=FixedRounds(3),
                  device=TimingOnlyDevice(),
                  decoder=PresetLatencyDecoder(0.1),
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
              ), verbose=False)
 
@@ -234,7 +238,7 @@ def test_lattice_surgery_ir_can_lower_to_physical_ir_then_run():
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == (1,)
     assert frontend.operations[2].blocked_by == 1
-    assert result["chip"].decode_release_time[2] >= result["cluster"].windows[(1, 0)].t_done
+    assert result.chip.decode_release_time[2] >= result.window_manager.windows[(1, 0)].t_done
 
 
 def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
@@ -250,24 +254,24 @@ def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
 
     result = simulate(RunSpec(
                  frontend=frontend,
-                 code=code,
                  layout=layout,
                  num_units=2,
                  rounds_policy=FixedRounds(4),
                  device=SyndromeBitDevice(code, per_patch=True),
                  decoder=decoder,
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
              ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
     assert isinstance(code, P.CodeModel)
-    assert result["cluster"].layout is layout
+    assert result.window_manager._code_geometry.code_name == code.name
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == ()
     assert {job.code for job in decoder.jobs} == {code.name}
     assert {job.spatial_nodes for job in decoder.jobs} == {code.spatial_nodes(1)}
     assert all(job.payloads for job in decoder.jobs)
-    assert len(result["cluster"].committed_windows) == result["cluster"].total_windows
+    assert len(result.window_manager.committed_windows) == result.window_manager.total_windows
 
 
 def test_bb_code_isa_can_lower_to_physical_ir_then_run():
@@ -283,12 +287,12 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
 
     result = simulate(RunSpec(
                  frontend=frontend,
-                 code=code,
                  layout=layout,
                  num_units=2,
                  rounds_policy=FixedRounds(4),
                  device=SyndromeBitDevice(code, per_patch=True),
                  decoder=decoder,
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
              ), verbose=False)
 
@@ -297,7 +301,7 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
     assert isinstance(frontend.physical_frontend, PhysicalPatchIRFrontend)
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == ()
-    assert result["cluster"].code is code
+    assert result.window_manager._code_geometry.code_name == code.name
     assert {job.code for job in decoder.jobs} == {code.name}
     assert {job.spatial_nodes for job in decoder.jobs} == {code.spatial_nodes(1)}
-    assert len(result["cluster"].committed_windows) == result["cluster"].total_windows
+    assert len(result.window_manager.committed_windows) == result.window_manager.total_windows

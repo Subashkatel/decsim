@@ -2,16 +2,11 @@
 
 Each benchmark reproduces a published quantitative result with a config-only
 setup: pick RunSpec parts, state the paper's observable and tolerance, run.
-The recipe for adding a new paper is benchmarks/README.md; these three are
-its worked examples.
 
   1. Skoric et al., arXiv:2209.08552 — streaming backlog: bounded at ρ<1,
      grows at rate λ−μ (±10%) at ρ>1; windowed == global decode accuracy.
   2. Gidney–Ekerå, arXiv:1905.09749 — reaction-limited serial chain: runtime
      matches the analytic per-layer period within ±15% (QLX's own tolerance).
-  3. Terhal-style feed-forward statistics (Terhal RMP 87, 030501 (2015);
-     Litinski arXiv:1808.02892): each non-Clifford layer draws its corrective
-     basis with the published f = 1/2, so clean chains occur at rate f^k.
 """
 import pytest
 
@@ -45,20 +40,21 @@ def _chain(k):
 #==================================================================
 
 T_DD_US = 0.5      # boundary-handoff hop between consecutive windows
+T_WDO_US = 1.0     # accepted weak result before boundary publication
 
 def _backlog_run(rho, rounds):
     """Sliding windows on one unit decode STRICTLY in sequence — "sliding
     window decoding is inherently sequential" (Skoric §I.B p. 2): window k+1
     needs window k's committed boundary (artificial) defects (+t_dd hop), so
-    the service cycle per window is E[S] + t_dd and
-    ρ = (E[S] + t_dd) / (commit·t_round)."""
+    the service cycle per window is E[S] + t_wdo + t_dd and
+    ρ = (E[S] + t_wdo + t_dd) / (commit·t_round)."""
     backlog = {}
 
-    def make_metrics(engine, cluster, chip, factory):
-        backlog["m"] = DecodeBacklog(cluster)
+    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+        backlog["m"] = DecodeBacklog(window_manager, decoder_manager)
         return [backlog["m"]]
 
-    service_us = rho * COMMIT * ROUND_US - T_DD_US
+    service_us = rho * COMMIT * ROUND_US - T_WDO_US - T_DD_US
     res = simulate(RunSpec(ops=_memory_op(rounds), d=D,
                            rounds_policy=FixedRounds(rounds),
                            round_us=ROUND_US, num_units=1,
@@ -82,7 +78,7 @@ def test_skoric_supercritical_backlog_grows_at_lambda_minus_mu():
     mu = COMMIT / (rho * COMMIT * ROUND_US)     # rounds decoded per us
     expected = (lam - mu) / TICKS_PER_US        # rounds per tick
 
-    t1, t2 = 0.25 * res["chip_done"], 0.95 * res["chip_done"]
+    t1, t2 = 0.25 * res.result.chip_done_ticks, 0.95 * res.result.chip_done_ticks
     b1 = max(b for t, b in metric.trace if t <= t1)
     b2 = max(b for t, b in metric.trace if t <= t2)
     measured = (b2 - b1) / (t2 - t1)
@@ -92,7 +88,7 @@ def test_skoric_supercritical_backlog_grows_at_lambda_minus_mu():
 def test_skoric_subcritical_backlog_bounded():
     """ρ<1: the p99 backlog is pipeline-sized and flat across the run."""
     res, metric = _backlog_run(0.8, rounds=600)
-    during = sorted(b for t, b in metric.trace if t <= res["chip_done"])
+    during = sorted(b for t, b in metric.trace if t <= res.result.chip_done_ticks)
     p99 = during[int(0.99 * (len(during) - 1))]
     assert p99 <= 4 * COMMIT                    # ~a window, not ~the run length
     assert metric.trace[-1][1] == 0             # drains completely
@@ -108,7 +104,12 @@ def test_skoric_windowed_decode_matches_global_on_frozen_shots():
     pytest.importorskip("pymatching")
     import json, pathlib
 
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+        decode_windowed,
+    )
     from decsim.mwpm_decoder import matching_window_decoder
 
     data = pathlib.Path(__file__).resolve().parent / "data"
@@ -118,9 +119,18 @@ def test_skoric_windowed_decode_matches_global_on_frozen_shots():
     shots = np.load(data / "rsc-d3-r6-p0.005.shots.npz")
     dets, obs = shots["dets"], shots["obs"]
 
-    models = build_window_error_models(circ, [tuple(w) for w in g["plan"]])
+    models = build_window_error_models(
+        circ,
+        [tuple(w) for w in g["plan"]],
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
     inner = matching_window_decoder()
-    windowed = sum(int(decode_windowed(models, dets[i], inner)[0] != obs[i, 0])
+    windowed = sum(int(decode_windowed(
+        models,
+        dets[i],
+        inner,
+        selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+    )[0] != obs[i, 0])
                    for i in range(g["n"]))
     assert abs(windowed - g["global_mwpm_fails"]) <= max(2, int(0.01 * g["n"]))
 
@@ -144,18 +154,25 @@ def test_gidney_ekera_reaction_limited_runtime_within_15_percent():
     within ±15% — the tolerance QLX validates its own Ekerå–Håstad
     runtimes at."""
     from decsim.schemes import NaiveOnlineScheme
+    from decsim.links import LinkModelConfig
     k, rounds, decode_us = 6, 11, 5.0
-    t = TimingConfig()
+    links = LinkModelConfig.reference_fixed_latency_profile()
     res = simulate(RunSpec(ops=_chain(k), d=D,
                            rounds_policy=FixedRounds(rounds),
                            round_us=ROUND_US, num_units=1,
                            scheme=NaiveOnlineScheme(),   # one window per layer
                            decoder=PresetLatencyDecoder(decode_us)))
-    gate = res["chip"]
+    gate = res.chip
 
     body = rounds * us(ROUND_US)
-    reaction = (t.ticks("t_qc") + t.ticks("t_cd") + us(decode_us)
-                + t.ticks("t_do") + t.ticks("t_oc") + t.ticks("t_cq"))
+    reaction = (
+        links.qc.channel.propagation_latency_ticks
+        + links.cwd.channel.propagation_latency_ticks
+        + us(decode_us)
+        + links.wdo.channel.propagation_latency_ticks
+        + links.oc.channel.propagation_latency_ticks
+        + links.cq.channel.propagation_latency_ticks
+    )
     period = body + reaction
 
     releases = [gate.decode_release_time[i] for i in range(1, k)]
@@ -164,6 +181,8 @@ def test_gidney_ekera_reaction_limited_runtime_within_15_percent():
         assert measured == pytest.approx(period, rel=0.15)
     # the LAST layer releases no successor, so its return hops never happen:
     # total = k*period - (t_oc + t_cq)   (Codex re-derivation, exact)
-    total = k * period - (t.ticks("t_oc") + t.ticks("t_cq"))
-    assert res["fully_done"] == pytest.approx(total, rel=0.15)
-
+    total = k * period - (
+        links.oc.channel.propagation_latency_ticks
+        + links.cq.channel.propagation_latency_ticks
+    )
+    assert res.result.fully_done_ticks == pytest.approx(total, rel=0.15)

@@ -17,7 +17,8 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from conftest import fixed_latency_link_config
+from decsim.controllers import ModularController
 from decsim.decoders import PerRoundDecoder
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import Operation
@@ -44,14 +45,20 @@ class WindowedCode:
     def rounds_per_logical_cycle(self):
         return self.d
 
-    def rounds_per_op(self):
-        return self.d
+    def round_period_us(self):
+        return None
 
     def commit_rounds(self):
         return self._commit
 
     def buffer_rounds(self):
         return self._buffer
+
+    def buffering_floor(self):
+        return (self.d, self.d)
+
+    def buffer_floor_override_active(self):
+        return True
 
     def spatial_nodes(self, num_patches):
         return max(1, num_patches) * self.d * self.d
@@ -73,9 +80,11 @@ def _run_memory(tau_us, commit, buffer, n_windows=20):
             rounds_policy=FixedRounds(rounds),
             round_us=TAU_GEN_US,
             decoder=PerRoundDecoder(tau_us),
-            make_controller=lambda e: ModularController(e, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False),
+            links=fixed_latency_link_config(),
+            make_controller=lambda e, links: ModularController(
+                e, links=links, log_syndromes=False),
         ), verbose=False)
-    return r["cluster"], rounds
+    return r.window_manager, rounds
 
 
 def _reference_finish_times(cluster, rounds, tau_us):

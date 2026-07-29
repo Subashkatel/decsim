@@ -42,20 +42,20 @@ def _engine_failures(p: float, shots: int, seed0: int) -> int:
     circuit = _circuit(p)
     failures = 0
     for shot in range(shots):
-        device = StimDevice(seed=seed0 + shot)
+        device = StimDevice()
         op = Operation(id=1, name="memory", qubits=(0,), clifford=True,
                        circuit=circuit)
         res = simulate(RunSpec(
                   ops=[op],
                   num_units=4,
-                  d=D,
                   rounds_policy=FixedRounds(ROUNDS),
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),
                   device=device,
                   decoder=PyMatchingDecoder(_ZeroLatency()),
+                  seed=seed0 + shot,
               ), verbose=False)
-        predicted = int(res["cluster"].op_results[1])
+        predicted = res.window_manager.op_results[1][0]
         failures += int(predicted != int(device._truth[1][0]))
     return failures
 

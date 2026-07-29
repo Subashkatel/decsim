@@ -1,6 +1,6 @@
 """Runtime window layout for streams whose length is not known up front.
 
-The runtime twin of planner.WindowPlanner: the planner lays out all windows
+The runtime twin of static root materialization: the root lays out all windows
 up front for ops of known length; this lays them out on the fly for a
 dynamic stream, whose total length only emerges as the run proceeds (op
 segments fold their rounds into it via Operation.stream_id). Windows are
@@ -34,11 +34,18 @@ class DynamicWindows:
 
     # ------------------------------------------------------------ register
 
-    def register(self, stream_op: Operation, code, source_round_limit) -> None:
+    def register(
+        self,
+        stream_op: Operation,
+        *,
+        commit_round_count,
+        buffer_round_count,
+        source_round_limit,
+    ) -> None:
         """Track a stream whose windows are created from arriving rounds."""
         self._streams[stream_op.id] = {
-            "commit_rounds": code.commit_rounds(),
-            "buffer_rounds": code.buffer_rounds(),
+            "commit_rounds": commit_round_count,
+            "buffer_rounds": buffer_round_count,
             "next_window": 0,
             "sealed": False,
             "source_round_limit": source_round_limit,
@@ -57,6 +64,19 @@ class DynamicWindows:
         """True for non-streams and sealed streams."""
         stream_state = self._streams.get(op_id)
         return stream_state is None or stream_state["sealed"]
+
+    def arrival_round_limit(
+        self,
+        op_id,
+        fallback_rounds: int,
+    ) -> Optional[int]:
+        """Maximum legal device round, or None for an open unbounded stream."""
+        stream_state = self._streams.get(op_id)
+        if stream_state is None:
+            return fallback_rounds
+        if stream_state["sealed"]:
+            return stream_state["sealed_round_count"]
+        return stream_state["source_round_limit"]
 
     # ---------------------------------------------------------------- grow
 
@@ -197,6 +217,15 @@ class DynamicWindows:
             return
         self.committed_round_counts[stream_id] = committed
         self.window_manager.release_stream_segments_at_commit(stream_id, committed)
+
+    def recompute_committed_round_count(self, stream_id) -> int:
+        """Reset a speculative stream prefix from its actual committed windows."""
+        committed = self._committed_prefix_round_count(stream_id)
+        if committed:
+            self.committed_round_counts[stream_id] = committed
+        else:
+            self.committed_round_counts.pop(stream_id, None)
+        return committed
 
     def _committed_prefix_round_count(self, stream_id) -> int:
         """How many initial rounds are covered by committed windows."""

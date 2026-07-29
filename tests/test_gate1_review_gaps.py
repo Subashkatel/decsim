@@ -4,15 +4,21 @@ Each test pins a branch the 2026-07-03 review found uncovered:
   7  held-early-strong result discarded when the weak proves confident
   8  PayloadStore.replace strictly frees rounds the new lease drops
   9  dem.decode_windowed raises when artificial defects are never consumed
-  10 ClusterGapMetric.from_window_model + the SoftOutputDecoder wrapper path
   HA switching threshold equality keeps weak (>= semantics)
   HA SlidingWindowScheme.data_complete overflow branches
   HA ComplementaryGapMetric multi-observable guard
 """
 import pytest
 
+from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE
 from decsim.engine import Engine
-from decsim.message import DecodeJob, DecodeResult, SyndromePayload, Window
+from decsim.message import (
+    DecodeJob,
+    DecodeResult,
+    SoftOutput,
+    SyndromePayload,
+    Window,
+)
 from decsim.decoder_manager import StrategyServicesImpl, DecoderManager
 from decsim.payload_store import PayloadStore
 from decsim.schemes import SlidingWindowScheme
@@ -27,15 +33,25 @@ WS = 500_000
 
 class _FifoScheduler:
     def insert(self, queue, job): queue.append(job)
-    def pop(self, queue): return queue.pop(0)
+    def pop(self, queue, now_ticks): return queue.pop(0)
 
 
 class _Decoder:
     def __init__(self, latency, soft=None, logical=0):
-        self._latency, self.soft, self.logical = latency, soft, logical
+        self._latency = latency
+        self.soft = (
+            None
+            if soft is None
+            else SoftOutput(
+                gap=soft,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            )
+        )
+        self.logical = logical
     def latency(self, job): return self._latency
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=self.logical,
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(self.logical,),
                             soft_output=self.soft)
 
 
@@ -56,6 +72,10 @@ class _RuntimeStub:
         self.commits.append((job.op_id, job.window_id, job.awaiting_strong_result))
     def on_strong_decode_done(self, key, result):
         self.strong_commits.append(key)
+    def prepare_strong_selection(self, weak_job, serial_submission):
+        if serial_submission is not None:
+            self.pool.enqueue(serial_submission.job, WS)
+        return WS
 
 
 def _window():
@@ -67,8 +87,8 @@ def _pool(strategy, weak, strong):
     rt = _RuntimeStub()
     pool = DecoderManager(eng, router=_Router(weak, strong),
                           scheduler=_FifoScheduler(),
-                          unit_pools={"default": 1, "strong": 1},
-                          ws_delay_ticks=WS)
+                          unit_pools={"default": 1, "strong": 1})
+    rt.pool = pool
     pool.strategy = strategy
     pool.services = StrategyServicesImpl(eng, rt, pool)
     pool.on_window_decoded = rt.on_decode_done
@@ -83,7 +103,7 @@ def test_held_early_strong_discarded_on_confident_weak():
     confident -> FINALIZE cancels the held result; it must never apply."""
     weak = _Decoder(10_000, soft=0.9)           # slow weak, HIGH confidence
     strong = _Decoder(10, logical=1)            # strong completes early -> held
-    strat = Switching(confidence_threshold=0.5, run_both_at_once=True)
+    strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True)
     eng, rt, pool = _pool(strat, weak, strong)
     w = _window()
     job = DecodeJob(op_id=0, window_id=0, n_rounds=6, window=w, label="op0 W0")
@@ -106,10 +126,24 @@ def test_held_early_strong_discarded_on_confident_weak():
 # ------------------------------------------------- finding 8: strict replace
 
 def test_payload_store_replace_strictly_frees_dropped_rounds():
+    from decsim.message import (
+        RetainedSyndromeFragment,
+        SyndromePayload,
+        SyndromeRoundPacket,
+    )
+
     ps = PayloadStore()
     ps.register_op(0)
     for r in (1, 2, 3):
-        ps.store(0, r, payload=f"round{r}")
+        payload = SyndromePayload(0, 0, r)
+        ps.store_round(
+            SyndromeRoundPacket(
+                operation_id=0,
+                round_index=r,
+                fragments=(RetainedSyndromeFragment.from_payload(payload),),
+            ),
+            completion_tick=r,
+        )
     ps.lease("L", [(0, 1), (0, 2), (0, 3)])
     assert ps.payloads_held == 3
     ps.replace("L", [(0, 3)])
@@ -135,18 +169,35 @@ def _surface_circuit(d=3, rounds=9, p=0.003):
 def test_decode_windowed_raises_on_unconsumed_artificial_defects():
     """A plan that truncates the stream leaves committed faults' future
     flips pending; the forward-only walk must raise, not silently drop."""
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+        decode_windowed,
+    )
 
     circuit = _surface_circuit()
     # Full coverage plan is [(1,3,6),(4,6,9),(7,9,9)]; truncate to the
     # first TWO windows and force is_last=False semantics by building the
     # full plan, then dropping the tail window from the walk.
-    models = build_window_error_models(circuit, [(1, 3, 6), (4, 6, 9), (7, 9, 9)])
-    assert any(m.future_flips for m in models[:2])
+    models = build_window_error_models(
+        circuit,
+        [(1, 3, 6), (4, 6, 9), (7, 9, 9)],
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
+    graphlike_faults = [
+        model.require_faults(FaultRepresentation.GRAPHLIKE)
+        for model in models[:2]
+    ]
+    assert any(faults.future_flips for faults in graphlike_faults)
     matchings = [pymatching.Matching.from_check_matrix(
-        m.check, weights=np.log((1 - m.priors) / m.priors),
-        faults_matrix=np.eye(np.asarray(m.check).shape[1], dtype=np.uint8))
-        for m in models[:2]]   # per-column selections (G9 review fix)
+        faults.check,
+        weights=np.log((1 - faults.priors) / faults.priors),
+        faults_matrix=np.eye(
+            np.asarray(faults.check).shape[1],
+            dtype=np.uint8,
+        ))
+        for faults in graphlike_faults]   # per-column selections (G9 review fix)
 
     def decode_window(model, syndrome):
         idx = models.index(model)
@@ -157,7 +208,12 @@ def test_decode_windowed_raises_on_unconsumed_artificial_defects():
     for shot in dets:
         # find a shot whose first-two-window decode commits a future flip
         try:
-            decode_windowed(list(models[:2]), shot, decode_window)
+            decode_windowed(
+                list(models[:2]),
+                shot,
+                decode_window,
+                selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+            )
         except RuntimeError as err:
             assert "artificial defects were never consumed" in str(err)
             saw_defect_shot = True
@@ -166,45 +222,35 @@ def test_decode_windowed_raises_on_unconsumed_artificial_defects():
                              "64 seeded shots; raise the shot count")
 
 
-# ------------------------- finding 10: cluster gap from window model + wrapper
-
-def test_cluster_gap_from_window_model_and_soft_output_decoder_path():
-    from decsim.detector_error_model import build_window_error_models
-    from decsim.soft_output import ClusterGapMetric, SoftOutputDecoder
-
-    circuit = _surface_circuit(rounds=3)
-    (model,) = build_window_error_models(circuit, [(1, 3, 3)])
-    metric = ClusterGapMetric.from_window_model(model)
-
-    empty = np.zeros(model.check.shape[0], dtype=np.uint8)
-    out = metric.evaluate(empty)
-    assert out.logical_value == 0
-    assert out.gap > 0.0                        # confident on empty syndrome
-    single = empty.copy()
-    single[0] = 1
-    out_single = metric.evaluate(single)
-    assert out_single.gap >= 0.0                # finite, defined
-
-    # wrapper path: SoftOutputDecoder attaches the cluster gap to a result
-    base = _Decoder(10, logical=0)
-    wrapper = SoftOutputDecoder(base, ClusterGapMetric)
-    payload = SyndromePayload(0, 0, 1, bits=empty)
-    job = DecodeJob(op_id=0, window_id=0, n_rounds=3, dem=model,
-                    payloads=[payload], label="op0 W0")
-    result = wrapper.decode(job)
-    assert result.soft_output == pytest.approx(out.gap)
-
-
 # ----------------------------------------- hidden assumption: >= threshold
 
 def test_switching_threshold_equality_keeps_weak():
-    strat = Switching(confidence_threshold=0.5)
+    strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5)
     assert strat.keep_weak_result(
-        DecodeResult(0, 0, soft_output=0.5)) is True     # == keeps weak
+        DecodeResult(
+            0,
+            0,
+            soft_output=SoftOutput(
+                gap=0.5,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            ),
+        ),
+        None,
+    ) is True
     assert strat.keep_weak_result(
-        DecodeResult(0, 0, soft_output=0.4999)) is False
-    assert strat.keep_weak_result(DecodeResult(0, 0, soft_output=None)) is False
-    assert strat.keep_weak_result(None) is False
+        DecodeResult(
+            0,
+            0,
+            soft_output=SoftOutput(
+                gap=0.4999,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            ),
+        ),
+        None,
+    ) is False
+    assert strat.keep_weak_result(
+        DecodeResult(0, 0, soft_output=None), None) is False
+    assert strat.keep_weak_result(None, None) is False
 
 
 # ------------------------------- hidden assumption: data_complete overflow
@@ -213,7 +259,7 @@ def test_data_complete_overflow_branches():
     scheme = SlidingWindowScheme()
     w = Window(op_id=0, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=9)
     round_count = 6                              # overflow = 9 - 6 = 3
-    common = dict(round_count=round_count, op=None, layout=None)
+    common = dict(round_count=round_count, operation=None)
     # not enough in-op data yet -> False regardless of overflow sources
     assert not scheme.data_complete(w, rounds_arrived=5, successor_rounds=9,
                                     memory_rounds=9, has_successor=True, **common)

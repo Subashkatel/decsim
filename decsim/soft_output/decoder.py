@@ -1,22 +1,82 @@
-"""Decoder wrapper that attaches a soft-output confidence ``g`` to each committed window."""
+"""Attach a typed confidence record to each committed decoder window."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 from ..adapters.window_decode_results import payload_syndrome
-from ..message import DecodeJob, DecodeResult
+from ..message import (
+    DecodeJob,
+    DecodeResult,
+    RunSeedChild,
+    RunSeedPathSegment,
+    SoftOutputSource,
+)
+from ..detector_error_model import DecoderFaultModelRequirement
 
 if TYPE_CHECKING:
     from ..protocols import Decoder
 
 
 class SoftOutputDecoder:
-    """Wrap a base decoder and attach a soft output ``g`` for observable-bearing windows only."""
+    """Attach one configured metric's confidence without changing hard output.
+
+    ``metric_cls`` is a configured factory instance declaring ``source`` and
+    ``from_window_model(model)``.
+    """
 
     def __init__(self, base: "Decoder", metric_cls):
+        if isinstance(metric_cls, type):
+            raise TypeError(
+                "SoftOutputDecoder requires a configured metric factory "
+                "instance, not a metric class"
+            )
+        if not isinstance(
+            getattr(metric_cls, "source", None),
+            SoftOutputSource,
+        ):
+            raise TypeError(
+                "configured metric factory must declare one SoftOutputSource"
+            )
+        if not callable(getattr(metric_cls, "from_window_model", None)):
+            raise TypeError(
+                "configured metric factory must build from a window model"
+            )
+        try:
+            base_requirement = base.fault_model_requirement
+            metric_requirement = metric_cls.fault_model_requirement
+        except AttributeError as error:
+            raise TypeError(
+                "base decoder and metric factory must declare "
+                "fault_model_requirement"
+            ) from error
+        if not isinstance(base_requirement, DecoderFaultModelRequirement):
+            raise TypeError(
+                "base decoder fault_model_requirement must be a "
+                "DecoderFaultModelRequirement"
+            )
+        if not isinstance(metric_requirement, DecoderFaultModelRequirement):
+            raise TypeError(
+                "metric factory fault_model_requirement must be a "
+                "DecoderFaultModelRequirement"
+            )
         self.base = base
         self.metric_cls = metric_cls
-        self._metrics: dict = {}
+        self.fault_model_requirement = base_requirement.joined(
+            metric_requirement
+        )
+
+    def run_seed_children(self):
+        """Expose the base decoder and configured confidence builder."""
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "base"),),
+                self.base,
+            ),
+            RunSeedChild(
+                (RunSeedPathSegment("field", "metric_cls"),),
+                self.metric_cls,
+            ),
+        )
 
     def latency(self, job: DecodeJob) -> int:
         """Timing is the base decoder's; the soft output adds no modelled latency."""
@@ -27,23 +87,18 @@ class SoftOutputDecoder:
         result = self.base.decode(job)
         metric = self._metric_for(job.dem)
         if metric is not None:
-            result.soft_output = metric.evaluate(payload_syndrome(job)).gap
+            result.soft_output = metric.evaluate(payload_syndrome(job))
         return result
 
     def _metric_for(self, model):
-        """Return a cached metric for this window model, or None without observable."""
-        import weakref
-
+        """Build this decode's metric, or return None without an observable."""
         import numpy as np
+        from ..detector_error_model import FaultRepresentation
 
-        if model is None or getattr(model, "obs", None) is None:
+        if model is None:
             return None
-        obs = np.asarray(model.obs)
+        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        obs = np.asarray(faults.observables)
         if obs.shape[0] != 1 or not obs.any():
             return None
-        entry = self._metrics.get(id(model))
-        metric = entry[1] if entry is not None and entry[0]() is model else None
-        if metric is None:
-            metric = self.metric_cls.from_window_model(model)
-            self._metrics[id(model)] = (weakref.ref(model), metric)
-        return metric
+        return self.metric_cls.from_window_model(model)

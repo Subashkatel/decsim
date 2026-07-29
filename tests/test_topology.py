@@ -14,14 +14,14 @@ insertion seq breaks the tie), so causal order survives while no time advances.
 
 These tests assert the two consequences that make the fused model honest:
   - a path's latency is the SUM of its hops, ADDITIVE on top of the rest, and
-    INVARIANT to how that sum is split (so collapsing do+oc+cq into one "fused
+    INVARIANT to how that sum is split (so collapsing wdo+oc+cq into one "fused
     feedback" number is a labelling choice, not a timing change);
   - zero hops add exactly nothing (fused == the bare decode/round timeline).
 """
-from conftest import trace_time  # noqa: F401  (kept for parity with sibling tests)
+from conftest import fixed_latency_link_config, trace_time  # noqa: F401
 
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
 from decsim.schemes import NaiveOnlineScheme
@@ -38,20 +38,29 @@ class _FixedLatency:
         return self.latency_ticks
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
-def _controller(t_qc=0.0, t_cd=0.0, t_dd=0.0, t_do=0.0, t_oc=0.0, t_cq=0.0):
-    """A controller whose six hops we set explicitly (microseconds). The cluster
-    reads dd/do from this same shared LinkModel, so this fixes the WHOLE topology."""
-    def make(engine):
-        return ModularController(engine, links=LinkModel(qc=us(t_qc), cd=us(t_cd), dd=us(t_dd), do=us(t_do), oc=us(t_oc), cq=us(t_cq)), log_syndromes=False)
-    return make
+def _controller(engine, links):
+    return ModularController(engine, links=links, log_syndromes=False)
 
 
-def _first_round_arrival(t_qc, t_cd):
+def _links(t_qc=0.0, t_cwd=0.0, t_dd=0.0, t_wdo=0.0,
+           t_oc=0.0, t_cq=0.0):
+    return fixed_latency_link_config(
+        qc=us(t_qc),
+        cwd=us(t_cwd),
+        dd=us(t_dd),
+        wdo=us(t_wdo),
+        oc=us(t_oc),
+        cq=us(t_cq),
+    )
+
+
+def _first_round_arrival(t_qc, t_cwd):
     """When round 1 of a memory op reaches the decoder cluster = production time
-    + the forward budget (t_qc + t_cd). Everything else on the fabric is zero."""
+    + the forward budget (t_qc + t_cwd). Everything else is zero."""
     op = Operation(0, "M(q0)", (0,), clifford=True, patches=(0,))
     res = simulate(RunSpec(
               ops=[op],
@@ -60,9 +69,10 @@ def _first_round_arrival(t_qc, t_cd):
               rounds_policy=FixedRounds(3),
               round_us=1.0,
               decoder=_FixedLatency(1.0),
-              make_controller=_controller(t_qc=t_qc, t_cd=t_cd),
+              links=_links(t_qc=t_qc, t_cwd=t_cwd),
+              make_controller=_controller,
           ), verbose=False)
-    return res["cluster"].windows[(0, 0)].t_first_round
+    return res.window_manager.windows[(0, 0)].t_first_round
 
 
 def test_forward_latency_is_additive_and_split_invariant():
@@ -77,9 +87,9 @@ def test_forward_latency_is_additive_and_split_invariant():
     assert split_all_qc == fused + us(1.4)                    # exactly additive
 
 
-def _decode_release(t_do, t_oc, t_cq):
+def _decode_release(t_wdo, t_oc, t_cq):
     """A feedback-blocked successor releases when op 0's correction returns through the
-    feedback path (t_do + t_oc + t_cq). Returns (release_time, op0_decode_done)."""
+    feedback path (t_wdo + t_oc + t_cq). Returns release and decode time."""
     ops = CircuitFrontend([
         Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
         Operation(1, "T1", (0,), clifford=False, blocked_by=0,
@@ -93,15 +103,16 @@ def _decode_release(t_do, t_oc, t_cq):
               round_us=1.0,
               decoder=_FixedLatency(1.0),
               scheme=NaiveOnlineScheme(),
-              make_controller=_controller(t_do=t_do, t_oc=t_oc, t_cq=t_cq),
+              links=_links(t_wdo=t_wdo, t_oc=t_oc, t_cq=t_cq),
+              make_controller=_controller,
           ), verbose=False)
-    return res["chip"].decode_release_time[1], res["cluster"].windows[(0, 0)].t_done
+    return res.chip.decode_release_time[1], res.window_manager.windows[(0, 0)].t_done
 
 
 def test_feedback_latency_is_additive_and_split_invariant():
     """Feedback path (result -> qpu): the gate releases at op0's decode-done + the
-    feedback budget, INVARIANT to whether that budget sits on do, oc, or cq -- which
-    is exactly why collapsing do+oc+cq into one 'fused control-system feedback'
+    feedback budget, INVARIANT to whether that budget sits on WDO, OC, or CQ -- which
+    is exactly why collapsing WDO+OC+CQ into one 'fused control-system feedback'
     number changes no timing. Zero feedback hops => release the instant decode is
     done (the fully-fused, no-separate-orchestrator case)."""
     on_do, done_do = _decode_release(1.7, 0.0, 0.0)

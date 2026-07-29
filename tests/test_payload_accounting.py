@@ -35,7 +35,7 @@ def _run(ops):
                            num_units=2,
                            decoder=PresetLatencyDecoder(1.0),
                            memory_model=model))
-    return res["cluster"], model
+    return res.window_manager, model
 
 
 def test_peak_payloads_matches_brute_force_recount():
@@ -59,7 +59,8 @@ def test_per_window_release_holds_only_the_live_set():
     of scaling with the operation length (the per-op resident upper bound)."""
     from decsim.config import us
     from decsim.codes import SurfaceCodeModel
-    from decsim.controllers import ModularController, LinkModel
+    from conftest import fixed_latency_link_config
+    from decsim.controllers import ModularController
     from decsim.message import DecodeResult, Operation
     from decsim.schemes import SlidingWindowScheme
 
@@ -67,25 +68,26 @@ def test_per_window_release_holds_only_the_live_set():
         def latency(self, job):
             return us(1.0)
         def decode(self, job):
-            return DecodeResult(job.op_id, job.window_id, logical_value=0)
+            return DecodeResult(job.op_id, job.window_id,
+                                logical_observables=(0,))
 
-    def _links(engine):
-        return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+    def _links(engine, links):
+        return ModularController(engine, links=links, log_syndromes=False)
 
     def peak_for(rounds):
         op = Operation(0, "mem", (0,), clifford=True, patches=(0,))
         res = simulate(RunSpec(
                   ops=[op],
                   num_units=4,
-                  d=3,
                   rounds_policy=FixedRounds(rounds),
                   round_us=1.0,
                   decoder=_Dec(),
                   scheme=SlidingWindowScheme(),
                   code=SurfaceCodeModel(d=3),
+                  links=fixed_latency_link_config(),
                   make_controller=_links,
               ), verbose=False)
-        c = res["cluster"]
+        c = res.window_manager
         assert c.payloads_held == 0            # drains fully
         return c.peak_payloads
 
@@ -99,7 +101,16 @@ def test_round_arriving_after_op_completed_fails_loudly():
     committed) means the device emitted more rounds than planned -- the cluster must
     say so, not die on a KeyError or corrupt the running counter."""
     import pytest
-    from decsim.message import SyndromePayload
+    from decsim.message import (
+        RetainedSyndromeFragment,
+        SyndromePayload,
+        SyndromeRoundPacket,
+    )
     cluster, _ = _run(three_cnot_circuit())               # run to completion
+    payload = SyndromePayload(0, 0, 99)
     with pytest.raises(RuntimeError, match="syndrome RAM was freed"):
-        cluster.on_syndrome_arrival(SyndromePayload(0, 0, 99))
+        cluster.on_syndrome_arrival(SyndromeRoundPacket(
+            operation_id=0,
+            round_index=99,
+            fragments=(RetainedSyndromeFragment.from_payload(payload),),
+        ))

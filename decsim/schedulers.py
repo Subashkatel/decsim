@@ -12,7 +12,7 @@ class FifoScheduler:
         """Add a job to the back of the queue."""
         queue.append(job)
 
-    def pop(self, queue: list) -> DecodeJob:
+    def pop(self, queue: list, now_ticks: int) -> DecodeJob:
         """Take the oldest job (first in, first out)."""
         return queue.pop(0)
 
@@ -24,7 +24,7 @@ class EarliestDeadlineScheduler:
         """Add a job to the queue."""
         queue.append(job)
 
-    def pop(self, queue: list) -> DecodeJob:
+    def pop(self, queue: list, now_ticks: int) -> DecodeJob:
         """Take the job with the earliest deadline."""
         queue.sort(key=lambda j: j.deadline)
         return queue.pop(0)
@@ -46,13 +46,12 @@ class WeightedUrgencyCostScheduler:
     (predictive causal-cone coloring) and the Min-Degree-First policy
     (needs decoding-graph degree, which decsim jobs do not carry) are
     NOT implemented; the paper remains a qualitative anchor for those.
-    Needs the engine for `now`: pass it at construction.
+    The decoder manager supplies the exact current dispatch tick to `pop`.
     """
 
-    def __init__(self, engine, w_u: float = 0.5, w_c: float = 0.5):
+    def __init__(self, w_u: float = 0.5, w_c: float = 0.5):
         if abs(w_u + w_c - 1.0) > 1e-9:
             raise ValueError(f"w_u + w_c must be 1 (got {w_u} + {w_c})")
-        self.engine = engine
         self.w_u = float(w_u)
         self.w_c = float(w_c)
 
@@ -60,23 +59,26 @@ class WeightedUrgencyCostScheduler:
         """Add a job to the queue."""
         queue.append(job)
 
-    def priority(self, job: DecodeJob) -> float:
+    def priority(self, job: DecodeJob, now_ticks: int) -> float:
         """Triage Eq.2 mapped to decsim jobs (higher = served first)."""
-        slack = max(job.deadline - self.engine.now, 1)
+        slack = max(job.deadline - now_ticks, 1)
         return self.w_u / slack + self.w_c / max(job.n_rounds, 1)
 
-    def pop(self, queue: list) -> DecodeJob:
+    def pop(self, queue: list, now_ticks: int) -> DecodeJob:
         """Take the highest-priority job."""
         best = max(range(len(queue)),
-                   key=lambda i: (self.priority(queue[i]), -i))
+                   key=lambda i: (
+                       self.priority(queue[i], now_ticks),
+                       -i,
+                   ))
         return queue.pop(best)
 
 
 class EnqueueTimeDeadline:
-    """Default policy where every job deadline is its enqueue time."""
+    """Default deadline at window-job construction/logical admission."""
 
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
-        """Return the enqueue time (all jobs equally urgent)."""
+        """Return the policy-stamp tick (all newly built jobs equally urgent)."""
         return now
 
 
@@ -102,8 +104,8 @@ class BufferExpiryDeadline:
     ones (their data expires sooner) — the opposite of uniform slack.
 
     Pure buffer semantics: on_reaction_path is ignored here (reaction
-    tightening stays ReactionPathDeadline's job). Windows without an
-    arrival stamp fall back to now + capacity_rounds * round_ticks.
+    tightening stays ReactionPathDeadline's job). A window without its
+    first-round arrival stamp cannot define a buffer-expiry deadline.
     """
 
     def __init__(self, capacity_rounds: int, round_ticks: int):
@@ -113,8 +115,12 @@ class BufferExpiryDeadline:
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
         """Expiry tick of the window's first buffered round."""
         first = getattr(window, "t_first_round", None)
-        base = now if first is None else first
-        return base + self.capacity_rounds * self.round_ticks
+        if first is None:
+            raise RuntimeError(
+                f"cannot stamp buffer-expiry deadline for window {window.key}: "
+                "first-round arrival provenance is missing"
+            )
+        return first + self.capacity_rounds * self.round_ticks
 
 
 class ReservedCapacityLanes:

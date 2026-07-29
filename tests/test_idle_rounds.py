@@ -34,7 +34,7 @@ def test_cap_fires_loudly_and_stops_emission():
             decoder=PresetLatencyDecoder(200.0),
             max_idle_rounds=10,
         ), verbose=False)
-    lines = r["engine"].log_lines
+    lines = r.engine.log_lines
     assert sum("memory round for A:T(q0)" in l for l in lines) == 10
     assert any("hit the idle-round cap" in l and "max_idle_rounds=10" in l
                for l in lines)
@@ -50,5 +50,5 @@ def test_default_cap_is_unchanged_and_silent():
             rounds_policy=FixedRounds(11),
             decoder=PresetLatencyDecoder(1.0),
         ), verbose=False)
-    assert r["chip"].max_idle_rounds == 100 * 3
-    assert not any("hit the idle-round cap" in l for l in r["engine"].log_lines)
+    assert r.chip.max_idle_rounds == 100 * 3
+    assert not any("hit the idle-round cap" in l for l in r.engine.log_lines)

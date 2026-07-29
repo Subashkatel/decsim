@@ -2,6 +2,7 @@
 
 from decsim.config import us
 from decsim.decoders import PresetLatencyDecoder
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import BacklogTrajectory, ConditionalReactionTime
@@ -12,6 +13,8 @@ from decsim.planner import FixedRounds
 
 class _FixedLatency:
     """Timing decoder with a fixed service time."""
+
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, latency_us):
         self.latency_ticks = us(latency_us)
@@ -43,15 +46,15 @@ def test_reaction_time_is_pure_wait_in_rounds():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip),
             BacklogTrajectory(chip),
         ],
              ), verbose=False)
 
-    reaction = result["metrics"]["conditional_reaction_time"]
-    backlog_row = BacklogTrajectory(result["chip"]).rows()[0]
-    wait_rounds = backlog_row["wait"] / result["chip"].round_ticks
+    reaction = result.result.metric_values()["conditional_reaction_time"]
+    backlog_row = BacklogTrajectory(result.chip).rows()[0]
+    wait_rounds = backlog_row["wait"] / result.chip.round_ticks
 
     assert reaction["total_conditionals"] == 1
     assert reaction["released_conditionals"] == 1
@@ -67,12 +70,12 @@ def test_reaction_time_uses_all_conditionals_as_denominator():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
              ), verbose=False)
 
-    reaction = result["metrics"]["conditional_reaction_time"]
+    reaction = result.result.metric_values()["conditional_reaction_time"]
     waits = reaction["conditioned_decode_wait_times"]
 
     assert reaction["success"] is True
@@ -89,12 +92,12 @@ def test_reaction_time_marks_threshold_divergence():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip, divergence_threshold_rounds=0.5)
         ],
              ), verbose=False)
 
-    reaction = result["metrics"]["conditional_reaction_time"]
+    reaction = result.result.metric_values()["conditional_reaction_time"]
 
     assert reaction["success"] is False
     assert reaction["failed"] is True
@@ -118,14 +121,14 @@ def test_reaction_time_marks_idle_cap_failure():
                  scheme=NaiveOnlineScheme(),
                  decoder=_FixedLatency(50.0),
                  max_idle_rounds=1,
-                 make_metrics=lambda _engine, _cluster, chip, _factory: [
+                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
             ConditionalReactionTime(chip)
         ],
              ), verbose=False)
 
-    reaction = result["metrics"]["conditional_reaction_time"]
+    reaction = result.result.metric_values()["conditional_reaction_time"]
 
-    assert result["chip"].idle_cap_hits
+    assert result.chip.idle_cap_hits
     assert reaction["success"] is False
     assert reaction["failed"] is True
     assert reaction["failure_reason"] == "idle-round cap reached"
@@ -145,10 +148,10 @@ def test_final_non_clifford_decode_does_not_return_to_chip_by_default():
                  decoder=PresetLatencyDecoder(2.0),
              ), verbose=False)
 
-    assert result["cluster"].windows[(0, 0)].t_done is not None
-    assert result["chip"].result_return_time_by_operation == {}
+    assert result.window_manager.windows[(0, 0)].t_done is not None
+    assert result.chip.result_return_time_by_operation == {}
     assert not any("DISPATCH result return" in line
-                   for line in result["engine"].log_lines)
+                   for line in result.engine.log_lines)
 
 
 def test_explicit_result_return_to_chip_uses_feedback_links():
@@ -172,26 +175,26 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
                  decoder=PresetLatencyDecoder(2.0),
              ), verbose=False)
 
-    controller = result["controller"]
+    controller = result.controller
     window_done = max(
         window.t_done
-        for key, window in result["cluster"].windows.items()
+        for key, window in result.window_manager.windows.items()
         if key[0] == 0
     )
     expected_return = (
         window_done
-        + controller.links.do.cost()
-        + controller.links.oc.cost()
-        + controller.links.cq.cost()
+        + us(1.0)   # WDO: accepted weak window result
+        + us(4.0)   # OC: orchestrator instruction
+        + us(0.15)  # CQ: controller-to-QPU instruction
     )
 
-    assert result["chip"].decode_release_time == {}
-    assert result["chip"].result_return_time_by_operation[0] == expected_return
-    assert result["fully_done"] == expected_return
+    assert result.chip.decode_release_time == {}
+    assert result.chip.result_return_time_by_operation[0] == expected_return
+    assert result.result.fully_done_ticks == expected_return
     assert any("DISPATCH result return for op#0" in line
-               for line in result["engine"].log_lines)
+               for line in result.engine.log_lines)
     assert any("received result return for T0" in line
-               for line in result["engine"].log_lines)
+               for line in result.engine.log_lines)
 
 
 def test_naive_batch_decode_label_shows_absorbed_idle_rounds():
@@ -212,6 +215,8 @@ def test_naive_batch_decode_label_shows_absorbed_idle_rounds():
                  max_idle_rounds=1000,
              ), verbose=False)
 
-    assert result["cluster"].windows[(1, 0)].n_rounds > 27
+    window = result.window_manager.windows[(1, 0)]
+    assert window.n_rounds == 27
+    assert window.batched_preceding_idle_round_count > 0
     assert any("T1 [whole op," in line and "idle + 27 body" in line
-               for line in result["engine"].log_lines)
+               for line in result.engine.log_lines)

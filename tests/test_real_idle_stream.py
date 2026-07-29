@@ -47,11 +47,11 @@ def _setup():
 def test_idle_stretch_carries_real_firing_syndromes():
     """The idle segment must emit REAL, non-empty, actually-firing detection events -- not the
     empty payloads the stall emitter produces today."""
-    circ, segments, stream_op, _ = _setup()
+    circ, segments, stream_op, rounds_map = _setup()
     idle_seg = segments[1]                     # the middle (idle) segment
     dev = StimDevice(seed=1)
     for seg in segments:
-        dev.begin_operation(seg)
+        dev.begin_operation(seg, rounds_map[seg.id])
     fired = 0
     nbits = 0
     for r in range(1, IDLE + 1):
@@ -66,22 +66,22 @@ def test_continuous_idle_decode_equals_global_per_shot():
     circ, segments, stream_op, rounds_map = _setup()
     gm = pymatching.Matching.from_detector_error_model(
         circ.detector_error_model(decompose_errors=True))
-    device = StimDevice(seed=17)
     agree = eng_err = glob_err = 0
     shots = 250
-    for _ in range(shots):
+    for shot in range(shots):
+        device = StimDevice()
         res = simulate(RunSpec(
                   ops=segments,
                   decode_ops=[stream_op],
                   device=device,
                   num_units=4,
-                  d=D,
                   rounds_policy=PerOpRounds(rounds_map),
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),
                   decoder=PyMatchingDecoder(_ZeroLatency()),
+                  seed=17 + shot,
               ), verbose=False)
-        pe = int(res["cluster"].op_results.get(stream_op.id, 0))
+        pe = res.window_manager.op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         t = int(device._truth[stream_op.id][0])
         agree += (pe == pg); eng_err += (pe != t); glob_err += (pg != t)
@@ -103,22 +103,22 @@ def test_idle_stretch_decoded_by_runtime_builder_equals_global():
     circ, segments, stream_op, rounds_map = _setup()
     gm = pymatching.Matching.from_detector_error_model(
         circ.detector_error_model(decompose_errors=True))
-    device = StimDevice(seed=21)
     agree = 0
     shots = 200
-    for _ in range(shots):
+    for shot in range(shots):
+        device = StimDevice()
         res = simulate(RunSpec(
                   ops=segments,
                   dynamic_streams=[stream_op],
                   device=device,
                   num_units=4,
-                  d=D,
                   rounds_policy=PerOpRounds(rounds_map),
                   code=SurfaceCodeModel(d=D),
                   scheme=SlidingWindowScheme(),
                   decoder=PyMatchingDecoder(_ZeroLatency()),
+                  seed=21 + shot,
               ), verbose=False)
-        pe = int(res["cluster"].op_results.get(stream_op.id, 0))
+        pe = res.window_manager.op_results[stream_op.id][0]
         pg = int(gm.decode(device._dets[stream_op.id])[0])
         agree += (pe == pg)
     assert agree >= 0.98 * shots                      # idle rounds decoded at runtime track global
@@ -131,15 +131,15 @@ def test_a_window_commits_inside_the_idle_stretch():
     res = simulate(RunSpec(
               ops=segments,
               decode_ops=[stream_op],
-              device=StimDevice(seed=3),
+              device=StimDevice(),
               num_units=4,
-              d=D,
               rounds_policy=PerOpRounds(rounds_map),
               code=SurfaceCodeModel(d=D),
               scheme=SlidingWindowScheme(),
               decoder=PyMatchingDecoder(_ZeroLatency()),
+              seed=3,
           ), verbose=False)
-    cluster = res["cluster"]
+    cluster = res.window_manager
     lo, hi = OP_A + 1, OP_A + IDLE
     inside = [w for (op, k), w in cluster.windows.items()
               if op == stream_op.id and w.commit_lo >= lo and w.commit_hi <= hi]

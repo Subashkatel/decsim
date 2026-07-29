@@ -99,6 +99,7 @@ def graphs():
         noisy,
         plan,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     coords = {i: tuple(c) for i, c in clean.get_detector_coordinates().items()}
     return matching, models, coords

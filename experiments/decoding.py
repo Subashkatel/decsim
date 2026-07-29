@@ -58,6 +58,7 @@ class OfflineBatchDecoder:
             num_observables,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
+            fault_exclusion_ranges=(),
         )
         return cls(circuit, models, decode_window, fault_representation)
 

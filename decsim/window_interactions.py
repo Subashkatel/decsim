@@ -135,9 +135,7 @@ class DefaultWindowInteraction:
             operation_round_count,
         )
 
-        has_restart = any(
-            later.commit_lo > commit_hi for later in later_windows
-        )
+        has_restart = commit_hi < operation_round_count
 
         return StrongRegionPlan(
             commit_lo=commit_lo,

@@ -276,6 +276,99 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
         == res_serial.window_manager.op_results[0]
 
 
+def test_nonaligned_double_window_partitions_linked_fault_models_exactly():
+    """The strong slab plus rephased suffix own every global fault once."""
+    from decsim.decoders import SampledConfidenceDecoder
+    from decsim.detector_error_model import (
+        LINKED_FAULT_MODELS_REQUIRED,
+        detector_error_model_to_faults,
+    )
+    from decsim.message import DecodeResult
+
+    class LinkedFixedDecoder:
+        fault_model_requirement = LINKED_FAULT_MODELS_REQUIRED
+
+        @staticmethod
+        def latency(job):
+            return 1
+
+        @staticmethod
+        def decode(job):
+            return DecodeResult(
+                job.op_id,
+                job.window_id,
+                logical_observables=(0,),
+            )
+
+    rounds = 50
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", distance=3, rounds=rounds,
+        after_clifford_depolarization=0.006,
+        after_reset_flip_probability=0.006,
+        before_measure_flip_probability=0.006,
+        before_round_data_depolarization=0.006)
+    operation = Operation(0, "memory", (0,), clifford=True, circuit=circuit)
+    weak = _Recording(SampledConfidenceDecoder(
+        LinkedFixedDecoder(),
+        0.0,
+        probability_for=lambda job: 1.0 if job.window_id == 1 else 0.0,
+    ))
+    strong = _Recording(LinkedFixedDecoder())
+    result = simulate(RunSpec(
+        ops=[operation],
+        num_units=1,
+        rounds_policy=FixedRounds(rounds),
+        code=SurfaceCodeModel(
+            d=3,
+            commit_rounds_override=7,
+            buffer_rounds_override=3,
+        ),
+        scheme=SlidingWindowScheme(),
+        strategy=Switching(
+            confidence_threshold=0.5,
+            expected_source=SAMPLED_CONFIDENCE_SOURCE,
+            double_window=True,
+        ),
+        device=StimDevice(),
+        router=SwitchingRouter(weak, strong),
+        unit_pools={"default": 1, "strong": 1},
+    ), verbose=False)
+
+    runtime = result.window_manager
+    final_models = [runtime.window_models[(0, 0)]] + [
+        runtime.window_models[(0, window_index)]
+        for window_index in range(2, 7)
+    ] + [strong.jobs[0].dem]
+    catalog_sizes = {
+        FaultRepresentation.GRAPHLIKE: len(detector_error_model_to_faults(
+            circuit.detector_error_model(decompose_errors=True))[0]),
+        FaultRepresentation.PHYSICAL: len(detector_error_model_to_faults(
+            circuit.detector_error_model(decompose_errors=False))[0]),
+    }
+    for representation, catalog_size in catalog_sizes.items():
+        owned_source_ids = [
+            source_fault_id
+            for model in final_models
+            for faults in [model.require_faults(representation)]
+            for source_fault_id, owned in zip(
+                faults.source_fault_ids,
+                faults.owned,
+            )
+            if owned
+        ]
+        assert sorted(owned_source_ids) == list(range(catalog_size))
+        assert len(owned_source_ids) == len(set(owned_source_ids))
+
+    for model in final_models:
+        graphlike = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        physical = model.require_faults(FaultRepresentation.PHYSICAL)
+        assert np.array_equal(
+            (graphlike.check
+             @ model.physical_to_graphlike_detector_projection) % 2,
+            physical.check,
+        )
+
+
 @pytest.mark.parametrize(
     "seam_owner",
     [SeamFaultOwner.STRONG_REGION, SeamFaultOwner.RESTART_WINDOW],

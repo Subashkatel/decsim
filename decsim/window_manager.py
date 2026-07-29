@@ -145,6 +145,19 @@ class _EscalationRegistry:
         self._by_key[pending.key] = pending
         readiness_index[readiness_key] = pending.key
 
+    def update_wsd_arrival(
+        self,
+        expected: _PendingEscalation,
+        wsd_arrival_ticks: int,
+    ) -> _PendingEscalation:
+        """Record post-commit WSD timing without changing readiness ownership."""
+        if self._by_key.get(expected.key) is not expected:
+            raise RuntimeError(
+                f"stale escalation timing update for {expected.key}")
+        updated = replace(expected, wsd_arrival_ticks=wsd_arrival_ticks)
+        self._by_key[expected.key] = updated
+        return updated
+
     def peek_key(self, key: tuple) -> Optional[_PendingEscalation]:
         return self._by_key.get(key)
 
@@ -435,7 +448,8 @@ class WindowManager:
                 continue
             models = self.syndrome_source.window_models_for_operation(
                 op, wins, self.rounds_for(op),
-                fault_model_requirement=self._fault_model_requirement(op))
+                fault_model_requirement=self._fault_model_requirement(op),
+                fault_exclusion_ranges=())
             if not models:
                 continue
             for key, model in zip(keys, models):
@@ -1045,6 +1059,20 @@ class WindowManager:
             [WindowInfo.from_window(window) for window in later_windows],
             round_count,
         )
+        if not isinstance(plan, StrongRegionPlan):
+            raise TypeError(
+                f"window interaction must return StrongRegionPlan for "
+                f"double-window escalation {key}, got "
+                f"{type(plan).__name__}")
+        crossing_windows = [
+            window for window in later_windows
+            if window.commit_lo <= plan.commit_hi < window.commit_hi
+        ]
+        if crossing_windows:
+            self._defer_crossing_strong_escalation(
+                weak_job, weak_window, later_windows, round_count, plan,
+                crossing_windows[0])
+            return
         resolved_region = self._resolve_strong_region_plan(
             key, weak_window, later_windows, round_count, plan)
         restart_key = resolved_region.restart_window_key
@@ -1079,6 +1107,8 @@ class WindowManager:
         strong_model = self._build_strong_window_model(
             self._ops[op_id], slab, round_count,
             resolved_region.strong_fault_exclusion_ranges)
+        logical_candidate = self._strong_slab_ownership_candidate(
+            key, resolved_region)
         guard_lease = None
         if restart_key is not None:
             guard_lease = (key, "restart-plan-guard")
@@ -1090,7 +1120,7 @@ class WindowManager:
                 weak_job,
                 payload_bits=None,
             )
-            self._install_strong_slab_ownership(key, resolved_region)
+            self.logical_contributions = logical_candidate
             phase = (
                 _EscalationPhase.WAITING_TERMINAL_DATA
                 if restart_key is None
@@ -1146,48 +1176,410 @@ class WindowManager:
             if guard_lease is not None:
                 self.store.release(guard_lease)
 
-    def _install_strong_slab_ownership(
+    def _defer_crossing_strong_escalation(
+        self, weak_job: DecodeJob, weak_window: Window, later_windows: list,
+        round_count: int, plan: StrongRegionPlan, crossing_window: Window,
+    ) -> None:
+        """Atomically replace a non-aligned post-slab suffix before deferral."""
+        key = weak_window.key
+        op_id = key[0]
+        if self._escalations.peek_key(key) is not None:
+            raise RuntimeError(
+                f"duplicate strong escalation for window {key}: one switching "
+                "event creates exactly one strong job")
+        if not (
+            1 <= plan.context_lo <= plan.commit_lo
+            <= weak_window.commit_lo <= weak_window.commit_hi
+            <= plan.commit_hi <= plan.context_hi <= round_count
+        ):
+            raise RuntimeError(
+                f"invalid strong-region bounds for {key}: context "
+                f"{plan.context_lo}-{plan.context_hi}, commit "
+                f"{plan.commit_lo}-{plan.commit_hi}, operation 1-{round_count}")
+        if plan.commit_lo != weak_window.commit_lo:
+            raise RuntimeError(
+                f"strong-region commit for {key} must start at the "
+                f"escalated window's commit start {weak_window.commit_lo}")
+        if (
+            plan.restart_buffer_lo is None
+            or not 1 <= plan.restart_buffer_lo <= plan.commit_hi + 1
+            or not isinstance(plan.restart_seam_fault_owner, SeamFaultOwner)
+        ):
+            raise RuntimeError(
+                f"strong-region restart after {key} needs an exact buffer "
+                f"start and seam owner")
+
+        absorbed = tuple(
+            window.key for window in later_windows
+            if window.commit_hi <= plan.commit_hi
+        )
+        crossing_index = later_windows.index(crossing_window)
+        reusable_keys = tuple(
+            window.key for window in later_windows[crossing_index:]
+        )
+        residual_round_count = round_count - plan.commit_hi
+        suffix_plan = self.scheme.plan_operation(
+            op_id,
+            residual_round_count,
+            commit_round_count=self._code_geometry.commit_round_count,
+            buffer_round_count=self._code_geometry.buffer_round_count,
+        )
+        if not suffix_plan.windows:
+            raise RuntimeError(
+                f"crossing strong-region plan for {key} produced no suffix")
+        if len(suffix_plan.windows) > len(reusable_keys):
+            raise RuntimeError(
+                f"crossing strong-region plan for {key} needs "
+                f"{len(suffix_plan.windows)} stable keys but only "
+                f"{len(reusable_keys)} remain")
+
+        retained_keys = reusable_keys[:len(suffix_plan.windows)]
+        retired_keys = reusable_keys[len(suffix_plan.windows):]
+        replacement_windows = []
+        for index, (window_key, geometry) in enumerate(zip(
+            retained_keys, suffix_plan.windows,
+        )):
+            buffer_lo = geometry.buffer_lo + plan.commit_hi
+            if index == 0:
+                buffer_lo = plan.restart_buffer_lo
+            commit_lo = geometry.commit_lo + plan.commit_hi
+            commit_hi = geometry.commit_hi + plan.commit_hi
+            buffer_hi = min(
+                geometry.buffer_hi + plan.commit_hi,
+                round_count,
+            )
+            if not (
+                1 <= buffer_lo <= commit_lo <= commit_hi
+                <= buffer_hi <= round_count
+            ):
+                raise RuntimeError(
+                    f"invalid rephased suffix geometry for {window_key}: "
+                    f"buffer {buffer_lo}-{buffer_hi}, commit "
+                    f"{commit_lo}-{commit_hi}, operation 1-{round_count}")
+            replacement_windows.append(Window(
+                op_id=op_id,
+                k=window_key[1],
+                buffer_lo=buffer_lo,
+                commit_lo=commit_lo,
+                commit_hi=commit_hi,
+                buffer_hi=buffer_hi,
+                n_rounds=buffer_hi - buffer_lo + 1,
+            ))
+        if (
+            replacement_windows[0].commit_lo != plan.commit_hi + 1
+            or replacement_windows[-1].commit_hi != round_count
+            or any(
+                left.commit_hi + 1 != right.commit_lo
+                for left, right in zip(
+                    replacement_windows, replacement_windows[1:]
+                )
+            )
+        ):
+            raise RuntimeError(
+                f"rephased suffix for {key} must tile rounds "
+                f"{plan.commit_hi + 1}-{round_count} exactly")
+
+        affected_keys = absorbed + reusable_keys
+        if op_id in self._finished_ops or op_id in self.op_results:
+            raise RuntimeError(
+                f"cannot rephase suffix for completed operation {op_id}")
+        historical_sets = (
+            self.committed_windows,
+            self.absorbed_windows,
+            self._pending_strong_windows,
+        )
+        historical_maps = (
+            self._held_boundary,
+            self._committed_boundaries,
+            self._boundary_versions,
+            self.logical_contributions,
+        )
+        for affected_key in affected_keys:
+            window = self.windows[affected_key]
+            if window.queued or window.committed:
+                raise RuntimeError(
+                    f"cannot rephase window {affected_key}: decode lifecycle "
+                    "already started")
+            if any(affected_key in values for values in historical_sets):
+                raise RuntimeError(
+                    f"cannot rephase historical window {affected_key}")
+            if any(affected_key in values for values in historical_maps):
+                raise RuntimeError(
+                    f"cannot rephase window {affected_key} with published state")
+            if self._escalations.peek_key(affected_key) is not None:
+                raise RuntimeError(
+                    f"cannot rephase pending escalation {affected_key}")
+        if any(
+            source in affected_keys or destination in affected_keys
+            for source, destination in self._boundary_delivery_versions
+        ) or any(
+            source in affected_keys or destination in affected_keys
+            for source, destination in self._released_boundary_dependencies
+        ):
+            raise RuntimeError(
+                f"cannot rephase suffix for {key} after boundary delivery")
+
+        serial_windows = [weak_window, *later_windows]
+        for source, destination in zip(serial_windows, serial_windows[1:]):
+            if source.dependents != [destination.key]:
+                raise RuntimeError(
+                    f"cannot rephase suffix with external or non-serial edge "
+                    f"from {source.key}: {source.dependents}")
+            if destination.deps != [source.key] or destination.deps_remaining != 1:
+                raise RuntimeError(
+                    f"cannot rephase suffix with released or non-serial edge "
+                    f"into {destination.key}")
+        if later_windows[-1].dependents:
+            raise RuntimeError(
+                f"cannot rephase suffix with external edge from "
+                f"{later_windows[-1].key}")
+
+        for index, window in enumerate(replacement_windows):
+            predecessor_key = key if index == 0 else retained_keys[index - 1]
+            window.deps = [predecessor_key]
+            window.deps_remaining = 1
+            if index + 1 < len(replacement_windows):
+                window.dependents = [retained_keys[index + 1]]
+            window.boundary_in = self.window_interaction.initial_boundary_state(
+                WindowInfo.from_window(window))
+
+        left_exclusions = (
+            ((1, plan.commit_lo - 1),) if plan.commit_lo > 1 else ()
+        )
+        if plan.restart_seam_fault_owner is SeamFaultOwner.STRONG_REGION:
+            strong_exclusions = left_exclusions
+            suffix_exclusions = ((1, plan.commit_hi),)
+        else:
+            strong_exclusions = left_exclusions + (
+                (plan.commit_hi + 1, round_count),
+            )
+            suffix_exclusions = left_exclusions
+
+        operation = self._ops[op_id]
+        suffix_models = []
+        if self.syndrome_source is not None:
+            suffix_models = self.syndrome_source.window_models_for_operation(
+                operation,
+                replacement_windows,
+                round_count,
+                fault_model_requirement=self._fault_model_requirement(operation),
+                fault_exclusion_ranges=suffix_exclusions,
+            )
+            if suffix_models and len(suffix_models) != len(replacement_windows):
+                raise RuntimeError(
+                    f"device returned {len(suffix_models)} models for "
+                    f"{len(replacement_windows)} rephased windows")
+        slab = Window(
+            op_id=op_id,
+            k=key[1],
+            commit_lo=plan.commit_lo,
+            commit_hi=plan.commit_hi,
+            buffer_lo=plan.context_lo,
+            buffer_hi=plan.context_hi,
+            n_rounds=plan.context_hi - plan.context_lo + 1,
+        )
+        strong_model = self._build_strong_window_model(
+            operation, slab, round_count, strong_exclusions)
+        restart_window = replacement_windows[0]
+        restart_reads = self._read_keys_for_bounds(
+            op_id, restart_window.start_round, restart_window.buffer_hi,
+            restart_window)
+        resolved_region = _ResolvedStrongRegion(
+            plan=plan,
+            absorbed_window_keys=absorbed,
+            restart_window_key=restart_window.key,
+            restart_read_keys=tuple(restart_reads),
+            strong_fault_exclusion_ranges=strong_exclusions,
+            restart_fault_exclusion_ranges=suffix_exclusions,
+        )
+        if self._escalations.peek_far(restart_window.key) is not None:
+            raise RuntimeError(
+                f"readiness index collision for {restart_window.key}")
+        logical_candidate = self._strong_slab_ownership_candidate(
+            key, resolved_region)
+        pending = _PendingEscalation(
+            key=key,
+            weak_job=weak_job,
+            label=weak_job.strong_label,
+            resolved_region=resolved_region,
+            strong_window=slab,
+            strong_model=strong_model,
+            wsd_arrival_ticks=0,
+            phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
+        )
+
+        lease_ids = [
+            lease_id
+            for window_key in affected_keys
+            for lease_id in (window_key, (window_key, "strong"))
+        ]
+        lease_ids.append((key, "strong"))
+        lease_ids = list(dict.fromkeys(lease_ids))
+        absent = object()
+        lease_snapshot = {}
+        for lease_id in lease_ids:
+            try:
+                lease_snapshot[lease_id] = self.store.lease_round_keys(lease_id)
+            except KeyError:
+                lease_snapshot[lease_id] = absent
+
+        replacement_leases = {}
+        for window in replacement_windows:
+            weak_reads = self._read_keys_for_bounds(
+                op_id, window.start_round, window.buffer_hi, window)
+            replacement_leases[window.key] = weak_reads
+            replacement_leases[(window.key, "strong")] = \
+                self._strong_context_read_keys(window, weak_reads)
+        replacement_leases[(key, "strong")] = [
+            (op_id, round_index)
+            for round_index in range(plan.context_lo, plan.context_hi + 1)
+        ]
+        guarded_reads = []
+        for old_reads in lease_snapshot.values():
+            if old_reads is not absent:
+                guarded_reads.extend(old_reads)
+        for new_reads in replacement_leases.values():
+            guarded_reads.extend(new_reads)
+        guarded_reads = list(dict.fromkeys(guarded_reads))
+        self._require_retained_payloads(
+            guarded_reads, f"suffix rephase guard for {key}")
+
+        guard_lease = (key, "suffix-rephase-guard")
+        windows_snapshot = dict(self.windows)
+        op_window_indices = self.op_windows[op_id]
+        op_window_snapshot = list(op_window_indices)
+        window_count_snapshot = self.window_count[op_id]
+        total_windows_snapshot = self.total_windows
+        window_models_snapshot = dict(self.window_models)
+        committed_count_snapshot = self._committed_per_op.get(op_id, absent)
+        logical_snapshot = self.logical_contributions
+        escalated_dependents = list(weak_window.dependents)
+
+        self.store.lease(guard_lease, guarded_reads)
+        registered = False
+        try:
+            weak_window.dependents[:] = [restart_window.key]
+            for absorbed_key in absorbed:
+                absorbed_window = deepcopy(self.windows[absorbed_key])
+                absorbed_window.queued = True
+                absorbed_window.committed = True
+                absorbed_window.deps = []
+                absorbed_window.dependents = []
+                absorbed_window.deps_remaining = 0
+                self.windows[absorbed_key] = absorbed_window
+            for window in replacement_windows:
+                self.windows[window.key] = window
+            for retired_key in retired_keys:
+                self.windows.pop(retired_key)
+                self.window_models.pop(retired_key, None)
+            retired_indices = {retired_key[1] for retired_key in retired_keys}
+            op_window_indices[:] = [
+                index for index in op_window_indices
+                if index not in retired_indices
+            ]
+            self.window_count[op_id] -= len(retired_keys)
+            self.total_windows -= len(retired_keys)
+            self.committed_windows.update(absorbed)
+            self.absorbed_windows.update(absorbed)
+            self._committed_per_op[op_id] = (
+                self._committed_per_op.get(op_id, 0) + len(absorbed)
+            )
+            for affected_key in affected_keys:
+                self.window_models.pop(affected_key, None)
+            for model_key, model in zip(retained_keys, suffix_models):
+                self.window_models[model_key] = model
+            self.logical_contributions = logical_candidate
+            self._escalations.register_far(pending, restart_window.key)
+            registered = True
+            for lease_id in lease_ids:
+                if lease_id in replacement_leases:
+                    self.store.replace(lease_id, replacement_leases[lease_id])
+                else:
+                    self.store.release(lease_id)
+        except Exception:
+            for lease_id, old_reads in lease_snapshot.items():
+                if old_reads is absent:
+                    self.store.release(lease_id)
+                else:
+                    self.store.replace(lease_id, old_reads)
+            weak_window.dependents[:] = escalated_dependents
+            self.windows.clear()
+            self.windows.update(windows_snapshot)
+            op_window_indices[:] = op_window_snapshot
+            self.window_count[op_id] = window_count_snapshot
+            self.total_windows = total_windows_snapshot
+            self.window_models.clear()
+            self.window_models.update(window_models_snapshot)
+            self.committed_windows.difference_update(absorbed)
+            self.absorbed_windows.difference_update(absorbed)
+            if committed_count_snapshot is absent:
+                self._committed_per_op.pop(op_id, None)
+            else:
+                self._committed_per_op[op_id] = committed_count_snapshot
+            self.logical_contributions = logical_snapshot
+            if registered:
+                self._escalations.take_far(restart_window.key, pending)
+            raise
+        finally:
+            self.store.release(guard_lease)
+
+        wsd_arrival_ticks = self._link_arrival(
+            LinkPath.WSD,
+            weak_job,
+            payload_bits=None,
+        )
+        pending = self._escalations.update_wsd_arrival(
+            pending, wsd_arrival_ticks)
+        self.engine.log(
+            "DecoderCluster",
+            f"{pending.label}: slab rounds {plan.commit_lo}-"
+            f"{plan.commit_hi} assigned; suffix rephased to "
+            f"{len(replacement_windows)} window(s); strong start deferred "
+            "until the far-side weak boundary",
+        )
+        self.check_window(restart_window.key)
+
+    def _strong_slab_ownership_candidate(
         self,
         key: tuple,
         resolved_region: _ResolvedStrongRegion,
-    ) -> None:
-        """Replace every absorbed result owner with one durable slab owner."""
+    ) -> dict:
+        """Prepare the complete logical-owner map without changing live state."""
         plan = resolved_region.plan
+        if (
+            type(plan.commit_lo) is not int
+            or type(plan.commit_hi) is not int
+        ):
+            raise TypeError(
+                "logical contribution bounds must be exact ints")
         replaced_owner_keys = {
             key, *resolved_region.absorbed_window_keys,
         }
-        for other_key, contribution in self.logical_contributions.items():
+        candidate = {
+            owner_key: contribution
+            for owner_key, contribution in self.logical_contributions.items()
+            if owner_key not in replaced_owner_keys
+        }
+        for other_key, contribution in candidate.items():
             if other_key[0] != key[0]:
                 continue
-            overlaps_slab = (
+            if (
                 contribution.commit_lo <= plan.commit_hi
                 and plan.commit_lo <= contribution.commit_hi
-            )
-            if overlaps_slab and other_key not in replaced_owner_keys:
+            ):
                 raise RuntimeError(
                     f"strong slab {key} extent {plan.commit_lo}-"
                     f"{plan.commit_hi} overlaps unabsorbed logical "
                     f"contribution {other_key} extent "
                     f"{contribution.commit_lo}-{contribution.commit_hi}")
-
-        candidate = dict(self.logical_contributions)
-        for owner_key in replaced_owner_keys:
-            candidate.pop(owner_key, None)
-        previous = self.logical_contributions
-        self.logical_contributions = candidate
-        try:
-            self._install_logical_contribution(
-                LogicalContribution(
-                    owner_key=key,
-                    commit_lo=plan.commit_lo,
-                    commit_hi=plan.commit_hi,
-                    ownership_kind="strong_slab",
-                    logical_observables=None,
-                )
-            )
-        except Exception:
-            self.logical_contributions = previous
-            raise
+        candidate[key] = LogicalContribution(
+            owner_key=key,
+            commit_lo=plan.commit_lo,
+            commit_hi=plan.commit_hi,
+            ownership_kind="strong_slab",
+            logical_observables=None,
+        )
+        return candidate
 
     def _resolve_strong_region_plan(
         self, key: tuple, weak_window: Window, later_windows: list,

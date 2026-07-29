@@ -62,6 +62,7 @@ class StaticOnlyDevice:
 
     def window_models_for_operation(
         self, operation, windows, round_count, *, fault_model_requirement,
+        fault_exclusion_ranges,
     ):
         return []
 
@@ -75,6 +76,7 @@ class MissingCircuitScopeDevice:
 
     def window_models_for_operation(
         self, operation, windows, round_count, *, fault_model_requirement,
+        fault_exclusion_ranges,
     ):
         return []
 

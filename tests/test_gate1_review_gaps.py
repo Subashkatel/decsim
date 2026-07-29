@@ -184,6 +184,7 @@ def test_decode_windowed_raises_on_unconsumed_artificial_defects():
         circuit,
         [(1, 3, 6), (4, 6, 9), (7, 9, 9)],
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     graphlike_faults = [
         model.require_faults(FaultRepresentation.GRAPHLIKE)

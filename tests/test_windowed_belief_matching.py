@@ -51,6 +51,7 @@ def _windowed_preds(circ, plan, shots):
         circ,
         plan,
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     dec = belief_matching_window_decoder()
     return np.array(
@@ -75,11 +76,13 @@ def test_linked_requirement_leaves_graphlike_model_identical():
         circ,
         plan,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     bm = build_window_error_models(
         circ,
         plan,
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     assert len(base) == len(bm)
     for a, b in zip(base, bm):
@@ -171,6 +174,7 @@ def test_engine_belief_matching_matches_offline():
         plan,
         detector_rounds=folded,
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     ref_inner = belief_matching_window_decoder()
 

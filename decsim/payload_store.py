@@ -122,6 +122,12 @@ class PayloadStore:
 
     # -------------------------------------------------------------- leases
 
+    def lease_round_keys(self, lease_id) -> tuple:
+        """Return one lease's exact ordered keys without exposing mutation."""
+        if lease_id not in self._leases:
+            raise KeyError(lease_id)
+        return tuple(self._leases[lease_id])
+
     def lease(self, lease_id, round_keys) -> None:
         """Register a named lease over round keys, bumping each ref."""
         if lease_id in self._leases:

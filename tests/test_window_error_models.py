@@ -1237,6 +1237,7 @@ def test_belief_window_projection_preserves_physical_component_identity():
         DemBackedCircuit(),
         [(1, 1, 1)],
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+        fault_exclusion_ranges=(),
     )[0]
     graphlike = exact_model.graphlike_faults
     physical = exact_model.physical_faults
@@ -1254,6 +1255,7 @@ def test_belief_window_projection_preserves_physical_component_identity():
         circuit,
         _plan(circuit),
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+        fault_exclusion_ranges=(),
     )
 
     for model in models:
@@ -1295,6 +1297,7 @@ def test_every_fault_is_owned_by_exactly_one_window():
     models = build_window_error_models(
         circuit, _plan(circuit),
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     det_sets, _, _ = detector_error_model_to_faults(
         circuit.detector_error_model(decompose_errors=True))
@@ -1311,6 +1314,7 @@ def test_interior_windows_have_open_time_boundaries():
     models = build_window_error_models(
         circuit, _plan(circuit),
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     interior = models[1].graphlike_faults
     assert (interior.check.sum(axis=0) == 1).any()
@@ -1325,6 +1329,7 @@ def test_single_crossing_fault_round_trips_exactly():
     models = build_window_error_models(
         circuit, _plan(circuit),
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     det_sets, obs_sets, _ = detector_error_model_to_faults(
         circuit.detector_error_model(decompose_errors=True))
@@ -1369,6 +1374,7 @@ def test_windowed_accuracy_matches_global_decoding():
     models = build_window_error_models(
         circuit, _plan(circuit),
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     shots = 2000
     dets, obs = circuit.compile_detector_sampler(seed=11).sample(
@@ -1399,6 +1405,7 @@ def test_empty_syndrome_decodes_to_no_correction_and_no_flip():
     models = build_window_error_models(
         circuit, _plan(circuit),
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     decode = matching_window_decoder()
     empty = np.zeros(circuit.num_detectors, dtype=np.uint8)
@@ -1427,6 +1434,7 @@ def test_boundary_priors_are_clipped_not_infinite():
         circuit,
         [(1, 3, 6), (4, 6, 6)],
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     m0 = models[0]
     faults0 = m0.graphlike_faults
@@ -1540,6 +1548,7 @@ def test_sub_d_tail_window_measurably_degrades_accuracy():
             circuit,
             _plan(absorb),
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+            fault_exclusion_ranges=(),
         )
         decode = matching_window_decoder()
         fails[absorb] = np.array([
@@ -1590,6 +1599,7 @@ def test_parallel_two_sided_windows_match_global_decoding():
         circuit,
         plan,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     assert any(m.has_leading_buffer for m in models)
     shots = 2000
@@ -1641,6 +1651,7 @@ def _bb_models(circuit):
         _BB_PLAN,
         detector_rounds=rounds,
         fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
 
 
@@ -1652,6 +1663,7 @@ def test_bb_circuit_without_coordinates_requires_explicit_rounds():
             circuit,
             _BB_PLAN,
             fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
+            fault_exclusion_ranges=(),
         )
 
 

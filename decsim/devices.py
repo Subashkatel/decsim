@@ -63,8 +63,8 @@ class TimingOnlyDevice:
         return None
 
     def window_models_for_operation(self, op: Operation, windows: list,
-                                    round_count: int,
-                                    *, fault_model_requirement) -> list:
+                                    round_count: int, *, fault_model_requirement,
+                                    fault_exclusion_ranges: tuple) -> list:
         return []
 
     def window_model_for_stream(self, stream_id, window, *, is_last: bool):
@@ -359,8 +359,8 @@ class SyndromeBitDevice:
         return None
 
     def window_models_for_operation(self, op: Operation, windows: list,
-                                    round_count: int,
-                                    *, fault_model_requirement) -> list:
+                                    round_count: int, *, fault_model_requirement,
+                                    fault_exclusion_ranges: tuple) -> list:
         """Fake-bit decode jobs carry no detector error model."""
         return []
 

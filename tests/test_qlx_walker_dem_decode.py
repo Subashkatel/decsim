@@ -127,6 +127,7 @@ def test_windowed_tracks_global_on_walker_dem_samples():
         [(1, 3, 5), (4, 5, 6), (6, 7, 7)],
         detector_rounds=rounds_of,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     # ownership must tile over DETECTABLE faults: detector-less
     # mechanisms (undetectable logical flips, e.g. "error(p) L0") touch

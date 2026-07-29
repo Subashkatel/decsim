@@ -410,7 +410,7 @@ class SyndromeDevice(Protocol):
 
     def window_models_for_operation(
         self, op, windows: list, round_count: int, *,
-        fault_model_requirement,
+        fault_model_requirement, fault_exclusion_ranges: tuple,
     ) -> list: ...
 
     def window_model_for_stream(

@@ -211,6 +211,7 @@ def test_windowed_decode_equals_global_on_qlx_circuit(
             plan,
             detector_rounds=detector_rounds,
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+            fault_exclusion_ranges=(),
         )
 
     fails = int((pred_global != truth).sum())

@@ -366,6 +366,30 @@ def test_magic_state_latency_metric():
     assert res["total"]["n"] == 1
 
 
+def test_magic_state_latency_keeps_every_delivered_state():
+    eng = Engine(verbose=False)
+    factory = DistillationFactory(
+        eng,
+        num_units=1,
+        cycle_ticks=1,
+        decode_service=None,
+        corr_rounds=0,
+        n_corr=0,
+        return_ticks=0,
+        p_success=1.0,
+    )
+    delivered = []
+    for _ in range(4_100):
+        factory.request(0, lambda: delivered.append(eng.now))
+    eng.run()
+
+    result = MagicStateLatency(factory).result()
+
+    assert len(delivered) == 4_100
+    assert len(factory.traces) == 4_100
+    assert result["total"]["n"] == 4_100
+
+
 def test_multilevel_continuous_fills_top_buffer():
     eng = Engine(verbose=False)
     f = MultiLevelDistillationFactory(

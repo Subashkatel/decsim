@@ -247,7 +247,7 @@ class DistillationFactory(_RandomSeedConsumer):
         )
 
     def _init_runtime_state(self, initial_store: int) -> None:
-        """Initialize queues, counters, and bounded trace storage."""
+        """Initialize queues, counters, and delivered-state traces."""
         self.store = initial_store
         self.waiting: list[tuple[int, Callable[[], None]]] = []
         self.produced = 0
@@ -257,7 +257,7 @@ class DistillationFactory(_RandomSeedConsumer):
         self.total_stall = 0
         self._stall_start: dict[int, int] = {}
         self._shutdown = False
-        self.traces: deque = deque(maxlen=4096)
+        self.traces: deque = deque()
         self._ready_traces: list[StateTrace] = []
         self._next_state_id = 0
 

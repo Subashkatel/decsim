@@ -42,6 +42,26 @@ def test_complementary_gap_uses_canonical_matching_weights_at_endpoints():
     assert expected_weights[1] < 0
 
 
+def test_matching_weights_preserve_every_strict_interior_probability():
+    from decsim.mwpm_decoder.weights import matching_weights
+
+    strict_interior_priors = np.array([
+        5e-13,
+        1e-12,
+        0.25,
+        1 - 1e-12,
+        1 - 5e-13,
+    ])
+    expected_weights = np.log(
+        (1 - strict_interior_priors) / strict_interior_priors
+    )
+
+    assert np.array_equal(
+        matching_weights(strict_interior_priors),
+        expected_weights,
+    )
+
+
 def _memory_circuit(d, p, rounds=None):
     rounds = rounds or d
     return stim.Circuit.generated(

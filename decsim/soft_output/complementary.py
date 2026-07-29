@@ -137,12 +137,7 @@ class ComplementaryGapMetric:
 
 @dataclass(frozen=True)
 class ComplementaryGapMetricFactory:
-    """Configured builder exposed to the run graph as ``metric_cls``.
-
-    The wrapper consumes only ``source``, ``run_manifest_config()``, and
-    ``from_window_model(model)``. This object owns no per-window or per-shot
-    state.
-    """
+    """Stateless complementary-gap builder used by ``SoftOutputDecoder``."""
 
     source = COMPLEMENTARY_GAP_SOURCE
 
@@ -151,9 +146,3 @@ class ComplementaryGapMetricFactory:
         model: "WindowErrorModel",
     ) -> ComplementaryGapMetric:
         return ComplementaryGapMetric.from_window_model(model)
-
-    def run_manifest_config(self):
-        return {
-            "kind": "complementary_gap_metric_factory",
-            "source": self.source.manifest_value(),
-        }

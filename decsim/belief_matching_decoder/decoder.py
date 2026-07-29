@@ -29,13 +29,6 @@ class BeliefMatchingDecoder:
         self.bp_method = bp_method
         self._inner = belief_matching_window_decoder(max_iter=max_iter, bp_method=bp_method)
 
-    def run_manifest_config(self):
-        return {
-            "kind": "belief_matching",
-            "max_iter": self.max_iter,
-            "bp_method": self.bp_method,
-        }
-
     def run_seed_children(self):
         """Expose the latency model that controls simulated service time."""
         return (

@@ -724,20 +724,6 @@ class UnionFindDecoder:
         self.latency_model = latency_model
         self._graphs: dict = {}
 
-    def run_manifest_config(self):
-        return {
-            "algorithm": "union_find",
-            "growth_schedule": "meister_uniform_fair",
-            "edge_geometry": "unit_graph_edges",
-            "cluster_origin": "union_find_decoder",
-            "correction": "completed_growth_edge_peeling",
-            "confidence_method": "cluster_gap",
-            "gap_units": "graph_edges",
-            "graph_domain": "one_or_two_detectors",
-            "confidence_observable_count": 1,
-            "logical_search": "global_odd_parity_closed_walk",
-        }
-
     def run_seed_children(self):
         return (
             RunSeedChild(

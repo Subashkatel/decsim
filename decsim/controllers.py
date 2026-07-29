@@ -67,12 +67,6 @@ class ModularController:
         self._pending: dict = {}
         self._completed_rounds: set = set()
 
-    def run_manifest_config(self):
-        return {
-            "kind": "modular",
-            "log_syndromes": self.log_syndromes,
-        }
-
     # ------------------------------------------------------- syndrome path
 
     def relay_syndrome(self, payload, deliver: Callable) -> None:

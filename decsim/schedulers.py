@@ -8,9 +8,6 @@ from .message import DecodeJob
 class FifoScheduler:
     """First-in, first-out."""
 
-    def run_manifest_config(self):
-        return {"kind": "fifo"}
-
     def insert(self, queue: list, job: DecodeJob) -> None:
         """Add a job to the back of the queue."""
         queue.append(job)
@@ -22,9 +19,6 @@ class FifoScheduler:
 
 class EarliestDeadlineScheduler:
     """Send the job with the nearest deadline first."""
-
-    def run_manifest_config(self):
-        return {"kind": "earliest_deadline"}
 
     def insert(self, queue: list, job: DecodeJob) -> None:
         """Add a job to the queue."""
@@ -61,13 +55,6 @@ class WeightedUrgencyCostScheduler:
         self.w_u = float(w_u)
         self.w_c = float(w_c)
 
-    def run_manifest_config(self):
-        return {
-            "kind": "weighted_urgency_cost",
-            "urgency_weight": self.w_u,
-            "cost_weight": self.w_c,
-        }
-
     def insert(self, queue: list, job: DecodeJob) -> None:
         """Add a job to the queue."""
         queue.append(job)
@@ -90,9 +77,6 @@ class WeightedUrgencyCostScheduler:
 class EnqueueTimeDeadline:
     """Default deadline at window-job construction/logical admission."""
 
-    def run_manifest_config(self):
-        return {"kind": "enqueue_time"}
-
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
         """Return the policy-stamp tick (all newly built jobs equally urgent)."""
         return now
@@ -103,12 +87,6 @@ class ReactionPathDeadline:
 
     def __init__(self, slack_ticks: int):
         self.slack_ticks = int(slack_ticks)
-
-    def run_manifest_config(self):
-        return {
-            "kind": "reaction_path",
-            "slack_ticks": self.slack_ticks,
-        }
 
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
         """Tight deadline on the reaction path; now + slack off it."""
@@ -133,13 +111,6 @@ class BufferExpiryDeadline:
     def __init__(self, capacity_rounds: int, round_ticks: int):
         self.capacity_rounds = int(capacity_rounds)
         self.round_ticks = int(round_ticks)
-
-    def run_manifest_config(self):
-        return {
-            "kind": "buffer_expiry",
-            "capacity_rounds": self.capacity_rounds,
-            "round_ticks": self.round_ticks,
-        }
 
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
         """Expiry tick of the window's first buffered round."""

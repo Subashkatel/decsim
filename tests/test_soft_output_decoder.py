@@ -44,21 +44,7 @@ def test_soft_output_decoder_requires_a_configured_metric_factory():
     )
 
     assert decoder.metric_cls is metric_factory
-    assert decoder.run_manifest_config() == {
-        "kind": "soft_output",
-        "metric_source": COMPLEMENTARY_GAP_SOURCE.manifest_value(),
-    }
-    assert metric_factory.run_manifest_config() == {
-        "kind": "complementary_gap_metric_factory",
-        "source": {
-            "method": "complementary_gap",
-            "cluster_origin": "mwpm_opposite_logical",
-            "growth_schedule": "minimum_weight_matching",
-            "gap_units": "log_likelihood_weight",
-            "correction": "opposite_logical_constraint",
-            "references": ["arXiv:2510.25222v1 Section II.C"],
-        },
-    }
+    assert metric_factory.source is COMPLEMENTARY_GAP_SOURCE
     with pytest.raises(TypeError, match="configured metric factory instance"):
         SoftOutputDecoder(
             PyMatchingDecoder(_ZeroLatency()),
@@ -96,12 +82,6 @@ def test_soft_output_decoder_releases_metrics_for_dead_window_models():
             metric = Metric(model)
             self.metric_references.append(weakref.ref(metric))
             return metric
-
-        def run_manifest_config(self):
-            return {
-                "kind": "test_metric_factory",
-                "source": self.source.manifest_value(),
-            }
 
     class BaseDecoder:
         def decode(self, job):

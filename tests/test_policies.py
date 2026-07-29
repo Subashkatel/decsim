@@ -27,13 +27,6 @@ class _RecordingTimingChild:
         self.logical_bit = logical_bit
         self.decode_calls = []
 
-    def run_manifest_config(self):
-        return {
-            "kind": "recording_timing_child",
-            "latency_ticks": self.latency_ticks,
-            "logical_bit": self.logical_bit,
-        }
-
     def latency(self, job):
         return self.latency_ticks
 
@@ -226,31 +219,6 @@ def test_switching_decoder_latency_mix():
     ) == (None, None, None, None, None)
     assert weak.decode_calls == []
     assert strong.decode_calls == []
-
-
-def test_switching_decoder_manifest_declares_timing_only_sampling():
-    decoder = SwitchingDecoder(
-        PresetLatencyDecoder(1.0),
-        PresetLatencyDecoder(10.0),
-        gamma_switch=0.25,
-    )
-
-    expected = {
-        "kind": "sampled_inline_switching_timing",
-        "switch_probability": 0.25,
-        "handoff_ticks": us(0.5),
-        "weak_communication_ticks": 0,
-        "timing_path_source": "bernoulli_per_job",
-    }
-    assert decoder.run_manifest_config() == expected
-
-    completed = RunSpec(ops=[], decoder=decoder).build(verbose=False)
-    published = [
-        component["configuration"]
-        for component in completed.manifest.to_json_value()["components"]
-        if component["implementation"].endswith(".SwitchingDecoder")
-    ]
-    assert published == [expected]
 
 
 def test_switching_decoder_cannot_reroute_completion_from_latency():

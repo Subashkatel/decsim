@@ -33,16 +33,6 @@ class BPOSDDecoder:
                                            bp_method=bp_method, schedule=schedule,
                                            osd_method=osd_method)
 
-    def run_manifest_config(self):
-        return {
-            "kind": "bposd",
-            "max_iter": self.max_iter,
-            "osd_order": self.osd_order,
-            "bp_method": self.bp_method,
-            "schedule": self.schedule,
-            "osd_method": self.osd_method,
-        }
-
     def run_seed_children(self):
         """Expose the latency model that controls simulated service time."""
         return (

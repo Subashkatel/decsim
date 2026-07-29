@@ -56,20 +56,6 @@ class ThresholdRegister:
         self.history: list = []
         self._seq = 0
 
-    def run_manifest_config(self):
-        return {
-            "kind": "threshold_register",
-            "default_threshold": self._initial_default,
-            "per_code_thresholds": [
-                {
-                    "code": code,
-                    "threshold": self._initial_per_code[code],
-                }
-                for code in sorted(self._initial_per_code)
-            ],
-            "expected_source": self.expected_source.manifest_value(),
-        }
-
     def get(self, code) -> float:
         return self.per_code.get(code, self.default)
 
@@ -98,9 +84,6 @@ class ThresholdRegister:
 
 class Baseline:
     """Plain windowed decoding: submit the weak job, accept every outcome."""
-
-    def run_manifest_config(self):
-        return {"kind": "baseline"}
 
     def validate_declared_run(
         self,
@@ -205,20 +188,6 @@ class Switching:
         self.weak_keepup_ratio = weak_keepup_ratio
         self.bulk_strong = bulk_strong
         self.double_window = double_window
-
-    def run_manifest_config(self):
-        return {
-            "kind": "switching",
-            "confidence_threshold": self.confidence_threshold,
-            "expected_source": self.expected_source.manifest_value(),
-            "threshold_register_installed": (
-                self.threshold_register is not None
-            ),
-            "run_both_at_once": self.run_both_at_once,
-            "weak_keepup_ratio": self.weak_keepup_ratio,
-            "bulk_strong": self.bulk_strong,
-            "double_window": self.double_window,
-        }
 
     def run_seed_children(self):
         """Expose the optional register that selects confidence thresholds."""

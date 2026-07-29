@@ -34,12 +34,6 @@ class TimingOnlyDevice:
 
     operation_circuit_scope = "none"
 
-    def run_manifest_config(self):
-        return {
-            "kind": "timing_only",
-            "operation_circuit_scope": self.operation_circuit_scope,
-        }
-
     def begin_operation(
         self,
         op: Operation,
@@ -196,14 +190,6 @@ class SyndromeBitDevice:
                 self.code,
             ),
         )
-
-    def run_manifest_config(self):
-        return {
-            "kind": "syndrome_bits",
-            "max_bits": self.max_bits,
-            "per_patch": self.per_patch,
-            "operation_circuit_scope": self.operation_circuit_scope,
-        }
 
     def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
         """Prepare a replacement RNG without advancing the active one."""

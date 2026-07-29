@@ -809,18 +809,6 @@ class SoftOutputSource:
                     "Unicode-scalar strings"
                 )
 
-    def manifest_value(self) -> dict:
-        """Return the complete JSON-safe confidence interpretation."""
-        return {
-            "method": self.method,
-            "cluster_origin": self.cluster_origin,
-            "growth_schedule": self.growth_schedule,
-            "gap_units": self.gap_units,
-            "correction": self.correction,
-            "references": list(self.references),
-        }
-
-
 @dataclass(frozen=True)
 class SoftOutput:
     """One nonnegative confidence gap with immutable interpretation."""

@@ -18,6 +18,7 @@ from experiments.harness import (
     offline_batch_seed,
     sample_batch_sha256,
 )
+from experiments.decoding import OfflineBatchDecoder
 
 
 def _chunk(batch_index=0, first_shot_index=0, requested_shots=3, **changes):
@@ -175,3 +176,89 @@ def test_experiment_bytes_and_hash_are_canonical_and_seed_sensitive():
 
     assert experiment.canonical_bytes() == experiment.canonical_bytes()
     assert experiment.sha256() != replace(experiment, experiment_seed=8).sha256()
+
+
+def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
+    stim = pytest.importorskip("stim")
+    pytest.importorskip("pymatching")
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        decode_windowed,
+    )
+    from decsim.mwpm_decoder import matching_window_decoder
+    from decsim.schemes import SlidingWindowScheme
+
+    circuit = stim.Circuit.generated(
+        "repetition_code:memory",
+        distance=3,
+        rounds=6,
+        after_clifford_depolarization=0.01,
+    )
+    layers = 1 + max(
+        int(coordinates[-1])
+        for coordinates in circuit.get_detector_coordinates().values()
+    )
+    windows = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in SlidingWindowScheme().plan_operation(
+            0, layers, commit_round_count=3, buffer_round_count=3
+        ).windows
+    ]
+
+    class CountingCircuit:
+        def __init__(self, inner):
+            self.inner = inner
+            self.sampler_compiles = 0
+
+        def __getattr__(self, name):
+            return getattr(self.inner, name)
+
+        def compile_detector_sampler(self, **kwargs):
+            self.sampler_compiles += 1
+            return self.inner.compile_detector_sampler(**kwargs)
+
+    counted = CountingCircuit(circuit)
+    inner = matching_window_decoder()
+    model_ids = []
+
+    def decode(model, syndrome):
+        model_ids.append(id(model))
+        return inner(model, syndrome)
+
+    decoder = OfflineBatchDecoder.prepare(
+        counted,
+        windows,
+        decode,
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_representation=FaultRepresentation.GRAPHLIKE,
+    )
+    first = exact_batches(7, 4)[0]
+    seed = 19
+    result = decoder.run(first, seed)
+
+    detectors, truth = circuit.compile_detector_sampler(seed=seed).sample(
+        shots=first.shots, separate_observables=True
+    )
+    reference_decode = matching_window_decoder()
+    failures = sum(
+        tuple(int(bit) for bit in decode_windowed(
+            decoder.window_models,
+            detectors[index],
+            reference_decode,
+            selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+        ))
+        != tuple(int(bit) for bit in truth[index])
+        for index in range(first.shots)
+    )
+
+    assert result.attempted_shots == first.shots
+    assert result.primary_failures == failures
+    assert result.sample_batch_sha256 == sample_batch_sha256(detectors, truth)
+    assert counted.sampler_compiles == 1
+    assert set(model_ids) == {id(model) for model in decoder.window_models}
+
+    assert decoder.run(first, seed) == result
+    decoder.run(exact_batches(7, 4)[1], seed + 1)
+    assert counted.sampler_compiles == 3
+    assert set(model_ids) == {id(model) for model in decoder.window_models}

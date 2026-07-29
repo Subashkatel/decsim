@@ -216,6 +216,7 @@ def test_decoder_assembly_uses_structural_patch_order_not_transport_order():
                     bits=(position & 1,),
                     code=None,
                     size_bits=1,
+                    fragment_index=position,
                 )
                 for position, patch_id in enumerate(order)
             )

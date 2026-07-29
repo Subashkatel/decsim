@@ -243,6 +243,20 @@ def test_invalid_identity_is_rejected_before_cached_sampler_lookup():
         )
 
 
+def test_terminal_finalizer_rejects_an_unsampled_stream():
+    device = StimDevice(
+        terminal_detector_ids={"s": (0,)},
+        terminal_data_bits={"s": 1},
+    )
+    finalizer = Operation(
+        9, "terminal", (0,), stream_id="s", stream_offset=0,
+        finalizes_stream_round=True,
+        syndrome_fragment_index=1, syndrome_fragment_count=2,
+    )
+    with pytest.raises(RuntimeError, match="sampled stream"):
+        device.finalize_stream_round(finalizer)
+
+
 def test_unseeded_sampling_keeps_stim_owned_identity_behavior():
     class RecordingSampler:
         def __init__(self):

@@ -288,14 +288,15 @@ class Switching:
 
     def validate_operations(self, operations) -> None:
         if self.double_window and any(
-            operation.predecessors or operation.has_successor
+            operation.decoder_boundary_predecessors
+            or operation.has_successor
             for operation in operations
         ):
             raise ValueError(
                 "double_window models one single-patch stream per operation "
-                "(arXiv:2510.25222 Fig. 12); operation chains with "
-                "predecessors/successors would let a slab cross an op seam "
-                "where no far-boundary gate exists yet")
+                "(arXiv:2510.25222 Fig. 12); decoder-boundary chains would "
+                "let a slab cross an op seam where no far-boundary gate "
+                "exists yet")
 
     def validate_code_geometry(self, geometry) -> None:
         if self.weak_keepup_ratio is None:

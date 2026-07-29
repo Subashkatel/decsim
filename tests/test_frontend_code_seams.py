@@ -42,6 +42,7 @@ class PhysicalPatchIRFrontend:
                 consumes_magic_state=record.get("consumes_magic_state"),
                 patches=patches,
                 predecessors=tuple(sorted(predecessors)),
+                decoder_boundary_predecessors=tuple(sorted(predecessors)),
                 blocked_by=record.get("blocked_by"),
             )
             operations.append(operation)
@@ -115,6 +116,7 @@ class BBCodeISAFrontend:
                 clifford=instruction.get("clifford", True),
                 patches=(block,),
                 predecessors=tuple(sorted(predecessors)),
+                decoder_boundary_predecessors=tuple(sorted(predecessors)),
             )
             operations.append(operation)
 

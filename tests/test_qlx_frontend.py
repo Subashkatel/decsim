@@ -60,10 +60,12 @@ def test_dependency_dag_matches_the_diagram(program):
     assert deps["dealloc_0"] == ("mz_0",)
     ops = {op.id: op for op in program.operations}
     assert ops[by_qlx["dealloc_0"]].has_successor is False
-    assert ops[by_qlx["mz_0"]].has_successor is True
+    assert ops[by_qlx["mz_0"]].has_successor is False
+    assert all(op.decoder_boundary_predecessors == ()
+               for op in program.operations)
 
 
-def test_durations_preserved_and_rounds_clamped(program):
+def test_durations_preserved_without_clamping(program):
     by_qlx = {qlx: i for i, qlx in program.op_ids.items()}
     assert program.raw_durations[by_qlx["produce_resource_0"]] == 120
     assert program.raw_durations[by_qlx["transport_0"]] == 1
@@ -71,7 +73,7 @@ def test_durations_preserved_and_rounds_clamped(program):
     ops = {op.id: op for op in program.operations}
     for op in program.operations:
         r = program.rounds.rounds_for(op, code=None)
-        assert r == max(1, program.raw_durations[op.id])
+        assert r == program.raw_durations[op.id]
 
 
 def test_region_slot_cells_become_patches(program):
@@ -79,15 +81,14 @@ def test_region_slot_cells_become_patches(program):
     ops = {program.op_ids[op.id]: op for op in program.operations}
     assert ops["alloc_0"].patches == (0,)
     assert ops["produce_resource_0"].patches == (1,)
-    # transport occupies no fabric cell -> inherits its dependency's patches
-    assert ops["transport_0"].patches == (1,)
+    assert ops["transport_0"].patches == ()
 
 
 def test_resource_flow_produce_transport_consume(program):
     assert program.resource_flows == [
         ("T", "produce_resource_0", "transport_0", "inject_0")]
     ops = {program.op_ids[op.id]: op for op in program.operations}
-    assert ops["inject_0"].consumes_magic_state is True
+    assert ops["inject_0"].consumes_magic_state is False
     assert ops["inject_0"].clifford is False
     assert ops["inject_0"].kind is OpKind.INJECT
     assert ops["produce_resource_0"].consumes_magic_state is False
@@ -147,15 +148,14 @@ def test_corpus_structural_invariants(path):
     assert ids == sorted(set(ids)), "ids must be unique and ordered"
     for op in prog.operations:
         assert all(0 <= d < len(ids) and d != op.id for d in op.predecessors)
-        assert prog.rounds.rounds_for(op, code=None) >= 1
-        assert op.patches, f"{op.name} has no patch"
+        assert prog.rounds.rounds_for(op, code=None) >= 0
     # every resource flow starts at a producer and ends at a consumer
     by_qlx = {q: i for i, q in prog.op_ids.items()}
     ops = {op.id: op for op in prog.operations}
     for flow in prog.resource_flows:
         resource, producer, *rest = flow
         assert ops[by_qlx[producer]].consumes_magic_state is False
-        assert ops[by_qlx[flow[-1]]].consumes_magic_state is True
+        assert ops[by_qlx[flow[-1]]].consumes_magic_state is False
 
 
 @pytest.mark.skipif(not (CORPUS / "schedule_h_then_2t.json").exists(),
@@ -173,57 +173,22 @@ def test_two_t_program_has_two_flows_and_parallel_factory_slots():
     p0 = ops[by_qlx["produce_resource_0"]].patches
     p1 = ops[by_qlx["produce_resource_1"]].patches
     assert p0 != p1, "parallel factory slots collapsed onto one patch"
-    # both injections consume, and QLX serialized them via an explicit dep
-    assert ops[by_qlx["inject_1"]].consumes_magic_state is True
+    # QLX owns both injected states and serialized the injections explicitly.
+    assert ops[by_qlx["inject_1"]].consumes_magic_state is False
     assert by_qlx["inject_0"] in ops[by_qlx["inject_1"]].predecessors
-
-
-def _critical_path_rounds(prog):
-    """Independent reference: longest path over dependency edges PLUS
-    same-patch program order, with decsim's clamped >=1-round durations."""
-    ops = prog.operations
-    dur = {op.id: max(1, prog.raw_durations[op.id]) for op in ops}
-    edges = {op.id: set(op.predecessors) for op in ops}
-    last_on_patch: dict = {}
-    for op in ops:                       # program order per patch
-        for patch in op.patches:
-            if patch in last_on_patch:
-                edges[op.id].add(last_on_patch[patch])
-            last_on_patch[patch] = op.id
-    finish: dict = {}
-    for op in ops:                       # ids are topological (QLX order)
-        start = max((finish[d] for d in edges[op.id]), default=0)
-        finish[op.id] = start + dur[op.id]
-    return max(finish.values())
 
 
 @pytest.mark.skipif(not _CORPUS_FILES, reason="corpus not captured")
 @pytest.mark.parametrize("path", _CORPUS_FILES,
                          ids=[p.stem for p in _CORPUS_FILES])
 def test_timing_cross_validation_against_real_qlx_schedules(path):
-    """decsim's engine must reproduce the independent critical path EXACTLY
-    on every real compiled program, and exceed QLX's own makespan only by
-    the zero-duration ops decsim clamps to 1 round (delta reported)."""
+    """The engine reproduces every QLX absolute start, end, and makespan."""
 
     doc = json.loads(path.read_text())
     prog = qlx_frontend(doc)
-    # QLX may schedule ops CONCURRENTLY on the same slot (produce_resource
-    # in mem_surface_t; mz/dealloc siblings in ls_cx); decsim's chip
-    # requires program-order wiring for patch-sharing ops, so chain each
-    # op to the LAST op on its patch — the same rule as
-    # frontends.circuit._wire_patch_dependencies — before running (G7P4
-    # bring-up amendment 2, generalized for the ls_cx corpus program;
-    # both the engine and the reference critical path see the same edges)
-    last_on_patch: dict = {}
-    for op in prog.operations:
-        for patch in op.patches:
-            prev = last_on_patch.get(patch)
-            if prev is not None and prev not in op.predecessors:
-                op.predecessors = tuple(op.predecessors) + (prev,)
-                prog.operations[prev].has_successor = True
-            last_on_patch[patch] = op.id
     res = simulate(RunSpec(
-              ops=prog.operations,
+              frontend=prog,
+              decode_ops=list(prog.decoder_operations),
               num_units=4,
               d=3,
               rounds_policy=prog.rounds,
@@ -231,16 +196,17 @@ def test_timing_cross_validation_against_real_qlx_schedules(path):
               decoder=PerRoundDecoder(tau_us=1.0),
           ), verbose=False)
     decsim_rounds = res.result.chip_done_ticks / 1_000_000
-    reference = _critical_path_rounds(prog)
-    assert decsim_rounds == reference, \
-        f"decsim {decsim_rounds} != independent critical path {reference}"
     qlx_makespan = max(prog.start_rounds[op.id] +
                        prog.raw_durations[op.id] for op in prog.operations)
-    n_zero = sum(1 for op in prog.operations
-                 if prog.raw_durations[op.id] == 0)
-    assert qlx_makespan <= decsim_rounds <= qlx_makespan + n_zero, \
-        (f"decsim {decsim_rounds} vs QLX {qlx_makespan} beyond the "
-         f"zero-duration clamp budget ({n_zero})")
+    assert decsim_rounds == qlx_makespan
+    for operation in prog.operations:
+        assert res.chip.op_start_time[operation.id] == (
+            prog.start_rounds[operation.id] * 1_000_000
+        )
+        assert res.chip.body_done_time[operation.id] == (
+            (prog.start_rounds[operation.id]
+             + prog.raw_durations[operation.id]) * 1_000_000
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -297,3 +263,105 @@ def test_artifact_confirms_real_feedback_program():
 def test_artifact_kind_is_checked():
     with pytest.raises(ValueError, match="qlx.realtime_artifact"):
         qlx_frontend(None, realtime_artifact={"kind": "something_else"})
+
+
+def test_closed_vocabulary_rejects_repeat_and_unknown_tasks():
+    base = {
+        "op_id": "bad_0",
+        "dependencies": (),
+        "occupied_slots": (),
+        "duration": 0,
+        "consumes": None,
+        "produces": None,
+        "protocol": None,
+        "start_round": 0,
+    }
+    for op_name, message in (
+        ("fabric.repeat", "expanded"),
+        ("fabric.future_task", "unsupported"),
+    ):
+        entry = dict(base, op_name=op_name)
+        with pytest.raises(ValueError, match=message):
+            qlx_frontend({"entries": [entry]})
+
+
+def _resource_entry(op_id, name, dependencies=(), produces=None):
+    return {
+        "op_id": op_id, "op_name": f"fabric.{name}",
+        "dependencies": dependencies, "occupied_slots": (),
+        "duration": 0, "consumes": None, "produces": produces,
+        "protocol": None, "start_round": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("duration", 1.5),
+        ("duration", True),
+        ("start_round", 1.5),
+        ("start_round", True),
+    ],
+)
+def test_schedule_times_require_exact_integers(field, value):
+    entry = _resource_entry("task", "alloc")
+    entry[field] = value
+    with pytest.raises(TypeError, match=field):
+        qlx_frontend({"entries": [entry]})
+
+
+def test_source_operation_ids_must_be_unique():
+    entries = [
+        _resource_entry("duplicate", "alloc"),
+        _resource_entry("duplicate", "dealloc"),
+    ]
+    with pytest.raises(ValueError, match="unique"):
+        qlx_frontend({"entries": entries})
+
+
+def test_dependency_cannot_start_before_predecessor_finishes():
+    first = _resource_entry("first", "alloc")
+    first.update(duration=2, start_round=0)
+    second = _resource_entry("second", "dealloc", ("first",))
+    second.update(duration=0, start_round=1)
+    with pytest.raises(ValueError, match="predecessor finishes"):
+        qlx_frontend({"entries": [first, second]})
+
+
+def test_dependency_may_start_at_predecessor_end():
+    first = _resource_entry("first", "alloc")
+    first.update(duration=2, start_round=0)
+    second = _resource_entry("second", "dealloc", ("first",))
+    second.update(duration=0, start_round=2)
+    program = qlx_frontend({"entries": [first, second]})
+    assert program.operations[1].predecessors == (0,)
+
+
+def test_same_cell_zero_duration_tasks_may_share_one_tick():
+    first = _resource_entry("first", "alloc")
+    second = _resource_entry("second", "dealloc")
+    for entry in (first, second):
+        entry["occupied_slots"] = (("compute", 0),)
+    program = qlx_frontend({"entries": [first, second]})
+    assert program.operations[1].predecessors == (0,)
+
+
+@pytest.mark.parametrize(
+    ("entries", "message"),
+    [
+        ([
+            _resource_entry("p", "produce_resource", produces="T"),
+            _resource_entry("t0", "transport", ("p",)),
+            _resource_entry("t1", "transport", ("p",)),
+        ], "forks"),
+        ([_resource_entry("t", "transport")], "orphan"),
+        ([
+            _resource_entry("p0", "produce_resource", produces="T"),
+            _resource_entry("p1", "produce_resource", produces="T"),
+            _resource_entry("i", "inject", ("p0", "p1")),
+        ], "join"),
+    ],
+)
+def test_resource_chain_mutations_fail_closed(entries, message):
+    with pytest.raises(ValueError, match=message):
+        qlx_frontend({"entries": entries})

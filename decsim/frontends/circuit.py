@@ -69,6 +69,7 @@ def _wire_circuit(operations: list[Operation],
 
     for operation in operations:
         operation.predecessors = tuple(sorted(predecessors[operation.id]))
+        operation.decoder_boundary_predecessors = operation.predecessors
         operation.has_successor = has_successor[operation.id]
     return operations
 

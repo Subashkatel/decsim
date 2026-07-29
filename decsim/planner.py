@@ -54,7 +54,8 @@ def _validated(value: int, source: str) -> int:
 
 def _validate_operation_graph(ops: list[Operation], *,
                               validate_blockers: bool = False,
-                              external_blocker_ids=()) -> None:
+                              external_blocker_ids=(),
+                              dependency_field: str = "predecessors") -> None:
     """Reject dependency graphs that dictionaries or an empty event queue
     would otherwise hide. Operation IDs are the graph's stable keys."""
     by_id = {}
@@ -70,7 +71,7 @@ def _validate_operation_graph(ops: list[Operation], *,
     indegree = {operation_id: 0 for operation_id in by_id}
     for operation in ops:
         seen_predecessors = set()
-        for predecessor_id in operation.predecessors:
+        for predecessor_id in getattr(operation, dependency_field):
             if predecessor_id in seen_predecessors:
                 raise ValueError(
                     f"operation {operation.id} lists predecessor "
@@ -144,6 +145,8 @@ def _validate_workload_identity(ops, decode_ops, dynamic_streams) -> None:
     dynamic_owners = tuple(dynamic_streams)
     for operation in ops:
         if operation.stream_id is None:
+            if not operation.emits_detector_data:
+                continue
             if decode_ops and not any(
                 owner is operation for owner in static_owners
             ):
@@ -176,7 +179,7 @@ class PerOpRounds:
 
     def __init__(self, rounds_by_op: dict, fallback=None):
         self.rounds_by_op = {
-            op_id: _validated(int(r), f"PerOpRounds[{op_id}]")
+            op_id: self._validated(int(r), op_id)
             for op_id, r in dict(rounds_by_op).items()}
         self.fallback = fallback if fallback is not None else CodeRounds()
 
@@ -184,6 +187,14 @@ class PerOpRounds:
         if op.id in self.rounds_by_op:
             return self.rounds_by_op[op.id]
         return self.fallback.rounds_for(op, code)
+
+    @staticmethod
+    def _validated(value: int, operation_id) -> int:
+        if value < 0:
+            raise ValueError(
+                f"PerOpRounds[{operation_id}] must give >= 0 rounds "
+                f"(got {value})")
+        return value
 
 
 class CodeRounds:
@@ -330,7 +341,12 @@ def _plan_execution(
         )
     except KeyError as error:
         raise ValueError(f"unknown planned operation id {error.args[0]}") from error
-    _validate_operation_graph(list(planned_views))
+    if any(operation.round_count < 1 for operation in planned_resolved):
+        raise ValueError("decode owners must have at least one round")
+    _validate_operation_graph(
+        list(planned_views),
+        dependency_field="decoder_boundary_predecessors",
+    )
     window_ledgers = tuple(
         scheme.plan_operation(
             operation.operation_id,
@@ -419,7 +435,7 @@ def _materialize_execution_plan(
 
     for operation in operations:
         destination_plan = plan_by_operation_id[operation.id]
-        for predecessor_id in operation.predecessors:
+        for predecessor_id in operation.decoder_boundary_predecessors:
             if predecessor_id not in plan_by_operation_id:
                 raise ValueError(
                     f"operation {operation.id} has unknown predecessor "

@@ -589,7 +589,7 @@ class WindowManager:
         self.lifecycle.maybe_update(op.id)
         self._check_deferred_strong_after_arrival(op.id)
         self.check_windows_for_operation(op.id)
-        for predecessor_id in op.predecessors:
+        for predecessor_id in op.decoder_boundary_predecessors:
             self.check_windows_for_operation(predecessor_id)
 
     def _store_payload(

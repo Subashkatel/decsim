@@ -204,11 +204,18 @@ class SyndromePayload:
     bits: Optional[Any] = None        # detector bits (None = timing-only run)
     code: Optional[str] = None        # code name; drives CodeRouter routing
     n_fragments: int = 1              # link-layer fragments the round arrives in
+    fragment_index: int = 0           # stable position within the complete round
     size_bits: Optional[int] = None   # wire size, for bandwidth/packing models
 
     def __post_init__(self) -> None:
+        if type(self.n_fragments) is not int:
+            raise TypeError("n_fragments must be an exact built-in int")
         if self.n_fragments < 1:
             raise ValueError(f"n_fragments must be >= 1 (got {self.n_fragments})")
+        if type(self.fragment_index) is not int:
+            raise TypeError("fragment_index must be an exact built-in int")
+        if not 0 <= self.fragment_index < self.n_fragments:
+            raise ValueError("fragment_index must be within n_fragments")
 
 
 def _retained_bits(bits: Any) -> Optional[tuple[int, ...]]:
@@ -246,6 +253,7 @@ class RetainedSyndromeFragment:
     bits: Optional[tuple[int, ...]]
     code: Optional[str]
     size_bits: Optional[int]
+    fragment_index: int
 
     def __post_init__(self) -> None:
         if not is_stable_identity(self.operation_id):
@@ -272,6 +280,10 @@ class RetainedSyndromeFragment:
                 raise TypeError("size_bits must be an exact built-in int")
             if self.size_bits < 0:
                 raise ValueError("size_bits must be nonnegative")
+        if type(self.fragment_index) is not int:
+            raise TypeError("fragment_index must be an exact built-in int")
+        if self.fragment_index < 0:
+            raise ValueError("fragment_index must be nonnegative")
 
     @classmethod
     def from_payload(cls, payload: SyndromePayload) -> "RetainedSyndromeFragment":
@@ -282,6 +294,7 @@ class RetainedSyndromeFragment:
             bits=_retained_bits(payload.bits),
             code=payload.code,
             size_bits=payload.size_bits,
+            fragment_index=payload.fragment_index,
         )
 
 
@@ -309,14 +322,20 @@ class SyndromeRoundPacket:
             raise TypeError(
                 "packet fragments must be a nonempty tuple of retained fragments"
             )
+        seen_fragment_indices = set()
         seen_patch_ids = []
         for fragment in self.fragments:
             if not same_stable_identity(fragment.operation_id, self.operation_id):
                 raise ValueError("packet fragments must share operation identity")
             if fragment.round_index != self.round_index:
                 raise ValueError("packet fragments must share round_index")
-            if any(same_stable_identity(fragment.patch_id, seen)
-                   for seen in seen_patch_ids):
+            if fragment.fragment_index in seen_fragment_indices:
+                raise ValueError("packet fragment indices must be distinct")
+            seen_fragment_indices.add(fragment.fragment_index)
+            if any(
+                same_stable_identity(fragment.patch_id, patch_id)
+                for patch_id in seen_patch_ids
+            ):
                 raise ValueError("packet patch identities must be distinct")
             seen_patch_ids.append(fragment.patch_id)
 
@@ -483,7 +502,7 @@ class ResolvedOperationPlanning:
             raise TypeError("operation_id must be an exact int")
         if type(self.code_geometry) is not ResolvedCodeGeometry:
             raise TypeError("code_geometry must be an exact ResolvedCodeGeometry")
-        _exact_positive_int(self.round_count, "round_count")
+        _exact_nonnegative_int(self.round_count, "round_count")
         _exact_positive_int(self.round_ticks, "round_ticks")
         _exact_positive_int(self.spatial_node_count, "spatial_node_count")
 
@@ -982,13 +1001,19 @@ class Operation:
     circuit: Optional[Any] = None     # stim circuit for real-syndrome (data-path) runs
     consumes_magic_state: Optional[bool] = None  # override; None = infer from clifford
     patches: tuple = ()               # patch ids whose syndrome streams feed the op
-    predecessors: tuple = ()          # op ids whose windows must decode first
+    predecessors: tuple = ()          # workload op ids that must complete first
+    decoder_boundary_predecessors: tuple = ()  # prior decode streams at a boundary
     has_successor: bool = False       # a later op consumes this op's boundary
     # Decode stream this segment's rounds fold into. Seeded StimDevice runs
     # require an exact built-in int/str; unseeded and non-Stim devices may use
     # another identity type accepted by that device.
     stream_id: Optional[Any] = None
     stream_offset: Optional[int] = None  # global-round offset of the segment in its stream
+    scheduled_start_round: int = 0
+    emits_detector_data: bool = True
+    finalizes_stream_round: bool = False
+    syndrome_fragment_index: Optional[int] = None
+    syndrome_fragment_count: Optional[int] = None
     blocked_by: Optional[int] = None  # op id whose Decision must release this op
     feedback_boundary_mode: Optional[str] = None  # per-op override of the RunSpec mode
     requires_result_return_to_chip: bool = False  # decision must travel back to the QPU
@@ -1017,6 +1042,47 @@ class Operation:
             raise TypeError(
                 f"operation {self.id} predecessors must contain exact "
                 "built-in int operation ids")
+        if type(self.decoder_boundary_predecessors) is not tuple or any(
+            type(predecessor) is not int
+            for predecessor in self.decoder_boundary_predecessors
+        ):
+            raise TypeError(
+                f"operation {self.id} decoder_boundary_predecessors must "
+                "contain exact built-in int operation ids")
+        if type(self.scheduled_start_round) is not int:
+            raise TypeError("scheduled_start_round must be an exact int")
+        if self.scheduled_start_round < 0:
+            raise ValueError("scheduled_start_round must be nonnegative")
+        if type(self.emits_detector_data) is not bool:
+            raise TypeError("emits_detector_data must be an exact bool")
+        if type(self.finalizes_stream_round) is not bool:
+            raise TypeError("finalizes_stream_round must be an exact bool")
+        fragment_fields = (
+            self.syndrome_fragment_index,
+            self.syndrome_fragment_count,
+        )
+        if (fragment_fields[0] is None) != (fragment_fields[1] is None):
+            raise ValueError(
+                "syndrome fragment index and count must be set together")
+        if fragment_fields[0] is not None:
+            if any(type(value) is not int for value in fragment_fields):
+                raise TypeError("syndrome fragment fields must be exact ints")
+            if not 0 <= fragment_fields[0] < fragment_fields[1]:
+                raise ValueError(
+                    "syndrome fragment index must be within fragment count")
+            if not self.emits_detector_data:
+                raise ValueError("syndrome fragment slots require an emitter")
+        if self.finalizes_stream_round:
+            if not self.emits_detector_data:
+                raise ValueError("stream finalizers must emit detector data")
+            if self.stream_id is None:
+                raise ValueError("stream finalizers require an explicit stream_id")
+            if type(self.stream_offset) is not int or self.stream_offset < 0:
+                raise ValueError(
+                    "stream finalizers require a nonnegative stream_offset")
+            if fragment_fields[0] is None:
+                raise ValueError(
+                    "stream finalizers require an explicit fragment slot")
         if self.blocked_by is not None and type(self.blocked_by) is not int:
             raise TypeError(
                 f"operation {self.id} blocked_by must be an exact built-in "
@@ -1070,9 +1136,15 @@ class OperationPlanningView:
     consumes_magic_state: Optional[bool]
     patches: tuple
     predecessors: tuple
+    decoder_boundary_predecessors: tuple
     has_successor: bool
     stream_id: Optional[int]
     stream_offset: Optional[int]
+    scheduled_start_round: int
+    emits_detector_data: bool
+    finalizes_stream_round: bool
+    syndrome_fragment_index: Optional[int]
+    syndrome_fragment_count: Optional[int]
     blocked_by: Optional[int]
     feedback_boundary_mode: str
     requires_result_return_to_chip: bool
@@ -1099,9 +1171,17 @@ class OperationPlanningView:
             consumes_magic_state=operation.consumes_magic_state,
             patches=tuple(operation.patches),
             predecessors=tuple(operation.predecessors),
+            decoder_boundary_predecessors=tuple(
+                operation.decoder_boundary_predecessors
+            ),
             has_successor=operation.has_successor,
             stream_id=operation.stream_id,
             stream_offset=operation.stream_offset,
+            scheduled_start_round=operation.scheduled_start_round,
+            emits_detector_data=operation.emits_detector_data,
+            finalizes_stream_round=operation.finalizes_stream_round,
+            syndrome_fragment_index=operation.syndrome_fragment_index,
+            syndrome_fragment_count=operation.syndrome_fragment_count,
             blocked_by=operation.blocked_by,
             feedback_boundary_mode=(
                 operation.feedback_boundary_mode

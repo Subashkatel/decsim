@@ -76,6 +76,8 @@ class StimDevice:
         self,
         seed: Optional[Integral] = None,
         detector_rounds: Optional[dict] = None,
+        terminal_detector_ids: Optional[dict] = None,
+        terminal_data_bits: Optional[dict] = None,
     ):
         """Configure Stim sampling and optional detector-round overrides.
 
@@ -83,6 +85,8 @@ class StimDevice:
         ``{detector: 1-based round}`` for circuits whose DETECTORs carry no
         coordinates (for example QLX-emitted circuits; the map comes from
         ``emit_decoder_params()['dem_detector_locs']`` packet indices).
+        ``terminal_detector_ids`` removes declared final-readout detectors
+        from ordinary rounds; ``terminal_data_bits`` prices their raw wire part.
 
         See the class contract for the root-seed domain and the conditional
         seeded identity restriction.
@@ -96,6 +100,11 @@ class StimDevice:
         self._detector_rounds_override = {
             key: dict(rounds_map)
             for key, rounds_map in (detector_rounds or {}).items()}
+        self._terminal_detector_ids = {
+            key: tuple(detector_ids)
+            for key, detector_ids in (terminal_detector_ids or {}).items()
+        }
+        self._terminal_data_bits = dict(terminal_data_bits or {})
         self._samplers: dict = {}
         self._dets: dict = {}
         self._truth: dict = {}
@@ -267,6 +276,7 @@ class StimDevice:
         self._dets[key] = dets[0]
         self._truth[key] = obs[0]
         override = self._detector_rounds_override.get(key)
+        terminal_ids = set(self._terminal_detector_ids.get(key, ()))
         buckets: dict[int, list[int]] = {}
         if override is not None:
             max_round = max(override.values(), default=0)
@@ -276,6 +286,8 @@ class StimDevice:
                 else resolved_round_count
             )
             for detector_index, detector_round in override.items():
+                if detector_index in terminal_ids:
+                    continue
                 buckets.setdefault(
                     min(detector_round, round_count), []).append(detector_index)
         else:
@@ -288,6 +300,8 @@ class StimDevice:
                 else resolved_round_count
             )
             for detector_index, coordinate in coords.items():
+                if detector_index in terminal_ids:
+                    continue
                 detector_round = int(coordinate[-1]) + 1
                 buckets.setdefault(
                     min(detector_round, round_count), []).append(detector_index)
@@ -307,6 +321,25 @@ class StimDevice:
         target = op.stream_id if op.stream_id is not None else op.id
         return [SyndromePayload(target, patch, global_round, bits=bits,
                                 size_bits=len(bits))]
+
+    def finalize_stream_round(self, op: Operation) -> list[SyndromePayload]:
+        """Emit terminal detector events from the already sampled stream."""
+        key = self._key(op)
+        if key not in self._dets:
+            raise RuntimeError("terminal finalizer requires a sampled stream")
+        detector_ids = self._terminal_detector_ids.get(key)
+        if detector_ids is None:
+            raise ValueError("terminal finalizer has no declared detector ids")
+        if key not in self._terminal_data_bits:
+            raise ValueError("terminal finalizer has no raw data-bit size")
+        patch = op.patches[0] if op.patches else op.qubits[0]
+        return [SyndromePayload(
+            key,
+            patch,
+            op.stream_offset + 1,
+            bits=self._dets[key][list(detector_ids)],
+            size_bits=self._terminal_data_bits[key],
+        )]
 
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
                             patch) -> list[SyndromePayload]:

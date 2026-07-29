@@ -17,8 +17,9 @@ def _packet(op_id, round_index, fragments=((0, (0,)),)):
                 bits=bits,
                 code=None,
                 size_bits=len(bits),
+                fragment_index=fragment_index,
             )
-            for patch_id, bits in fragments
+            for fragment_index, (patch_id, bits) in enumerate(fragments)
         ),
     )
 

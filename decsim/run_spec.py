@@ -373,9 +373,12 @@ def _decode_plan_operations(ops, decode_ops, dynamic_streams, *,
     if static_decode_selected:
         return decode_ops
     if not dynamic_streams:
-        return ops
+        return tuple(op for op in ops if op.emits_detector_data)
     dynamic_ids = {stream.id for stream in dynamic_streams}
-    return tuple(op for op in ops if op.stream_id not in dynamic_ids)
+    return tuple(
+        op for op in ops
+        if op.emits_detector_data and op.stream_id not in dynamic_ids
+    )
 
 
 def _metric_bindings(metrics):

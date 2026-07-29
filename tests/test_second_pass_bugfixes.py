@@ -92,7 +92,10 @@ def test_packing_does_not_reserve_the_serialized_link_early():
     def deliver_packed(packet):
         arrivals.append(("packed", eng.now))
     for patch in (0, 1):
-        fragment = SyndromePayload(0, patch, 1, n_fragments=2, size_bits=500)
+        fragment = SyndromePayload(
+            0, patch, 1, n_fragments=2,
+            fragment_index=patch, size_bits=500,
+        )
         eng.schedule(0, lambda p=fragment: ctrl.relay_syndrome(
             p, deliver_packed))
     whole = SyndromePayload(1, 2, 1, size_bits=500)

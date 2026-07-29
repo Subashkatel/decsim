@@ -7,7 +7,7 @@ live in links.py.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
 from .links import (
@@ -118,10 +118,12 @@ class ModularController:
             if not _same_delivery_sink(sink_identity, pending.sink_identity):
                 raise ValueError("all fragments must share one delivery sink")
         if any(
-            same_stable_identity(fragment.patch_id, candidate.patch_id)
+            fragment.fragment_index == candidate.fragment_index
             for candidate in pending.fragments
         ):
-            raise ValueError("duplicate syndrome patch identity")
+            raise ValueError("duplicate syndrome fragment index")
+        if fragment.fragment_index >= pending.fragment_count:
+            raise ValueError("syndrome fragment index exceeds declared count")
         if len(pending.fragments) >= pending.fragment_count:
             raise ValueError("too many distinct syndrome fragments")
 
@@ -139,7 +141,7 @@ class ModularController:
         packet = SyndromeRoundPacket(
             operation_id=fragment.operation_id,
             round_index=fragment.round_index,
-            fragments=tuple(pending.fragments),
+            fragments=self._collapse_fragments(pending.fragments),
         )
         del self._pending[round_key]
         self._completed_rounds.add(round_key)
@@ -187,6 +189,36 @@ class ModularController:
                                  attribution=attribution),
                              lambda: deliver(packet),
                              label="controller->decoder packet")
+
+    @staticmethod
+    def _collapse_fragments(fragments) -> tuple:
+        """Order source fragments, then merge parts from the same patch."""
+        collapsed = []
+        for fragment in sorted(fragments, key=lambda item: item.fragment_index):
+            prior_index = next((
+                index for index, prior in enumerate(collapsed)
+                if same_stable_identity(prior.patch_id, fragment.patch_id)
+            ), None)
+            if prior_index is None:
+                collapsed.append(fragment)
+                continue
+            prior = collapsed[prior_index]
+            bits = (
+                prior.bits + fragment.bits
+                if prior.bits is not None and fragment.bits is not None
+                else None
+            )
+            size_bits = (
+                prior.size_bits + fragment.size_bits
+                if prior.size_bits is not None and fragment.size_bits is not None
+                else None
+            )
+            collapsed[prior_index] = replace(
+                prior,
+                bits=bits,
+                size_bits=size_bits,
+            )
+        return tuple(collapsed)
 
     # ------------------------------------------------------- decision path
 

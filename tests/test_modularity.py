@@ -212,6 +212,8 @@ def _blocked_ops():
     c = Operation(2, "T2(q1)", (1,), clifford=False, blocked_by=1)
     a.patches, b.patches, c.patches = (0, 1), (1,), (1,)
     b.predecessors, c.predecessors = (0,), (1,)
+    b.decoder_boundary_predecessors = (0,)
+    c.decoder_boundary_predecessors = (1,)
     a.has_successor = b.has_successor = True
     return [a, b, c]
 

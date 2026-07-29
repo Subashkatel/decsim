@@ -157,7 +157,8 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
 def _blocked_pair(**succ_kw):
     a = Operation(0, "A:T(q0)", (0,), clifford=False, has_successor=True)
     b = Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0,
-                  predecessors=(0,), **succ_kw)
+                  predecessors=(0,), decoder_boundary_predecessors=(0,),
+                  **succ_kw)
     return [a, b]
 
 
@@ -251,7 +252,7 @@ def test_magic_wait_overlaps_feedback_wait():
     """Op waits max(state_ready, feedback_release), not the sum."""
     a = Operation(0, "A", (0,), clifford=True, has_successor=True)
     b = Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0,
-                  predecessors=(0,))
+                  predecessors=(0,), decoder_boundary_predecessors=(0,))
     eng, gate, cluster, factory = _gate([a, b], factory_delay=20 * ROUND)
     _deliver_decision_late(eng, gate, 6 * ROUND)
     eng.run()

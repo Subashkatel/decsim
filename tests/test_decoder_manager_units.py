@@ -128,13 +128,10 @@ def test_metrics_see_every_pool():
     for i in range(4):                  # 4 back-to-back 10us jobs on the one strong unit
         cluster.submit_decode(6, lambda: None, label=f"s{i}", hint="strong")
     engine.run()
-    # 1 of 2 units busy across the run's decode-done events. The first 10us fall
-    # BEFORE the first engine event (the job dispatched from the direct submit call,
-    # not inside an event), and this observe-after-event metric pattern cannot see
-    # busy time before the first event: 30us busy / (2 units * 40us) = 0.375.
-    assert util.result() == 0.375
-    # same pattern for the queue: depth 3 existed only before the first event, so
-    # the metric's first sample (after decode-done #1) sees 2 ...
-    assert queue.result()["peak"] == 2
-    # ... while the cluster's own queue_log records AT SUBMIT TIME and saw all 3.
+    assert util.result()["aggregate_busy_fraction"] == 0.5
+    assert util.result()["per_pool_busy_fraction"] == {
+        "default": 0.0,
+        "strong": 1.0,
+    }
+    assert queue.result()["peak_jobs"] == 3
     assert max(q for _, q in cluster.queue_log) == 3

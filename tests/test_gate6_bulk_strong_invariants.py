@@ -149,7 +149,7 @@ def test_bulk_merge_delivers_every_key_and_frees_units():
     assert [(t / us(1), k) for t, k in results] == \
         [(10.0, (1, 0)), (20.0, (2, 0)), (20.0, (3, 0))]
     assert manager.pool_free == {"default": 1, "strong": 1}
-    assert manager.strong_running_rounds == 0
+    assert manager.admitted_strong_work_snapshot() == ()
     assert not manager._windows_waiting_for_strong_result
 
 
@@ -163,6 +163,23 @@ def test_strong_handoff_changes_readiness_without_renewing_deadline():
 
     assert job.ready_time == us(2)
     assert job.deadline == us(99)
+
+
+def test_in_transit_strong_snapshot_never_consults_prospective_lane_policy():
+    class RaisingLanePolicy:
+        def pool_for(self, job):
+            raise AssertionError("measurement must not route in-transit work")
+
+    eng, manager, _ = build(ws_delay_ticks=us(2))
+    manager.lane_policy = RaisingLanePolicy()
+    job = strong_job(2, 5)
+    job.hint = None
+
+    manager.enqueue(job, delay_ticks=us(2))
+
+    assert manager.admitted_strong_work_snapshot() == (
+        (((2, 0),), "in_transit", 5),
+    )
 
 
 @pytest.mark.parametrize("deadlines", [(us(20), us(70)), (us(70), us(20))])
@@ -249,7 +266,9 @@ def test_merged_result_rejects_accuracy_fields_before_lifecycle_mutation(
     assert [(outcome.job.op_id, outcome.job.window_id)
             for outcome in strategy.outcomes] == [(1, 0)]
     assert manager.pool_free == {"default": 1, "strong": 0}
-    assert manager.strong_running_rounds == 10
+    assert manager.admitted_strong_work_snapshot() == (
+        (((2, 0), (3, 0)), "running", 10),
+    )
     assert set(manager._running_strong_decodes) == {(2, 0), (3, 0)}
     assert manager._windows_waiting_for_strong_result == {(2, 0), (3, 0)}
     merged_job = manager._running_strong_decodes[(2, 0)]
@@ -294,7 +313,7 @@ def test_cancel_one_merged_key_keeps_sibling_result():
         result for _, key, result in delivered if key == (3, 0))
     assert (survivor_result.op_id, survivor_result.window_id) == (3, 0)
     assert manager.strong_cancelled == 1
-    assert manager.strong_running_rounds == 0, "rounds accounting leaked"
+    assert manager.admitted_strong_work_snapshot() == ()
     assert manager.pool_free == {"default": 1, "strong": 1}
     assert manager._windows_waiting_for_strong_result == {(2, 0)}
 
@@ -307,7 +326,7 @@ def test_cancel_all_merged_keys_cancels_the_batch_once():
     eng.run()
     assert [k for _, k in results] == [(1, 0)]
     assert manager.strong_cancelled == 2
-    assert manager.strong_running_rounds == 0
+    assert manager.admitted_strong_work_snapshot() == ()
     assert manager.pool_free == {"default": 1, "strong": 1}
 
 
@@ -324,13 +343,18 @@ def test_bulk_strong_refuses_accuracy_coupled_merges():
         eng.run()
 
 
-def test_running_rounds_tracks_merged_batch_lifecycle():
+def test_running_snapshot_tracks_merged_batch_lifecycle():
     eng, manager, _ = build()
     occupy_then_merge(eng, manager)
     seen = []
 
     def watch():
-        seen.append((eng.now / us(1), manager.strong_running_rounds))
+        running_rounds = sum(
+            rounds for _keys, phase, rounds
+            in manager.admitted_strong_work_snapshot()
+            if phase == "running"
+        )
+        seen.append((eng.now / us(1), running_rounds))
         if eng.now < us(25):
             eng.schedule(us(1), watch)
     eng.schedule(0, watch)
@@ -350,7 +374,7 @@ def test_duplicate_active_strong_destination_is_rejected_before_any_mutation(
     manager.enqueue(strong_job(1, 10, "s-block"))
     live = strong_job(2, 5, "s-first")
     manager.enqueue(live)
-    before = (dict(manager.pool_free), manager.strong_running_rounds,
+    before = (dict(manager.pool_free), manager.admitted_strong_work_snapshot(),
               set(manager._running_strong_decodes), manager.queued_total(),
               dict(manager._completed_strong_results),
               len(manager.queue_log), len(eng.log_lines))
@@ -358,7 +382,7 @@ def test_duplicate_active_strong_destination_is_rejected_before_any_mutation(
     with pytest.raises(RuntimeError, match="duplicate strong decode"):
         manager.enqueue(strong_job(2, 7, "s-duplicate"))
 
-    assert (dict(manager.pool_free), manager.strong_running_rounds,
+    assert (dict(manager.pool_free), manager.admitted_strong_work_snapshot(),
             set(manager._running_strong_decodes), manager.queued_total(),
             dict(manager._completed_strong_results),
             len(manager.queue_log), len(eng.log_lines)) == before

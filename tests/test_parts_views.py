@@ -19,9 +19,10 @@ from decsim.planner import FixedRounds, GateRounds
 from decsim.run_spec import RunSpec, simulate
 from decsim.switching import Switching
 from decsim.views import (BacklogView, OpReactionInfo, ReactionView,
-                          StrongPoolView, TruthView, UtilizationView,
+                          StrongWorkPhaseView, StrongWorkView, TruthView,
+                          UtilizationView,
                           WindowLatencyView, WindowStageRow, backlog_view,
-                          reaction_view, strong_pool_view, utilization_view,
+                          reaction_view, strong_work_view, utilization_view,
                           window_latency_view)
 
 SEED = 7
@@ -86,7 +87,9 @@ def test_views_are_frozen():
              OpReactionInfo(0, "A", None, 1, 1),
              ReactionView(None, 0, (), (), (), ()),
              TruthView((), ()),
-             StrongPoolView("strong", 0, 0, 0, 0, 0)]
+             StrongWorkPhaseView(0, 0),
+             StrongWorkView(*(StrongWorkPhaseView(0, 0) for _ in range(5)),
+                            0, 0, 0)]
     for view in views:
         field = dataclasses.fields(view)[0].name
         with pytest.raises(dataclasses.FrozenInstanceError):
@@ -140,16 +143,9 @@ def test_backlog_window_truth_strong_views_populated_by_real_run():
         assert row.total == (row.buffer_fill + row.dep_block
                              + row.queue_wait + row.service)
 
-    strong = strong_pool_view(
-        cluster,
-        "strong",
-        cluster.nominal_window_redo_round_count,
-    )
-    assert strong.total_units == 1 and strong.busy_units == 0
-    assert (
-        strong.redo_rounds
-        == cluster.nominal_window_redo_round_count
-    )
+    strong = strong_work_view(cluster)
+    assert strong.total_jobs == 0
+    assert strong.total_full_input_rounds == 0
 
 
 #==================================================================
@@ -172,7 +168,9 @@ def test_utilization_metric_reproduces_hand_computed_number():
     metric.observe(engine)                  # [0,10) held busy=1
     engine.now = 20
     metric.observe(engine)                  # [10,20) held busy=2
-    assert metric.result() == (1 * 10 + 2 * 10) / (2 * 20)   # 0.75
+    result = metric.result()
+    assert result["aggregate_busy_fraction"] == 0.75
+    assert result["per_pool_busy_fraction"] == {"": 0.75}
 
 
 #==================================================================

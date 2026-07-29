@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 from .config import fmt
+from .message import is_stable_string
 
 
 class SimulationFailed(RuntimeError):
@@ -42,6 +43,8 @@ class Engine:
         self.log_sink = None
         self._phase = "construction" if construction_guarded else "open"
         self._failure_cause: Optional[BaseException] = None
+        self._event_action_in_progress = False
+        self._metric_callback_in_progress = False
 
     def _start_running(self) -> None:
         """Open one root-owned engine for its only primary drain."""
@@ -113,13 +116,54 @@ class Engine:
             print(line)
 
     def add_metric(self, metric):
-        """Observe this metric after every event."""
+        """Register one observer at a stable boundary, sampling it first."""
+        self._raise_if_failed("register metrics")
+        if self._phase in ("finalizing", "completed"):
+            raise RuntimeError(
+                f"engine cannot register metrics while {self._phase}"
+            )
+        if self._event_action_in_progress or self._metric_callback_in_progress:
+            raise RuntimeError("metrics may be registered only at a stable boundary")
+        name = metric.name
+        version = metric.result_schema_version
+        if not is_stable_string(name) or not name:
+            raise TypeError("metric name must be a nonempty Unicode scalar string")
+        if type(version) is not int or version < 1:
+            raise TypeError("metric result_schema_version must be a positive built-in int")
+        self._invoke_metric_callback(
+            lambda: metric.observe(self), callback_kind="initial observation"
+        )
+        if metric.name != name or metric.result_schema_version != version:
+            raise RuntimeError("metric identity changed during initial observation")
         self.metrics.append(metric)
         return metric
 
+    def _invoke_metric_callback(self, callback, *, callback_kind: str):
+        if self._event_action_in_progress or self._metric_callback_in_progress:
+            raise RuntimeError(
+                f"metric {callback_kind} requires a stable engine boundary"
+            )
+        self._metric_callback_in_progress = True
+        try:
+            return callback()
+        finally:
+            self._metric_callback_in_progress = False
+
+    def _observe_metrics(self) -> None:
+        for metric in tuple(self.metrics):
+            self._invoke_metric_callback(
+                lambda metric=metric: metric.observe(self),
+                callback_kind="observation",
+            )
+
     def metric_results(self) -> dict:
         """Return final metric values keyed by metric name."""
-        return {metric.name: metric.result() for metric in self.metrics}
+        return {
+            metric.name: self._invoke_metric_callback(
+                metric.result, callback_kind="result"
+            )
+            for metric in self.metrics
+        }
 
     def run(self, until: Optional[int] = None) -> None:
         """Run until the event queue is empty or the optional time limit is reached.
@@ -136,10 +180,12 @@ class Engine:
             raise RuntimeError(
                 f"engine cannot run while {self._phase}"
             )
+        self._observe_metrics()
         while self._event_queue:
             next_event_time = self._event_queue[0].time
             if until is not None and next_event_time > until:
                 self.now = until
+                self._observe_metrics()
                 break
 
             event = heapq.heappop(self._event_queue)
@@ -147,6 +193,9 @@ class Engine:
                 raise ValueError(f"Event scheduled in the past: {event} "
                                  f"(now={self.now})")
             self.now = event.time
-            event.action()
-            for metric in self.metrics:
-                metric.observe(self)
+            self._event_action_in_progress = True
+            try:
+                event.action()
+            finally:
+                self._event_action_in_progress = False
+            self._observe_metrics()

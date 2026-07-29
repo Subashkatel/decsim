@@ -9,81 +9,134 @@ from the pre-view implementations.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional
 
+from .message import stable_identity_order_key
 from .views import (WINDOW_STAGES, backlog_view, reaction_view,
-                    strong_pool_view, utilization_view,
+                    strong_work_view, utilization_view,
                     window_latency_view)
 
 if TYPE_CHECKING:
     from .engine import Engine
 
 
+@dataclass
+class _StepIntegral:
+    first_tick: Optional[int] = None
+    last_tick: Optional[int] = None
+    last_value: int = 0
+    area: int = 0
+
+    def observe(self, tick: int, value: int) -> None:
+        if self.first_tick is None:
+            self.first_tick = tick
+            self.last_tick = tick
+        if tick < self.last_tick:
+            raise ValueError("metric observations must be monotone")
+        self.area += self.last_value * (tick - self.last_tick)
+        self.last_tick = tick
+        self.last_value = value
+
+    @property
+    def span_ticks(self) -> int:
+        if self.first_tick is None:
+            return 0
+        return self.last_tick - self.first_tick
+
+    def time_average(self) -> float:
+        return self.area / self.span_ticks if self.span_ticks else 0.0
+
+
 class DecoderUtilization:
     """Time-weighted fraction of decoder units that were busy."""
 
     name = "decoder_utilization"
+    result_schema_version = 1
 
     def __init__(self, cluster):
         self.cluster = cluster
-        self._t = 0
-        self._busy_area = 0.0
-        self._last_busy = 0
+        self._topology = None
+        self._aggregate = _StepIntegral()
+        self._per_pool = {}
 
     def run_manifest_config(self):
-        return {"kind": "decoder_utilization"}
+        return {"kind": "decoder_utilization",
+                "result_schema_version": self.result_schema_version}
 
     def observe(self, engine: "Engine") -> None:
         """Add the busy level held since the last event, then re-sample it."""
         view = utilization_view(self.cluster)
-        self._busy_area += self._last_busy * (engine.now - self._t)
-        self._t = engine.now
-        self._last_busy = view.busy_units
+        topology = tuple((name, total) for name, _, total in view.per_pool)
+        if self._topology is None:
+            self._topology = topology
+            self._per_pool = {name: _StepIntegral() for name, _ in topology}
+        elif topology != self._topology:
+            raise RuntimeError("decoder pool topology changed during measurement")
+        self._aggregate.observe(engine.now, view.busy_units)
+        for name, busy, _ in view.per_pool:
+            self._per_pool[name].observe(engine.now, busy)
 
-    def result(self) -> float:
-        """Fraction of decoder-unit-time that was busy (0..1), across all pools."""
-        total = utilization_view(self.cluster).total_units
-        return self._busy_area / (total * self._t) if self._t else 0.0
+    def result(self) -> dict:
+        """Aggregate and named per-pool time-weighted busy fractions."""
+        topology = self._topology or ()
+        totals = dict(topology)
+        aggregate_total = sum(totals.values())
+        return {
+            "observation_span_ticks": self._aggregate.span_ticks,
+            "aggregate_busy_fraction": (
+                self._aggregate.time_average() / aggregate_total
+                if aggregate_total else 0.0
+            ),
+            "aggregate_total_units": aggregate_total,
+            "per_pool_busy_fraction": {
+                name: (self._per_pool[name].time_average() / total)
+                for name, total in topology
+            },
+            "per_pool_total_units": totals,
+        }
 
 
 class ReadyQueueStats:
     """Peak and time-average number of decode jobs waiting."""
 
     name = "ready_queue"
+    result_schema_version = 1
 
     def __init__(self, cluster):
         self.cluster = cluster
-        self._t = 0
-        self._area = 0.0
-        self._last_len = 0
+        self._integral = _StepIntegral()
         self.peak = 0
 
     def run_manifest_config(self):
-        return {"kind": "ready_queue"}
+        return {"kind": "ready_queue",
+                "result_schema_version": self.result_schema_version}
 
     def observe(self, engine: "Engine") -> None:
         """Accumulate time-weighted queue length and track the peak."""
         view = backlog_view(self.cluster, include_rounds=False)
-        self._area += self._last_len * (engine.now - self._t)
-        self._t = engine.now
-        self._last_len = view.ready_jobs
-        self.peak = max(self.peak, self._last_len)
+        self._integral.observe(engine.now, view.ready_jobs)
+        self.peak = max(self.peak, view.ready_jobs)
 
     def result(self) -> dict:
         """Peak and time-average ready-queue length."""
-        return {"peak": self.peak, "time_avg": (self._area / self._t if self._t else 0.0)}
+        return {"observation_span_ticks": self._integral.span_ticks,
+                "peak_jobs": self.peak,
+                "time_avg_jobs": self._integral.time_average()}
 
 
 class WindowLatencyBreakdown:
     """Per-window buffer, dependency, queue, and service latency."""
 
     name = "window_latency"
+    result_schema_version = 1
 
     def __init__(self, cluster):
         self.cluster = cluster
 
     def run_manifest_config(self):
-        return {"kind": "window_latency"}
+        return {"kind": "window_latency",
+                "result_schema_version": self.result_schema_version}
 
     def observe(self, engine: "Engine") -> None:
         """Nothing to sample (event-driven; the cluster stamps the windows)."""
@@ -122,27 +175,25 @@ class DecodeBacklog:
     """Rounds of syndrome data produced but not yet decoded."""
 
     name = "decode_backlog"
+    result_schema_version = 1
 
     def __init__(self, cluster):
         self.cluster = cluster
-        self._t = 0
-        self._area = 0.0
-        self._last = 0
+        self._integral = _StepIntegral()
         self.peak = 0
         self.trace = []
 
     def run_manifest_config(self):
-        return {"kind": "decode_backlog"}
+        return {"kind": "decode_backlog",
+                "result_schema_version": self.result_schema_version}
 
     def observe(self, engine: "Engine") -> None:
         """Sample the backlog and update peak, average, and trace."""
         view = backlog_view(self.cluster)
-        self._area += self._last * (engine.now - self._t)
-        self._t = engine.now
-        self._last = view.total_rounds
-        self.peak = max(self.peak, self._last)
-        if not self.trace or self.trace[-1][1] != self._last:
-            self.trace.append((engine.now, self._last))
+        self._integral.observe(engine.now, view.total_rounds)
+        self.peak = max(self.peak, view.total_rounds)
+        if not self.trace or self.trace[-1][1] != view.total_rounds:
+            self.trace.append((engine.now, view.total_rounds))
 
     def rows(self) -> list:
         """Backlog time series, one record per value change."""
@@ -152,7 +203,7 @@ class DecodeBacklog:
     def result(self) -> dict:
         """Peak and time-average backlog, in rounds waiting to be decoded."""
         return {"peak_rounds": self.peak,
-                "time_avg_rounds": (self._area / self._t if self._t else 0.0)}
+                "time_avg_rounds": self._integral.time_average()}
 
 
 class BacklogEarlyWarning:
@@ -169,15 +220,12 @@ class BacklogEarlyWarning:
     and attributes the warning to the patch(es) with the largest
     positive backlog slope over those k bins.
 
-    Initialization note: the bin-start baseline seeds from the first
-    observe() only when it lands at tick 0 (true for engine runs,
-    which always start at t=0); a first event later than tick 0
-    treats the pre-event backlog as 0, which is correct in-engine but
-    makes synthetic traces that start mid-stream show an artificial
-    first-bin slope.
+    The first observation owns the bin epoch, so late registration never
+    fabricates backlog before the metric existed.
     """
 
     name = "backlog_early_warning"
+    result_schema_version = 1
 
     def __init__(self, cluster, round_ticks: int, window_ticks: int,
                  threshold_f: float = 0.1, consecutive: int = 2):
@@ -204,6 +252,7 @@ class BacklogEarlyWarning:
             "window_ticks": self.window_ticks,
             "threshold_f": self.threshold_f,
             "consecutive": self.consecutive,
+            "result_schema_version": self.result_schema_version,
         }
 
     def _slope(self, delta_rounds: int, ticks: int) -> float:
@@ -217,9 +266,12 @@ class BacklogEarlyWarning:
         the value held since the previous event.
         """
         view = backlog_view(self.cluster)
-        if self._last_view is None and engine.now == self._bin_start:
+        if self._last_view is None:
+            self._bin_start = engine.now
             self._start_backlog = view.total_rounds
             self._start_per_patch = dict(view.per_patch_rounds)
+            self._last_view = view
+            return
         while engine.now >= self._bin_start + self.window_ticks:
             bin_end = self._bin_start + self.window_ticks
             if engine.now == bin_end or self._last_view is None:
@@ -250,7 +302,9 @@ class BacklogEarlyWarning:
                           for p in patches}
                 worst = max(deltas.values(), default=0)
                 self.attribution = tuple(sorted(
-                    p for p, dv in deltas.items() if dv == worst and dv > 0))
+                    (p for p, dv in deltas.items() if dv == worst and dv > 0),
+                    key=stable_identity_order_key,
+                ))
         else:
             self._streak = 0
         self._bin_start = bin_end
@@ -298,6 +352,7 @@ class BurstEscalationDetector:
     """
 
     name = "burst_escalation_detector"
+    result_schema_version = 1
 
     def __init__(self, patches, z: float = 6.0, baseline_bins: int = 100,
                  warmup_bins: int = 30, patch_quorum: int = 3):
@@ -347,82 +402,80 @@ class BurstEscalationDetector:
 
 
 class StrongDecoderBacklog:
-    """Outstanding strong-decoder jobs under decoder switching."""
+    """Exact global strong input assigned but not yet completed."""
 
     name = "strong_backlog"
+    result_schema_version = 1
 
-    def __init__(self, cluster, pool: str = "strong"):
-        if type(pool) is not str or not pool:
-            raise TypeError("pool must be a nonempty built-in str")
+    _phase_names = (
+        "waiting_far_boundary", "waiting_terminal_data",
+        "in_transit", "queued", "running",
+    )
+
+    def __init__(self, cluster):
         self.cluster = cluster
-        self.pool = pool
-        self._nominal_window_redo_round_count = (
-            cluster.nominal_window_redo_round_count
-        )
         self.peak_jobs = 0
-        self._t = 0
-        self._area = 0.0
-        self._last = 0
+        self.peak_full_input_rounds = 0
+        self._jobs = _StepIntegral()
+        self._rounds = _StepIntegral()
         self.trace = []
 
     def run_manifest_config(self):
-        return {
-            "pool": self.pool,
-            "nominal_window_redo_round_count": (
-                self._nominal_window_redo_round_count
-            ),
-        }
+        return {"kind": "strong_backlog",
+                "result_schema_version": self.result_schema_version}
 
     def observe(self, engine: "Engine") -> None:
         """Sample outstanding strong work and update peak, average, and trace."""
-        view = strong_pool_view(
-            self.cluster,
-            self.pool,
-            self._nominal_window_redo_round_count,
+        view = strong_work_view(self.cluster)
+        self._jobs.observe(engine.now, view.total_jobs)
+        self._rounds.observe(engine.now, view.total_full_input_rounds)
+        self.peak_jobs = max(self.peak_jobs, view.total_jobs)
+        self.peak_full_input_rounds = max(
+            self.peak_full_input_rounds, view.total_full_input_rounds
         )
-        self._area += self._last * (engine.now - self._t)
-        self._t = engine.now
-        self._last = view.queued_jobs + view.busy_units
-        self.peak_jobs = max(self.peak_jobs, self._last)
-        if not self.trace or self.trace[-1][1] != self._last:
-            self.trace.append((engine.now, self._last))
+        row = {"t_ticks": engine.now}
+        for phase_name in self._phase_names:
+            phase = getattr(view, phase_name)
+            row[f"{phase_name}_jobs"] = phase.jobs
+            row[f"{phase_name}_full_input_rounds"] = phase.full_input_rounds
+        row["total_jobs"] = view.total_jobs
+        row["total_full_input_rounds"] = view.total_full_input_rounds
+        comparable = {key: value for key, value in row.items() if key != "t_ticks"}
+        if not self.trace or any(
+            self.trace[-1][key] != value for key, value in comparable.items()
+        ):
+            self.trace.append(row)
 
     def rows(self) -> list:
-        """Strong-backlog time series, one record per value change.
-
-        SCOPE: `rounds` is a job count times the configured nominal redo size
-        (commit + 2*buffer). It is NOT the decoder input a strong job is billed
-        for: a double-window slab reads one buffer of context per face and is
-        priced for that wider extent (see Switching), and an end-clamped slab or
-        a bulk batch differs again. Theorem 1 of arXiv:2510.25222 bounds
-        tau_strong against unprocessed rounds of decoder INPUT, so this series
-        may not be published as that quantity."""
-        per_job = self._nominal_window_redo_round_count
-        return [{"t": time_ticks, "jobs": jobs, "rounds": jobs * per_job}
-                for time_ticks, jobs in self.trace]
+        """Return fresh phase rows in ticks, jobs, and full input rounds."""
+        return [dict(row) for row in self.trace]
 
     def result(self) -> dict:
         """Peak and time-average outstanding strong jobs."""
-        view = strong_pool_view(
-            self.cluster,
-            self.pool,
-            self._nominal_window_redo_round_count,
-        )
-        return {"peak_jobs": self.peak_jobs,
-                "time_avg_jobs": (self._area / self._t if self._t else 0.0),
-                "strong_needed": view.strong_needed}
+        view = strong_work_view(self.cluster)
+        return {
+            "observation_span_ticks": self._jobs.span_ticks,
+            "peak_jobs": self.peak_jobs,
+            "time_avg_jobs": self._jobs.time_average(),
+            "peak_full_input_rounds": self.peak_full_input_rounds,
+            "time_avg_full_input_rounds": self._rounds.time_average(),
+            "strong_needed": view.strong_needed,
+            "trace": self.rows(),
+        }
 
 
 class BacklogTrajectory:
     """Per-feedback-gate reaction wait and backlog in rounds."""
 
     name = "backlog_trajectory"
+    result_schema_version = 1
 
     def __init__(self, chip):
         self.chip = chip
 
     def run_manifest_config(self):
-        return {"kind": "backlog_trajectory"}
+        return {"kind": "backlog_trajectory",
+                "result_schema_version": self.result_schema_version}
 
     def observe(self, engine: "Engine") -> None:
         """Nothing to sample (event-driven; the chip stamps the timestamps)."""
@@ -471,6 +524,7 @@ class ConditionalReactionTime:
     # ref: SWIPER; average divides by every conditional op, not only finished ones.
 
     name = "conditional_reaction_time"
+    result_schema_version = 1
 
     def __init__(self, chip, divergence_threshold_rounds: float | None = None,
                  require_all_released: bool = True):
@@ -485,6 +539,7 @@ class ConditionalReactionTime:
                 self.divergence_threshold_rounds
             ),
             "require_all_released": self.require_all_released,
+            "result_schema_version": self.result_schema_version,
         }
 
     def observe(self, engine: "Engine") -> None:
@@ -585,12 +640,14 @@ class MagicStateLatency:
     # StateTrace is already a typed per-state record, i.e. the factory's view.
 
     name = "magic_state_latency"
+    result_schema_version = 1
 
     def __init__(self, factory):
         self.factory = factory
 
     def run_manifest_config(self):
-        return {"kind": "magic_state_latency"}
+        return {"kind": "magic_state_latency",
+                "result_schema_version": self.result_schema_version}
 
     def observe(self, engine: "Engine") -> None:
         """Nothing to sample (the factory stamps each state's StateTrace)."""

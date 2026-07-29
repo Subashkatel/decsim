@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .message import stable_identity_order_key
+
 WINDOW_STAGES = ("buffer_fill", "dep_block", "queue_wait", "service", "total")
 
 
@@ -89,15 +91,25 @@ class TruthView:
 
 
 @dataclass(frozen=True)
-class StrongPoolView:
-    """Strong-decoder lane occupancy (published under Switching)."""
+class StrongWorkPhaseView:
+    """One closed phase of outstanding strong decoder input."""
 
-    pool: str
-    queued_jobs: int
-    busy_units: int
-    total_units: int
+    jobs: int
+    full_input_rounds: int
+
+
+@dataclass(frozen=True)
+class StrongWorkView:
+    """Global assigned strong work before and after decoder admission."""
+
+    waiting_far_boundary: StrongWorkPhaseView
+    waiting_terminal_data: StrongWorkPhaseView
+    in_transit: StrongWorkPhaseView
+    queued: StrongWorkPhaseView
+    running: StrongWorkPhaseView
+    total_jobs: int
+    total_full_input_rounds: int
     strong_needed: int
-    redo_rounds: int                # rounds re-decoded per strong job
 
 
 # ---------------------------------------------------------------- builders
@@ -154,7 +166,10 @@ def backlog_view(cluster, include_rounds: bool = True) -> BacklogView:
         ready_jobs += sum(len(queue) for queue in pools.values())
 
     per_op, per_patch = [], {}
-    for op_id in (cluster.window_manager._ops if include_rounds else ()):
+    for op_id in sorted(
+        (cluster.window_manager._ops if include_rounds else ()),
+        key=stable_identity_order_key,
+    ):
         waiting = max(0, cluster.rounds_arrived.get(op_id, 0)
                       - _rounds_decoded(cluster, op_id))
         per_op.append((op_id, waiting))
@@ -162,16 +177,21 @@ def backlog_view(cluster, include_rounds: bool = True) -> BacklogView:
         per_patch[patch] = per_patch.get(patch, 0) + waiting
     return BacklogView(ready_jobs=ready_jobs,
                        per_lane=tuple(per_lane),
-                       per_op_rounds=tuple(sorted(per_op)),
+                       per_op_rounds=tuple(sorted(
+                           per_op, key=lambda item: stable_identity_order_key(item[0])
+                       )),
                        per_patch_rounds=tuple(sorted(per_patch.items(),
-                                                     key=lambda kv: str(kv[0]))),
+                           key=lambda item: stable_identity_order_key(item[0]))),
                        total_rounds=sum(w for _, w in per_op))
 
 
 def window_latency_view(cluster) -> WindowLatencyView:
     """Snapshot the per-window stage decomposition (fully-decoded only)."""
     rows = []
-    for (op_id, window_index), window in sorted(cluster.windows.items()):
+    for (op_id, window_index), window in sorted(
+        cluster.windows.items(),
+        key=lambda item: stable_identity_order_key(item[0]),
+    ):
         stamps = (window.t_first_round, window.t_data_complete,
                   window.t_queued, window.t_dispatch, window.t_done)
         if any(stamp is None for stamp in stamps):
@@ -192,12 +212,20 @@ def reaction_view(gate) -> ReactionView:
         OpReactionInfo(op=op_id, name=op.name, blocked_by=op.blocked_by,
                        round_ticks=gate._round_ticks_for(op),
                        rounds=gate._round_count_for(op))
-        for op_id, op in sorted(gate._ops.items()))
+        for op_id, op in sorted(
+            gate._ops.items(), key=lambda item: stable_identity_order_key(item[0])
+        ))
     return ReactionView(
         chip_done=gate.last_finish_time,
         fully_done=gate.engine.now,
-        body_done_time=tuple(sorted(gate.body_done_time.items())),
-        decode_release_time=tuple(sorted(gate.decode_release_time.items())),
+        body_done_time=tuple(sorted(
+            gate.body_done_time.items(),
+            key=lambda item: stable_identity_order_key(item[0]),
+        )),
+        decode_release_time=tuple(sorted(
+            gate.decode_release_time.items(),
+            key=lambda item: stable_identity_order_key(item[0]),
+        )),
         idle_cap_hits=tuple(tuple(sorted(hit.items()))
                             for hit in gate.idle_cap_hits),
         ops=ops)
@@ -207,26 +235,51 @@ def truth_view(cluster, device) -> TruthView:
     """Snapshot sampled truth (device) next to published predictions."""
     truth = getattr(device, "_truth", {}) or {}
     observables = tuple(sorted(
-        (op_id, tuple(int(bit) for bit in bits))
-        for op_id, bits in truth.items()))
-    predictions = tuple(sorted(cluster.op_results.items()))
+        (
+            (op_id, tuple(int(bit) for bit in bits))
+            for op_id, bits in truth.items()
+        ),
+        key=lambda item: stable_identity_order_key(item[0]),
+    ))
+    predictions = tuple(sorted(
+        cluster.op_results.items(),
+        key=lambda item: stable_identity_order_key(item[0]),
+    ))
     return TruthView(observables=observables, predictions=predictions)
 
 
-def strong_pool_view(
-    cluster,
-    pool: str,
-    nominal_window_redo_round_count: int,
-) -> StrongPoolView:
-    """Snapshot one strong lane's queue depth and occupancy."""
-    totals = getattr(cluster, "unit_totals", {}) or {}
-    free = getattr(cluster, "pool_free", {}) or {}
-    queues = getattr(cluster, "pool_ready", {}) or {}
-    total = totals.get(pool, 0)
-    return StrongPoolView(
-        pool=pool,
-        queued_jobs=len(queues.get(pool, [])),
-        busy_units=total - free.get(pool, 0),
-        total_units=total,
-        strong_needed=getattr(cluster, "strong_needed", 0),
-        redo_rounds=nominal_window_redo_round_count)
+def strong_work_view(cluster) -> StrongWorkView:
+    """Compose exact global strong work from its two lifecycle owners."""
+    pending = cluster.pending_strong_work_snapshot()
+    admitted = cluster.admitted_strong_work_snapshot()
+    pending_keys = {key for key, _, _ in pending}
+    admitted_keys = {key for keys, _, _ in admitted for key in keys}
+    overlap = pending_keys & admitted_keys
+    if overlap:
+        raise RuntimeError(f"strong work has overlapping owners for {overlap!r}")
+
+    values = {
+        phase: [0, 0]
+        for phase in (
+            "waiting_far_boundary", "waiting_terminal_data",
+            "in_transit", "queued", "running",
+        )
+    }
+    for _, phase, rounds in pending:
+        values[phase][0] += 1
+        values[phase][1] += rounds
+    for _, phase, rounds in admitted:
+        values[phase][0] += 1
+        values[phase][1] += rounds
+    phases = {
+        phase: StrongWorkPhaseView(*counts)
+        for phase, counts in values.items()
+    }
+    return StrongWorkView(
+        **phases,
+        total_jobs=sum(value.jobs for value in phases.values()),
+        total_full_input_rounds=sum(
+            value.full_input_rounds for value in phases.values()
+        ),
+        strong_needed=cluster.strong_needed,
+    )

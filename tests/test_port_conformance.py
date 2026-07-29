@@ -135,22 +135,16 @@ def test_strategy_services_satisfy_their_seam(completed_run):
         or isinstance(completed_run.window_manager.services, protocols.StrategyServices)
 
 
-@pytest.mark.parametrize("pool", ["", 1, True])
-def test_strong_backlog_pool_is_an_exact_nonempty_string(
+def test_strong_backlog_is_global_and_has_no_pool_compatibility_argument(
     completed_run,
-    pool,
 ):
-    with pytest.raises(TypeError, match=r"pool.*nonempty.*built-in str"):
-        StrongDecoderBacklog(completed_run.cluster, pool=pool)
-
-
-def test_strong_backlog_declares_its_selected_pool(completed_run):
-    metric = StrongDecoderBacklog(completed_run.cluster, pool="alternate")
-
+    metric = StrongDecoderBacklog(completed_run.cluster)
     assert metric.run_manifest_config() == {
-        "pool": "alternate",
-        "nominal_window_redo_round_count": 9,
+        "kind": "strong_backlog",
+        "result_schema_version": 1,
     }
+    with pytest.raises(TypeError, match="unexpected keyword argument 'pool'"):
+        StrongDecoderBacklog(completed_run.cluster, pool="strong")
 
 
 def test_factories_conform_and_smoke(completed_run):

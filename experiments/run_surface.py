@@ -79,10 +79,11 @@ def run_surface_configuration(configuration, output_directory):
     workers = configuration.get("workers", 1)
     scientific_configuration = dict(configuration)
     scientific_configuration.pop("workers", None)
-    circuit = _circuit(scientific_configuration)
-    experiment_id = scientific_configuration.get(
+    scientific_configuration.setdefault(
         "experiment_id", "surface-weak-mwpm"
     )
+    circuit = _circuit(scientific_configuration)
+    experiment_id = scientific_configuration["experiment_id"]
     experiment = Experiment(
         experiment_id=experiment_id,
         experiment_seed=scientific_configuration["seed"],

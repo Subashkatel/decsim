@@ -205,6 +205,21 @@ class _EscalationRegistry:
             key: pending.phase for key, pending in self._by_key.items()
         })
 
+    def snapshot_work(self) -> tuple:
+        """Return pending strong assignments without exposing live windows."""
+        phase_names = {
+            _EscalationPhase.WAITING_FAR_BOUNDARY: "waiting_far_boundary",
+            _EscalationPhase.WAITING_TERMINAL_DATA: "waiting_terminal_data",
+        }
+        records = (
+            (key, phase_names[pending.phase], pending.strong_window.n_rounds)
+            for key, pending in self._by_key.items()
+        )
+        return tuple(sorted(
+            records,
+            key=lambda record: stable_identity_order_key(record[0]),
+        ))
+
 
 class WindowManager:
     """Own window state, readiness, commits, and boundary handoff."""
@@ -1899,6 +1914,10 @@ class WindowManager:
 
     def committed_stream_round_count(self, stream_id) -> int:
         return self.lifecycle.committed_round_counts.get(stream_id, 0)
+
+    def pending_strong_work_snapshot(self) -> tuple:
+        """Snapshot strong slabs assigned but not yet admitted for service."""
+        return self._escalations.snapshot_work()
 
     @property
     def peak_payloads(self) -> int:

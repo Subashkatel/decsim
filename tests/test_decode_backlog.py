@@ -63,7 +63,7 @@ def _run(latency_us, rounds):
               make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl), ReadyQueueStats(cl)],
           ), verbose=False)
     m = res.result.metric_values()
-    return m["decode_backlog"]["peak_rounds"], m["ready_queue"]["peak"]
+    return m["decode_backlog"]["peak_rounds"], m["ready_queue"]["peak_jobs"]
 
 
 def test_backlog_bounded_when_decoder_keeps_up():

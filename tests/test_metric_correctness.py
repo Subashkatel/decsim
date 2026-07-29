@@ -1,13 +1,4 @@
-"""Metric correctness (validation-matrix row 20).
-
-The observer metrics sample AFTER each engine event, which gives them a
-documented blind spot: activity that happens before the first event (jobs
-dispatched straight from submit_decode calls, not from inside an event) is
-invisible to them, while the cluster's own submit-time records see it. Any
-experiment that reads these metrics under load (e.g. a backlog replication)
-must know exactly how big that distortion is and where the ground truth
-lives. These tests pin the arithmetic by hand.
-"""
+"""Metric correctness against hand-derived event ledgers."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -34,17 +25,9 @@ def test_mixed_pool_utilization_and_queue_arithmetic_by_hand():
       t=10us  both dones fire (2 events); each pool dispatches its second job.
       t=20us  second dones fire; run ends. engine.now = 20us.
 
-    TRUE utilization is 1.0 (both units busy the whole run). The observer's
-    first sample happens at t=10us, so the first 10us of BOTH units is in the
-    blind spot and it must report exactly
-
-        area = 2 units * 10us (the 10..20us stretch) / (2 units * 20us) = 0.5.
-
-    The queue observer's first sample also lands after the t=10us dispatches
-    (depth 1 -- only one of d1/s1 left waiting at that instant it samples),
-    so its peak is 1, while the submit-time queue_log holds the true peak 2.
-    Both numbers are correct FOR WHAT THEY MEASURE; this test pins the
-    difference so no experiment mistakes one for the other."""
+    Both units are busy for the full 20us, so aggregate and per-pool
+    utilization are 1.0. Queue depth is 2 for [0, 10us) and 0 afterward, so
+    its peak is 2 and time average is 1.0 job."""
     engine = Engine(verbose=False)
     cluster = DecoderManager(engine,
                              router=CodeRouter(PresetLatencyDecoder(10.0)),
@@ -59,11 +42,44 @@ def test_mixed_pool_utilization_and_queue_arithmetic_by_hand():
     engine.run()
 
     assert engine.now == us(20)
-    assert util.result() == 0.5                    # true 1.0 minus blind spot
-    assert queue.result()["peak"] == 1             # observer view
-    assert max(depth for _, depth in cluster.queue_log) == 2   # submit truth
+    assert util.result() == {
+        "observation_span_ticks": us(20),
+        "aggregate_busy_fraction": 1.0,
+        "aggregate_total_units": 2,
+        "per_pool_busy_fraction": {"default": 1.0, "strong": 1.0},
+        "per_pool_total_units": {"default": 1, "strong": 1},
+    }
+    assert queue.result() == {
+        "observation_span_ticks": us(20),
+        "peak_jobs": 2,
+        "time_avg_jobs": 1.0,
+    }
+    assert max(depth for _, depth in cluster.queue_log) == 2
     # and the log records the exact submit-time sequence at t=0:
     assert [q for t, q in cluster.queue_log if t == 0] == [1, 0, 1, 0, 1, 2]
+
+
+def test_late_registered_utilization_uses_its_own_observation_epoch():
+    engine = Engine(verbose=False)
+    engine.now = us(10)
+    cluster = DecoderManager(
+        engine,
+        router=CodeRouter(PresetLatencyDecoder(10.0)),
+        scheduler=FifoScheduler(),
+        unit_pools={"default": 1},
+    )
+    cluster.pool_free["default"] = 0
+    metric = DecoderUtilization(cluster)
+    engine.add_metric(metric)
+    engine.schedule(
+        us(10),
+        lambda: cluster.pool_free.__setitem__("default", 1),
+    )
+
+    engine.run()
+
+    assert metric.result()["observation_span_ticks"] == us(10)
+    assert metric.result()["aggregate_busy_fraction"] == 1.0
 
 
 class _FixedLatencyDecoder:
@@ -113,7 +129,7 @@ def test_decode_backlog_summary_is_consistent_with_its_own_trace():
     assert trace[-1][1] == 0, "backlog must drain to zero by end of run"
     # recompute the time integral of the step function the trace describes,
     # over [0, last-observe-time], exactly as the metric accumulated it
-    end = metric._t
+    end = metric._integral.last_tick
     area = 0.0
     for (t0, v0), (t1, _) in zip(trace, trace[1:]):
         area += v0 * (t1 - t0)

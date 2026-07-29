@@ -42,6 +42,7 @@ class InvariantGuard:
     Also tracks the peak simultaneously-busy units per pool, so a scenario can assert it
     really did stress the units (and not, say, trivially serialize)."""
     name = "invariants"
+    result_schema_version = 1
 
     def __init__(self, cluster):
         self.cluster = cluster

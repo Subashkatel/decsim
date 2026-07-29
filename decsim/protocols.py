@@ -589,6 +589,7 @@ class Metric(Protocol):
     never mutates what it observes."""
 
     name: str
+    result_schema_version: int
 
     def observe(self, view) -> None: ...
 

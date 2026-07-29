@@ -166,10 +166,18 @@ class LogicalOperationResult:
 
 
 @dataclass(frozen=True)
+class _ResolvedMetricBinding:
+    metric: Any
+    name: str
+    result_schema_version: int
+
+
+@dataclass(frozen=True)
 class MetricResultRecord:
     """One validated metric value in declared observation order."""
 
     name: str
+    result_schema_version: int
     canonical_value_json: bytes
 
     def value(self):
@@ -231,6 +239,7 @@ class PrimaryRunResult:
             "metric_results": [
                 {
                     "name": record.name,
+                    "result_schema_version": record.result_schema_version,
                     "value": record.value(),
                 }
                 for record in self.metric_results
@@ -1580,14 +1589,7 @@ class RunSpec:
         pool.on_window_decoded = window_manager.on_decode_done
         pool.on_strong_window_decoded = window_manager.on_strong_decode_done
 
-        cluster = ClusterFacade(
-            window_manager,
-            pool,
-            nominal_window_redo_round_count=(
-                code_cadence_plan.code_geometry.commit_round_count
-                + 2 * code_cadence_plan.code_geometry.buffer_round_count
-            ),
-        )
+        cluster = ClusterFacade(window_manager, pool)
 
         factory = self.make_factory(engine, cluster) \
             if self.make_factory is not None else _make_infinite(engine)
@@ -1622,6 +1624,7 @@ class RunSpec:
             frame=orchestrator.frame)
 
         metrics = []
+        metric_bindings = ()
         if self.make_metrics is not None:
             metrics = self.make_metrics(engine, cluster, gate, factory)
             if type(metrics) is not list:
@@ -1640,6 +1643,22 @@ class RunSpec:
                         f"duplicate metric name {metric.name!r}"
                     )
                 metric_names.add(metric.name)
+                if (
+                    type(metric.result_schema_version) is not int
+                    or metric.result_schema_version < 1
+                ):
+                    raise TypeError(
+                        f"metric {index} result_schema_version must be a "
+                        "positive built-in int"
+                    )
+            metric_bindings = tuple(
+                _ResolvedMetricBinding(
+                    metric=metric,
+                    name=metric.name,
+                    result_schema_version=metric.result_schema_version,
+                )
+                for metric in metrics
+            )
 
         seed_roots = self._run_seed_roots(
             frontend=self.frontend,
@@ -1656,7 +1675,7 @@ class RunSpec:
             orchestrator=orchestrator,
             controller=controller,
             links=links,
-            metrics=metrics,
+            metrics=metric_bindings,
             workload=workload,
         )
         fixed_composition_anchors = _fixed_composition_anchors(
@@ -1673,6 +1692,9 @@ class RunSpec:
             seed_roots,
             self._validated_root_seed(),
             anchors=fixed_composition_anchors,
+        )
+        _validate_metric_component_configurations(
+            component_graph, metric_bindings
         )
         seed_plan = component_graph.seed_plan
         resolved_components = _resolved_components(component_graph)
@@ -1719,8 +1741,9 @@ class RunSpec:
                     stream,
                     resolved_operation_by_id[stream.id],
                 )
-            for metric in metrics:
-                engine.add_metric(metric)
+            for binding in metric_bindings:
+                _validate_live_metric_binding(binding)
+                engine.add_metric(binding.metric)
             gate._load(ops)
             engine._start_running()
             engine.run()
@@ -1731,7 +1754,7 @@ class RunSpec:
                 gate=gate,
                 window_manager=window_manager,
                 operations=all_operations,
-                metrics=metrics,
+                metric_bindings=metric_bindings,
             )
             _validate_shipped_component_configuration(component_graph)
             operation_records = _resolved_operation_records(
@@ -1896,14 +1919,14 @@ class RunSpec:
                     getattr(links, link_name),
                 )
             )
-        for metric in metrics:
+        for binding in metrics:
             roots.append(
                 (
                     (
                         field_segment("metrics"),
-                        RunSeedPathSegment("string_key", metric.name),
+                        RunSeedPathSegment("string_key", binding.name),
                     ),
-                    metric,
+                    binding.metric,
                 )
             )
         if device.operation_circuit_scope == "per_operation":
@@ -3824,18 +3847,9 @@ class ClusterFacade:
     """The 'cluster' read surface chip/factory/metrics code expects,
     backed by the new window_manager + pool."""
 
-    def __init__(
-        self,
-        window_manager,
-        pool,
-        *,
-        nominal_window_redo_round_count,
-    ):
+    def __init__(self, window_manager, pool):
         self.window_manager = window_manager
         self.pool = pool
-        self._nominal_window_redo_round_count = (
-            nominal_window_redo_round_count
-        )
 
     # chip-side surface
     def register_op(self, op) -> None:
@@ -3893,10 +3907,6 @@ class ClusterFacade:
     @property
     def op_windows(self):
         return self.window_manager.op_windows
-
-    @property
-    def nominal_window_redo_round_count(self):
-        return self._nominal_window_redo_round_count
 
     @property
     def rounds_arrived(self):
@@ -3970,9 +3980,11 @@ class ClusterFacade:
     def strong_needed(self):
         return self.pool.strong_needed
 
-    @property
-    def strong_running_rounds(self):
-        return self.pool.strong_running_rounds
+    def pending_strong_work_snapshot(self):
+        return self.window_manager.pending_strong_work_snapshot()
+
+    def admitted_strong_work_snapshot(self):
+        return self.pool.admitted_strong_work_snapshot()
 
     @property
     def strong_cancelled(self):
@@ -4002,7 +4014,7 @@ def _capture_primary_run_result(
     gate,
     window_manager,
     operations,
-    metrics,
+    metric_bindings,
 ) -> PrimaryRunResult:
     """Validate and freeze the result while scheduling is sealed."""
     operation_by_id = {}
@@ -4029,8 +4041,12 @@ def _capture_primary_run_result(
         )
 
     metric_results = []
-    for metric in metrics:
-        value = _validated_json_value(metric.result())
+    for binding in metric_bindings:
+        _validate_live_metric_binding(binding)
+        value = _validated_json_value(engine._invoke_metric_callback(
+            binding.metric.result, callback_kind="result"
+        ))
+        _validate_live_metric_binding(binding)
         canonical_value_json = json.dumps(
             value,
             sort_keys=True,
@@ -4040,7 +4056,8 @@ def _capture_primary_run_result(
         ).encode("utf-8")
         metric_results.append(
             MetricResultRecord(
-                name=metric.name,
+                name=binding.name,
+                result_schema_version=binding.result_schema_version,
                 canonical_value_json=canonical_value_json,
             )
         )
@@ -4050,7 +4067,7 @@ def _capture_primary_run_result(
     if not gate.workload_complete:
         raise RuntimeError("primary run ended before the chip workload completed")
     return PrimaryRunResult(
-        schema_version=1,
+        schema_version=2,
         terminal_status="complete",
         event_queue_empty=True,
         decode_work_settled=True,
@@ -4066,6 +4083,35 @@ def _validated_logical_bit(value) -> int:
     if type(value) is not int or value not in (0, 1):
         raise TypeError(f"logical observables must contain exact bits; got {value!r}")
     return value
+
+
+def _validate_live_metric_binding(binding: _ResolvedMetricBinding) -> None:
+    if (
+        binding.metric.name != binding.name
+        or binding.metric.result_schema_version != binding.result_schema_version
+    ):
+        raise RuntimeError(
+            f"metric {binding.name!r} changed its frozen result identity"
+        )
+
+
+def _validate_metric_component_configurations(
+    graph: _ResolvedComponentGraph,
+    bindings: tuple[_ResolvedMetricBinding, ...],
+) -> None:
+    entries = {id(entry.component): entry for entry in graph.components}
+    for binding in bindings:
+        entry = entries.get(id(binding.metric))
+        if entry is None:
+            raise RuntimeError(f"metric {binding.name!r} is absent from component graph")
+        if entry.configuration_json is None:
+            continue
+        configuration = json.loads(entry.configuration_json)
+        if configuration.get("result_schema_version") != binding.result_schema_version:
+            raise RuntimeError(
+                f"metric {binding.name!r} manifest result schema disagrees "
+                "with its frozen binding"
+            )
 
 
 def _validated_json_value(value):

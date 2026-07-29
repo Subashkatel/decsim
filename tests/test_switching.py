@@ -478,9 +478,7 @@ def test_run_both_at_once_keeps_the_weak_stream_byte_identical_to_plain_sliding(
 # ---- backlog-vs-time trace: the metrics retain a series, not just a summary ----------
 
 def test_strong_backlog_trace_is_a_step_series_matching_the_peak():
-    """StrongDecoderBacklog keeps a time series: rows() gives one (t, jobs, rounds) record per
-    change, with non-decreasing times, rounds = jobs * (commit + 2*buffer) = jobs * 3d, and the
-    largest sampled job count equal to the reported peak."""
+    """The strong trace is ordered and its exact job/round peaks reconcile."""
     captured = {}
     def metrics(e, c, ch, fa):
         m = StrongDecoderBacklog(c)
@@ -489,10 +487,25 @@ def test_strong_backlog_trace_is_a_step_series_matching_the_peak():
     res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 6 * GAMMA_BOUND, 600, metrics=metrics)
     rows = captured["m"].rows()
     assert rows                                                    # a series was recorded
-    assert [r["t"] for r in rows] == sorted(r["t"] for r in rows)  # non-decreasing in time
-    assert all(rows[i]["jobs"] != rows[i - 1]["jobs"] for i in range(1, len(rows)))  # step trace
-    assert all(r["rounds"] == r["jobs"] * 3 * D for r in rows)     # jobs -> rounds (commit+2*buffer)
-    assert max(r["jobs"] for r in rows) == res.result.metric_values()["strong_backlog"]["peak_jobs"]
+    assert [r["t_ticks"] for r in rows] == sorted(
+        r["t_ticks"] for r in rows
+    )
+    summary = res.result.metric_values()["strong_backlog"]
+    assert max(r["total_jobs"] for r in rows) == summary["peak_jobs"]
+    assert max(r["total_full_input_rounds"] for r in rows) == (
+        summary["peak_full_input_rounds"]
+    )
+    phases = (
+        "waiting_far_boundary", "waiting_terminal_data",
+        "in_transit", "queued", "running",
+    )
+    for row in rows:
+        assert row["total_jobs"] == sum(
+            row[f"{phase}_jobs"] for phase in phases
+        )
+        assert row["total_full_input_rounds"] == sum(
+            row[f"{phase}_full_input_rounds"] for phase in phases
+        )
 
 
 def test_decode_backlog_trace_tracks_the_rising_backlog():
@@ -1228,6 +1241,9 @@ def test_escalation_registry_far_transfer_is_exactly_once():
     assert dict(registry.snapshot_phases()) == {
         pending.key: _EscalationPhase.WAITING_FAR_BOUNDARY,
     }
+    assert registry.snapshot_work() == (
+        ((0, 2), "waiting_far_boundary", 12),
+    )
     with pytest.raises(RuntimeError, match="wrong-phase take"):
         registry.take_terminal(0, pending)
     assert registry.peek_far(far_boundary_key) is pending
@@ -1266,11 +1282,31 @@ def test_escalation_registry_terminal_transfer_uses_only_terminal_index():
     assert dict(registry.snapshot_phases()) == {}
 
     registry.register_terminal(pending, 7)
+    assert registry.snapshot_work() == (
+        ((7, 8), "waiting_terminal_data", 12),
+    )
     assert registry.peek_terminal(7) is pending
     assert registry.peek_far((7, 9)) is None
     assert registry.take_terminal(7, pending) is pending
     assert registry.peek_terminal(7) is None
     assert registry.peek_key(pending.key) is None
+
+
+def test_escalation_work_snapshot_orders_mixed_stable_identities():
+    registry = _EscalationRegistry()
+    integer_key = _pending_escalation(
+        (0, 2), _EscalationPhase.WAITING_FAR_BOUNDARY
+    )
+    string_key = _pending_escalation(
+        ("0", 2), _EscalationPhase.WAITING_FAR_BOUNDARY
+    )
+    registry.register_far(string_key, ("far", 1))
+    registry.register_far(integer_key, ("far", 0))
+
+    assert registry.snapshot_work() == (
+        ((0, 2), "waiting_far_boundary", 12),
+        (("0", 2), "waiting_far_boundary", 12),
+    )
 
 
 @pytest.mark.parametrize("invalid_key", [True, (0, True), object()])

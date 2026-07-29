@@ -968,6 +968,7 @@ def test_static_manifest_strings_reject_surrogates_before_execution(
 
     class InvalidNameMetric:
         name = "\udfff"
+        result_schema_version = 1
 
         def observe(self, view):
             return None
@@ -1086,6 +1087,7 @@ def test_invalid_metric_json_fails_sealed_finalization_without_publication(
 ):
     class InvalidMetric:
         name = "invalid-json"
+        result_schema_version = 1
 
         def observe(self, view):
             return None
@@ -1110,6 +1112,7 @@ def test_non_bmp_metric_json_is_frozen_before_result_digest():
 
     class UnicodeMetric:
         name = "unicode"
+        result_schema_version = 1
 
         def observe(self, view):
             return None
@@ -1124,7 +1127,89 @@ def test_non_bmp_metric_json_is_frozen_before_result_digest():
     ).build()
 
     assert completed.result.metric_values() == {"unicode": value}
+    assert completed.result.to_json_value()["schema_version"] == 2
+    assert completed.result.to_json_value()["metric_results"] == [{
+        "name": "unicode",
+        "result_schema_version": 1,
+        "value": value,
+    }]
     assert completed.manifest.primary_result_sha256
+
+
+def test_metric_manifest_drift_is_rejected_before_engine_registration():
+    retained = {}
+
+    class DriftingMetric:
+        name = "original"
+        result_schema_version = 1
+
+        def __init__(self):
+            self.observations = 0
+
+        def run_manifest_config(self):
+            self.name = "drifted"
+            return {"result_schema_version": 1}
+
+        def observe(self, engine):
+            self.observations += 1
+
+        def result(self):
+            return {}
+
+    def make_metrics(engine, _cluster, _chip, _factory):
+        metric = DriftingMetric()
+        retained.update(engine=engine, metric=metric)
+        return [metric]
+
+    with pytest.raises(RuntimeError, match="changed its frozen result identity"):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            make_metrics=make_metrics,
+        ).build()
+
+    assert retained["engine"].metrics == []
+    assert retained["metric"].observations == 0
+
+
+@pytest.mark.parametrize("version", [True, 1.0, 0, -1])
+def test_metric_result_schema_version_is_an_exact_positive_integer(version):
+    class InvalidVersionMetric:
+        name = "invalid-version"
+        result_schema_version = version
+
+        def observe(self, engine):
+            return None
+
+        def result(self):
+            return {}
+
+    with pytest.raises(TypeError, match="positive built-in int"):
+        RunSpec(
+            ops=[], decoder=StaticDecoder(),
+            make_metrics=lambda *_args: [InvalidVersionMetric()],
+        ).build()
+
+
+def test_metric_manifest_schema_version_must_match_frozen_binding():
+    class MismatchedMetric:
+        name = "mismatched"
+        result_schema_version = 1
+
+        def run_manifest_config(self):
+            return {"result_schema_version": 2}
+
+        def observe(self, engine):
+            return None
+
+        def result(self):
+            return {}
+
+    with pytest.raises(RuntimeError, match="manifest result schema disagrees"):
+        RunSpec(
+            ops=[], decoder=StaticDecoder(),
+            make_metrics=lambda *_args: [MismatchedMetric()],
+        ).build()
 
 
 @pytest.mark.parametrize(
@@ -1549,7 +1634,7 @@ def test_every_shipped_runtime_metric_declares_effective_configuration():
                 threshold_f=0.15,
                 consecutive=4,
             ),
-            StrongDecoderBacklog(cluster, pool="strong"),
+            StrongDecoderBacklog(cluster),
             BacklogTrajectory(chip),
             ConditionalReactionTime(
                 chip,
@@ -1571,28 +1656,27 @@ def test_every_shipped_runtime_metric_declares_effective_configuration():
     }
 
     expected = {
-        "decoder_utilization": {"kind": "decoder_utilization"},
-        "ready_queue": {"kind": "ready_queue"},
-        "window_latency": {"kind": "window_latency"},
-        "decode_backlog": {"kind": "decode_backlog"},
+        "decoder_utilization": {"kind": "decoder_utilization", "result_schema_version": 1},
+        "ready_queue": {"kind": "ready_queue", "result_schema_version": 1},
+        "window_latency": {"kind": "window_latency", "result_schema_version": 1},
+        "decode_backlog": {"kind": "decode_backlog", "result_schema_version": 1},
         "backlog_early_warning": {
             "kind": "backlog_early_warning",
             "round_ticks": 3,
             "window_ticks": 20,
             "threshold_f": 0.15,
             "consecutive": 4,
+            "result_schema_version": 1,
         },
-        "strong_backlog": {
-            "pool": "strong",
-            "nominal_window_redo_round_count": 9,
-        },
-        "backlog_trajectory": {"kind": "backlog_trajectory"},
+        "strong_backlog": {"kind": "strong_backlog", "result_schema_version": 1},
+        "backlog_trajectory": {"kind": "backlog_trajectory", "result_schema_version": 1},
         "conditional_reaction_time": {
             "kind": "conditional_reaction_time",
             "divergence_threshold_rounds": 12.5,
             "require_all_released": False,
+            "result_schema_version": 1,
         },
-        "magic_state_latency": {"kind": "magic_state_latency"},
+        "magic_state_latency": {"kind": "magic_state_latency", "result_schema_version": 1},
     }
     assert {
         name: component["configuration"]
@@ -2188,6 +2272,7 @@ def test_factory_cannot_drive_the_engine_before_seed_binding():
 def test_metric_cannot_schedule_work_after_primary_drain():
     class SchedulingMetric:
         name = "scheduling_metric"
+        result_schema_version = 1
 
         def __init__(self, engine):
             self.engine = engine

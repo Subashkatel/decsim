@@ -76,6 +76,7 @@ def test_A1_dispatch_is_bounded_by_free_units_and_queue_drains():
 
     class _Probe:
         name = "probe"
+        result_schema_version = 1
         def __init__(self): self.min_free = N; self.max_busy = 0
         def observe(self, e):
             self.min_free = min(self.min_free, cluster.free_units)
@@ -212,7 +213,7 @@ def test_A4_confident_weak_never_escalates():
 def test_A4_strong_redo_size_is_commit_plus_two_buffers():
     """A4: the strong re-decode covers Switching.strong_redo_rounds(window) =
     commit + 2*buffer (= 3d when commit=buffer=d). Cross-check the policy's
-    formula against one frozen runtime window and the explicit nominal scalar."""
+    formula against one frozen runtime window."""
     res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 1.0, rounds=60)
     c = res.cluster
     w = c.windows[(0, 0)]
@@ -220,7 +221,7 @@ def test_A4_strong_redo_size_is_commit_plus_two_buffers():
     trailing_buffer = w.buffer_hi - w.commit_hi
     assert (commit, trailing_buffer) == (D, D)
     redo = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5).strong_redo_rounds(w)
-    assert redo == c.nominal_window_redo_round_count == 3 * D
+    assert redo == 3 * D
 
 
 # =====================================================================================
@@ -263,16 +264,22 @@ def test_A5_parallel_mixed_one_strong_job_per_window():
 # =====================================================================================
 
 def _strong_running_samples(switching, low_conf_prob, *, rounds, tau_strong, seed=1):
-    """Sample cluster.strong_running_rounds after every engine event (the batch size on the
-    strong unit, set at bulk dispatch)."""
+    """Sample physical running strong jobs and their exact input rounds."""
     captured = {}
 
     class _Sampler:
         name = "strong_running"
+        result_schema_version = 1
         def __init__(self, cluster): self.cluster = cluster; self.samples = []
         def observe(self, e):
-            self.samples.append(getattr(self.cluster, "strong_running_rounds", 0))
-        def result(self): return self.samples
+            running = [
+                rounds
+                for _keys, phase, rounds
+                in self.cluster.admitted_strong_work_snapshot()
+                if phase == "running"
+            ]
+            self.samples.append((len(running), sum(running)))
+        def result(self): return [list(sample) for sample in self.samples]
 
     def make_metrics(e, c, ch, fa):
         m = _Sampler(c); captured["m"] = m; return [m]
@@ -291,7 +298,6 @@ def test_A6_bulk_strong_merges_outstanding_jobs_into_one_decode():
     in one merged batch -- and returns to 0 after the run. The merged batch's latency is
     proportional to its round count (one big decode), so the few large batches in bulk mode are far
     fewer step-changes than per-job decoding would produce."""
-    per_job = 3 * D                                   # commit + 2*buffer
     res, samples = _strong_running_samples(
         Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, bulk_strong=True), 1.0,
         rounds=120, tau_strong=10.0)
@@ -299,15 +305,12 @@ def test_A6_bulk_strong_merges_outstanding_jobs_into_one_decode():
     assert c.total_windows > 0
     assert c.strong_needed == c.total_windows         # every window escalated -> heavy backlog
 
-    nonzero = sorted({s for s in samples if s > 0})
-    assert nonzero, "strong_running_rounds never moved -- the strong pool did not run"
-    # every observed merged-batch size is a whole number of per-job (3d) re-decodes
-    assert all(s % per_job == 0 for s in nonzero), nonzero
-    # at least one batch merged MORE THAN ONE job (the defining property of bulk decoding)
-    assert max(nonzero) > per_job, nonzero
-    # the strong unit is idle (batch counter back to 0) once everything has decoded
-    assert getattr(c, "strong_running_rounds", 0) == 0
-    assert samples[-1] == 0
+    nonzero_rounds = sorted({rounds for jobs, rounds in samples if jobs})
+    assert nonzero_rounds, "the strong pool did not run"
+    assert all(jobs <= 1 for jobs, _rounds in samples)
+    assert max(nonzero_rounds) > min(nonzero_rounds)
+    assert c.admitted_strong_work_snapshot() == ()
+    assert samples[-1] == (0, 0)
 
 
 def test_A6_non_bulk_decodes_jobs_individually_not_in_one_batch():
@@ -324,9 +327,13 @@ def test_A6_non_bulk_decodes_jobs_individually_not_in_one_batch():
 
     # both escalate exactly the same windows
     assert res_bulk.cluster.strong_needed == res_plain.cluster.strong_needed > 0
-    # plain serial never populates the bulk-batch counter; bulk drives it well past one job
-    assert max(samples_plain) == 0
-    assert max(samples_bulk) > 3 * D
+    # Both occupy one unit; only bulk combines several inputs into a larger
+    # physical service job.
+    assert all(jobs <= 1 for jobs, _rounds in samples_plain)
+    assert all(jobs <= 1 for jobs, _rounds in samples_bulk)
+    assert max(rounds for _jobs, rounds in samples_bulk) > max(
+        rounds for _jobs, rounds in samples_plain
+    )
     # both still commit every window
     assert len(res_bulk.cluster.committed_windows) == res_bulk.cluster.total_windows
     assert len(res_plain.cluster.committed_windows) == res_plain.cluster.total_windows

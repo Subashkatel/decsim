@@ -28,7 +28,8 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from .message import DecodeJob, DecodeOutcome, DecodeResult
+from .message import (DecodeJob, DecodeOutcome, DecodeResult,
+                      stable_identity_order_key)
 from .protocols import Directive
 from .config import fmt
 
@@ -74,7 +75,6 @@ class DecoderManager:
 
         self.strong_needed = 0
         self.strong_cancelled = 0
-        self.strong_running_rounds = 0
         # One destination window owns at most one unconsumed strong result at
         # a time: a live request, or a completion held for a demand that has
         # not registered yet. Whether a result still has a consumer is decided
@@ -279,8 +279,6 @@ class DecoderManager:
             else:
                 job.cancelled = True
                 self.pool_free[job.pool] += 1
-                self.strong_running_rounds = max(
-                    0, self.strong_running_rounds - job.n_rounds)
                 self.try_dispatch()
         self.strong_cancelled += 1
 
@@ -299,7 +297,6 @@ class DecoderManager:
     def _next_job(self, pool: str, queue: list) -> DecodeJob:
         if self.bulk_strong and pool != "default":
             job = self._merge_strong_batch(queue)
-            self.strong_running_rounds = job.n_rounds
             return job
         return self.scheduler.pop(queue, self.engine.now)
 
@@ -468,8 +465,48 @@ class DecoderManager:
         if job.strong_decode_for is not None:
             for key in getattr(job, "merged_keys", None) or [job.strong_decode_for]:
                 self._running_strong_decodes.pop(key, None)
-            self.strong_running_rounds = max(
-                0, self.strong_running_rounds - job.n_rounds)
+
+    def admitted_strong_work_snapshot(self) -> tuple:
+        """Snapshot each physical strong job once in its authoritative phase."""
+        queue_memberships = {}
+        for pool in self.unit_totals:
+            for queued_job in self.queue_for(pool):
+                queue_memberships.setdefault(id(queued_job), []).append(queued_job)
+
+        jobs_by_identity = {}
+        keys_by_identity = {}
+        for destination_key, job in self._running_strong_decodes.items():
+            identity = id(job)
+            jobs_by_identity[identity] = job
+            keys_by_identity.setdefault(identity, []).append(destination_key)
+
+        records = []
+        for identity, job in jobs_by_identity.items():
+            queued_matches = queue_memberships.get(identity, ())
+            if any(candidate is not job for candidate in queued_matches):
+                raise RuntimeError("strong-work identity collision in ready queues")
+            if len(queued_matches) > 1:
+                raise RuntimeError("one strong job appears in multiple ready queues")
+            if job.pool is not None:
+                if queued_matches:
+                    raise RuntimeError("running strong job also remains queued")
+                phase = "running"
+            elif queued_matches:
+                phase = "queued"
+            else:
+                phase = "in_transit"
+            destination_keys = tuple(sorted(
+                keys_by_identity[identity], key=stable_identity_order_key
+            ))
+            records.append((destination_keys, phase, job.n_rounds))
+        return tuple(sorted(
+            records,
+            key=lambda record: (
+                tuple(stable_identity_order_key(key) for key in record[0]),
+                record[1],
+                record[2],
+            ),
+        ))
 
     def _prepare_strong_result_deliveries(
         self, job: DecodeJob, result: DecodeResult,

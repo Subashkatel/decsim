@@ -193,6 +193,7 @@ class MyFactory:
 
 class MyMetric:
     name = "my_events"
+    result_schema_version = 1
     def __init__(self): self.count = 0
     def observe(self, engine): self.count += 1
     def result(self): return self.count

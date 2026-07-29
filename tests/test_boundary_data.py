@@ -6,7 +6,8 @@
 #==================================================================
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from conftest import fixed_latency_link_config
+from decsim.controllers import ModularController
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.engine import Engine
@@ -117,10 +118,10 @@ def test_per_patch_fragments_gate_round_arrival():
     observed = []
     controllers = []
 
-    def make_controller(engine):
+    def make_controller(engine, links):
         controller = ModularController(
             engine,
-            links=LinkModel(qc=0, cd=0),
+            links=links,
             log_syndromes=False,
         )
         controllers.append(controller)
@@ -155,6 +156,7 @@ def test_per_patch_fragments_gate_round_arrival():
         decoder=PresetLatencyDecoder(1.0),
         num_units=1,
         device=SilentDevice(),
+        links=fixed_latency_link_config(),
         make_controller=make_controller,
         make_metrics=install_probe,
     ).build()

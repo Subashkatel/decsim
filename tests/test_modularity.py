@@ -22,7 +22,6 @@ from decsim.layouts import UniformLayout
 from decsim.codes import SurfaceCodeModel
 from decsim.run_spec import RunSpec, simulate
 from decsim.decoders import PerRoundDecoder
-from decsim.links import LinkModel
 from decsim.pauli_frame import PauliFrame
 
 
@@ -150,9 +149,9 @@ class MyRouter:
         return self.decoder
 
 class MyController:
-    def __init__(self, engine):
+    def __init__(self, engine, links):
         self.engine = engine
-        self.links = LinkModel()
+        self.links = links
     def relay_syndrome(self, payload, deliver):
         packet = SyndromeRoundPacket(
             operation_id=payload.operation_id,

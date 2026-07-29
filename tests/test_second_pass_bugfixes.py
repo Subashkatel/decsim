@@ -12,6 +12,7 @@ Clifford decoder results and exercised end to end, and fan-out readiness
 continues each predecessor patch.
 """
 import gc
+from dataclasses import replace
 
 import pytest
 
@@ -20,7 +21,12 @@ from decsim.controllers import ModularController
 from decsim.engine import Engine
 from decsim.factories import DistillationFactory
 from decsim.frontends.qlx import qlx_frontend
-from decsim.links import Link, LinkModel
+from decsim.links import (
+    LinkCapacityConfig,
+    LinkConfig,
+    LinkModelConfig,
+    LinkQuantityBasis,
+)
 from decsim.message import Operation, SyndromePayload
 
 
@@ -60,8 +66,26 @@ def test_packing_does_not_reserve_the_serialized_link_early():
     FINISHES; a whole message that is ready during the packing gap uses
     the idle link first."""
     eng = Engine(verbose=False)
-    links = LinkModel(qc=Link(0),
-                      cd=Link(0, bandwidth_bits_per_us=1000, serialize=True))
+    config = LinkModelConfig.reference_fixed_latency_profile()
+    cwd_channel = LinkConfig(
+        0,
+        LinkCapacityConfig(
+            1000.0,
+            LinkQuantityBasis.DIRECT_AGGREGATE,
+            None,
+            "test serialized CWD bus",
+        ),
+        "test serialized CWD bus",
+    )
+    links = replace(
+        config,
+        qc=replace(
+            config.qc,
+            channel=LinkConfig(0, None, "test zero QC"),
+        ),
+        cwd=replace(config.cwd, channel=cwd_channel),
+        profile_name="test_packing_serialization",
+    ).resolve()
     ctrl = ModularController(eng, links=links, log_syndromes=False,
                              t_pack=us(1.0))
     arrivals = []

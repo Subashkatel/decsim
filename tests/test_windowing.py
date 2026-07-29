@@ -314,12 +314,13 @@ def test_parallel_scheme_reaction_matches_eq13():
         ), verbose=False)
     tail = r.result.fully_done_ticks - r.result.chip_done_ticks
     # after the last round: chip->controller->decoders hops, the last layer-A window
-    # (3d rounds), the t_dd boundary, the layer-B window (3d rounds), then t_do.
+    # (3d rounds), WDO + t_dd, the layer-B window (3d rounds), then WDO.
     # This is Eq. 13's two-window 6d*tau_d(d^2) plus the one-way hops (a Clifford memory
     # op pays no t_oc + t_cq return path -- Pauli-frame updates stay in the orchestrator).
-    expected = (us(0.15) + us(2.0)            # t_qc + t_cd
-                + us(3 * d * 1.0) + us(0.5)   # 3d rounds at 1 us/round + t_dd
-                + us(3 * d * 1.0) + us(1.0))  # 3d rounds + t_do
+    expected = (us(0.15) + us(2.0)              # QC + CWD
+                + us(3 * d * 1.0) + us(1.0)     # layer A + WDO
+                + us(0.5)                       # DD
+                + us(3 * d * 1.0) + us(1.0))    # layer B + WDO
     assert abs(tail - expected) <= 4          # integer-tick rounding only
 
 

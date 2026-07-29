@@ -3,8 +3,9 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.codes import SurfaceCodeModel
+from conftest import fixed_latency_link_config
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.decoder_manager import DecoderManager
 from decsim.decoders import CodeRouter, PresetLatencyDecoder
 from decsim.engine import Engine
@@ -115,8 +116,9 @@ def test_decode_backlog_summary_is_consistent_with_its_own_trace():
         decoder=_FixedLatencyDecoder(6.0),
         scheme=SlidingWindowScheme(),
         code=SurfaceCodeModel(d=3),
-        make_controller=lambda e: ModularController(
-            e, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0),
+        links=fixed_latency_link_config(),
+        make_controller=lambda e, links: ModularController(
+            e, links=links,
             log_syndromes=False),
         make_metrics=make_metrics,
     ), verbose=False)

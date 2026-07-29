@@ -1,9 +1,10 @@
 """Frontend and code-model seams for external IR adapters."""
 
 from decsim import protocols as P
+from conftest import fixed_latency_link_config
 from decsim.codes import BBCodeModel, SurfaceCodeModel
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.layouts import UniformLayout
@@ -173,8 +174,8 @@ class RecordingDecoder:
                             logical_observables=(0,))
 
 
-def _zero_link_controller(engine):
-    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+def _zero_link_controller(engine, links):
+    return ModularController(engine, links=links, log_syndromes=False)
 
 
 def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():
@@ -196,6 +197,7 @@ def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():
                  rounds_policy=FixedRounds(3),
                  device=TimingOnlyDevice(),
                  decoder=PresetLatencyDecoder(0.1),
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
              ), verbose=False)
 
@@ -226,6 +228,7 @@ def test_lattice_surgery_ir_can_lower_to_physical_ir_then_run():
                  rounds_policy=FixedRounds(3),
                  device=TimingOnlyDevice(),
                  decoder=PresetLatencyDecoder(0.1),
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
              ), verbose=False)
 
@@ -256,6 +259,7 @@ def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
                  rounds_policy=FixedRounds(4),
                  device=SyndromeBitDevice(code, per_patch=True),
                  decoder=decoder,
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
              ), verbose=False)
 
@@ -288,6 +292,7 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
                  rounds_policy=FixedRounds(4),
                  device=SyndromeBitDevice(code, per_patch=True),
                  decoder=decoder,
+                 links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
              ), verbose=False)
 

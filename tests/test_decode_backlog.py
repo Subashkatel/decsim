@@ -18,8 +18,9 @@ import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.codes import SurfaceCodeModel
+from conftest import fixed_latency_link_config
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import DecodeBacklog, ReadyQueueStats
 from decsim.schemes import SlidingWindowScheme
@@ -44,8 +45,8 @@ class _FixedLatencyDecoder:
                             logical_observables=(0,))
 
 
-def _zero_link_controller(engine):
-    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+def _zero_link_controller(engine, links):
+    return ModularController(engine, links=links, log_syndromes=False)
 
 
 def _run(latency_us, rounds):
@@ -59,6 +60,7 @@ def _run(latency_us, rounds):
               decoder=_FixedLatencyDecoder(latency_us),
               scheme=SlidingWindowScheme(),
               code=SurfaceCodeModel(d=D),
+              links=fixed_latency_link_config(),
               make_controller=_zero_link_controller,
               make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl), ReadyQueueStats(cl)],
           ), verbose=False)

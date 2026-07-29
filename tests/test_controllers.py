@@ -4,18 +4,53 @@
 # forwards batched packets to the decoders -- so a round arriving in fragments
 # (possibly at different times) must ship as ONE packet after its last fragment.
 #==================================================================
+from dataclasses import replace
+
 import pytest
 import numpy as np
 
 from decsim.config import us
 from decsim.controllers import ModularController
 from decsim.engine import Engine
-from decsim.links import Link, LinkModel
+from decsim.links import (
+    LinkCapacityConfig,
+    LinkConfig,
+    LinkEdgeConfig,
+    LinkModelConfig,
+    LinkPath,
+    LinkQuantityBasis,
+    TrafficAttribution,
+)
 from decsim.message import SyndromePayload, SyndromeRoundPacket
 
 
 def _frag(patch, n=2):
     return SyndromePayload(0, patch, 1, n_fragments=n)
+
+
+def _actual_edge(*, bandwidth=None):
+    capacity = None if bandwidth is None else LinkCapacityConfig(
+        float(bandwidth),
+        LinkQuantityBasis.DIRECT_AGGREGATE,
+        None,
+        "test capacity",
+    )
+    return LinkEdgeConfig(
+        LinkConfig(0, capacity, "test channel"),
+        None,
+        "SyndromePayload.size_bits",
+    )
+
+
+def _links(**edges):
+    return replace(
+        LinkModelConfig.reference_fixed_latency_profile(),
+        **edges,
+    ).resolve()
+
+
+def _window_attribution(round_index):
+    return TrafficAttribution(0, (0,), 0, round_index, round_index)
 
 
 def test_staggered_fragments_ship_as_one_packet_after_the_last():
@@ -203,7 +238,9 @@ def test_controller_fragment_ingress_is_exact_and_non_mutating(field, value):
 
 def test_controller_rejects_duplicate_count_sink_and_late_fragments():
     engine = Engine(verbose=False)
-    controller = ModularController(engine, links=LinkModel(qc=0, cd=0),
+    controller = ModularController(engine, links=_links(
+                                       qc=_actual_edge(),
+                                       cwd=_actual_edge()),
                                    log_syndromes=False)
     delivered = []
     deliver = delivered.append
@@ -250,8 +287,8 @@ def test_controller_rejects_duplicate_count_sink_and_late_fragments():
 def test_bandwidth_links_price_the_syndrome_bits():
     # 1000 bits over 1000 bits/us (qc) then 2000 bits/us (cd): 1.5 us total
     eng = Engine(verbose=False)
-    links = LinkModel(qc=Link(0, bandwidth_bits_per_us=1000),
-                      cd=Link(0, bandwidth_bits_per_us=2000))
+    links = _links(qc=_actual_edge(bandwidth=1000),
+                   cwd=_actual_edge(bandwidth=2000))
     ctrl = ModularController(eng, links=links, log_syndromes=False)
     arrivals = []
     payload = SyndromePayload(0, 0, 1, size_bits=1000)
@@ -264,8 +301,8 @@ def test_bandwidth_links_price_the_syndrome_bits():
 def test_serialized_chip_link_queues_concurrent_rounds():
     # two 1000-bit rounds on a shared 1000 bits/us qc bus: 1 us then 2 us
     eng = Engine(verbose=False)
-    links = LinkModel(qc=Link(0, bandwidth_bits_per_us=1000, serialize=True),
-                      cd=Link(0))
+    links = _links(qc=_actual_edge(bandwidth=1000),
+                   cwd=_actual_edge())
     ctrl = ModularController(eng, links=links, log_syndromes=False)
     arrivals = []
     for round_index in (1, 2):
@@ -279,14 +316,19 @@ def test_serialized_chip_link_queues_concurrent_rounds():
 def test_generic_send_prices_bits_and_queues_on_serialized_links():
     # the same two-message queueing through Transport.send on a dd bus
     eng = Engine(verbose=False)
-    links = LinkModel(dd=Link(0, bandwidth_bits_per_us=1000, serialize=True))
+    links = _links(dd=_actual_edge(bandwidth=1000))
     ctrl = ModularController(eng, links=links, log_syndromes=False)
     arrivals = []
 
     def send_both():
         for round_index in (1, 2):
-            ctrl.send("dd", SyndromePayload(0, 0, round_index, size_bits=1000),
-                      lambda p: arrivals.append(eng.now), now=eng.now)
+            ctrl.send(
+                LinkPath.DD,
+                SyndromePayload(0, 0, round_index, size_bits=1000),
+                lambda p: arrivals.append(eng.now),
+                now=eng.now,
+                attribution=_window_attribution(round_index),
+            )
 
     eng.schedule(0, send_both)
     eng.run()
@@ -296,7 +338,8 @@ def test_generic_send_prices_bits_and_queues_on_serialized_links():
 def test_packed_fragments_are_priced_by_their_total_bits():
     # 400 + 600 bit fragments = one 1000-bit packet over 1000 bits/us (cd)
     eng = Engine(verbose=False)
-    links = LinkModel(qc=Link(0), cd=Link(0, bandwidth_bits_per_us=1000))
+    links = _links(qc=_actual_edge(),
+                   cwd=_actual_edge(bandwidth=1000))
     ctrl = ModularController(eng, links=links, log_syndromes=False)
     arrivals = []
     deliver = lambda packet: arrivals.append(eng.now)

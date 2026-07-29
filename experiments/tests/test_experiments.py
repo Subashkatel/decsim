@@ -465,16 +465,24 @@ def test_surface_runner_executes_real_mwpm_batches(tmp_path):
 
 
 def test_surface_runner_uses_requested_circuit_noise():
-    circuit = _circuit({
+    stim = pytest.importorskip("stim")
+    configuration = {
         "distance": 3,
         "rounds": 3,
         "physical_error_rate": 0.007,
-    })
+    }
+    circuit = _circuit(configuration)
+    expected = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=3,
+        rounds=3,
+        after_clifford_depolarization=0.007,
+        after_reset_flip_probability=0.007,
+        before_measure_flip_probability=0.007,
+        before_round_data_depolarization=0.007,
+    )
 
-    text = str(circuit)
-    assert "DEPOLARIZE1(0.007)" in text
-    assert "DEPOLARIZE2(0.007)" in text
-    assert "X_ERROR(0.007)" in text
+    assert circuit == expected
 
 
 def test_surface_runner_absorbs_terminal_layer_and_short_tail():
@@ -509,6 +517,33 @@ def test_surface_runner_worker_count_does_not_change_scientific_identity(tmp_pat
     assert one == two
     assert sorted(path.read_bytes() for path in (tmp_path / "one").rglob("*.csv")) == sorted(
         path.read_bytes() for path in (tmp_path / "two").rglob("*.csv")
+    )
+
+
+def test_surface_runner_resolves_default_experiment_name_before_identity(tmp_path):
+    configuration = {
+        "distance": 3,
+        "rounds": 3,
+        "physical_error_rate": 0.005,
+        "commit_rounds": 3,
+        "buffer_rounds": 3,
+        "shots": 3,
+        "batch_shots": 2,
+        "seed": 31,
+        "workers": 1,
+    }
+
+    implicit = run_surface_configuration(configuration, tmp_path / "implicit")
+    explicit = run_surface_configuration(
+        {**configuration, "experiment_id": "surface-weak-mwpm"},
+        tmp_path / "explicit",
+    )
+
+    assert implicit == explicit
+    assert sorted(
+        path.read_bytes() for path in (tmp_path / "implicit").rglob("*.csv")
+    ) == sorted(
+        path.read_bytes() for path in (tmp_path / "explicit").rglob("*.csv")
     )
 
 

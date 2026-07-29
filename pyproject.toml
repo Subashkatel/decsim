@@ -27,4 +27,4 @@ include = ["decsim*"]
 # docs/ holds cloned third-party artifacts (e.g. the SWIPER repo) whose own
 # test suites must not be collected by our `python -m pytest -q` entry point.
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "experiments/tests"]

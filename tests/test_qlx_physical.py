@@ -290,3 +290,340 @@ def test_detection_rate_matches_twin(sampled):
     sigma = math.sqrt(max(rate * (1 - rate) / n_bits, 1e-12))
     assert abs(rate - twin_rate) < max(5 * sigma, 0.002), \
         f"det rate {rate:.5f} vs twin {twin_rate:.5f}"
+
+
+def _terminal_schedule():
+    names = (
+        ["alloc", "prep_z", "reset", "reset", "h"]
+        + ["cx"] * 8
+        + ["h", "measure_syndrome", "h"]
+        + ["cx"] * 8
+        + ["h", "measure_syndrome", "h"]
+        + ["cx"] * 8
+        + ["h", "measure_syndrome", "mz", "dealloc"]
+    )
+    starts = ([0] * 15) + ([1] * 11) + ([2] * 11) + [3, 3]
+    assert len(names) == len(starts) == 39
+    entries = []
+    for index, (name, start) in enumerate(zip(names, starts)):
+        entries.append({
+            "op_id": f"{name}_{index}",
+            "op_name": f"fabric.{name}",
+            "dependencies": (() if index == 0 else
+                             (entries[index - 1]["op_id"],)),
+            "occupied_slots": (("C0", 0),),
+            "duration": 1 if name == "measure_syndrome" else 0,
+            "consumes": None,
+            "produces": None,
+            "protocol": None,
+            "start_round": start,
+        })
+    return {"entries": entries}
+
+
+def _terminal_circuit_and_metadata():
+    circuit = stim.Circuit("""
+        M 0 1
+        M 2 3
+        M 4 5
+        X_ERROR(0.25) 6
+        M 6 7 8
+        DETECTOR rec[-9]
+        DETECTOR rec[-8]
+        DETECTOR rec[-7] rec[-9]
+        DETECTOR rec[-6] rec[-8]
+        DETECTOR rec[-5] rec[-7]
+        DETECTOR rec[-4] rec[-6]
+        DETECTOR rec[-4] rec[-3] rec[-1]
+        DETECTOR rec[-5] rec[-2]
+        OBSERVABLE_INCLUDE(0) rec[-3]
+    """)
+    metadata = {
+        "dem_num_detectors": 8,
+        "dem_num_observables": 1,
+        "dem_num_sx": 1,
+        "dem_hx": [[1]],
+        "dem_hz": [[0, 2]],
+        "dem_detector_locs": [
+            [0, 0, -1], [0, 1, -1],
+            [1, 0, 0], [1, 1, 0],
+            [2, 0, 1], [2, 1, 1],
+            [-1, 0, 2], [-2, 0, 2],
+        ],
+        "dem_D_sparse": [[999]],
+        "dem_O_sparse": [[999]],
+        "dem_weights": [999.0],
+    }
+    return circuit, metadata
+
+
+def _asymmetric_check_circuit_and_metadata():
+    circuit = stim.Circuit()
+    measurement_count = 13
+    circuit.append("M", range(measurement_count))
+    locations = []
+
+    def add_detector(records, location):
+        circuit.append("DETECTOR", [
+            stim.target_rec(record - measurement_count)
+            for record in records
+        ])
+        locations.append(location)
+
+    check_count = 3
+    for submission in range(3):
+        for check in range(check_count):
+            records = [submission * check_count + check]
+            baseline = submission - 1
+            if baseline >= 0:
+                records.append(baseline * check_count + check)
+            add_detector(records, [submission, check, baseline])
+
+    add_detector([6, 9, 11], [-2, 0, 2])
+    add_detector([7, 10], [-1, 0, 2])
+    add_detector([8, 11, 12], [-1, 1, 2])
+    metadata = {
+        "dem_num_detectors": 12,
+        "dem_num_observables": 0,
+        "dem_num_sx": 1,
+        "dem_hx": [[0, 2]],
+        "dem_hz": [[1], [2, 3]],
+        "dem_detector_locs": locations,
+    }
+    return circuit, metadata
+
+
+def test_detector_routing_supports_asymmetric_check_counts():
+    from decsim.frontends.qlx import _prove_detector_routing
+
+    circuit, metadata = _asymmetric_check_circuit_and_metadata()
+    rounds, terminal_ids, terminal_data_count = _prove_detector_routing(
+        circuit, metadata, submission_count=3
+    )
+    assert terminal_ids == (9, 10, 11)
+    assert terminal_data_count == 4
+    assert rounds[8] == rounds[9] == 3
+
+
+def test_detector_routing_rejects_inconsistent_x_check_split():
+    from decsim.frontends.qlx import _prove_detector_routing
+
+    circuit, metadata = _asymmetric_check_circuit_and_metadata()
+    metadata["dem_num_sx"] = 2
+    with pytest.raises(ValueError, match="dem_num_sx"):
+        _prove_detector_routing(circuit, metadata, submission_count=3)
+
+
+@pytest.mark.parametrize("value", [True, 1.5, -1])
+def test_detector_routing_requires_nonnegative_exact_x_check_count(value):
+    from decsim.frontends.qlx import _prove_detector_routing
+
+    circuit, metadata = _asymmetric_check_circuit_and_metadata()
+    metadata["dem_num_sx"] = value
+    error = TypeError if type(value) is not int else ValueError
+    with pytest.raises(error, match="dem_num_sx"):
+        _prove_detector_routing(circuit, metadata, submission_count=3)
+
+
+def test_detector_routing_requires_exact_list_check_matrices():
+    from decsim.frontends.qlx import _prove_detector_routing
+
+    circuit, metadata = _asymmetric_check_circuit_and_metadata()
+    metadata["dem_hx"] = ([0, 2],)
+    with pytest.raises(TypeError, match="dem_hx"):
+        _prove_detector_routing(circuit, metadata, submission_count=3)
+
+
+def _terminal_program():
+    from decsim.frontends.qlx import qlx_frontend
+
+    circuit, metadata = _terminal_circuit_and_metadata()
+    return qlx_frontend(
+        _terminal_schedule(),
+        physical_circuit=circuit,
+        detector_metadata=metadata,
+        decode_operation_id=99,
+    )
+
+
+def test_exact_terminal_schedule_and_physical_lowering():
+    program = _terminal_program()
+    assert len(program.operations) == 39
+    assert sum(program.raw_durations.values()) == 3
+    assert sum(value == 0 for value in program.raw_durations.values()) == 36
+    assert max(
+        operation.scheduled_start_round + program.raw_durations[operation.id]
+        for operation in program.operations
+    ) == 3
+    assert program.rounds_for(program.decoder_operations[0], None) == 3
+    emitters = [op for op in program.operations if op.emits_detector_data]
+    assert len(emitters) == 4
+    assert [op.stream_offset for op in emitters] == [0, 1, 2, 2]
+    assert [op.syndrome_fragment_index for op in emitters[-2:]] == [0, 1]
+
+
+def test_decode_owner_id_cannot_collide_with_schedule_operation_id():
+    from decsim.frontends.qlx import qlx_frontend
+
+    circuit, metadata = _terminal_circuit_and_metadata()
+    with pytest.raises(ValueError, match="collides"):
+        qlx_frontend(
+            _terminal_schedule(),
+            physical_circuit=circuit,
+            detector_metadata=metadata,
+            decode_operation_id=0,
+        )
+
+
+def test_physical_lowering_rejects_nonunit_submission_duration():
+    from decsim.frontends.qlx import qlx_frontend
+
+    schedule = _terminal_schedule()
+    measure = next(
+        entry for entry in schedule["entries"]
+        if entry["op_name"] == "fabric.measure_syndrome"
+    )
+    measure["duration"] = 2
+    measure_index = schedule["entries"].index(measure)
+    for entry in schedule["entries"][measure_index + 1:]:
+        entry["start_round"] += 1
+    circuit, metadata = _terminal_circuit_and_metadata()
+    with pytest.raises(ValueError, match="unit-duration"):
+        qlx_frontend(
+            schedule,
+            physical_circuit=circuit,
+            detector_metadata=metadata,
+            decode_operation_id=99,
+        )
+
+
+@pytest.mark.parametrize("field", ["locations", "terminal_parity"])
+def test_physical_lowering_rejects_detector_routing_mutations(field):
+    from decsim.frontends.qlx import qlx_frontend
+
+    circuit, metadata = _terminal_circuit_and_metadata()
+    metadata = json.loads(json.dumps(metadata))
+    if field == "locations":
+        metadata["dem_detector_locs"][0], metadata["dem_detector_locs"][1] = (
+            metadata["dem_detector_locs"][1],
+            metadata["dem_detector_locs"][0],
+        )
+    else:
+        metadata["dem_hz"][0] = [1]
+    with pytest.raises(ValueError, match="measurement records"):
+        qlx_frontend(
+            _terminal_schedule(),
+            physical_circuit=circuit,
+            detector_metadata=metadata,
+            decode_operation_id=99,
+        )
+
+
+def test_terminal_lowering_rejects_mz_on_another_cell():
+    from decsim.frontends.qlx import qlx_frontend
+
+    schedule = _terminal_schedule()
+    terminal = next(
+        entry for entry in schedule["entries"]
+        if entry["op_name"] == "fabric.mz"
+    )
+    terminal["occupied_slots"] = (("F0", 0),)
+    circuit, metadata = _terminal_circuit_and_metadata()
+    with pytest.raises(ValueError, match="dependent mz"):
+        qlx_frontend(
+            schedule, physical_circuit=circuit,
+            detector_metadata=metadata, decode_operation_id=99,
+        )
+
+
+def test_sparse_dem_arrays_are_outside_the_consumed_contract():
+    from decsim.frontends.qlx import qlx_frontend
+
+    circuit, metadata = _terminal_circuit_and_metadata()
+    changed = json.loads(json.dumps(metadata))
+    changed["dem_D_sparse"] = [[1, 2, 3]]
+    changed["dem_O_sparse"] = []
+    changed["dem_weights"] = [-7.0]
+    first = qlx_frontend(
+        _terminal_schedule(), physical_circuit=circuit,
+        detector_metadata=metadata, decode_operation_id=99,
+    )
+    second = qlx_frontend(
+        _terminal_schedule(), physical_circuit=circuit,
+        detector_metadata=changed, decode_operation_id=99,
+    )
+    assert first.detector_rounds_by_stream == second.detector_rounds_by_stream
+    assert (first.terminal_detector_ids_by_stream
+            == second.terminal_detector_ids_by_stream)
+
+
+@pytest.mark.parametrize("scheme_name", ["sliding", "parallel"])
+def test_terminal_stream_has_three_rounds_in_window_schemes(scheme_name):
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.codes import SurfaceCodeModel
+    from decsim.decoders import PresetLatencyDecoder
+    from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
+
+    program = _terminal_program()
+    scheme = (SlidingWindowScheme() if scheme_name == "sliding"
+              else ParallelWindowScheme())
+    device = StimDevice(
+        detector_rounds=program.detector_rounds_by_stream,
+        terminal_detector_ids=program.terminal_detector_ids_by_stream,
+        terminal_data_bits=program.terminal_data_bits_by_stream,
+    )
+    result = simulate(RunSpec(
+        frontend=program, decode_ops=list(program.decoder_operations),
+        rounds_policy=program, code=SurfaceCodeModel(d=3), scheme=scheme,
+        device=device, decoder=PresetLatencyDecoder(0.0), seed=41,
+    ), verbose=False)
+    assert result.window_manager.rounds_for(program.decoder_operations[0]) == 3
+    assert result.window_manager.window_count[99] == 1
+
+
+def test_terminal_stream_matches_global_sample_and_decode():
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.codes import SurfaceCodeModel
+    from decsim.mwpm_decoder import PyMatchingDecoder
+    from decsim.schemes import NaiveOnlineScheme
+
+    class ZeroLatency:
+        def latency(self, job):
+            return 1
+
+    program = _terminal_program()
+    device = StimDevice(
+        detector_rounds=program.detector_rounds_by_stream,
+        terminal_detector_ids=program.terminal_detector_ids_by_stream,
+        terminal_data_bits=program.terminal_data_bits_by_stream,
+    )
+    result = simulate(RunSpec(
+        frontend=program,
+        decode_ops=list(program.decoder_operations),
+        rounds_policy=program,
+        code=SurfaceCodeModel(d=3),
+        scheme=NaiveOnlineScheme(),
+        device=device,
+        decoder=PyMatchingDecoder(ZeroLatency()),
+        seed=37,
+    ), verbose=False)
+
+    matching = pymatching.Matching.from_detector_error_model(
+        program.decoder_operations[0].circuit.detector_error_model()
+    )
+    expected = tuple(int(value) for value in matching.decode(device._dets[99]))
+    assert result.window_manager.op_results[99] == expected
+    assert len(device._dets[99]) == 8
+    assert result.window_manager.rounds_arrived[99] == 3
+    assert result.chip.stream_next_round[99] == 3
+    transfers = result.result.link_traffic["transfers"]
+    final_qc = [
+        row for row in transfers
+        if row["path"] == "qc" and row["attribution"]["round_lo"] == 3
+    ]
+    final_cwd = [
+        row for row in transfers
+        if row["path"] == "cwd" and row["attribution"]["round_lo"] == 3
+    ]
+    assert [row["payload_bits"] for row in final_qc] == [2, 3]
+    assert [row["payload_bits"] for row in final_cwd] == [5]

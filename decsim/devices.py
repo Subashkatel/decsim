@@ -51,6 +51,9 @@ class TimingOnlyDevice:
                             patch) -> list:
         return [SyndromePayload(stream_id, patch, global_round)]
 
+    def finalize_stream_round(self, op: Operation) -> list:
+        raise ValueError("TimingOnlyDevice cannot finalize a physical stream")
+
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
                                 *, fault_model_requirement):
         return None
@@ -108,6 +111,23 @@ class ClockedDevice:
             raise ValueError(
                 f"operation {operation.id} has no resolved round count"
             ) from error
+        if not operation.emits_detector_data:
+            self.engine.schedule(
+                total_rounds * round_ticks,
+                lambda: on_body_done(operation),
+                label=f"body-done({operation.name})",
+            )
+            return
+        if total_rounds == 0:
+            if not operation.finalizes_stream_round:
+                raise ValueError(
+                    "zero-duration detector emitters must finalize a stream round"
+                )
+            self.relay_payloads(
+                self.device.finalize_stream_round(operation), operation
+            )
+            on_body_done(operation)
+            return
         self.device.begin_operation(operation, total_rounds)
         self.engine.schedule(
             round_ticks,
@@ -132,7 +152,7 @@ class ClockedDevice:
         payloads = self.device.round_payloads(operation, round_index)
         self.engine.log("Chip", f"{operation.name} fires round "
                                 f"{round_index}/{total_rounds}")
-        self.relay_payloads(payloads)
+        self.relay_payloads(payloads, operation)
         if round_index < total_rounds:
             self.engine.schedule(
                 round_ticks,
@@ -147,13 +167,30 @@ class ClockedDevice:
         else:
             on_body_done(operation)
 
-    def relay_payloads(self, payloads) -> None:
+    def relay_payloads(self, payloads, operation: Operation) -> None:
         """Send all fragments from one syndrome round through the controller."""
-        fragment_count = len(payloads)
-        for payload in payloads:
+        if (
+            operation.syndrome_fragment_index is not None
+            and len(payloads) != 1
+        ):
+            raise ValueError(
+                "an explicit syndrome fragment slot must emit one payload"
+            )
+        fragment_count = (
+            operation.syndrome_fragment_count
+            if operation.syndrome_fragment_count is not None
+            else len(payloads)
+        )
+        for local_index, payload in enumerate(payloads):
+            fragment_index = (
+                operation.syndrome_fragment_index
+                if operation.syndrome_fragment_index is not None
+                else local_index
+            )
             relayed_payload = replace(
                 payload,
                 n_fragments=fragment_count,
+                fragment_index=fragment_index,
             )
             self.controller.relay_syndrome(
                 relayed_payload,
@@ -307,6 +344,9 @@ class SyndromeBitDevice:
         bits = self._bits(1)
         return [SyndromePayload(stream_id, patch, global_round, bits=bits,
                                 code=self.code.name, size_bits=len(bits))]
+
+    def finalize_stream_round(self, op: Operation) -> list[SyndromePayload]:
+        raise ValueError("SyndromeBitDevice cannot finalize a physical stream")
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
                                 *, fault_model_requirement):

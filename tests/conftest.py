@@ -63,6 +63,7 @@ def _segment_operation(circuit, *, segment_id: int, stream_id: int,
         stream_id=stream_id,
         stream_offset=offset,
         predecessors=predecessor,
+        decoder_boundary_predecessors=predecessor,
         has_successor=(segment_index < segment_count - 1))
 
 

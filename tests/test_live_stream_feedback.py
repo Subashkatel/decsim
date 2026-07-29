@@ -41,6 +41,7 @@ def _live_stream_pair():
         consumes_magic_state=False,
         patches=(0,),
         predecessors=(first.id,),
+        decoder_boundary_predecessors=(first.id,),
         stream_id=stream.id,
         blocked_by=first.id,
     )

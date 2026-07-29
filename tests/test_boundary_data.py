@@ -134,12 +134,16 @@ def test_per_patch_fragments_gate_round_arrival():
         def probe():
             deliver = window_manager.on_syndrome_arrival
             controllers[0].relay_syndrome(
-                SyndromePayload(0, 0, 1, n_fragments=2),
+                SyndromePayload(
+                    0, 0, 1, n_fragments=2, fragment_index=0
+                ),
                 deliver,
             )
             observed.append(window_manager.rounds_arrived[0])
             controllers[0].relay_syndrome(
-                SyndromePayload(0, 1, 1, n_fragments=2),
+                SyndromePayload(
+                    0, 1, 1, n_fragments=2, fragment_index=1
+                ),
                 deliver,
             )
             observed.append(window_manager.rounds_arrived[0])

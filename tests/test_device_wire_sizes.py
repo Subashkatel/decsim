@@ -9,7 +9,7 @@
 import pytest
 
 from decsim.codes import SurfaceCodeModel
-from decsim.devices import ClockedDevice, SyndromeBitDevice
+from decsim.devices import ClockedDevice, SyndromeBitDevice, TimingOnlyDevice
 from decsim.message import Operation, SyndromePayload
 
 
@@ -53,7 +53,9 @@ def test_clocked_device_relay_does_not_mutate_source_fragment_counts():
         SyndromePayload(0, "south", 1),
     ]
 
-    clocked.relay_payloads(source_payloads)
+    clocked.relay_payloads(
+        source_payloads, Operation(0, "round", ("north", "south"))
+    )
 
     assert [payload.n_fragments for payload in source_payloads] == [1, 1]
     assert [payload.n_fragments for payload in controller.payloads] == [2, 2]
@@ -61,6 +63,70 @@ def test_clocked_device_relay_does_not_mutate_source_fragment_counts():
         relayed is not source
         for relayed, source in zip(controller.payloads, source_payloads)
     )
+
+
+def test_explicit_fragment_slot_rejects_multiple_payloads_before_relay():
+    class RecordingController:
+        def __init__(self):
+            self.payloads = []
+
+        def relay_syndrome(self, payload, deliver):
+            self.payloads.append(payload)
+
+    controller = RecordingController()
+    clocked = ClockedDevice(
+        engine=None, device=None, controller=controller,
+        on_syndrome_arrival=lambda packet: None,
+        round_count_by_operation_id={},
+    )
+    operation = Operation(
+        0, "declared fragment", (0,),
+        syndrome_fragment_index=0, syndrome_fragment_count=2,
+    )
+    with pytest.raises(ValueError, match="one payload"):
+        clocked.relay_payloads(
+            [SyndromePayload(0, 0, 1), SyndromePayload(0, 1, 1)],
+            operation,
+        )
+    assert controller.payloads == []
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({
+            "emits_detector_data": False, "stream_id": 7, "stream_offset": 0,
+            "syndrome_fragment_index": 1, "syndrome_fragment_count": 2,
+        }, "emitter"),
+        ({
+            "stream_offset": 0,
+            "syndrome_fragment_index": 1, "syndrome_fragment_count": 2,
+        }, "stream_id"),
+        ({
+            "stream_id": 7,
+            "syndrome_fragment_index": 1, "syndrome_fragment_count": 2,
+        }, "stream_offset"),
+        ({"stream_id": 7, "stream_offset": 0}, "fragment slot"),
+    ],
+)
+def test_malformed_stream_finalizer_is_rejected(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        Operation(0, "bad finalizer", (0,),
+                  finalizes_stream_round=True, **kwargs)
+
+
+def test_nonphysical_devices_fail_closed_on_terminal_finalization():
+    operation = Operation(
+        0, "terminal", (0,), stream_id=7, stream_offset=0,
+        finalizes_stream_round=True,
+        syndrome_fragment_index=1, syndrome_fragment_count=2,
+    )
+    for device in (
+        TimingOnlyDevice(),
+        SyndromeBitDevice(SurfaceCodeModel(d=3)),
+    ):
+        with pytest.raises(ValueError, match="cannot finalize"):
+            device.finalize_stream_round(operation)
 
 
 def test_idle_round_fake_payload_reports_its_bit_count():

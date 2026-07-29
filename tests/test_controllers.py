@@ -24,8 +24,14 @@ from decsim.links import (
 from decsim.message import SyndromePayload, SyndromeRoundPacket
 
 
-def _frag(patch, n=2):
-    return SyndromePayload(0, patch, 1, n_fragments=n)
+def _frag(patch, n=2, index=None):
+    return SyndromePayload(
+        0,
+        patch,
+        1,
+        n_fragments=n,
+        fragment_index=patch if index is None else index,
+    )
 
 
 def _actual_edge(*, bandwidth=None):
@@ -81,6 +87,42 @@ def test_packaging_cost_is_priced_per_packet():
     assert arrivals == [us(0.15) + us(0.3) + us(2.0)]
 
 
+def test_same_patch_fragments_use_declared_order_not_arrival_order():
+    engine = Engine(verbose=False)
+    controller = ModularController(engine, log_syndromes=False)
+    delivered = []
+    deliver = delivered.append
+    terminal = SyndromePayload(
+        7, "patch", 3, bits=[1], n_fragments=2,
+        fragment_index=1, size_bits=3,
+    )
+    ordinary = SyndromePayload(
+        7, "patch", 3, bits=[0, 1], n_fragments=2,
+        fragment_index=0, size_bits=2,
+    )
+
+    controller.relay_syndrome(terminal, deliver)
+    controller.relay_syndrome(ordinary, deliver)
+    engine.run()
+
+    assert len(delivered) == 1
+    assert len(delivered[0].fragments) == 1
+    fragment = delivered[0].fragments[0]
+    assert fragment.patch_id == "patch"
+    assert fragment.bits == (0, 1, 1)
+    assert fragment.size_bits == 5
+    assert fragment.fragment_index == 0
+
+
+@pytest.mark.parametrize(
+    ("count", "index"),
+    [(True, 0), (2, True), (2, 2), (2, -1)],
+)
+def test_invalid_fragment_carrier_is_rejected_at_construction(count, index):
+    with pytest.raises((TypeError, ValueError)):
+        SyndromePayload(0, 0, 1, n_fragments=count, fragment_index=index)
+
+
 def test_whole_round_payloads_take_the_original_path():
     # n_fragments=1 (every default device): no buffering, no t_pack -- two plain hops
     eng = Engine(verbose=False)
@@ -101,13 +143,16 @@ def test_controller_copies_mixed_identity_fragments_into_one_packet():
     mutable_bits = [[index & 1, (index + 1) & 1]
                     for index in range(len(identities))]
 
-    for patch_id, bits in zip(identities, mutable_bits):
+    for fragment_index, (patch_id, bits) in enumerate(
+        zip(identities, mutable_bits)
+    ):
         ctrl.relay_syndrome(
             SyndromePayload(
                 operation_id=("operation", 3),
                 patch_id=patch_id,
                 round_index=1,
-                n_fragments=len(identities),
+                    n_fragments=len(identities),
+                    fragment_index=fragment_index,
                 bits=bits,
                 code="surface",
                 size_bits=2,
@@ -245,34 +290,34 @@ def test_controller_rejects_duplicate_count_sink_and_late_fragments():
     delivered = []
     deliver = delivered.append
 
-    controller.relay_syndrome(_frag("north"), deliver)
+    controller.relay_syndrome(_frag("north", index=0), deliver)
     engine.run()
     assert len(controller._pending[(0, 1)].fragments) == 1
 
-    controller.relay_syndrome(_frag("north"), deliver)
+    controller.relay_syndrome(_frag("north", index=0), deliver)
     with pytest.raises(ValueError, match="duplicate"):
         engine.run()
     assert len(controller._pending[(0, 1)].fragments) == 1
 
     controller.relay_syndrome(
-        SyndromePayload(0, "south", 1, n_fragments=3),
+            SyndromePayload(0, "south", 1, n_fragments=3, fragment_index=1),
         deliver,
     )
     with pytest.raises(ValueError, match="same count"):
         engine.run()
     assert len(controller._pending[(0, 1)].fragments) == 1
 
-    controller.relay_syndrome(_frag("south"), lambda packet: None)
+    controller.relay_syndrome(_frag("south", index=1), lambda packet: None)
     with pytest.raises(ValueError, match="delivery sink"):
         engine.run()
     assert len(controller._pending[(0, 1)].fragments) == 1
 
-    controller.relay_syndrome(_frag("south"), deliver)
+    controller.relay_syndrome(_frag("south", index=1), deliver)
     engine.run()
     assert len(delivered) == 1
     assert (0, 1) in controller._completed_rounds
 
-    controller.relay_syndrome(_frag("late"), deliver)
+    controller.relay_syndrome(_frag("late", index=0), deliver)
     with pytest.raises(ValueError, match="already completed"):
         engine.run()
     assert len(delivered) == 1
@@ -344,7 +389,9 @@ def test_packed_fragments_are_priced_by_their_total_bits():
     arrivals = []
     deliver = lambda packet: arrivals.append(eng.now)
     for patch, bits in ((0, 400), (1, 600)):
-        payload = SyndromePayload(0, patch, 1, n_fragments=2, size_bits=bits)
+        payload = SyndromePayload(
+            0, patch, 1, n_fragments=2, fragment_index=patch, size_bits=bits
+        )
         eng.schedule(0, lambda p=payload: ctrl.relay_syndrome(
             p, deliver))
     eng.run()

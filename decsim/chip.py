@@ -67,6 +67,7 @@ class Chip:
 
         self._ops: dict[int, Operation] = {}
         self._deps_remaining: dict[int, int] = {}
+        self._schedule_released: set[int] = set()
         self._op_successors: dict[int, list[int]] = {}
         self.busy_claims: dict[tuple, int] = {}       # (kind, id) -> op_id
         self.requested: set[int] = set()
@@ -133,8 +134,21 @@ class Chip:
             for predecessor_id in operation.predecessors:
                 self._op_successors[predecessor_id].append(operation.id)
         for operation in ops:
-            if self._deps_remaining[operation.id] == 0:
-                self._attempt_start(operation)
+            release_tick = (
+                operation.scheduled_start_round
+                * self._round_ticks_for(operation)
+            )
+            if release_tick == 0:
+                self._schedule_released.add(operation.id)
+            else:
+                self.engine.schedule(
+                    release_tick,
+                    lambda ready_operation=operation:
+                        self._release_scheduled_start(ready_operation),
+                    label=f"scheduled-start({operation.name})",
+                )
+        for operation in ops:
+            self._attempt_start(operation)
 
     # ---------------------------------------------------------------- start
 
@@ -147,6 +161,12 @@ class Chip:
 
     def _attempt_start(self, operation: Operation) -> None:
         """Reserve resources and fetch the magic state while feedback may pend."""
+        if (
+            self._deps_remaining[operation.id] != 0
+            or operation.id not in self._schedule_released
+            or operation.id in self.requested
+        ):
+            return
         self._claim_resources(operation)
         self.requested.add(operation.id)
         if operation.needs_magic_state:
@@ -158,6 +178,10 @@ class Chip:
                     self._on_state_ready(ready_operation))
         else:
             self._on_state_ready(operation)
+
+    def _release_scheduled_start(self, operation: Operation) -> None:
+        self._schedule_released.add(operation.id)
+        self._attempt_start(operation)
 
     def _claim_resources(self, operation: Operation) -> None:
         """Reserve this op's typed ResourceClaims until its body is done.
@@ -243,6 +267,11 @@ class Chip:
             return
         stream_id = operation.stream_id
         next_round = self.stream_next_round.get(stream_id, 0)
+        if operation.finalizes_stream_round:
+            if operation.stream_offset != next_round - 1:
+                raise RuntimeError(
+                    f"{operation.name} must finalize stream round {next_round}")
+            return
         if operation.stream_offset is None:
             operation.stream_offset = next_round
         elif operation.stream_offset < next_round:
@@ -403,10 +432,11 @@ class Chip:
     def relay_syndrome_payloads(self, payloads) -> None:
         """Send all fragments from one syndrome round through the controller."""
         fragment_count = len(payloads)
-        for payload in payloads:
+        for fragment_index, payload in enumerate(payloads):
             relayed_payload = replace(
                 payload,
                 n_fragments=fragment_count,
+                fragment_index=fragment_index,
             )
             self.controller.relay_syndrome(
                 relayed_payload,
@@ -420,9 +450,10 @@ class Chip:
                 if (successor.blocked_by is not None
                         and successor.id not in self.started
                         and successor.id in self.decode_released
-                        and successor.id in self.state_ready):
+                        and successor.id in self.state_ready
+                        and successor.id in self._schedule_released):
                     self._patches_emitting.discard(patch)
-                    self._begin(successor)
+                    self._maybe_begin(successor)
 
     def _submit_idle_decode_if_due(self, op_id: int, patch,
                                    round_index: int) -> None:

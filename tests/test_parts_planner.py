@@ -54,20 +54,27 @@ def test_validation_rejects_below_one():
     with pytest.raises(ValueError):
         FixedRounds(0)
     with pytest.raises(ValueError):
-        PerOpRounds({3: 0})
+        PerOpRounds({3: -1})
     with pytest.raises(ValueError):
         TemporalRounds(0)
 
 
 def test_per_op_passthrough_and_fallback():
-    p = PerOpRounds({7: 42}, fallback=FixedRounds(11))
+    p = PerOpRounds({7: 42, 9: 0}, fallback=FixedRounds(11))
     assert p.rounds_for(Operation(7, "x", (0,)), _Code()) == 42
     assert p.rounds_for(Operation(8, "y", (0,)), _Code()) == 11
+    assert p.rounds_for(Operation(9, "structural", ()), _Code()) == 0
 
 
 def test_materializer_uses_only_ledger_and_direct_operation_edges():
     a = Operation(0, "a", (0,), has_successor=True)
-    b = Operation(1, "b", (0,), predecessors=(0,))
+    b = Operation(
+        1,
+        "b",
+        (0,),
+        predecessors=(0,),
+        decoder_boundary_predecessors=(0,),
+    )
     geometry = ResolvedCodeGeometry(
         code_name="fake",
         distance=5,
@@ -122,9 +129,16 @@ def test_materializer_adds_no_transitive_boundary_edge():
             "b",
             (0,),
             predecessors=(0,),
+            decoder_boundary_predecessors=(0,),
             has_successor=True,
         ),
-        Operation(2, "c", (0,), predecessors=(1,)),
+        Operation(
+            2,
+            "c",
+            (0,),
+            predecessors=(1,),
+            decoder_boundary_predecessors=(1,),
+        ),
     )
     geometry = ResolvedCodeGeometry(
         code_name="fake",
@@ -170,3 +184,64 @@ def test_materializer_adds_no_transitive_boundary_edge():
 
     assert plan.windows[(2, 0)].deps == [(1, 0)]
     assert (0, 0) not in plan.windows[(2, 0)].deps
+
+
+def test_materializer_uses_decoder_boundaries_not_workload_order():
+    source = Operation(
+        0,
+        "source",
+        (0,),
+        decoder_boundary_predecessors=(),
+        has_successor=True,
+    )
+    destination = Operation(
+        1,
+        "destination",
+        (0,),
+        predecessors=(0,),
+        decoder_boundary_predecessors=(),
+    )
+    geometry = ResolvedCodeGeometry(
+        code_name="fake",
+        distance=3,
+        commit_round_count=3,
+        buffer_round_count=3,
+        minimum_leading_buffer_round_count=3,
+        minimum_trailing_buffer_round_count=3,
+        one_patch_spatial_node_count=9,
+        buffer_floor_override_active=False,
+    )
+    resolved = tuple(
+        ResolvedOperationPlanning(
+            operation_id=operation.id,
+            code_geometry=geometry,
+            round_count=3,
+            round_ticks=1,
+            spatial_node_count=9,
+        )
+        for operation in (source, destination)
+    )
+    ledgers = tuple(
+        OperationWindowPlan(
+            operation_id=operation.id,
+            windows=(WindowGeometry(1, 1, 3, 3),),
+            internal_dependencies=(),
+            entry_window_indices=(0,),
+            exit_window_indices=(0,),
+            windowed=True,
+            batch_preceding_idle_rounds=False,
+        )
+        for operation in (source, destination)
+    )
+
+    plan = _materialize_execution_plan(
+        tuple(
+            OperationPlanningView.from_operation(operation)
+            for operation in (source, destination)
+        ),
+        resolved,
+        ledgers,
+    )
+
+    assert plan.windows[(1, 0)].deps == []
+    assert plan.successors == {0: [], 1: []}

@@ -1525,10 +1525,49 @@ def test_double_window_rejects_unsupported_runspec_shapes():
         RunSpec(ops=[_memory_op()],
                 dynamic_streams=[Operation(7, "stream", (1,))],
                 **base).build()
-    chained = [Operation(0, "a", (0,), has_successor=True),
-               Operation(1, "b", (1,), predecessors=(0,))]
+    chained = [
+        Operation(0, "a", (0,), has_successor=True),
+        Operation(
+            1,
+            "b",
+            (1,),
+            predecessors=(0,),
+            decoder_boundary_predecessors=(0,),
+        ),
+    ]
     with pytest.raises(ValueError, match="single-patch"):
         RunSpec(ops=chained, **base).build()
+
+
+def test_double_window_allows_workload_only_operation_ordering():
+    strategy = Switching(
+        expected_source=SAMPLED_CONFIDENCE_SOURCE,
+        confidence_threshold=0.5,
+        double_window=True,
+    )
+    strategy.validate_operations([
+        Operation(0, "prepare", (0,)),
+        Operation(1, "measure", (1,), predecessors=(0,)),
+    ])
+
+
+def test_double_window_rejects_decoder_boundary_operation_chains():
+    strategy = Switching(
+        expected_source=SAMPLED_CONFIDENCE_SOURCE,
+        confidence_threshold=0.5,
+        double_window=True,
+    )
+    operations = [
+        Operation(0, "first stream", (0,), has_successor=True),
+        Operation(
+            1,
+            "second stream",
+            (0,),
+            decoder_boundary_predecessors=(0,),
+        ),
+    ]
+    with pytest.raises(ValueError, match="single-patch"):
+        strategy.validate_operations(operations)
 
 
 def test_double_window_terminal_slab_waits_for_its_final_rounds():

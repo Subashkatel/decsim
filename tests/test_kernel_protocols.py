@@ -5,7 +5,7 @@ from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import DecodeJob, DecodeOutcome, DecodeResult, Window
 from decsim.protocols import (BoundaryPolicy, DecodingStrategy, Directive,
                           OutcomeDirective, RoundsPolicy, StrategyServices,
-                          Submission)
+                          Submission, SyndromeDevice)
 
 
 class _FakeServices:
@@ -217,11 +217,14 @@ def test_devices_and_switching_expose_circuit_scope_and_behavior_children():
 
     code = SurfaceCodeModel(d=3)
     bit_device = SyndromeBitDevice(code)
+    assert isinstance(bit_device, SyndromeDevice)
     assert bit_device.operation_circuit_scope == "none"
     assert _seed_child_paths(bit_device) == {
         (("field", "code"),): code,
     }
     assert TimingOnlyDevice.operation_circuit_scope == "none"
+    assert isinstance(TimingOnlyDevice(), SyndromeDevice)
+    assert isinstance(stim_device, SyndromeDevice)
 
     register = ThresholdRegister(
         default=0.5,

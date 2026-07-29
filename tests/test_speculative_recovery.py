@@ -591,7 +591,10 @@ def test_static_operation_seam_replays_without_a_data_dependent_crash():
     spec = RunSpec(
         ops=[
             Operation(0, "A", (0,), has_successor=True),
-            Operation(1, "B", (0,), predecessors=(0,)),
+            Operation(
+                1, "B", (0,), predecessors=(0,),
+                decoder_boundary_predecessors=(0,),
+            ),
         ],
         d=3,
         rounds_policy=FixedRounds(6),
@@ -667,7 +670,10 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
         result = simulate(RunSpec(
             ops=[
                 Operation(0, "A", (0,), has_successor=True),
-                Operation(1, "B", (0,), predecessors=(0,)),
+                Operation(
+                    1, "B", (0,), predecessors=(0,),
+                    decoder_boundary_predecessors=(0,),
+                ),
             ],
             d=3,
             rounds_policy=FixedRounds(6),
@@ -772,6 +778,7 @@ def _run_static_stream_recovery(policy, *, first_segment_rounds,
     second_segment = Operation(
         2, "segment-1", (0,), stream_id=stream.id,
         stream_offset=first_segment_rounds, predecessors=(first_segment.id,),
+        decoder_boundary_predecessors=(first_segment.id,),
     )
     feedback_consumer = Operation(
         3, "feedback-consumer", (1,), blocked_by=first_segment.id)

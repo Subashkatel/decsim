@@ -13,12 +13,10 @@ import tempfile
 @dataclass(frozen=True)
 class ChunkResult:
     schema_version: int
-    campaign_id: str
-    manifest_sha256: str
+    experiment_id: str
+    experiment_sha256: str
     config_id: str
-    sample_group_id: str
-    sampling_domain: str
-    seed_protocol_version: str
+    sample_set_id: str
     sample_batch_sha256: str
     batch_index: int
     first_shot_index: int
@@ -38,12 +36,10 @@ class ChunkResult:
 @dataclass(frozen=True)
 class ReducedResult:
     schema_version: int
-    campaign_id: str
-    manifest_sha256: str
+    experiment_id: str
+    experiment_sha256: str
     config_id: str
-    sample_group_id: str
-    sampling_domain: str
-    seed_protocol_version: str
+    sample_set_id: str
     attempted_shots: int
     primary_failures: int
     accepted_shots: int
@@ -66,12 +62,10 @@ class ShardConflictError(RuntimeError):
 
 _IDENTITY_FIELDS = (
     "schema_version",
-    "campaign_id",
-    "manifest_sha256",
+    "experiment_id",
+    "experiment_sha256",
     "config_id",
-    "sample_group_id",
-    "sampling_domain",
-    "seed_protocol_version",
+    "sample_set_id",
 )
 _COUNT_FIELDS = (
     "attempted_shots",
@@ -87,41 +81,9 @@ _COUNT_FIELDS = (
 )
 
 
-def _validate_chunk(row: ChunkResult) -> None:
-    if not isinstance(row, ChunkResult):
-        raise TypeError("rows must contain ChunkResult values")
-    for name in _IDENTITY_FIELDS[1:] + ("sample_batch_sha256",):
-        if type(getattr(row, name)) is not str or not getattr(row, name):
-            raise ValueError(f"{name} must be a nonempty string")
-    integer_fields = (
-        "schema_version",
-        "batch_index",
-        "first_shot_index",
-        "requested_shots",
-    ) + _COUNT_FIELDS
-    for name in integer_fields:
-        value = getattr(row, name)
-        if type(value) is not int or value < 0:
-            raise ValueError(f"{name} must be a nonnegative integer")
-    if row.schema_version != 1:
-        raise ValueError("schema_version must be 1")
-    if row.requested_shots == 0 or row.attempted_shots != row.requested_shots:
-        raise ValueError("attempted_shots must equal positive requested_shots")
-    if row.primary_failures > row.attempted_shots:
-        raise ValueError("primary_failures cannot exceed attempted_shots")
-    if row.accepted_shots > row.attempted_shots:
-        raise ValueError("accepted_shots cannot exceed attempted_shots")
-    if row.accepted_logical_failures > row.accepted_shots:
-        raise ValueError(
-            "accepted_logical_failures cannot exceed accepted_shots"
-        )
-
-
 def canonical_chunk_csv(rows) -> bytes:
     """Serialize chunk rows with a fixed header, ordering, and newline."""
     ordered = sorted(tuple(rows), key=lambda row: row.batch_index)
-    for row in ordered:
-        _validate_chunk(row)
     stream = io.StringIO(newline="")
     names = [field.name for field in fields(ChunkResult)]
     writer = csv.DictWriter(stream, fieldnames=names, lineterminator="\n")
@@ -175,8 +137,6 @@ def reduce_chunks(rows) -> ReducedResult:
     ordered = sorted(tuple(rows), key=lambda row: row.batch_index)
     if not ordered:
         raise ValueError("at least one chunk is required")
-    for row in ordered:
-        _validate_chunk(row)
     if len({row.batch_index for row in ordered}) != len(ordered):
         raise ValueError("duplicate batch index")
     first = ordered[0]
@@ -198,42 +158,3 @@ def reduce_chunks(rows) -> ReducedResult:
         **{name: getattr(first, name) for name in _IDENTITY_FIELDS},
         **totals,
     )
-
-
-def validate_paired_chunks(left_rows, right_rows) -> None:
-    """Require two offline arms to contain the same raw sampled shots."""
-    left = sorted(tuple(left_rows), key=lambda row: row.batch_index)
-    right = sorted(tuple(right_rows), key=lambda row: row.batch_index)
-    left_summary = reduce_chunks(left)
-    right_summary = reduce_chunks(right)
-    if (
-        left_summary.sampling_domain != "offline_stim_batch_v1"
-        or right_summary.sampling_domain != "offline_stim_batch_v1"
-    ):
-        raise ValueError("paired chunks require the offline sampling domain")
-    for name in (
-        "schema_version",
-        "campaign_id",
-        "manifest_sha256",
-        "sample_group_id",
-        "seed_protocol_version",
-    ):
-        if getattr(left_summary, name) != getattr(right_summary, name):
-            raise ValueError(f"paired chunks disagree on {name}")
-    if len(left) != len(right):
-        raise ValueError("paired chunks have different batch counts")
-    for left_row, right_row in zip(left, right):
-        left_range = (
-            left_row.batch_index,
-            left_row.first_shot_index,
-            left_row.requested_shots,
-        )
-        right_range = (
-            right_row.batch_index,
-            right_row.first_shot_index,
-            right_row.requested_shots,
-        )
-        if left_range != right_range:
-            raise ValueError("paired chunks have different shot ranges")
-        if left_row.sample_batch_sha256 != right_row.sample_batch_sha256:
-            raise ValueError("paired chunks have different raw sample digest")

@@ -1,6 +1,8 @@
 from dataclasses import replace
 import hashlib
 import json
+from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -389,3 +391,21 @@ def test_parallel_offline_run_matches_one_worker_byte_for_byte(tmp_path):
     one_chunks = sorted(path.read_bytes() for path in one.rglob("*.csv"))
     two_chunks = sorted(path.read_bytes() for path in two.rglob("*.csv"))
     assert one_chunks == two_chunks
+
+
+def test_slurm_array_maps_one_index_to_one_configuration(tmp_path):
+    configurations = tmp_path / "configurations.txt"
+    configurations.write_text("first.json\nsecond.json\nthird.json\n")
+    script = Path(__file__).parents[1] / "slurm_array.sh"
+    environment = {"SLURM_ARRAY_TASK_ID": "1"}
+
+    completed = subprocess.run(
+        ["bash", script, configurations, "/bin/echo"],
+        env=environment,
+        text=True,
+        capture_output=True,
+        check=True,
+    )
+
+    assert completed.stdout.strip() == "--config second.json"
+    assert "%" not in script.read_text()

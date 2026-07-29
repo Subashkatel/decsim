@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from ..message import SoftOutput, SoftOutputSource
 from ..detector_error_model import GRAPHLIKE_FAULT_MODEL_REQUIRED
+from ..mwpm_decoder.weights import matching_weights
 
 if TYPE_CHECKING:
     import stim
@@ -31,8 +32,6 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
         canonical_error_instructions,
         validate_graphlike_fault,
     )
-    from ..mwpm_decoder.weights import matching_weights
-
     num_det = dem.num_detectors
     num_obs = dem.num_observables
     h_cols: list = []
@@ -71,13 +70,6 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
     h = np.array(h_cols, dtype=np.uint8).T if h_cols else np.zeros((num_det, 0), np.uint8)
     o = np.array(o_cols, dtype=np.uint8).T if o_cols else np.zeros((num_obs, 0), np.uint8)
     return h, o, np.asarray(weights, dtype=float)
-
-
-def _weights_from_priors(priors):
-    """Convert probabilities with the MWPM decoder endpoint convention."""
-    from ..mwpm_decoder.weights import matching_weights
-
-    return matching_weights(priors)
 
 
 class ComplementaryGapMetric:
@@ -123,7 +115,7 @@ class ComplementaryGapMetric:
         return cls(
             faults.check,
             faults.observables,
-            _weights_from_priors(faults.priors),
+            matching_weights(faults.priors),
         )
 
     def evaluate(self, syndrome) -> SoftOutput:

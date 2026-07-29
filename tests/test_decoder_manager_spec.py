@@ -12,6 +12,7 @@ import pytest
 
 from decsim.decoders import CodeRouter
 from decsim.decoder_manager import DecoderManager
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.config import us
 from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
                              SAMPLED_CONFIDENCE_SOURCE,
@@ -368,6 +369,8 @@ def test_A7_strong_latency_does_not_affect_an_all_confident_run():
 # =====================================================================================
 
 class _FixedResultDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, logical_observables):
         self.logical_observables = logical_observables
 

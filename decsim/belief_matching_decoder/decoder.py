@@ -10,6 +10,10 @@ from ..adapters.window_decode_results import (
     result_from_selected_faults,
 )
 from ..message import DecodeResult, RunSeedChild, RunSeedPathSegment
+from ..detector_error_model import (
+    FaultRepresentation,
+    LINKED_FAULT_MODELS_REQUIRED,
+)
 from .window_decoder import belief_matching_window_decoder
 
 if TYPE_CHECKING:
@@ -20,7 +24,7 @@ if TYPE_CHECKING:
 class BeliefMatchingDecoder:
     """Decode one hyperedge-bearing window with belief matching."""
 
-    needs_hyperedges = True
+    fault_model_requirement = LINKED_FAULT_MODELS_REQUIRED
 
     def __init__(self, latency_model: "Decoder", max_iter: int = 30,
                  bp_method: str = "product_sum"):
@@ -47,12 +51,14 @@ class BeliefMatchingDecoder:
         model = job.dem
         if model is None:
             return DecodeResult(job.op_id, job.window_id)
-        if model.h_check is None:
+        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        model.require_faults(FaultRepresentation.PHYSICAL)
+        if model.physical_to_graphlike_detector_projection is None:
             raise ValueError(
-                f"{job.label}: BeliefMatchingDecoder needs hyperedge DEMs. The cluster must "
-                "build window models with belief_matching=True (it does so automatically when a "
-                "routed decoder exposes needs_hyperedges=True)")
+                f"{job.label}: BeliefMatchingDecoder needs the physical-to-"
+                "graphlike link"
+            )
         syndrome = payload_syndrome(job)
-        check_syndrome_size(job, syndrome, model)
+        check_syndrome_size(job, syndrome, faults)
         selected = self._inner(model, syndrome)
-        return result_from_selected_faults(job, model, selected)
+        return result_from_selected_faults(job, model, faults, selected)

@@ -20,8 +20,14 @@ from decsim.controllers import ModularController
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
-from decsim.detector_error_model import (build_window_error_models,
-                                             decode_windowed)
+from decsim.detector_error_model import (
+    FaultRepresentation,
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    PHYSICAL_FAULT_MODEL_REQUIRED,
+    PlacedFaultModel,
+    build_window_error_models,
+    decode_windowed,
+)
 from decsim.adapters.window_decode_results import result_from_selected_faults
 from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
 from decsim.codes import SurfaceCodeModel
@@ -74,17 +80,22 @@ def test_window_adapter_preserves_every_logical_observable_row():
     obs[9, 0] = 1
     obs[10, 1] = 1
     obs[11, 2] = 1
-    model = SimpleNamespace(
+    placed_faults = PlacedFaultModel(
+        representation=FaultRepresentation.GRAPHLIKE,
+        check=np.zeros((0, 3), dtype=np.uint8),
+        priors=np.zeros(3),
+        observables=obs,
         owned=np.ones(3, dtype=bool),
-        obs=obs,
         future_flips={},
-        defect_positions={},
+        source_fault_ids=(0, 1, 2),
     )
+    model = SimpleNamespace(defect_positions={})
     job = SimpleNamespace(op_id=7, window_id=4)
 
     result = result_from_selected_faults(
         job,
         model,
+        placed_faults,
         np.ones(3, dtype=np.uint8),
     )
 
@@ -167,7 +178,12 @@ def test_engine_matches_offline_reference_and_global_exactly():
             buffer_round_count=D,
         ).windows
     ]
-    ref_models = build_window_error_models(circuit, plan, detector_rounds=folded)
+    ref_models = build_window_error_models(
+        circuit,
+        plan,
+        detector_rounds=folded,
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
     ref_inner = matching_window_decoder()
     global_m = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
@@ -192,7 +208,16 @@ def test_engine_matches_offline_reference_and_global_exactly():
             seed=11 + s,
         )
         shot = device._dets[1]
-        pred_offline = (int(decode_windowed(ref_models, shot, ref_inner)[0]),)
+        pred_offline = (
+            int(
+                decode_windowed(
+                    ref_models,
+                    shot,
+                    ref_inner,
+                    selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+                )[0]
+            ),
+        )
         pred_global = (int(global_m.decode(shot)[0]),)
         assert pred_engine == pred_offline, f"shot {s}: engine != offline reference"
         assert pred_engine == pred_global, f"shot {s}: engine != global decode"
@@ -274,7 +299,12 @@ def test_engine_bposd_matches_offline_reference():
             buffer_round_count=D,
         ).windows
     ]
-    ref_models = build_window_error_models(circuit, plan, detector_rounds=folded)
+    ref_models = build_window_error_models(
+        circuit,
+        plan,
+        detector_rounds=folded,
+        fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
+    )
     ref_inner = bposd_window_decoder()
 
     for s in range(15):
@@ -286,7 +316,14 @@ def test_engine_bposd_matches_offline_reference():
             seed=29 + s,
         )
         pred_offline = (
-            int(decode_windowed(ref_models, device._dets[1], ref_inner)[0]),
+            int(
+                decode_windowed(
+                    ref_models,
+                    device._dets[1],
+                    ref_inner,
+                    selected_fault_representation=FaultRepresentation.PHYSICAL,
+                )[0]
+            ),
         )
         assert pred_engine == pred_offline, f"shot {s}: engine != offline BP-OSD reference"
 

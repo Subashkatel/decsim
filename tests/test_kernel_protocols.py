@@ -1,6 +1,7 @@
 """Port protocols are runtime-checkable and the seam types carry the contract."""
 import pytest
 
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import DecodeJob, DecodeOutcome, DecodeResult, Window
 from decsim.protocols import (BoundaryPolicy, DecodingStrategy, Directive,
                           OutcomeDirective, RoundsPolicy, StrategyServices,
@@ -34,6 +35,12 @@ class _FakeBoundary:
 
 class _FakeRounds:
     def rounds_for(self, op, code): return 11
+
+
+class _NoFaultDecoder:
+    """Explicit timing-only placeholder for decoder composition tests."""
+
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
 
 
 def test_protocols_are_structural():
@@ -120,9 +127,9 @@ def _seed_child_paths(component):
 def test_decoder_routers_expose_every_semantic_child():
     from decsim.decoders import CodeRouter, SwitchingRouter
 
-    default = object()
-    by_code = object()
-    by_none = object()
+    default = _NoFaultDecoder()
+    by_code = _NoFaultDecoder()
+    by_none = _NoFaultDecoder()
     code_router = CodeRouter(
         default,
         {"surface": by_code, None: by_none},
@@ -133,8 +140,8 @@ def test_decoder_routers_expose_every_semantic_child():
         (("field", "by_code"), ("none_key", None)): by_none,
     }
 
-    weak = object()
-    strong = object()
+    weak = _NoFaultDecoder()
+    strong = _NoFaultDecoder()
     assert _seed_child_paths(SwitchingRouter(weak, strong)) == {
         (("field", "weak"),): weak,
         (("field", "strong"),): strong,
@@ -162,15 +169,15 @@ def test_decoder_wrappers_expose_children_and_behavior_callbacks():
         SoftOutputDecoder,
     )
 
-    weak = object()
-    strong = object()
+    weak = _NoFaultDecoder()
+    strong = _NoFaultDecoder()
     switching = SwitchingDecoder(weak, strong, gamma_switch=0.5)
     assert _seed_child_paths(switching) == {
         (("field", "weak"),): weak,
         (("field", "strong"),): strong,
     }
 
-    inner = object()
+    inner = _NoFaultDecoder()
     probability_for = lambda job: 0.5
     sampled = SampledConfidenceDecoder(
         inner,
@@ -234,7 +241,7 @@ def test_real_decoder_adapters_expose_their_latency_models():
     from decsim.belief_matching_decoder import BeliefMatchingDecoder
     from decsim.bposd_decoder import BPOSDDecoder
     from decsim.mwpm_decoder import PyMatchingDecoder
-    from decsim.soft_output import UnionFindDecoder
+    from decsim.union_find_decoder import UnionFindDecoder
 
     latency_model = object()
     expected = {(("field", "latency_model"),): latency_model}

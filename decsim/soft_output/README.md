@@ -19,12 +19,33 @@ class SoftOutputMetric(Protocol):
 - **`ComplementaryGapMetric`** (`complementary.py`) — `g_comp = |w_comp - w_min|` for MWPM:
   decode normally to `w_min`, force the opposite logical class to `w_comp`. Reproduces the
   paper's P(error|g) and γ(g_th)-vs-d.
-- **`UnionFindDecoder`** (`union_find_decoder.py`) — hard Union-Find correction
-  plus cluster gap from that same decode's final radii. It quotients the actual
-  grown balls and searches globally for the shortest odd-logical closed walk.
-  The hard decode follows Delfosse and Nickerson arXiv:1709.06218v3; the
-  confidence follows Meister et al. arXiv:2405.07433v2, Definition 9 and
-  Algorithm 2.
+- **`UnionFindClusterGapDecoder`** (`cluster.py`) — confidence wrapper for
+  `decsim.union_find_decoder.UnionFindDecoder`. It quotients the actual balls
+  returned by that exact hard decode and searches globally for the shortest
+  odd-logical closed walk. The hard decode follows Delfosse and Nickerson
+  arXiv:1709.06218v3; confidence follows Meister et al.
+  arXiv:2405.07433v2, Definition 9 and Algorithm 2.
+
+Hard-only Union-Find is a normal decoder endpoint:
+```python
+from decsim.union_find_decoder import UnionFindDecoder
+```
+The paper cluster-gap pairing is explicit:
+```python
+from decsim.soft_output import UnionFindClusterGapDecoder
+from decsim.union_find_decoder import UnionFindDecoder
+
+decoder = UnionFindClusterGapDecoder(UnionFindDecoder(latency))
+```
+
+The hard decoder accepts graphlike/stringlike faults, uses uniform fair
+half-edge growth, supports every logical-observable row, and does not use fault
+priors as growth weights. Cluster gap requires exactly one nonzero logical row
+and reports normalized graph-edge units. Its exact log-odds interpretation
+applies only to the uniform repetition-code setting of Meister et al.,
+Theorem 10. Surface-code gap is confidence, not a calibrated failure
+probability. Host execution time is not simulated decoder latency, and this
+Python implementation makes no claim to the papers' complexity bounds.
 
 `SoftOutput` contains confidence only. Its immutable `source` identifies the
 method, cluster origin, growth schedule, gap units, correction variant, and
@@ -34,7 +55,7 @@ has one owner: `DecodeResult.logical_observables`.
 ## Landing it in the data path
 `SoftOutputDecoder(base, metric_cls)` (`decoder.py`) wraps an MWPM-family
 `decsim.protocols.Decoder` with a configured metric builder. The builder
-declares one `source`, one `run_manifest_config()`, and
+declares one `source`, one `fault_model_requirement`, and
 `from_window_model(model)`. `SoftOutputDecoder` sets
 `DecodeResult.soft_output` to typed confidence from the same placed window
 model the hard decoder uses. The A2 behavior-child path remains

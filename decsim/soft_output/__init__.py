@@ -1,4 +1,4 @@
-"""Soft-output confidence for MWPM and Union-Find decoding windows."""
+"""Soft-output confidence for decoder switching."""
 # ref: Toshio et al. 2510.25222 Sec. II.B
 from typing import Protocol, runtime_checkable
 
@@ -23,9 +23,9 @@ from .complementary import (
     dem_to_matrices,
 )
 from .decoder import SoftOutputDecoder
-from .union_find_decoder import (
+from .cluster import (
     UNION_FIND_CLUSTER_GAP_SOURCE,
-    UnionFindDecoder,
+    UnionFindClusterGapDecoder,
 )
 
 __all__ = [
@@ -37,5 +37,5 @@ __all__ = [
     "dem_to_matrices",
     "SoftOutputDecoder",
     "UNION_FIND_CLUSTER_GAP_SOURCE",
-    "UnionFindDecoder",
+    "UnionFindClusterGapDecoder",
 ]

@@ -28,8 +28,12 @@ stim = pytest.importorskip("stim")
 np = pytest.importorskip("numpy")
 pytest.importorskip("pymatching")
 
-from decsim.detector_error_model import (build_window_error_models,  # noqa: E402
-                                                 decode_windowed)
+from decsim.detector_error_model import (  # noqa: E402
+    FaultRepresentation,
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    build_window_error_models,
+    decode_windowed,
+)
 from decsim.codes import SurfaceCodeModel                                     # noqa: E402
 from decsim.mwpm_decoder import matching_window_decoder                       # noqa: E402
 from decsim.message import ResolvedCodeGeometry                               # noqa: E402
@@ -49,9 +53,18 @@ def _plan(d, rounds, buffer_rounds):
 
 
 def _fails(circ, plan, dets, obs):
-    models = build_window_error_models(circ, plan)
+    models = build_window_error_models(
+        circ,
+        plan,
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
     inner = matching_window_decoder()
-    return sum(int(decode_windowed(models, dets[i], inner)[0] != obs[i, 0])
+    return sum(int(decode_windowed(
+        models,
+        dets[i],
+        inner,
+        selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+    )[0] != obs[i, 0])
                for i in range(dets.shape[0]))
 
 

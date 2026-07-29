@@ -23,6 +23,10 @@ from .message import (
     SoftOutputSource,
 )
 from .config import us
+from .detector_error_model import (
+    DecoderFaultModelRequirement,
+    NO_FAULT_MODEL_REQUIRED,
+)
 
 SAMPLED_CONFIDENCE_SOURCE = SoftOutputSource(
     method="sampled_confidence",
@@ -139,10 +143,9 @@ class CodeRouter:
                 "CodeRouter keys must be exact built-in str or None; "
                 f"got {invalid_keys[0]!r}"
             )
-        self.needs_hyperedges = any(
-            _decoder_needs_hyperedges(decoder)
-            for decoder in (self.default, *self.by_code.values())
-        )
+        for decoder in (self.default, *self.by_code.values()):
+            if decoder is not None:
+                _decoder_fault_model_requirement(decoder)
 
     def run_seed_children(self):
         """Expose routed decoders under stable semantic paths."""
@@ -173,6 +176,16 @@ class CodeRouter:
         """Pick the decoder for this job (by code; default when unmapped)."""
         return self.by_code.get(job.code, self.default)
 
+    def fault_model_requirement_for(
+        self,
+        code: Optional[str],
+    ) -> DecoderFaultModelRequirement:
+        """Return only the requirement of the decoder selected for ``code``."""
+        decoder = self.by_code.get(code, self.default)
+        if decoder is None:
+            return NO_FAULT_MODEL_REQUIRED
+        return _decoder_fault_model_requirement(decoder)
+
 
 class FunctionLatencyDecoder:
     """Timing-only decoder whose service time comes from a caller-supplied
@@ -180,6 +193,8 @@ class FunctionLatencyDecoder:
     code, attempt — are on the job). One-off models belong next to the
     experiment that uses them; the named classes below are the established
     parameterizations of this one."""
+
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, latency_us_for):
         self.latency_us_for = latency_us_for   # job -> microseconds
@@ -238,6 +253,9 @@ class SwitchingDecoder(_RandomSeedConsumer):
         self.gamma_switch = gamma_switch
         self.handoff = us(handoff_us)
         self.t_comm_weak = us(t_comm_weak_us)
+        self.fault_model_requirement = _decoder_fault_model_requirement(
+            weak
+        ).joined(_decoder_fault_model_requirement(strong))
         self._initialize_run_seed_state(seed)
         self.switches = 0                      # diagnostic: how many jobs escalated
 
@@ -276,10 +294,8 @@ class SwitchingRouter:
     def __init__(self, weak: "Decoder", strong: "Decoder"):
         self.weak = weak
         self.strong = strong
-        self.needs_hyperedges = any(
-            _decoder_needs_hyperedges(decoder)
-            for decoder in (weak, strong)
-        )
+        _fault_model_requirement_for(weak, None)
+        _fault_model_requirement_for(strong, None)
 
     def run_seed_children(self):
         """Expose both routed decoder tiers."""
@@ -298,18 +314,50 @@ class SwitchingRouter:
         """Strong decoder for escalated jobs, weak decoder for everything else."""
         return self.strong if job.hint == "strong" else self.weak
 
+    def fault_model_requirement_for(
+        self,
+        code: Optional[str],
+    ) -> DecoderFaultModelRequirement:
+        """Join the weak and strong views that may own this code's window."""
+        return _fault_model_requirement_for(
+            self.weak,
+            code,
+        ).joined(_fault_model_requirement_for(self.strong, code))
 
-def _decoder_needs_hyperedges(decoder) -> bool:
-    """Resolve a decoder's optional model requirement at router construction."""
-    missing = object()
-    requirement = getattr(type(decoder), "needs_hyperedges", missing)
-    if requirement is missing:
-        requirement = getattr(decoder, "needs_hyperedges", False)
-    if type(requirement) is not bool:
+
+def _decoder_fault_model_requirement(
+    decoder,
+) -> DecoderFaultModelRequirement:
+    """Return one decoder's explicitly declared fault-model requirement."""
+    try:
+        requirement = decoder.fault_model_requirement
+    except AttributeError as error:
         raise TypeError(
-            f"{type(decoder).__name__}.needs_hyperedges must be an exact bool"
+            f"{type(decoder).__name__} must declare fault_model_requirement"
+        ) from error
+    if not isinstance(requirement, DecoderFaultModelRequirement):
+        raise TypeError(
+            f"{type(decoder).__name__}.fault_model_requirement must be a "
+            "DecoderFaultModelRequirement"
         )
     return requirement
+
+
+def _fault_model_requirement_for(
+    decoder_or_router,
+    code: Optional[str],
+) -> DecoderFaultModelRequirement:
+    """Resolve either a leaf declaration or a code-aware routed declaration."""
+    resolver = getattr(decoder_or_router, "fault_model_requirement_for", None)
+    if resolver is not None:
+        requirement = resolver(code)
+        if not isinstance(requirement, DecoderFaultModelRequirement):
+            raise TypeError(
+                f"{type(decoder_or_router).__name__}.fault_model_requirement_for "
+                "must return DecoderFaultModelRequirement"
+            )
+        return requirement
+    return _decoder_fault_model_requirement(decoder_or_router)
 
 
 class SampledConfidenceDecoder(_RandomSeedConsumer):
@@ -333,6 +381,7 @@ class SampledConfidenceDecoder(_RandomSeedConsumer):
         self.inner = inner
         self.escalation_probability = escalation_probability
         self.probability_for = probability_for
+        self.fault_model_requirement = _decoder_fault_model_requirement(inner)
         self._initialize_run_seed_state(seed)
 
     def run_seed_children(self):

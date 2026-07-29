@@ -169,18 +169,35 @@ def _surface_circuit(d=3, rounds=9, p=0.003):
 def test_decode_windowed_raises_on_unconsumed_artificial_defects():
     """A plan that truncates the stream leaves committed faults' future
     flips pending; the forward-only walk must raise, not silently drop."""
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+        decode_windowed,
+    )
 
     circuit = _surface_circuit()
     # Full coverage plan is [(1,3,6),(4,6,9),(7,9,9)]; truncate to the
     # first TWO windows and force is_last=False semantics by building the
     # full plan, then dropping the tail window from the walk.
-    models = build_window_error_models(circuit, [(1, 3, 6), (4, 6, 9), (7, 9, 9)])
-    assert any(m.future_flips for m in models[:2])
+    models = build_window_error_models(
+        circuit,
+        [(1, 3, 6), (4, 6, 9), (7, 9, 9)],
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
+    graphlike_faults = [
+        model.require_faults(FaultRepresentation.GRAPHLIKE)
+        for model in models[:2]
+    ]
+    assert any(faults.future_flips for faults in graphlike_faults)
     matchings = [pymatching.Matching.from_check_matrix(
-        m.check, weights=np.log((1 - m.priors) / m.priors),
-        faults_matrix=np.eye(np.asarray(m.check).shape[1], dtype=np.uint8))
-        for m in models[:2]]   # per-column selections (G9 review fix)
+        faults.check,
+        weights=np.log((1 - faults.priors) / faults.priors),
+        faults_matrix=np.eye(
+            np.asarray(faults.check).shape[1],
+            dtype=np.uint8,
+        ))
+        for faults in graphlike_faults]   # per-column selections (G9 review fix)
 
     def decode_window(model, syndrome):
         idx = models.index(model)
@@ -191,7 +208,12 @@ def test_decode_windowed_raises_on_unconsumed_artificial_defects():
     for shot in dets:
         # find a shot whose first-two-window decode commits a future flip
         try:
-            decode_windowed(list(models[:2]), shot, decode_window)
+            decode_windowed(
+                list(models[:2]),
+                shot,
+                decode_window,
+                selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+            )
         except RuntimeError as err:
             assert "artificial defects were never consumed" in str(err)
             saw_defect_shot = True

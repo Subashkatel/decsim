@@ -104,7 +104,12 @@ def test_skoric_windowed_decode_matches_global_on_frozen_shots():
     pytest.importorskip("pymatching")
     import json, pathlib
 
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+        decode_windowed,
+    )
     from decsim.mwpm_decoder import matching_window_decoder
 
     data = pathlib.Path(__file__).resolve().parent / "data"
@@ -114,9 +119,18 @@ def test_skoric_windowed_decode_matches_global_on_frozen_shots():
     shots = np.load(data / "rsc-d3-r6-p0.005.shots.npz")
     dets, obs = shots["dets"], shots["obs"]
 
-    models = build_window_error_models(circ, [tuple(w) for w in g["plan"]])
+    models = build_window_error_models(
+        circ,
+        [tuple(w) for w in g["plan"]],
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
     inner = matching_window_decoder()
-    windowed = sum(int(decode_windowed(models, dets[i], inner)[0] != obs[i, 0])
+    windowed = sum(int(decode_windowed(
+        models,
+        dets[i],
+        inner,
+        selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+    )[0] != obs[i, 0])
                    for i in range(g["n"]))
     assert abs(windowed - g["global_mwpm_fails"]) <= max(2, int(0.01 * g["n"]))
 

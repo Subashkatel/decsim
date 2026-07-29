@@ -335,7 +335,7 @@ class StimDevice:
         return self._detector_rounds(circuit, round_count)
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
-                                *, belief_matching: bool = False):
+                                *, fault_model_requirement):
         """Prepare the window model source for one finite Stim-backed stream."""
         if stream_op.circuit is None:
             return None
@@ -349,7 +349,7 @@ class StimDevice:
             "slicer": WindowSlicer(
                 stream_op.circuit,
                 detector_rounds=detector_rounds,
-                belief_matching=belief_matching),
+                fault_model_requirement=fault_model_requirement),
         }
         return round_count
 
@@ -373,7 +373,7 @@ class StimDevice:
 
     def window_models_for_operation(self, op: Operation, windows: list,
                                     round_count: int,
-                                    *, belief_matching: bool = False) -> list:
+                                    *, fault_model_requirement) -> list:
         """Build detector error models for one finite Stim operation."""
         if op.circuit is None or not windows:
             return []
@@ -391,7 +391,7 @@ class StimDevice:
             op.circuit,
             model_plan,
             detector_rounds=detector_rounds,
-            belief_matching=belief_matching)
+            fault_model_requirement=fault_model_requirement)
 
     def window_model_for_stream(self, stream_id, window, *, is_last: bool):
         """Build the detector error model for one dynamic stream window."""
@@ -405,7 +405,7 @@ class StimDevice:
             is_last=is_last)
 
     def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
-                                          *, belief_matching: bool = False,
+                                          *, fault_model_requirement,
                                           exclude_faults_touching=None):
         """Build an independent two-sided context model for a strong re-decode
         with one optional inclusive range assigned to another seam side."""
@@ -421,12 +421,12 @@ class StimDevice:
             (window.start_round, window.commit_lo,
              window.commit_hi, min(window.buffer_hi, round_count)),
             detector_rounds=detector_rounds,
-            belief_matching=belief_matching,
+            fault_model_requirement=fault_model_requirement,
             exclude_faults_touching=exclude_faults_touching)
 
     def strong_window_model_for_operation_with_exclusions(
         self, op: Operation, window, round_count: int, *,
-        belief_matching: bool = False, fault_exclusion_ranges: tuple,
+        fault_model_requirement, fault_exclusion_ranges: tuple,
     ):
         """Build a strong model with multiple non-owned inclusive ranges."""
         if op.circuit is None:
@@ -443,5 +443,5 @@ class StimDevice:
             (window.start_round, window.commit_lo,
              window.commit_hi, min(window.buffer_hi, round_count)),
             detector_rounds=detector_rounds,
-            belief_matching=belief_matching,
+            fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=fault_exclusion_ranges)

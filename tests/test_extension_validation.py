@@ -4,6 +4,7 @@ import numpy as np
 import pytest
 
 from decsim.decoders import PerRoundDecoder, SAMPLED_CONFIDENCE_SOURCE
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import TimingOnlyDevice
 from decsim.codes import SurfaceCodeModel
 from decsim.engine import Engine
@@ -60,7 +61,7 @@ class StaticOnlyDevice:
         return TimingOnlyDevice().round_payloads(operation, round_index)
 
     def window_models_for_operation(
-        self, operation, windows, round_count, *, belief_matching=False,
+        self, operation, windows, round_count, *, fault_model_requirement,
     ):
         return []
 
@@ -73,12 +74,14 @@ class MissingCircuitScopeDevice:
         return []
 
     def window_models_for_operation(
-        self, operation, windows, round_count, *, belief_matching=False,
+        self, operation, windows, round_count, *, fault_model_requirement,
     ):
         return []
 
 
 class StaticDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def latency(self, job):
         return 1
 
@@ -362,21 +365,44 @@ def test_plain_class_controller_provider_is_accepted_without_instantiation():
     spec.build()
 
 
-def test_router_owns_the_frozen_hyperedge_requirement():
+def test_router_resolves_only_the_selected_codes_fault_model_requirement():
     from decsim.decoders import CodeRouter
-
-    class HyperedgeDecoder(StaticDecoder):
-        needs_hyperedges = True
-
-    router = CodeRouter(
-        default=StaticDecoder(),
-        by_code={"surface": HyperedgeDecoder()},
+    from decsim.detector_error_model import (
+        DecoderFaultModelRequirement,
+        FaultRepresentation,
     )
 
-    completed = RunSpec(ops=[], router=router).build()
+    graphlike = DecoderFaultModelRequirement(
+        frozenset({FaultRepresentation.GRAPHLIKE}),
+    )
+    physical = DecoderFaultModelRequirement(
+        frozenset({FaultRepresentation.PHYSICAL}),
+    )
+    no_faults = DecoderFaultModelRequirement()
 
-    assert router.needs_hyperedges is True
-    assert completed.window_manager.needs_hyperedges is True
+    router = CodeRouter(
+        default=type(
+            "TimingDecoder",
+            (StaticDecoder,),
+            {"fault_model_requirement": no_faults},
+        )(),
+        by_code={
+            "surface": type(
+                "GraphlikeDecoder",
+                (StaticDecoder,),
+                {"fault_model_requirement": graphlike},
+            )(),
+            "bb": type(
+                "PhysicalDecoder",
+                (StaticDecoder,),
+                {"fault_model_requirement": physical},
+            )(),
+        },
+    )
+
+    assert router.fault_model_requirement_for("surface") == graphlike
+    assert router.fault_model_requirement_for("bb") == physical
+    assert router.fault_model_requirement_for("unmapped").representations == frozenset()
 
 
 def test_device_receives_the_exact_frozen_operation_round_count():

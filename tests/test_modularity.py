@@ -22,6 +22,7 @@ from decsim.layouts import UniformLayout
 from decsim.codes import SurfaceCodeModel
 from decsim.run_spec import RunSpec, simulate
 from decsim.decoders import PerRoundDecoder
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.pauli_frame import PauliFrame
 
 
@@ -39,21 +40,23 @@ class MyDevice:
     def idle_round_payloads(self, op, stream_id, global_round, patch):
         return [SyndromePayload(stream_id, patch, global_round)]
 
-    def register_dynamic_stream(self, stream_op, round_count, *, belief_matching=False):
+    def register_dynamic_stream(
+        self, stream_op, round_count, *, fault_model_requirement,
+    ):
         return None
 
     def validate_stream_length(self, stream_op, stream_round_count):
         return None
 
     def window_models_for_operation(self, op, windows, round_count,
-                                    *, belief_matching=False):
+                                    *, fault_model_requirement):
         return []
 
     def window_model_for_stream(self, stream_id, window, *, is_last):
         return None
 
     def strong_window_model_for_operation(self, op, window, round_count,
-                                          *, belief_matching=False,
+                                          *, fault_model_requirement,
                                           exclude_faults_touching=None):
         return None
 
@@ -123,6 +126,8 @@ class MyRounds:
     def rounds_for(self, op, code): return 7
 
 class MyDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self): self.decodes = 0
     def latency(self, job): return us(0.2)
     def decode(self, job):
@@ -142,11 +147,13 @@ class MyRouter:
     def __init__(self, decoder):
         self.decoder = decoder
         self.calls = 0
-        self.needs_hyperedges = False
 
     def route(self, job):
         self.calls += 1
         return self.decoder
+
+    def fault_model_requirement_for(self, code):
+        return self.decoder.fault_model_requirement
 
 class MyController:
     def __init__(self, engine, links):

@@ -10,6 +10,7 @@ from decsim.decoders import (CodeRouter, FunctionLatencyDecoder,
                              SAMPLED_CONFIDENCE_SOURCE,
                              SampledConfidenceDecoder, SwitchingDecoder,
                              SwitchingRouter)
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
 from decsim.message import DecodeJob, DecodeResult, Operation
 from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
@@ -22,6 +23,8 @@ from decsim.switching import Switching
 
 
 class _RecordingTimingChild:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, latency_ticks, logical_bit):
         self.latency_ticks = latency_ticks
         self.logical_bit = logical_bit
@@ -169,10 +172,12 @@ def test_custom_router_by_hint():
     class HintRouter:
         def __init__(self, normal, strong):
             self.normal, self.strong = normal, strong
-            self.needs_hyperedges = False
 
         def route(self, job):
             return self.strong if job.hint == "strong" else self.normal
+
+        def fault_model_requirement_for(self, code):
+            return NO_FAULT_MODEL_REQUIRED
 
     weak, strong = PresetLatencyDecoder(1.0), PresetLatencyDecoder(10.0)
     router = HintRouter(weak, strong)

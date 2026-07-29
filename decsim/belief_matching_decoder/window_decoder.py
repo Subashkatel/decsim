@@ -10,9 +10,14 @@ if TYPE_CHECKING:
 
 def _require_belief_matching_model(model: "WindowErrorModel") -> None:
     """Fail if the window model lacks hyperedge data for belief matching."""
-    if model.h_check is None or model.h_priors is None or model.h2e is None:
-        raise ValueError("belief_matching_window_decoder needs models built with "
-                         "build_window_error_models(..., belief_matching=True)")
+    from ..detector_error_model import FaultRepresentation
+
+    model.require_faults(FaultRepresentation.GRAPHLIKE)
+    model.require_faults(FaultRepresentation.PHYSICAL)
+    if model.physical_to_graphlike_detector_projection is None:
+        raise ValueError(
+            "belief_matching_window_decoder needs a physical-to-graphlike link"
+        )
 
 
 def _cache_entry(model: "WindowErrorModel", cache: dict,
@@ -30,20 +35,26 @@ def _cache_entry(model: "WindowErrorModel", cache: dict,
 
     from ..detector_error_model import validate_belief_matching_matrices
 
+    from ..detector_error_model import FaultRepresentation
+    graphlike = model.require_faults(FaultRepresentation.GRAPHLIKE)
+    physical = model.require_faults(FaultRepresentation.PHYSICAL)
+
     validate_belief_matching_matrices(
-        model.check,
-        model.obs,
-        model.h_check,
-        model.h_priors,
-        model.h2e,
+        graphlike.check,
+        graphlike.observables,
+        physical.check,
+        physical.priors,
+        model.physical_to_graphlike_detector_projection,
         location="belief-matching window model",
     )
-    bp = BpDecoder(csr_matrix(model.h_check),
-                   error_channel=list(model.h_priors),
+    bp = BpDecoder(csr_matrix(physical.check),
+                   error_channel=list(physical.priors),
                    max_iter=max_iter,
                    bp_method=bp_method,
                    input_vector_type="syndrome")
-    edge_from_hyperedge = csr_matrix(model.h2e.astype(np.float64))
+    edge_from_hyperedge = csr_matrix(
+        model.physical_to_graphlike_detector_projection.astype(np.float64)
+    )
     entry = (bp, edge_from_hyperedge)
     cache[id(model)] = entry
     # id() values are recycled by CPython; evict on GC so a fresh model cannot
@@ -75,14 +86,17 @@ def belief_matching_window_decoder(max_iter: int = 30, bp_method: str = "product
         import pymatching
 
         _require_belief_matching_model(model)
+        from ..detector_error_model import FaultRepresentation
+        graphlike = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        physical = model.require_faults(FaultRepresentation.PHYSICAL)
         syndrome = np.asarray(syndrome, dtype=np.uint8)
-        if model.h_check.shape[1] == 0:                # empty window
-            return np.zeros(model.check.shape[1], dtype=np.uint8)
+        if physical.check.shape[1] == 0:                # empty window
+            return np.zeros(graphlike.check.shape[1], dtype=np.uint8)
 
         bp, edge_from_hyperedge = _cache_entry(model, cache, max_iter, bp_method)
         edge_posteriors = _edge_posteriors(bp, edge_from_hyperedge, syndrome)
         matching = pymatching.Matching.from_check_matrix(
-            model.check,
+            graphlike.check,
             weights=-np.log(edge_posteriors))
         return np.asarray(matching.decode(syndrome), dtype=np.uint8)
 

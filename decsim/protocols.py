@@ -280,9 +280,9 @@ class Decoder(Protocol):
 class DecoderRouter(Protocol):
     """Port 9. Selects a decoder for each job."""
 
-    needs_hyperedges: bool
-
     def route(self, job: DecodeJob) -> Decoder: ...
+
+    def fault_model_requirement_for(self, code: Optional[str]): ...
 
 
 @runtime_checkable
@@ -399,7 +399,7 @@ class SyndromeDevice(Protocol):
     ) -> list: ...
 
     def register_dynamic_stream(
-        self, stream_op, round_count: int, *, belief_matching: bool = False,
+        self, stream_op, round_count: int, *, fault_model_requirement,
     ): ...
 
     def validate_stream_length(
@@ -408,7 +408,7 @@ class SyndromeDevice(Protocol):
 
     def window_models_for_operation(
         self, op, windows: list, round_count: int, *,
-        belief_matching: bool = False,
+        fault_model_requirement,
     ) -> list: ...
 
     def window_model_for_stream(
@@ -417,7 +417,7 @@ class SyndromeDevice(Protocol):
 
     def strong_window_model_for_operation(
         self, op, window, round_count: int, *,
-        belief_matching: bool = False, exclude_faults_touching=None,
+        fault_model_requirement, exclude_faults_touching=None,
     ): ...
 
 
@@ -427,7 +427,7 @@ class MultiFaultExclusionSyndromeDevice(Protocol):
 
     def strong_window_model_for_operation_with_exclusions(
         self, op, window, round_count: int, *,
-        belief_matching: bool = False, fault_exclusion_ranges: tuple,
+        fault_model_requirement, fault_exclusion_ranges: tuple,
     ): ...
 
 

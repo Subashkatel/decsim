@@ -53,12 +53,23 @@ def test_soft_output_decoder_requires_a_configured_metric_factory():
 
 
 def test_soft_output_decoder_releases_metrics_for_dead_window_models():
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
     from decsim.message import DecodeJob, DecodeResult, SoftOutput
     from decsim.soft_output import COMPLEMENTARY_GAP_SOURCE
 
+    class Faults:
+        observables = np.array([[1]], dtype=np.uint8)
+
     class Model:
         def __init__(self):
-            self.obs = np.array([[1]], dtype=np.uint8)
+            self.faults = Faults()
+
+        def require_faults(self, representation):
+            assert representation is FaultRepresentation.GRAPHLIKE
+            return self.faults
 
     class Metric:
         def __init__(self, model):
@@ -74,6 +85,7 @@ def test_soft_output_decoder_releases_metrics_for_dead_window_models():
 
     class MetricFactory:
         source = COMPLEMENTARY_GAP_SOURCE
+        fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
 
         def __init__(self):
             self.metric_references = []
@@ -84,6 +96,8 @@ def test_soft_output_decoder_releases_metrics_for_dead_window_models():
             return metric
 
     class BaseDecoder:
+        fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
+
         def decode(self, job):
             return DecodeResult(job.op_id, job.window_id)
 
@@ -236,11 +250,8 @@ def test_engine_soft_output_is_error_predictive():
     assert np.corrcoef(gaps, errs)[0, 1] < 0
 
 
-def test_union_find_engine_path_reproduces_a_deterministic_logical_fault():
-    from decsim.soft_output import (
-        UNION_FIND_CLUSTER_GAP_SOURCE,
-        UnionFindDecoder,
-    )
+def test_hard_union_find_engine_path_reproduces_a_deterministic_logical_fault():
+    from decsim.union_find_decoder import UnionFindDecoder
 
     circuit = stim.Circuit(
         """
@@ -270,7 +281,47 @@ def test_union_find_engine_path_reproduces_a_deterministic_logical_fault():
     assert decoded == (1,)
     assert decoder.last_result.correction.tolist() == [1]
     assert decoder.last_result.logical_observables == (1,)
-    assert decoder.last_result.soft_output.source == (
-        UNION_FIND_CLUSTER_GAP_SOURCE
+    assert decoder.last_result.soft_output is None
+
+
+@pytest.mark.parametrize("distance", (3, 5))
+def test_real_surface_memory_cluster_wrapper_preserves_hard_result(distance):
+    from decsim.soft_output import (
+        UNION_FIND_CLUSTER_GAP_SOURCE,
+        UnionFindClusterGapDecoder,
     )
-    assert np.isinf(decoder.last_result.soft_output.gap)
+    from decsim.union_find_decoder import UnionFindDecoder
+
+    class CapturingClusterDecoder(UnionFindClusterGapDecoder):
+        def decode(self, job):
+            result = super().decode(job)
+            self.last_result = result
+            return result
+
+    circuit = _circuit(distance, distance, 2e-3)
+    for seed in (8803, 8805, 8807, 8809):
+        hard_prediction = _naive_shot(
+            circuit,
+            StimDevice(),
+            UnionFindDecoder(_ZeroLatency()),
+            distance,
+            distance,
+            seed=seed,
+        )
+        cluster_decoder = CapturingClusterDecoder(
+            UnionFindDecoder(_ZeroLatency())
+        )
+        cluster_prediction = _naive_shot(
+            circuit,
+            StimDevice(),
+            cluster_decoder,
+            distance,
+            distance,
+            seed=seed,
+        )
+
+        assert cluster_prediction == hard_prediction
+        assert cluster_decoder.last_result.soft_output.source == (
+            UNION_FIND_CLUSTER_GAP_SOURCE
+        )
+        assert cluster_decoder.last_result.soft_output.gap >= 0.0

@@ -114,7 +114,7 @@ def _closure_cache(decode):
                 if isinstance(cell.cell_contents, dict))
 
 
-def _window_models(belief_matching=False):
+def _window_models(fault_model_requirement):
     stim = pytest.importorskip("stim")
     from decsim.detector_error_model import build_window_error_models
     circuit = stim.Circuit.generated(
@@ -125,18 +125,27 @@ def _window_models(belief_matching=False):
         before_round_data_depolarization=0.003)
     n_layers = 1 + max(int(c[-1]) for c in
                        circuit.get_detector_coordinates().values())
-    return build_window_error_models(circuit, [(1, n_layers, n_layers)],
-                                     belief_matching=belief_matching)
+    return build_window_error_models(
+        circuit,
+        [(1, n_layers, n_layers)],
+        fault_model_requirement=fault_model_requirement,
+    )
 
 
 def test_bposd_cache_evicts_entries_when_models_are_collected():
     pytest.importorskip("ldpc")
     np = pytest.importorskip("numpy")
     from decsim.bposd_decoder import bposd_window_decoder
-    models = _window_models()
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        PHYSICAL_FAULT_MODEL_REQUIRED,
+    )
+    models = _window_models(PHYSICAL_FAULT_MODEL_REQUIRED)
     decode = bposd_window_decoder()
     cache = _closure_cache(decode)
-    decode(models[0], np.zeros(models[0].check.shape[0], dtype=np.uint8))
+    physical = models[0].require_faults(FaultRepresentation.PHYSICAL)
+    decode(models[0], np.zeros(physical.check.shape[0], dtype=np.uint8))
+    del physical
     assert len(cache) == 1
     del models
     gc.collect()
@@ -148,10 +157,16 @@ def test_belief_matching_cache_evicts_entries_when_models_are_collected():
     pytest.importorskip("pymatching")
     np = pytest.importorskip("numpy")
     from decsim.belief_matching_decoder import belief_matching_window_decoder
-    models = _window_models(belief_matching=True)
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        LINKED_FAULT_MODELS_REQUIRED,
+    )
+    models = _window_models(LINKED_FAULT_MODELS_REQUIRED)
     decode = belief_matching_window_decoder()
     cache = _closure_cache(decode)
-    decode(models[0], np.zeros(models[0].h_check.shape[0], dtype=np.uint8))
+    physical = models[0].require_faults(FaultRepresentation.PHYSICAL)
+    decode(models[0], np.zeros(physical.check.shape[0], dtype=np.uint8))
+    del physical
     assert len(cache) == 1
     del models
     gc.collect()

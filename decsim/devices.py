@@ -52,7 +52,7 @@ class TimingOnlyDevice:
         return [SyndromePayload(stream_id, patch, global_round)]
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
-                                *, belief_matching: bool = False):
+                                *, fault_model_requirement):
         return None
 
     def validate_stream_length(self, stream_op: Operation,
@@ -61,7 +61,7 @@ class TimingOnlyDevice:
 
     def window_models_for_operation(self, op: Operation, windows: list,
                                     round_count: int,
-                                    *, belief_matching: bool = False) -> list:
+                                    *, fault_model_requirement) -> list:
         return []
 
     def window_model_for_stream(self, stream_id, window, *, is_last: bool):
@@ -69,13 +69,13 @@ class TimingOnlyDevice:
 
     def strong_window_model_for_operation(self, op: Operation, window,
                                           round_count: int,
-                                          *, belief_matching: bool = False,
+                                          *, fault_model_requirement,
                                           exclude_faults_touching=None):
         return None
 
     def strong_window_model_for_operation_with_exclusions(
         self, op: Operation, window, round_count: int, *,
-        belief_matching: bool = False, fault_exclusion_ranges: tuple,
+        fault_model_requirement, fault_exclusion_ranges: tuple,
     ):
         return None
 
@@ -309,7 +309,7 @@ class SyndromeBitDevice:
                                 code=self.code.name, size_bits=len(bits))]
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
-                                *, belief_matching: bool = False):
+                                *, fault_model_requirement):
         """Fake-bit streams have no fixed detector-model length."""
         return None
 
@@ -320,7 +320,7 @@ class SyndromeBitDevice:
 
     def window_models_for_operation(self, op: Operation, windows: list,
                                     round_count: int,
-                                    *, belief_matching: bool = False) -> list:
+                                    *, fault_model_requirement) -> list:
         """Fake-bit decode jobs carry no detector error model."""
         return []
 
@@ -329,14 +329,14 @@ class SyndromeBitDevice:
         return None
 
     def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
-                                          *, belief_matching: bool = False,
+                                          *, fault_model_requirement,
                                           exclude_faults_touching=None):
         """Fake-bit strong re-decodes carry no detector error model."""
         return None
 
     def strong_window_model_for_operation_with_exclusions(
         self, op: Operation, window, round_count: int, *,
-        belief_matching: bool = False, fault_exclusion_ranges: tuple,
+        fault_model_requirement, fault_exclusion_ranges: tuple,
     ):
         """Fake-bit strong re-decodes carry no detector error model."""
         return None

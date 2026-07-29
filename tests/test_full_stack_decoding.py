@@ -183,6 +183,7 @@ def test_engine_matches_offline_reference_and_global_exactly():
         plan,
         detector_rounds=folded,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     ref_inner = matching_window_decoder()
     global_m = pymatching.Matching.from_detector_error_model(
@@ -304,6 +305,7 @@ def test_engine_bposd_matches_offline_reference():
         plan,
         detector_rounds=folded,
         fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     ref_inner = bposd_window_decoder()
 

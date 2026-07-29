@@ -639,7 +639,7 @@ class _DispatchRecorder:
 
 def _double_window_run(
     escalate_window, rounds=30, strong_tau=F_STRONG,
-    window_interaction=None, device=None, metrics=None,
+    window_interaction=None, device=None, metrics=None, code=None,
 ):
     """One memory op on sliding d/d windows; exactly the window with index
     escalate_window reports low confidence (deterministic, no sampling)."""
@@ -659,7 +659,8 @@ def _double_window_run(
     res = simulate(RunSpec(
               ops=[_memory_op()],
               num_units=1,
-              d=D,
+              d=None if code is not None else D,
+              code=code,
               rounds_policy=FixedRounds(rounds),
               round_us=TAU_GEN_US,
               scheme=SlidingWindowScheme(),
@@ -672,6 +673,306 @@ def _double_window_run(
               make_metrics=make_metrics,
           ), verbose=False)
     return res, weak, strong
+
+
+def _nonaligned_code():
+    return SurfaceCodeModel(
+        d=D,
+        commit_rounds_override=7,
+        buffer_rounds_override=3,
+    )
+
+
+def test_double_window_rephases_residual_inside_crossing_final_commit():
+    result, weak, strong = _double_window_run(
+        escalate_window=1,
+        rounds=21,
+        code=_nonaligned_code(),
+    )
+
+    restart = result.window_manager.windows[(0, 2)]
+    assert (
+        restart.buffer_lo,
+        restart.commit_lo,
+        restart.commit_hi,
+        restart.buffer_hi,
+        restart.n_rounds,
+    ) == (18, 21, 21, 21, 4)
+    assert [job.window_id for _, job in weak.starts] == [0, 1, 2]
+    (strong_start_tick, strong_job), = strong.starts
+    restart_job = next(job for _, job in weak.starts if job.window_id == 2)
+    assert strong_job.strong_decode_for == (0, 1)
+    assert restart.t_done is not None
+    assert strong_start_tick > restart.t_done
+    assert restart_job.n_rounds == 4
+
+
+def test_double_window_rephases_and_clamps_complete_nonaligned_suffix():
+    recorded_model_windows = []
+
+    class RecordingDevice(TimingOnlyDevice):
+        def window_models_for_operation(
+            self, op, windows, round_count, *,
+            fault_model_requirement, fault_exclusion_ranges,
+        ):
+            recorded_model_windows.append((
+                tuple(
+                    (
+                        window.buffer_lo,
+                        window.commit_lo,
+                        window.commit_hi,
+                        window.buffer_hi,
+                        window.n_rounds,
+                    )
+                    for window in windows
+                ),
+                fault_exclusion_ranges,
+            ))
+            return []
+
+    result, weak, _ = _double_window_run(
+        escalate_window=1,
+        rounds=50,
+        code=_nonaligned_code(),
+        device=RecordingDevice(),
+    )
+
+    runtime = result.window_manager
+    suffix_keys = [(0, index) for index in range(2, 7)]
+    assert [
+        (
+            runtime.windows[key].buffer_lo,
+            runtime.windows[key].commit_lo,
+            runtime.windows[key].commit_hi,
+            runtime.windows[key].buffer_hi,
+            runtime.windows[key].n_rounds,
+        )
+        for key in suffix_keys
+    ] == [
+        (18, 21, 27, 30, 13),
+        (28, 28, 34, 37, 10),
+        (35, 35, 41, 44, 10),
+        (42, 42, 48, 50, 9),
+        (49, 49, 50, 50, 2),
+    ]
+    assert (0, 7) not in runtime.windows
+    suffix_model_call = next(
+        windows
+        for windows, exclusions in recorded_model_windows
+        if exclusions == ((1, 20),)
+    )
+    assert suffix_model_call[-1] == (49, 49, 50, 50, 2)
+    suffix_jobs = [
+        job for _, job in weak.starts
+        if job.window_id in {2, 3, 4, 5, 6}
+    ]
+    assert max(
+        payload.round_index
+        for job in suffix_jobs
+        for payload in job.payloads
+    ) <= 50
+
+
+def test_double_window_rephase_preserves_conflicting_registry_owner():
+    class SeedConflict(DefaultWindowInteraction):
+        runtime = None
+        conflict = None
+
+        def plan_strong_region(
+            self, weak_window, later_windows, operation_round_count,
+        ):
+            plan = super().plan_strong_region(
+                weak_window, later_windows, operation_round_count)
+            self.conflict = _PendingEscalation(
+                key=weak_window.key,
+                weak_job=None,
+                label="existing",
+                resolved_region=None,
+                strong_window=Window(
+                    op_id=0,
+                    k=1,
+                    commit_lo=8,
+                    commit_hi=20,
+                    buffer_lo=5,
+                    buffer_hi=23,
+                    n_rounds=19,
+                ),
+                strong_model=None,
+                wsd_arrival_ticks=0,
+                phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
+            )
+            self.runtime._escalations.register_far(
+                self.conflict, (77, 0))
+            return plan
+
+    interaction = SeedConflict()
+    captured = {}
+
+    def connect_interaction(engine, window_manager, decoder_manager, chip, factory):
+        interaction.runtime = window_manager
+        captured["runtime"] = window_manager
+        return []
+
+    with pytest.raises(RuntimeError, match="duplicate strong escalation"):
+        _double_window_run(
+            escalate_window=1,
+            rounds=50,
+            code=_nonaligned_code(),
+            window_interaction=interaction,
+            metrics=connect_interaction,
+        )
+
+    runtime = captured["runtime"]
+    assert runtime._escalations.peek_key((0, 1)) is interaction.conflict
+    assert runtime._escalations.peek_far((77, 0)) is interaction.conflict
+    assert runtime._escalations._by_key == {(0, 1): interaction.conflict}
+    assert runtime._escalations._by_far_boundary == {(77, 0): (0, 1)}
+    assert runtime._escalations._by_terminal_operation == {}
+    assert runtime.op_windows[0] == list(range(8))
+    assert runtime.window_count[0] == 8
+    assert runtime.total_windows == 8
+    assert runtime._committed_per_op == {0: 1}
+    assert runtime.absorbed_windows == set()
+    assert (0, 7) in runtime.windows
+
+
+@pytest.mark.parametrize("published_state", ["boundary", "external_edge"])
+def test_double_window_rephase_rejects_historical_or_external_suffix_state(
+    published_state,
+):
+    captured = {}
+
+    def inject_state(engine, window_manager, decoder_manager, chip, factory):
+        captured["runtime"] = window_manager
+        original_defer = window_manager.defer_strong_escalation
+
+        def defer_with_published_state(weak_job):
+            if published_state == "boundary":
+                window_manager._held_boundary[(0, 2)] = (0, {})
+            else:
+                window_manager.windows[(0, 7)].dependents.append((99, 0))
+            original_defer(weak_job)
+
+        window_manager.defer_strong_escalation = defer_with_published_state
+        return []
+
+    expected = "published state|external or non-serial edge|external edge"
+    with pytest.raises(RuntimeError, match=expected):
+        _double_window_run(
+            escalate_window=1,
+            rounds=50,
+            code=_nonaligned_code(),
+            metrics=inject_state,
+        )
+
+    runtime = captured["runtime"]
+    assert runtime.op_windows[0] == list(range(8))
+    assert runtime.pending_escalations == {}
+    assert (0, 7) in runtime.windows
+
+
+def test_double_window_rephase_rolls_back_manager_and_lease_state():
+    captured = {}
+
+    def inject_failure(engine, window_manager, decoder_manager, chip, factory):
+        captured["runtime"] = window_manager
+        original_replace = window_manager.store.replace
+        target_ids = [
+            lease_id
+            for window_index in range(2, 8)
+            for lease_id in (
+                (0, window_index),
+                ((0, window_index), "strong"),
+            )
+        ] + [((0, 1), "strong")]
+        captured["old_leases"] = None
+        replacement_count = 0
+
+        def fail_second_replacement(lease_id, round_keys):
+            nonlocal replacement_count
+            if lease_id in target_ids:
+                if captured["old_leases"] is None:
+                    captured["old_leases"] = {
+                        target_id: window_manager.store.lease_round_keys(target_id)
+                        for target_id in target_ids
+                    }
+                replacement_count += 1
+                if replacement_count == 2:
+                    raise RuntimeError("injected suffix lease failure")
+            original_replace(lease_id, round_keys)
+
+        window_manager.store.replace = fail_second_replacement
+        return []
+
+    with pytest.raises(RuntimeError, match="injected suffix lease failure"):
+        _double_window_run(
+            escalate_window=1,
+            rounds=50,
+            code=_nonaligned_code(),
+            metrics=inject_failure,
+        )
+
+    runtime = captured["runtime"]
+    assert runtime.op_windows[0] == list(range(8))
+    assert runtime.window_count[0] == 8
+    assert runtime.total_windows == 8
+    assert [
+        (
+            runtime.windows[(0, index)].buffer_lo,
+            runtime.windows[(0, index)].commit_lo,
+            runtime.windows[(0, index)].commit_hi,
+            runtime.windows[(0, index)].buffer_hi,
+        )
+        for index in range(2, 8)
+    ] == [
+        (15, 15, 21, 24),
+        (22, 22, 28, 31),
+        (29, 29, 35, 38),
+        (36, 36, 42, 45),
+        (43, 43, 49, 52),
+        (50, 50, 50, 53),
+    ]
+    assert runtime.absorbed_windows == set()
+    assert runtime.pending_escalations == {}
+    assert set(runtime.logical_contributions) == {(0, 0)}
+    assert runtime.windows[(0, 1)].dependents == [(0, 2)]
+    for lease_id, old_round_keys in captured["old_leases"].items():
+        assert runtime.store.lease_round_keys(lease_id) == old_round_keys
+    with pytest.raises(KeyError):
+        runtime.store.lease_round_keys(((0, 1), "suffix-rephase-guard"))
+
+
+def test_double_window_rephase_rollback_restores_absent_commit_count():
+    captured = {}
+
+    def inject_failure(engine, window_manager, decoder_manager, chip, factory):
+        captured["runtime"] = window_manager
+        original_replace = window_manager.store.replace
+        replacement_count = 0
+
+        def fail_second_replacement(lease_id, round_keys):
+            nonlocal replacement_count
+            if lease_id in {(0, 1), ((0, 1), "strong")}:
+                replacement_count += 1
+                if replacement_count == 2:
+                    raise RuntimeError("injected first-window suffix failure")
+            original_replace(lease_id, round_keys)
+
+        window_manager.store.replace = fail_second_replacement
+        return []
+
+    with pytest.raises(RuntimeError, match="first-window suffix failure"):
+        _double_window_run(
+            escalate_window=0,
+            rounds=50,
+            code=_nonaligned_code(),
+            metrics=inject_failure,
+        )
+
+    runtime = captured["runtime"]
+    assert runtime._committed_per_op == {}
+    assert runtime.pending_escalations == {}
+    assert runtime.op_windows[0] == list(range(8))
 
 
 def test_double_window_backlog_records_pending_assignment_before_admission():
@@ -907,6 +1208,28 @@ def test_restart_owned_seam_requires_multi_range_device_capability():
             device=SingleRangeOnlyDevice(),
         )
 
+
+
+def test_aligned_double_window_rejects_float_commit_bounds():
+    class FloatCommitBounds(DefaultWindowInteraction):
+        def plan_strong_region(
+            self, weak_window, later_windows, operation_round_count,
+        ):
+            plan = super().plan_strong_region(
+                weak_window, later_windows, operation_round_count)
+            object.__setattr__(plan, "commit_lo", float(plan.commit_lo))
+            object.__setattr__(plan, "commit_hi", float(plan.commit_hi))
+            return plan
+
+    with pytest.raises(
+        TypeError,
+        match="logical contribution bounds must be exact ints",
+    ):
+        _double_window_run(
+            escalate_window=2,
+            rounds=30,
+            window_interaction=FloatCommitBounds(),
+        )
 
 def test_double_window_retains_every_round_added_to_the_restart_buffer():
     class EarlierRetainedRestart(DefaultWindowInteraction):

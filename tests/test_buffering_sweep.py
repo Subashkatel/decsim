@@ -57,6 +57,7 @@ def _fails(circ, plan, dets, obs):
         circ,
         plan,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     inner = matching_window_decoder()
     return sum(int(decode_windowed(

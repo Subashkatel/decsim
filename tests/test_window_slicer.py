@@ -91,6 +91,7 @@ def test_slicer_identical_to_static_builder(scheme, R):
         plan,
         detector_rounds=folded,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     inc = _incremental(circ, plan, folded)
     assert len(inc) == len(ref)
@@ -153,6 +154,7 @@ def test_matching_window_decoder_cache_survives_id_reuse():
             circ,
             plan,
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+            fault_exclusion_ranges=(),
         )[0]
 
     a = one_model(0)

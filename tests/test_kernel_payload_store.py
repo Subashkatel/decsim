@@ -111,3 +111,20 @@ def test_duplicate_lease_rejected():
     ps.replace("w0", [(0, 2)])                 # replace is the sanctioned path
     _store_rounds(ps, 0, [1, 2])
     assert ps.fragments(0, 1) is None or ps.payloads_held >= 1
+
+
+def test_lease_round_keys_distinguishes_absent_from_present_empty():
+    store = PayloadStore()
+    store.lease("present-empty", ())
+
+    assert store.lease_round_keys("present-empty") == ()
+    with pytest.raises(KeyError, match="unknown"):
+        store.lease_round_keys("unknown")
+
+
+def test_lease_round_keys_preserves_order_and_multiplicity():
+    store = PayloadStore()
+    round_keys = ((0, 2), (0, 1), (0, 2))
+    store.lease("ordered-repeated", round_keys)
+
+    assert store.lease_round_keys("ordered-repeated") == round_keys

@@ -1157,6 +1157,7 @@ def build_window_error_models(
     *,
     detector_rounds: Optional[dict] = None,
     fault_model_requirement: DecoderFaultModelRequirement,
+    fault_exclusion_ranges: tuple,
 ) -> list:
     """Slice an operation circuit into one typed model per planned window."""
     slicer = WindowSlicer(
@@ -1170,6 +1171,7 @@ def build_window_error_models(
         slicer.slice_window(
             *_parse_window_entry(window_entry),
             is_last=(window_index == last_window),
+            fault_exclusion_ranges=fault_exclusion_ranges,
         )
         for window_index, window_entry in enumerate(plan)
     ]

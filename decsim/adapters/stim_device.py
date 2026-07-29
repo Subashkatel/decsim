@@ -405,8 +405,8 @@ class StimDevice:
             "is known.")
 
     def window_models_for_operation(self, op: Operation, windows: list,
-                                    round_count: int,
-                                    *, fault_model_requirement) -> list:
+                                    round_count: int, *, fault_model_requirement,
+                                    fault_exclusion_ranges: tuple) -> list:
         """Build detector error models for one finite Stim operation."""
         if op.circuit is None or not windows:
             return []
@@ -424,7 +424,8 @@ class StimDevice:
             op.circuit,
             model_plan,
             detector_rounds=detector_rounds,
-            fault_model_requirement=fault_model_requirement)
+            fault_model_requirement=fault_model_requirement,
+            fault_exclusion_ranges=fault_exclusion_ranges)
 
     def window_model_for_stream(self, stream_id, window, *, is_last: bool):
         """Build the detector error model for one dynamic stream window."""

@@ -132,6 +132,7 @@ def _window_models(fault_model_requirement):
         circuit,
         [(1, n_layers, n_layers)],
         fault_model_requirement=fault_model_requirement,
+        fault_exclusion_ranges=(),
     )
 
 

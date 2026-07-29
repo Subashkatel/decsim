@@ -307,3 +307,28 @@ def test_default_strong_region_names_the_restart_seam_owner():
 
     assert plan.commit_hi == 15
     assert plan.restart_seam_fault_owner is SeamFaultOwner.STRONG_REGION
+
+
+def test_strong_region_retains_residual_inside_the_final_old_commit():
+    from decsim.message import SeamFaultOwner
+
+    escalated = WindowInfo(
+        op_id=0, k=1, commit_lo=8, commit_hi=14,
+        buffer_lo=8, buffer_hi=17, n_rounds=10,
+        dependents=((0, 2),), deps=((0, 0),),
+    )
+    final_old_window = WindowInfo(
+        op_id=0, k=2, commit_lo=15, commit_hi=21,
+        buffer_lo=15, buffer_hi=21, n_rounds=7,
+        dependents=(), deps=((0, 1),),
+    )
+
+    plan = DefaultWindowInteraction().plan_strong_region(
+        escalated,
+        [final_old_window],
+        operation_round_count=21,
+    )
+
+    assert (plan.commit_lo, plan.commit_hi) == (8, 20)
+    assert plan.restart_buffer_lo == 18
+    assert plan.restart_seam_fault_owner is SeamFaultOwner.STRONG_REGION

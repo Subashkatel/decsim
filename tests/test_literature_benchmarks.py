@@ -123,6 +123,7 @@ def test_skoric_windowed_decode_matches_global_on_frozen_shots():
         circ,
         [tuple(w) for w in g["plan"]],
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     inner = matching_window_decoder()
     windowed = sum(int(decode_windowed(

@@ -103,6 +103,7 @@ def test_high_p_saturates_at_coin_flip_and_windows_survive_dense_syndromes():
         c,
         plan,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
     )
     decode = matching_window_decoder()
     global_pred = matcher.decode_batch(dets)[:500, 0]

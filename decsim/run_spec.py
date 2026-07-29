@@ -4086,9 +4086,13 @@ def _validated_logical_bit(value) -> int:
 
 
 def _validate_live_metric_binding(binding: _ResolvedMetricBinding) -> None:
+    current_name = binding.metric.name
+    current_version = binding.metric.result_schema_version
     if (
-        binding.metric.name != binding.name
-        or binding.metric.result_schema_version != binding.result_schema_version
+        not is_stable_string(current_name)
+        or current_name != binding.name
+        or type(current_version) is not int
+        or current_version != binding.result_schema_version
     ):
         raise RuntimeError(
             f"metric {binding.name!r} changed its frozen result identity"
@@ -4107,7 +4111,11 @@ def _validate_metric_component_configurations(
         if entry.configuration_json is None:
             continue
         configuration = json.loads(entry.configuration_json)
-        if configuration.get("result_schema_version") != binding.result_schema_version:
+        manifest_version = configuration.get("result_schema_version")
+        if (
+            type(manifest_version) is not int
+            or manifest_version != binding.result_schema_version
+        ):
             raise RuntimeError(
                 f"metric {binding.name!r} manifest result schema disagrees "
                 "with its frozen binding"

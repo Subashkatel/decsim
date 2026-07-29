@@ -133,7 +133,14 @@ class Engine:
         self._invoke_metric_callback(
             lambda: metric.observe(self), callback_kind="initial observation"
         )
-        if metric.name != name or metric.result_schema_version != version:
+        current_name = metric.name
+        current_version = metric.result_schema_version
+        if (
+            not is_stable_string(current_name)
+            or current_name != name
+            or type(current_version) is not int
+            or current_version != version
+        ):
             raise RuntimeError("metric identity changed during initial observation")
         self.metrics.append(metric)
         return metric

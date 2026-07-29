@@ -1172,6 +1172,71 @@ def test_metric_manifest_drift_is_rejected_before_engine_registration():
     assert retained["metric"].observations == 0
 
 
+class _EqualMetricName(str):
+    """Wrong identity type that compares equal to an exact metric name."""
+
+
+@pytest.mark.parametrize(
+    "field,mutated_value",
+    [
+        ("name", _EqualMetricName("equal-type-drift")),
+        ("result_schema_version", True),
+        ("result_schema_version", 1.0),
+    ],
+)
+def test_metric_equal_but_wrong_identity_type_is_rejected(
+    field,
+    mutated_value,
+):
+    class DriftingMetric:
+        name = "equal-type-drift"
+        result_schema_version = 1
+
+        def observe(self, engine):
+            setattr(self, field, mutated_value)
+
+        def result(self):
+            return {}
+
+    with pytest.raises(RuntimeError, match="identity changed|changed.*identity"):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            make_metrics=lambda *_args: [DriftingMetric()],
+        ).build()
+
+
+@pytest.mark.parametrize(
+    "field,mutated_value",
+    [
+        ("name", _EqualMetricName("result-type-drift")),
+        ("result_schema_version", True),
+        ("result_schema_version", 1.0),
+    ],
+)
+def test_metric_result_callback_cannot_change_identity_type(
+    field,
+    mutated_value,
+):
+    class ResultDriftingMetric:
+        name = "result-type-drift"
+        result_schema_version = 1
+
+        def observe(self, engine):
+            return None
+
+        def result(self):
+            setattr(self, field, mutated_value)
+            return {}
+
+    with pytest.raises(RuntimeError, match="changed its frozen result identity"):
+        RunSpec(
+            ops=[],
+            decoder=StaticDecoder(),
+            make_metrics=lambda *_args: [ResultDriftingMetric()],
+        ).build()
+
+
 @pytest.mark.parametrize("version", [True, 1.0, 0, -1])
 def test_metric_result_schema_version_is_an_exact_positive_integer(version):
     class InvalidVersionMetric:
@@ -1191,13 +1256,16 @@ def test_metric_result_schema_version_is_an_exact_positive_integer(version):
         ).build()
 
 
-def test_metric_manifest_schema_version_must_match_frozen_binding():
+@pytest.mark.parametrize("manifest_version", [True, 1.0, 2])
+def test_metric_manifest_schema_version_must_match_frozen_binding(
+    manifest_version,
+):
     class MismatchedMetric:
         name = "mismatched"
         result_schema_version = 1
 
         def run_manifest_config(self):
-            return {"result_schema_version": 2}
+            return {"result_schema_version": manifest_version}
 
         def observe(self, engine):
             return None

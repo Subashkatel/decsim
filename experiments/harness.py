@@ -104,8 +104,6 @@ class Experiment:
     configurations: tuple
     sampling: dict
     stopping: dict
-    dependencies: dict
-    repository_revision: str
     schema_version: int = 1
 
     def canonical_bytes(self) -> bytes:

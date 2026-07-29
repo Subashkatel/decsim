@@ -14,6 +14,7 @@ from experiments.results import (
     reduce_chunks,
 )
 from experiments.plotting import _binomial_interval, plot_logical_error_rate
+from experiments.run_surface import _circuit, _windows, run_surface_configuration
 from experiments.harness import (
     Experiment,
     SamplePlan,
@@ -197,8 +198,6 @@ def test_experiment_bytes_and_hash_are_canonical_and_seed_sensitive():
         configurations=({"decoder": "mwpm", "distance": 3},),
         sampling={"batch_shots": 4, "max_shots": 10},
         stopping={"method": "fixed"},
-        dependencies={"stim": "1.15"},
-        repository_revision="deadbeef",
     )
 
     assert experiment.canonical_bytes() == experiment.canonical_bytes()
@@ -298,8 +297,6 @@ def test_offline_experiment_writes_chunks_and_resumes_without_redecoding(tmp_pat
         configurations=({"decoder": "test"},),
         sampling={"batch_shots": 4, "max_shots": 7},
         stopping={"method": "fixed"},
-        dependencies={},
-        repository_revision="e4d0700",
     )
     plan = SamplePlan.create(
         experiment.experiment_id,
@@ -357,8 +354,6 @@ def test_parallel_offline_run_matches_one_worker_byte_for_byte(tmp_path):
         configurations=({"decoder": "test"},),
         sampling={"batch_shots": 3, "max_shots": 10},
         stopping={"method": "fixed"},
-        dependencies={},
-        repository_revision="7ae515f",
     )
     plan = SamplePlan.create(
         experiment.experiment_id,
@@ -438,3 +433,52 @@ def test_zero_failure_interval_matches_closed_form():
 
     assert lower == 0
     assert upper == pytest.approx(1 - 0.025 ** (1 / 10_000))
+
+
+def test_surface_runner_executes_real_mwpm_batches(tmp_path):
+    pytest.importorskip("stim")
+    pytest.importorskip("pymatching")
+    configuration = {
+        "distance": 3,
+        "rounds": 6,
+        "physical_error_rate": 0.001,
+        "commit_rounds": 3,
+        "buffer_rounds": 3,
+        "shots": 7,
+        "batch_shots": 4,
+        "seed": 17,
+        "workers": 1,
+    }
+
+    result = run_surface_configuration(configuration, tmp_path)
+
+    assert result.attempted_shots == 7
+    assert result.window_attempts > result.attempted_shots
+    assert len(list(tmp_path.rglob("*.csv"))) == 2
+
+
+def test_surface_runner_uses_requested_circuit_noise():
+    circuit = _circuit({
+        "distance": 3,
+        "rounds": 3,
+        "physical_error_rate": 0.007,
+    })
+
+    text = str(circuit)
+    assert "DEPOLARIZE1(0.007)" in text
+    assert "DEPOLARIZE2(0.007)" in text
+    assert "X_ERROR(0.007)" in text
+
+
+def test_surface_runner_absorbs_terminal_layer_and_short_tail():
+    configuration = {
+        "rounds": 7,
+        "commit_rounds": 3,
+        "buffer_rounds": 3,
+    }
+
+    assert _windows(configuration) == ((1, 3, 6), (4, 7, 7))
+    assert _windows({**configuration, "rounds": 6}) == (
+        (1, 3, 6),
+        (4, 6, 6),
+    )

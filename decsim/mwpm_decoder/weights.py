@@ -21,4 +21,4 @@ def matching_weights(priors):
     finite_priors = priors.copy()
     finite_priors[priors == 0] = 1e-12
     finite_priors[priors == 1] = 1 - 1e-12
-    return np.log((1 - finite_priors) / finite_priors)
+    return np.log1p(-finite_priors) - np.log(finite_priors)

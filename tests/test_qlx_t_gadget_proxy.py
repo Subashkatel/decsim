@@ -10,12 +10,13 @@ T layer on the 225 data qubits. The `tsim` sampler package is not
 available (PyPI 'tsim' 0.1.0 is an empty placeholder), so the true
 non-Clifford circuit cannot be sampled here. DECLARED PROXY SCOPE:
 removing that one T layer yields a valid stim circuit with the
-IDENTICAL detector/observable structure — the decoding problem decsim
-sees is unchanged. These tests therefore validate decsim's windowed
-decoding of the QLX T-gadget's syndrome stream (geometry, rounds,
-window slicing, observable wiring), NOT the non-Clifford error
-dynamics through the T layer. Claim-level qualifier mandatory wherever
-this is cited (ledger row to say "stabilizer-proxy").
+IDENTICAL detector/observable structure. These tests validate that
+stabilizer proxy's structure, rounds, observable wiring, and explicit
+rejection of its detectorless-logical DEM. They do NOT validate
+successful window slicing or decoding, and do NOT validate the
+non-Clifford error dynamics through the T layer. Claim-level qualifier
+mandatory wherever this is cited (ledger row to say
+"stabilizer-proxy, decoder-domain rejection").
 """
 import pathlib
 import re
@@ -65,10 +66,11 @@ def _detector_rounds(circuit) -> dict:
 
 
 def test_windowed_decode_equals_global_on_t_gadget_proxy():
-    """decsim's window slicer must reproduce global MWPM bit-for-bit on
-    the QLX T-gadget syndrome stream (coordinate-less detectors -> the
-    Gate-2 detector_rounds override path)."""
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    """The G9 proxy evidence is preserved, but its invalid DEM is rejected."""
+    from decsim.detector_error_model import (
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+    )
 
     _, _, proxy = load_proxy()
     circuit = stim.Circuit(proxy)
@@ -83,22 +85,13 @@ def test_windowed_decode_equals_global_on_t_gadget_proxy():
     pred_global = matching.decode_batch(dets)[:, 0].astype(np.uint8)
 
     plan = [(1, 3, 5), (4, 5, 6), (6, total_rounds, total_rounds)]
-    models = build_window_error_models(circuit, plan,
-                                       detector_rounds=rounds_of)
-    matchings = [pymatching.Matching.from_check_matrix(
-        np.asarray(m.check),
-        weights=np.log((1 - np.asarray(m.priors)) / np.asarray(m.priors)),
-        faults_matrix=np.eye(np.asarray(m.check).shape[1], dtype=np.uint8))
-        for m in models]   # per-column selections (see walker test note)
-
-    def decode_window(model, syndrome):
-        return matchings[models.index(model)].decode(syndrome)
-
-    disagreements = sum(
-        int(decode_windowed(models, dets[s], decode_window)[0]
-            != pred_global[s])
-        for s in range(SHOTS))
-    assert disagreements == 0
+    with pytest.raises(ValueError, match="detectorless logical"):
+        build_window_error_models(
+            circuit,
+            plan,
+            detector_rounds=rounds_of,
+            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        )
 
     # Noise-content reality check (QLX emission gap G9): the tsim path
     # emitted ONLY the bitflip noise (mz/mr) and dropped the idle

@@ -1,7 +1,10 @@
 #==================================================================
 # TESTS FOR TIMING CONSTANTS
 #==================================================================
+import pytest
+
 from decsim.config import TICKS_PER_US, TimingConfig, us, fmt
+from decsim.links import LinkModelConfig
 
 
 def test_ticks_per_us():
@@ -16,9 +19,9 @@ def test_fmt():
     assert fmt(2_000_000) == "  2.000 us"
 
 
-def test_ws_link_defaults_to_dd():
-    """ws is the weak<->strong escalation link: follows t_dd unless overridden."""
-    t = TimingConfig(t_dd_us=0.7)
-    assert t.ticks("t_dd") == us(0.7) and t.ticks("t_ws") == us(0.7)
-    t = TimingConfig(t_dd_us=0.7, t_ws_us=0.2)
-    assert t.ticks("t_ws") == us(0.2)
+def test_link_timing_is_not_owned_by_timing_config():
+    profile = LinkModelConfig.reference_fixed_latency_profile()
+    assert profile.dd.channel.propagation_latency_ticks == us(0.5)
+    assert profile.wsd.channel.propagation_latency_ticks == us(0.5)
+    with pytest.raises(TypeError):
+        TimingConfig(t_dd_us=0.7)

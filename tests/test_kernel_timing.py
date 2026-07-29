@@ -4,6 +4,7 @@ import dataclasses
 import pytest
 
 from decsim.config import TICKS_PER_US, TimingConfig, fmt, us
+from decsim.links import LinkModelConfig
 
 
 def test_tick_conversion():
@@ -14,21 +15,19 @@ def test_tick_conversion():
 
 
 def test_link_defaults_match_today():
-    t = TimingConfig()
-    assert t.ticks("t_qc") == 150_000
-    assert t.ticks("t_cd") == 2_000_000
-    assert t.ticks("t_dd") == 500_000
-    assert t.ticks("t_do") == 1_000_000
-    assert t.ticks("t_oc") == 4_000_000
-    assert t.ticks("t_cq") == 150_000
-    assert t.round_ticks == 1_100_000
+    links = LinkModelConfig.reference_fixed_latency_profile()
+    assert links.qc.channel.propagation_latency_ticks == 150_000
+    assert links.cwd.channel.propagation_latency_ticks == 2_000_000
+    assert links.dd.channel.propagation_latency_ticks == 500_000
+    assert links.wdo.channel.propagation_latency_ticks == 1_000_000
+    assert links.oc.channel.propagation_latency_ticks == 4_000_000
+    assert links.cq.channel.propagation_latency_ticks == 150_000
+    assert TimingConfig().round_ticks == 1_100_000
 
 
-def test_ws_default_and_override():
-    # today: LinkModel defaults ws=us(0.5) (links.py:47); SimConfig's t_ws_us=None
-    # means "use that default"
-    assert TimingConfig().ticks("t_ws") == 500_000
-    assert TimingConfig(t_ws_us=0.7).ticks("t_ws") == 700_000
+def test_non_link_timing_rejects_link_names():
+    with pytest.raises(ValueError, match="unknown non-link timing"):
+        TimingConfig().ticks("t_ws")
 
 
 def test_frozen():

@@ -13,8 +13,9 @@ import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.codes import SurfaceCodeModel
+from conftest import fixed_latency_link_config
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import BacklogEarlyWarning, DecodeBacklog
 from decsim.schemes import SlidingWindowScheme
@@ -36,14 +37,38 @@ class FakeCluster:
     def __init__(self, per_op_patch: dict):
         self.ready = []
         self.pool_ready = {}
-        self.ops = {op: FakeOp((patch,))
-                    for op, patch in per_op_patch.items()}
-        self.rounds_arrived = {op: 0 for op in per_op_patch}
-        self.windows = {}
-        self.committed_windows = set()
+        self.window_manager = FakeWindowManager(per_op_patch)
+
+    @property
+    def rounds_arrived(self):
+        return self.window_manager.rounds_arrived
+
+    @property
+    def windows(self):
+        return self.window_manager.windows
+
+    @property
+    def committed_windows(self):
+        return self.window_manager.committed_windows
 
     def set_backlog(self, per_op: dict):
-        self.rounds_arrived.update(per_op)
+        self.window_manager.rounds_arrived.update(per_op)
+
+
+class FakeWindowManager:
+    """The actual owner of operation and window state consumed by the view."""
+
+    def __init__(self, per_op_patch: dict):
+        self._ops = {
+            operation_id: FakeOp((patch,))
+            for operation_id, patch in per_op_patch.items()
+        }
+        self.rounds_arrived = {
+            operation_id: 0
+            for operation_id in per_op_patch
+        }
+        self.windows = {}
+        self.committed_windows = set()
 
 
 class FakeEngine:
@@ -63,7 +88,7 @@ def make(cluster, **kw):
     args = dict(round_ticks=us(1), window_ticks=us(10),
                 threshold_f=0.1, consecutive=2)
     args.update(kw)
-    return BacklogEarlyWarning(cluster, **args)
+    return BacklogEarlyWarning(cluster.window_manager, cluster, **args)
 
 
 def test_slope_arithmetic_and_no_warning_when_flat():
@@ -164,7 +189,8 @@ class _FixedLatencyDecoder:
         return self._t
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
 def _run_regime(tau_w_us, rounds=120):
@@ -172,21 +198,21 @@ def _run_regime(tau_w_us, rounds=120):
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=3,
               rounds_policy=FixedRounds(rounds),
               round_us=1.0,
               decoder=_FixedLatencyDecoder(tau_w_us),
               scheme=SlidingWindowScheme(),
               code=SurfaceCodeModel(d=3),
-              make_controller=lambda e: ModularController(
-            e, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0),
+              links=fixed_latency_link_config(),
+              make_controller=lambda e, links: ModularController(
+            e, links=links,
             log_syndromes=False),
-              make_metrics=lambda e, cl, ch, f: [
-            DecodeBacklog(cl),
-            BacklogEarlyWarning(cl, round_ticks=us(1),
+              make_metrics=lambda e, wm, dm, ch, f: [
+            DecodeBacklog(wm, dm),
+            BacklogEarlyWarning(wm, dm, round_ticks=us(1),
                                 window_ticks=us(10))],
           ), verbose=False)
-    return res["metrics"]["backlog_early_warning"]
+    return res.result.metric_values()["backlog_early_warning"]
 
 
 def test_engine_stable_regime_never_warns():

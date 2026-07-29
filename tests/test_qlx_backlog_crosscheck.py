@@ -24,8 +24,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import pytest
 
 from decsim.codes import SurfaceCodeModel
+from conftest import fixed_latency_link_config
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import DecodeBacklog
 from decsim.schemes import SlidingWindowScheme
@@ -46,12 +47,12 @@ class _FixedLatencyDecoder:
         return self._t
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
-def _zero_link_controller(engine):
-    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0,
-                                                     do=0, oc=0, cq=0),
+def _zero_link_controller(engine, links):
+    return ModularController(engine, links=links,
                              log_syndromes=False)
 
 
@@ -60,17 +61,17 @@ def _run(latency_us, rounds):
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=D,
               rounds_policy=FixedRounds(rounds),
               round_us=ROUND_US,
               decoder=_FixedLatencyDecoder(latency_us),
               scheme=SlidingWindowScheme(),
               code=SurfaceCodeModel(d=D),
+              links=fixed_latency_link_config(),
               make_controller=_zero_link_controller,
-              make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl)],
+              make_metrics=lambda e, wm, dm, ch, f: [DecodeBacklog(wm, dm)],
           ), verbose=False)
-    drain_rounds = (res["fully_done"] - res["chip_done"]) / us(ROUND_US)
-    peak = res["metrics"]["decode_backlog"]["peak_rounds"]
+    drain_rounds = (res.result.fully_done_ticks - res.result.chip_done_ticks) / us(ROUND_US)
+    peak = res.result.metric_values()["decode_backlog"]["peak_rounds"]
     return drain_rounds, peak
 
 

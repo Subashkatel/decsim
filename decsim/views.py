@@ -1,16 +1,17 @@
 """Typed read-only metric views (spec §8.9).
 
 Frozen snapshot dataclasses + the builders that populate them. Metrics
-consume these views instead of reaching into live window_manager objects; the
+consume these views instead of reaching through a combined facade; the
 engine invokes Metric.observe(...) only between events, so every
 snapshot is taken at a consistent instant (principle 7: no mid-mutation
-reads). The builders read the shared cluster/gate metric surface, so
-they read the shared cluster surface (ClusterFacade).
+reads). Each builder receives the state owners it actually consumes.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+
+from .message import stable_identity_order_key
 
 WINDOW_STAGES = ("buffer_fill", "dep_block", "queue_wait", "service", "total")
 
@@ -89,39 +90,50 @@ class TruthView:
 
 
 @dataclass(frozen=True)
-class StrongPoolView:
-    """Strong-decoder lane occupancy (published under Switching)."""
+class StrongWorkPhaseView:
+    """One closed phase of outstanding strong decoder input."""
 
-    pool: str
-    queued_jobs: int
-    busy_units: int
-    total_units: int
+    jobs: int
+    full_input_rounds: int
+
+
+@dataclass(frozen=True)
+class StrongWorkView:
+    """Global assigned strong work before and after decoder admission."""
+
+    waiting_far_boundary: StrongWorkPhaseView
+    waiting_terminal_data: StrongWorkPhaseView
+    in_transit: StrongWorkPhaseView
+    queued: StrongWorkPhaseView
+    running: StrongWorkPhaseView
+    total_jobs: int
+    total_full_input_rounds: int
     strong_needed: int
-    redo_rounds: int                # rounds re-decoded per strong job
 
 
 # ---------------------------------------------------------------- builders
 
-def utilization_view(cluster) -> UtilizationView:
-    """Snapshot decoder occupancy from the cluster metric surface."""
-    totals = getattr(cluster, "unit_totals", None)
+def utilization_view(decoder_manager) -> UtilizationView:
+    """Snapshot decoder occupancy."""
+    totals = getattr(decoder_manager, "unit_totals", None)
     if totals is None:
-        busy = cluster.num_units - cluster.free_units
-        return UtilizationView(busy, cluster.num_units,
-                               (("", busy, cluster.num_units),))
+        busy = decoder_manager.num_units - decoder_manager.free_units
+        return UtilizationView(busy, decoder_manager.num_units,
+                               (("", busy, decoder_manager.num_units),))
     total = sum(totals.values())
-    busy = total - sum(cluster.pool_free.values())
+    busy = total - sum(decoder_manager.pool_free.values())
     per_pool = tuple(
-        (name, totals[name] - cluster.pool_free.get(name, 0), totals[name])
+        (name, totals[name] - decoder_manager.pool_free.get(name, 0), totals[name])
         for name in sorted(totals))
     return UtilizationView(busy, total, per_pool)
 
 
-def _rounds_decoded(cluster, op_id) -> int:
+def _rounds_decoded(window_manager, op_id) -> int:
     """Rounds decoded in an unbroken prefix from round 1."""
     committed_ranges = sorted(
-        (cluster.windows[key].commit_lo, cluster.windows[key].commit_hi)
-        for key in cluster.committed_windows
+        (window_manager.windows[key].commit_lo,
+         window_manager.windows[key].commit_hi)
+        for key in window_manager.committed_windows
         if key[0] == op_id)
     decoded = 0
     for start_round, end_round in committed_ranges:
@@ -141,37 +153,46 @@ def _patch_of(op, op_id):
     return op_id
 
 
-def backlog_view(cluster, include_rounds: bool = True) -> BacklogView:
+def backlog_view(window_manager, decoder_manager,
+                 include_rounds: bool = True) -> BacklogView:
     """Snapshot job queues + per-op/per-patch/system syndrome backlog.
 
     include_rounds=False skips the (comparatively costly) rounds scan for
     per-event observers that only need the job-queue depths."""
-    pools = getattr(cluster, "pool_ready", None)
-    ready_jobs = len(cluster.ready)
+    pools = getattr(decoder_manager, "pool_ready", None)
+    ready_jobs = len(decoder_manager.ready)
     per_lane = [("", ready_jobs)]
     if pools is not None:
         per_lane += [(lane, len(queue)) for lane, queue in sorted(pools.items())]
         ready_jobs += sum(len(queue) for queue in pools.values())
 
     per_op, per_patch = [], {}
-    for op_id in (cluster.ops if include_rounds else ()):
-        waiting = max(0, cluster.rounds_arrived.get(op_id, 0)
-                      - _rounds_decoded(cluster, op_id))
+    for op_id in sorted(
+        (window_manager._ops if include_rounds else ()),
+        key=stable_identity_order_key,
+    ):
+        waiting = max(0, window_manager.rounds_arrived.get(op_id, 0)
+                      - _rounds_decoded(window_manager, op_id))
         per_op.append((op_id, waiting))
-        patch = _patch_of(cluster.ops.get(op_id), op_id)
+        patch = _patch_of(window_manager._ops.get(op_id), op_id)
         per_patch[patch] = per_patch.get(patch, 0) + waiting
     return BacklogView(ready_jobs=ready_jobs,
                        per_lane=tuple(per_lane),
-                       per_op_rounds=tuple(sorted(per_op)),
+                       per_op_rounds=tuple(sorted(
+                           per_op, key=lambda item: stable_identity_order_key(item[0])
+                       )),
                        per_patch_rounds=tuple(sorted(per_patch.items(),
-                                                     key=lambda kv: str(kv[0]))),
+                           key=lambda item: stable_identity_order_key(item[0]))),
                        total_rounds=sum(w for _, w in per_op))
 
 
-def window_latency_view(cluster) -> WindowLatencyView:
+def window_latency_view(window_manager) -> WindowLatencyView:
     """Snapshot the per-window stage decomposition (fully-decoded only)."""
     rows = []
-    for (op_id, window_index), window in sorted(cluster.windows.items()):
+    for (op_id, window_index), window in sorted(
+        window_manager.windows.items(),
+        key=lambda item: stable_identity_order_key(item[0]),
+    ):
         stamps = (window.t_first_round, window.t_data_complete,
                   window.t_queued, window.t_dispatch, window.t_done)
         if any(stamp is None for stamp in stamps):
@@ -191,38 +212,75 @@ def reaction_view(gate) -> ReactionView:
     ops = tuple(
         OpReactionInfo(op=op_id, name=op.name, blocked_by=op.blocked_by,
                        round_ticks=gate._round_ticks_for(op),
-                       rounds=gate.cluster.rounds_for(op))
-        for op_id, op in sorted(gate.ops.items()))
+                       rounds=gate._round_count_for(op))
+        for op_id, op in sorted(
+            gate._ops.items(), key=lambda item: stable_identity_order_key(item[0])
+        ))
     return ReactionView(
         chip_done=gate.last_finish_time,
         fully_done=gate.engine.now,
-        body_done_time=tuple(sorted(gate.body_done_time.items())),
-        decode_release_time=tuple(sorted(gate.decode_release_time.items())),
+        body_done_time=tuple(sorted(
+            gate.body_done_time.items(),
+            key=lambda item: stable_identity_order_key(item[0]),
+        )),
+        decode_release_time=tuple(sorted(
+            gate.decode_release_time.items(),
+            key=lambda item: stable_identity_order_key(item[0]),
+        )),
         idle_cap_hits=tuple(tuple(sorted(hit.items()))
                             for hit in gate.idle_cap_hits),
         ops=ops)
 
 
-def truth_view(cluster, device) -> TruthView:
+def truth_view(window_manager, device) -> TruthView:
     """Snapshot sampled truth (device) next to published predictions."""
     truth = getattr(device, "_truth", {}) or {}
     observables = tuple(sorted(
-        (op_id, tuple(int(bit) for bit in bits))
-        for op_id, bits in truth.items()))
-    predictions = tuple(sorted(cluster.op_results.items()))
+        (
+            (op_id, tuple(int(bit) for bit in bits))
+            for op_id, bits in truth.items()
+        ),
+        key=lambda item: stable_identity_order_key(item[0]),
+    ))
+    predictions = tuple(sorted(
+        window_manager.op_results.items(),
+        key=lambda item: stable_identity_order_key(item[0]),
+    ))
     return TruthView(observables=observables, predictions=predictions)
 
 
-def strong_pool_view(cluster, pool: str = "strong") -> StrongPoolView:
-    """Snapshot one strong lane's queue depth and occupancy."""
-    totals = getattr(cluster, "unit_totals", {}) or {}
-    free = getattr(cluster, "pool_free", {}) or {}
-    queues = getattr(cluster, "pool_ready", {}) or {}
-    total = totals.get(pool, 0)
-    return StrongPoolView(
-        pool=pool,
-        queued_jobs=len(queues.get(pool, [])),
-        busy_units=total - free.get(pool, 0),
-        total_units=total,
-        strong_needed=getattr(cluster, "strong_needed", 0),
-        redo_rounds=cluster.commit + 2 * cluster.buffer)
+def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
+    """Compose exact global strong work from its two lifecycle owners."""
+    pending = window_manager.pending_strong_work_snapshot()
+    admitted = decoder_manager.admitted_strong_work_snapshot()
+    pending_keys = {key for key, _, _ in pending}
+    admitted_keys = {key for keys, _, _ in admitted for key in keys}
+    overlap = pending_keys & admitted_keys
+    if overlap:
+        raise RuntimeError(f"strong work has overlapping owners for {overlap!r}")
+
+    values = {
+        phase: [0, 0]
+        for phase in (
+            "waiting_far_boundary", "waiting_terminal_data",
+            "in_transit", "queued", "running",
+        )
+    }
+    for _, phase, rounds in pending:
+        values[phase][0] += 1
+        values[phase][1] += rounds
+    for _, phase, rounds in admitted:
+        values[phase][0] += 1
+        values[phase][1] += rounds
+    phases = {
+        phase: StrongWorkPhaseView(*counts)
+        for phase, counts in values.items()
+    }
+    return StrongWorkView(
+        **phases,
+        total_jobs=sum(value.jobs for value in phases.values()),
+        total_full_input_rounds=sum(
+            value.full_input_rounds for value in phases.values()
+        ),
+        strong_needed=decoder_manager.strong_needed,
+    )

@@ -18,8 +18,10 @@ import pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.codes import SurfaceCodeModel
+from conftest import fixed_latency_link_config
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from decsim.controllers import ModularController
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import DecodeBacklog, ReadyQueueStats
 from decsim.schemes import SlidingWindowScheme
@@ -33,6 +35,8 @@ GEN_US = D * 1.0            # one commit region generated every 3 us (round = 1 
 class _FixedLatencyDecoder:
     """Timing-only decoder: fixed per-window service time, trivial logical output. Lets a test
     set f = latency / (n_com * round_us) precisely without stim/pymatching."""
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, latency_us):
         self._t = us(latency_us)
 
@@ -40,11 +44,12 @@ class _FixedLatencyDecoder:
         return self._t
 
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=0)
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(0,))
 
 
-def _zero_link_controller(engine):
-    return ModularController(engine, links=LinkModel(qc=0, cd=0, dd=0, do=0, oc=0, cq=0), log_syndromes=False)
+def _zero_link_controller(engine, links):
+    return ModularController(engine, links=links, log_syndromes=False)
 
 
 def _run(latency_us, rounds):
@@ -53,17 +58,17 @@ def _run(latency_us, rounds):
     res = simulate(RunSpec(
               ops=[op],
               num_units=4,
-              d=D,
               rounds_policy=FixedRounds(rounds),
               round_us=1.0,
               decoder=_FixedLatencyDecoder(latency_us),
               scheme=SlidingWindowScheme(),
               code=SurfaceCodeModel(d=D),
+              links=fixed_latency_link_config(),
               make_controller=_zero_link_controller,
-              make_metrics=lambda e, cl, ch, f: [DecodeBacklog(cl), ReadyQueueStats(cl)],
+              make_metrics=lambda e, wm, dm, ch, f: [DecodeBacklog(wm, dm), ReadyQueueStats(dm)],
           ), verbose=False)
-    m = res["metrics"]
-    return m["decode_backlog"]["peak_rounds"], m["ready_queue"]["peak"]
+    m = res.result.metric_values()
+    return m["decode_backlog"]["peak_rounds"], m["ready_queue"]["peak_jobs"]
 
 
 def test_backlog_bounded_when_decoder_keeps_up():

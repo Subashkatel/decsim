@@ -89,34 +89,56 @@ def test_windowed_tracks_global_on_walker_dem_samples():
     probabilities and 7 rounds, window-boundary effects are material,
     so the claim is: windowed decoding genuinely corrects (beats raw)
     and stays within a declared envelope of global."""
-    from decsim.detector_error_model import (detector_error_model_to_faults,
-                            _build_models_from_plan,
-                            _detector_position_in_round, decode_windowed)
+    from types import SimpleNamespace
+
+    from decsim.detector_error_model import (
+        FaultRepresentation,
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+        decode_windowed,
+        detector_error_model_to_faults,
+    )
 
     dem = walker_dem()
     rounds_of = detector_rounds()
-    det_sets, obs_sets, priors = detector_error_model_to_faults(dem)
+    graphlike_dem = stim.DetectorErrorModel()
+    for instruction in dem.flattened():
+        if instruction.type != "error":
+            continue
+        detector_count = sum(
+            target.is_relative_detector_id()
+            for target in instruction.targets_copy()
+        )
+        if 1 <= detector_count <= 2:
+            graphlike_dem.append(instruction)
+    det_sets, obs_sets, priors = detector_error_model_to_faults(graphlike_dem)
     # The walker DEM carries hyperedge mechanisms (Y errors, 3-4
     # detectors) WITHOUT decomposition hints (G9 sub-gap: EmitDEM emits
     # no `^` decompositions). A matching decoder is a graph decoder, so
     # BOTH sides of this comparison use the graphlike subset -- same
     # model, bit-for-bit comparable.
-    keep = [i for i, ds in enumerate(det_sets) if 1 <= len(ds) <= 2]
-    det_sets = [det_sets[i] for i in keep]
-    obs_sets = [obs_sets[i] for i in keep]
-    priors = [priors[i] for i in keep]
-    fault_rounds = [tuple(rounds_of[d] for d in ds) for ds in det_sets]
-    models = _build_models_from_plan(
-        plan=[(1, 3, 5), (4, 5, 6), (6, 7, 7)],
-        det_sets=det_sets, obs_sets=obs_sets, priors=priors,
-        n_obs=1, round_of=rounds_of, fault_rounds=fault_rounds,
-        pos_of=_detector_position_in_round(rounds_of),
-        belief_matching=False, h_det_sets=None, h_priors=None,
-        hyperedge_to_edge_map=None)
+    circuit_for_slicing = SimpleNamespace(
+        num_observables=1,
+        detector_error_model=lambda *, decompose_errors: graphlike_dem,
+        get_detector_coordinates=lambda: {},
+    )
+    models = build_window_error_models(
+        circuit_for_slicing,
+        [(1, 3, 5), (4, 5, 6), (6, 7, 7)],
+        detector_rounds=rounds_of,
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
     # ownership must tile over DETECTABLE faults: detector-less
     # mechanisms (undetectable logical flips, e.g. "error(p) L0") touch
     # no window and are equally invisible to the global matcher
-    assert sum(int(np.asarray(m.owned).sum()) for m in models) == len(det_sets)
+    assert sum(
+        int(
+            np.asarray(
+                model.require_faults(FaultRepresentation.GRAPHLIKE).owned
+            ).sum()
+        )
+        for model in models
+    ) == len(det_sets)
 
     sampler = dem.compile_sampler(seed=SEED)
     dets, obs, _ = sampler.sample(SHOTS)
@@ -134,23 +156,39 @@ def test_windowed_tracks_global_on_walker_dem_samples():
         check, weights=np.log((1 - pri) / pri), faults_matrix=obsm)
     pred_global = matching.decode_batch(dets)[:, 0].astype(np.uint8)
 
-    # decode_window must return PER-COLUMN fault selections (decsim
-    # XORs model.obs over selected&owned itself) -> identity faults
-    # matrix, NOT model.obs (that returns one obs bit which then
+    # decode_window must return PER-COLUMN fault selections (decsim XORs
+    # placed_faults.observables over selected&owned itself) -> identity faults
+    # matrix, NOT placed_faults.observables (that returns one obs bit which then
     # broadcasts against `owned` -- a bug that only looks fine on
     # vacuous fixtures; see G9 review)
-    matchings = [pymatching.Matching.from_check_matrix(
-        np.asarray(m.check),
-        weights=np.log((1 - np.asarray(m.priors)) / np.asarray(m.priors)),
-        faults_matrix=np.eye(np.asarray(m.check).shape[1], dtype=np.uint8))
-        for m in models]
+    matchings = []
+    for model in models:
+        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        matchings.append(
+            pymatching.Matching.from_check_matrix(
+                np.asarray(faults.check),
+                weights=np.log(
+                    (1 - np.asarray(faults.priors))
+                    / np.asarray(faults.priors)
+                ),
+                faults_matrix=np.eye(
+                    np.asarray(faults.check).shape[1],
+                    dtype=np.uint8,
+                ),
+            )
+        )
 
     def decode_window(model, syndrome):
         return matchings[models.index(model)].decode(syndrome)
 
     truth = obs[:, 0].astype(np.uint8)
     pred_win = np.array(
-        [int(decode_windowed(models, dets[s], decode_window)[0])
+        [int(decode_windowed(
+            models,
+            dets[s],
+            decode_window,
+            selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+        )[0])
          for s in range(SHOTS)], dtype=np.uint8)
     raw = float(truth.mean())
     ler_glob = float((pred_global != truth).mean())

@@ -12,7 +12,11 @@ generate_qlx_fixtures.py + dump_decoder_params.py):
   * mem_surface_walker_dem.txt — the analytic walker DEM
   * mem_surface_twin.json — QLX digital-twin reference (ler, det_rate)
 
-Claim level: WHOLE-PROGRAM physical + per-window slicing equivalence.
+Claim level: WHOLE-PROGRAM artifact, detector-bijection, and global-twin
+evidence, plus explicit decoder-domain rejection. The emitted fixture
+contains a detectorless logical mechanism, so it supports neither
+per-window decode-equivalence nor full-engine decoding-success claims.
+Nonvacuous detectable decoding evidence is in test_qlx_walker_dem_decode.py.
 No per-operation claim is made (compound feedback-bearing programs remain
 a QLX exporter boundary — see docs/validation/QLX_UTILIZATION_AND_GAP_
 ANALYSIS.md §5).
@@ -185,11 +189,15 @@ def test_detector_bijection_rejects_bit_permutations(circuit, params):
 
 def test_windowed_decode_equals_global_on_qlx_circuit(
         circuit, detector_rounds, sampled):
-    """decsim's sliding-window slicer, fed the QLX detector->round map,
-    must reproduce the global MWPM decode bit-for-bit on every shot
-    (NB: on this fixture the decode is VACUOUS -- see G9; this test now
-    validates plumbing/mapping only, ledger V1 revised)."""
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
+    """The vacuous QLX model is measured, then rejected by window decoding.
+
+    G9 leaves a detectorless logical mechanism in this fixture. Global
+    PyMatching silently omits it, but decsim must not discard that identity.
+    """
+    from decsim.detector_error_model import (
+        GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        build_window_error_models,
+    )
 
     dets, truth = sampled
     matching = pymatching.Matching.from_detector_error_model(
@@ -197,24 +205,13 @@ def test_windowed_decode_equals_global_on_qlx_circuit(
     pred_global = matching.decode_batch(dets)[:, 0].astype(np.uint8)
 
     plan = [(1, 3, 6), (4, 6, 7), (7, 7, 7)]
-    models = build_window_error_models(circuit, plan,
-                                       detector_rounds=detector_rounds)
-    matchings = [pymatching.Matching.from_check_matrix(
-        m.check, weights=np.log((1 - m.priors) / m.priors),
-        faults_matrix=np.eye(np.asarray(m.check).shape[1],
-                             dtype=np.uint8)) for m in models]
-    # (G9 review fix: decode_window must return per-column selections;
-    # faults_matrix=m.obs returned one obs bit that broadcast against
-    # `owned` -- undetected while the fixture decode was vacuous)
-
-    def decode_window(model, syndrome):
-        return matchings[models.index(model)].decode(syndrome)
-
-    disagreements = sum(
-        int(decode_windowed(models, dets[s], decode_window)[0]
-            != pred_global[s])
-        for s in range(SHOTS))
-    assert disagreements == 0
+    with pytest.raises(ValueError, match="detectorless logical"):
+        build_window_error_models(
+            circuit,
+            plan,
+            detector_rounds=detector_rounds,
+            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        )
 
     fails = int((pred_global != truth).sum())
     twin = json.loads((DATA / "mem_surface_twin.json").read_text())
@@ -232,14 +229,9 @@ def test_windowed_decode_equals_global_on_qlx_circuit(
 
 
 def test_qlx_circuit_runs_through_the_full_engine(circuit, detector_rounds):
-    """The QLX-origin whole-program circuit streams through the ACTUAL
-    simulator (chip -> controller -> window manager -> decoder ->
-    orchestrator) via StimDevice's explicit detector-round map, and the
-    engine's per-shot logical result matches the offline windowed
-    reference decode of the very same sampled shot."""
+    """The full engine rejects QLX's detectorless logical mechanism."""
     from decsim.adapters.stim_device import StimDevice
     from decsim.codes import SurfaceCodeModel
-    from decsim.detector_error_model import build_window_error_models, decode_windowed
     from decsim.message import Operation
     from decsim.mwpm_decoder import PyMatchingDecoder
     from decsim.planner import FixedRounds
@@ -250,46 +242,20 @@ def test_qlx_circuit_runs_through_the_full_engine(circuit, detector_rounds):
             return 1
 
     rounds = max(detector_rounds.values())          # 7 comparison rounds
-    plan = [(1, 3, 6), (4, 6, 7), (7, 7, 7)]
-    models = build_window_error_models(circuit, plan,
-                                       detector_rounds=detector_rounds)
-    matchings = [pymatching.Matching.from_check_matrix(
-        m.check, weights=np.log((1 - m.priors) / m.priors),
-        faults_matrix=np.eye(np.asarray(m.check).shape[1],
-                             dtype=np.uint8)) for m in models]
-    # (G9 review fix: decode_window must return per-column selections;
-    # faults_matrix=m.obs returned one obs bit that broadcast against
-    # `owned` -- undetected while the fixture decode was vacuous)
-
-    def decode_window(model, syndrome):
-        return matchings[models.index(model)].decode(syndrome)
-
-    mismatches = 0
-    engine_fails = 0
-    for shot in range(40):
-        device = StimDevice(seed=900 + shot,
-                            detector_rounds={1: detector_rounds})
-        op = Operation(id=1, name="qlx-mem", qubits=(0,), clifford=True,
-                       circuit=circuit)
-        res = simulate(RunSpec(
-                  ops=[op],
-                  num_units=4,
-                  d=3,
-                  rounds_policy=FixedRounds(rounds),
-                  code=SurfaceCodeModel(d=3),
-                  scheme=SlidingWindowScheme(),
-                  device=device,
-                  decoder=PyMatchingDecoder(_ZeroLatency()),
-              ), verbose=False)
-        engine_value = int(res["cluster"].op_results[1])
-        offline = int(decode_windowed(models, device._dets[1],
-                                      decode_window)[0])
-        mismatches += int(engine_value != offline)
-        engine_fails += int(engine_value != int(device._truth[1][0]))
-    assert mismatches == 0, \
-        f"{mismatches}/40 engine shots disagree with the offline reference"
-    # smoke-level sanity only (40 shots): LER ~ 0.056, so 0..8 failures
-    assert engine_fails < 10
+    device = StimDevice(detector_rounds={1: detector_rounds})
+    op = Operation(id=1, name="qlx-mem", qubits=(0,), clifford=True,
+                   circuit=circuit)
+    with pytest.raises(ValueError, match="detectorless logical"):
+        simulate(RunSpec(
+            ops=[op],
+            num_units=4,
+            rounds_policy=FixedRounds(rounds),
+            code=SurfaceCodeModel(d=3),
+            scheme=SlidingWindowScheme(),
+            device=device,
+            decoder=PyMatchingDecoder(_ZeroLatency()),
+            seed=900,
+        ), verbose=False)
 
 
 def test_stim_device_no_override_path_unchanged(circuit):
@@ -307,7 +273,7 @@ def test_stim_device_no_override_path_unchanged(circuit):
     for device in (plain, other):
         op = Operation(id=1, name="m", qubits=(0,), clifford=True,
                        circuit=coord_circuit)
-        device.begin_operation(op)
+        device.begin_operation(op, 6)
     assert plain._by_round[1] == other._by_round[1]
     assert (plain._detector_rounds_for_key(1, coord_circuit, 6)
             == other._detector_rounds_for_key(1, coord_circuit, 6)

@@ -7,15 +7,18 @@ import pathlib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+import numpy as np
 import pytest
 
 from decsim.decoders import CodeRouter
 from decsim.decoder_manager import DecoderManager
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.config import us
 from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
+                             SAMPLED_CONFIDENCE_SOURCE,
                              SampledConfidenceDecoder, SwitchingRouter)
 from decsim.engine import Engine
-from decsim.message import Operation
+from decsim.message import DecodeJob, DecodeResult, Operation
 from decsim.schedulers import FifoScheduler
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
@@ -39,7 +42,7 @@ def _switch_run(switching, low_confidence_probability, *, rounds=60, tau_weak=0.
     keep_weak_result is controllable) routed against a slow PerRoundDecoder strong by a
     SwitchingRouter, with separate "default"/"strong" unit pools."""
     weak = SampledConfidenceDecoder(PerRoundDecoder(tau_weak * TAU),
-                                    low_confidence_probability, seed=seed)
+                                    low_confidence_probability)
     strong = PerRoundDecoder(tau_strong * TAU)
     return simulate(RunSpec(
                ops=[_memory_op()],
@@ -48,10 +51,10 @@ def _switch_run(switching, low_confidence_probability, *, rounds=60, tau_weak=0.
                round_us=TAU,
                scheme=SlidingWindowScheme(),
                strategy=switching,
-               decoder=weak,
                router=SwitchingRouter(weak, strong),
                unit_pools=pools or {"default": 1, "strong": 1},
                make_metrics=make_metrics,
+               seed=seed,
            ), verbose=False)
 
 
@@ -74,6 +77,7 @@ def test_A1_dispatch_is_bounded_by_free_units_and_queue_drains():
 
     class _Probe:
         name = "probe"
+        result_schema_version = 1
         def __init__(self): self.min_free = N; self.max_busy = 0
         def observe(self, e):
             self.min_free = min(self.min_free, cluster.free_units)
@@ -188,38 +192,36 @@ def test_A4_serial_escalates_unsure_windows_and_counts_strong_needed():
     re-decode is queued and strong_needed increments by one per escalated window. With every weak
     result flagged low-confidence (probability 1.0), strong_needed == total_windows. Serial mode
     never cancels (strong_cancelled == 0), and every window still commits exactly once."""
-    res = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=60)
-    c = res["cluster"]
-    assert c.total_windows > 0
-    assert c.strong_needed == c.total_windows         # one escalation per window
-    assert c.strong_cancelled == 0                    # serial never cancels
-    assert len(c.committed_windows) == c.total_windows
+    res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 1.0, rounds=60)
+    wm, dm = res.window_manager, res.decoder_manager
+    assert wm.total_windows > 0
+    assert dm.strong_needed == wm.total_windows       # one escalation per window
+    assert dm.strong_cancelled == 0                   # serial never cancels
+    assert len(wm.committed_windows) == wm.total_windows
 
 
 def test_A4_confident_weak_never_escalates():
     """A4: if the weak decoder is always confident (low-confidence probability 0.0), no window is
     escalated -- strong_needed == 0 and strong_cancelled == 0 -- yet every window still commits."""
-    res = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds=60)
-    c = res["cluster"]
-    assert c.total_windows > 0
-    assert c.strong_needed == 0
-    assert c.strong_cancelled == 0
-    assert len(c.committed_windows) == c.total_windows
+    res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 0.0, rounds=60)
+    wm, dm = res.window_manager, res.decoder_manager
+    assert wm.total_windows > 0
+    assert dm.strong_needed == 0
+    assert dm.strong_cancelled == 0
+    assert len(wm.committed_windows) == wm.total_windows
 
 
 def test_A4_strong_redo_size_is_commit_plus_two_buffers():
     """A4: the strong re-decode covers Switching.strong_redo_rounds(window) =
-    commit + 2*buffer (= 3d when commit=buffer=d). Cross-check the policy's own formula against
-    the public cluster geometry (commit / buffer) the run used."""
-    res = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=60)
-    c = res["cluster"]
-    assert (c.commit, c.buffer) == (D, D)             # default sliding scheme
-    # Reconstruct the policy's redo size from the cluster's committed geometry and confirm 3d.
-    from decsim.message import Window
-    w = Window(op_id=0, k=0, commit_lo=1, commit_hi=c.commit,
-               buffer_hi=c.commit + c.buffer, n_rounds=c.commit + c.buffer)
-    redo = Switching(confidence_threshold=0.5).strong_redo_rounds(w)
-    assert redo == c.commit + 2 * c.buffer == 3 * D
+    commit + 2*buffer (= 3d when commit=buffer=d). Cross-check the policy's
+    formula against one frozen runtime window."""
+    res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 1.0, rounds=60)
+    w = res.window_manager.windows[(0, 0)]
+    commit = w.commit_hi - w.commit_lo + 1
+    trailing_buffer = w.buffer_hi - w.commit_hi
+    assert (commit, trailing_buffer) == (D, D)
+    redo = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5).strong_redo_rounds(w)
+    assert redo == 3 * D
 
 
 # =====================================================================================
@@ -233,28 +235,28 @@ def test_A5_parallel_starts_strong_everywhere_and_cancels_confident():
     is either cancelled or needed (strong_cancelled + strong_needed == total_windows), and the
     cancelled strong work neither corrupts op_results nor double-commits a window."""
     # All-confident weak -> every strong job is cancelled.
-    res = _switch_run(Switching(confidence_threshold=0.5, run_both_at_once=True), 0.0,
+    res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True), 0.0,
                       rounds=60, pools={"default": 1, "strong": 2})
-    c = res["cluster"]
-    assert c.total_windows > 0
-    assert c.strong_cancelled == c.total_windows      # every window's strong job halted
-    assert c.strong_needed == 0
-    assert c.strong_cancelled + c.strong_needed == c.total_windows
+    wm, dm = res.window_manager, res.decoder_manager
+    assert wm.total_windows > 0
+    assert dm.strong_cancelled == wm.total_windows    # every window's strong job halted
+    assert dm.strong_needed == 0
+    assert dm.strong_cancelled + dm.strong_needed == wm.total_windows
     # every window committed exactly once despite the cancellations
-    assert len(c.committed_windows) == c.total_windows
+    assert len(wm.committed_windows) == wm.total_windows
 
 
 def test_A5_parallel_mixed_one_strong_job_per_window():
     """A5: with a mix of confident and unsure windows, parallel still launches exactly one strong
     job per window: the cancelled ones plus the needed ones account for every window. Cancellation
     must not perturb the committed-window count."""
-    res = _switch_run(Switching(confidence_threshold=0.5, run_both_at_once=True), 0.4,
+    res = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True), 0.4,
                       rounds=200, pools={"default": 1, "strong": 2})
-    c = res["cluster"]
-    assert c.strong_cancelled > 0                      # some windows turned out confident
-    assert c.strong_needed > 0                         # some genuinely escalated
-    assert c.strong_cancelled + c.strong_needed == c.total_windows
-    assert len(c.committed_windows) == c.total_windows
+    wm, dm = res.window_manager, res.decoder_manager
+    assert dm.strong_cancelled > 0                    # some windows turned out confident
+    assert dm.strong_needed > 0                       # some genuinely escalated
+    assert dm.strong_cancelled + dm.strong_needed == wm.total_windows
+    assert len(wm.committed_windows) == wm.total_windows
 
 
 # =====================================================================================
@@ -262,19 +264,25 @@ def test_A5_parallel_mixed_one_strong_job_per_window():
 # =====================================================================================
 
 def _strong_running_samples(switching, low_conf_prob, *, rounds, tau_strong, seed=1):
-    """Sample cluster.strong_running_rounds after every engine event (the batch size on the
-    strong unit, set at bulk dispatch)."""
+    """Sample physical running strong jobs and their exact input rounds."""
     captured = {}
 
     class _Sampler:
         name = "strong_running"
+        result_schema_version = 1
         def __init__(self, cluster): self.cluster = cluster; self.samples = []
         def observe(self, e):
-            self.samples.append(getattr(self.cluster, "strong_running_rounds", 0))
-        def result(self): return self.samples
+            running = [
+                rounds
+                for _keys, phase, rounds
+                in self.cluster.admitted_strong_work_snapshot()
+                if phase == "running"
+            ]
+            self.samples.append((len(running), sum(running)))
+        def result(self): return [list(sample) for sample in self.samples]
 
-    def make_metrics(e, c, ch, fa):
-        m = _Sampler(c); captured["m"] = m; return [m]
+    def make_metrics(e, wm, dm, ch, fa):
+        m = _Sampler(dm); captured["m"] = m; return [m]
 
     res = _switch_run(switching, low_conf_prob, rounds=rounds, tau_strong=tau_strong,
                       seed=seed, make_metrics=make_metrics)
@@ -285,50 +293,48 @@ def test_A6_bulk_strong_merges_outstanding_jobs_into_one_decode():
     """A6 (bulk decoding; arXiv:2510.25222 Sec IV, the NEW feature). In serial mode with
     switch_bulk_strong=True, a backed-up strong pool merges ALL its queued re-decode jobs into ONE
     decode whose round count is the sum of the merged jobs' rounds. With every window escalated and
-    a slow strong decoder, the strong pool backs up, so strong_running_rounds takes values that are
-    INTEGER MULTIPLES of the per-job redo (3d) and exceeds a single job's 3d -- proving >1 job ran
-    in one merged batch -- and returns to 0 after the run. The merged batch's latency is
-    proportional to its round count (one big decode), so the few large batches in bulk mode are far
-    fewer step-changes than per-job decoding would produce."""
-    per_job = 3 * D                                   # commit + 2*buffer
+    a slow strong decoder, the admitted-work snapshot exposes one running physical job whose exact
+    input-round count can exceed an individual job. The merged batch's latency is proportional to
+    that literal round count, and the admitted-work snapshot is empty after completion."""
     res, samples = _strong_running_samples(
-        Switching(confidence_threshold=0.5, bulk_strong=True), 1.0,
+        Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, bulk_strong=True), 1.0,
         rounds=120, tau_strong=10.0)
-    c = res["cluster"]
-    assert c.total_windows > 0
-    assert c.strong_needed == c.total_windows         # every window escalated -> heavy backlog
+    wm, dm = res.window_manager, res.decoder_manager
+    assert wm.total_windows > 0
+    assert dm.strong_needed == wm.total_windows       # every window escalated -> heavy backlog
 
-    nonzero = sorted({s for s in samples if s > 0})
-    assert nonzero, "strong_running_rounds never moved -- the strong pool did not run"
-    # every observed merged-batch size is a whole number of per-job (3d) re-decodes
-    assert all(s % per_job == 0 for s in nonzero), nonzero
-    # at least one batch merged MORE THAN ONE job (the defining property of bulk decoding)
-    assert max(nonzero) > per_job, nonzero
-    # the strong unit is idle (batch counter back to 0) once everything has decoded
-    assert getattr(c, "strong_running_rounds", 0) == 0
-    assert samples[-1] == 0
+    nonzero_rounds = sorted({rounds for jobs, rounds in samples if jobs})
+    assert nonzero_rounds, "the strong pool did not run"
+    assert all(jobs <= 1 for jobs, _rounds in samples)
+    assert max(nonzero_rounds) > min(nonzero_rounds)
+    assert dm.admitted_strong_work_snapshot() == ()
+    assert samples[-1] == (0, 0)
 
 
 def test_A6_non_bulk_decodes_jobs_individually_not_in_one_batch():
     """A6 (contrast). WITHOUT bulk_strong (plain serial), the strong pool processes re-decodes one
-    job at a time: strong_running_rounds is the bulk-dispatch counter and stays 0 throughout, while
-    the SAME workload under bulk_strong drives that counter to a large merged value. Same windows
-    escalate either way; bulk merges them, non-bulk does not."""
+    physical job at a time, so its admitted running round count remains the size of one submitted
+    input. The same workload under bulk_strong produces a larger merged physical job. The same
+    windows escalate either way; only the compute grouping differs."""
     res_bulk, samples_bulk = _strong_running_samples(
-        Switching(confidence_threshold=0.5, bulk_strong=True), 1.0,
+        Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, bulk_strong=True), 1.0,
         rounds=120, tau_strong=10.0)
     res_plain, samples_plain = _strong_running_samples(
-        Switching(confidence_threshold=0.5, bulk_strong=False), 1.0,
+        Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, bulk_strong=False), 1.0,
         rounds=120, tau_strong=10.0)
 
     # both escalate exactly the same windows
-    assert res_bulk["cluster"].strong_needed == res_plain["cluster"].strong_needed > 0
-    # plain serial never populates the bulk-batch counter; bulk drives it well past one job
-    assert max(samples_plain) == 0
-    assert max(samples_bulk) > 3 * D
+    assert res_bulk.decoder_manager.strong_needed == res_plain.decoder_manager.strong_needed > 0
+    # Both occupy one unit; only bulk combines several inputs into a larger
+    # physical service job.
+    assert all(jobs <= 1 for jobs, _rounds in samples_plain)
+    assert all(jobs <= 1 for jobs, _rounds in samples_bulk)
+    assert max(rounds for _jobs, rounds in samples_bulk) > max(
+        rounds for _jobs, rounds in samples_plain
+    )
     # both still commit every window
-    assert len(res_bulk["cluster"].committed_windows) == res_bulk["cluster"].total_windows
-    assert len(res_plain["cluster"].committed_windows) == res_plain["cluster"].total_windows
+    assert len(res_bulk.window_manager.committed_windows) == res_bulk.window_manager.total_windows
+    assert len(res_plain.window_manager.committed_windows) == res_plain.window_manager.total_windows
 
 
 # =====================================================================================
@@ -341,10 +347,10 @@ def test_A7_slower_strong_decoder_lengthens_escalated_windows():
     escalated, a strong PerRoundDecoder of 20 us/round makes the run finish strictly later than the
     identical run with a 2 us/round strong decoder -- the only thing that changed is the escalated
     windows' strong-decode service time."""
-    slow = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=30, tau_strong=20.0)
-    fast = _switch_run(Switching(confidence_threshold=0.5), 1.0, rounds=30, tau_strong=2.0)
-    assert slow["cluster"].strong_needed == fast["cluster"].strong_needed > 0
-    assert slow["engine"].now > fast["engine"].now
+    slow = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 1.0, rounds=30, tau_strong=20.0)
+    fast = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 1.0, rounds=30, tau_strong=2.0)
+    assert slow.decoder_manager.strong_needed == fast.decoder_manager.strong_needed > 0
+    assert slow.engine.now > fast.engine.now
 
 
 def test_A7_strong_latency_does_not_affect_an_all_confident_run():
@@ -352,7 +358,84 @@ def test_A7_strong_latency_does_not_affect_an_all_confident_run():
     irrelevant: two runs with wildly different strong-decoder speeds finish at the SAME time when
     every weak result is confident -- isolating that it is the *chosen* decoder's latency, on the
     escalated windows, that moves the clock."""
-    slow = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds=30, tau_strong=20.0)
-    fast = _switch_run(Switching(confidence_threshold=0.5), 0.0, rounds=30, tau_strong=2.0)
-    assert slow["cluster"].strong_needed == fast["cluster"].strong_needed == 0
-    assert slow["engine"].now == fast["engine"].now
+    slow = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 0.0, rounds=30, tau_strong=20.0)
+    fast = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), 0.0, rounds=30, tau_strong=2.0)
+    assert slow.decoder_manager.strong_needed == fast.decoder_manager.strong_needed == 0
+    assert slow.engine.now == fast.engine.now
+
+
+# =====================================================================================
+# A8 -- functional decoder-result boundary
+# =====================================================================================
+
+class _FixedResultDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
+    def __init__(self, logical_observables):
+        self.logical_observables = logical_observables
+
+    def decode(self, job):
+        return DecodeResult(
+            job.op_id,
+            job.window_id,
+            logical_observables=self.logical_observables,
+        )
+
+
+class _EqualToOne:
+    def __eq__(self, other):
+        return other == 1
+
+
+@pytest.mark.parametrize(
+    "logical_observables",
+    [
+        [0, 1],
+        (True,),
+        (0.0,),
+        (np.uint8(1),),
+        (_EqualToOne(),),
+    ],
+    ids=["list", "bool", "float", "numpy-integer", "equality-spoof"],
+)
+def test_A8_decoder_boundary_rejects_non_exact_prediction_bits(
+        logical_observables):
+    engine = Engine(verbose=False)
+    cluster = DecoderManager(
+        engine,
+        router=CodeRouter(_FixedResultDecoder(logical_observables)),
+        scheduler=FifoScheduler(),
+    )
+    job = DecodeJob(op_id=5, window_id=2, n_rounds=3)
+
+    with pytest.raises(TypeError, match=r"job \(5, 2\).*logical_observables"):
+        cluster._decode_and_validate_result(job)
+
+
+def test_A8_decoder_boundary_rejects_prediction_bits_outside_binary_domain():
+    engine = Engine(verbose=False)
+    cluster = DecoderManager(
+        engine,
+        router=CodeRouter(_FixedResultDecoder((0, 2))),
+        scheduler=FifoScheduler(),
+    )
+    job = DecodeJob(op_id=5, window_id=2, n_rounds=3)
+
+    with pytest.raises(ValueError, match=r"job \(5, 2\).*index 1.*2"):
+        cluster._decode_and_validate_result(job)
+
+
+@pytest.mark.parametrize("logical_observables", [None, (), (0,), (1, 0, 1)])
+def test_A8_decoder_boundary_accepts_timing_and_exact_prediction_vectors(
+        logical_observables):
+    engine = Engine(verbose=False)
+    cluster = DecoderManager(
+        engine,
+        router=CodeRouter(_FixedResultDecoder(logical_observables)),
+        scheduler=FifoScheduler(),
+    )
+    job = DecodeJob(op_id=5, window_id=2, n_rounds=3)
+
+    result = cluster._decode_and_validate_result(job)
+
+    assert result.logical_observables == logical_observables

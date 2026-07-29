@@ -106,8 +106,8 @@ def three_cnot_six_qubits_circuit() -> list[Operation]:
     """Three independent CNOTs on six qubits."""
     operations = [
         Operation(0, "Op0:CNOT(q0,q1)", (0, 1), clifford=True),
-        Operation(1, "Op1:CNOT(q2,q3)", (3, 4), clifford=True),
-        Operation(2, "Op2:CNOT(q1,q3)", (2, 5), clifford=True),
+        Operation(1, "Op1:CNOT(q3,q4)", (3, 4), clifford=True),
+        Operation(2, "Op2:CNOT(q2,q5)", (2, 5), clifford=True),
     ]
     return _wire_circuit(operations)
 
@@ -232,7 +232,13 @@ class SurgeryIRFrontend:
                 for token in tokens[1:]
                 if token.lower().startswith("q")
             )
-            is_clifford = _gate_is_clifford(mnemonic)
+            angle = None
+            if mnemonic.lower() in ROTATION_GATES:
+                angle = next(
+                    (token for token in tokens[1:]
+                     if not token.lower().startswith("q")),
+                    None)
+            is_clifford = _gate_is_clifford(mnemonic, angle)
             gate_list.append((mnemonic, qubits, is_clifford, blocked_by))
 
         return _operations_from_gate_list(gate_list, self.qubit_to_patch)

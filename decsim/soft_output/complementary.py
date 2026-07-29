@@ -1,9 +1,11 @@
 """Complementary-gap soft output: ``g_comp = |w_comp - w_min|`` for MWPM (SoftOutputMetric seam)."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..message import SoftOutput
+from ..message import SoftOutput, SoftOutputSource
+from ..detector_error_model import GRAPHLIKE_FAULT_MODEL_REQUIRED
 
 if TYPE_CHECKING:
     import stim
@@ -11,10 +13,24 @@ if TYPE_CHECKING:
 
 _CITATION = "Toshio et al. 2510.25222 Sec. II.C"
 
+COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
+    method="complementary_gap",
+    cluster_origin="mwpm_opposite_logical",
+    growth_schedule="minimum_weight_matching",
+    gap_units="log_likelihood_weight",
+    correction="opposite_logical_constraint",
+    references=("arXiv:2510.25222v1 Section II.C",),
+)
+
 
 def dem_to_matrices(dem: "stim.DetectorErrorModel"):
     """Flatten a decomposed DEM into ``(H[det x err], O[obs x err], weights=ln((1-p)/p))``."""
     import numpy as np
+
+    from ..detector_error_model import (
+        canonical_error_instructions,
+        validate_graphlike_fault,
+    )
 
     num_det = dem.num_detectors
     num_obs = dem.num_observables
@@ -22,33 +38,34 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
     o_cols: list = []
     weights: list = []
 
-    def flush(dets, obs, weight) -> None:
-        if not dets and not obs:
-            return
+    def append_component(dets, obs, weight) -> None:
         hcol = np.zeros(num_det, dtype=np.uint8)
-        hcol[dets] = 1
+        hcol[list(dets)] = 1
         ocol = np.zeros(num_obs, dtype=np.uint8)
-        ocol[obs] = 1
+        ocol[list(obs)] = 1
         h_cols.append(hcol)
         o_cols.append(ocol)
         weights.append(weight)
 
-    for instr in dem.flattened():
-        if instr.type != "error":
-            continue
-        prob = instr.args_copy()[0]
+    for record in canonical_error_instructions(dem):
+        prob = record.probability
         weight = float(np.log((1 - prob) / prob)) if 0 < prob < 1 else 50.0
-        dets: list = []
-        obs: list = []
-        for target in instr.targets_copy():
-            if target.is_separator():
-                flush(dets, obs, weight)
-                dets, obs = [], []
-            elif target.is_relative_detector_id():
-                dets.append(target.val)
-            elif target.is_logical_observable_id():
-                obs.append(target.val)
-        flush(dets, obs, weight)
+        for component in record.components:
+            fault = validate_graphlike_fault(
+                component.detectors,
+                component.logical_observables,
+                location=(
+                    f"error {record.error_ordinal} component "
+                    f"{component.component_ordinal}"
+                ),
+            )
+            assert fault is not None
+            detectors, logical_observables = fault
+            append_component(
+                detectors,
+                logical_observables,
+                weight,
+            )
 
     h = np.array(h_cols, dtype=np.uint8).T if h_cols else np.zeros((num_det, 0), np.uint8)
     o = np.array(o_cols, dtype=np.uint8).T if o_cols else np.zeros((num_obs, 0), np.uint8)
@@ -72,9 +89,16 @@ class ComplementaryGapMetric:
         import numpy as np
         import pymatching
 
+        from ..detector_error_model import validate_graphlike_matrices
+
         self.check = np.asarray(check, dtype=np.uint8)
         self.obs = np.asarray(obs, dtype=np.uint8)
         self.weights = np.asarray(weights, dtype=float)
+        validate_graphlike_matrices(
+            self.check,
+            self.obs,
+            location="complementary-gap model",
+        )
         if self.obs.shape[0] != 1:
             raise ValueError(
                 "the complementary gap is defined for one observable; got "
@@ -93,7 +117,14 @@ class ComplementaryGapMetric:
     @classmethod
     def from_window_model(cls, model: "WindowErrorModel") -> "ComplementaryGapMetric":
         """Build the metric from a decsim WindowErrorModel (check/obs/priors)."""
-        return cls(model.check, model.obs, _weights_from_priors(model.priors))
+        from ..detector_error_model import FaultRepresentation
+
+        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        return cls(
+            faults.check,
+            faults.observables,
+            _weights_from_priors(faults.priors),
+        )
 
     def evaluate(self, syndrome) -> SoftOutput:
         """Return the :class:`SoftOutput` (logical value + gap) for one syndrome."""
@@ -105,8 +136,22 @@ class ComplementaryGapMetric:
         forced = np.concatenate([bits, [pred ^ 1]]).astype(np.uint8)
         _, w_comp = self._aug.decode(forced, return_weight=True)
         return SoftOutput(
-            logical_value=pred,
             gap=abs(float(w_comp) - float(w_min)),
+            source=COMPLEMENTARY_GAP_SOURCE,
             w_min=float(w_min),
             w_comp=float(w_comp),
         )
+
+
+@dataclass(frozen=True)
+class ComplementaryGapMetricFactory:
+    """Stateless complementary-gap builder used by ``SoftOutputDecoder``."""
+
+    source = COMPLEMENTARY_GAP_SOURCE
+    fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
+
+    def from_window_model(
+        self,
+        model: "WindowErrorModel",
+    ) -> ComplementaryGapMetric:
+        return ComplementaryGapMetric.from_window_model(model)

@@ -1,8 +1,9 @@
 """End-to-end simulate() smoke tests (real engine, real parts, fake decoder)."""
+
 import pytest
 
 from decsim.decoders import PerRoundDecoder
-from decsim.run_spec import simulate
+from decsim.run_spec import CompletedRun, simulate
 from decsim.message import Operation
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec
@@ -18,10 +19,41 @@ def test_simulate_two_clifford_ops_end_to_end():
     res = simulate(RunSpec(ops=_two_op_clifford(),
                            decoder=PerRoundDecoder(0.5),
                            rounds_policy=FixedRounds(11), num_units=2))
-    assert res["chip_done"] == 22 * 1_100_000            # 2 ops x 11 rounds, serial
-    assert res["fully_done"] > res["chip_done"]          # decode + delivery tail
-    assert set(res["cluster"].op_results) <= {0, 1}
-    assert res["chip"].body_done_time[1] == res["chip_done"]
+    assert isinstance(res, CompletedRun)
+    assert res.result.chip_done_ticks == 22 * 1_100_000            # 2 ops x 11 rounds, serial
+    assert res.result.fully_done_ticks > res.result.chip_done_ticks          # decode + delivery tail
+    assert set(res.window_manager.op_results) <= {0, 1}
+    assert res.chip.body_done_time[1] == res.result.chip_done_ticks
+    assert res.result.terminal_status == "complete"
+    assert res.result.event_queue_empty
+    assert res.result.decode_work_settled
+    assert res.result.chip_workload_complete
+    with pytest.raises(RuntimeError, match="completed"):
+        res.engine.run()
+    with pytest.raises(RuntimeError, match="completed"):
+        res.engine.schedule(0, lambda: None)
+
+
+def test_completed_run_replaces_the_ambiguous_world_name():
+    import decsim.run_spec as run_spec_module
+
+    assert not hasattr(run_spec_module, "World")
+
+
+def test_completed_run_is_replayable():
+    def run():
+        return simulate(RunSpec(
+            ops=_two_op_clifford(),
+            decoder=PerRoundDecoder(0.5),
+            rounds_policy=FixedRounds(11),
+            num_units=2,
+            seed=17,
+        ))
+
+    first = run()
+    second = run()
+
+    assert first.result == second.result
 
 
 def test_simulate_blocked_t_reaction_path():
@@ -30,24 +62,21 @@ def test_simulate_blocked_t_reaction_path():
                      predecessors=(0,))]
     res = simulate(RunSpec(ops=ops, decoder=PerRoundDecoder(0.5),
                            rounds_policy=FixedRounds(11)))
-    gate = res["chip"]
+    gate = res.chip
     assert 1 in gate.decode_released                     # Decision released B
     assert gate.decode_release_time[1] > gate.body_done_time[0]
-    assert res["cluster"].memory_rounds_total > 0        # idle rounds while blocked
+    assert res.window_manager.memory_rounds_total > 0        # idle rounds while blocked
 
 
-def test_runspec_validation():
+def test_runspec_build_contracts():
     with pytest.raises(ValueError, match="exactly one"):
-        RunSpec().validate()
+        RunSpec().build()
     with pytest.raises(ValueError, match="decoder"):
         RunSpec(ops=_two_op_clifford()).build()
-    spec = RunSpec(ops=_two_op_clifford(), decoder=PerRoundDecoder(0.5))
-    spec.validate()                                      # defaults are coherent
+    RunSpec(ops=[], decoder=PerRoundDecoder(0.5)).build()
 
 
-def test_build_runs_validate_first():
-    """build() enforces validate() (Codex review finding): an invalid
-    feedback_boundary_mode must raise at build, not silently misbehave."""
+def test_build_rejects_invalid_feedback_boundary_mode():
     import pytest as _pytest
     from decsim.planner import FixedRounds
     from decsim.run_spec import RunSpec
@@ -56,7 +85,7 @@ def test_build_runs_validate_first():
                 feedback_boundary_mode="bogus").build()
 
 
-def test_validate_rejects_ambiguous_stream_configs():
+def test_build_rejects_ambiguous_stream_configs():
     """Codex API review: an op in decode_ops AND dynamic_streams raised a
     duplicate-lease crash deep in PayloadStore; now a clear validate error."""
     import pytest as _pytest

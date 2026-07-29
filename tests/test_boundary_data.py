@@ -6,9 +6,11 @@
 #==================================================================
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
-from decsim.controllers import ModularController, LinkModel
+from conftest import fixed_latency_link_config
+from decsim.controllers import ModularController
 from decsim.decoders import PresetLatencyDecoder
-from decsim.devices import SyndromeBitDevice
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
+from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.engine import Engine
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation, SyndromePayload
@@ -24,6 +26,8 @@ class DefectEmittingDecoder:
     """Records every payload each window's decode sees, and (optionally) emits a fixed
     artificial-defect mask at the round just past its commit region -- the place crossing
     chains put defects (arXiv:2209.08552 Fig. 2)."""
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, emit: bool):
         self.emit = emit
         self.seen = {}   # (job_op, window, payload_op, round, patch) -> bits tuple
@@ -45,15 +49,21 @@ def _memory_ops(n=1):
     return CircuitFrontend(ops).build()
 
 
-def _run(ops, emit, device=None):
+def _run(ops, emit, device=None, seed=0):
     dec = DefectEmittingDecoder(emit)
+    code_selection = (
+        {"code": device.code}
+        if type(device) is SyndromeBitDevice
+        else {"d": 3}
+    )
     simulate(RunSpec(
         ops=ops,
         num_units=2,
-        d=3,
         rounds_policy=FixedRounds(11),
         decoder=dec,
         device=device,
+        seed=seed,
+        **code_selection,
     ), verbose=False)
     return dec.seen
 
@@ -61,9 +71,9 @@ def _run(ops, emit, device=None):
 def test_artificial_defects_reach_next_window_same_op():
     # sequential scheme, one op: W_k commits rounds 3k+1..3k+3; W_{k-1}'s defects land
     # exactly on W_k's first round (3k+1).
-    device = lambda: SyndromeBitDevice(SurfaceCodeModel(d=3), seed=1)
-    base = _run(_memory_ops(), emit=False, device=device())
-    flipped = _run(_memory_ops(), emit=True, device=device())
+    device = lambda: SyndromeBitDevice(SurfaceCodeModel(d=3))
+    base = _run(_memory_ops(), emit=False, device=device(), seed=1)
+    flipped = _run(_memory_ops(), emit=True, device=device(), seed=1)
     assert set(base) == set(flipped)
     changed = []
     for key, bits in base.items():
@@ -79,10 +89,10 @@ def test_artificial_defects_reach_next_window_same_op():
 def test_artificial_defects_cross_op_shift():
     # two chained ops, 11 rounds each: op0's last window commits up to round 11 and emits
     # defects at op0-local round 12 -> shifted to op1-local round 1 on op1's first window.
-    device = SyndromeBitDevice(SurfaceCodeModel(d=3), seed=2)
-    base = _run(_memory_ops(2), emit=False, device=device)
-    device = SyndromeBitDevice(SurfaceCodeModel(d=3), seed=2)
-    flipped = _run(_memory_ops(2), emit=True, device=device)
+    device = SyndromeBitDevice(SurfaceCodeModel(d=3))
+    base = _run(_memory_ops(2), emit=False, device=device, seed=2)
+    device = SyndromeBitDevice(SurfaceCodeModel(d=3))
+    flipped = _run(_memory_ops(2), emit=True, device=device, seed=2)
     key = next(k for k in base
                if k[0] == 1 and k[1] == 0 and k[2] == 1 and k[3] == 1)  # op1 W0, round 1
     assert flipped[key] == tuple(b ^ m for b, m in zip(base[key], MASK))
@@ -100,29 +110,76 @@ def test_timing_only_payload_becomes_defect_mask():
 
 
 def test_per_patch_fragments_gate_round_arrival():
-    # a round with n_fragments=2 only counts as arrived once BOTH patches are in
+    # The controller is the sole fragment-completion owner; the manager sees
+    # exactly one complete round after both patch fragments arrive.
+    class SilentDevice(TimingOnlyDevice):
+        def round_payloads(self, operation, round_index):
+            return []
+
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     op.patches = (0, 1)
-    cl = RunSpec(ops=[op], d=3, rounds_policy=FixedRounds(11),
-                 decoder=PresetLatencyDecoder(1.0),
-                 num_units=1).build().cluster    # ops registered, windows built
-    cl.on_syndrome_arrival(SyndromePayload(0, 0, 1, n_fragments=2))
-    assert cl.rounds_arrived[0] == 0             # half the round is not the round
-    cl.on_syndrome_arrival(SyndromePayload(0, 1, 1, n_fragments=2))
-    assert cl.rounds_arrived[0] == 1
+    observed = []
+    controllers = []
+
+    def make_controller(engine, links):
+        controller = ModularController(
+            engine,
+            links=links,
+            log_syndromes=False,
+        )
+        controllers.append(controller)
+        return controller
+
+    def install_probe(engine, window_manager, decoder_manager, _chip, _factory):
+        def probe():
+            deliver = window_manager.on_syndrome_arrival
+            controllers[0].relay_syndrome(
+                SyndromePayload(0, 0, 1, n_fragments=2),
+                deliver,
+            )
+            observed.append(window_manager.rounds_arrived[0])
+            controllers[0].relay_syndrome(
+                SyndromePayload(0, 1, 1, n_fragments=2),
+                deliver,
+            )
+            observed.append(window_manager.rounds_arrived[0])
+            engine.schedule(
+                1,
+                lambda: observed.append(window_manager.rounds_arrived[0]),
+                label="observe complete packet",
+            )
+
+        engine.schedule(0, probe, label="fragment arrival probe")
+        return []
+
+    RunSpec(
+        ops=[op],
+        d=3,
+        rounds_policy=FixedRounds(11),
+        decoder=PresetLatencyDecoder(1.0),
+        num_units=1,
+        device=SilentDevice(),
+        links=fixed_latency_link_config(),
+        make_controller=make_controller,
+        make_metrics=install_probe,
+    ).build()
+
+    assert observed == [0, 0, 1]
 
 
 def test_per_patch_device_end_to_end():
     # a 2-patch op with a per-patch device: every decoded round carries BOTH fragments
     op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
     dec = DefectEmittingDecoder(emit=False)
+    code = SurfaceCodeModel(d=3)
     simulate(RunSpec(
         ops=CircuitFrontend([op]).build(),
         num_units=1,
-        d=3,
+        code=code,
         rounds_policy=FixedRounds(11),
         decoder=dec,
-        device=SyndromeBitDevice(SurfaceCodeModel(d=3), seed=3, per_patch=True),
+        device=SyndromeBitDevice(code, per_patch=True),
+        seed=3,
     ), verbose=False)
     w0_rounds = {(r, p) for (_, k, _, r, p) in dec.seen if k == 0}
     assert {(r, p) for r in range(1, 7) for p in (0, 1)} <= w0_rounds

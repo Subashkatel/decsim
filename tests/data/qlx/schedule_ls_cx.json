@@ -1,0 +1,98 @@
+{
+ "program": "ls_cx",
+ "estimate": {
+  "wallclock_ns": "0.0",
+  "wallclock_us": "0.0",
+  "bottleneck": "'compute_limited'",
+  "logical_error_rate": "0.0012000000000000001",
+  "physical_qubits_peak": "68",
+  "factory_utilization": "{}"
+ },
+ "entries": [
+  {
+   "op_id": "'alloc_0'",
+   "op_name": "'fabric.alloc'",
+   "dependencies": "()",
+   "duration": "0",
+   "occupied_slots": "(('A', 0),)",
+   "consumes": "None",
+   "produces": "None",
+   "region": "'A'",
+   "slot": "0",
+   "start_round": "0",
+   "protocol": "None",
+   "av_override": "None"
+  },
+  {
+   "op_id": "'alloc_1'",
+   "op_name": "'fabric.alloc'",
+   "dependencies": "()",
+   "duration": "0",
+   "occupied_slots": "(('B', 0),)",
+   "consumes": "None",
+   "produces": "None",
+   "region": "'B'",
+   "slot": "0",
+   "start_round": "0",
+   "protocol": "None",
+   "av_override": "None"
+  },
+  {
+   "op_id": "'cx_0'",
+   "op_name": "'fabric.cx'",
+   "dependencies": "('alloc_0', 'alloc_1')",
+   "duration": "0",
+   "occupied_slots": "(('A', 0),)",
+   "consumes": "None",
+   "produces": "None",
+   "region": "'A'",
+   "slot": "0",
+   "start_round": "0",
+   "protocol": "None",
+   "av_override": "None"
+  },
+  {
+   "op_id": "'mz_0'",
+   "op_name": "'fabric.mz'",
+   "dependencies": "('cx_0',)",
+   "duration": "0",
+   "occupied_slots": "(('A', 0),)",
+   "consumes": "None",
+   "produces": "None",
+   "region": "'A'",
+   "slot": "0",
+   "start_round": "0",
+   "protocol": "None",
+   "av_override": "None"
+  },
+  {
+   "op_id": "'dealloc_1'",
+   "op_name": "'fabric.dealloc'",
+   "dependencies": "('cx_0',)",
+   "duration": "0",
+   "occupied_slots": "(('A', 0),)",
+   "consumes": "None",
+   "produces": "None",
+   "region": "'A'",
+   "slot": "0",
+   "start_round": "0",
+   "protocol": "None",
+   "av_override": "None"
+  },
+  {
+   "op_id": "'dealloc_0'",
+   "op_name": "'fabric.dealloc'",
+   "dependencies": "('mz_0',)",
+   "duration": "0",
+   "occupied_slots": "(('A', 0),)",
+   "consumes": "None",
+   "produces": "None",
+   "region": "'A'",
+   "slot": "0",
+   "start_round": "0",
+   "protocol": "None",
+   "av_override": "None"
+  }
+ ],
+ "diagram_type": "SpaceTimeDiagram"
+}

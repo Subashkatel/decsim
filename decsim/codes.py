@@ -43,6 +43,9 @@ class SurfaceCodeModel:
         """Syndrome rounds per logical cycle."""
         return self.d
 
+    def round_period_us(self) -> Optional[float]:
+        return self.round_us
+
     def commit_rounds(self) -> int:
         """Rounds committed per decode window (commit_rounds_override, else d)."""
         return self.commit_rounds_override if self.commit_rounds_override is not None else self.d
@@ -51,10 +54,13 @@ class SurfaceCodeModel:
         """Look-ahead buffer rounds per window (buffer_rounds_override, else d)."""
         return self.buffer_rounds_override if self.buffer_rounds_override is not None else self.d
 
-    def buffering_floor(self, scheme=None) -> tuple:
+    def buffering_floor(self) -> tuple[int, int]:
         """Literature buffering floor per side: (lead, trail) = (d, d)
         (Skoric n_buf=d, arXiv:2209.08552; Bombin b>=d, arXiv:2303.04846)."""
         return (self.d, self.d)
+
+    def buffer_floor_override_active(self) -> bool:
+        return self.buffer_rounds_override is not None
 
     def spatial_nodes(self, num_patches: int) -> int:
         """Decoding-graph node count per round for this many patches (drives
@@ -104,10 +110,16 @@ class BBCodeModel:
         """Syndrome rounds per logical cycle."""
         return self.d
 
-    def buffering_floor(self, scheme=None) -> tuple:
+    def round_period_us(self) -> Optional[float]:
+        return self.round_us
+
+    def buffering_floor(self) -> tuple[int, int]:
         """Literature buffering floor per side: (lead, trail) = (d, d)
         (Skoric n_buf=d, arXiv:2209.08552; Bombin b>=d, arXiv:2303.04846)."""
         return (self.d, self.d)
+
+    def buffer_floor_override_active(self) -> bool:
+        return False
 
     def commit_rounds(self) -> int:
         """Rounds committed per decode window."""

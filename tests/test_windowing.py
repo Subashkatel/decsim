@@ -6,10 +6,24 @@ from decsim.config import us
 from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.layouts import UniformLayout
-from decsim.message import Operation
-from decsim.planner import WindowPlanner
-from decsim.planner import PerOpRounds
-from decsim.schemes import SlidingWindowScheme, ParallelWindowScheme
+from decsim.message import (
+    Operation,
+    OperationPlanningView,
+    OperationWindowPlan,
+    ResolvedCodeGeometry,
+    ResolvedOperationPlanning,
+    WindowGeometry,
+)
+from decsim.planner import (
+    PerOpRounds,
+    _materialize_execution_plan,
+    _validate_operation_graph,
+)
+from decsim.schemes import (
+    NaiveOnlineScheme,
+    ParallelWindowScheme,
+    SlidingWindowScheme,
+)
 from conftest import continuous_stream
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
@@ -22,9 +36,116 @@ def _memory_op(rounds_unused=None):
     return [op]
 
 
+def test_typed_scheme_ledgers_pin_mode_idle_policy_and_parallel_boundaries():
+    sliding = SlidingWindowScheme().plan_operation(
+        7, 5, commit_round_count=2, buffer_round_count=1,
+    )
+    assert sliding == OperationWindowPlan(
+        operation_id=7,
+        windows=(
+            WindowGeometry(1, 1, 2, 3),
+            WindowGeometry(3, 3, 4, 5),
+            WindowGeometry(5, 5, 5, 6),
+        ),
+        internal_dependencies=((0, 1), (1, 2)),
+        entry_window_indices=(0,),
+        exit_window_indices=(2,),
+        windowed=True,
+        batch_preceding_idle_rounds=False,
+    )
+
+    naive = NaiveOnlineScheme().plan_operation(
+        7, 5, commit_round_count=2, buffer_round_count=1,
+    )
+    assert naive.windows == (WindowGeometry(1, 1, 5, 5),)
+    assert naive.internal_dependencies == ()
+    assert naive.entry_window_indices == naive.exit_window_indices == (0,)
+    assert naive.windowed is False
+    assert naive.batch_preceding_idle_rounds is True
+
+    expected = {
+        1: ((), (0,), (0,)),
+        2: (((0, 1),), (0,), (1,)),
+        3: (((0, 1), (2, 1)), (0, 2), (1,)),
+        4: (((0, 1), (2, 1), (2, 3)), (0, 2), (1, 3)),
+        5: (
+            ((0, 1), (2, 1), (2, 3), (4, 3)),
+            (0, 2, 4),
+            (1, 3),
+        ),
+    }
+    for window_count, (edges, roots, sinks) in expected.items():
+        plan = ParallelWindowScheme().plan_operation(
+            7,
+            window_count,
+            commit_round_count=1,
+            buffer_round_count=1,
+        )
+        assert plan.internal_dependencies == edges
+        assert plan.entry_window_indices == roots
+        assert plan.exit_window_indices == sinks
+        assert plan.windowed is True
+        assert plan.batch_preceding_idle_rounds is False
+
+
 def _plan(scheme, ops, rounds_per_op, d=3):
-    planner = WindowPlanner(scheme, UniformLayout(SurfaceCodeModel(d=d)), rounds_per_op)
-    return planner.plan(ops)
+    rounds_policy = (
+        rounds_per_op
+        if hasattr(rounds_per_op, "rounds_for")
+        else FixedRounds(rounds_per_op)
+    )
+    _validate_operation_graph(ops)
+    code = SurfaceCodeModel(d=d)
+    layout = UniformLayout(code)
+    leading_floor, trailing_floor = code.buffering_floor()
+    geometry = ResolvedCodeGeometry(
+        code_name=code.name,
+        distance=code.distance,
+        commit_round_count=code.commit_rounds(),
+        buffer_round_count=code.buffer_rounds(),
+        minimum_leading_buffer_round_count=leading_floor,
+        minimum_trailing_buffer_round_count=trailing_floor,
+        one_patch_spatial_node_count=code.spatial_nodes(1),
+        buffer_floor_override_active=code.buffer_floor_override_active(),
+    )
+    resolved = []
+    ledgers = []
+    for operation in ops:
+        round_count = rounds_policy.rounds_for(operation, code)
+        patch_count = max(
+            1,
+            len(operation.patches)
+            if operation.patches
+            else len(operation.qubits),
+        )
+        resolved.append(
+            ResolvedOperationPlanning(
+                operation_id=operation.id,
+                code_geometry=geometry,
+                round_count=round_count,
+                round_ticks=1,
+                spatial_node_count=layout.spatial_nodes_for(
+                    operation,
+                    base_spatial_node_count=code.spatial_nodes(patch_count),
+                ),
+            )
+        )
+        ledgers.append(
+            scheme.plan_operation(
+                operation.id,
+                round_count,
+                commit_round_count=geometry.commit_round_count,
+                buffer_round_count=geometry.buffer_round_count,
+            )
+        )
+    return _materialize_execution_plan(
+        tuple(
+            OperationPlanningView.from_operation(operation)
+            for operation in ops
+        ),
+        tuple(resolved),
+        tuple(ledgers),
+    )
 
 
 def _max_window_depth(plan):
@@ -42,12 +163,15 @@ def _max_window_depth(plan):
 
 def _timing_stream_plan(segment_rounds, d=3):
     """Plan one timing-only decode stream split into scheduled operation segments."""
-    code = SurfaceCodeModel(d=d)
     segments, stream_op, rounds_map = continuous_stream(None, segment_rounds,
                                                         patch=0, base_id=0)
-    planner = WindowPlanner(ParallelWindowScheme(), UniformLayout(code),
-                            PerOpRounds(rounds_map))
-    return planner.plan([stream_op]), segments, stream_op, rounds_map
+    plan = _plan(
+        ParallelWindowScheme(),
+        [stream_op],
+        PerOpRounds(rounds_map),
+        d=d,
+    )
+    return plan, segments, stream_op, rounds_map
 
 
 # ---- structural: the default chain is unchanged by the seam refactor ----------------
@@ -108,7 +232,7 @@ def test_parallel_scheme_tail_window():
 def test_parallel_stream_bounds_depth_across_short_scheduled_ops():
     """DecLat/Skoric parallel windows are global over a decode stream, not reset at every
     short scheduled operation. The clean path is therefore to plan one stream op whose rounds are
-    emitted by several segment ops; the ordinary WindowPlanner then gives O(1) A/B depth."""
+    emitted by several segment ops; static materialization then gives O(1) A/B depth."""
     d = 3
     plan, _segments, stream_op, _rounds_map = _timing_stream_plan([d] * 32, d=d)
 
@@ -125,7 +249,7 @@ def test_parallel_stream_bounds_depth_across_short_scheduled_ops():
 def test_timing_only_stream_runs_through_normal_parallel_scheme():
     """Timing-only and real-syndrome streams use the same runtime path. The device emits empty
     payloads, but they are tagged to the stream id/global round and decoded by the normal
-    WindowPlanner + ParallelWindowScheme path."""
+    static-plan + ParallelWindowScheme path."""
     d = 3
     plan, segments, stream_op, rounds_map = _timing_stream_plan([6, 6, 6], d=d)
     res = simulate(RunSpec(
@@ -133,13 +257,12 @@ def test_timing_only_stream_runs_through_normal_parallel_scheme():
               decode_ops=[stream_op],
               device=TimingOnlyDevice(),
               num_units=4,
-              d=d,
               rounds_policy=PerOpRounds(rounds_map),
               code=SurfaceCodeModel(d=d),
               scheme=ParallelWindowScheme(),
               decoder=PresetLatencyDecoder(0.1),
           ), verbose=False)
-    cluster = res["cluster"]
+    cluster = res.window_manager
     assert cluster.window_count[stream_op.id] == plan.window_count[stream_op.id]
     assert all(seg.id not in cluster.window_count for seg in segments)
     assert len(cluster.committed_windows) == cluster.total_windows
@@ -164,13 +287,12 @@ def test_short_successor_closes_cross_operation_buffer():
     result = simulate(RunSpec(
                  ops=[first, second],
                  num_units=2,
-                 d=3,
                  rounds_policy=PerOpRounds(rounds_map),
                  code=SurfaceCodeModel(d=3),
                  scheme=SlidingWindowScheme(),
                  decoder=PresetLatencyDecoder(0.1),
              ), verbose=False)
-    cluster = result["cluster"]
+    cluster = result.window_manager
 
     assert len(cluster.committed_windows) == cluster.total_windows
     assert cluster.payloads_held == 0
@@ -190,14 +312,15 @@ def test_parallel_scheme_reaction_matches_eq13():
             decoder=PerRoundDecoder(tau_us=1.0),
             scheme=ParallelWindowScheme(),
         ), verbose=False)
-    tail = r["fully_done"] - r["chip_done"]
+    tail = r.result.fully_done_ticks - r.result.chip_done_ticks
     # after the last round: chip->controller->decoders hops, the last layer-A window
-    # (3d rounds), the t_dd boundary, the layer-B window (3d rounds), then t_do.
+    # (3d rounds), WDO + t_dd, the layer-B window (3d rounds), then WDO.
     # This is Eq. 13's two-window 6d*tau_d(d^2) plus the one-way hops (a Clifford memory
     # op pays no t_oc + t_cq return path -- Pauli-frame updates stay in the orchestrator).
-    expected = (us(0.15) + us(2.0)            # t_qc + t_cd
-                + us(3 * d * 1.0) + us(0.5)   # 3d rounds at 1 us/round + t_dd
-                + us(3 * d * 1.0) + us(1.0))  # 3d rounds + t_do
+    expected = (us(0.15) + us(2.0)              # QC + CWD
+                + us(3 * d * 1.0) + us(1.0)     # layer A + WDO
+                + us(0.5)                       # DD
+                + us(3 * d * 1.0) + us(1.0))    # layer B + WDO
     assert abs(tail - expected) <= 4          # integer-tick rounding only
 
 
@@ -217,8 +340,8 @@ def test_backlog_sweep_parallel_vs_sequential():
                 decoder=PresetLatencyDecoder(10.0),
                 scheme=scheme,
             ), verbose=False)
-        peak_q = max((q for _, q in r["cluster"].queue_log), default=0)
-        return r["fully_done"], peak_q
+        peak_q = max((q for _, q in r.decoder_manager.queue_log), default=0)
+        return r.result.fully_done_ticks, peak_q
 
     seq = {u: run(SlidingWindowScheme(), u) for u in (1, 2, 4)}
     par = {u: run(ParallelWindowScheme(), u) for u in (1, 2, 4)}
@@ -255,7 +378,7 @@ def test_naive_scheme_decodes_only_after_the_last_round():
             decoder=PresetLatencyDecoder(1.0),
             scheme=NaiveOnlineScheme(),
         ), verbose=False)
-    lines = r["engine"].log_lines
+    lines = r.engine.log_lines
     # naive = one batch decode of the whole op (no "Wk"/commit vocabulary); match the
     # decode-start independent of that wording.
     assert trace_time(lines, "START DECODE M(q0)") >= \

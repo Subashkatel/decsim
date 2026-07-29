@@ -1,8 +1,16 @@
 """Strategies + pool completion pipeline (Contract 2b/2c orderings)."""
 import pytest
 
+from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE
 from decsim.engine import Engine
-from decsim.message import DecodeJob, DecodeOutcome, DecodeResult, Window
+from decsim.message import (
+    DecodeJob,
+    DecodeOutcome,
+    DecodeResult,
+    ResolvedCodeGeometry,
+    SoftOutput,
+    Window,
+)
 from decsim.decoder_manager import StrategyServicesImpl, DecoderManager
 from decsim.protocols import Directive, Submission
 from decsim.switching import Baseline, Switching
@@ -12,15 +20,26 @@ WS = 500_000
 
 class _FifoScheduler:
     def insert(self, queue, job): queue.append(job)
-    def pop(self, queue): return queue.pop(0)
+    def pop(self, queue, now_ticks): return queue.pop(0)
 
 
 class _Decoder:
     def __init__(self, latency, soft=None, logical=0, name="w"):
-        self._latency, self.soft, self.logical, self.name = latency, soft, logical, name
+        self._latency = latency
+        self.soft = (
+            None
+            if soft is None
+            else SoftOutput(
+                gap=soft,
+                source=SAMPLED_CONFIDENCE_SOURCE,
+            )
+        )
+        self.logical = logical
+        self.name = name
     def latency(self, job): return self._latency
     def decode(self, job):
-        return DecodeResult(job.op_id, job.window_id, logical_value=self.logical,
+        return DecodeResult(job.op_id, job.window_id,
+                            logical_observables=(self.logical,),
                             soft_output=self.soft)
 
 
@@ -43,6 +62,10 @@ class _RuntimeStub:
         self.commits.append((job.op_id, job.window_id, job.awaiting_strong_result))
     def on_strong_decode_done(self, key, result):
         self.strong_commits.append(key)
+    def prepare_strong_selection(self, weak_job, serial_submission):
+        if serial_submission is not None:
+            self.pool.enqueue(serial_submission.job, WS)
+        return WS
 
 
 def _window():
@@ -59,8 +82,8 @@ def _pool(strategy, weak, strong, pools=None):
     eng = Engine(verbose=False)
     rt = _RuntimeStub()
     pool = DecoderManager(eng, router=_Router(weak, strong), scheduler=_FifoScheduler(),
-                    unit_pools=pools or {"default": 1, "strong": 1},
-                    ws_delay_ticks=WS)
+                    unit_pools=pools or {"default": 1, "strong": 1})
+    rt.pool = pool
     pool.strategy = strategy
     pool.services = StrategyServicesImpl(eng, rt, pool)
     pool.on_window_decoded = rt.on_decode_done
@@ -82,7 +105,7 @@ def test_baseline_finalizes_and_never_escalates():
 def test_serial_escalation_after_ws_and_awaiting_set_before_commit():
     weak = _Decoder(10, soft=0.1)                 # low confidence -> escalate
     strong = _Decoder(1_000, logical=1, name="s")
-    strat = Switching(confidence_threshold=0.5)
+    strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5)
     eng, rt, pool = _pool(strat, weak, strong)
     w = _window()
     job = _weak_job(w)
@@ -98,10 +121,10 @@ def test_serial_escalation_after_ws_and_awaiting_set_before_commit():
     assert strat.strong_redo_rounds(w) == 9
 
 
-def test_keep_weak_cancels_parallel_strong():
+def test_confident_weak_result_cancels_parallel_strong():
     weak = _Decoder(10, soft=0.9)                 # confident -> keep weak
     strong = _Decoder(1_000_000, name="s")        # would take forever
-    strat = Switching(confidence_threshold=0.5, run_both_at_once=True)
+    strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True)
     eng, rt, pool = _pool(strat, weak, strong)
     w = _window()
     job = _weak_job(w)
@@ -124,7 +147,7 @@ def test_keep_weak_cancels_parallel_strong():
 def test_early_strong_held_then_applied_when_weak_commits():
     weak = _Decoder(10_000, soft=0.1)             # slow weak, low confidence
     strong = _Decoder(10, logical=1, name="s")    # strong finishes first
-    strat = Switching(confidence_threshold=0.5, run_both_at_once=True)
+    strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True)
     eng, rt, pool = _pool(strat, weak, strong)
     w = _window()
     job = _weak_job(w)
@@ -138,7 +161,7 @@ def test_early_strong_held_then_applied_when_weak_commits():
 
 def test_same_decoder_route_raises_at_build_time():
     shared = _Decoder(10)
-    strat = Switching(confidence_threshold=0.5, run_both_at_once=True)
+    strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True)
     eng, rt, pool = _pool(strat, shared, shared)
     w = _window()
     with pytest.raises(RuntimeError, match="distinct decoder"):
@@ -147,11 +170,22 @@ def test_same_decoder_route_raises_at_build_time():
 
 def test_switching_config_validation():
     with pytest.raises(ValueError):
-        Switching(0.5, weak_keepup_ratio=1.5)
+        Switching(0.5, SAMPLED_CONFIDENCE_SOURCE, weak_keepup_ratio=1.5)
     with pytest.raises(ValueError):
-        Switching(0.5, run_both_at_once=True, bulk_strong=True)
+        Switching(0.5, SAMPLED_CONFIDENCE_SOURCE, run_both_at_once=True, bulk_strong=True)
     with pytest.raises(ValueError):
-        Switching(0.5, weak_keepup_ratio=0.9).check_window_size(3, 3)
+        Switching(0.5, SAMPLED_CONFIDENCE_SOURCE, weak_keepup_ratio=0.9).validate_code_geometry(
+            ResolvedCodeGeometry(
+                code_name="test",
+                distance=3,
+                commit_round_count=3,
+                buffer_round_count=3,
+                minimum_leading_buffer_round_count=3,
+                minimum_trailing_buffer_round_count=3,
+                one_patch_spatial_node_count=9,
+                buffer_floor_override_active=True,
+            )
+        )
 
 
 def test_pool_validation():

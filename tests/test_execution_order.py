@@ -25,7 +25,7 @@ def _run(ops, **kw):
     kw.setdefault("d", 3)
     kw.setdefault("decoder", PresetLatencyDecoder(1.0))
     r = simulate(RunSpec(ops=ops, **kw), verbose=False)
-    return r["engine"].log_lines
+    return r.engine.log_lines
 
 
 def test_t_gate_waits_for_earlier_cnot_on_same_qubit():
@@ -81,7 +81,8 @@ def test_brickwork_with_t_keeps_program_order():
 
 def test_unwired_conflicting_ops_fail_loudly():
     """The busy_qubits invariant: ops sharing a qubit WITHOUT a dependency edge
-    (someone skipped _wire_circuit) must raise, not silently serialize or overlap."""
+    (someone skipped _wire_circuit) must raise, not silently serialize or overlap.
+    Enforced by the chip's live resource owner before either operation starts."""
     ops = [Operation(0, "A:X(q0)", (0,), clifford=True),
            Operation(1, "B:X(q0)", (0,), clifford=True)]   # deliberately NOT wired
     with pytest.raises(RuntimeError, match="share"):

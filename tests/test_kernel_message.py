@@ -1,9 +1,15 @@
 """Kernel domain model: typed records, PauliFrame purity, no rollback fields."""
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from decsim.message import (Decision, DecodeJob, DecodeOutcome,
-                            DecodeResult, OpKind, Operation, ResourceClaim,
-                            SyndromePayload, Window, WindowGraph)
+                            DecodeResult, FeedbackEffect,
+                            IntrinsicMeasurement, OpKind, Operation,
+                            ResourceClaim, SoftOutput, SoftOutputSource,
+                            SyndromePayload, Window, WindowGraph,
+                            stable_identity_bytes,
+                            stable_identity_order_key)
 from decsim.pauli_frame import PauliFrame
 
 
@@ -13,6 +19,49 @@ def test_syndrome_round_matches_todays_payload_shape():
     assert r.n_fragments == 1 and r.size_bits is None
     with pytest.raises(ValueError):
         SyndromePayload(operation_id=1, patch_id=0, round_index=1, n_fragments=0)
+
+
+def test_stable_identity_bytes_define_a_reproducible_total_order():
+    def independent_bytes(identity):
+        if type(identity) is int:
+            payload = str(identity).encode("ascii")
+            return b"I" + len(payload).to_bytes(8, "big") + payload
+        if type(identity) is str:
+            payload = identity.encode("utf-8")
+            return b"S" + len(payload).to_bytes(8, "big") + payload
+        encoded_items = tuple(independent_bytes(item) for item in identity)
+        return (
+            b"T"
+            + len(encoded_items).to_bytes(8, "big")
+            + b"".join(
+                len(item).to_bytes(8, "big") + item
+                for item in encoded_items
+            )
+        )
+
+    identities = (
+        2,
+        "2",
+        (),
+        (2, "north"),
+        ("gross", (5, "north")),
+        -11,
+        "",
+    )
+    expected = {identity: independent_bytes(identity) for identity in identities}
+
+    assert all(stable_identity_bytes(identity) == expected[identity]
+               for identity in identities)
+    assert all(stable_identity_order_key(identity) == expected[identity]
+               for identity in identities)
+    assert sorted(identities, key=stable_identity_order_key) == sorted(
+        identities,
+        key=independent_bytes,
+    )
+@pytest.mark.parametrize("identity", [True, 1.0, "\ud800", (1, object())])
+def test_stable_identity_bytes_reject_values_outside_the_exact_domain(identity):
+    with pytest.raises(TypeError, match="stable identities"):
+        stable_identity_bytes(identity)
 
 
 def test_decode_job_has_no_rollback_fields():
@@ -48,12 +97,120 @@ def test_operation_kind_and_magic_state_rule():
 
 def test_outcome_claim_decision_shapes():
     out = DecodeOutcome(job=DecodeJob(1, 0, 11),
-                        result=DecodeResult(op_id=1, window_id=0, logical_value=1))
-    assert out.result.logical_value == 1
+                        result=DecodeResult(
+                            op_id=1,
+                            window_id=0,
+                            logical_observables=(1, 0),
+                        ))
+    assert out.result.logical_observables == (1, 0)
     c = ResourceClaim("qubits", frozenset({0, 1}))
     assert c.kind == "qubits"
-    d = Decision(4, "Z")
-    assert d.releases_operation and d.pauli == "I"
+    effect = FeedbackEffect(
+        logical_observable_index=1,
+        decoded_value=0,
+        intrinsic_measurement=None,
+        correction_value=0,
+        basis="Z",
+        pauli="I",
+        apply_s=False,
+    )
+    d = Decision(4, effect)
+    assert d.releases_operation and d.effect is effect
+
+
+def _confidence_source(**changes):
+    fields = {
+        "method": "cluster_gap",
+        "cluster_origin": "union_find_decoder",
+        "growth_schedule": "meister_uniform_fair",
+        "gap_units": "graph_edges",
+        "correction": "none",
+        "references": (
+            "arXiv:1709.06218v3 Algorithm 1",
+            "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
+        ),
+    }
+    fields.update(changes)
+    return SoftOutputSource(**fields)
+
+
+def test_soft_output_has_immutable_confidence_provenance_and_no_prediction():
+    source = _confidence_source()
+    confidence = SoftOutput(gap=2.5, source=source)
+    result = DecodeResult(
+        op_id=1,
+        window_id=0,
+        logical_observables=(1,),
+        soft_output=confidence,
+    )
+
+    assert result.logical_observables == (1,)
+    assert confidence.gap == 2.5
+    assert confidence.source is source
+    assert confidence.w_min is None
+    assert confidence.w_comp is None
+    assert not hasattr(confidence, "logical_value")
+    with pytest.raises(FrozenInstanceError):
+        confidence.gap = 1.0
+
+
+@pytest.mark.parametrize(
+    ("changes", "error"),
+    [
+        ({"method": ""}, ValueError),
+        ({"cluster_origin": 1}, TypeError),
+        ({"references": []}, TypeError),
+        ({"references": ()}, ValueError),
+        ({"references": ("valid", "")}, ValueError),
+    ],
+)
+def test_soft_output_source_rejects_missing_or_unstable_provenance(
+        changes, error):
+    with pytest.raises(error):
+        _confidence_source(**changes)
+
+
+@pytest.mark.parametrize("gap", [True, -1.0, float("nan")])
+def test_soft_output_rejects_invalid_gap(gap):
+    with pytest.raises((TypeError, ValueError)):
+        SoftOutput(gap=gap, source=_confidence_source())
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("operation_id", True, TypeError),
+        ("operation_id", object(), TypeError),
+        ("trajectory_id", (1, object()), TypeError),
+        ("value", True, TypeError),
+        ("value", 1.0, TypeError),
+        ("value", 2, ValueError),
+        ("source", "", ValueError),
+    ],
+)
+def test_intrinsic_measurement_rejects_unstable_identity_or_non_exact_bit(
+        field, value, error):
+    kwargs = {
+        "operation_id": 3,
+        "trajectory_id": ("stream", 3),
+        "value": 1,
+        "source": "controlled fixture",
+    }
+    kwargs[field] = value
+
+    with pytest.raises(error):
+        IntrinsicMeasurement(**kwargs)
+
+
+def test_intrinsic_measurement_accepts_recursive_stable_identity():
+    measurement = IntrinsicMeasurement(
+        operation_id=3,
+        trajectory_id=("stream", (3, "branch")),
+        value=0,
+        source="controlled fixture",
+    )
+
+    assert measurement.value == 0
 
 
 def test_pauli_frame_behavior():

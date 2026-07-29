@@ -73,4 +73,3 @@ class PauliFrame:
 
     def __repr__(self) -> str:
         return f"PauliFrame({self.snapshot()})"
-

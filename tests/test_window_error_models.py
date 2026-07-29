@@ -5,6 +5,8 @@ Paper contract: docs/PAPER_MODEL_MAP.md.
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
+from types import SimpleNamespace
+
 import pytest
 
 stim = pytest.importorskip("stim")
@@ -92,6 +94,88 @@ def _window(*, detector_ids, graphlike=None, physical=None, link=None,
     )
 
 
+def _adapter_physical_window():
+    return _window(
+        detector_ids=(0, 1),
+        physical=_placed(
+            FaultRepresentation.PHYSICAL,
+            [[1, 0], [0, 1]],
+            [0.1, 0.2],
+            [[1, 0]],
+        ),
+    )
+
+
+class _FakeTesseractDecoder:
+    def __init__(self, selected_errors=(0,), *, low_confidence=False):
+        self.selected_errors = selected_errors
+        self.low_confidence_flag = low_confidence
+        self.decode_calls = 0
+
+    def decode_to_errors(self, syndrome):
+        self.decode_calls += 1
+        return self.selected_errors
+
+
+def _install_fake_tesseract(monkeypatch, backend_decoder, observed_seeds):
+    from decsim.tesseract_decoder import window_decoder as adapter_module
+
+    def build_det_orders(dem, count, method, seed):
+        observed_seeds.append(seed)
+        return ("fixed-order",)
+
+    fake_backend = SimpleNamespace(
+        utils=SimpleNamespace(
+            DetOrder=SimpleNamespace(
+                DetIndex="index",
+                DetBFS="breadth-first",
+                DetCoordinate="coordinate",
+            ),
+            build_det_orders=build_det_orders,
+        ),
+        tesseract=SimpleNamespace(
+            TesseractConfig=lambda **kwargs: SimpleNamespace(
+                compile_decoder=lambda: backend_decoder
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        adapter_module,
+        "_load_tesseract_backend",
+        lambda: fake_backend,
+    )
+
+
+def _install_fake_relay(monkeypatch, detailed_result, observed):
+    from decsim.relay_bp_decoder import RelayBpWindowDecoder
+
+    class FakeRelayDecoder:
+        def __init__(self, check, priors, **kwargs):
+            observed["seeds"].append(kwargs["seed"])
+            observed["gamma_tables"].append(kwargs["explicit_gammas"])
+
+        def decode_detailed(self, syndrome):
+            observed["calls"] += 1
+            return detailed_result
+
+    monkeypatch.setattr(
+        RelayBpWindowDecoder,
+        "_load_relay_decoder_type",
+        staticmethod(lambda: FakeRelayDecoder),
+    )
+
+
+def _relay_result(*, success=True, decoded_detectors=(1, 0)):
+    return SimpleNamespace(
+        decoding=np.array([1, 0], dtype=np.uint8),
+        decoded_detectors=np.array(decoded_detectors, dtype=np.uint8),
+        iterations=4,
+        max_iter=20,
+        posterior_ratios=np.array([-2.0, 3.0]),
+        success=success,
+    )
+
+
 def _backend_outcome(
     status,
     *,
@@ -114,6 +198,226 @@ def _backend_outcome(
         fault_model_fingerprint=model_fingerprint,
         decoder_configuration_fingerprint=("2" * 64),
     )
+
+
+@pytest.mark.parametrize(
+    ("selected_errors", "low_confidence", "expected_status",
+     "expected_reason"),
+    [
+        ((0,), False, BackendDecodeStatus.SUCCEEDED, None),
+        (
+            (0,),
+            True,
+            BackendDecodeStatus.LOW_CONFIDENCE,
+            BackendFailureReason.SEARCH_LIMIT_EXHAUSTED,
+        ),
+        (
+            (0, 0),
+            False,
+            BackendDecodeStatus.INVALID_CORRECTION,
+            BackendFailureReason.CORRECTION_WRONG_ARITY,
+        ),
+    ],
+)
+def test_tesseract_adapter_calls_official_api_once_and_types_disposition(
+    monkeypatch,
+    selected_errors,
+    low_confidence,
+    expected_status,
+    expected_reason,
+):
+    from decsim.tesseract_decoder import TesseractDecoderConfig
+    from decsim.tesseract_decoder import TesseractWindowDecoder
+
+    backend = _FakeTesseractDecoder(
+        selected_errors,
+        low_confidence=low_confidence,
+    )
+    _install_fake_tesseract(monkeypatch, backend, [])
+    decoder = TesseractWindowDecoder(
+        TesseractDecoderConfig(detector_order_seed=7)
+    )
+
+    outcome = decoder.decode(
+        _adapter_physical_window(),
+        np.array([1, 0], dtype=np.uint8),
+    )
+
+    assert backend.decode_calls == 1
+    assert outcome.status is expected_status
+    assert outcome.failure_reason is expected_reason
+    if expected_status is BackendDecodeStatus.SUCCEEDED:
+        assert outcome.physical_correction == (1, 0)
+        assert outcome.reconstructed_syndrome == (1, 0)
+
+
+@pytest.mark.parametrize(
+    ("detailed_result", "expected_status", "expected_reason"),
+    [
+        (
+            _relay_result(success=False),
+            BackendDecodeStatus.NONCONVERGED,
+            BackendFailureReason.NO_CONVERGED_RELAY_SOLUTION,
+        ),
+        (
+            _relay_result(decoded_detectors=(0, 1)),
+            BackendDecodeStatus.INVALID_CORRECTION,
+            BackendFailureReason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
+        ),
+    ],
+)
+def test_relay_adapter_calls_detailed_api_once_and_types_disposition(
+    monkeypatch,
+    detailed_result,
+    expected_status,
+    expected_reason,
+):
+    from decsim.relay_bp_decoder import RelayBpWindowDecoder
+
+    observed = {"calls": 0, "seeds": [], "gamma_tables": []}
+    _install_fake_relay(monkeypatch, detailed_result, observed)
+    decoder = RelayBpWindowDecoder(
+        relay_set_count=2,
+        gamma_table_seed=11,
+    )
+
+    outcome = decoder.decode(
+        _adapter_physical_window(),
+        np.array([1, 0], dtype=np.uint8),
+    )
+
+    assert observed["calls"] == 1
+    assert outcome.status is expected_status
+    assert outcome.failure_reason is expected_reason
+    assert outcome.iterations == 4
+    assert outcome.iteration_limit == 20
+    assert outcome.posterior_log_likelihood_ratios == (-2.0, 3.0)
+
+
+def test_tesseract_none_seed_reservation_keeps_entropy_private():
+    from decsim.tesseract_decoder import TesseractWindowDecoder
+
+    decoder = TesseractWindowDecoder()
+    reservation = decoder.reserve_run_seed(None)
+
+    assert reservation.proposed_seed_source == "entropy"
+    assert reservation.proposed_seed is None
+    assert type(reservation.prepared_state) is int
+    assert 0 <= reservation.prepared_state < 2**64
+
+    decoder.commit_run_seed(reservation)
+
+
+def test_physical_adapter_run_seed_binding_is_replayable_and_conflict_explicit(
+    monkeypatch,
+):
+    from decsim.relay_bp_decoder import RelayBpWindowDecoder
+    from decsim.tesseract_decoder import (
+        TesseractDecoderConfig,
+        TesseractWindowDecoder,
+    )
+
+    with pytest.raises(ValueError, match="explicit seed.*conflicts"):
+        TesseractWindowDecoder(
+            TesseractDecoderConfig(detector_order_seed=1)
+        ).reserve_run_seed(2)
+    with pytest.raises(ValueError, match="explicit gamma-table seed.*conflicts"):
+        RelayBpWindowDecoder(gamma_table_seed=1).reserve_run_seed(2)
+
+    tesseract_seeds = []
+    _install_fake_tesseract(
+        monkeypatch,
+        _FakeTesseractDecoder(),
+        observed_seeds=tesseract_seeds,
+    )
+    tesseract = TesseractWindowDecoder()
+    reservation = tesseract.reserve_run_seed(91)
+    tesseract.commit_run_seed(reservation)
+    tesseract.decode(
+        _adapter_physical_window(),
+        np.array([1, 0], dtype=np.uint8),
+    )
+    assert tesseract_seeds == [91]
+
+    relay_observed = {"calls": 0, "seeds": [], "gamma_tables": []}
+    _install_fake_relay(
+        monkeypatch,
+        _relay_result(),
+        relay_observed,
+    )
+    relay = RelayBpWindowDecoder(relay_set_count=2)
+    reservation = relay.reserve_run_seed(91)
+    relay.commit_run_seed(reservation)
+    relay.decode(
+        _adapter_physical_window(),
+        np.array([1, 0], dtype=np.uint8),
+    )
+    expected_gammas = np.random.Generator(np.random.PCG64(91)).uniform(
+        -0.24,
+        0.66,
+        size=(2, 2),
+    )
+    assert relay_observed["seeds"] == [91]
+    assert np.array_equal(relay_observed["gamma_tables"][0], expected_gammas)
+
+
+@pytest.mark.parametrize("decoder_family", ["tesseract", "relay"])
+def test_physical_runtime_adapters_commit_correction_and_inject_latency(
+    monkeypatch,
+    decoder_family,
+):
+    from decsim.decoders import CodeRouter
+    from decsim.message import DecodeJob, SyndromePayload
+
+    class FixedLatency:
+        def latency(self, job):
+            return 17
+
+    model = _adapter_physical_window()
+    job = DecodeJob(
+        op_id=5,
+        window_id=2,
+        n_rounds=1,
+        dem=model,
+        payloads=[
+            SyndromePayload(
+                operation_id=5,
+                patch_id=0,
+                round_index=1,
+                bits=np.array([True, False]),
+            )
+        ],
+    )
+    if decoder_family == "tesseract":
+        from decsim.tesseract_decoder import TesseractDecoder
+
+        decoder = TesseractDecoder(FixedLatency())
+    else:
+        from decsim.relay_bp_decoder import RelayBpDecoder
+
+        decoder = RelayBpDecoder(FixedLatency())
+    faults = model.require_faults(FaultRepresentation.PHYSICAL)
+    outcome = _backend_outcome(
+        BackendDecodeStatus.SUCCEEDED,
+        model_fingerprint=fault_model_fingerprint(faults),
+        correction=(1, 0),
+        reconstructed_syndrome=(1, 0),
+    )
+    monkeypatch.setattr(
+        decoder.window_decoder,
+        "decode",
+        lambda received_model, syndrome: outcome,
+    )
+    router = CodeRouter(decoder)
+
+    result = router.route(job).decode(job)
+
+    assert (
+        router.fault_model_requirement_for(job.code)
+        is PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    assert decoder.latency(job) == 17
+    assert result.logical_observables == (1,)
 
 
 def test_backend_outcome_snapshots_mutable_backend_arrays():

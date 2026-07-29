@@ -9,6 +9,7 @@ import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.decoders import PresetLatencyDecoder
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import cnot_plus_two_t_circuit, three_cnot_circuit
 from decsim.run_spec import simulate
 from decsim.planner import FixedRounds
@@ -65,6 +66,8 @@ def test_per_window_release_holds_only_the_live_set():
     from decsim.schemes import SlidingWindowScheme
 
     class _Dec:
+        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
         def latency(self, job):
             return us(1.0)
         def decode(self, job):

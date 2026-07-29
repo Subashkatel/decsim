@@ -9,6 +9,7 @@ from decsim.controllers import ModularController
 from decsim.decoder_manager import DecoderManager
 from decsim.decoders import CodeRouter, PresetLatencyDecoder
 from decsim.engine import Engine
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import DecodeBacklog, DecoderUtilization, ReadyQueueStats
 from decsim.schedulers import FifoScheduler
@@ -84,6 +85,8 @@ def test_late_registered_utilization_uses_its_own_observation_epoch():
 
 
 class _FixedLatencyDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, latency_us):
         self._t = us(latency_us)
 

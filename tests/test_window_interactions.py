@@ -4,6 +4,7 @@ from types import MappingProxyType
 import pytest
 
 from decsim.config import us
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import (BoundaryUpdate, DecodeResult, Operation,
                             WindowInfo)
 from decsim.planner import FixedRounds, PerOpRounds
@@ -12,6 +13,8 @@ from decsim.window_interactions import DefaultWindowInteraction
 
 
 class RichBoundaryDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self):
         self.first_round_bits = {}
 
@@ -168,6 +171,8 @@ class _CrossOperationTargetWithoutRelease(_CrossOperationTarget):
 
 
 class _OrderedBoundaryDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, *, slow_source=False):
         self.slow_source = slow_source
 

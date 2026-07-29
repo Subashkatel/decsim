@@ -22,6 +22,7 @@ from conftest import fixed_latency_link_config, trace_time  # noqa: F401
 
 from decsim.config import us
 from decsim.controllers import ModularController
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
 from decsim.schemes import NaiveOnlineScheme
@@ -30,6 +31,8 @@ from decsim.planner import FixedRounds
 
 
 class _FixedLatency:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     """Timing-only decoder: a constant modelled decode latency, trivial result."""
     def __init__(self, latency_us=1.0):
         self.latency_ticks = us(latency_us)

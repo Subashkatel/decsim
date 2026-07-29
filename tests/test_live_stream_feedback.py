@@ -8,6 +8,10 @@ import pytest
 
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import PresetLatencyDecoder
+from decsim.detector_error_model import (
+    FaultRepresentation,
+    NO_FAULT_MODEL_REQUIRED,
+)
 from decsim.devices import TimingOnlyDevice
 from decsim.message import DecodeResult, Operation
 from decsim.layouts import UniformLayout
@@ -56,6 +60,7 @@ class _RecordingDecoder:
 
     def __init__(self, inner):
         self.inner = inner
+        self.fault_model_requirement = inner.fault_model_requirement
         self.rows_seen: list[tuple[int, int]] = []
 
     def latency(self, job):
@@ -67,12 +72,17 @@ class _RecordingDecoder:
             for payload in job.payloads
             if payload.bits is not None
         )
-        model_rows = job.dem.check.shape[0] if job.dem is not None else 0
+        model_rows = (
+            job.dem.require_faults(FaultRepresentation.GRAPHLIKE).check.shape[0]
+            if job.dem is not None else 0
+        )
         self.rows_seen.append((payload_bits, model_rows))
         return self.inner.decode(job)
 
 
 class _FunctionalDecoder:
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def latency(self, job):
         return 0
 

@@ -4,6 +4,7 @@ from conftest import fixed_latency_link_config, trace_time
 
 from decsim.config import TICKS_PER_US, us
 from decsim.controllers import ModularController
+from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import WindowLatencyBreakdown
@@ -16,6 +17,8 @@ class BlockingDecoder:
     """A real-ish decoder whose Python work is deliberately slower than its model."""
     # It takes one microsecond of simulated time to decode, but one second of wall clock time. 
     # this makes it easy to verify that the simulated time is working as intended
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, latency_us=1.0, sleep_s=1.0):
         self.latency_ticks = us(latency_us) # uses the us function to convert microseconds to ticks
         self.sleep_s = sleep_s

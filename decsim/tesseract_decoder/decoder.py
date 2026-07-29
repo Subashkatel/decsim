@@ -9,6 +9,7 @@ from ..adapters.window_decode_results import (
     check_syndrome_size,
     payload_syndrome,
     result_from_selected_faults,
+    validate_backend_outcome,
 )
 from ..detector_error_model import (
     FaultRepresentation,
@@ -67,6 +68,12 @@ class TesseractDecoder:
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, physical_faults)
         outcome = self.window_decoder.decode(model, syndrome)
+        validate_backend_outcome(
+            outcome,
+            model,
+            physical_faults,
+            syndrome,
+        )
         if not outcome.succeeded:
             raise DecoderAttemptFailed(job, outcome)
         return result_from_selected_faults(

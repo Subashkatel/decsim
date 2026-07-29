@@ -255,10 +255,6 @@ class RelayBpWindowDecoder:
             return self._backend_error_outcome(compiled)
 
         reconstructed = self._reconstruct(faults.check, correction)
-        component_correction = self._component_correction(
-            window_model,
-            correction,
-        )
         if decoded_detectors != reconstructed or (
             succeeded
             and reconstructed != tuple(int(bit) for bit in syndrome)
@@ -281,7 +277,7 @@ class RelayBpWindowDecoder:
             )
         common = dict(
             physical_correction=correction,
-            component_correction=component_correction,
+            component_correction=None,
             reconstructed_syndrome=decoded_detectors,
             iterations=iterations,
             iteration_limit=iteration_limit,
@@ -470,19 +466,6 @@ class RelayBpWindowDecoder:
             @ np.asarray(correction, dtype=np.uint64)
         ) % 2
         return tuple(int(bit) for bit in reconstructed)
-
-    @staticmethod
-    def _component_correction(window_model, correction):
-        import numpy as np
-
-        projection = window_model.physical_to_graphlike_detector_projection
-        if projection is None:
-            return None
-        component = (
-            np.asarray(projection, dtype=np.uint64)
-            @ np.asarray(correction, dtype=np.uint64)
-        ) % 2
-        return tuple(int(bit) for bit in component)
 
     @staticmethod
     def _invalid_outcome(compiled, reason) -> BackendDecodeOutcome:

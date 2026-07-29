@@ -6,6 +6,8 @@ import subprocess
 
 import pytest
 
+from decsim.detector_error_model import FaultRepresentation, decode_windowed
+
 from experiments.results import (
     ChunkResult,
     ShardConflictError,
@@ -14,7 +16,12 @@ from experiments.results import (
     reduce_chunks,
 )
 from experiments.plotting import _binomial_interval, plot_logical_error_rate
-from experiments.run_surface import _circuit, _windows, run_surface_configuration
+from experiments.run_surface import (
+    _SurfaceMwpmFactory,
+    _circuit,
+    _windows,
+    run_surface_configuration,
+)
 from experiments.harness import (
     Experiment,
     SamplePlan,
@@ -482,3 +489,50 @@ def test_surface_runner_absorbs_terminal_layer_and_short_tail():
         (1, 3, 6),
         (4, 6, 6),
     )
+
+
+def test_surface_runner_worker_count_does_not_change_scientific_identity(tmp_path):
+    configuration = {
+        "distance": 3,
+        "rounds": 3,
+        "physical_error_rate": 0.005,
+        "commit_rounds": 3,
+        "buffer_rounds": 3,
+        "shots": 7,
+        "batch_shots": 4,
+        "seed": 29,
+    }
+
+    one = run_surface_configuration({**configuration, "workers": 1}, tmp_path / "one")
+    two = run_surface_configuration({**configuration, "workers": 2}, tmp_path / "two")
+
+    assert one == two
+    assert sorted(path.read_bytes() for path in (tmp_path / "one").rglob("*.csv")) == sorted(
+        path.read_bytes() for path in (tmp_path / "two").rglob("*.csv")
+    )
+
+
+def test_surface_runner_window_decode_matches_global_reference():
+    pymatching = pytest.importorskip("pymatching")
+    configuration = {
+        "distance": 3,
+        "rounds": 6,
+        "physical_error_rate": 0.008,
+        "commit_rounds": 3,
+        "buffer_rounds": 3,
+    }
+    decoder = _SurfaceMwpmFactory(configuration)()
+    detectors, _ = decoder.circuit.compile_detector_sampler(seed=43).sample(
+        shots=1, separate_observables=True
+    )
+    prediction = decode_windowed(
+        decoder.window_models,
+        detectors[0],
+        decoder.decode_window,
+        selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+    )
+    global_matching = pymatching.Matching.from_detector_error_model(
+        decoder.circuit.detector_error_model(decompose_errors=True)
+    )
+
+    assert tuple(prediction) == tuple(global_matching.decode(detectors[0]))

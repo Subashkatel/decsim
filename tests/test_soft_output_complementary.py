@@ -20,6 +20,28 @@ pymatching = pytest.importorskip("pymatching")
 from decsim.soft_output import ComplementaryGapMetric, SoftOutput
 
 
+def test_complementary_gap_uses_canonical_matching_weights_at_endpoints():
+    from decsim.mwpm_decoder.weights import matching_weights
+    from decsim.soft_output.complementary import (
+        _weights_from_priors,
+        dem_to_matrices,
+    )
+
+    endpoint_priors = np.array([0.0, 1.0])
+    detector_error_model = stim.DetectorErrorModel(
+        "error(0) D0 L0\nerror(1) D1"
+    )
+    _, _, detector_model_weights = dem_to_matrices(detector_error_model)
+    window_model_weights = _weights_from_priors(endpoint_priors)
+    expected_weights = matching_weights(endpoint_priors)
+
+    assert np.array_equal(detector_model_weights, expected_weights)
+    assert np.array_equal(window_model_weights, expected_weights)
+    assert np.isfinite(expected_weights).all()
+    assert expected_weights[0] > 0
+    assert expected_weights[1] < 0
+
+
 def _memory_circuit(d, p, rounds=None):
     rounds = rounds or d
     return stim.Circuit.generated(

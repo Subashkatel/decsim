@@ -31,6 +31,7 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
         canonical_error_instructions,
         validate_graphlike_fault,
     )
+    from ..mwpm_decoder.weights import matching_weights
 
     num_det = dem.num_detectors
     num_obs = dem.num_observables
@@ -49,7 +50,7 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
 
     for record in canonical_error_instructions(dem):
         prob = record.probability
-        weight = float(np.log((1 - prob) / prob)) if 0 < prob < 1 else 50.0
+        weight = float(matching_weights([prob])[0])
         for component in record.components:
             fault = validate_graphlike_fault(
                 component.detectors,
@@ -73,11 +74,10 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
 
 
 def _weights_from_priors(priors):
-    """Convert fault probabilities into matching edge weights ``ln((1-p)/p)``."""
-    import numpy as np
+    """Convert probabilities with the MWPM decoder endpoint convention."""
+    from ..mwpm_decoder.weights import matching_weights
 
-    priors = np.asarray(priors, dtype=float)
-    return np.log((1.0 - priors) / priors)
+    return matching_weights(priors)
 
 
 class ComplementaryGapMetric:

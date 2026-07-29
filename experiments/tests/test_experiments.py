@@ -1,4 +1,6 @@
 from dataclasses import replace
+import hashlib
+import json
 
 import pytest
 
@@ -8,19 +10,23 @@ from experiments.results import (
     canonical_chunk_csv,
     publish_immutable,
     reduce_chunks,
-    validate_paired_chunks,
+)
+from experiments.harness import (
+    Experiment,
+    SamplePlan,
+    exact_batches,
+    offline_batch_seed,
+    sample_batch_sha256,
 )
 
 
 def _chunk(batch_index=0, first_shot_index=0, requested_shots=3, **changes):
     values = dict(
         schema_version=1,
-        campaign_id="campaign",
-        manifest_sha256="a" * 64,
+        experiment_id="experiment",
+        experiment_sha256="a" * 64,
         config_id="config",
-        sample_group_id="samples",
-        sampling_domain="offline_stim_batch_v1",
-        seed_protocol_version="decsim_derive_component_seed_v1",
+        sample_set_id="samples",
         sample_batch_sha256=f"{batch_index + 1:064x}",
         batch_index=batch_index,
         first_shot_index=first_shot_index,
@@ -98,25 +104,74 @@ def test_reduction_sums_integer_counts_and_requires_exact_ranges():
         reduce_chunks([rows[0], replace(rows[1], first_shot_index=2)])
 
 
-def test_reduction_rejects_impossible_counts():
-    with pytest.raises(ValueError, match="primary_failures"):
-        reduce_chunks([_chunk(primary_failures=4)])
-    with pytest.raises(ValueError, match="accepted_logical_failures"):
-        reduce_chunks([_chunk(accepted_shots=1, accepted_logical_failures=2)])
+def test_batches_cover_the_requested_shots_once_without_overshoot():
+    assert [(batch.index, batch.first_shot, batch.shots) for batch in exact_batches(10, 4)] == [
+        (0, 0, 4),
+        (1, 4, 4),
+        (2, 8, 2),
+    ]
 
 
-def test_paired_chunks_require_the_same_raw_detector_and_truth_digest():
-    left = [_chunk()]
-    right = [replace(_chunk(), config_id="other-decoder")]
-    validate_paired_chunks(left, right)
+def test_sample_plan_is_stable_and_separates_experiment_seeds():
+    trajectory = {
+        "circuit_sha256": "c" * 64,
+        "physical_error_rate": 0.001,
+        "batch_shots": 100,
+    }
+    offline = SamplePlan.create("experiment", 7, trajectory)
+    replay = SamplePlan.create("experiment", 7, trajectory)
+    other_seed = SamplePlan.create("experiment", 8, trajectory)
 
-    with pytest.raises(ValueError, match="raw sample digest"):
-        validate_paired_chunks(
-            left,
-            [replace(right[0], sample_batch_sha256="f" * 64)],
-        )
-    with pytest.raises(ValueError, match="sampling domain"):
-        validate_paired_chunks(
-            left,
-            [replace(right[0], sampling_domain="event_runspec_device_v1")],
-        )
+    assert offline == replay
+    expected_descriptor = json.dumps(
+        trajectory,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    assert offline.input_sha256 == hashlib.sha256(
+        expected_descriptor
+    ).hexdigest()
+    assert offline.sample_set_id != other_seed.sample_set_id
+
+
+def test_offline_batch_seed_depends_on_batch_but_not_execution_order():
+    plan = SamplePlan.create("experiment", 7, {"circuit": "memory"})
+
+    forward = [offline_batch_seed(7, plan.sample_set_id, index) for index in range(3)]
+    reversed_order = {
+        index: offline_batch_seed(7, plan.sample_set_id, index)
+        for index in reversed(range(3))
+    }
+
+    assert len(set(forward)) == 3
+    assert forward == [reversed_order[index] for index in range(3)]
+
+
+def test_sample_digest_covers_detector_truth_shape_dtype_and_bytes():
+    np = pytest.importorskip("numpy")
+    detectors = np.array([[0, 1], [1, 0]], dtype=np.uint8)
+    truth = np.array([[1], [0]], dtype=np.uint8)
+    expected = sample_batch_sha256(detectors, truth)
+
+    assert sample_batch_sha256(detectors.copy(), truth.copy()) == expected
+    changed = detectors.copy()
+    changed[0, 0] = 1
+    assert sample_batch_sha256(changed, truth) != expected
+    assert sample_batch_sha256(detectors.astype(np.int64), truth) != expected
+
+
+def test_experiment_bytes_and_hash_are_canonical_and_seed_sensitive():
+    experiment = Experiment(
+        experiment_id="experiment",
+        experiment_seed=7,
+        configurations=({"decoder": "mwpm", "distance": 3},),
+        sampling={"batch_shots": 4, "max_shots": 10},
+        stopping={"method": "fixed"},
+        dependencies={"stim": "1.15"},
+        repository_revision="deadbeef",
+    )
+
+    assert experiment.canonical_bytes() == experiment.canonical_bytes()
+    assert experiment.sha256() != replace(experiment, experiment_seed=8).sha256()

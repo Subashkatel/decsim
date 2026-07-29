@@ -89,6 +89,7 @@ class RunSpec:
     router: Optional[Any] = None
     strategy: Optional[Any] = None
     scheduler: Optional[Any] = None
+    lane_policy: Optional[Any] = None
     deadline_policy: Optional[Any] = None
     unit_pools: Optional[dict] = None
     num_units: Optional[int] = None
@@ -239,7 +240,8 @@ class RunSpec:
             engine, router=router, scheduler=scheduler,
             unit_pools=self.unit_pools,
             num_units=self.num_units if self.num_units is not None else 1,
-            bulk_strong=getattr(strategy, "bulk_strong", False))
+            bulk_strong=getattr(strategy, "bulk_strong", False),
+            lane_policy=self.lane_policy)
         services = StrategyServicesImpl(engine, window_manager, decoder_manager)
         window_manager.strategy = strategy
         window_manager.services = services
@@ -278,6 +280,7 @@ class RunSpec:
             self, code=code, layout=layout, scheme=scheme,
             rounds_policy=rounds_policy, device=device, decoder_router=router,
             factory=factory, strategy=strategy, scheduler=scheduler,
+            lane_policy=self.lane_policy,
             deadline_policy=deadline_policy, boundary_policy=boundary_policy,
             window_interaction=window_interaction, idle_policy=idle_policy,
             orchestrator=orchestrator, controller=controller,

@@ -10,6 +10,8 @@ Synthetic service times only (no latency claims).
 import sys
 import pathlib
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.codes import SurfaceCodeModel
@@ -227,3 +229,39 @@ def test_engine_unstable_regime_warns_early():
     out = _run_regime(6.0)                      # f = +1.0
     assert out["warned"], out
     assert out["t_warn_ticks"] <= 0.3 * us(120), out["t_warn_ticks"]
+
+
+@pytest.mark.parametrize("name, value", [
+    ("round_ticks", 0),
+    ("window_ticks", 0),
+    ("consecutive", 0),
+])
+def test_backlog_warning_rejects_nonpositive_loop_parameters(name, value):
+    cluster = FakeCluster({0: "p0"})
+    parameters = {
+        "round_ticks": us(1),
+        "window_ticks": us(10),
+        "consecutive": 2,
+    }
+    parameters[name] = value
+
+    with pytest.raises(ValueError, match=name):
+        BacklogEarlyWarning(
+            cluster.window_manager,
+            cluster,
+            **parameters,
+        )
+
+
+@pytest.mark.parametrize("threshold", [-0.1, float("nan"), float("inf")])
+def test_backlog_warning_rejects_invalid_thresholds(threshold):
+    cluster = FakeCluster({0: "p0"})
+
+    with pytest.raises(ValueError, match="threshold_f"):
+        BacklogEarlyWarning(
+            cluster.window_manager,
+            cluster,
+            round_ticks=us(1),
+            window_ticks=us(10),
+            threshold_f=threshold,
+        )

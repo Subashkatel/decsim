@@ -10,6 +10,7 @@ from the pre-view implementations.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import TYPE_CHECKING, Optional
 
 from .message import stable_identity_order_key
@@ -215,12 +216,24 @@ class BacklogEarlyWarning:
     def __init__(self, window_manager, decoder_manager,
                  round_ticks: int, window_ticks: int,
                  threshold_f: float = 0.1, consecutive: int = 2):
+        round_ticks = int(round_ticks)
+        window_ticks = int(window_ticks)
+        threshold_f = float(threshold_f)
+        consecutive = int(consecutive)
+        if round_ticks <= 0:
+            raise ValueError("round_ticks must be positive")
+        if window_ticks <= 0:
+            raise ValueError("window_ticks must be positive")
+        if not math.isfinite(threshold_f) or threshold_f < 0:
+            raise ValueError("threshold_f must be finite and nonnegative")
+        if consecutive <= 0:
+            raise ValueError("consecutive must be positive")
         self.window_manager = window_manager
         self.decoder_manager = decoder_manager
-        self.round_ticks = int(round_ticks)
-        self.window_ticks = int(window_ticks)
-        self.threshold_f = float(threshold_f)
-        self.consecutive = int(consecutive)
+        self.round_ticks = round_ticks
+        self.window_ticks = window_ticks
+        self.threshold_f = threshold_f
+        self.consecutive = consecutive
         self.warned = False
         self.t_warn = None
         self.attribution = ()
@@ -333,11 +346,28 @@ class BurstEscalationDetector:
 
     def __init__(self, patches, z: float = 6.0, baseline_bins: int = 100,
                  warmup_bins: int = 30, patch_quorum: int = 3):
-        self.patches = list(patches)
-        self.z = float(z)
-        self.baseline_bins = int(baseline_bins)
-        self.warmup_bins = int(warmup_bins)
-        self.patch_quorum = int(patch_quorum)
+        patches = list(patches)
+        z = float(z)
+        baseline_bins = int(baseline_bins)
+        warmup_bins = int(warmup_bins)
+        patch_quorum = int(patch_quorum)
+        if not patches:
+            raise ValueError("patches must be nonempty")
+        if len(set(patches)) != len(patches):
+            raise ValueError("patches must not contain duplicates")
+        if not math.isfinite(z) or z < 0:
+            raise ValueError("z must be finite and nonnegative")
+        if baseline_bins <= 0:
+            raise ValueError("baseline_bins must be positive")
+        if warmup_bins <= 0:
+            raise ValueError("warmup_bins must be positive")
+        if not 1 <= patch_quorum <= len(patches):
+            raise ValueError("patch_quorum must select configured patches")
+        self.patches = patches
+        self.z = z
+        self.baseline_bins = baseline_bins
+        self.warmup_bins = warmup_bins
+        self.patch_quorum = patch_quorum
         self.fired = False
         self.fired_bin = None
         self.fired_patches = ()

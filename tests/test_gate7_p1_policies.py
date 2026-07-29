@@ -15,12 +15,17 @@ import pytest
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.config import us
+from decsim.codes import SurfaceCodeModel
 from decsim.engine import Engine
 from decsim.decoders import CodeRouter, PerRoundDecoder
 from decsim.decoder_manager import DecoderManager
-from decsim.message import Window
+from decsim.message import (Operation, RunSeedPathSegment, RunSeedReservation,
+                            Window)
+from decsim.planner import FixedRounds
+from decsim.run_spec import RunSpec, simulate
 from decsim.schedulers import (BufferExpiryDeadline, DistanceLanes,
                                EarliestDeadlineScheduler, FifoScheduler)
+from decsim.seeding import derive_component_seed
 
 
 def make_window(t_first_round) -> Window:
@@ -254,3 +259,42 @@ def test_lanes_protect_short_jobs_from_heavy_flood_deterministic():
                 DistanceLanes({11: "heavy"}, dist_of))
     assert laned == us(4)              # 1us arrival + 3 rounds, no wait
     assert shared >= us(100)           # starved behind a long job
+
+
+class _SeededRecordingLanePolicy:
+    def __init__(self):
+        self.jobs = []
+        self.committed_seed = None
+
+    def pool_for(self, job):
+        self.jobs.append(job)
+        return "heavy"
+
+    def reserve_run_seed(self, seed):
+        return RunSeedReservation("derived", seed, seed)
+
+    def cancel_run_seed(self, reservation):
+        pass
+
+    def commit_run_seed(self, reservation):
+        self.committed_seed = reservation.proposed_seed
+
+
+def test_runspec_routes_through_and_seeds_the_supplied_lane_policy():
+    lane_policy = _SeededRecordingLanePolicy()
+    completed = simulate(RunSpec(
+        ops=[Operation(0, "memory", (0,), patches=(0,))],
+        code=SurfaceCodeModel(d=3),
+        rounds_policy=FixedRounds(3),
+        decoder=PerRoundDecoder(tau_us=1.0),
+        unit_pools={"default": 1, "heavy": 1},
+        lane_policy=lane_policy,
+        seed=17,
+    ))
+
+    assert completed.decoder_manager.lane_policy is lane_policy
+    assert lane_policy.jobs
+    assert {job.pool for job in lane_policy.jobs} == {"heavy"}
+    assert lane_policy.committed_seed == derive_component_seed(17, (
+        RunSeedPathSegment("field", "lane_policy"),
+    ))

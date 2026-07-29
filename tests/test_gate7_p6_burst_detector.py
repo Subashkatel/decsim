@@ -7,6 +7,8 @@ baseline self-poisoning exclusion.
 import sys
 import pathlib
 
+import pytest
+
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.metrics import BurstEscalationDetector
@@ -87,3 +89,22 @@ def test_escalated_bins_do_not_poison_the_baseline():
                          and det.escalations[-1][0] == det.bin_index)
     assert hot_bins == 40, "burst poisoned its own baseline"
     assert det.fired
+
+
+@pytest.mark.parametrize("parameters, name", [
+    ({"patches": []}, "patches"),
+    ({"patches": ["a", "a"]}, "patches"),
+    ({"baseline_bins": 0}, "baseline_bins"),
+    ({"warmup_bins": 0}, "warmup_bins"),
+    ({"patch_quorum": 0}, "patch_quorum"),
+    ({"patch_quorum": len(PATCHES) + 1}, "patch_quorum"),
+    ({"z": -0.1}, "z"),
+    ({"z": float("nan")}, "z"),
+    ({"z": float("inf")}, "z"),
+])
+def test_burst_detector_rejects_undefined_domains(parameters, name):
+    parameters = dict(parameters)
+    patches = parameters.pop("patches", PATCHES)
+
+    with pytest.raises(ValueError, match=name):
+        BurstEscalationDetector(patches, **parameters)

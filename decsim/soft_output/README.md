@@ -20,8 +20,8 @@ class SoftOutputMetric(Protocol):
   decode normally to `w_min`, force the opposite logical class to `w_comp`. Reproduces the
   paper's P(error|g) and γ(g_th)-vs-d.
 - **`UnionFindClusterGapDecoder`** (`cluster.py`) — confidence wrapper for
-  `decsim.union_find_decoder.UnionFindDecoder`. It quotients the actual balls
-  returned by that exact hard decode and searches globally for the shortest
+  `decsim.union_find_decoder.UnionFindDecoder`. It quotients the weighted edge
+  intervals returned by that exact hard decode and searches for the shortest
   odd-logical closed walk. The hard decode follows Delfosse and Nickerson
   arXiv:1709.06218v3; confidence follows Meister et al.
   arXiv:2405.07433v2, Definition 9 and Algorithm 2.
@@ -38,14 +38,14 @@ from decsim.union_find_decoder import UnionFindDecoder
 decoder = UnionFindClusterGapDecoder(UnionFindDecoder(latency))
 ```
 
-The hard decoder accepts graphlike/stringlike faults, uses uniform fair
-half-edge growth, supports every logical-observable row, and does not use fault
-priors as growth weights. Cluster gap requires exactly one nonzero logical row
-and reports normalized graph-edge units. Its exact log-odds interpretation
-applies only to the uniform repetition-code setting of Meister et al.,
-Theorem 10. Surface-code gap is confidence, not a calibrated failure
-probability. Host execution time is not simulated decoder latency, and this
-Python implementation makes no claim to the papers' complexity bounds.
+The hard decoder accepts graphlike/stringlike faults, uses prior-weighted global
+fair growth, and supports every logical-observable row. Cluster gap requires
+exactly one nonzero logical row and reports decibels. Its exact likelihood-ratio
+interpretation applies only to the uniform repetition-code setting of Meister
+et al., Theorem 10. Surface-code gap is confidence, not a calibrated failure
+probability or a general Union-Find likelihood bound. Host execution time is not
+simulated decoder latency, and this Python implementation makes no claim to the
+papers' complexity bounds.
 
 `SoftOutput` contains confidence only. Its immutable `source` identifies the
 method, cluster origin, growth schedule, gap units, correction variant, and

@@ -81,6 +81,35 @@ def _placed(representation, check, priors, observables, *, owned=None,
     )
 
 
+def test_placed_fault_model_owns_bytes_backed_immutable_arrays():
+    check = np.asarray([[1, 0], [0, 1]], dtype=np.uint8)
+    priors = np.asarray([0.1, 0.2], dtype=float)
+    observables = np.asarray([[1, 0]], dtype=np.uint8)
+    owned = np.asarray([True, False], dtype=bool)
+    placed = _placed(
+        FaultRepresentation.GRAPHLIKE,
+        check,
+        priors,
+        observables,
+        owned=owned,
+    )
+
+    check[0, 0] = 0
+    priors[0] = 0.4
+    observables[0, 0] = 0
+    owned[0] = False
+    assert placed.check.tolist() == [[1, 0], [0, 1]]
+    assert placed.priors.tolist() == [0.1, 0.2]
+    assert placed.observables.tolist() == [[1, 0]]
+    assert placed.owned.tolist() == [True, False]
+
+    for stored in (placed.check, placed.priors, placed.observables, placed.owned):
+        with pytest.raises(ValueError, match="read-only"):
+            stored.flat[0] = stored.flat[0]
+        with pytest.raises(ValueError):
+            stored.setflags(write=True)
+
+
 def _window(*, detector_ids, graphlike=None, physical=None, link=None,
             commit_hi=1, defect_positions=None):
     return WindowErrorModel(

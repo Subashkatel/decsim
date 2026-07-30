@@ -1,4 +1,4 @@
-"""Cluster-gap confidence from one Union-Find hard decode."""
+"""Cluster-gap confidence from one weighted Union-Find hard decode."""
 
 from __future__ import annotations
 
@@ -10,167 +10,50 @@ from ..detector_error_model import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
-from ..message import (
-    DecodeJob,
-    DecodeResult,
-    SoftOutput,
-    SoftOutputSource,
-)
+from ..message import DecodeJob, DecodeResult, SoftOutput, SoftOutputSource
 from ..union_find_decoder.decoder import UnionFindDecoder
 from ..union_find_decoder.window_decoder import (
+    Closed,
+    Open,
     UnionFindGraph,
     UnionFindHardEvidence,
 )
 
 
-_EPSILON = 1e-12
-
 UNION_FIND_CLUSTER_GAP_SOURCE = SoftOutputSource(
     method="cluster_gap",
     cluster_origin="union_find_decoder",
-    growth_schedule="meister_uniform_fair",
-    gap_units="graph_edges",
+    growth_schedule="weighted_global_fair",
+    gap_units="decibels",
     correction="none",
     references=(
-        "arXiv:1709.06218v3 Algorithm 1",
+        "arXiv:2004.04693 Section II",
         "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
+        "arXiv:2510.25222v1 Section II-C",
     ),
 )
 
 
-def _graph_adjacency(graph: UnionFindGraph):
-    return {node: neighbors for node, neighbors in graph.adjacency}
-
-
-def _endpoint_potentials(
-    graph: UnionFindGraph,
-    radii: dict[int, float],
-):
-    adjacency = _graph_adjacency(graph)
-    potentials = {node: math.inf for node in adjacency}
-    sources: dict[int, int | None] = {
-        node: None for node in adjacency
-    }
-    sequence = itertools.count()
-    pending = []
-    for center, radius in sorted(radii.items()):
-        potentials[center] = -radius
-        sources[center] = center
-        heapq.heappush(
-            pending,
-            (-radius, center, next(sequence), center),
-        )
-    while pending:
-        potential, source, _sequence_id, node = heapq.heappop(pending)
-        if potential > potentials[node] + _EPSILON:
-            continue
-        if (
-            math.isclose(
-                potential,
-                potentials[node],
-                rel_tol=0.0,
-                abs_tol=_EPSILON,
-            )
-            and sources[node] is not None
-            and source > sources[node]
-        ):
-            continue
-        for neighbor, _edge_index in adjacency[node]:
-            candidate = potential + 1.0
-            current = potentials[neighbor]
-            current_source = sources[neighbor]
-            if (
-                candidate < current - _EPSILON
-                or (
-                    math.isclose(
-                        candidate,
-                        current,
-                        rel_tol=0.0,
-                        abs_tol=_EPSILON,
-                    )
-                    and (
-                        current_source is None
-                        or source < current_source
-                    )
-                )
-            ):
-                potentials[neighbor] = candidate
-                sources[neighbor] = source
-                heapq.heappush(
-                    pending,
-                    (candidate, source, next(sequence), neighbor),
-                )
-    return potentials, sources
-
-
-def _covered_intervals(
-    graph: UnionFindGraph,
-    radii: dict[int, float],
-    cluster_label_by_center: dict[int, int],
-):
-    potentials, sources = _endpoint_potentials(graph, radii)
-    intervals_by_edge = []
-    for edge in graph.edges:
-        candidates = []
-        left_potential = potentials[edge.detector_a]
-        left_source = sources[edge.detector_a]
-        if left_source is not None and left_potential <= _EPSILON:
-            candidates.append(
-                (
-                    cluster_label_by_center[left_source],
-                    0.0,
-                    min(1.0, max(0.0, -left_potential)),
-                )
-            )
-        right_potential = potentials[edge.detector_b]
-        right_source = sources[edge.detector_b]
-        if right_source is not None and right_potential <= _EPSILON:
-            candidates.append(
-                (
-                    cluster_label_by_center[right_source],
-                    max(0.0, min(1.0, 1.0 + right_potential)),
-                    1.0,
-                )
-            )
-        merged = []
-        for label, lower, upper in sorted(
-            candidates,
-            key=lambda item: (item[1], item[2], item[0]),
-        ):
-            if (
-                merged
-                and label == merged[-1][0]
-                and lower <= merged[-1][2] + _EPSILON
-            ):
-                merged[-1][2] = max(merged[-1][2], upper)
-            else:
-                merged.append([label, lower, upper])
-        intervals_by_edge.append(
-            tuple(
-                (int(label), float(lower), float(upper))
-                for label, lower, upper in merged
-            )
-        )
-    return tuple(intervals_by_edge)
-
-
 def _quotient_cluster_gap(
     graph: UnionFindGraph,
-    intervals_by_edge,
+    edge_intervals: tuple[Open | Closed, ...],
 ) -> float:
+    """Return the shortest odd-logical quotient walk in natural-log units."""
     adjacency: dict[object, list[tuple[object, float, int]]] = {}
 
     def add_segment(left, right, weight: float, parity: int) -> None:
         adjacency.setdefault(left, []).append((right, weight, parity))
         adjacency.setdefault(right, []).append((left, weight, parity))
 
-    for edge_index, edge in enumerate(graph.edges):
-        intervals = intervals_by_edge[edge_index]
-        breakpoints = {0.0, 1.0}
-        for _label, lower, upper in intervals:
-            breakpoints.add(lower)
-            breakpoints.add(upper)
-        coordinates = sorted(breakpoints)
+    for edge_index, (edge, interval) in enumerate(
+        zip(graph.edges, edge_intervals)
+    ):
+        if isinstance(interval, Closed):
+            coordinates = (0.0, edge.weight)
+        else:
+            coordinates = tuple(
+                sorted({0.0, interval.lower, interval.upper, edge.weight})
+            )
         path_nodes: list[object] = [edge.detector_a]
         path_nodes.extend(
             ("union_find_edge", edge_index, split_index)
@@ -180,12 +63,8 @@ def _quotient_cluster_gap(
         for segment_index, (lower, upper) in enumerate(
             zip(coordinates, coordinates[1:])
         ):
-            midpoint = (lower + upper) / 2.0
-            covered = any(
-                interval_lower - _EPSILON
-                <= midpoint
-                <= interval_upper + _EPSILON
-                for _label, interval_lower, interval_upper in intervals
+            covered = isinstance(interval, Closed) or (
+                upper <= interval.lower or lower >= interval.upper
             )
             add_segment(
                 path_nodes[segment_index],
@@ -203,27 +82,21 @@ def _quotient_cluster_gap(
         pending = [(0.0, next(sequence), source_state)]
         while pending:
             distance, _sequence_id, state = heapq.heappop(pending)
-            if distance > distances.get(state, math.inf) + _EPSILON:
+            if distance != distances.get(state, math.inf):
                 continue
-            if distance >= best - _EPSILON:
+            if distance >= best:
                 break
             if state == target_state:
                 best = distance
                 break
             graph_node, logical_parity = state
-            for neighbor, weight, edge_parity in adjacency.get(
-                graph_node,
-                (),
-            ):
+            for neighbor, weight, edge_parity in adjacency.get(graph_node, ()):
                 neighbor_state = (
                     neighbor,
                     logical_parity ^ edge_parity,
                 )
                 candidate = distance + weight
-                if candidate + _EPSILON < distances.get(
-                    neighbor_state,
-                    math.inf,
-                ):
+                if candidate < distances.get(neighbor_state, math.inf):
                     distances[neighbor_state] = candidate
                     heapq.heappush(
                         pending,
@@ -233,16 +106,11 @@ def _quotient_cluster_gap(
 
 
 def _cluster_gap(hard_evidence: UnionFindHardEvidence) -> float:
-    radii = dict(hard_evidence.radius_by_syndrome_center)
-    cluster_labels = dict(
-        hard_evidence.cluster_label_by_syndrome_center
-    )
-    intervals = _covered_intervals(
+    natural_gap = _quotient_cluster_gap(
         hard_evidence.graph,
-        radii,
-        cluster_labels,
+        hard_evidence.edge_intervals,
     )
-    return _quotient_cluster_gap(hard_evidence.graph, intervals)
+    return natural_gap * 10.0 / math.log(10.0)
 
 
 class UnionFindClusterGapDecoder:
@@ -250,13 +118,12 @@ class UnionFindClusterGapDecoder:
 
     SCOPE:
     - Confidence requires exactly one nonzero logical-observable row.
-    - The gap is in normalized graph-edge units.
-    - Multiplying by ``log((1-p)/p)`` is justified only for the uniform
+    - The public gap is in decibels; hard growth uses natural-log-odds lengths.
+    - The exact likelihood-ratio interpretation applies only to the uniform
       repetition-code setting of arXiv:2405.07433v2, Theorem 10.
     - Surface-code cluster gap is confidence, not a calibrated failure
-      probability.
-    - Confidence uses the immutable final growth evidence from the same hard
-      decode and does not rerun or reconstruct Union-Find.
+      probability or a general Union-Find likelihood bound.
+    - Confidence consumes immutable intervals from the same hard decode.
     """
 
     fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
@@ -298,15 +165,8 @@ class UnionFindClusterGapDecoder:
             )
 
         decoded_window = self.base.decode_with_growth_evidence(job)
-        gap = _cluster_gap(decoded_window.hard_evidence)
-        if not math.isfinite(gap):
-            raise ValueError(
-                "Union-Find cluster confidence could not reach an odd "
-                "logical cycle"
-            )
-        soft_output = SoftOutput(
-            gap=gap,
+        decoded_window.hard_result.soft_output = SoftOutput(
+            gap=_cluster_gap(decoded_window.hard_evidence),
             source=UNION_FIND_CLUSTER_GAP_SOURCE,
         )
-        decoded_window.hard_result.soft_output = soft_output
         return decoded_window.hard_result

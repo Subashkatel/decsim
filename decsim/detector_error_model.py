@@ -88,6 +88,17 @@ class PlacedFaultModel:
     future_flips: dict
     source_fault_ids: tuple[int, ...]
 
+    def __post_init__(self) -> None:
+        import numpy as np
+
+        for field_name in ("check", "priors", "observables", "owned"):
+            source = np.ascontiguousarray(getattr(self, field_name))
+            frozen = np.frombuffer(
+                source.tobytes(order="C"),
+                dtype=source.dtype,
+            ).reshape(source.shape)
+            object.__setattr__(self, field_name, frozen)
+
 
 @dataclass(frozen=True)
 class _FaultCatalog:

@@ -62,8 +62,11 @@ class SpeculativeRecovery:
             "state": "waiting_strong",
         }
 
-    def complete(self, key: tuple, result) -> bool:
+    def complete(self, completion) -> bool:
         """Return True when strong completion is deferred or handled here."""
+        key = (completion.request_key.operation_id,
+               completion.request_key.window_id)
+        result = completion.result
         record = self._pending.get(key)
         if record is None:
             return False
@@ -74,6 +77,7 @@ class SpeculativeRecovery:
             self._release_record(key)
             return False
 
+        record["strong_completion"] = completion
         record["strong_result"] = result
         record["strong_boundary"] = strong_boundary
         record["state"] = "ready_to_repair"
@@ -136,6 +140,7 @@ class SpeculativeRecovery:
         runtime = self.runtime
         record = self._pending[key]
         result = record["strong_result"]
+        completion = record["strong_completion"]
         descendants = record["descendants"]
         descendant_set = set(descendants)
         source_window = runtime.windows[key]
@@ -168,7 +173,9 @@ class SpeculativeRecovery:
         record["state"] = "replaying"
         runtime._resolve_strong_wait(key, key[0])
         self.replay_count += 1
-        runtime._send_boundary(source_window, source_op, corrected_boundary)
+        runtime._send_boundary(
+            source_window, source_op, corrected_boundary,
+            source_request_key=completion.request_key)
         runtime.release_stream_segments_at_commit(
             source_op.id,
             runtime.lifecycle.committed_round_counts.get(source_op.id, 0),

@@ -14,6 +14,8 @@ from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import (
     DecodeJob,
     DecodeResult,
+    DecoderRequestKey,
+    DecoderTier,
     Operation,
     OperationPlanningView,
     ResolvedCodeGeometry,
@@ -22,6 +24,7 @@ from decsim.message import (
     RetainedSyndromeFragment,
     SyndromePayload,
     SyndromeRoundPacket,
+    StrongDecodeCompletion,
     Window,
     WindowPlan,
 )
@@ -293,11 +296,14 @@ def test_default_boundary_revisions_replace_one_sources_contribution():
     )
     source = rt.windows[(0, 0)]
     operation = rt._ops[0]
+    request_key = DecoderRequestKey(0, 0, DecoderTier.WEAK, 0)
 
     # The first scheduled message is stale before it arrives. Only the newer
     # revision releases the dependency and contributes a mask.
-    rt._send_boundary(source, operation, {7: [1, 0]})
-    rt._send_boundary(source, operation, {7: [0, 1]})
+    rt._send_boundary(
+        source, operation, {7: [1, 0]}, source_request_key=request_key)
+    rt._send_boundary(
+        source, operation, {7: [0, 1]}, source_request_key=request_key)
     eng.run(until=T_DD)
     destination = rt.windows[(1, 0)]
     assert destination.deps_remaining == 0
@@ -305,7 +311,8 @@ def test_default_boundary_revisions_replace_one_sources_contribution():
 
     # A later accepted revision replaces this source rather than decrementing
     # the dependency twice or XORing old and new versions together.
-    rt._send_boundary(source, operation, {7: [1, 1, 1]})
+    rt._send_boundary(
+        source, operation, {7: [1, 1, 1]}, source_request_key=request_key)
     eng.run(until=eng.now + T_DD)
     assert destination.deps_remaining == 0
     assert destination.boundary_in == {1: [1, 1, 1]}
@@ -320,9 +327,9 @@ def test_strong_revises_logical_only_contract_1_4():
                                         boundary_defects={7: [1]}))
     eng.run(until=T_DD)
     dep_boundary_before = dict(rt.windows[(1, 0)].boundary_in)
-    rt.on_strong_decode_done((0, 0), DecodeResult(
-        0, 0, logical_observables=(0,),
-                                                  boundary_defects={7: [1, 1]}))
+    rt.on_strong_decode_done(StrongDecodeCompletion(
+        DecoderRequestKey(0, 0, DecoderTier.STRONG, 1), DecodeResult(
+            0, 0, logical_observables=(0,), boundary_defects={7: [1, 1]})))
     eng.run(until=eng.now + T_DO)
     assert rt.logical_contributions[(0, 0)].logical_observables == (0,)
     assert rt.windows[(1, 0)].boundary_in == dep_boundary_before  # untouched
@@ -337,10 +344,9 @@ def test_op_delivery_gated_on_pending_strong_contract_1_5():
     rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(1,)))
     eng.run()
     assert fb.integrated == []                    # gated: pending strong
-    rt.on_strong_decode_done(
-        (0, 0),
-        DecodeResult(0, 0, logical_observables=(1,)),
-    )
+    rt.on_strong_decode_done(StrongDecodeCompletion(
+        DecoderRequestKey(0, 0, DecoderTier.STRONG, 1),
+        DecodeResult(0, 0, logical_observables=(1,))))
     eng.run()
     assert [op_id for op_id, _ in fb.integrated] == [0]   # released after final
 
@@ -366,9 +372,9 @@ def test_held_ships_only_when_final():
                                         boundary_defects={7: [1]}))
     eng.run()
     assert rt.windows[(1, 0)].deps_remaining == 1   # held: nothing shipped
-    rt.on_strong_decode_done((0, 0), DecodeResult(
-        0, 0, logical_observables=(1,),
-                                                  boundary_defects={7: [1]}))
+    rt.on_strong_decode_done(StrongDecodeCompletion(
+        DecoderRequestKey(0, 0, DecoderTier.STRONG, 1), DecodeResult(
+            0, 0, logical_observables=(1,), boundary_defects={7: [1]})))
     eng.run()
     assert rt.windows[(1, 0)].deps_remaining == 0   # shipped at final
 

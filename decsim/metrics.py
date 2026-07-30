@@ -9,17 +9,52 @@ from the pre-view implementations.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
+from enum import Enum
 import math
 from typing import TYPE_CHECKING, Optional
 
-from .message import stable_identity_order_key
+from .message import (DecoderRequestKey, stable_identity_json,
+                      stable_identity_order_key)
 from .views import (WINDOW_STAGES, backlog_view, reaction_view,
                     strong_work_view, utilization_view,
-                    window_latency_view)
+                    switching_records_view, window_latency_view)
 
 if TYPE_CHECKING:
     from .engine import Engine
+
+
+class WindowSwitchingRecords:
+    name = "window_switching_records"
+    result_schema_version = 1
+
+    def __init__(self, window_manager, decoder_manager):
+        self.window_manager = window_manager
+        self.decoder_manager = decoder_manager
+
+    def observe(self, engine: "Engine") -> None:
+        return None
+
+    def result(self) -> dict:
+        view = switching_records_view(self.window_manager, self.decoder_manager)
+
+        def json_value(value):
+            if isinstance(value, Enum):
+                return value.value
+            if type(value) is DecoderRequestKey:
+                return {"operation_id": stable_identity_json(value.operation_id),
+                        "window_id": value.window_id, "tier": value.tier.value,
+                        "run_sequence": value.run_sequence}
+            if is_dataclass(value):
+                return {field.name: json_value(getattr(value, field.name))
+                        for field in fields(value)}
+            if isinstance(value, (tuple, list)):
+                return [json_value(item) for item in value]
+            return value
+        return {"identity_scope": "single_primary_run", "tick_unit": "ticks",
+                "windows": json_value(view.windows),
+                "requests": json_value(view.requests),
+                "services": json_value(view.services)}
 
 
 @dataclass

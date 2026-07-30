@@ -85,7 +85,8 @@ class _CorrectingStrongDecoder:
 def _deterministic_run(boundary_policy, *, uncertain=(1,), strong=None,
                        run_both_at_once=False, weak_ticks=1, operation=None,
                        propagate=False, rounds=15, links=None,
-                       window_interaction=None, strategy=None):
+                       window_interaction=None, strategy=None,
+                       record_switching_windows=False):
     weak = _WeakBoundaryDecoder(
         uncertain, ticks=weak_ticks, propagate=propagate)
     strong = strong if strong is not None else _CorrectingStrongDecoder()
@@ -103,6 +104,7 @@ def _deterministic_run(boundary_policy, *, uncertain=(1,), strong=None,
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
         links=links,
+        record_switching_windows=record_switching_windows,
     ))
     return result, weak
 
@@ -188,7 +190,8 @@ def test_interaction_cannot_invalidate_unrelated_finished_work():
 
 
 def test_eager_boundary_disagreement_replays_the_transitive_weak_cone():
-    recovered, weak = _deterministic_run(Eager())
+    recovered, weak = _deterministic_run(
+        Eager(), record_switching_windows=True)
     held, _ = _deterministic_run(Held())
 
     runtime = recovered.window_manager
@@ -203,6 +206,16 @@ def test_eager_boundary_disagreement_replays_the_transitive_weak_cone():
     assert weak.window_ids.count(4) == 2
     assert runtime.speculative_replays == 1
     assert runtime.payloads_held == 0
+    replacements = [row["attribution"]["relation"] for row in
+                    recovered.result.link_traffic["transfers"]
+                    if row["path"] == "dd"
+                    and row["attribution"]["window_id"] == 1]
+    assert [row["request_key"]["tier"] for row in replacements] == [
+        "weak", "strong"]
+    revisions = [(row["source_revision"], row["delivery_revision"])
+                 for row in replacements]
+    assert revisions[0] == (1, 1)
+    assert revisions[1][0] == 2 and revisions[1][1] > revisions[0][1]
 
 
 @pytest.mark.parametrize("strong_first", [True, False])

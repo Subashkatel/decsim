@@ -18,6 +18,7 @@ from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
                     runtime_checkable)
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
+                      DecoderRequestKey,
                       DecodeOutcome, DecodeResult, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
                       StrongRegionPlan, SyndromePayload, SyndromeRoundPacket,
@@ -106,6 +107,7 @@ class OutcomeDirective:
     """A strategy's verdict on one decode outcome."""
     directive: Directive
     extra: Optional[Submission] = None
+    strong_request_key: Optional[DecoderRequestKey] = None
 
 
 @runtime_checkable
@@ -121,7 +123,7 @@ class StrategyServices(Protocol):
 
     def defer_strong_escalation(
         self, weak_job: DecodeJob,
-    ) -> None: ...
+    ) -> DecoderRequestKey: ...
 
     def check_strong_route(
         self, weak_job: DecodeJob, strong_job: DecodeJob,
@@ -130,7 +132,8 @@ class StrategyServices(Protocol):
     def cancel_strong(self, key: tuple) -> None: ...
 
     def prepare_strong_selection(
-        self, weak_job: DecodeJob, serial_submission: Optional[Submission],
+        self, weak_job: DecodeJob, strong_request_key: DecoderRequestKey,
+        serial_strong_job: Optional[DecodeJob], *, deferred: bool,
     ) -> int: ...
 
 

@@ -218,18 +218,23 @@ class Switching:
         if job.attempt != 0 or self.keep_weak_result(outcome.result, job):
             return OutcomeDirective(Directive.FINALIZE)   # pool cancels sibling
         extra = None
+        strong_request_key = None
         if self.double_window:
             # Faithful protocol: register the escalation only. The window
             # manager builds and submits the slab once the far-side weak
             # boundary is determined (paper Fig. 12 start condition).
-            services.defer_strong_escalation(
-                job)
+            strong_request_key = services.defer_strong_escalation(job)
         elif not self.run_both_at_once:        # serial: redo after ws (dm:153-154)
             strong = services.make_strong_job(
                 job, self.strong_redo_rounds(job.window),
                 getattr(job, "strong_label", f"strong({job.label})"))
             extra = Submission(strong)
-        return OutcomeDirective(Directive.AWAIT_STRONG, extra=extra)
+            strong_request_key = strong.request_key
+        return OutcomeDirective(
+            Directive.AWAIT_STRONG,
+            extra=extra,
+            strong_request_key=strong_request_key,
+        )
 
     def metrics(self) -> dict:
         return {"confidence_threshold": self.confidence_threshold,

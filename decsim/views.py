@@ -10,8 +10,11 @@ reads). Each builder receives the state owners it actually consumes.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
-from .message import stable_identity_order_key
+from .decoder_manager import TerminalRequestRecord, TerminalServiceRecord
+from .message import DecoderRequestKey, stable_identity_order_key
+
 
 WINDOW_STAGES = ("buffer_fill", "dep_block", "queue_wait", "service", "total")
 
@@ -111,7 +114,26 @@ class StrongWorkView:
     strong_needed: int
 
 
-# ---------------------------------------------------------------- builders
+@dataclass(frozen=True)
+class FinalWindowRow:
+    destination_key: tuple[object, int]
+    weak_buffer_lo: int
+    weak_commit_lo: int
+    weak_commit_hi: int
+    weak_buffer_hi: int
+    final_commit_lo: Optional[int]
+    final_commit_hi: Optional[int]
+    window_disposition: str
+    absorbed_into: Optional[tuple[object, int]]
+    selected_request_key: Optional[DecoderRequestKey]
+
+
+@dataclass(frozen=True)
+class SwitchingRecordsView:
+    windows: tuple[FinalWindowRow, ...]
+    requests: tuple[TerminalRequestRecord, ...]
+    services: tuple[TerminalServiceRecord, ...]
+
 
 def utilization_view(decoder_manager) -> UtilizationView:
     """Snapshot decoder occupancy."""
@@ -284,3 +306,35 @@ def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
         ),
         strong_needed=decoder_manager.strong_needed,
     )
+
+
+def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsView:
+    """Compose terminal owner facts without duplicating transfer timing."""
+    rows = []
+    for key, window in sorted(window_manager.windows.items(),
+                              key=lambda item: stable_identity_order_key(item[0])):
+        contribution = window_manager.logical_contributions.get(key)
+        absorbed = key in window_manager.absorbed_windows
+        absorbed_into = None
+        if absorbed:
+            owners = [owner for owner, value in
+                      window_manager.logical_contributions.items()
+                      if value.ownership_kind == "strong_slab"
+                      and value.commit_lo <= window.commit_lo
+                      and value.commit_hi >= window.commit_hi]
+            if len(owners) != 1:
+                raise RuntimeError(f"absorbed window {key} has no unique owner")
+            absorbed_into = owners[0]
+        elif contribution is None:
+            raise RuntimeError(f"final window {key} has no logical contribution")
+        rows.append(FinalWindowRow(
+            key, window.start_round, window.commit_lo, window.commit_hi,
+            window.buffer_hi,
+            None if absorbed else contribution.commit_lo,
+            None if absorbed else contribution.commit_hi,
+            "absorbed" if absorbed else contribution.ownership_kind,
+            absorbed_into, None if absorbed else
+            window_manager._selected_request_keys.get(key)))
+    return SwitchingRecordsView(
+        tuple(rows), decoder_manager.terminal_request_records_snapshot(),
+        decoder_manager.terminal_service_records_snapshot())

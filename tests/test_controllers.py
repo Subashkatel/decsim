@@ -55,8 +55,8 @@ def _links(**edges):
     ).resolve()
 
 
-def _window_attribution(round_index):
-    return TrafficAttribution(0, (0,), 0, round_index, round_index)
+def _round_attribution(round_index):
+    return TrafficAttribution(0, (0,), None, round_index, round_index)
 
 
 def test_staggered_fragments_ship_as_one_packet_after_the_last():
@@ -359,20 +359,20 @@ def test_serialized_chip_link_queues_concurrent_rounds():
 
 
 def test_generic_send_prices_bits_and_queues_on_serialized_links():
-    # the same two-message queueing through Transport.send on a dd bus
+    # the same two-message queueing through Transport.send on a qc bus
     eng = Engine(verbose=False)
-    links = _links(dd=_actual_edge(bandwidth=1000))
+    links = _links(qc=_actual_edge(bandwidth=1000))
     ctrl = ModularController(eng, links=links, log_syndromes=False)
     arrivals = []
 
     def send_both():
         for round_index in (1, 2):
             ctrl.send(
-                LinkPath.DD,
+                LinkPath.QC,
                 SyndromePayload(0, 0, round_index, size_bits=1000),
                 lambda p: arrivals.append(eng.now),
                 now=eng.now,
-                attribution=_window_attribution(round_index),
+                attribution=_round_attribution(round_index),
             )
 
     eng.schedule(0, send_both)

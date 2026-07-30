@@ -132,7 +132,7 @@ def test_fifo_completes_in_arrival_order():
 # strong-cancel paths were outside the original invariant net.
 # ---------------------------------------------------------------------------
 
-from decsim.message import DecodeJob
+from decsim.message import DecodeJob, DecoderRequestKey, DecoderTier
 
 
 def test_multi_pool_conservation_and_work_conservation():
@@ -211,7 +211,8 @@ def test_cancel_queued_strong_job():
                           label="blocker")
     key = (7, 3)
     strong = DecodeJob(op_id=7, window_id=3, n_rounds=4,
-                       strong_decode_for=key, label="strong-redo")
+                       strong_decode_for=key, label="strong-redo",
+                       request_key=DecoderRequestKey(*key, DecoderTier.STRONG, 0))
     manager.enqueue(strong)
     assert manager.queued_total() == 1
     manager.cancel_strong(key)
@@ -229,7 +230,8 @@ def test_cancel_running_strong_job_frees_unit_exactly_once():
         scheduler=FifoScheduler(), unit_pools={"default": 1})
     key = (9, 1)
     strong = DecodeJob(op_id=9, window_id=1, n_rounds=30,
-                       strong_decode_for=key, label="strong-running")
+                       strong_decode_for=key, label="strong-running",
+                       request_key=DecoderRequestKey(*key, DecoderTier.STRONG, 0))
     manager.enqueue(strong)                        # starts immediately
     assert manager.pool_free["default"] == 0
     eng.schedule(us(5), lambda: manager.cancel_strong(key))

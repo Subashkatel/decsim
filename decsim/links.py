@@ -14,10 +14,45 @@ from typing import Optional
 
 from .config import us
 from .message import (
+    DecoderRequestKey, DecoderTier,
     is_stable_identity,
     is_stable_string,
+    stable_identity_json,
     stable_identity_order_key,
 )
+
+
+@dataclass(frozen=True)
+class RequestTransferRelation:
+    request_key: DecoderRequestKey
+
+    def __post_init__(self) -> None:
+        if type(self.request_key) is not DecoderRequestKey:
+            raise TypeError("request relation requires an exact request key")
+
+
+@dataclass(frozen=True)
+class BoundaryTransferRelation:
+    source_request_key: DecoderRequestKey
+    source_window_key: tuple
+    destination_window_key: tuple
+    source_revision: int
+    delivery_revision: int
+
+    def __post_init__(self) -> None:
+        if type(self.source_request_key) is not DecoderRequestKey:
+            raise TypeError("boundary relation requires an exact request key")
+        expected_source = (self.source_request_key.operation_id,
+                           self.source_request_key.window_id)
+        if self.source_window_key != expected_source:
+            raise ValueError("boundary source does not match its request key")
+        if type(self.destination_window_key) is not tuple:
+            raise TypeError("boundary destination must be an exact tuple")
+        revisions = (self.source_revision, self.delivery_revision)
+        if any(type(revision) is not int for revision in revisions):
+            raise TypeError("boundary revisions must be exact ints")
+        if min(revisions) < 1:
+            raise ValueError("boundary revisions must be positive")
 
 
 def _require_nonempty_stable_string(value, field_name: str) -> None:
@@ -255,6 +290,7 @@ class TrafficAttribution:
     window_id: Optional[int]
     round_lo: Optional[int]
     round_hi: Optional[int]
+    relation: Optional[RequestTransferRelation | BoundaryTransferRelation] = None
 
     def __post_init__(self) -> None:
         if not is_stable_identity(self.operation_id):
@@ -643,6 +679,25 @@ class LinkModel:
             expected = "operation-only attribution"
         if not valid:
             raise ValueError(f"{path.value} requires {expected}")
+        relation = attribution.relation
+        request_paths = (LinkPath.WSD, LinkPath.CSD, LinkPath.WDO, LinkPath.DO)
+        if path in request_paths and type(relation) is not RequestTransferRelation:
+            raise ValueError(f"{path.value} requires a request relation")
+        expected_tier = DecoderTier.WEAK if path is LinkPath.WDO else DecoderTier.STRONG
+        if (type(relation) is RequestTransferRelation
+                and relation.request_key.tier is not expected_tier):
+            raise ValueError(f"{path.value} requires the {expected_tier.value} tier")
+        if path is LinkPath.DD and type(relation) is not BoundaryTransferRelation:
+            raise ValueError("dd requires a boundary relation")
+        if path not in request_paths + (LinkPath.DD,) and relation is not None:
+            raise ValueError(f"{path.value} does not accept a relation")
+        request_key = (relation.request_key if type(relation) is RequestTransferRelation
+                       else relation.source_request_key
+                       if type(relation) is BoundaryTransferRelation else None)
+        if request_key is not None and (
+                request_key.operation_id != attribution.operation_id
+                or request_key.window_id != attribution.window_id):
+            raise ValueError("transfer relation does not match attribution")
 
     def _member_paths(self, physical: Link) -> tuple:
         return tuple(
@@ -742,34 +797,40 @@ class LinkModel:
             "reconciliation": reconciliation,
         }
 
-    @staticmethod
-    def _identity_json(identity) -> dict:
-        if type(identity) is int:
-            return {"kind": "integer", "value": str(identity), "items": None}
-        if type(identity) is str:
-            return {"kind": "string", "value": identity, "items": None}
-        return {
-            "kind": "tuple",
-            "value": None,
-            "items": [LinkModel._identity_json(item) for item in identity],
-        }
-
     @classmethod
     def _transfer_json(cls, record: SemanticTransferRecord) -> dict:
         reservation = record.reservation
         attribution = record.attribution
+        relation = attribution.relation
+        relation_json = None
+        if relation is not None:
+            key = (relation.request_key if type(relation) is RequestTransferRelation
+                   else relation.source_request_key)
+            relation_json = {
+                "request_key": {
+                    "operation_id": stable_identity_json(key.operation_id),
+                    "window_id": key.window_id, "tier": key.tier.value,
+                    "run_sequence": key.run_sequence},
+            }
+            if type(relation) is BoundaryTransferRelation:
+                relation_json.update({
+                    "source_window_key": relation.source_window_key,
+                    "destination_window_key": relation.destination_window_key,
+                    "source_revision": relation.source_revision,
+                    "delivery_revision": relation.delivery_revision})
         return {
             "path": record.path.value,
             "physical_alias": record.physical_alias,
             "attribution": {
-                "operation_id": cls._identity_json(attribution.operation_id),
+                "operation_id": stable_identity_json(attribution.operation_id),
                 "patch_ids": [
-                    cls._identity_json(patch_id)
+                    stable_identity_json(patch_id)
                     for patch_id in attribution.patch_ids
                 ],
                 "window_id": attribution.window_id,
                 "round_lo": attribution.round_lo,
                 "round_hi": attribution.round_hi,
+                "relation": relation_json,
             },
             "payload_bits": record.payload_bits,
             "payload_selection": record.payload_selection.value,

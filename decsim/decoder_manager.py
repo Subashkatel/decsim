@@ -1,37 +1,73 @@
-"""Decoder unit pools: queues, dispatch, strategy-hook completion pipeline.
-
-Part module (port 12): faithful port of decoder_manager.py with the switching
-branches replaced by the DecodingStrategy seam (Contract 2b/2c). The pool owns
-what the core never sees: unit occupancy, per-pool queues, strong-job
-bookkeeping (hold-or-deliver, cancellation), external jobs, bulk batching.
-
-Parity anchors:
-  - completion order (Contract 2b): cancelled/duplicate guard -> decode and
-    validate identity -> free unit -> strong bookkeeping/strategy, or strategy
-    directive (one transition: the demand is registered, the replacement the
-    directive carries is enqueued, and awaiting is set, all BEFORE the commit
-    callback, so no reader reached from that callback sees a destination that
-    asked for a strong result and is not yet recorded as waiting) ->
-    window_manager commit -> apply held early strong same tick -> try_dispatch.
-    External jobs have no decoder result and free their unit before their
-    callback.
-  - a strong job crossing the weak-to-strong link becomes queue-ready at link
-    arrival, while its configured physical deadline remains the one stamped
-    from its source window.
-  - cancel: queued -> remove silently (never dispatched); executing -> mark
-    cancelled + free the unit immediately (dm:178-192); a held early strong
-    result is discarded on keep-weak (dm:180).
-  - weak and strong must route to distinct decoders (dm:169-176).
-"""
+"""Decoder queues, dispatch, switching ownership, and terminal records."""
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from enum import Enum
 from typing import Callable, Optional
 
 from .message import (DecodeJob, DecodeOutcome, DecodeResult,
+                      DecoderRequestKey, DecoderServiceKey,
+                      SoftOutput, StrongDecodeCompletion,
                       stable_identity_order_key)
 from .protocols import Directive
 from .config import fmt
+
+
+@dataclass(frozen=True)
+class _LiveStrongRequest:
+    request_job: DecodeJob
+    service_job: DecodeJob
+
+
+@dataclass(frozen=True)
+class _HeldStrongCompletion:
+    request_job: DecodeJob
+    completion: StrongDecodeCompletion
+    decode_output_ticks: int
+
+
+class RequestProcessingOutcome(Enum):
+    WEAK_FORWARDED_FOR_DELIVERY = "weak_forwarded_for_delivery"
+    WEAK_AWAITED_STRONG = "weak_awaited_strong"
+    STRONG_FORWARDED_FOR_DELIVERY = "strong_forwarded_for_delivery"
+    STRONG_COMPLETED_DISCARDED = "strong_completed_discarded"
+    STRONG_CANCELLED_BEFORE_DISPATCH = "strong_cancelled_before_dispatch"
+    STRONG_CANCELLED_DURING_SERVICE = "strong_cancelled_during_service"
+    STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED = (
+        "strong_cancelled_member_service_continued")
+
+
+@dataclass(frozen=True)
+class TerminalRequestRecord:
+    request_key: DecoderRequestKey
+    input_round_lo: int
+    input_round_hi: int
+    input_round_count: int
+    syndrome_bit_count: Optional[int]
+    syndrome_weight: Optional[int]
+    created_ticks: int
+    admitted_ticks: Optional[int]
+    ready_ticks: int
+    dispatch_ticks: Optional[int]
+    decode_output_ticks: Optional[int]
+    scheduler_priority_ticks: int
+    service_key: Optional[DecoderServiceKey]
+    soft_output: Optional[SoftOutput]
+    terminal_processing_outcome: RequestProcessingOutcome
+
+
+@dataclass(frozen=True)
+class TerminalServiceRecord:
+    service_key: DecoderServiceKey
+    pool: str
+    original_request_keys: tuple[DecoderRequestKey, ...]
+    completed_request_keys: tuple[DecoderRequestKey, ...]
+    cancelled_request_keys: tuple[DecoderRequestKey, ...]
+    input_round_count: int
+    dispatch_ticks: int
+    terminal_ticks: int
+    service_ticks: int
 
 
 class DecoderManager:
@@ -40,15 +76,17 @@ class DecoderManager:
     def __init__(self, engine, *, router, scheduler,
                  unit_pools: Optional[dict] = None, num_units: int = 1,
                  bulk_strong: bool = False,
-                 lane_policy=None, log_name: str = "DecoderCluster"):
+                 lane_policy=None, log_name: str = "DecoderCluster",
+                 capture_enabled: bool = False):
         self.engine = engine
         self.router = router
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
         self.log_name = log_name
+        self._terminal_request_records = [] if capture_enabled else None
+        self._terminal_service_records = [] if capture_enabled else None
 
-        # Wired post-construction by the composition root:
         self.strategy = None
         self.services = None
         self.on_window_decoded: Optional[Callable] = None
@@ -74,23 +112,12 @@ class DecoderManager:
 
         self.strong_needed = 0
         self.strong_cancelled = 0
-        # One destination window owns at most one unconsumed strong result at
-        # a time: a live request, or a completion held for a demand that has
-        # not registered yet. Whether a result still has a consumer is decided
-        # when it completes, not when it is requested: between the two the
-        # runtime submits the rest of the attempt's work and the strategy
-        # returns its directive.
-        self._running_strong_decodes: dict[tuple, DecodeJob] = {}
-        self._windows_waiting_for_strong_selection: set[tuple] = set()
-        self._windows_waiting_for_strong_result: set[tuple] = set()
-        self._completed_strong_results: dict[tuple, DecodeResult] = {}
-        # Destinations whose weak decode is admitted and has not yet produced
-        # an outcome directive: while one is open the destination may still ask
-        # for a strong result. One per destination, because every structure
-        # above is keyed by destination alone.
+        self._running_strong_decodes: dict[tuple, _LiveStrongRequest] = {}
+        self._windows_waiting_for_strong_selection: dict[tuple, DecoderRequestKey] = {}
+        self._windows_waiting_for_strong_result: dict[tuple, DecoderRequestKey] = {}
+        self._completed_strong_results: dict[tuple, _HeldStrongCompletion] = {}
         self._unresolved_weak_decodes: set[tuple] = set()
 
-    # -------------------------------------------------------------- queues
 
     @property
     def free_units(self) -> int:
@@ -118,8 +145,6 @@ class DecoderManager:
     def decoder_for(self, job: DecodeJob):
         return self.router.route(job)
 
-    # ------------------------------------------------------------- enqueue
-
     def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None:
         """Entry point for the window_manager's strategy Submissions."""
         self._reject_spent_job(job)
@@ -141,13 +166,7 @@ class DecoderManager:
 
     @staticmethod
     def _reject_spent_job(job: DecodeJob) -> None:
-        """A DecodeJob is submitted once: it carries the unit it occupies and
-        the cancellation handle its destination holds, so a second submission
-        of the same object hands out both twice. Admitted covers the whole
-        span a queue slot or a unit is held, from the moment enqueue accepts
-        the job through crossing the weak->strong link, queueing and
-        execution; cancelled and completed name the two ways that span ends.
-        """
+        """Reject resubmission of a live or terminal job."""
         if job.cancelled or job.completed or job.submitted:
             spent = ("cancelled" if job.cancelled else
                      "completed" if job.completed else "admitted")
@@ -157,40 +176,23 @@ class DecoderManager:
                 f"DecodeJob is submitted once, build a new one")
 
     def _admit_strong_request(self, job: DecodeJob) -> None:
-        """Give one destination window's next strong result to this job.
-
-        Admission decides only what it can decide now: a destination that
-        still owns an unconsumed strong result, live or held, cannot hand its
-        next result to a second request without clobbering the first's
-        cancellation handle or replacing a held completion. Whether anything
-        will consume the result is settled at completion instead, because
-        between submission and completion the runtime enqueues the rest of the
-        attempt's work and the strategy returns its directive. Admission runs
-        at submission, ahead of the handoff log and of every mutation, so a
-        refused job leaves no state and no trace behind, and a request still
-        crossing the weak->strong link is cancellable.
-        """
+        """Give one destination's next strong result to this request."""
         key = job.strong_decode_for
+        if job.request_key is None:
+            raise RuntimeError("built-in strong decode requires a request key")
         if (key in self._running_strong_decodes
                 or key in self._completed_strong_results):
             raise RuntimeError(
                 f"duplicate strong decode for window {key}: a destination "
                 f"window has at most one unconsumed strong result")
-        self._running_strong_decodes[key] = job
+        self._running_strong_decodes[key] = _LiveStrongRequest(job, job)
 
     def _admit_weak_decode(self, job: DecodeJob) -> None:
-        """Open one destination window's decode attempt.
-
-        Every strong structure is keyed by destination alone, so two of a
-        destination's weak decodes open at once are indistinguishable: either
-        decode's directive consumes whichever result the destination owns, and
-        the other attempt commits awaiting a result nothing will deliver. One
-        open decode per destination is what makes the destination key
-        sufficient, so a second is refused here rather than left to strand a
-        window. Admission runs ahead of every mutation, so a refused job leaves
-        no state and no trace behind.
-        """
+        """Open one destination window's decode attempt."""
         key = (job.op_id, job.window_id)
+        if job.request_key is None:
+            raise RuntimeError("built-in weak decode requires a request key")
+        job.request_admitted_ticks = self.engine.now
         if key in self._unresolved_weak_decodes:
             raise RuntimeError(
                 f"second weak decode for window {key} while the first is "
@@ -208,9 +210,11 @@ class DecoderManager:
 
     def _enqueue_now(self, job: DecodeJob) -> None:
         if job.strong_decode_for is not None:
-            if self._running_strong_decodes.get(job.strong_decode_for) is not job:
+            live = self._running_strong_decodes.get(job.strong_decode_for)
+            if live is None or live.request_job is not job:
                 return                             # cancelled across the link
             job.ready_time = self.engine.now
+            job.request_admitted_ticks = self.engine.now
         pool = self.pool_for(job)
         queue = self.queue_for(pool)
         self.scheduler.insert(queue, job)
@@ -254,36 +258,41 @@ class DecoderManager:
         its weak decode has resolved, and a destination still waiting keeps its
         demand, so the cancelled request can be replaced in either position.
         """
-        self._completed_strong_results.pop(key, None)
-        job = self._running_strong_decodes.pop(key, None)
-        if job is None:
+        held = self._completed_strong_results.pop(key, None)
+        if held is not None:
+            self._record_request(
+                held.request_job, held.completion.result,
+                RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
+                held.decode_output_ticks)
+        live = self._running_strong_decodes.pop(key, None)
+        if live is None:
             return
+        job = live.service_job
         if job.pool is None:
-            # scan every queue rather than recomputing pool_for(job): a lane
-            # policy may be reconfigured after this job was queued, and a
-            # queued job keeps its enqueue-time placement
             for pool in self.unit_totals:
                 queue = self.queue_for(pool)
                 if job in queue:
                     queue.remove(job)
                     break
+            self._record_request(
+                live.request_job, None,
+                RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
+                None)
         else:
-            merged = getattr(job, "merged_keys", None) or []
-            survivors = [k for k in merged
-                         if k in self._running_strong_decodes]
+            job.service_cancelled_request_keys.add(live.request_job.request_key)
+            survivors = any(
+                survivor.service_job is job
+                for survivor in self._running_strong_decodes.values())
             if survivors:
-                # a merged sibling still needs this running decode:
-                # keep the batch, drop only this key from delivery
-                # (cancelling the whole batch would silently lose the
-                # siblings' results and hang their windows)
-                job.merged_keys = survivors
+                outcome = RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED
             else:
+                outcome = RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE
                 job.cancelled = True
                 self.pool_free[job.pool] += 1
+                self._record_service(job)
                 self.try_dispatch()
+            self._record_request(live.request_job, None, outcome, None)
         self.strong_cancelled += 1
-
-    # ------------------------------------------------------------- dispatch
 
     def try_dispatch(self) -> None:
         for pool in self.unit_totals:
@@ -317,8 +326,9 @@ class DecoderManager:
                         "disable it for accuracy-coupled switching.")
         window_keys = [j.strong_decode_for for j in jobs
                        if j.strong_decode_for is not None]
+        request_keys = tuple(j.request_key for j in jobs)
         if len(jobs) == 1:
-            jobs[0].merged_keys = window_keys
+            jobs[0].service_original_request_keys = request_keys
             return jobs[0]
         total = sum(j.n_rounds for j in jobs)
         batch = DecodeJob(op_id=-1, window_id=0, n_rounds=total,
@@ -329,13 +339,26 @@ class DecoderManager:
                           hint="strong", spatial_nodes=jobs[0].spatial_nodes,
                           strong_decode_for=window_keys[0] if window_keys
                           else None)
-        batch.merged_keys = window_keys
-        for window_key in window_keys:
-            self._running_strong_decodes[window_key] = batch
+        batch.service_original_request_keys = request_keys
+        for window_key, request_job in zip(window_keys, jobs):
+            self._running_strong_decodes[window_key] = _LiveStrongRequest(
+                request_job, batch)
         return batch
 
     def _start_job(self, pool: str, job: DecodeJob) -> None:
         job.pool = pool
+        members = job.service_original_request_keys
+        if not members and job.request_key is not None:
+            members = (job.request_key,)
+            job.service_original_request_keys = members
+        if members:
+            job.service_key = DecoderServiceKey(
+                min(key.run_sequence for key in members))
+            job.service_dispatch_ticks = self.engine.now
+            for live in self._running_strong_decodes.values():
+                if live.service_job is job:
+                    live.request_job.service_key = job.service_key
+                    live.request_job.service_dispatch_ticks = self.engine.now
         self.pool_free[pool] -= 1
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
@@ -350,8 +373,6 @@ class DecoderManager:
         self.engine.schedule(
             latency_ticks, lambda j=job: self._on_decode_done(j),
             label=f"decode_done({job.label})")
-
-    # ----------------------------------------------------------- completion
 
     def _on_decode_done(self, job: DecodeJob) -> None:
         """Contract 2b pipeline with the strategy seam in the switching slots."""
@@ -372,6 +393,7 @@ class DecoderManager:
             self.strategy.on_decode_outcome(DecodeOutcome(job, result),
                                             self.services)   # FINALIZE_STRONG
             self._handle_strong_decode_result(strong_result_deliveries)
+            self._record_service(job)
             self.try_dispatch()
             return
 
@@ -394,33 +416,65 @@ class DecoderManager:
                                                     self.services)
         self._resolve_weak_decode(key)
         awaiting = directive.directive is Directive.AWAIT_STRONG
+        if not awaiting and (directive.extra is not None
+                             or directive.strong_request_key is not None):
+            name = directive.directive.name.lower()
+            raise RuntimeError(f"{name} directive cannot carry strong identity")
         if directive.directive is Directive.FINALIZE:
             self.cancel_strong(key)                # no-op unless one is live/held
         if awaiting:
-            self.strong_needed += 1
-            self._windows_waiting_for_strong_selection.add(key)
+            serial_job = None if directive.extra is None else directive.extra.job
+            strong_request_key = directive.strong_request_key
+            carriers = tuple(filter(None, (
+                self._running_strong_decodes.get(key),
+                self._completed_strong_results.get(key),
+            )))
+            deferred = serial_job is None and strong_request_key is not None
+            if serial_job is not None:
+                if (strong_request_key is None or carriers
+                        or serial_job.request_key != strong_request_key):
+                    raise RuntimeError("serial directive request key mismatch")
+            elif deferred:
+                if carriers:
+                    raise RuntimeError(
+                        "parallel directive cannot provide an explicit key")
+            else:
+                if len(carriers) != 1:
+                    raise RuntimeError(
+                        "parallel strong selection needs exactly one carrier")
+                carrier = carriers[0]
+                strong_request_key = carrier.request_job.request_key
             selection_delay = self.services.prepare_strong_selection(
-                job,
-                directive.extra,
+                job, strong_request_key, serial_job, deferred=deferred,
             )
+            self.strong_needed += 1
+            self._windows_waiting_for_strong_selection[key] = strong_request_key
             self.engine.schedule(
                 selection_delay,
-                lambda destination=key: self._select_strong_result(destination),
+                lambda destination=key, request_key=strong_request_key:
+                    self._select_strong_result(destination, request_key),
                 label=f"select strong result {key}",
             )
         job.awaiting_strong_result = awaiting      # BEFORE the commit callback
         if self.on_window_decoded is None:
             raise RuntimeError("DecoderManager has no window completion callback")
         self.on_window_decoded(job, result)
+        self._record_request(
+            job, result,
+            (RequestProcessingOutcome.WEAK_AWAITED_STRONG if awaiting else
+             RequestProcessingOutcome.WEAK_FORWARDED_FOR_DELIVERY),
+            self.engine.now)
+        self._record_service(job)
         self.try_dispatch()
 
-    def _select_strong_result(self, key: tuple) -> None:
+    def _select_strong_result(self, key: tuple,
+                              request_key: DecoderRequestKey) -> None:
         """Make one strong completion eligible only after WSD delivery."""
-        if key not in self._windows_waiting_for_strong_selection:
+        if self._windows_waiting_for_strong_selection.get(key) != request_key:
             return
-        self._windows_waiting_for_strong_selection.remove(key)
-        self._windows_waiting_for_strong_result.add(key)
-        self._apply_held_strong_result(key)
+        del self._windows_waiting_for_strong_selection[key]
+        self._windows_waiting_for_strong_result[key] = request_key
+        self._apply_held_strong_result(key, request_key)
 
     def _resolve_weak_decode(self, key: tuple) -> None:
         """This destination's weak decode has produced its directive, so it
@@ -474,8 +528,9 @@ class DecoderManager:
 
     def _finish_strong_bookkeeping(self, job: DecodeJob) -> None:
         if job.strong_decode_for is not None:
-            for key in getattr(job, "merged_keys", None) or [job.strong_decode_for]:
-                self._running_strong_decodes.pop(key, None)
+            for key, live in tuple(self._running_strong_decodes.items()):
+                if live.service_job is job:
+                    self._running_strong_decodes.pop(key)
 
     def admitted_strong_work_snapshot(self) -> tuple:
         """Snapshot each physical strong job once in its authoritative phase."""
@@ -486,7 +541,8 @@ class DecoderManager:
 
         jobs_by_identity = {}
         keys_by_identity = {}
-        for destination_key, job in self._running_strong_decodes.items():
+        for destination_key, live in self._running_strong_decodes.items():
+            job = live.service_job
             identity = id(job)
             jobs_by_identity[identity] = job
             keys_by_identity.setdefault(identity, []).append(destination_key)
@@ -523,15 +579,21 @@ class DecoderManager:
         self, job: DecodeJob, result: DecodeResult,
     ) -> tuple:
         """Validate batch provenance and return per-window result deliveries."""
-        keys = tuple(
-            getattr(job, "merged_keys", None) or [job.strong_decode_for])
+        requests = tuple(
+            live.request_job
+            for live in self._running_strong_decodes.values()
+            if live.service_job is job
+        )
+        keys = tuple(request.strong_decode_for for request in requests)
         result_identity = (result.op_id, result.window_id)
         is_merged_delivery = (
             len(keys) > 1
             or any(key != result_identity for key in keys)
         )
         if not is_merged_delivery:
-            return ((keys[0], result),)
+            completion = StrongDecodeCompletion(requests[0].request_key, result)
+            return ((_HeldStrongCompletion(
+                requests[0], completion, self.engine.now)),)
 
         accuracy_field_names = (
             "correction",
@@ -552,34 +614,34 @@ class DecoderManager:
                 f"({populated_fields}); disable bulk_strong for accuracy-coupled "
                 "switching")
 
-        return tuple(
-            (key, DecodeResult(op_id=key[0], window_id=key[1]))
-            for key in keys
-        )
+        return tuple(_HeldStrongCompletion(
+            request,
+            StrongDecodeCompletion(
+                request.request_key,
+                DecodeResult(op_id=key[0], window_id=key[1])),
+            self.engine.now,
+        ) for key, request in zip(keys, requests))
 
     def _handle_strong_decode_result(
         self, strong_result_deliveries: tuple,
     ) -> None:
-        for key, result in strong_result_deliveries:
-            self._complete_strong_result(key, result)
+        for held in strong_result_deliveries:
+            self._complete_strong_result(held)
 
-    def _complete_strong_result(self, key: tuple, result: DecodeResult) -> None:
-        """Apply a strong result if the weak already committed, else hold it.
-
-        A hold is the early-strong case: it lasts only until the destination's
-        demand arrives, so it is legitimate only while that destination's weak
-        decode is still open to raise one. A destination whose
-        decode attempt has resolved without asking will never ask, and one
-        whose next result already belongs to another live request would have
-        this one replaced unseen: both refuse rather than park a value in a map
-        nothing consumes.
-        """
-        if key in self._windows_waiting_for_strong_result:
-            self._windows_waiting_for_strong_result.remove(key)
+    def _complete_strong_result(self, held: _HeldStrongCompletion) -> None:
+        """Apply a strong result if demanded, otherwise hold it briefly."""
+        completion = held.completion
+        key = (completion.request_key.operation_id, completion.request_key.window_id)
+        if self._windows_waiting_for_strong_result.get(key) == completion.request_key:
+            del self._windows_waiting_for_strong_result[key]
             if self.on_strong_window_decoded is None:
                 raise RuntimeError(
                     "DecoderManager has no strong completion callback")
-            self.on_strong_window_decoded(key, result)
+            self.on_strong_window_decoded(completion)
+            self._record_request(
+                held.request_job, completion.result,
+                RequestProcessingOutcome.STRONG_FORWARDED_FOR_DELIVERY,
+                held.decode_output_ticks)
             return
         if key in self._running_strong_decodes:
             raise RuntimeError(
@@ -591,25 +653,68 @@ class DecoderManager:
                 f"strong result for window {key} has no destination waiting "
                 f"for it: the destination registered no strong demand and its "
                 f"decode attempt has resolved")
-        self._completed_strong_results[key] = result
+        self._completed_strong_results[key] = held
 
-    def _apply_held_strong_result(self, key: tuple) -> None:
+    def _apply_held_strong_result(self, key: tuple,
+                                  request_key: DecoderRequestKey) -> None:
         """Deliver a completion held from before this destination's demand."""
         if key in self._completed_strong_results:
-            result = self._completed_strong_results.pop(key)
-            self._complete_strong_result(key, result)
+            held = self._completed_strong_results[key]
+            if held.completion.request_key != request_key:
+                return
+            self._completed_strong_results.pop(key)
+            self._complete_strong_result(held)
+
+    def _record_request(self, job: DecodeJob, result: Optional[DecodeResult],
+                        outcome: RequestProcessingOutcome,
+                        decode_output_ticks: Optional[int]) -> None:
+        if self._terminal_request_records is None:
+            return
+        if job.request_key is None or job.request_created_ticks is None:
+            raise RuntimeError("terminal built-in request has no identity")
+        window = job.window
+        if window is None:
+            raise RuntimeError("terminal built-in request has no window")
+        bits_known = bool(job.payloads) and all(
+            payload.bits is not None for payload in job.payloads)
+        bit_count = (sum(len(payload.bits) for payload in job.payloads)
+                     if bits_known else None)
+        weight = (sum(sum(payload.bits) for payload in job.payloads)
+                  if bits_known else None)
+        self._terminal_request_records.append(TerminalRequestRecord(
+            job.request_key, window.start_round, window.buffer_hi, job.n_rounds,
+            bit_count, weight, job.request_created_ticks,
+            job.request_admitted_ticks, job.ready_time,
+            job.service_dispatch_ticks, decode_output_ticks, job.deadline,
+            job.service_key, None if result is None else result.soft_output,
+            outcome))
+
+    def _record_service(self, job: DecodeJob) -> None:
+        if self._terminal_service_records is None or job.service_key is None:
+            return
+        original = job.service_original_request_keys
+        cancelled = tuple(key for key in original
+                          if key in job.service_cancelled_request_keys)
+        completed = tuple(key for key in original if key not in cancelled)
+        dispatch = job.service_dispatch_ticks
+        if dispatch is None or job.pool is None:
+            raise RuntimeError("terminal decoder service has no dispatch")
+        self._terminal_service_records.append(TerminalServiceRecord(
+            job.service_key, job.pool, original, completed, cancelled,
+            job.n_rounds, dispatch, self.engine.now, self.engine.now - dispatch))
+
+    def terminal_request_records_snapshot(self) -> tuple:
+        if self._terminal_request_records is None:
+            raise RuntimeError("switching record capture is disabled")
+        return tuple(self._terminal_request_records)
+
+    def terminal_service_records_snapshot(self) -> tuple:
+        if self._terminal_service_records is None:
+            raise RuntimeError("switching record capture is disabled")
+        return tuple(self._terminal_service_records)
 
     def check_decode_work_settled(self) -> None:
-        """Every window the run decoded reached a final result.
-
-        Each state below is legitimate while the run continues, so the pool
-        cannot judge one as it happens; at quiescence none is, because no
-        decode is running and no queue holds work. A destination still recorded
-        here never became final, and no metric or view reports any of these
-        structures, so the run would otherwise return a logical accounting with
-        that window's value silently missing (arXiv:2510.25222 Sec. III A Step
-        4: an unconfident window's final estimate *is* the strong result).
-        """
+        """Require every admitted decode to reach a final result."""
         unsettled = {
             state: sorted(keys) for state, keys in (
                 ("waiting for a strong result",
@@ -648,10 +753,10 @@ class StrategyServicesImpl:
         self._pool.check_strong_route(weak_job, strong)   # fail at build time
         return strong
 
-    def defer_strong_escalation(self, weak_job: DecodeJob) -> None:
+    def defer_strong_escalation(self, weak_job: DecodeJob) -> DecoderRequestKey:
         """Faithful double window: the runtime submits the strong job once
         the far-side weak boundary is determined (arXiv:2510.25222 III C)."""
-        self._runtime.defer_strong_escalation(weak_job)
+        return self._runtime.defer_strong_escalation(weak_job)
 
     def check_strong_route(self, weak_job: DecodeJob,
                            strong_job: DecodeJob) -> None:
@@ -661,8 +766,10 @@ class StrategyServicesImpl:
         self._pool.cancel_strong(key)
 
     def prepare_strong_selection(self, weak_job: DecodeJob,
-                                 serial_submission) -> int:
+                                 strong_request_key: DecoderRequestKey,
+                                 serial_strong_job: Optional[DecodeJob], *,
+                                 deferred: bool) -> int:
         return self._runtime.prepare_strong_selection(
-            weak_job,
-            serial_submission,
+            weak_job, strong_request_key, serial_strong_job,
+            deferred=deferred,
         )

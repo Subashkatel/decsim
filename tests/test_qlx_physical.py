@@ -435,6 +435,46 @@ def test_detector_routing_requires_exact_list_check_matrices():
         _prove_detector_routing(circuit, metadata, submission_count=3)
 
 
+def _two_submission_metadata(locations):
+    return {
+        "dem_num_detectors": len(locations),
+        "dem_num_observables": 0,
+        "dem_num_sx": 0,
+        "dem_hx": [],
+        "dem_hz": [[]],
+        "dem_detector_locs": locations,
+    }
+
+
+def test_detector_routing_rejects_future_baseline_submission():
+    from decsim.frontends.qlx import _prove_detector_routing
+
+    circuit = stim.Circuit("""
+        M 0
+        M 1
+        DETECTOR rec[-2] rec[-1]
+    """)
+    metadata = _two_submission_metadata([[0, 0, 1]])
+
+    with pytest.raises(ValueError, match="precede current submission"):
+        _prove_detector_routing(circuit, metadata, submission_count=2)
+
+
+def test_detector_routing_rejects_nonmonotonic_global_detector_order():
+    from decsim.frontends.qlx import _prove_detector_routing
+
+    circuit = stim.Circuit("""
+        M 0
+        M 1
+        DETECTOR rec[-2] rec[-1]
+        DETECTOR rec[-2]
+    """)
+    metadata = _two_submission_metadata([[1, 0, 0], [0, 0, -1]])
+
+    with pytest.raises(ValueError, match="global detector order"):
+        _prove_detector_routing(circuit, metadata, submission_count=2)
+
+
 def _terminal_program():
     from decsim.frontends.qlx import qlx_frontend
 

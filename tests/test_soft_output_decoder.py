@@ -287,8 +287,8 @@ def test_hard_union_find_engine_path_reproduces_a_deterministic_logical_fault():
 @pytest.mark.parametrize("distance", (3, 5))
 def test_real_surface_memory_cluster_wrapper_preserves_hard_result(distance):
     from decsim.soft_output import (
-        UNION_FIND_CLUSTER_GAP_SOURCE,
         UnionFindClusterGapDecoder,
+        union_find_cluster_gap_source,
     )
     from decsim.union_find_decoder import UnionFindDecoder
 
@@ -322,6 +322,6 @@ def test_real_surface_memory_cluster_wrapper_preserves_hard_result(distance):
 
         assert cluster_prediction == hard_prediction
         assert cluster_decoder.last_result.soft_output.source == (
-            UNION_FIND_CLUSTER_GAP_SOURCE
+            union_find_cluster_gap_source()
         )
         assert cluster_decoder.last_result.soft_output.gap >= 0.0

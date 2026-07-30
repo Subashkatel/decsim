@@ -35,11 +35,14 @@ The paper cluster-gap pairing is explicit:
 from decsim.soft_output import UnionFindClusterGapDecoder
 from decsim.union_find_decoder import UnionFindDecoder
 
-decoder = UnionFindClusterGapDecoder(UnionFindDecoder(latency))
+decoder = UnionFindClusterGapDecoder(UnionFindDecoder(latency, weight_step=0.1))
 ```
 
 The hard decoder accepts graphlike/stringlike faults, uses prior-weighted global
-fair growth, and supports every logical-observable row. Cluster gap requires
+fair growth on nearest-step integer weights, and supports every
+logical-observable row. The absolute natural-log `weight_step` defaults to
+`0.1`; confidence thresholds must be calibrated separately for each step.
+Cluster gap requires
 exactly one nonzero logical row and reports decibels. Its exact likelihood-ratio
 interpretation applies only to the uniform repetition-code setting of Meister
 et al., Theorem 10. Surface-code gap is confidence, not a calibrated failure

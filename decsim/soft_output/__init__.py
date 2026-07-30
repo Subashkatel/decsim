@@ -24,8 +24,8 @@ from .complementary import (
 )
 from .decoder import SoftOutputDecoder
 from .cluster import (
-    UNION_FIND_CLUSTER_GAP_SOURCE,
     UnionFindClusterGapDecoder,
+    union_find_cluster_gap_source,
 )
 
 __all__ = [
@@ -36,6 +36,6 @@ __all__ = [
     "COMPLEMENTARY_GAP_SOURCE",
     "dem_to_matrices",
     "SoftOutputDecoder",
-    "UNION_FIND_CLUSTER_GAP_SOURCE",
     "UnionFindClusterGapDecoder",
+    "union_find_cluster_gap_source",
 ]

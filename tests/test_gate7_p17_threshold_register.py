@@ -25,6 +25,7 @@ SAMPLED_SOURCE = SoftOutputSource(
     growth_schedule="none",
     gap_units="branch_marker",
     correction="none",
+    weight_step_natural_log=None,
     references=("controlled Bernoulli experimental input",),
 )
 
@@ -34,6 +35,7 @@ OTHER_SOURCE = SoftOutputSource(
     growth_schedule="meister_uniform_fair",
     gap_units="graph_edges",
     correction="none",
+    weight_step_natural_log=None,
     references=(
         "arXiv:1709.06218v3 Algorithm 1",
         "arXiv:2405.07433v2 Definition 9 / Algorithm 2",

@@ -30,7 +30,6 @@ def plot_logical_error_rate(rows, output, *, title="Logical error rate"):
         grouped[row["distance"]].append(row)
 
     figure, axis = plt.subplots(figsize=(6.4, 4.4))
-    zero_failure_points = 0
     for distance, points in sorted(grouped.items()):
         points.sort(key=lambda point: point["physical_error_rate"])
         x_values = []
@@ -45,7 +44,6 @@ def plot_logical_error_rate(rows, output, *, title="Logical error rate"):
             if failures == 0:
                 rate = upper
                 lower = upper
-                zero_failure_points += 1
             x_values.append(point["physical_error_rate"])
             y_values.append(rate)
             lower_errors.append(rate - lower)
@@ -73,6 +71,13 @@ def plot_logical_error_rate(rows, output, *, title="Logical error rate"):
     figure.savefig(output, dpi=180)
     plt.close(figure)
 
+
+def write_logical_error_rate_card(rows, output, *, title="Logical error rate"):
+    """Describe an exact-count logical-error-rate plot in plain language."""
+    rows = tuple(rows)
+    grouped = {row["distance"] for row in rows}
+    zero_failure_points = sum(row["failures"] == 0 for row in rows)
+
     distances = ", ".join(str(distance) for distance in sorted(grouped))
     shot_counts = ", ".join(
         f"{shots:,}" for shots in sorted({row["shots"] for row in rows})
@@ -82,7 +87,9 @@ def plot_logical_error_rate(rows, output, *, title="Logical error rate"):
         "95% confidence upper limit."
         if zero_failure_points else ""
     )
-    output.with_suffix(".md").write_text(
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
         f"# {title}\n\n"
         "This offline figure asks how the weak-decoder logical error rate "
         "changes with physical error rate. It does not include event-engine "

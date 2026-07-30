@@ -10,7 +10,7 @@ from decsim.message import RunSeedPathSegment
 from decsim.seeding import derive_component_seed
 
 
-def _canonical_json(value) -> bytes:
+def canonical_json(value) -> bytes:
     return json.dumps(
         value,
         allow_nan=False,
@@ -21,7 +21,7 @@ def _canonical_json(value) -> bytes:
 
 
 def _sha256(value) -> str:
-    return hashlib.sha256(_canonical_json(value)).hexdigest()
+    return hashlib.sha256(canonical_json(value)).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,7 @@ def sample_batch_sha256(detectors, observable_truth) -> str:
     """Hash raw sample arrays with dtype and shape framing."""
     digest = hashlib.sha256()
     for name, array in (("detectors", detectors), ("observable_truth", observable_truth)):
-        metadata = _canonical_json({
+        metadata = canonical_json({
             "name": name,
             "dtype": array.dtype.str,
             "shape": list(array.shape),
@@ -107,7 +107,7 @@ class Experiment:
     schema_version: int = 1
 
     def canonical_bytes(self) -> bytes:
-        return _canonical_json(asdict(self)) + b"\n"
+        return canonical_json(asdict(self)) + b"\n"
 
     def sha256(self) -> str:
         return hashlib.sha256(self.canonical_bytes()).hexdigest()

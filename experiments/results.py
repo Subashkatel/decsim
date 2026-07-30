@@ -174,3 +174,31 @@ def reduce_chunks(rows) -> ReducedResult:
         **{name: getattr(first, name) for name in _IDENTITY_FIELDS},
         **totals,
     )
+
+
+def surface_plot_row(configuration, result: ReducedResult) -> dict:
+    """Project exact surface-run counts into the plotting schema."""
+    return {
+        "schema_version": result.schema_version,
+        "experiment_id": result.experiment_id,
+        "experiment_sha256": result.experiment_sha256,
+        "config_id": result.config_id,
+        "sample_set_id": result.sample_set_id,
+        "code_family": "rotated_surface",
+        "distance": configuration["distance"],
+        "rounds": configuration["rounds"],
+        "physical_error_rate": configuration["physical_error_rate"],
+        "basis": "z",
+        "decoder": "mwpm",
+        "shots": result.attempted_shots,
+        "failures": result.primary_failures,
+    }
+
+
+def canonical_surface_plot_csv(row) -> bytes:
+    stream = io.StringIO(newline="")
+    names = tuple(row)
+    writer = csv.DictWriter(stream, fieldnames=names, lineterminator="\n")
+    writer.writeheader()
+    writer.writerow(row)
+    return stream.getvalue().encode("utf-8")

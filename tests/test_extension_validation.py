@@ -1099,6 +1099,19 @@ def test_run_spec_rejects_multiple_explicit_code_sources(
         spec.build()
 
 
+def test_run_spec_code_selection_uses_explicit_none():
+    with pytest.raises(ValueError, match="d"):
+        RunSpec(ops=[], d=0).build()
+
+    class FalseySurfaceCode(SurfaceCodeModel):
+        def __bool__(self):
+            return False
+
+    supplied = FalseySurfaceCode(d=5)
+    completed = RunSpec(ops=[], code=supplied).build()
+    assert completed.window_manager._code_geometry.distance == 5
+
+
 @pytest.mark.parametrize("operation_source", [
     "ops",
     "frontend",

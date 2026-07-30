@@ -588,6 +588,17 @@ def test_switch_probability_per_round_scales_with_commit_rounds():
     assert p(DecodeJob(op_id=0, window_id=0, n_rounds=4 * D, window=None)) == pytest.approx(0.4)
 
 
+def test_switch_probability_per_round_rejects_invalid_scaled_probability():
+    with pytest.raises(ValueError, match="gamma_switch"):
+        switch_probability_per_round(-0.1, D)
+    with pytest.raises(ValueError, match="d"):
+        switch_probability_per_round(0.1, 0)
+
+    probability_for = switch_probability_per_round(1.0, D)
+    with pytest.raises(ValueError, match="switch probability"):
+        probability_for(DecodeJob(0, 0, D + 1))
+
+
 def test_sampled_soft_output_uses_the_probability_for_callback():
     """SampledConfidenceDecoder consults probability_for per job: a rule returning 1.0 escalates
     every window, overriding the flat escalation_probability of 0.0."""

@@ -1,5 +1,7 @@
 """Frontend and code-model seams for external IR adapters."""
 
+import pytest
+
 from decsim import protocols as P
 from conftest import fixed_latency_link_config
 from decsim.codes import BBCodeModel, SurfaceCodeModel
@@ -310,3 +312,27 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
     assert {job.code for job in decoder.jobs} == {code.name}
     assert {job.spatial_nodes for job in decoder.jobs} == {code.spatial_nodes(1)}
     assert len(result.window_manager.committed_windows) == result.window_manager.total_windows
+
+
+def test_surface_code_model_input_domain_and_distance_one_timing_run():
+    with pytest.raises(ValueError, match="d"):
+        SurfaceCodeModel(d=0)
+    with pytest.raises(ValueError, match="commit_rounds_override"):
+        SurfaceCodeModel(commit_rounds_override=0)
+    assert SurfaceCodeModel(d=1).distance == 1
+
+
+def test_builtin_code_cards_reject_zero_tick_cadence():
+    for factory in (SurfaceCodeModel, BBCodeModel):
+        for value in (0, 0.0000004, float("nan")):
+            with pytest.raises(ValueError, match="round_us"):
+                factory(round_us=value)
+
+
+def test_bb_code_model_input_domain_and_exact_detector_quotient():
+    with pytest.raises(ValueError, match="d"):
+        BBCodeModel(d=0)
+    with pytest.raises(ValueError, match="n_detectors"):
+        BBCodeModel(n=20, k=4, d=6, n_detectors=25)
+    code = BBCodeModel(n=20, k=4, d=5, n_detectors=40)
+    assert code.spatial_nodes(1) == code.syndrome_bits_per_round(1) == 8

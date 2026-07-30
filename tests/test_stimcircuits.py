@@ -8,6 +8,7 @@ import pytest
 
 stim = pytest.importorskip("stim")
 from decsim.stimcircuits import generate_circuit
+from decsim.stimcircuits.noise import NoiseModel
 
 
 def test_toric_memory_x_generates():
@@ -31,3 +32,25 @@ def test_rotated_surface_memory_generates():
 def test_noiseless_circuit_has_no_detection_events():
     c = generate_circuit("surface_code:rotated_memory_x", distance=3, rounds=3)
     assert c.compile_detector_sampler().sample(16).sum() == 0
+
+
+@pytest.mark.parametrize("model_field,generator_field", [
+    ("p_clifford", "after_clifford_depolarization"),
+    ("p_data", "before_round_data_depolarization"),
+    ("p_meas", "before_measure_flip_probability"),
+    ("p_reset", "after_reset_flip_probability"),
+])
+def test_noise_boundaries_cover_models_and_public_generator(model_field, generator_field):
+    for value in (-0.1, float("nan"), 1.1):
+        with pytest.raises(ValueError, match=model_field):
+            NoiseModel(**{model_field: value})
+        with pytest.raises(ValueError, match=generator_field):
+            generate_circuit(
+                "surface_code:rotated_memory_z", distance=2, rounds=2,
+                **{generator_field: value},
+            )
+
+
+def test_phenomenological_noise_rejects_transformed_probability_above_one():
+    with pytest.raises(ValueError, match="p_data"):
+        NoiseModel.phenomenological(0.8)

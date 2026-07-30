@@ -327,7 +327,8 @@ def _select_code(distance, code, layout):
             raise ValueError(
                 f"layout must declare exactly one code (got {len(codes)})")
         return codes[0], layout
-    selected = code or SurfaceCodeModel(d=distance or 3)
+    selected = code if code is not None else SurfaceCodeModel(
+        d=3 if distance is None else distance)
     return selected, UniformLayout(selected)
 
 

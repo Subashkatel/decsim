@@ -1,3 +1,5 @@
+from fractions import Fraction
+
 #==================================================================
 # TESTS FOR POLICY SEAMS (deadlines, routing, switching, round time, idle decode)
 #==================================================================
@@ -226,14 +228,38 @@ def test_switching_decoder_latency_mix():
     assert strong.decode_calls == []
 
 
-@pytest.mark.parametrize("value", [-0.01, 1.01, float("nan")])
-def test_stochastic_decoders_reject_invalid_probabilities(value):
+def test_stochastic_decoder_probability_domains():
     weak = PresetLatencyDecoder(1.0)
     strong = PresetLatencyDecoder(10.0)
-    with pytest.raises(ValueError, match="gamma_switch"):
-        SwitchingDecoder(weak, strong, gamma_switch=value)
-    with pytest.raises(ValueError, match="escalation_probability"):
-        SampledConfidenceDecoder(weak, escalation_probability=value)
+    for value in (0, 1, -0.0, 0.25):
+        switching = SwitchingDecoder(weak, strong, gamma_switch=value)
+        sampled = SampledConfidenceDecoder(
+            weak,
+            escalation_probability=value,
+        )
+        assert type(switching.gamma_switch) is float
+        assert type(sampled.escalation_probability) is float
+
+    for value in (-0.01, 1.01, float("nan"), float("inf"), -float("inf")):
+        with pytest.raises(ValueError, match="gamma_switch"):
+            SwitchingDecoder(weak, strong, gamma_switch=value)
+        with pytest.raises(ValueError, match="escalation_probability"):
+            SampledConfidenceDecoder(weak, escalation_probability=value)
+
+    for value in (True, Fraction(1, 2)):
+        with pytest.raises(TypeError, match="gamma_switch"):
+            SwitchingDecoder(weak, strong, gamma_switch=value)
+        with pytest.raises(TypeError, match="escalation_probability"):
+            SampledConfidenceDecoder(weak, escalation_probability=value)
+
+
+def test_sampled_confidence_validates_fixed_probability_with_callback():
+    with pytest.raises(TypeError, match="escalation_probability"):
+        SampledConfidenceDecoder(
+            PresetLatencyDecoder(1.0),
+            escalation_probability=True,
+            probability_for=lambda job: 0.5,
+        )
 
 
 def test_switching_decoder_cannot_reroute_completion_from_latency():
@@ -382,16 +408,51 @@ def test_sampled_confidence_run_seed_binding_and_explicit_conflict():
     ]
 
 
-def test_sampled_confidence_rejects_invalid_callback_before_stochastic_state():
+def test_sampled_confidence_rejects_foreign_callback_probability():
     decoder = SampledConfidenceDecoder(
         PresetLatencyDecoder(1.0),
         escalation_probability=0.0,
-        probability_for=lambda job: -0.1,
-        seed=17,
+        probability_for=lambda job: Fraction(1, 2),
     )
+    with pytest.raises(TypeError, match="probability_for"):
+        decoder.decode(DecodeJob(0, 0, 3))
+
+
+def test_sampled_confidence_rejects_invalid_callback_before_stochastic_state():
+    class InvalidThenValidProbability:
+        def __init__(self):
+            self.values = iter((-0.1, 0.5))
+            self.calls = 0
+
+        def __call__(self, job):
+            self.calls += 1
+            return next(self.values)
+
+    callback = InvalidThenValidProbability()
+    decoder = SampledConfidenceDecoder(
+        PresetLatencyDecoder(1.0),
+        escalation_probability=0.0,
+        probability_for=callback,
+        seed=982451653,
+    )
+    control = SampledConfidenceDecoder(
+        PresetLatencyDecoder(1.0),
+        escalation_probability=0.0,
+        probability_for=lambda job: 0.5,
+        seed=982451653,
+    )
+    rng_state = decoder._rng.getstate()
+
     with pytest.raises(ValueError, match="probability_for"):
         decoder.decode(DecodeJob(0, 0, 3))
+    assert callback.calls == 1
     assert decoder._stochastic_use_started is False
+    assert decoder._rng.getstate() == rng_state
+
+    recovered = decoder.decode(DecodeJob(0, 1, 3))
+    expected = control.decode(DecodeJob(0, 1, 3))
+    assert callback.calls == 2
+    assert recovered.soft_output.gap == expected.soft_output.gap
 
 
 def test_sampled_decoders_do_not_expose_their_rng_state():

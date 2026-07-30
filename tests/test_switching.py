@@ -22,6 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import pytest
 
+from conftest import fixed_latency_link_config
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
 from decsim.decoders import (
@@ -34,7 +35,8 @@ from decsim.decoders import (
 )
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import TimingOnlyDevice
-from decsim.message import (DecodeJob, DecodeResult, Operation,
+from decsim.message import (DecodeJob, DecodeResult, DecoderRequestKey,
+                            DecoderTier, Operation,
                             ResolvedCodeGeometry,
                             SeamFaultOwner, StrongRegionPlan, Window,
                             WindowInfo)
@@ -43,6 +45,7 @@ from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
+from decsim.protocols import Directive, OutcomeDirective
 from decsim.window_interactions import DefaultWindowInteraction
 from decsim.window_manager import (
     WindowManager,
@@ -696,6 +699,7 @@ class _DispatchRecorder:
 def _double_window_run(
     escalate_window, rounds=30, strong_tau=F_STRONG,
     window_interaction=None, device=None, metrics=None, code=None,
+    record_switching_windows=False, links=None,
 ):
     """One memory op on sliding d/d windows; exactly the window with index
     escalate_window reports low confidence (deterministic, no sampling)."""
@@ -727,6 +731,8 @@ def _double_window_run(
               device=device,
               unit_pools={"default": 1, "strong": 1},
               make_metrics=make_metrics,
+              record_switching_windows=record_switching_windows,
+              links=links,
           ), verbose=False)
     return res, weak, strong
 
@@ -737,6 +743,79 @@ def _nonaligned_code():
         commit_rounds_override=7,
         buffer_rounds_override=3,
     )
+
+
+def test_strong_selection_is_not_published_before_do_delivery():
+    selections_before_delivery = []
+
+    def inspect_commit(engine, window_manager, decoder_manager, chip, factory):
+        original = window_manager._commit_strong_decode_done
+        def commit(completion):
+            key = (completion.request_key.operation_id,
+                   completion.request_key.window_id)
+            selections_before_delivery.append(
+                window_manager._selected_request_keys.get(key))
+            original(completion)
+        window_manager._commit_strong_decode_done = commit
+        return []
+
+    result, _, _ = _double_window_run(
+        1, metrics=inspect_commit, record_switching_windows=True)
+    assert selections_before_delivery == [None]
+    assert result.window_manager._selected_request_keys[(0, 1)].tier is DecoderTier.STRONG
+
+
+def test_deferred_directive_key_must_match_registered_pending_key():
+    exposed = {}
+
+    def expose_state(engine, window_manager, decoder_manager, chip, factory):
+        exposed.update(window_manager=window_manager,
+                       decoder_manager=decoder_manager)
+        return []
+
+    class WrongDeferredKey(Switching):
+        def on_decode_outcome(self, outcome, services):
+            directive = super().on_decode_outcome(outcome, services)
+            if directive.directive is not Directive.AWAIT_STRONG:
+                return directive
+            key = directive.strong_request_key
+            return OutcomeDirective(
+                Directive.AWAIT_STRONG,
+                strong_request_key=DecoderRequestKey(
+                    key.operation_id, key.window_id, key.tier,
+                    key.run_sequence + 1))
+
+    with pytest.raises(RuntimeError, match="deferred.*key"):
+        _switch_run(WrongDeferredKey(
+            expected_source=SAMPLED_CONFIDENCE_SOURCE,
+            confidence_threshold=0.5, double_window=True), 1.0, 30,
+            metrics=expose_state)
+
+    runtime = exposed["window_manager"]
+    manager = exposed["decoder_manager"]
+    selected_paths = {row["path"] for row in runtime.links.traffic_json_value()[
+        "transfers"] if row["path"] in ("wsd", "csd")}
+    assert selected_paths == set()
+    assert runtime.pending_escalations
+    assert runtime._escalations.peek_key((0, 0)).wsd_arrival_ticks is None
+    assert manager.strong_needed == 0
+    assert not manager._running_strong_decodes
+    assert not manager._windows_waiting_for_strong_selection
+    assert not manager._windows_waiting_for_strong_result
+    assert manager._terminal_request_records is None
+    assert manager._terminal_service_records is None
+
+    class AbandonDeferred(Switching):
+        def on_decode_outcome(self, outcome, services):
+            directive = super().on_decode_outcome(outcome, services)
+            return (OutcomeDirective(Directive.FINALIZE)
+                    if directive.directive is Directive.AWAIT_STRONG
+                    else directive)
+
+    with pytest.raises(RuntimeError, match="WSD reservation|pending strong escalations"):
+        _switch_run(AbandonDeferred(
+            expected_source=SAMPLED_CONFIDENCE_SOURCE,
+            confidence_threshold=0.5, double_window=True), 1.0, 30)
 
 
 def test_double_window_rephases_residual_inside_crossing_final_commit():
@@ -791,6 +870,7 @@ def test_double_window_rephases_and_clamps_complete_nonaligned_suffix():
         rounds=50,
         code=_nonaligned_code(),
         device=RecordingDevice(),
+        record_switching_windows=True,
     )
 
     runtime = result.window_manager
@@ -827,6 +907,11 @@ def test_double_window_rephases_and_clamps_complete_nonaligned_suffix():
         for job in suffix_jobs
         for payload in job.payloads
     ) <= 50
+    rows = result.result.metric_values()["window_switching_records"]["windows"]
+    assert len(rows) == 7
+    assert [row["destination_key"] for row in rows] == [
+        [0, index] for index in range(7)]
+    assert all(row["window_disposition"] != "absorbed" for row in rows)
 
 
 def test_double_window_rephase_preserves_conflicting_registry_owner():
@@ -856,6 +941,9 @@ def test_double_window_rephase_preserves_conflicting_registry_owner():
                 strong_model=None,
                 wsd_arrival_ticks=0,
                 phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
+                strong_request_key=DecoderRequestKey(
+                    weak_window.op_id, weak_window.k, DecoderTier.STRONG, 0),
+                strong_request_created_ticks=0,
             )
             self.runtime._escalations.register_far(
                 self.conflict, (77, 0))
@@ -960,6 +1048,9 @@ def test_double_window_rephase_rejects_affected_far_readiness_owner():
                 strong_model=None,
                 wsd_arrival_ticks=0,
                 phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
+                strong_request_key=DecoderRequestKey(
+                    "other-escalation", 0, DecoderTier.STRONG, 0),
+                strong_request_created_ticks=0,
             )
             self.runtime._escalations.register_far(
                 self.conflict, (0, 4))
@@ -1652,11 +1743,27 @@ def test_double_window_weak_pipeline_never_stalls_on_strong_work():
         == {k: w.t_done for k, w in slow.window_manager.windows.items()}
 
 
-def test_double_window_last_window_uses_the_terminal_boundary():
+def test_double_window_last_window_uses_the_terminal_boundary(monkeypatch):
     """The final window's slab clamps at the stream end and has no restart
     window: the terminal time boundary already exists, so the slab is
     submitted at escalation without any extra wait."""
-    res, weak, strong = _double_window_run(escalate_window=9)  # last of 10
+    events = []
+    original_prepare = WindowManager.prepare_strong_selection
+    original_submit = WindowManager._submit_terminal_strong
+
+    def record_prepare(runtime, *args, **kwargs):
+        events.append(("prepare", runtime.engine.now))
+        return original_prepare(runtime, *args, **kwargs)
+
+    def record_submit(runtime, *args):
+        events.append(("submit", runtime.engine.now))
+        return original_submit(runtime, *args)
+
+    monkeypatch.setattr(WindowManager, "prepare_strong_selection", record_prepare)
+    monkeypatch.setattr(WindowManager, "_submit_terminal_strong", record_submit)
+    res, weak, strong = _double_window_run(
+        escalate_window=9, strong_tau=0, record_switching_windows=True,
+        links=fixed_latency_link_config())  # last of 10
     cluster = res.window_manager
     w9 = cluster.windows[(0, 9)]
     (start_tick, job), = strong.starts
@@ -1664,7 +1771,15 @@ def test_double_window_last_window_uses_the_terminal_boundary():
     # clamped r_strong is 3 committed rounds; the decoder reads 25-30
     assert job.n_rounds == 6
     assert len({p.round_index for p in job.payloads}) == 6
-    assert start_tick == w9.t_done + us(2.0)
+    assert start_tick == w9.t_done
+    assert events == [("prepare", w9.t_done), ("submit", w9.t_done)]
+    requests = res.result.metric_values()["window_switching_records"]["requests"]
+    assert any(row["terminal_processing_outcome"] == "strong_forwarded_for_delivery" for row in requests)
+    transfers = [row for row in res.result.link_traffic["transfers"]
+                 if row["path"] in ("wsd", "csd")]
+    assert [row["path"] for row in transfers] == ["wsd", "csd"]
+    assert (transfers[0]["attribution"]["relation"]["request_key"] ==
+            transfers[1]["attribution"]["relation"]["request_key"])
     assert cluster.absorbed_windows == set()
 
 
@@ -1754,6 +1869,9 @@ def _pending_escalation(key, phase):
         strong_model=None,
         wsd_arrival_ticks=0,
         phase=phase,
+        strong_request_key=DecoderRequestKey(
+            key[0], key[1], DecoderTier.STRONG, 0),
+        strong_request_created_ticks=0,
     )
 
 

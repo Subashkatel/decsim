@@ -1,26 +1,4 @@
-"""The windowing runtime: tracks each decode window from ready to committed.
-
-When a window's rounds are all present it builds the decode job (submission
-itself is DecodingStrategy.on_window_ready), hands the result to the
-orchestrator, ships boundary data to dependent windows at commit (gated by
-BoundaryPolicy.on_commit; Eager, the default, always ships), and declares
-the op finished once every window is committed. The windows are laid out
-either statically by the composition root or at runtime by DynamicWindows
-for streams of unknown length; this hub runs whatever both produce. Two
-helpers own adjacent state: PayloadStore (how
-long raw syndrome rounds stay retained) and DynamicWindows (dynamic-stream
-growth and sealing).
-
-Event ordering here is load-bearing: same-tick events run FIFO, so the
-frozen timing goldens pin the engine.schedule call order inside every
-handler. Invariants to know before editing:
-  - on_decode_done runs after the decode layer has set
-    job.awaiting_strong_result, so the escalation check sees it.
-  - a strong (redo) result revises the op's logical accumulator; under Eager,
-    a changed boundary also rolls back and replays its static dependent cone.
-  - op delivery waits on the per-op pending-strong count and the stream
-    seal; requires_strong_commit marks the op but never gates delivery.
-"""
+"""Window lifecycle, switching, boundary delivery, and logical ownership."""
 
 from __future__ import annotations
 
@@ -31,10 +9,12 @@ from types import MappingProxyType
 from typing import Callable, Optional
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecodeResult,
+                      DecoderRequestKey, DecoderTier, StrongDecodeCompletion,
                       Operation, SeamFaultOwner, SyndromeRoundPacket,
                       StrongRegionPlan, Window, WindowInfo, WindowPlan,
                       is_stable_identity, stable_identity_order_key)
-from .links import LinkPath, TrafficAttribution
+from .links import (BoundaryTransferRelation, LinkPath,
+                    RequestTransferRelation, TrafficAttribution)
 from .payload_store import PayloadStore
 from .dynamic_windows import DynamicWindows
 from .protocols import MultiFaultExclusionSyndromeDevice
@@ -50,6 +30,13 @@ class LogicalContribution:
     commit_hi: int
     ownership_kind: str
     logical_observables: Optional[tuple[int, ...]]
+
+
+@dataclass(frozen=True)
+class _HeldBoundary:
+    source_request_key: DecoderRequestKey
+    operation_id: object
+    boundary: object
 
 
 @dataclass(frozen=True)
@@ -81,8 +68,10 @@ class _PendingEscalation:
     resolved_region: _ResolvedStrongRegion
     strong_window: Window
     strong_model: object
-    wsd_arrival_ticks: int
+    wsd_arrival_ticks: Optional[int]
     phase: _EscalationPhase
+    strong_request_key: DecoderRequestKey
+    strong_request_created_ticks: int
 
 
 class _EscalationRegistry:
@@ -150,10 +139,12 @@ class _EscalationRegistry:
         expected: _PendingEscalation,
         wsd_arrival_ticks: int,
     ) -> _PendingEscalation:
-        """Record post-commit WSD timing without changing readiness ownership."""
+        """Record validated pre-submission WSD timing without moving ownership."""
         if self._by_key.get(expected.key) is not expected:
             raise RuntimeError(
                 f"stale escalation timing update for {expected.key}")
+        if expected.wsd_arrival_ticks is not None:
+            raise RuntimeError(f"duplicate WSD reservation for {expected.key}")
         updated = replace(expected, wsd_arrival_ticks=wsd_arrival_ticks)
         self._by_key[expected.key] = updated
         return updated
@@ -247,7 +238,8 @@ class WindowManager:
                  fault_model_requirement_for,
                  feedback_boundary_mode: str = "trailing_buffer",
                  syndrome_source=None, switching_active: bool = False,
-                 store: Optional[PayloadStore] = None):
+                 store: Optional[PayloadStore] = None,
+                 capture_enabled: bool = False):
         self.engine = engine
         self.scheme = scheme
         self._code_geometry = code_geometry
@@ -272,10 +264,10 @@ class WindowManager:
         self._fault_model_requirement_for_code = fault_model_requirement_for
         self.feedback_boundary_mode = feedback_boundary_mode
         self.syndrome_source = syndrome_source
-        #: retains rounds for possible strong re-decodes (today: switching set).
         self.switching_active = switching_active
+        self._next_decoder_request_sequence = 0
+        self._selected_request_keys = {} if capture_enabled else None
 
-        # Wired post-construction by the composition root:
         self.strategy = None
         self.services = None
         self.submit_fn: Optional[Callable] = None    # (job, delay_ticks) -> None
@@ -303,7 +295,7 @@ class WindowManager:
         self._boundary_versions: dict[tuple, int] = {}
         self._boundary_delivery_versions: dict[tuple, int] = {}
         self._released_boundary_dependencies: set[tuple] = set()
-        self._held_boundary: dict[tuple, tuple] = {}      # Held policy deferrals
+        self._held_boundary: dict[tuple, _HeldBoundary] = {}
         self._pending_strong_windows: set[tuple] = set()
         self._pending_strong_per_op: dict[int, int] = {}
         self._escalations = _EscalationRegistry()
@@ -318,8 +310,6 @@ class WindowManager:
         self._windows_built = False
         self._windowed_by_operation = {}
         self._batch_preceding_idle_rounds_by_operation = {}
-
-    # ---------------------------------------------------------- registration
 
     def _fault_model_requirement(self, operation: Operation):
         """Resolve the decoder views for this operation's frozen code."""
@@ -414,8 +404,6 @@ class WindowManager:
                 f"operation {op.id} has no frozen planning view"
             ) from error
 
-    # ----------------------------------------------------------------- plan
-
     def load_execution_plan(self, plan: WindowPlan) -> None:
         """Install the pre-computed compile-time window plan."""
         if self._windows_built:
@@ -454,8 +442,6 @@ class WindowManager:
                 continue
             for key, model in zip(keys, models):
                 self.window_models[key] = model
-
-    # ----------------------------------------------------------- read leases
 
     def _build_round_leases(self) -> None:
         for key, window in self.windows.items():
@@ -541,8 +527,6 @@ class WindowManager:
             for r in range(window.start_round, window.commit_hi + 1))
         self.store.replace(key, new_reads)
 
-    # ------------------------------------------------------- dynamic windows
-
     def create_dynamic_window(self, stream_id, window_index, commit_lo,
                               commit_hi, buffer_hi, *, is_last) -> None:
         """Create one dynamic-stream window and wire it into the live plan.
@@ -586,8 +570,6 @@ class WindowManager:
             return
         self.syndrome_source.validate_stream_length(
             self._ops[stream_id], stream_round_count)
-
-    # -------------------------------------------------------------- arrivals
 
     def on_syndrome_arrival(self, packet: SyndromeRoundPacket) -> None:
         """Retain one complete syndrome round and re-check affected windows."""
@@ -656,8 +638,6 @@ class WindowManager:
             return
         w = self.windows[(op_id, 0)]
         w.batched_preceding_idle_round_count += round_count
-
-    # ------------------------------------------------------------- readiness
 
     def check_windows_for_operation(self, op_id: int) -> None:
         for window_index in range(self.window_count[op_id]):
@@ -754,8 +734,6 @@ class WindowManager:
             for s in successor_ids)
         return overflow if successors_exhausted else successor_rounds
 
-    # ------------------------------------------------------------ job build
-
     def _deadline_for_window(self, op: Operation, window: Window) -> int:
         """Stamp one window, copying retained start-round provenance when present."""
         if window.t_first_round is None:
@@ -772,11 +750,21 @@ class WindowManager:
             on_reaction_path=(op.id in self.blocking_ops),
         )
 
+    def _new_request_key(
+        self, operation_id, window_id: int, tier: DecoderTier,
+    ) -> DecoderRequestKey:
+        request_key = DecoderRequestKey(
+            operation_id, window_id, tier, self._next_decoder_request_sequence)
+        self._next_decoder_request_sequence += 1
+        return request_key
+
     def _submit_window_decode(self, key: tuple, window: Window,
                               op: Operation) -> None:
         """Build the weak job, ask the strategy, and enqueue its submissions."""
         deadline = self._deadline_for_window(op, window)
         window.t_queued = self.engine.now
+        request_key = self._new_request_key(
+            window.op_id, window.k, DecoderTier.WEAK)
         job = DecodeJob(
                         op_id=window.op_id, window_id=window.k,
                         n_rounds=(
@@ -793,7 +781,9 @@ class WindowManager:
                             ].code_geometry.code_name
                         ),
                         window=window, label=self._job_desc(window, op),
-                        strong_label=f"strong({op.name} W{window.k})")
+                        strong_label=f"strong({op.name} W{window.k})",
+                        request_key=request_key,
+                        request_created_ticks=self.engine.now)
         window.queued = True
         for submission in self.strategy.on_window_ready(window, job,
                                                         self.services):
@@ -805,8 +795,6 @@ class WindowManager:
                         "strong transport delay is owned by the link fabric"
                     )
                 self._submit_strong_with_csd(submission.job)
-
-    # ------------------------------------------------------- payload assembly
 
     def _assemble_payloads(self, w: Window) -> list:
         """Collect this window's payloads, including successor overflow rounds."""
@@ -854,7 +842,8 @@ class WindowManager:
         return sum(sizes)
 
     @staticmethod
-    def _job_attribution(job: DecodeJob) -> TrafficAttribution:
+    def _job_attribution(job: DecodeJob,
+                         request_key: DecoderRequestKey) -> TrafficAttribution:
         patches = {}
         for payload in job.payloads or ():
             patch_id = payload.patch_id
@@ -877,12 +866,14 @@ class WindowManager:
                 if window.buffer_hi is None
                 else window.buffer_hi
             ),
+            relation=RequestTransferRelation(request_key),
         )
 
     @staticmethod
     def _window_attribution(
         window: Window,
         op: Operation,
+        request_key: DecoderRequestKey,
     ) -> TrafficAttribution:
         return TrafficAttribution(
             operation_id=op.id,
@@ -901,6 +892,7 @@ class WindowManager:
                 if window.buffer_hi is None
                 else window.buffer_hi
             ),
+            relation=RequestTransferRelation(request_key),
         )
 
     def _window_link_arrival(
@@ -908,12 +900,13 @@ class WindowManager:
         path: LinkPath,
         window: Window,
         op: Operation,
+        request_key: DecoderRequestKey,
     ) -> int:
         reservation = self.links.reserve(
             path,
             payload_bits=None,
             now_ticks=self.engine.now,
-            attribution=self._window_attribution(window, op),
+            attribution=self._window_attribution(window, op, request_key),
         )
         return self.engine.now + reservation.total_delay_ticks
 
@@ -923,12 +916,16 @@ class WindowManager:
         job: DecodeJob,
         *,
         payload_bits: Optional[int],
+        request_key: Optional[DecoderRequestKey] = None,
     ) -> int:
+        relation_key = job.request_key if request_key is None else request_key
+        if relation_key is None:
+            raise RuntimeError("window transfer requires a request key")
         reservation = self.links.reserve(
             path,
             payload_bits=payload_bits,
             now_ticks=self.engine.now,
-            attribution=self._job_attribution(job),
+            attribution=self._job_attribution(job, relation_key),
         )
         return self.engine.now + reservation.total_delay_ticks
 
@@ -954,32 +951,55 @@ class WindowManager:
     def prepare_strong_selection(
         self,
         weak_job: DecodeJob,
-        serial_submission,
+        strong_request_key: DecoderRequestKey,
+        serial_strong_job: Optional[DecodeJob],
+        *,
+        deferred: bool,
     ) -> int:
         """Reserve real input legs and return WSD selection-delivery delay."""
         key = (weak_job.op_id, weak_job.window_id)
         pending = self._escalations.peek_key(key)
-        if serial_submission is not None:
+        if deferred:
+            if pending is None or pending.strong_request_key != strong_request_key:
+                raise RuntimeError("deferred directive key has no matching pending request")
             wsd_arrival_ticks = self._link_arrival(
                 LinkPath.WSD,
                 weak_job,
                 payload_bits=None,
+                request_key=strong_request_key,
+            )
+            pending = self._escalations.update_wsd_arrival(
+                pending, wsd_arrival_ticks)
+            selection_delay = max(
+                0, pending.wsd_arrival_ticks - self.engine.now)
+            if (pending.phase is _EscalationPhase.WAITING_TERMINAL_DATA
+                    and self.rounds_arrived[pending.key[0]] >=
+                    pending.resolved_region.plan.context_hi):
+                self._submit_terminal_strong(pending.key[0], pending)
+            return selection_delay
+        if serial_strong_job is not None:
+            if serial_strong_job.request_key != strong_request_key:
+                raise RuntimeError("serial strong selection request key mismatch")
+            wsd_arrival_ticks = self._link_arrival(
+                LinkPath.WSD,
+                weak_job,
+                payload_bits=None,
+                request_key=strong_request_key,
             )
             self._submit_strong_with_csd(
-                serial_submission.job,
+                serial_strong_job,
                 wsd_arrival_ticks=wsd_arrival_ticks,
             )
             return wsd_arrival_ticks - self.engine.now
         if pending is not None:
-            return max(0, pending.wsd_arrival_ticks - self.engine.now)
+            raise RuntimeError("deferred pending request needs an explicit key")
         wsd_arrival_ticks = self._link_arrival(
             LinkPath.WSD,
             weak_job,
             payload_bits=None,
+            request_key=strong_request_key,
         )
         return wsd_arrival_ticks - self.engine.now
-
-    # ------------------------------------------------------------ strong jobs
 
     def make_strong_decode_job(self, weak_job: DecodeJob, round_count: int,
                                label: str) -> DecodeJob:
@@ -995,13 +1015,16 @@ class WindowManager:
                 op, strong_window,
                 self._round_count_for_window(op.id, strong_window),
                 fault_model_requirement=self._fault_model_requirement(op))
+        request_key = self._new_request_key(
+            weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
             n_rounds=round_count, ready_time=self.engine.now,
             deadline=deadline, label=label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=self._assemble_payloads(strong_window),
-            attempt=1, window=strong_window, strong_decode_for=key)
+            attempt=1, window=strong_window, strong_decode_for=key,
+            request_key=request_key, request_created_ticks=self.engine.now)
 
     def _strong_context_window(self, weak_window: Window) -> Window:
         buffer_lo, commit_lo, commit_hi, buffer_hi = \
@@ -1020,12 +1043,7 @@ class WindowManager:
         buffer_hi = window.commit_hi + buffer_rounds
         return buffer_lo, window.commit_lo, window.commit_hi, buffer_hi
 
-    # ------------------------------------------- faithful double window (III C)
-    # arXiv:2510.25222 Fig. 12: forward slab, weak-chain skip, strong owns
-    # the slab, start gated on both weak-determined boundaries. Protocol and
-    # seam formalism are documented on Switching (switching.py).
-
-    def defer_strong_escalation(self, weak_job: DecodeJob) -> None:
+    def defer_strong_escalation(self, weak_job: DecodeJob) -> DecoderRequestKey:
         """Lay out the forward slab, absorb the windows it covers, and hold
         the strong job until the restart window's weak commit
         (waiting_far_boundary) or, terminally, until every clamped slab
@@ -1046,6 +1064,9 @@ class WindowManager:
         if weak_job.strong_label is None:
             raise RuntimeError(
                 f"double-window escalation {key} needs a declared strong label")
+        strong_request_key = self._new_request_key(
+            weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
+        strong_request_created_ticks = self.engine.now
         weak_window = self.windows[key]
         op_id, escalated_index = key
         round_count = self._round_count_for_window(op_id, weak_window)
@@ -1071,8 +1092,9 @@ class WindowManager:
         if crossing_windows:
             self._defer_crossing_strong_escalation(
                 weak_job, weak_window, later_windows, round_count, plan,
-                crossing_windows[0])
-            return
+                crossing_windows[0], strong_request_key,
+                strong_request_created_ticks)
+            return strong_request_key
         resolved_region = self._resolve_strong_region_plan(
             key, weak_window, later_windows, round_count, plan)
         restart_key = resolved_region.restart_window_key
@@ -1115,11 +1137,6 @@ class WindowManager:
             self.store.lease(
                 guard_lease, resolved_region.restart_read_keys)
         try:
-            wsd_arrival_ticks = self._link_arrival(
-                LinkPath.WSD,
-                weak_job,
-                payload_bits=None,
-            )
             self.logical_contributions = logical_candidate
             phase = (
                 _EscalationPhase.WAITING_TERMINAL_DATA
@@ -1133,15 +1150,15 @@ class WindowManager:
                 resolved_region=resolved_region,
                 strong_window=slab,
                 strong_model=strong_model,
-                wsd_arrival_ticks=wsd_arrival_ticks,
+                wsd_arrival_ticks=None,
                 phase=phase,
+                strong_request_key=strong_request_key,
+                strong_request_created_ticks=strong_request_created_ticks,
             )
             if restart_key is None:
                 self._escalations.register_terminal(pending, op_id)
             else:
                 self._escalations.register_far(pending, restart_key)
-            # The deferred slab is assembled after later weak commits release
-            # their leases, so retain every context round until submission.
             self.store.replace((key, "strong"),
                                [(op_id, r) for r in
                                 range(plan.context_lo, plan.context_hi + 1)])
@@ -1159,11 +1176,7 @@ class WindowManager:
                 f"{len(resolved_region.absorbed_window_keys)} window(s); "
                 f"strong start deferred until {readiness_description}",
             )
-            if restart_key is None:
-                # terminal slab: clamped tail rounds may not be generated yet
-                if self.rounds_arrived[op_id] >= plan.context_hi:
-                    self._submit_terminal_strong(op_id, pending)
-            else:
+            if restart_key is not None:
                 self._reslice_restart_window(
                     restart_key,
                     plan.restart_buffer_lo,
@@ -1172,6 +1185,7 @@ class WindowManager:
                     plan.restart_seam_fault_owner,
                 )
                 self.check_window(restart_key)  # its absorbed dep is gone
+            return strong_request_key
         finally:
             if guard_lease is not None:
                 self.store.release(guard_lease)
@@ -1179,6 +1193,8 @@ class WindowManager:
     def _defer_crossing_strong_escalation(
         self, weak_job: DecodeJob, weak_window: Window, later_windows: list,
         round_count: int, plan: StrongRegionPlan, crossing_window: Window,
+        strong_request_key: DecoderRequestKey,
+        strong_request_created_ticks: int,
     ) -> None:
         """Atomically replace a non-aligned post-slab suffix before deferral."""
         key = weak_window.key
@@ -1409,8 +1425,10 @@ class WindowManager:
             resolved_region=resolved_region,
             strong_window=slab,
             strong_model=strong_model,
-            wsd_arrival_ticks=0,
+            wsd_arrival_ticks=None,
             phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
+            strong_request_key=strong_request_key,
+            strong_request_created_ticks=strong_request_created_ticks,
         )
 
         lease_ids = [
@@ -1528,13 +1546,6 @@ class WindowManager:
         finally:
             self.store.release(guard_lease)
 
-        wsd_arrival_ticks = self._link_arrival(
-            LinkPath.WSD,
-            weak_job,
-            payload_bits=None,
-        )
-        pending = self._escalations.update_wsd_arrival(
-            pending, wsd_arrival_ticks)
         self.engine.log(
             "DecoderCluster",
             f"{pending.label}: slab rounds {plan.commit_lo}-"
@@ -1806,13 +1817,17 @@ class WindowManager:
             label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,
-            attempt=1, window=slab, strong_decode_for=key)
+            attempt=1, window=slab, strong_decode_for=key,
+            request_key=pending.strong_request_key,
+            request_created_ticks=pending.strong_request_created_ticks)
 
     def _submit_far_strong(
         self,
         far_boundary_key: tuple,
         pending: _PendingEscalation,
     ) -> None:
+        if pending.wsd_arrival_ticks is None:
+            raise RuntimeError("far strong submission requires WSD reservation")
         strong_job = self._build_pending_strong_job(pending)
         self.services.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_far(far_boundary_key, pending)
@@ -1832,6 +1847,8 @@ class WindowManager:
         operation_id,
         pending: _PendingEscalation,
     ) -> None:
+        if pending.wsd_arrival_ticks is None:
+            raise RuntimeError("terminal strong submission requires WSD reservation")
         strong_job = self._build_pending_strong_job(pending)
         self.services.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_terminal(operation_id, pending)
@@ -1870,8 +1887,6 @@ class WindowManager:
             for key, phase in self._escalations.snapshot_phases().items()
         }
 
-    # ---------------------------------------------------------------- commit
-
     def on_decode_done(self, job: DecodeJob, res: DecodeResult) -> None:
         """Publish an accepted weak result only after its WDO transfer."""
         window = self.windows[(job.op_id, job.window_id)]
@@ -1884,6 +1899,7 @@ class WindowManager:
             LinkPath.WDO,
             window,
             op,
+            job.request_key,
         )
         self.engine.schedule(
             delivery_ticks - self.engine.now,
@@ -1897,15 +1913,19 @@ class WindowManager:
         window = self.windows[key]
         op = self._ops[job.op_id]
         self._commit_window(job, res, key, window, op)
+        if not job.awaiting_strong_result and self._selected_request_keys is not None:
+            self._selected_request_keys[key] = job.request_key
         self.lifecycle.update_committed_round_count(op.id)
         boundary = self.window_interaction.boundary_from_result(res, None)
         if job.awaiting_strong_result:
             self.speculative_recovery.begin(job, boundary)
         final = not job.awaiting_strong_result
         if self.boundary_policy.on_commit(window, final=final):
-            self._send_boundary(window, op, boundary)
+            self._send_boundary(
+                window, op, boundary, source_request_key=job.request_key)
         else:
-            self._held_boundary[key] = (op.id, boundary)    # Held: ship at final
+            self._held_boundary[key] = _HeldBoundary(
+                job.request_key, op.id, boundary)
         self.store.release(key)
         self._check_deferred_strong_after_commit(key)
         self.speculative_recovery.after_commit()
@@ -1939,7 +1959,6 @@ class WindowManager:
         if job.awaiting_strong_result:
             self._mark_window_waiting_for_strong(key, op.id)
         if self._escalations.peek_key(key) is None:
-            # a deferred slab still needs these rounds; released at submission
             self.store.release((key, "strong"))
 
     def _install_logical_contribution(
@@ -2141,36 +2160,43 @@ class WindowManager:
         self._pending_strong_per_op[op_id] = \
             self._pending_strong_per_op.get(op_id, 0) + 1
 
-    def on_strong_decode_done(self, key: tuple, result: DecodeResult) -> None:
+    def on_strong_decode_done(self, completion: StrongDecodeCompletion) -> None:
         """Publish an accepted strong result only after its DO transfer."""
+        key = (completion.request_key.operation_id,
+               completion.request_key.window_id)
         window = self.windows[key]
         op = self._ops[window.op_id]
         delivery_ticks = self._window_link_arrival(
             LinkPath.DO,
             window,
             op,
+            completion.request_key,
         )
         self.engine.schedule(
             delivery_ticks - self.engine.now,
-            lambda: self._commit_strong_decode_done(key, result),
+            lambda: self._commit_strong_decode_done(completion),
             label=f"strong result {op.name}W{window.k}->orchestrator",
         )
 
     def _commit_strong_decode_done(
         self,
-        key: tuple,
-        result: DecodeResult,
+        completion: StrongDecodeCompletion,
     ) -> None:
         """Finalize a weak-committed window with the delivered strong result.
 
         Held ships the strong boundary now. Eager delegates a boundary change
         to SpeculativeRecovery, which replays the affected static descendants.
         """
+        key = (completion.request_key.operation_id,
+               completion.request_key.window_id)
+        result = completion.result
         window = self.windows[key]
         op = self._ops[window.op_id]
         self.op_strong_commit_time[op.id] = max(
             self.op_strong_commit_time.get(op.id, 0), self.engine.now)
-        if self.speculative_recovery.complete(key, result):
+        if self._selected_request_keys is not None:
+            self._selected_request_keys[key] = completion.request_key
+        if self.speculative_recovery.complete(completion):
             return
         if result.logical_observables is not None:
             self._replace_contribution_prediction(
@@ -2179,10 +2205,12 @@ class WindowManager:
             )
         self._resolve_strong_wait(key, op.id)
         if key in self._held_boundary:                        # Held: ship now
-            src_op_id, boundary = self._held_boundary.pop(key)
+            held = self._held_boundary.pop(key)
             self._send_boundary(
-                window, self._ops[src_op_id],
-                self.window_interaction.boundary_from_result(result, boundary))
+                window, self._ops[held.operation_id],
+                self.window_interaction.boundary_from_result(
+                    result, held.boundary),
+                source_request_key=completion.request_key)
         self.speculative_recovery.after_commit()
         self.release_stream_segments_at_commit(
             op.id, self.lifecycle.committed_round_counts.get(op.id, 0))
@@ -2203,9 +2231,8 @@ class WindowManager:
     def speculative_replays(self) -> int:
         return self.speculative_recovery.replay_count
 
-    # -------------------------------------------------------------- handoff
-
-    def _send_boundary(self, window: Window, op: Operation, boundary) -> None:
+    def _send_boundary(self, window: Window, op: Operation, boundary, *,
+                       source_request_key: DecoderRequestKey) -> None:
         """Schedule policy-selected boundary deliveries over the dd link."""
         source_key = (window.op_id, window.k)
         selected_targets = tuple(self.window_interaction.boundary_targets(
@@ -2251,7 +2278,11 @@ class WindowManager:
                 LinkPath.DD,
                 payload_bits=None,
                 now_ticks=self.engine.now,
-                attribution=self._window_attribution(window, op),
+                attribution=replace(
+                    self._window_attribution(window, op, source_request_key),
+                    relation=BoundaryTransferRelation(
+                        source_request_key, source_key, dep_key,
+                        version, delivery_version)),
             )
             self.engine.schedule(
                 reservation.total_delay_ticks,
@@ -2367,8 +2398,6 @@ class WindowManager:
             for key, window in self.windows.items()
         })
 
-    # --------------------------------------------------------------- finish
-
     def gate_finalize(self, op_id, predicate: Callable) -> None:
         """Hold this op's result publication (and so its non-Clifford
         feed-forward) until predicate(op) is true, on top of the built-in
@@ -2442,8 +2471,6 @@ class WindowManager:
         )
         self.orchestrator.integrate(op, result)
 
-    # -------------------------------------------------------- stream segments
-
     def release_stream_segments_at_commit(self, stream_id,
                                           committed_round_count: int) -> None:
         """Deliver segment results whose full round range has committed
@@ -2497,9 +2524,6 @@ class WindowManager:
         if operation.stream_offset is None:
             return None
         return operation.stream_offset + self.rounds_for(operation)
-
-    # ------------------------------------------------------------- lifecycle
-    # thin delegations kept for the composition root / chip side
 
     def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
         self.lifecycle.close_boundary(stream_id, stream_round_count)

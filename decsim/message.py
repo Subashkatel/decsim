@@ -88,6 +88,16 @@ def stable_identity_order_key(identity: Any) -> bytes:
     return stable_identity_bytes(identity)
 
 
+def stable_identity_json(identity: Any) -> dict:
+    """Serialize a stable identity with explicit recursive type framing."""
+    if type(identity) is int:
+        return {"kind": "integer", "value": str(identity), "items": None}
+    if type(identity) is str:
+        return {"kind": "string", "value": identity, "items": None}
+    items = [stable_identity_json(item) for item in identity]
+    return {"kind": "tuple", "value": None, "items": items}
+
+
 @dataclass(frozen=True)
 class RunSeedPathSegment:
     """One framed semantic edge in the run-level seed component graph."""
@@ -842,6 +852,40 @@ class SoftOutput:
             object.__setattr__(self, field_name, normalized_value)
 
 
+class DecoderTier(Enum):
+    WEAK = "weak"
+    STRONG = "strong"
+
+
+@dataclass(frozen=True)
+class DecoderRequestKey:
+    operation_id: Any
+    window_id: int
+    tier: DecoderTier
+    run_sequence: int
+
+    def __post_init__(self) -> None:
+        if not is_stable_identity(self.operation_id):
+            raise TypeError("decoder request operation_id must be a stable identity")
+        if type(self.window_id) is not int or type(self.run_sequence) is not int:
+            raise TypeError("decoder request indices must be exact built-in ints")
+        if self.window_id < 0 or self.run_sequence < 0:
+            raise ValueError("decoder request indices must be nonnegative")
+        if type(self.tier) is not DecoderTier:
+            raise TypeError("decoder request tier must be a DecoderTier")
+
+
+@dataclass(frozen=True)
+class DecoderServiceKey:
+    run_sequence: int
+
+    def __post_init__(self) -> None:
+        if type(self.run_sequence) is not int:
+            raise TypeError("decoder service sequence must be an exact built-in int")
+        if self.run_sequence < 0:
+            raise ValueError("decoder service sequence must be nonnegative")
+
+
 @dataclass
 class DecodeJob:
     """One unit of decoder work."""
@@ -869,6 +913,13 @@ class DecodeJob:
     completed: bool = False                  # guards against duplicate completion delivery
     submitted: bool = False                  # set once the pool admits the job; a job holds one
                                              # queue slot and one unit, so it is enqueued once
+    request_key: Optional[DecoderRequestKey] = None
+    request_created_ticks: Optional[int] = None
+    request_admitted_ticks: Optional[int] = None
+    service_key: Optional[DecoderServiceKey] = None
+    service_original_request_keys: tuple[DecoderRequestKey, ...] = ()
+    service_cancelled_request_keys: set[DecoderRequestKey] = field(default_factory=set)
+    service_dispatch_ticks: Optional[int] = None
 
 
 @dataclass
@@ -885,6 +936,22 @@ class DecodeResult:
     # Typed decoder confidence; below a source-compatible threshold escalates.
     boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
+
+
+@dataclass(frozen=True)
+class StrongDecodeCompletion:
+    request_key: DecoderRequestKey
+    result: DecodeResult
+
+    def __post_init__(self) -> None:
+        if (type(self.request_key), type(self.result)) != (
+                DecoderRequestKey, DecodeResult):
+            raise TypeError("strong completion requires exact key and result types")
+        if (self.request_key.tier is not DecoderTier.STRONG
+                or not same_stable_identity(
+                    self.request_key.operation_id, self.result.op_id)
+                or self.request_key.window_id != self.result.window_id):
+            raise ValueError("strong completion identity must match its strong key")
 
 
 @dataclass

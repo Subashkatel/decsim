@@ -7,12 +7,14 @@ from decsim.message import (
     DecodeJob,
     DecodeOutcome,
     DecodeResult,
+    DecoderRequestKey,
+    DecoderTier,
     ResolvedCodeGeometry,
     SoftOutput,
     Window,
 )
 from decsim.decoder_manager import StrategyServicesImpl, DecoderManager
-from decsim.protocols import Directive, Submission
+from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.switching import Baseline, Switching
 
 WS = 500_000
@@ -57,14 +59,21 @@ class _RuntimeStub:
         return DecodeJob(op_id=weak_job.op_id, window_id=weak_job.window_id,
                          n_rounds=n_rounds, label=label, hint="strong",
                          attempt=1, window=w,
-                         strong_decode_for=(weak_job.op_id, weak_job.window_id))
+                         strong_decode_for=(weak_job.op_id, weak_job.window_id),
+                         request_key=DecoderRequestKey(
+                             weak_job.op_id, weak_job.window_id,
+                             DecoderTier.STRONG, 1))
     def on_decode_done(self, job, result):
         self.commits.append((job.op_id, job.window_id, job.awaiting_strong_result))
-    def on_strong_decode_done(self, key, result):
-        self.strong_commits.append(key)
-    def prepare_strong_selection(self, weak_job, serial_submission):
-        if serial_submission is not None:
-            self.pool.enqueue(serial_submission.job, WS)
+    def on_strong_decode_done(self, completion):
+        self.strong_commits.append((completion.request_key.operation_id,
+                                    completion.request_key.window_id))
+    def prepare_strong_selection(self, weak_job, strong_request_key,
+                                 serial_strong_job, *, deferred):
+        if deferred:
+            raise RuntimeError("deferred selection has no pending request")
+        if serial_strong_job is not None:
+            self.pool.enqueue(serial_strong_job, WS)
         return WS
 
 
@@ -73,7 +82,8 @@ def _window():
 
 
 def _weak_job(window):
-    j = DecodeJob(op_id=0, window_id=0, n_rounds=6, window=window, label="op0 W0")
+    j = DecodeJob(op_id=0, window_id=0, n_rounds=6, window=window, label="op0 W0",
+                  request_key=DecoderRequestKey(0, 0, DecoderTier.WEAK, 0))
     j.strong_label = "strong(op0 W0)"
     return j
 
@@ -157,6 +167,32 @@ def test_early_strong_held_then_applied_when_weak_commits():
     # strong completed early -> held; applied right after the weak commit
     assert rt.commits == [(0, 0, True)]
     assert rt.strong_commits == [(0, 0)]
+
+
+@pytest.mark.parametrize("shape", ["serial", "parallel", "deferred", "final"])
+def test_decoder_manager_rejects_malformed_directive_carriers(shape):
+    class HostileStrategy:
+        def on_decode_outcome(self, outcome, services):
+            if outcome.job.strong_decode_for is not None:
+                return OutcomeDirective(Directive.FINALIZE_STRONG)
+            wrong = DecoderRequestKey(0, 0, DecoderTier.STRONG, 9)
+            if shape == "serial":
+                strong = services.make_strong_job(outcome.job, 6, "strong")
+                return OutcomeDirective(Directive.AWAIT_STRONG,
+                                        Submission(strong), wrong)
+            directive = (Directive.FINALIZE if shape == "final"
+                         else Directive.AWAIT_STRONG)
+            return OutcomeDirective(directive, strong_request_key=wrong)
+
+    weak = _Decoder(10, soft=0.1)
+    eng, rt, pool = _pool(HostileStrategy(), weak, _Decoder(100))
+    job = _weak_job(_window())
+    if shape == "parallel":
+        pool.enqueue(rt.make_strong_decode_job(job, 6, "parallel"))
+    pool.enqueue(job)
+    with pytest.raises(RuntimeError, match=shape):
+        eng.run()
+    assert pool.strong_needed == 0 and not pool._windows_waiting_for_strong_selection
 
 
 def test_same_decoder_route_raises_at_build_time():

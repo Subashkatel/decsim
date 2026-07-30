@@ -1,25 +1,9 @@
-"""bulk_strong merge invariants and the strong-demand contract they share.
-
-The bulk_strong paths of DecoderManager: merge-and-deliver, refusal of
-accuracy-coupled merges, running-rounds accounting, and cancellation of one
-key of a running merged batch, which keeps the batch alive for its siblings
-and drops only the cancelled key from delivery.
-
-The same destination-keyed state carries the strong-demand contract, which is
-exercised here at both bulk_strong settings. A destination window owns at most
-one unconsumed strong result, a live request or a held completion, and
-admission refuses a second. Whether a result will be consumed is decided when
-it completes, not when it is requested: it is delivered to a registered
-demand, held while the destination's weak decode is still open to raise one,
-and otherwise refused.
-
-Keying by destination is what requires the other two halves tested here: one
-open weak decode per destination, so the key identifies an attempt; and no
-window left unfinal once the run is quiescent.
-"""
+"""Bulk-service, strong-demand, identity, and conservation invariants."""
 import sys
 import pathlib
 from dataclasses import replace
+from itertools import count
+from types import SimpleNamespace
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -29,7 +13,8 @@ from decsim.config import us
 from decsim.engine import Engine
 from decsim.decoders import CodeRouter, PerRoundDecoder, SwitchingRouter
 from decsim.decoder_manager import DecoderManager, StrategyServicesImpl
-from decsim.message import DecodeJob, DecodeResult, Operation
+from decsim.message import (DecodeJob, DecodeResult, DecoderRequestKey,
+                            DecoderTier, Operation, Window)
 from decsim.planner import FixedRounds
 from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.run_spec import RunSpec, simulate
@@ -67,37 +52,58 @@ class _ImmediateSelectionServices:
     def __init__(self, manager):
         self.manager = manager
 
-    def prepare_strong_selection(self, weak_job, serial_submission):
-        if serial_submission is not None:
-            self.manager.enqueue(serial_submission.job)
+    def prepare_strong_selection(self, weak_job, strong_request_key,
+                                 serial_strong_job, *, deferred):
+        if deferred:
+            raise RuntimeError("deferred selection has no pending request")
+        if serial_strong_job is not None:
+            self.manager.enqueue(serial_strong_job)
         return 0
 
 
-def build(bulk_strong=True, decoder=None):
+def build(bulk_strong=True, decoder=None, capture_enabled=False):
     eng = Engine(verbose=False)
     if decoder is None:
         decoder = PerRoundDecoder(tau_us=1.0)
     manager = DecoderManager(
         eng, router=CodeRouter(default=decoder),
         scheduler=FifoScheduler(),
-        unit_pools={"default": 1, "strong": 1}, bulk_strong=bulk_strong)
+        unit_pools={"default": 1, "strong": 1}, bulk_strong=bulk_strong,
+        capture_enabled=capture_enabled)
     manager.strategy = _NullStrategy()
     manager.services = _ImmediateSelectionServices(manager)
     results = []
-    manager.on_strong_window_decoded = \
-        lambda key, res: results.append((eng.now, key))
+    manager.on_strong_window_decoded = lambda completion: results.append(
+        (eng.now, (completion.request_key.operation_id,
+                   completion.request_key.window_id)))
     return eng, manager, results
+
+
+_request_sequences = count()
 
 
 def strong_job(op, rounds, label=None):
     return DecodeJob(op_id=op, window_id=0, n_rounds=rounds,
                      strong_decode_for=(op, 0), hint="strong",
-                     label=label or f"s{op}")
+                     label=label or f"s{op}",
+                     request_key=DecoderRequestKey(
+                         op, 0, DecoderTier.STRONG, next(_request_sequences)),
+                     request_created_ticks=0,
+                     window=Window(op, 0, 1, rounds, rounds, rounds))
 
 
 def weak_job(op, rounds, label=None):
     return DecodeJob(op_id=op, window_id=0, n_rounds=rounds,
-                     label=label or f"w{op}")
+                     label=label or f"w{op}",
+                     request_key=DecoderRequestKey(
+                         op, 0, DecoderTier.WEAK, next(_request_sequences)),
+                     request_created_ticks=0,
+                     window=Window(op, 0, 1, rounds, rounds, rounds))
+
+
+def wait_for(manager, job):
+    manager._windows_waiting_for_strong_result[job.strong_decode_for] = \
+        job.request_key
 
 
 class _RecordingDecoder(PerRoundDecoder):
@@ -148,11 +154,11 @@ def escalating_attempt(eng, manager, op, weak_rounds):
 
 def occupy_then_merge(eng, manager):
     """Blocker holds the strong unit; two 5-round strongs queue+merge."""
-    manager.enqueue(strong_job(1, 10, "s-block"))
-    for op in (2, 3):
-        manager.enqueue(strong_job(op, 5))
-    for key in [(1, 0), (2, 0), (3, 0)]:
-        manager._windows_waiting_for_strong_result.add(key)
+    jobs = [strong_job(1, 10, "s-block"), strong_job(2, 5), strong_job(3, 5)]
+    for job in jobs:
+        manager.enqueue(job)
+        manager._windows_waiting_for_strong_result[job.strong_decode_for] = \
+            job.request_key
 
 
 def test_bulk_merge_delivers_every_key_and_frees_units():
@@ -218,16 +224,15 @@ def test_preserved_strong_deadlines_drive_edf_ahead_of_admission_order():
         bulk_strong=False,
     )
     manager.strategy = _NullStrategy()
-    manager.on_strong_window_decoded = lambda _key, _result: None
+    manager.on_strong_window_decoded = lambda _completion: None
     blocker = strong_job(1, 10, "blocker")
     admitted_first = strong_job(2, 1, "later-deadline")
     urgent = strong_job(3, 1, "earlier-deadline")
     blocker.deadline = us(1)
     admitted_first.deadline = us(70)
     urgent.deadline = us(20)
-    manager._windows_waiting_for_strong_result.update(
-        {(1, 0), (2, 0), (3, 0)}
-    )
+    for job in (blocker, admitted_first, urgent):
+        wait_for(manager, job)
 
     manager.enqueue(blocker)
     manager.enqueue(admitted_first)
@@ -283,17 +288,17 @@ def test_merged_result_rejects_accuracy_fields_before_lifecycle_mutation(
         (((2, 0), (3, 0)), "running", 10),
     )
     assert set(manager._running_strong_decodes) == {(2, 0), (3, 0)}
-    assert manager._windows_waiting_for_strong_result == {(2, 0), (3, 0)}
-    merged_job = manager._running_strong_decodes[(2, 0)]
+    assert set(manager._windows_waiting_for_strong_result) == {(2, 0), (3, 0)}
+    merged_job = manager._running_strong_decodes[(2, 0)].service_job
     assert not merged_job.completed
 
 
 def test_timing_only_merged_result_is_reidentified_for_each_window():
     eng, manager, _ = build()
     delivered = []
-    manager.on_strong_window_decoded = (
-        lambda key, result: delivered.append((key, result))
-    )
+    manager.on_strong_window_decoded = lambda completion: delivered.append((
+        (completion.request_key.operation_id, completion.request_key.window_id),
+        completion.result))
     occupy_then_merge(eng, manager)
 
     eng.run()
@@ -313,9 +318,10 @@ def test_cancel_one_merged_key_keeps_sibling_result():
     settles."""
     eng, manager, _ = build()
     delivered = []
-    manager.on_strong_window_decoded = (
-        lambda key, result: delivered.append((eng.now, key, result))
-    )
+    manager.on_strong_window_decoded = lambda completion: delivered.append((
+        eng.now,
+        (completion.request_key.operation_id, completion.request_key.window_id),
+        completion.result))
     occupy_then_merge(eng, manager)
     eng.schedule(us(12), lambda: manager.cancel_strong((2, 0)))
     eng.run()
@@ -328,7 +334,7 @@ def test_cancel_one_merged_key_keeps_sibling_result():
     assert manager.strong_cancelled == 1
     assert manager.admitted_strong_work_snapshot() == ()
     assert manager.pool_free == {"default": 1, "strong": 1}
-    assert manager._windows_waiting_for_strong_result == {(2, 0)}
+    assert set(manager._windows_waiting_for_strong_result) == {(2, 0)}
 
 
 def test_cancel_all_merged_keys_cancels_the_batch_once():
@@ -343,15 +349,62 @@ def test_cancel_all_merged_keys_cancels_the_batch_once():
     assert manager.pool_free == {"default": 1, "strong": 1}
 
 
+def test_terminal_request_and_service_records_conserve_bulk_membership():
+    eng, manager, _ = build(capture_enabled=True)
+    occupy_then_merge(eng, manager)
+    eng.schedule(us(12), lambda: manager.cancel_strong((2, 0)))
+    eng.run()
+
+    requests = manager.terminal_request_records_snapshot()
+    services = manager.terminal_service_records_snapshot()
+    assert len(requests) == 3 and len(services) == 2
+    outcomes = {record.request_key.operation_id:
+                record.terminal_processing_outcome.value for record in requests}
+    assert outcomes == {
+        1: "strong_forwarded_for_delivery",
+        2: "strong_cancelled_member_service_continued",
+        3: "strong_forwarded_for_delivery",
+    }
+    for service in services:
+        assert set(service.original_request_keys) == (
+            set(service.completed_request_keys) | set(service.cancelled_request_keys))
+        assert not (set(service.completed_request_keys)
+                    & set(service.cancelled_request_keys))
+    memberships = {key: service.service_key for service in services
+                   for key in service.original_request_keys}
+    assert {record.request_key for record in requests} == set(memberships)
+    assert all(record.service_key == memberships[record.request_key]
+               for record in requests)
+
+
+def test_terminal_syndrome_facts_distinguish_missing_from_sampled_all_zero():
+    eng, manager, _ = build(capture_enabled=True)
+    manager.strategy = _AdoptTheWeakResult()
+    manager.on_window_decoded = lambda job, result: None
+    missing, zero = weak_job(10, 2), weak_job(11, 2)
+    zero.payloads = [SimpleNamespace(bits=(0, 0, 0))]
+    manager.enqueue(missing)
+    manager.enqueue(zero)
+    eng.run()
+
+    records = {record.request_key.operation_id: record
+               for record in manager.terminal_request_records_snapshot()}
+    assert (records[10].syndrome_bit_count, records[10].syndrome_weight) == (
+        None, None)
+    assert (records[11].syndrome_bit_count, records[11].syndrome_weight) == (3, 0)
+
+
 def test_bulk_strong_refuses_accuracy_coupled_merges():
     eng, manager, _ = build()
-    manager.enqueue(strong_job(1, 10, "s-block"))
+    blocker = strong_job(1, 10, "s-block")
+    manager.enqueue(blocker)
     j2 = strong_job(2, 5)
     j2.dem = object()                       # accuracy-coupled marker
     manager.enqueue(j2)
-    manager.enqueue(strong_job(3, 5))
-    for key in [(1, 0), (2, 0), (3, 0)]:
-        manager._windows_waiting_for_strong_result.add(key)
+    j3 = strong_job(3, 5)
+    manager.enqueue(j3)
+    for job in (blocker, j2, j3):
+        wait_for(manager, job)
     with pytest.raises(RuntimeError, match="bulk_strong only merges"):
         eng.run()
 
@@ -401,16 +454,17 @@ def test_duplicate_active_strong_destination_is_rejected_before_any_mutation(
             len(manager.queue_log), len(eng.log_lines)) == before
     # the live request still owns the destination: same job object, so
     # cancel_strong((2, 0)) still reaches the decode that is really running
-    assert manager._running_strong_decodes[(2, 0)] is live
+    assert manager._running_strong_decodes[(2, 0)].request_job is live
 
-    manager._windows_waiting_for_strong_result.update({(1, 0), (2, 0)})
+    wait_for(manager, manager._running_strong_decodes[(1, 0)].request_job)
+    wait_for(manager, live)
     eng.run()
     assert [key for _, key in results] == [(1, 0), (2, 0)]
     assert manager._completed_strong_results == {}
 
-    manager._windows_waiting_for_strong_result.add((2, 0))   # a replay of the
-    manager._apply_held_strong_result((2, 0))                # same key
-    assert manager._windows_waiting_for_strong_result == {(2, 0)}
+    manager._windows_waiting_for_strong_result[(2, 0)] = live.request_key
+    manager._apply_held_strong_result((2, 0), live.request_key)
+    assert set(manager._windows_waiting_for_strong_result) == {(2, 0)}
     assert [key for _, key in results] == [(1, 0), (2, 0)]
 
 
@@ -445,10 +499,18 @@ def test_early_strong_result_is_held_until_its_destination_asks(bulk_strong):
     """The case the hold map exists for: the strong decode finishes while the
     destination's weak decode is still running, and the demand that weak
     outcome raises is what consumes it."""
-    eng, manager, results = build(bulk_strong=bulk_strong)
+    eng, manager, results = build(
+        bulk_strong=bulk_strong, capture_enabled=True)
     escalating_attempt(eng, manager, 2, weak_rounds=50)
     manager.enqueue(strong_job(2, 5, "s-early"))
     while_the_weak_still_runs = []
+    def reject_wrong_demand():
+        held = manager._completed_strong_results[(2, 0)]
+        manager._windows_waiting_for_strong_result[(2, 0)] = DecoderRequestKey(2, 0, DecoderTier.STRONG, held.completion.request_key.run_sequence + 1)
+        manager._apply_held_strong_result((2, 0), held.completion.request_key)
+        assert results == [] and (2, 0) in manager._completed_strong_results
+        manager._windows_waiting_for_strong_result.clear()
+    eng.schedule(us(10), reject_wrong_demand)
     eng.schedule(us(10), lambda: while_the_weak_still_runs.append(
         (set(manager._completed_strong_results), list(results))))
 
@@ -459,6 +521,9 @@ def test_early_strong_result_is_held_until_its_destination_asks(bulk_strong):
     assert [key for _, key in results] == [(2, 0)]
     assert manager._completed_strong_results == {}
     assert manager._unresolved_weak_decodes == set()
+    assert {record.terminal_processing_outcome.value for record in
+            manager.terminal_request_records_snapshot()} == {
+                "weak_awaited_strong", "strong_forwarded_for_delivery"}
 
 
 @pytest.mark.parametrize("bulk_strong", [True, False])
@@ -470,8 +535,9 @@ def test_strong_result_for_a_destination_that_already_adopted_one_is_refused(
     the destination adopted a result and has no weak decode outstanding to
     ask for another, so nothing would consume this one."""
     eng, manager, results = build(bulk_strong=bulk_strong)
-    manager._windows_waiting_for_strong_result.add((2, 0))
-    manager.enqueue(strong_job(2, 5, "s-first"))
+    first = strong_job(2, 5, "s-first")
+    wait_for(manager, first)
+    manager.enqueue(first)
     eng.run()
     assert [key for _, key in results] == [(2, 0)]
 
@@ -489,8 +555,9 @@ def test_time_separated_duplicate_is_refused_however_it_is_timed(bulk_strong):
     requests are refused whether the second is submitted straight away or
     handed over the weak->strong link to land after the first completed."""
     eng, manager, results = build(bulk_strong=bulk_strong)
-    manager._windows_waiting_for_strong_result.add((2, 0))
-    manager.enqueue(strong_job(2, 5, "s-first"))
+    first = strong_job(2, 5, "s-first")
+    wait_for(manager, first)
+    manager.enqueue(first)
     log_lines_before = len(eng.log_lines)
 
     with pytest.raises(RuntimeError, match="duplicate strong decode"):
@@ -615,14 +682,15 @@ def test_a_destination_that_adopted_a_result_escalates_again_on_its_next_attempt
     eng, manager, results = build(bulk_strong=bulk_strong)
     manager.strategy = _EscalateThenAdopt()
     manager.on_window_decoded = lambda job, result: None
-    manager._windows_waiting_for_strong_result.add((2, 0))
-    manager.enqueue(strong_job(2, 5, "s-first"))
+    first = strong_job(2, 5, "s-first")
+    wait_for(manager, first)
+    manager.enqueue(first)
     eng.run()
     assert [key for _, key in results] == [(2, 0)]
 
-    replayed_weak = DecodeJob(op_id=2, window_id=0, n_rounds=50,
-                              ready_time=eng.now, deadline=eng.now,
-                              label="w2 replay", attempt=1)
+    replayed_weak = weak_job(2, 50, "w2 replay")
+    replayed_weak.ready_time = replayed_weak.deadline = eng.now
+    replayed_weak.attempt = 1
     manager.enqueue(replayed_weak)                # slow: the strong lands first
     manager.enqueue(strong_job(2, 5, "s-replay"))
     eng.run()
@@ -630,7 +698,7 @@ def test_a_destination_that_adopted_a_result_escalates_again_on_its_next_attempt
     assert [key for _, key in results] == [(2, 0), (2, 0)]
     assert results[-1][0] > results[0][0], "the replayed attempt never delivered"
     assert manager._completed_strong_results == {}
-    assert manager._windows_waiting_for_strong_result == set()
+    assert not manager._windows_waiting_for_strong_result
 
 
 def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
@@ -659,9 +727,10 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
     def configure(_engine, _window_manager, pool, _chip, _factory):
         commit_strong_result = pool.on_strong_window_decoded
 
-        def record(key, result):
-            delivered.append(key)
-            commit_strong_result(key, result)
+        def record(completion):
+            delivered.append((completion.request_key.operation_id,
+                              completion.request_key.window_id))
+            commit_strong_result(completion)
 
         pool.on_strong_window_decoded = record
 
@@ -673,12 +742,17 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
     assert completed_run.window_manager._finished_ops == {88}
     assert len(delivered) == len(set(delivered)) > 1
     assert completed_run.decoder_manager._completed_strong_results == {}
-    assert completed_run.decoder_manager._windows_waiting_for_strong_result == set()
+    assert not completed_run.decoder_manager._windows_waiting_for_strong_result
 
     finalized_key = delivered[-1]
-    completed_run.decoder_manager._windows_waiting_for_strong_result.add(finalized_key)
-    completed_run.decoder_manager._apply_held_strong_result(finalized_key)
-    assert completed_run.decoder_manager._windows_waiting_for_strong_result == {finalized_key}
+    synthetic_key = DecoderRequestKey(
+        finalized_key[0], finalized_key[1], DecoderTier.STRONG, 10_000)
+    completed_run.decoder_manager._windows_waiting_for_strong_result[
+        finalized_key] = synthetic_key
+    completed_run.decoder_manager._apply_held_strong_result(
+        finalized_key, synthetic_key)
+    assert set(completed_run.decoder_manager._windows_waiting_for_strong_result) == {
+        finalized_key}
     assert delivered.count(finalized_key) == 1, \
         "a wait was released after finality without a decode of its own"
 
@@ -724,12 +798,15 @@ def test_a_request_cancelled_across_the_link_is_replaced_by_one_decode(
     contract exists to prevent."""
     decoder = _RecordingDecoder()
     eng, manager, results = build(bulk_strong=bulk_strong, decoder=decoder)
-    manager._windows_waiting_for_strong_result.add((2, 0))
-    manager.enqueue(strong_job(2, 5, "s-cancelled"), delay_ticks=us(20))
+    cancelled = strong_job(2, 5, "s-cancelled")
+    wait_for(manager, cancelled)
+    manager.enqueue(cancelled, delay_ticks=us(20))
 
     def cancel_then_replace():
         manager.cancel_strong((2, 0))
-        manager.enqueue(strong_job(2, 7, "s-replacement"), delay_ticks=us(20))
+        replacement = strong_job(2, 7, "s-replacement")
+        wait_for(manager, replacement)
+        manager.enqueue(replacement, delay_ticks=us(20))
 
     eng.schedule(us(5), cancel_then_replace)
     eng.run()
@@ -766,7 +843,7 @@ def test_a_destination_that_keeps_its_weak_result_discards_its_held_strong(
         "the early strong result was never held, so the discard is untested"
     assert results == []
     assert manager._completed_strong_results == {}
-    assert manager._windows_waiting_for_strong_result == set()
+    assert not manager._windows_waiting_for_strong_result
     assert manager._unresolved_weak_decodes == set()
     assert manager.pool_free == {"default": 1, "strong": 1}
 
@@ -808,11 +885,12 @@ def test_a_later_attempt_cannot_consume_an_earlier_requests_result(bulk_strong):
     assert manager._completed_strong_results == {}
 
     manager.enqueue(weak_job(2, 5, "later-attempt"))
-    eng.run()
+    with pytest.raises(RuntimeError, match="parallel strong selection"):
+        eng.run()
 
     assert results == [], \
         "a later attempt was released by an earlier request's result"
-    assert manager._windows_waiting_for_strong_result == {(2, 0)}
+    assert not manager._windows_waiting_for_strong_result
 
 
 def test_result_for_a_destination_with_no_decode_attempt_is_refused():
@@ -835,8 +913,8 @@ def test_a_cancelled_job_cannot_be_submitted_again(bulk_strong):
     its destination holds, so a second submission would hand out both twice
     and its completion callback would return without releasing the unit."""
     eng, manager, results = build(bulk_strong=bulk_strong)
-    manager._windows_waiting_for_strong_result.add((2, 0))
     job = strong_job(2, 5, "reused")
+    wait_for(manager, job)
     manager.enqueue(job)
     manager.cancel_strong((2, 0))
     before = (dict(manager.pool_free), set(manager._running_strong_decodes),
@@ -856,8 +934,8 @@ def test_a_completed_job_cannot_be_submitted_again():
     """The same rule from the other end of the lifecycle: a job that already
     produced its result would be decoded and delivered twice."""
     eng, manager, results = build()
-    manager._windows_waiting_for_strong_result.add((2, 0))
     job = strong_job(2, 5, "already-run")
+    wait_for(manager, job)
     manager.enqueue(job)
     eng.run()
     assert [key for _, key in results] == [(2, 0)]
@@ -969,7 +1047,7 @@ def test_public_strategy_may_list_its_submissions_in_either_order(strong_first):
     assert completed_run.window_manager._finished_ops == {88}
     assert completed_run.decoder_manager.strong_needed == completed_run.window_manager.window_count[88]
     assert completed_run.decoder_manager._completed_strong_results == {}
-    assert completed_run.decoder_manager._windows_waiting_for_strong_result == set()
+    assert not completed_run.decoder_manager._windows_waiting_for_strong_result
 
 
 def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
@@ -993,7 +1071,8 @@ def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
                 outcome.job, outcome.job.n_rounds,
                 f"replacement-{outcome.job.label}")
             return OutcomeDirective(Directive.AWAIT_STRONG,
-                                    extra=Submission(replacement))
+                                    extra=Submission(replacement),
+                                    strong_request_key=replacement.request_key)
 
         def metrics(self):
             return {}
@@ -1003,9 +1082,10 @@ def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
     def configure(_engine, _window_manager, pool, _chip, _factory):
         commit_strong_result = pool.on_strong_window_decoded
 
-        def record(key, result):
-            delivered.append(key)
-            commit_strong_result(key, result)
+        def record(completion):
+            delivered.append((completion.request_key.operation_id,
+                              completion.request_key.window_id))
+            commit_strong_result(completion)
 
         pool.on_strong_window_decoded = record
 
@@ -1020,7 +1100,7 @@ def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
     assert len(delivered) == window_count
     assert completed_run.decoder_manager.strong_cancelled == window_count
     assert completed_run.decoder_manager._completed_strong_results == {}
-    assert completed_run.decoder_manager._windows_waiting_for_strong_result == set()
+    assert not completed_run.decoder_manager._windows_waiting_for_strong_result
 
 
 # ------------------------------- one open weak decode per destination window
@@ -1167,9 +1247,10 @@ def test_two_open_weak_decodes_cannot_coalesce_onto_one_strong_result():
                 self.manager.enqueue(weak_job(2, 1, "w2-second"))
             except RuntimeError as refusal:
                 self.refusals.append(str(refusal))
+            strong = strong_job(2, 40, "s2")
             return OutcomeDirective(
-                Directive.AWAIT_STRONG,
-                extra=Submission(strong_job(2, 40, "s2")))
+                Directive.AWAIT_STRONG, extra=Submission(strong),
+                strong_request_key=strong.request_key)
 
     eng, manager, deliveries = build()
     strategy = EscalateAndSubmitFromTheHook(manager)
@@ -1237,7 +1318,7 @@ def test_a_run_that_leaves_a_window_waiting_for_a_strong_result_fails():
         router=SwitchingRouter(weak, PerRoundDecoder(tau_us=2.0)),
         unit_pools={"default": 1, "strong": 1},
     )
-    with pytest.raises(RuntimeError, match="waiting for a strong result"):
+    with pytest.raises(RuntimeError, match="parallel strong selection"):
         simulate(run)
 
 
@@ -1247,10 +1328,9 @@ def test_the_settled_check_names_every_kind_of_unsettled_decode_work():
     eng, manager, _ = build()
     assert manager.check_decode_work_settled() is None
 
-    manager._windows_waiting_for_strong_result.add((1, 0))
-    manager._completed_strong_results[(2, 0)] = DecodeResult(op_id=2,
-                                                            window_id=0)
-    manager._running_strong_decodes[(3, 0)] = strong_job(3, 5, "s3")
+    manager._windows_waiting_for_strong_result[(1, 0)] = object()
+    manager._completed_strong_results[(2, 0)] = object()
+    manager._running_strong_decodes[(3, 0)] = object()
     manager._unresolved_weak_decodes.add((4, 0))
 
     with pytest.raises(RuntimeError) as refusal:
@@ -1292,7 +1372,7 @@ def test_a_strong_request_refused_as_a_duplicate_may_be_submitted_later(
 
     manager.enqueue(weak_job(4, 2, "w4-again"))      # reopen the attempt
     manager.enqueue(second)                          # the same object, now legal
-    assert manager._running_strong_decodes[(4, 0)] is second
+    assert manager._running_strong_decodes[(4, 0)].request_job is second
     eng.run()
     assert [key for _, key in results] == [(4, 0), (4, 0)]
     assert manager.pool_free == {"default": 1, "strong": 1}

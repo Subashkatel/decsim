@@ -113,7 +113,7 @@ def build_laned(units_by_pool: dict):
 
 def test_lane_routing_precedence_hint_then_lane_then_default():
     eng, manager = build_laned({"default": 1, "mid": 1, "heavy": 1})
-    from decsim.message import DecodeJob
+    from decsim.message import DecodeJob, DecoderRequestKey, DecoderTier
     j_d3 = DecodeJob(op_id=-1, window_id=0, n_rounds=1, code="surface_d3")
     j_d7 = DecodeJob(op_id=-1, window_id=0, n_rounds=1, code="surface_d7")
     j_d11 = DecodeJob(op_id=-1, window_id=0, n_rounds=1, code="surface_d11")
@@ -133,7 +133,7 @@ def test_lane_naming_a_missing_pool_falls_back_to_default():
         eng, router=CodeRouter(default=PerRoundDecoder(tau_us=1.0)),
         scheduler=FifoScheduler(), unit_pools={"default": 1},
         lane_policy=DistanceLanes({5: "nonexistent"}, dist_of))
-    from decsim.message import DecodeJob
+    from decsim.message import DecodeJob, DecoderRequestKey, DecoderTier
     j = DecodeJob(op_id=-1, window_id=0, n_rounds=1, code="surface_d5")
     assert manager.pool_for(j) == "default"
 
@@ -204,7 +204,7 @@ def test_cancel_queued_strong_survives_unstable_lane_policy():
     """cancel_strong must find a queued job even when the lane policy
     is not stable between enqueue and cancel (queue scan, not
     pool_for recomputation)."""
-    from decsim.message import DecodeJob
+    from decsim.message import DecodeJob, DecoderRequestKey, DecoderTier
 
     class FlippingLanes:
         def __init__(self):
@@ -222,8 +222,9 @@ def test_cancel_queued_strong_survives_unstable_lane_policy():
     # occupy the heavy pool so the strong job queues there
     manager.submit_decode(50, lambda: None, label="blocker", hint="heavy")
     key = (3, 2)
-    strong = DecodeJob(op_id=3, window_id=2, n_rounds=4,
-                       strong_decode_for=key, label="flip-cancel")
+    strong = DecodeJob(op_id=3, window_id=2, n_rounds=4, strong_decode_for=key,
+                       label="flip-cancel",
+                       request_key=DecoderRequestKey(*key, DecoderTier.STRONG, 0))
     manager.enqueue(strong)              # FlippingLanes -> heavy (call 1)
     assert len(manager.queue_for("heavy")) == 1
     manager.cancel_strong(key)           # policy now says default

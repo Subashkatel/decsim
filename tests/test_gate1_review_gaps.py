@@ -15,6 +15,8 @@ from decsim.engine import Engine
 from decsim.message import (
     DecodeJob,
     DecodeResult,
+    DecoderRequestKey,
+    DecoderTier,
     SoftOutput,
     SyndromePayload,
     Window,
@@ -67,14 +69,21 @@ class _RuntimeStub:
         return DecodeJob(op_id=weak_job.op_id, window_id=weak_job.window_id,
                          n_rounds=n_rounds, label=label, hint="strong",
                          attempt=1, window=weak_job.window,
-                         strong_decode_for=(weak_job.op_id, weak_job.window_id))
+                         strong_decode_for=(weak_job.op_id, weak_job.window_id),
+                         request_key=DecoderRequestKey(
+                             weak_job.op_id, weak_job.window_id,
+                             DecoderTier.STRONG, 1))
     def on_decode_done(self, job, result):
         self.commits.append((job.op_id, job.window_id, job.awaiting_strong_result))
-    def on_strong_decode_done(self, key, result):
-        self.strong_commits.append(key)
-    def prepare_strong_selection(self, weak_job, serial_submission):
-        if serial_submission is not None:
-            self.pool.enqueue(serial_submission.job, WS)
+    def on_strong_decode_done(self, completion):
+        self.strong_commits.append((completion.request_key.operation_id,
+                                    completion.request_key.window_id))
+    def prepare_strong_selection(self, weak_job, strong_request_key,
+                                 serial_strong_job, *, deferred):
+        if deferred:
+            raise RuntimeError("deferred selection has no pending request")
+        if serial_strong_job is not None:
+            self.pool.enqueue(serial_strong_job, WS)
         return WS
 
 
@@ -106,7 +115,8 @@ def test_held_early_strong_discarded_on_confident_weak():
     strat = Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True)
     eng, rt, pool = _pool(strat, weak, strong)
     w = _window()
-    job = DecodeJob(op_id=0, window_id=0, n_rounds=6, window=w, label="op0 W0")
+    job = DecodeJob(op_id=0, window_id=0, n_rounds=6, window=w, label="op0 W0",
+                    request_key=DecoderRequestKey(0, 0, DecoderTier.WEAK, 0))
     job.strong_label = "strong(op0 W0)"
     for sub in strat.on_window_ready(w, job, pool.services):
         pool.enqueue(sub.job, sub.delay_ticks)

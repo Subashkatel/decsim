@@ -14,7 +14,7 @@ class _FakeServices:
     def defer_strong_escalation(self, weak_job): pass
     def check_strong_route(self, weak_job, strong_job): pass
     def cancel_strong(self, key): pass
-    def prepare_strong_selection(self, weak_job, serial_submission): return 500_000
+    def prepare_strong_selection(self, weak_job, strong_request_key, serial_strong_job, *, deferred): return 500_000
 
 
 class _FakeStrategy:

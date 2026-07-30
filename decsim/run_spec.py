@@ -109,6 +109,7 @@ class RunSpec:
     make_controller: Optional[Callable] = None
     make_factory: Optional[Callable] = None
     make_metrics: Optional[Callable] = None
+    record_switching_windows: bool = False
     make_orchestrator: Optional[Callable] = None
     seed: Optional[int] = 0
     _build_state: str = field(default="unstarted", init=False, repr=False)
@@ -160,6 +161,8 @@ class RunSpec:
         if self.feedback_boundary_mode not in (
             "trailing_buffer", "measurement_closed"):
             raise ValueError("invalid feedback_boundary_mode")
+        if type(self.record_switching_windows) is not bool:
+            raise TypeError("record_switching_windows must be an exact bool")
         if {op.id for op in decode_ops} & {op.id for op in dynamic_streams}:
             raise ValueError("an operation cannot be in decode_ops and dynamic_streams")
         all_operations = _unique_operations(ops + decode_ops + dynamic_streams)
@@ -235,13 +238,15 @@ class RunSpec:
             feedback_boundary_mode=self.feedback_boundary_mode,
             syndrome_source=device,
             store=PayloadStore(memory_model=self.memory_model),
-            switching_active=hasattr(strategy, "keep_weak_result"))
+            switching_active=hasattr(strategy, "keep_weak_result"),
+            capture_enabled=self.record_switching_windows)
         decoder_manager = DecoderManager(
             engine, router=router, scheduler=scheduler,
             unit_pools=self.unit_pools,
             num_units=self.num_units if self.num_units is not None else 1,
             bulk_strong=getattr(strategy, "bulk_strong", False),
-            lane_policy=self.lane_policy)
+            lane_policy=self.lane_policy,
+            capture_enabled=self.record_switching_windows)
         services = StrategyServicesImpl(engine, window_manager, decoder_manager)
         window_manager.strategy = strategy
         window_manager.services = services
@@ -275,6 +280,9 @@ class RunSpec:
         metrics = (self.make_metrics(
             engine, window_manager, decoder_manager, chip, factory)
             if self.make_metrics else [])
+        if self.record_switching_windows:
+            from .metrics import WindowSwitchingRecords
+            metrics.append(WindowSwitchingRecords(window_manager, decoder_manager))
         metric_bindings = _metric_bindings(metrics)
         bind_run_seed(_root_seed(self.seed), _seed_roots(
             self, code=code, layout=layout, scheme=scheme,
@@ -302,6 +310,10 @@ class RunSpec:
         chip._load(list(ops))
         engine._start_running()
         engine.run()
+        if window_manager.pending_escalations:
+            raise RuntimeError(
+                f"the run ended with pending strong escalations: "
+                f"{window_manager.pending_escalations}")
         decoder_manager.check_decode_work_settled()
         engine._begin_finalization()
         result = _capture_result(

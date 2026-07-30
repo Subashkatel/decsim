@@ -1,5 +1,5 @@
-"""Typed communication configuration, FIFO reservation, and run wiring."""
 from dataclasses import replace
+import json
 import math
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
@@ -8,6 +8,7 @@ import pytest
 
 from decsim.config import us
 from decsim.links import (
+    BoundaryTransferRelation,
     Link,
     LinkCapacityConfig,
     LinkConfig,
@@ -18,9 +19,10 @@ from decsim.links import (
     LinkQuantityBasis,
     PayloadSelectionSource,
     PayloadSizeConfig,
+    RequestTransferRelation,
     TrafficAttribution,
 )
-from decsim.message import Operation
+from decsim.message import DecoderRequestKey, DecoderTier, Operation
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
 from decsim.decoders import (
@@ -33,14 +35,43 @@ from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
 
 
-def _attribution() -> TrafficAttribution:
+def _attribution(relation=None) -> TrafficAttribution:
     return TrafficAttribution(
         operation_id=("stream", 2),
         patch_ids=(1, "north"),
         window_id=0,
         round_lo=1,
         round_hi=3,
+        relation=relation,
     )
+
+
+REQUEST_KEY = DecoderRequestKey(("stream", 2), 0, DecoderTier.STRONG, 0)
+REQUEST_RELATION = RequestTransferRelation(REQUEST_KEY)
+BOUNDARY_RELATION = BoundaryTransferRelation(REQUEST_KEY, (("stream", 2), 0),
+                                             (("stream", 2), 1), 1, 1)
+WRONG_RELATION = RequestTransferRelation(DecoderRequestKey("other", 0, DecoderTier.STRONG, 1))
+
+
+def test_request_and_boundary_relations_serialize_exact_identity_and_revisions():
+    links = LinkModelConfig.reference_fixed_latency_profile().resolve()
+    links.reserve(LinkPath.WSD, payload_bits=None, now_ticks=3,
+                  attribution=_attribution(REQUEST_RELATION))
+    links.reserve(LinkPath.DD, payload_bits=None, now_ticks=5,
+                  attribution=_attribution(BOUNDARY_RELATION))
+
+    request, boundary = [row["attribution"]["relation"]
+                         for row in links.traffic_json_value()["transfers"]]
+    assert request == {"request_key": {
+        "operation_id": {"kind": "tuple", "value": None, "items": [
+            {"kind": "string", "value": "stream", "items": None},
+            {"kind": "integer", "value": "2", "items": None}]},
+        "window_id": 0, "tier": "strong", "run_sequence": 0}}
+    assert boundary["request_key"] == request["request_key"]
+    assert boundary["source_window_key"] == (("stream", 2), 0)
+    assert boundary["destination_window_key"] == (("stream", 2), 1)
+    assert (boundary["source_revision"], boundary["delivery_revision"]) == (1, 1)
+    json.dumps(links.traffic_json_value())
 
 
 def _round_attribution() -> TrafficAttribution:
@@ -156,13 +187,16 @@ def test_exact_aliases_contend_but_equal_distinct_configs_do_not():
         attribution=_round_attribution(),
     )
     csd = first_run.reserve(
-        LinkPath.CSD, payload_bits=None, now_ticks=0, attribution=_attribution()
+        LinkPath.CSD, payload_bits=None, now_ticks=0,
+        attribution=_attribution(REQUEST_RELATION)
     )
     dd = first_run.reserve(
-        LinkPath.DD, payload_bits=None, now_ticks=0, attribution=_attribution()
+        LinkPath.DD, payload_bits=None, now_ticks=0,
+        attribution=_attribution(BOUNDARY_RELATION)
     )
     fresh = second_run.reserve(
-        LinkPath.CSD, payload_bits=None, now_ticks=0, attribution=_attribution()
+        LinkPath.CSD, payload_bits=None, now_ticks=0,
+        attribution=_attribution(REQUEST_RELATION)
     )
 
     assert cwd.total_delay_ticks == us(1.0)
@@ -180,7 +214,7 @@ def test_default_only_actual_override_is_rejected_before_all_mutation():
             LinkPath.DD,
             payload_bits=100,
             now_ticks=0,
-            attribution=_attribution(),
+            attribution=_attribution(BOUNDARY_RELATION),
         )
 
     assert links.traffic_json_value() == before
@@ -198,13 +232,13 @@ def test_actual_default_and_unresolved_provenance_are_distinct_and_reconcile():
         LinkPath.DD,
         payload_bits=None,
         now_ticks=0,
-        attribution=_attribution(),
+        attribution=_attribution(BOUNDARY_RELATION),
     )
     unresolved = links.reserve(
         LinkPath.WSD,
         payload_bits=None,
         now_ticks=0,
-        attribution=_attribution(),
+        attribution=_attribution(REQUEST_RELATION),
     )
     traffic = links.traffic_json_value()
 
@@ -221,37 +255,30 @@ def test_actual_default_and_unresolved_provenance_are_distinct_and_reconcile():
 
 
 @pytest.mark.parametrize(
-    ("path", "attribution"),
+    ("path", "attribution", "error"),
     [
-        (LinkPath.QC, _attribution()),
-        (LinkPath.CWD, _operation_attribution()),
-        (LinkPath.CSD, _round_attribution()),
-        (LinkPath.DO, _operation_attribution()),
-        (LinkPath.OC, _round_attribution()),
-        (LinkPath.CQ, _attribution()),
+        (LinkPath.QC, _attribution(), "requires"),
+        (LinkPath.CWD, _operation_attribution(), "requires"),
+        (LinkPath.CSD, _round_attribution(), "requires"),
+        (LinkPath.DO, _operation_attribution(), "requires"),
+        (LinkPath.OC, _round_attribution(), "requires"),
+        (LinkPath.CQ, _attribution(), "requires"),
+        (LinkPath.CSD, _attribution(WRONG_RELATION), "does not match"),
+        (LinkPath.WDO, _attribution(REQUEST_RELATION), "tier"),
     ],
 )
-def test_path_rejects_the_wrong_attribution_shape_before_mutation(
-    path,
-    attribution,
-):
+def test_invalid_path_attribution_fails_before_mutation(path, attribution, error):
     links = LinkModelConfig.reference_fixed_latency_profile().resolve()
     before = links.traffic_json_value()
 
-    with pytest.raises(ValueError, match="requires"):
-        links.reserve(
-            path,
-            payload_bits=None,
-            now_ticks=0,
-            attribution=attribution,
-        )
+    with pytest.raises(ValueError, match=error):
+        links.reserve(path, payload_bits=None, now_ticks=0,
+                      attribution=attribution)
 
     assert links.traffic_json_value() == before
 
 
 def test_wiring_threads_one_link_model_to_controller_and_cluster():
-    """Single source of truth: the controller and the cluster share the SAME LinkModel
-    object, so the fabric cannot disagree with itself."""
     ops = [Operation(0, "M(q0)", (0,), clifford=True)]
     r = simulate(RunSpec(
             ops=ops,
@@ -297,7 +324,7 @@ def test_finite_aggregate_link_reserves_one_fifo_by_hand():
 
 def _switching_run(*, low_confidence_probability, run_both_at_once=False,
                    double_window=False, rounds=3, links=None,
-                   probability_for=None):
+                   probability_for=None, record_switching_windows=False):
     weak = SampledConfidenceDecoder(
         PerRoundDecoder(0.0),
         low_confidence_probability,
@@ -317,6 +344,7 @@ def _switching_run(*, low_confidence_probability, run_both_at_once=False,
         router=SwitchingRouter(weak, PerRoundDecoder(0.0)),
         unit_pools={"default": 1, "strong": 1},
         links=links,
+        record_switching_windows=record_switching_windows,
     ).build()
 
 
@@ -356,6 +384,42 @@ def test_selected_result_lifecycles_are_mutually_exclusive_end_to_end():
     assert parallel_confident.decoder_manager.strong_cancelled == 1
 
 
+def test_capture_rows_cover_serial_parallel_and_aligned_absorption():
+    serial = _switching_run(low_confidence_probability=1.0,
+                            record_switching_windows=True)
+    parallel = _switching_run(low_confidence_probability=0.0,
+                              run_both_at_once=True, record_switching_windows=True)
+    for completed, selected_tier in ((serial, "strong"), (parallel, "weak")):
+        records = completed.result.metric_values()["window_switching_records"]
+        assert len(records["windows"]) == 1
+        assert records["windows"][0]["selected_request_key"]["tier"] == selected_tier
+        key_text = lambda key: json.dumps(key, sort_keys=True)
+        request_keys = {key_text(row["request_key"]) for row in records["requests"]}
+        service_members = {key_text(key) for service in records["services"]
+            for key in service["original_request_keys"]}
+        predispatch = {key_text(row["request_key"])
+                       for row in records["requests"] if row["terminal_processing_outcome"] ==
+                       "strong_cancelled_before_dispatch"}
+        transfer_keys = {key_text(row["attribution"]["relation"]["request_key"])
+                         for row in completed.result.link_traffic["transfers"]
+                         if row["attribution"]["relation"] is not None}
+        assert request_keys == service_members | predispatch
+        assert transfer_keys <= request_keys
+        assert not service_members & predispatch
+        assert all(row["service_key"] is None for row in records["requests"]
+                   if key_text(row["request_key"]) in predispatch)
+
+    aligned = _switching_run(
+        low_confidence_probability=0.0, double_window=True, rounds=30,
+        probability_for=lambda job: 1.0 if job.window_id == 2 else 0.0,
+        record_switching_windows=True)
+    rows = aligned.result.metric_values()["window_switching_records"]["windows"]
+    absorbed = [row for row in rows if row["window_disposition"] == "absorbed"]
+    assert len(rows) == 10 and len(absorbed) == 2 and all(
+        row["absorbed_into"] is not None and row["selected_request_key"] is None
+        for row in absorbed)
+
+
 def test_double_window_reserves_wsd_at_decision_and_csd_when_slab_exists():
     completed = _switching_run(
         low_confidence_probability=0.0,
@@ -372,6 +436,8 @@ def test_double_window_reserves_wsd_at_decision_and_csd_when_slab_exists():
 
     assert [transfer["path"] for transfer in selected] == ["wsd", "csd", "do"]
     assert selected[0]["send_ticks"] < selected[1]["send_ticks"]
+    assert (selected[0]["attribution"]["relation"]["request_key"]
+            == selected[2]["attribution"]["relation"]["request_key"])
     assert (
         selected[0]["attribution"]["round_lo"],
         selected[0]["attribution"]["round_hi"],

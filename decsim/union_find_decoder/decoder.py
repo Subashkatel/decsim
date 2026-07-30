@@ -36,18 +36,18 @@ class UnionFindDecodedWindow:
 
 
 class UnionFindDecoder:
-    """Uniform graphlike Union-Find hard decoder.
+    """Prior-weighted graphlike Union-Find hard decoder.
 
     SCOPE:
     - Faults must be graphlike/stringlike; detector hyperedges are rejected.
-    - Initial erasures and prior-weighted growth are not implemented.
-    - Growth uses uniform fair half-edge sweeps with stable fault-index ties.
+    - Initial erasure side information is not implemented.
+    - Growth uses natural-log-odds lengths and globally fair weighted events.
     - Every logical-observable row is retained in the hard result.
     - Host runtime is not simulated decoder service latency.
     - This Python implementation does not claim the paper's complexity bound.
 
-    The hard algorithm follows Delfosse--Nickerson arXiv:1709.06218v3,
-    Algorithms 1--2.
+    Growth and peeling follow Huang--Newman--Brown arXiv:2004.04693 and
+    Delfosse--Nickerson arXiv:1709.06218v3, Algorithms 1--2.
     """
 
     fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED

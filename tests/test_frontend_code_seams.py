@@ -1,5 +1,7 @@
 """Frontend and code-model seams for external IR adapters."""
 
+from fractions import Fraction
+
 import pytest
 
 from decsim import protocols as P
@@ -315,23 +317,64 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
 
 
 def test_surface_code_model_input_domain_and_distance_one_timing_run():
-    with pytest.raises(ValueError, match="d"):
-        SurfaceCodeModel(d=0)
-    with pytest.raises(ValueError, match="commit_rounds_override"):
-        SurfaceCodeModel(commit_rounds_override=0)
-    assert SurfaceCodeModel(d=1).distance == 1
+    for field_name in (
+        "d",
+        "commit_rounds_override",
+        "buffer_rounds_override",
+    ):
+        for value in (True, 1.5, Fraction(1, 1)):
+            with pytest.raises(TypeError, match=field_name):
+                SurfaceCodeModel(**{field_name: value})
+        with pytest.raises(ValueError, match=field_name):
+            SurfaceCodeModel(**{field_name: 0})
+
+    code = SurfaceCodeModel(d=1)
+    completed = simulate(
+        RunSpec(
+            ops=[Operation(17, "memory", (0,))],
+            code=code,
+            rounds_policy=FixedRounds(1),
+            decoder=PresetLatencyDecoder(0.1),
+            seed=31,
+        ),
+        verbose=False,
+    )
+    assert completed.result.terminal_status == "complete"
+    assert completed.window_manager._code_geometry.distance == 1
 
 
-def test_builtin_code_cards_reject_zero_tick_cadence():
+def test_builtin_code_card_round_us_domain_and_planning():
     for factory in (SurfaceCodeModel, BBCodeModel):
-        for value in (0, 0.0000004, float("nan")):
+        for value in (1, 0.75, 0.000001):
+            assert type(factory(round_us=value).round_us) is float
+        for value in (
+            0,
+            -1,
+            0.0000004,
+            float("nan"),
+            float("inf"),
+            -float("inf"),
+            10**400,
+        ):
             with pytest.raises(ValueError, match="round_us"):
+                factory(round_us=value)
+        for value in (True, Fraction(1, 2)):
+            with pytest.raises(TypeError, match="round_us"):
                 factory(round_us=value)
 
 
 def test_bb_code_model_input_domain_and_exact_detector_quotient():
-    with pytest.raises(ValueError, match="d"):
-        BBCodeModel(d=0)
+    for field_name in ("n", "k", "d", "n_detectors"):
+        for value in (True, 1.5, Fraction(1, 1)):
+            with pytest.raises(TypeError, match=field_name):
+                BBCodeModel(**{field_name: value})
+        with pytest.raises(ValueError, match=field_name):
+            BBCodeModel(**{field_name: 0})
+
+    with pytest.raises(ValueError, match="k.*n"):
+        BBCodeModel(n=5, k=6, d=1, n_detectors=5)
+    with pytest.raises(ValueError, match="d.*n"):
+        BBCodeModel(n=5, k=1, d=6, n_detectors=12)
     with pytest.raises(ValueError, match="n_detectors"):
         BBCodeModel(n=20, k=4, d=6, n_detectors=25)
     code = BBCodeModel(n=20, k=4, d=5, n_detectors=40)

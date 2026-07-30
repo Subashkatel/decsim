@@ -16,11 +16,37 @@ from typing import Optional
 from .config import us
 
 
-def _check_round_us(value):
-    if value is not None and (
-        value <= 0 or not math.isfinite(value) or us(value) < 1
-    ):
-        raise ValueError(f"round_us must be finite and at least one tick; got {value!r}")
+def _require_positive_int(value, field_name: str) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{field_name} must be a built-in int; got {value!r}")
+    if value <= 0:
+        raise ValueError(f"{field_name} must be positive; got {value!r}")
+    return value
+
+
+def _check_round_us(value) -> Optional[float]:
+    if value is None:
+        return None
+    if type(value) not in (int, float):
+        raise TypeError(
+            f"round_us must be a built-in int or float; got {value!r}"
+        )
+    if type(value) is float and not math.isfinite(value):
+        raise ValueError(f"round_us must be finite; got {value!r}")
+    if value <= 0:
+        raise ValueError(f"round_us must be positive; got {value!r}")
+    try:
+        normalized = float(value)
+        ticks = us(normalized)
+    except (OverflowError, ValueError) as error:
+        raise ValueError(
+            f"round_us must be finite and representable; got {value!r}"
+        ) from error
+    if not math.isfinite(normalized) or ticks < 1:
+        raise ValueError(
+            f"round_us must be finite and at least one tick; got {value!r}"
+        )
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -34,14 +60,15 @@ class SurfaceCodeModel:
 
     def __post_init__(self) -> None:
         """Validate the built-in Surface timing and sizing card."""
-        for label, value in (
-            ("d", self.d),
-            ("commit_rounds_override", self.commit_rounds_override),
-            ("buffer_rounds_override", self.buffer_rounds_override),
+        _require_positive_int(self.d, "d")
+        for field_name in (
+            "commit_rounds_override",
+            "buffer_rounds_override",
         ):
-            if value is not None and value <= 0:
-                raise ValueError(f"{label} must be positive; got {value!r}")
-        _check_round_us(self.round_us)
+            value = getattr(self, field_name)
+            if value is not None:
+                _require_positive_int(value, field_name)
+        object.__setattr__(self, "round_us", _check_round_us(self.round_us))
 
     @property
     def name(self) -> str:
@@ -113,14 +140,17 @@ class BBCodeModel:
     def __post_init__(self) -> None:
         """Validate the built-in BB timing and sizing card."""
         for field_name in ("n", "k", "d", "n_detectors"):
-            if getattr(self, field_name) <= 0:
-                raise ValueError(f"{field_name} must be positive")
+            _require_positive_int(getattr(self, field_name), field_name)
+        if self.k > self.n:
+            raise ValueError(f"k must not exceed n; got k={self.k!r}, n={self.n!r}")
+        if self.d > self.n:
+            raise ValueError(f"d must not exceed n; got d={self.d!r}, n={self.n!r}")
         if self.n_detectors % self.d != 0:
             raise ValueError(
                 "n_detectors must be divisible by d; "
                 f"got n_detectors={self.n_detectors!r}, d={self.d!r}"
             )
-        _check_round_us(self.round_us)
+        object.__setattr__(self, "round_us", _check_round_us(self.round_us))
 
     @property
     def name(self) -> str:

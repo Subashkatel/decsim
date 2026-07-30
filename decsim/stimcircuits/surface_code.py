@@ -20,9 +20,21 @@ from dataclasses import dataclass
 import math
 
 
-def _check_probability(value, field_name: str):
+def _check_probability(value, field_name: str) -> float:
+    if type(value) not in (int, float):
+        raise TypeError(
+            f"{field_name} must be a built-in int or float; got {value!r}"
+        )
+    if type(value) is float and not math.isfinite(value):
+        raise ValueError(f"{field_name} must be finite; got {value!r}")
     if not 0 <= value <= 1:
         raise ValueError(f"{field_name} must be in [0, 1]; got {value!r}")
+    normalized = float(value)
+    if not math.isfinite(normalized) or not 0 <= normalized <= 1:
+        raise ValueError(
+            f"{field_name} is not representable as a probability; got {value!r}"
+        )
+    return normalized
 
 
 def append_anti_basis_error(circuit: stim.Circuit, targets: List[int], p: float, basis: str) -> None:
@@ -52,7 +64,11 @@ class CircuitGenParameters:
                            "before_round_data_depolarization",
                            "before_measure_flip_probability",
                            "after_reset_flip_probability"):
-            _check_probability(getattr(self, field_name), field_name)
+            setattr(
+                self,
+                field_name,
+                _check_probability(getattr(self, field_name), field_name),
+            )
 
     def append_begin_round_tick(
             self,

@@ -16,6 +16,7 @@ pool, so StrongDecoderBacklog reads the strong backlog directly.
 import math
 import sys
 import pathlib
+from fractions import Fraction
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -591,12 +592,56 @@ def test_switch_probability_per_round_scales_with_commit_rounds():
 def test_switch_probability_per_round_rejects_invalid_scaled_probability():
     with pytest.raises(ValueError, match="gamma_switch"):
         switch_probability_per_round(-0.1, D)
+    with pytest.raises(TypeError, match="gamma_switch"):
+        switch_probability_per_round(Fraction(1, 2), D)
+    for invalid_distance in (True, 1.0, Fraction(1, 1), _IntSubclass(1)):
+        with pytest.raises(TypeError, match="d"):
+            switch_probability_per_round(0.1, invalid_distance)
     with pytest.raises(ValueError, match="d"):
         switch_probability_per_round(0.1, 0)
 
     probability_for = switch_probability_per_round(1.0, D)
     with pytest.raises(ValueError, match="switch probability"):
         probability_for(DecodeJob(0, 0, D + 1))
+
+
+def test_switch_probability_per_round_uses_exact_source_bound():
+    boundary = switch_probability_per_round(0.5, 3)
+    assert boundary(DecodeJob(0, 0, 6)) == 1.0
+
+    below = math.nextafter(1 / 3, -math.inf)
+    above = math.nextafter(1 / 3, math.inf)
+    assert Fraction.from_float(above) > Fraction(1, 3)
+    assert above * 3 == 1.0
+    assert switch_probability_per_round(below, 1)(DecodeJob(0, 0, 3)) < 1.0
+    with pytest.raises(ValueError, match="switch probability"):
+        switch_probability_per_round(above, 1)(DecodeJob(0, 0, 3))
+
+
+def test_switch_probability_per_round_rejects_invalid_effective_counts():
+    probability_for = switch_probability_per_round(0.1, 3)
+    for commit_rounds in (0, -1, True, 1.0, Fraction(1, 1), "1"):
+        with pytest.raises((TypeError, ValueError), match="commit_rounds"):
+            probability_for(DecodeJob(0, 0, commit_rounds))
+
+    for commit_hi in (0, 1.5):
+        window = Window(
+            op_id=0,
+            k=0,
+            commit_lo=1,
+            commit_hi=commit_hi,
+            buffer_hi=3,
+            n_rounds=3,
+        )
+        with pytest.raises((TypeError, ValueError), match="commit_rounds"):
+            probability_for(DecodeJob(0, 0, 3, window=window))
+
+
+def test_switch_probability_per_round_contextualizes_unrepresentable_result():
+    huge_count = 10**400
+    probability_for = switch_probability_per_round(1.0, huge_count)
+    with pytest.raises(ValueError, match="switch probability"):
+        probability_for(DecodeJob(0, 0, huge_count))
 
 
 def test_sampled_soft_output_uses_the_probability_for_callback():

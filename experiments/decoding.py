@@ -89,6 +89,48 @@ class OfflineBatchDecoder:
             window_attempts=batch.shots * len(self.window_models),
         )
 
+    def capture_detector_records(
+        self,
+        batch: Batch,
+        sample_seed: int,
+        global_shot_indices,
+        expected_sample_sha256: str,
+    ) -> tuple[dict, ...]:
+        sampler = self.circuit.compile_detector_sampler(seed=sample_seed)
+        detectors, truth = sampler.sample(
+            shots=batch.shots,
+            separate_observables=True,
+        )
+        actual_sample_sha256 = sample_batch_sha256(detectors, truth)
+        if actual_sample_sha256 != expected_sample_sha256:
+            raise ValueError("stored sample digest does not match reconstructed batch")
+
+        records = []
+        for global_shot_index in global_shot_indices:
+            local_shot_index = global_shot_index - batch.first_shot
+            detector_row = detectors[local_shot_index]
+            truth_bits = tuple(int(bit) for bit in truth[local_shot_index])
+            prediction_bits = tuple(int(bit) for bit in decode_windowed(
+                self.window_models,
+                detector_row,
+                self.decode_window,
+                selected_fault_representation=self.fault_representation,
+            ))
+            records.append({
+                "shot_index": global_shot_index,
+                "batch_index": batch.index,
+                "sample_batch_sha256": actual_sample_sha256,
+                "fired_detector_indices": [
+                    detector_index
+                    for detector_index, fired in enumerate(detector_row)
+                    if fired
+                ],
+                "observable_truth": list(truth_bits),
+                "prediction": list(prediction_bits),
+                "logical_failure": prediction_bits != truth_bits,
+            })
+        return tuple(records)
+
 
 def _chunk_row(decoded, experiment, sample_plan, experiment_sha256, config_id):
     batch = decoded.batch
@@ -123,6 +165,17 @@ def _result_directory(output_directory, experiment_sha256, config_id):
         / "chunks"
         / config_id
     )
+
+
+def read_stored_batch_result(
+    output_directory, reduced_result, batch_index
+) -> ChunkResult:
+    directory = _result_directory(
+        output_directory,
+        reduced_result.experiment_sha256,
+        reduced_result.config_id,
+    )
+    return read_chunk_csv(directory / f"{batch_index}.csv")
 
 
 def _publish_row(directory, row):

@@ -1309,6 +1309,11 @@ class WindowManager:
             if self._escalations.peek_key(affected_key) is not None:
                 raise RuntimeError(
                     f"cannot rephase pending escalation {affected_key}")
+            readiness_owner = self._escalations.peek_far(affected_key)
+            if readiness_owner is not None:
+                raise RuntimeError(
+                    f"cannot rephase readiness key {affected_key}: owned by "
+                    f"pending escalation {readiness_owner.key}")
         if any(
             source in affected_keys or destination in affected_keys
             for source, destination in self._boundary_delivery_versions

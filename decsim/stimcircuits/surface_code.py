@@ -20,6 +20,11 @@ from dataclasses import dataclass
 import math
 
 
+def _check_probability(value, field_name: str):
+    if not 0 <= value <= 1:
+        raise ValueError(f"{field_name} must be in [0, 1]; got {value!r}")
+
+
 def append_anti_basis_error(circuit: stim.Circuit, targets: List[int], p: float, basis: str) -> None:
     if p > 0:
         if basis == "X":
@@ -41,6 +46,13 @@ class CircuitGenParameters:
     before_measure_flip_probability: float = 0
     after_reset_flip_probability: float = 0
     exclude_other_basis_detectors: bool = False
+
+    def __post_init__(self) -> None:
+        for field_name in ("after_clifford_depolarization",
+                           "before_round_data_depolarization",
+                           "before_measure_flip_probability",
+                           "after_reset_flip_probability"):
+            _check_probability(getattr(self, field_name), field_name)
 
     def append_begin_round_tick(
             self,

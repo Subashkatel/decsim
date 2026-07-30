@@ -7,6 +7,11 @@ from dataclasses import dataclass
 from .surface_code import generate_circuit
 
 
+def _check_probability(value, field_name: str):
+    if not 0 <= value <= 1:
+        raise ValueError(f"{field_name} must be in [0, 1]; got {value!r}")
+
+
 @dataclass(frozen=True)
 class NoiseModel:
     """Physical error rates carried by each generated Stim circuit."""
@@ -15,6 +20,10 @@ class NoiseModel:
     p_meas: float = 0.0
     p_clifford: float = 0.0
     p_reset: float = 0.0
+
+    def __post_init__(self) -> None:
+        for field_name in ("p_data", "p_meas", "p_clifford", "p_reset"):
+            _check_probability(getattr(self, field_name), field_name)
 
     @classmethod
     def circuit_level(cls, p: float) -> "NoiseModel":

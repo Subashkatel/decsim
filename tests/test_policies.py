@@ -226,6 +226,16 @@ def test_switching_decoder_latency_mix():
     assert strong.decode_calls == []
 
 
+@pytest.mark.parametrize("value", [-0.01, 1.01, float("nan")])
+def test_stochastic_decoders_reject_invalid_probabilities(value):
+    weak = PresetLatencyDecoder(1.0)
+    strong = PresetLatencyDecoder(10.0)
+    with pytest.raises(ValueError, match="gamma_switch"):
+        SwitchingDecoder(weak, strong, gamma_switch=value)
+    with pytest.raises(ValueError, match="escalation_probability"):
+        SampledConfidenceDecoder(weak, escalation_probability=value)
+
+
 def test_switching_decoder_cannot_reroute_completion_from_latency():
     weak_timing = _RecordingTimingChild(latency_ticks=3, logical_bit=0)
     strong_timing = _RecordingTimingChild(latency_ticks=11, logical_bit=1)
@@ -370,6 +380,18 @@ def test_sampled_confidence_run_seed_binding_and_explicit_conflict():
         second.decode(DecodeJob(0, window_id, 3)).soft_output.gap
         for window_id in range(12)
     ]
+
+
+def test_sampled_confidence_rejects_invalid_callback_before_stochastic_state():
+    decoder = SampledConfidenceDecoder(
+        PresetLatencyDecoder(1.0),
+        escalation_probability=0.0,
+        probability_for=lambda job: -0.1,
+        seed=17,
+    )
+    with pytest.raises(ValueError, match="probability_for"):
+        decoder.decode(DecodeJob(0, 0, 3))
+    assert decoder._stochastic_use_started is False
 
 
 def test_sampled_decoders_do_not_expose_their_rng_state():

@@ -41,6 +41,12 @@ if TYPE_CHECKING:
     from .protocols import Decoder
 
 
+def _check_probability(value, field_name: str):
+    if not 0 <= value <= 1:
+        raise ValueError(f"{field_name} must be in [0, 1]; got {value!r}")
+    return value
+
+
 class _RandomSeedConsumer:
     """Leaf-owned atomic run-seed state for random.Random decoder models."""
 
@@ -250,7 +256,7 @@ class SwitchingDecoder(_RandomSeedConsumer):
                  t_comm_weak_us: float = 0.0):
         self.weak = weak
         self.strong = strong
-        self.gamma_switch = gamma_switch
+        self.gamma_switch = _check_probability(gamma_switch, "gamma_switch")
         self.handoff = us(handoff_us)
         self.t_comm_weak = us(t_comm_weak_us)
         self.fault_model_requirement = _decoder_fault_model_requirement(
@@ -379,7 +385,8 @@ class SampledConfidenceDecoder(_RandomSeedConsumer):
                  seed: Optional[int] = None,
                  probability_for=None):
         self.inner = inner
-        self.escalation_probability = escalation_probability
+        self.escalation_probability = _check_probability(
+            escalation_probability, "escalation_probability")
         self.probability_for = probability_for
         self.fault_model_requirement = _decoder_fault_model_requirement(inner)
         self._initialize_run_seed_state(seed)
@@ -412,6 +419,8 @@ class SampledConfidenceDecoder(_RandomSeedConsumer):
             escalation_probability = self.probability_for(job)
         else:
             escalation_probability = self.escalation_probability
+        escalation_probability = _check_probability(
+            escalation_probability, "probability_for result")
         self._mark_stochastic_use()
         confidence_gap = (
             0.0
@@ -431,9 +440,14 @@ def switch_probability_per_round(gamma_switch: float, d: int):
     ``gamma_switch`` is the escalation rate per d rounds; a window
     committing more rounds is proportionally more likely to escalate."""
 
+    gamma_switch = _check_probability(gamma_switch, "gamma_switch")
+    if d <= 0:
+        raise ValueError(f"d must be positive; got {d!r}")
+
     def probability(job: DecodeJob) -> float:
         window = job.window
         commit_rounds = (window.commit_hi - window.commit_lo + 1) \
             if window is not None else job.n_rounds
-        return gamma_switch * commit_rounds / d
+        return _check_probability(
+            gamma_switch * commit_rounds / d, "switch probability")
     return probability

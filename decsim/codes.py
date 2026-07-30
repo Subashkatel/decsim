@@ -10,7 +10,17 @@ or requires such tools and runs standalone."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Optional
+
+from .config import us
+
+
+def _check_round_us(value):
+    if value is not None and (
+        value <= 0 or not math.isfinite(value) or us(value) < 1
+    ):
+        raise ValueError(f"round_us must be finite and at least one tick; got {value!r}")
 
 
 @dataclass(frozen=True)
@@ -23,11 +33,15 @@ class SurfaceCodeModel:
     buffer_rounds_override: Optional[int] = None  # window look-ahead size; None = d
 
     def __post_init__(self) -> None:
-        """Reject non-positive commit/buffer overrides (None means 'use d')."""
-        for label, value in (("commit_rounds_override", self.commit_rounds_override),
-                             ("buffer_rounds_override", self.buffer_rounds_override)):
-            if value is not None and value < 1:
-                raise ValueError(f"{label} must be a positive number of rounds; got {value}")
+        """Validate the built-in Surface timing and sizing card."""
+        for label, value in (
+            ("d", self.d),
+            ("commit_rounds_override", self.commit_rounds_override),
+            ("buffer_rounds_override", self.buffer_rounds_override),
+        ):
+            if value is not None and value <= 0:
+                raise ValueError(f"{label} must be positive; got {value!r}")
+        _check_round_us(self.round_us)
 
     @property
     def name(self) -> str:
@@ -95,6 +109,18 @@ class BBCodeModel:
     d: int = 12                      # code distance
     n_detectors: int = 936           # captured DEM detector count (see above)
     round_us: Optional[float] = None  # per-code round period; None = global cadence
+
+    def __post_init__(self) -> None:
+        """Validate the built-in BB timing and sizing card."""
+        for field_name in ("n", "k", "d", "n_detectors"):
+            if getattr(self, field_name) <= 0:
+                raise ValueError(f"{field_name} must be positive")
+        if self.n_detectors % self.d != 0:
+            raise ValueError(
+                "n_detectors must be divisible by d; "
+                f"got n_detectors={self.n_detectors!r}, d={self.d!r}"
+            )
+        _check_round_us(self.round_us)
 
     @property
     def name(self) -> str:

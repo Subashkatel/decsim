@@ -847,6 +847,116 @@ def test_double_window_rephase_preserves_conflicting_registry_owner():
     assert (0, 7) in runtime.windows
 
 
+
+def test_double_window_rephase_rejects_affected_far_readiness_owner():
+    def manager_state(runtime):
+        return {
+            "windows": {
+                key: (
+                    window.buffer_lo,
+                    window.commit_lo,
+                    window.commit_hi,
+                    window.buffer_hi,
+                    window.n_rounds,
+                    tuple(window.deps),
+                    window.deps_remaining,
+                    tuple(window.dependents),
+                    window.queued,
+                    window.committed,
+                )
+                for key, window in runtime.windows.items()
+            },
+            "op_windows": {
+                op_id: tuple(indices)
+                for op_id, indices in runtime.op_windows.items()
+            },
+            "window_count": dict(runtime.window_count),
+            "total_windows": runtime.total_windows,
+            "committed_per_op": dict(runtime._committed_per_op),
+            "committed_windows": set(runtime.committed_windows),
+            "absorbed_windows": set(runtime.absorbed_windows),
+            "logical_contributions": dict(runtime.logical_contributions),
+            "registry_by_key": dict(runtime._escalations._by_key),
+            "registry_by_far": dict(runtime._escalations._by_far_boundary),
+            "registry_by_terminal": dict(
+                runtime._escalations._by_terminal_operation
+            ),
+            "leases": {
+                lease_id: tuple(round_keys)
+                for lease_id, round_keys in runtime.store._leases.items()
+            },
+            "round_refs": dict(runtime.store._round_refs),
+        }
+
+    class SeedAffectedFarOwner(DefaultWindowInteraction):
+        runtime = None
+        conflict = None
+        before = None
+
+        def plan_strong_region(
+            self, weak_window, later_windows, operation_round_count,
+        ):
+            plan = super().plan_strong_region(
+                weak_window, later_windows, operation_round_count)
+            self.conflict = _PendingEscalation(
+                key=("other-escalation", 0),
+                weak_job=None,
+                label="existing",
+                resolved_region=None,
+                strong_window=Window(
+                    op_id=0,
+                    k=99,
+                    commit_lo=1,
+                    commit_hi=1,
+                    buffer_lo=1,
+                    buffer_hi=1,
+                    n_rounds=1,
+                ),
+                strong_model=None,
+                wsd_arrival_ticks=0,
+                phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
+            )
+            self.runtime._escalations.register_far(
+                self.conflict, (0, 4))
+            self.before = manager_state(self.runtime)
+            return plan
+
+    interaction = SeedAffectedFarOwner()
+
+    def connect_interaction(
+        engine, window_manager, decoder_manager, chip, factory,
+    ):
+        interaction.runtime = window_manager
+        return []
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"cannot rephase readiness key [(]0, 4[)]",
+    ):
+        _double_window_run(
+            escalate_window=1,
+            rounds=50,
+            code=_nonaligned_code(),
+            window_interaction=interaction,
+            metrics=connect_interaction,
+        )
+
+    assert manager_state(interaction.runtime) == interaction.before
+    assert interaction.runtime._escalations.peek_key(
+        interaction.conflict.key
+    ) is interaction.conflict
+    assert interaction.runtime._escalations.peek_far(
+        (0, 4)
+    ) is interaction.conflict
+    affected = interaction.runtime.windows[(0, 4)]
+    assert (
+        affected.buffer_lo,
+        affected.commit_lo,
+        affected.commit_hi,
+        affected.buffer_hi,
+    ) == (29, 29, 35, 38)
+
+
 @pytest.mark.parametrize("published_state", ["boundary", "external_edge"])
 def test_double_window_rephase_rejects_historical_or_external_suffix_state(
     published_state,

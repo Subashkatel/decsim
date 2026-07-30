@@ -5,6 +5,7 @@ from __future__ import annotations
 import heapq
 import itertools
 import math
+from fractions import Fraction
 
 from ..detector_error_model import (
     FaultRepresentation,
@@ -17,31 +18,35 @@ from ..union_find_decoder.window_decoder import (
     Open,
     UnionFindGraph,
     UnionFindHardEvidence,
+    _normalize_weight_step,
 )
 
 
-UNION_FIND_CLUSTER_GAP_SOURCE = SoftOutputSource(
-    method="cluster_gap",
-    cluster_origin="union_find_decoder",
-    growth_schedule="weighted_global_fair",
-    gap_units="decibels",
-    correction="none",
-    references=(
-        "arXiv:2004.04693 Section II",
-        "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
-        "arXiv:2510.25222v1 Section II-C",
-    ),
-)
+def union_find_cluster_gap_source(weight_step=0.1) -> SoftOutputSource:
+    """Identify cluster confidence at one absolute natural-log weight step."""
+    return SoftOutputSource(
+        method="cluster_gap",
+        cluster_origin="union_find_decoder",
+        growth_schedule="weighted_global_fair",
+        gap_units="decibels",
+        correction="none",
+        weight_step_natural_log=_normalize_weight_step(weight_step),
+        references=(
+            "arXiv:2004.04693 Section II",
+            "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
+            "arXiv:2510.25222v1 Section II-C",
+        ),
+    )
 
 
 def _quotient_cluster_gap(
     graph: UnionFindGraph,
     edge_intervals: tuple[Open | Closed, ...],
-) -> float:
-    """Return the shortest odd-logical quotient walk in natural-log units."""
-    adjacency: dict[object, list[tuple[object, float, int]]] = {}
+) -> int | float:
+    """Return the shortest odd-logical quotient walk in integer half ticks."""
+    adjacency: dict[object, list[tuple[object, int, int]]] = {}
 
-    def add_segment(left, right, weight: float, parity: int) -> None:
+    def add_segment(left, right, weight: int, parity: int) -> None:
         adjacency.setdefault(left, []).append((right, weight, parity))
         adjacency.setdefault(right, []).append((left, weight, parity))
 
@@ -49,10 +54,15 @@ def _quotient_cluster_gap(
         zip(graph.edges, edge_intervals)
     ):
         if isinstance(interval, Closed):
-            coordinates = (0.0, edge.weight)
+            coordinates = (0, edge.length_half_ticks)
         else:
             coordinates = tuple(
-                sorted({0.0, interval.lower, interval.upper, edge.weight})
+                sorted({
+                    0,
+                    interval.lower_tick,
+                    interval.upper_tick,
+                    edge.length_half_ticks,
+                })
             )
         path_nodes: list[object] = [edge.detector_a]
         path_nodes.extend(
@@ -64,12 +74,12 @@ def _quotient_cluster_gap(
             zip(coordinates, coordinates[1:])
         ):
             covered = isinstance(interval, Closed) or (
-                upper <= interval.lower or lower >= interval.upper
+                upper <= interval.lower_tick or lower >= interval.upper_tick
             )
             add_segment(
                 path_nodes[segment_index],
                 path_nodes[segment_index + 1],
-                0.0 if covered else upper - lower,
+                0 if covered else upper - lower,
                 edge.logical_observables[0] if segment_index == 0 else 0,
             )
 
@@ -78,8 +88,8 @@ def _quotient_cluster_gap(
     for reference_node in adjacency:
         source_state = (reference_node, 0)
         target_state = (reference_node, 1)
-        distances = {source_state: 0.0}
-        pending = [(0.0, next(sequence), source_state)]
+        distances = {source_state: 0}
+        pending = [(0, next(sequence), source_state)]
         while pending:
             distance, _sequence_id, state = heapq.heappop(pending)
             if distance != distances.get(state, math.inf):
@@ -105,12 +115,36 @@ def _quotient_cluster_gap(
     return best
 
 
-def _cluster_gap(hard_evidence: UnionFindHardEvidence) -> float:
-    natural_gap = _quotient_cluster_gap(
+_BINARY64_LN_TEN = float.fromhex("0x1.26bb1bbb55516p+1")
+
+
+def _gap_half_ticks_to_decibels(
+    gap_half_ticks: int | float,
+    weight_step: float,
+) -> float:
+    if gap_half_ticks == math.inf:
+        return math.inf
+    exact_gap_db = (
+        Fraction(gap_half_ticks, 2)
+        * Fraction.from_float(weight_step)
+        * 10
+        / Fraction.from_float(_BINARY64_LN_TEN)
+    )
+    try:
+        return float(exact_gap_db)
+    except OverflowError:
+        return math.inf
+
+
+def _cluster_gap(
+    hard_evidence: UnionFindHardEvidence,
+    weight_step: float,
+) -> float:
+    gap_half_ticks = _quotient_cluster_gap(
         hard_evidence.graph,
         hard_evidence.edge_intervals,
     )
-    return natural_gap * 10.0 / math.log(10.0)
+    return _gap_half_ticks_to_decibels(gap_half_ticks, weight_step)
 
 
 class UnionFindClusterGapDecoder:
@@ -166,7 +200,10 @@ class UnionFindClusterGapDecoder:
 
         decoded_window = self.base.decode_with_growth_evidence(job)
         decoded_window.hard_result.soft_output = SoftOutput(
-            gap=_cluster_gap(decoded_window.hard_evidence),
-            source=UNION_FIND_CLUSTER_GAP_SOURCE,
+            gap=_cluster_gap(
+                decoded_window.hard_evidence,
+                self.base.weight_step,
+            ),
+            source=union_find_cluster_gap_source(self.base.weight_step),
         )
         return decoded_window.hard_result

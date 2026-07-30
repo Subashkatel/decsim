@@ -760,6 +760,7 @@ class SoftOutputSource:
     growth_schedule: str
     gap_units: str
     correction: str
+    weight_step_natural_log: Optional[float]
     references: tuple[str, ...]
 
     def __post_init__(self) -> None:
@@ -780,6 +781,18 @@ class SoftOutputSource:
                     f"soft-output source {field_name} must be a nonempty "
                     "Unicode-scalar string"
                 )
+        if self.weight_step_natural_log is not None:
+            value = self.weight_step_natural_log
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise TypeError(
+                    "soft-output source weight step must be a real number or None"
+                )
+            normalized = float(value)
+            if not math.isfinite(normalized) or normalized <= 0.0:
+                raise ValueError(
+                    "soft-output source weight step must be finite and positive"
+                )
+            object.__setattr__(self, "weight_step_natural_log", normalized)
         if type(self.references) is not tuple:
             raise TypeError("soft-output source references must be an exact tuple")
         if not self.references:

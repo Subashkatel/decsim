@@ -35,6 +35,7 @@ SAMPLED_CONFIDENCE_SOURCE = SoftOutputSource(
     growth_schedule="bernoulli_per_window",
     gap_units="branch_marker",
     correction="none",
+    weight_step_natural_log=None,
     references=("controlled Bernoulli experimental input",),
 )
 

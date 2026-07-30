@@ -24,6 +24,7 @@ from .window_decoder import (
     UnionFindHardEvidence,
     _decode_graph,
     _graph_from_model,
+    _normalize_weight_step,
 )
 
 
@@ -41,7 +42,8 @@ class UnionFindDecoder:
     SCOPE:
     - Faults must be graphlike/stringlike; detector hyperedges are rejected.
     - Initial erasure side information is not implemented.
-    - Growth uses natural-log-odds lengths and globally fair weighted events.
+    - Growth rounds natural-log-odds to the configured absolute weight step.
+    - A probability of one half is an ordinary zero-log-odds fault, not erasure.
     - Every logical-observable row is retained in the hard result.
     - Host runtime is not simulated decoder service latency.
     - This Python implementation does not claim the paper's complexity bound.
@@ -52,9 +54,15 @@ class UnionFindDecoder:
 
     fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
 
-    def __init__(self, latency_model) -> None:
+    def __init__(self, latency_model, weight_step=0.1) -> None:
         self.latency_model = latency_model
+        self._weight_step = _normalize_weight_step(weight_step)
         self._graphs: dict = {}
+
+    @property
+    def weight_step(self) -> float:
+        """Absolute natural-log units represented by one weight tick."""
+        return self._weight_step
 
     def run_seed_children(self):
         """Expose the latency model at its semantic decoder-child path."""
@@ -115,7 +123,11 @@ class UnionFindDecoder:
                 if job_label
                 else "Union-Find window model"
             )
-            graph = _graph_from_model(faults, location=location)
+            graph = _graph_from_model(
+                faults,
+                location=location,
+                weight_step=self.weight_step,
+            )
 
             def discard_dead_model(reference) -> None:
                 current = self._graphs.get(model_identity)

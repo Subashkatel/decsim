@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from numbers import Real
 from typing import Optional
 
 
@@ -14,15 +15,13 @@ BOUNDARY = -1
 class Open:
     """The uncovered interval between two growing edge fronts."""
 
-    lower: float
-    upper: float
+    lower_tick: int
+    upper_tick: int
 
 
 @dataclass(frozen=True)
 class Closed:
-    """A fully covered edge and its represented contact coordinate."""
-
-    contact: float
+    """A fully covered edge."""
 
 
 @dataclass(frozen=True)
@@ -33,7 +32,7 @@ class UnionFindEdge:
     detector_a: int
     detector_b: int
     logical_observables: tuple[int, ...]
-    weight: float
+    length_half_ticks: int
 
 
 @dataclass(frozen=True)
@@ -119,11 +118,36 @@ def _natural_log_odds(residual_probability: float) -> float:
     return math.log1p(-residual_probability) - math.log(residual_probability)
 
 
+def _normalize_weight_step(weight_step) -> float:
+    if isinstance(weight_step, bool) or not isinstance(weight_step, Real):
+        raise TypeError("Union-Find weight_step must be a real number")
+    normalized = float(weight_step)
+    if not math.isfinite(normalized) or normalized <= 0.0:
+        raise ValueError("Union-Find weight_step must be finite and positive")
+    return normalized
+
+
+def _quantize_weight_ticks(weight: float, weight_step: float) -> int:
+    if weight == 0.0:
+        return 0
+    weight_numerator, weight_denominator = weight.as_integer_ratio()
+    step_numerator, step_denominator = weight_step.as_integer_ratio()
+    numerator = weight_numerator * step_denominator
+    denominator = weight_denominator * step_numerator
+    whole, remainder = divmod(numerator, denominator)
+    return max(1, whole + (2 * remainder >= denominator))
+
+
 def _endpoint_node(detector: int, detector_count: int) -> int:
     return detector_count if detector == BOUNDARY else detector
 
 
-def _graph_from_model(faults, *, location: str) -> UnionFindGraph:
+def _graph_from_model(
+    faults,
+    *,
+    location: str,
+    weight_step: float,
+) -> UnionFindGraph:
     import numpy as np
 
     from ..detector_error_model import validate_graphlike_matrices
@@ -171,6 +195,10 @@ def _graph_from_model(faults, *, location: str) -> UnionFindGraph:
             detector_b = BOUNDARY
         else:
             detector_a, detector_b = detectors
+        weight_ticks = _quantize_weight_ticks(
+            _natural_log_odds(residual_probability),
+            weight_step,
+        )
         edge = UnionFindEdge(
             fault_index=fault_index,
             detector_a=detector_a,
@@ -178,7 +206,7 @@ def _graph_from_model(faults, *, location: str) -> UnionFindGraph:
             logical_observables=tuple(
                 int(value) for value in observables[:, fault_index]
             ),
-            weight=_natural_log_odds(residual_probability),
+            length_half_ticks=2 * weight_ticks,
         )
         edge_index = len(edges)
         edges.append(edge)
@@ -257,28 +285,31 @@ def _union_contact_batch(
 
 def _advance_open_interval(
     interval: Open,
-    weight: float,
-    elapsed: float,
+    length_half_ticks: int,
+    elapsed_ticks: int,
     left_active: bool,
     right_active: bool,
 ) -> Open:
-    lower = interval.lower + elapsed if left_active else interval.lower
-    upper = interval.upper - elapsed if right_active else interval.upper
-    if left_active and lower <= interval.lower:
-        raise RuntimeError("weighted Union-Find left edge front did not advance")
-    if right_active and upper >= interval.upper:
-        raise RuntimeError("weighted Union-Find right edge front did not advance")
-    if not (0.0 <= lower < upper <= weight):
+    lower_tick = (
+        interval.lower_tick + elapsed_ticks
+        if left_active else interval.lower_tick
+    )
+    upper_tick = (
+        interval.upper_tick - elapsed_ticks
+        if right_active else interval.upper_tick
+    )
+    if not (0 <= lower_tick < upper_tick <= length_half_ticks):
         raise RuntimeError(
             "weighted Union-Find edge update lost represented interval order"
         )
-    return Open(lower, upper)
+    return Open(lower_tick, upper_tick)
 
 
 def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
     disjoint_set = _DisjointSet(graph.detector_count, syndrome)
     edge_intervals: list[Open | Closed] = [
-        Closed(0.0) if edge.weight == 0.0 else Open(0.0, edge.weight)
+        Closed() if edge.length_half_ticks == 0
+        else Open(0, edge.length_half_ticks)
         for edge in graph.edges
     ]
     contact_edges = list(
@@ -323,8 +354,9 @@ def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
                 frozen_active[right_root]
             )
             if rate:
+                remaining_ticks = interval.upper_tick - interval.lower_tick
                 candidates.append(
-                    ((interval.upper - interval.lower) / rate, edge_index)
+                    ((remaining_ticks + rate - 1) // rate, edge_index)
                 )
         if not candidates:
             active_roots = tuple(
@@ -335,7 +367,7 @@ def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
                 f"roots {active_roots}"
             )
         elapsed = min(candidate for candidate, _edge_index in candidates)
-        if not math.isfinite(elapsed) or elapsed <= 0.0:
+        if elapsed <= 0:
             raise RuntimeError(
                 "weighted Union-Find event has no positive represented growth"
             )
@@ -357,23 +389,12 @@ def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
             right_active = frozen_active[right_root]
             if left_root != right_root:
                 if edge_index in selected:
-                    contact = (
-                        interval.lower + elapsed
-                        if left_active
-                        else interval.upper - elapsed
-                    )
-                    if not math.isfinite(contact) or not (
-                        0.0 <= contact <= edge.weight
-                    ):
-                        raise RuntimeError(
-                            "weighted Union-Find contact lies outside its edge"
-                        )
-                    proposals.append(Closed(contact))
+                    proposals.append(Closed())
                 else:
                     proposals.append(
                         _advance_open_interval(
                             interval,
-                            edge.weight,
+                            edge.length_half_ticks,
                             elapsed,
                             left_active,
                             right_active,
@@ -383,14 +404,14 @@ def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
             if not left_active:
                 proposals.append(interval)
                 continue
-            half_remaining = (interval.upper - interval.lower) / 2.0
-            if elapsed >= half_remaining:
-                proposals.append(Closed(interval.lower + half_remaining))
+            remaining_ticks = interval.upper_tick - interval.lower_tick
+            if 2 * elapsed >= remaining_ticks:
+                proposals.append(Closed())
             else:
                 proposals.append(
                     _advance_open_interval(
                         interval,
-                        edge.weight,
+                        edge.length_half_ticks,
                         elapsed,
                         True,
                         True,
@@ -424,7 +445,7 @@ def _minimum_weight_contact_forest(
     for edge_index in sorted(
         contact_edge_indices,
         key=lambda index: (
-            graph.edges[index].weight,
+            graph.edges[index].length_half_ticks,
             graph.edges[index].fault_index,
         ),
     ):
@@ -576,10 +597,18 @@ def _decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
     )
 
 
-def decode_union_find_model(model, syndrome) -> UnionFindHardEvidence:
+def decode_union_find_model(
+    model,
+    syndrome,
+    weight_step=0.1,
+) -> UnionFindHardEvidence:
     """Decode one placed weighted graphlike model and return hard evidence."""
     from ..detector_error_model import FaultRepresentation
 
     faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
-    graph = _graph_from_model(faults, location="Union-Find window model")
+    graph = _graph_from_model(
+        faults,
+        location="Union-Find window model",
+        weight_step=_normalize_weight_step(weight_step),
+    )
     return _decode_graph(graph, syndrome)

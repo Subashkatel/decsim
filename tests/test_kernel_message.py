@@ -125,6 +125,7 @@ def _confidence_source(**changes):
         "growth_schedule": "meister_uniform_fair",
         "gap_units": "graph_edges",
         "correction": "none",
+        "weight_step_natural_log": None,
         "references": (
             "arXiv:1709.06218v3 Algorithm 1",
             "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
@@ -162,6 +163,9 @@ def test_soft_output_has_immutable_confidence_provenance_and_no_prediction():
         ({"references": []}, TypeError),
         ({"references": ()}, ValueError),
         ({"references": ("valid", "")}, ValueError),
+        ({"weight_step_natural_log": True}, TypeError),
+        ({"weight_step_natural_log": 0.0}, ValueError),
+        ({"weight_step_natural_log": float("inf")}, ValueError),
     ],
 )
 def test_soft_output_source_rejects_missing_or_unstable_provenance(

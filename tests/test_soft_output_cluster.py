@@ -90,7 +90,21 @@ class _FixedLatency:
 
 
 def _edge_decibels(probability=0.1):
-    return math.log((1.0 - probability) / probability) * 10.0 / math.log(10.0)
+    weight = math.log((1.0 - probability) / probability)
+    step = 0.1
+    weight_numerator, weight_denominator = weight.as_integer_ratio()
+    step_numerator, step_denominator = step.as_integer_ratio()
+    numerator = weight_numerator * step_denominator
+    denominator = weight_denominator * step_numerator
+    whole, remainder = divmod(numerator, denominator)
+    ticks = max(1, whole + (2 * remainder >= denominator))
+    exact = (
+        Fraction(ticks)
+        * Fraction.from_float(step)
+        * 10
+        / Fraction.from_float(float.fromhex("0x1.26bb1bbb55516p+1"))
+    )
+    return float(exact)
 
 
 def _exhaustive_minimum_odd_eulerian(vertices, edges):
@@ -249,7 +263,7 @@ def _literal_weight_graph(detector_count, edge_endpoints, weights):
             detector_a=-1 if left is None else left,
             detector_b=-1 if right is None else right,
             logical_observables=(0,),
-            weight=float(weight),
+            length_half_ticks=2 * int(weight),
         )
         for edge_index, ((left, right), weight) in enumerate(
             zip(edge_endpoints, weights)
@@ -459,7 +473,7 @@ def test_union_find_gap_searches_every_signed_component(edge_endpoints):
         np.zeros(4, dtype=np.uint8),
     )
 
-    assert _cluster_gap(evidence) == pytest.approx(
+    assert _cluster_gap(evidence, 0.1) == pytest.approx(
         2.0 * _edge_decibels(), abs=1e-12
     )
 
@@ -504,7 +518,7 @@ def test_cluster_gap_matches_bounded_odd_eulerian_oracle():
                 tuple(range(detector_count)),
                 literal_edges,
             )
-            assert _cluster_gap(evidence) == pytest.approx(
+            assert _cluster_gap(evidence, 0.1) == pytest.approx(
                 expected * _edge_decibels(), abs=1e-12
             )
             checked_assignments += 1
@@ -526,7 +540,7 @@ def test_cluster_gap_matches_explicit_planar_boundary_path():
         np.zeros(3, dtype=np.uint8),
     )
 
-    assert _cluster_gap(evidence) == pytest.approx(
+    assert _cluster_gap(evidence, 0.1) == pytest.approx(
         4.0 * _edge_decibels(), abs=1e-12
     )
 
@@ -545,17 +559,17 @@ def test_cluster_gap_preserves_partial_edge_lengths():
         model,
         np.zeros(3, dtype=np.uint8),
     )
-    edge_weight = evidence.graph.edges[0].weight
+    edge_length = evidence.graph.edges[0].length_half_ticks
     edge_intervals = (
-        Open(0.5 * edge_weight, edge_weight),
-        Open(0.0, edge_weight),
-        Open(0.0, edge_weight),
+        Open(edge_length // 2, edge_length),
+        Open(0, edge_length),
+        Open(0, edge_length),
     )
 
     assert _quotient_cluster_gap(
         evidence.graph,
         edge_intervals,
-    ) == pytest.approx(2.5 * edge_weight, abs=1e-12)
+    ) == 5 * edge_length // 2
 
 
 def test_union_find_repetition_gap_matches_theorem_ten_exhaustively():
@@ -578,7 +592,7 @@ def test_union_find_repetition_gap_matches_theorem_ten_exhaustively():
         evidence = decode_union_find_model(model, syndrome)
         correction_weight = sum(evidence.selected_faults)
         assert correction_weight <= bit_count // 2
-        assert _cluster_gap(evidence) == pytest.approx(
+        assert _cluster_gap(evidence, 0.1) == pytest.approx(
             (bit_count - 2 * correction_weight) * _edge_decibels(),
             abs=1e-12,
         )
@@ -586,8 +600,8 @@ def test_union_find_repetition_gap_matches_theorem_ten_exhaustively():
 
 def test_cluster_wrapper_attaches_confidence_after_one_exact_hard_call():
     from decsim.soft_output import (
-        UNION_FIND_CLUSTER_GAP_SOURCE,
         UnionFindClusterGapDecoder,
+        union_find_cluster_gap_source,
     )
     from decsim.union_find_decoder import UnionFindDecoder
 
@@ -617,7 +631,7 @@ def test_cluster_wrapper_attaches_confidence_after_one_exact_hard_call():
     assert result.logical_observables == (0,)
     assert result.soft_output == SoftOutput(
         gap=0.0,
-        source=UNION_FIND_CLUSTER_GAP_SOURCE,
+        source=union_find_cluster_gap_source(),
     )
 
 
@@ -784,7 +798,7 @@ def test_complete_tied_contacts_feed_a_minimum_weight_forest():
     )
 
     edges = tuple(
-        UnionFindEdge(fault_index, *endpoints, (), weight)
+        UnionFindEdge(fault_index, *endpoints, (), int(2 * weight))
         for fault_index, (endpoints, weight) in enumerate(
             (((0, 1), 10.0), ((1, 2), 4.0), ((0, 2), 3.0))
         )
@@ -801,7 +815,7 @@ def test_complete_tied_contacts_feed_a_minimum_weight_forest():
     forest = _minimum_weight_contact_forest(graph, (0, 1, 2))
 
     assert tuple(graph.edges[index].fault_index for index in forest) == (2, 1)
-    assert sum(graph.edges[index].weight for index in forest) == 7.0
+    assert sum(graph.edges[index].length_half_ticks for index in forest) == 14
 
 
 def test_contact_forest_matches_exhaustive_acyclic_subset_oracle():
@@ -882,45 +896,59 @@ def test_weighted_events_match_exact_fraction_schedule_exhaustively():
     assert checked == 16
 
 
+def test_two_active_fronts_ceil_an_odd_half_tick_remainder():
+    from decsim.union_find_decoder.window_decoder import (
+        UnionFindEdge,
+        UnionFindGraph,
+        _decode_graph,
+    )
+
+    graph = UnionFindGraph(
+        detector_count=2,
+        fault_count=1,
+        edges=(UnionFindEdge(0, 0, 1, (0,), 1),),
+        adjacency=(),
+        baseline_faults=(0,),
+        baseline_syndrome=(0, 0),
+        logical_observables_by_fault=((0,),),
+        logical_observable_count=1,
+    )
+    evidence = _decode_graph(graph, np.array([1, 1], dtype=np.uint8))
+
+    assert evidence.contact_faults == (0,)
+    assert evidence.selected_faults == (1,)
+
+
 def test_internal_edge_order_loss_is_rejected_without_mutation():
     from decsim.union_find_decoder.window_decoder import Open, _advance_open_interval
 
-    lower = 1.0
-    one_ulp = math.ulp(lower)
-    upper = lower + 2.0 * one_ulp
-    elapsed = math.nextafter(one_ulp, 0.0)
-    interval = Open(lower, upper)
-    assert elapsed < (upper - lower) / 2.0
+    interval = Open(2, 4)
 
     with pytest.raises(RuntimeError, match="represented interval order"):
         _advance_open_interval(
             interval,
-            upper,
-            elapsed,
+            4,
+            1,
             True,
             True,
         )
-    assert interval == Open(lower, upper)
+    assert interval == Open(2, 4)
 
 
 def test_cross_root_edge_order_loss_is_rejected_without_mutation():
     from decsim.union_find_decoder.window_decoder import Open, _advance_open_interval
 
-    lower = 1.0
-    upper = math.nextafter(lower, math.inf)
-    elapsed = math.nextafter(upper - lower, 0.0)
-    interval = Open(lower, upper)
-    assert elapsed < upper - lower
+    interval = Open(2, 3)
 
     with pytest.raises(RuntimeError, match="represented interval order"):
         _advance_open_interval(
             interval,
-            upper,
-            elapsed,
+            3,
+            1,
             True,
             False,
         )
-    assert interval == Open(lower, upper)
+    assert interval == Open(2, 3)
 
 
 def test_closed_weighted_interval_has_no_one_ulp_quotient_remainder():
@@ -931,21 +959,18 @@ def test_closed_weighted_interval_has_no_one_ulp_quotient_remainder():
         UnionFindGraph,
     )
 
-    weight = float.fromhex("0x1.ad7a872cedaa1p+1")
-    partial_growth = float.fromhex("0x1.525e284196b65p+0")
-    assert partial_growth + (weight - partial_growth) < weight
     graph = UnionFindGraph(
         detector_count=0,
         fault_count=1,
-        edges=(UnionFindEdge(0, -1, -1, (1,), weight),),
+        edges=(UnionFindEdge(0, -1, -1, (1,), 7),),
         adjacency=(),
         baseline_faults=(0,),
         baseline_syndrome=(),
     )
 
-    natural_gap = _quotient_cluster_gap(graph, (Closed(partial_growth),))
+    gap_half_ticks = _quotient_cluster_gap(graph, (Closed(),))
 
-    assert natural_gap == 0.0
+    assert gap_half_ticks == 0
 
 
 def test_majority_baseline_restores_detector_and_all_logical_rows():
@@ -979,13 +1004,14 @@ def test_majority_baseline_restores_detector_and_all_logical_rows():
 
 def test_cluster_wrapper_publishes_weighted_decibel_source_and_infinity():
     from decsim.soft_output import (
-        UNION_FIND_CLUSTER_GAP_SOURCE,
         UnionFindClusterGapDecoder,
+        union_find_cluster_gap_source,
     )
     from decsim.union_find_decoder import UnionFindDecoder
 
-    assert UNION_FIND_CLUSTER_GAP_SOURCE.growth_schedule == "weighted_global_fair"
-    assert UNION_FIND_CLUSTER_GAP_SOURCE.gap_units == "decibels"
+    source = union_find_cluster_gap_source()
+    assert source.growth_schedule == "weighted_global_fair"
+    assert source.gap_units == "decibels"
     model = _unit_window_model(
         1,
         ((0, None),),
@@ -998,3 +1024,143 @@ def test_cluster_wrapper_publishes_weighted_decibel_source_and_infinity():
     )
 
     assert math.isinf(result.soft_output.gap)
+
+
+def test_minimum_subnormal_step_publishes_finite_public_cluster_gap():
+    from decsim.soft_output import UnionFindClusterGapDecoder
+    from decsim.union_find_decoder import UnionFindDecoder
+
+    minimum_subnormal = math.nextafter(0.0, 1.0)
+    model = _unit_window_model(
+        1,
+        ((0, None), (0, None)),
+        logical_edges=(1,),
+        priors=(0.5, minimum_subnormal),
+    )
+    decoder = UnionFindClusterGapDecoder(
+        UnionFindDecoder(_FixedLatency(), weight_step=minimum_subnormal)
+    )
+
+    result = decoder.decode(_decode_job(model, (0,)))
+
+    assert result.soft_output.gap == 3233.0621534311576
+    assert result.soft_output.source.weight_step_natural_log == minimum_subnormal
+
+
+def test_nondefault_step_is_the_public_source_and_threshold_identity():
+    from decsim.soft_output import (
+        UnionFindClusterGapDecoder,
+        union_find_cluster_gap_source,
+    )
+    from decsim.switching import Switching
+    from decsim.union_find_decoder import UnionFindDecoder
+
+    weights = (0.3, 0.7, 1.1)
+    model = _unit_window_model(
+        3,
+        ((0, 1), (1, 2), (2, 0)),
+        logical_edges=(0,),
+        priors=tuple(1.0 / (1.0 + math.exp(weight)) for weight in weights),
+    )
+    result = UnionFindClusterGapDecoder(
+        UnionFindDecoder(_FixedLatency(), weight_step=0.01)
+    ).decode(_decode_job(model, (0, 0, 0)))
+
+    source = union_find_cluster_gap_source(0.01)
+    assert result.soft_output.source == source
+    assert Switching(0.0, source).keep_weak_result(result, None)
+    with pytest.raises(ValueError, match="confidence source"):
+        Switching(
+            0.0,
+            union_find_cluster_gap_source(),
+        ).keep_weak_result(result, None)
+
+
+def test_disconnected_heavy_edge_does_not_rescale_existing_public_graph():
+    from decsim.soft_output import UnionFindClusterGapDecoder
+    from decsim.union_find_decoder import UnionFindDecoder
+
+    triangle_weights = (0.3, 0.7, 1.1)
+    triangle_priors = tuple(
+        1.0 / (1.0 + math.exp(weight)) for weight in triangle_weights
+    )
+    base_model = _unit_window_model(
+        3,
+        ((0, 1), (1, 2), (2, 0)),
+        logical_edges=(0,),
+        priors=triangle_priors,
+    )
+    extended_model = _unit_window_model(
+        5,
+        ((0, 1), (1, 2), (2, 0), (3, 4)),
+        logical_edges=(0,),
+        priors=triangle_priors + (1.0 / (1.0 + math.exp(100.0)),),
+    )
+
+    def decode(model, syndrome):
+        decoder = UnionFindClusterGapDecoder(
+            UnionFindDecoder(_FixedLatency(), weight_step=0.1)
+        )
+        result = decoder.decode(_decode_job(model, syndrome))
+        evidence = decoder.base.decode_with_growth_evidence(
+            _decode_job(model, syndrome)
+        ).hard_evidence
+        ticks = tuple(
+            edge.length_half_ticks // 2 for edge in evidence.graph.edges[:3]
+        )
+        return result, ticks
+
+    base_result, base_ticks = decode(base_model, (0, 0, 0))
+    extended_result, extended_ticks = decode(
+        extended_model,
+        (0, 0, 0, 0, 0),
+    )
+
+    assert base_ticks == extended_ticks == (3, 7, 11)
+    assert base_result.correction.tolist() == [0, 0, 0]
+    assert extended_result.correction.tolist() == [0, 0, 0, 0]
+    assert base_result.logical_observables == extended_result.logical_observables
+    assert base_result.soft_output == extended_result.soft_output
+
+
+def test_exact_tick_boundaries_and_true_public_float_overflow():
+    from decsim.soft_output.cluster import _gap_half_ticks_to_decibels
+    from decsim.union_find_decoder.window_decoder import _quantize_weight_ticks
+
+    step = 0.5
+    exact_tie = 1.25
+
+    assert _quantize_weight_ticks(0.0, step) == 0
+    assert _quantize_weight_ticks(math.nextafter(0.0, 1.0), step) == 1
+    assert _quantize_weight_ticks(math.nextafter(exact_tie, 0.0), step) == 2
+    assert _quantize_weight_ticks(exact_tie, step) == 3
+    assert _quantize_weight_ticks(math.nextafter(exact_tie, math.inf), step) == 3
+    assert math.isinf(_gap_half_ticks_to_decibels(2**1100, 1.0))
+
+
+def test_quantized_weights_satisfy_exact_approximation_bounds():
+    from decsim.union_find_decoder.window_decoder import _quantize_weight_ticks
+
+    minimum_subnormal = math.nextafter(0.0, 1.0)
+    for step in (minimum_subnormal, 0.01, 0.1, 1.0):
+        exact_step = Fraction.from_float(step)
+        for weight in (minimum_subnormal, 0.03, 0.25, 1.25, 744.4400719213812):
+            ticks = _quantize_weight_ticks(weight, step)
+            exact_weight = Fraction.from_float(weight)
+            error = abs(exact_weight - ticks * exact_step)
+            forced_positive = exact_weight > 0 and 2 * exact_weight < exact_step
+            if forced_positive:
+                assert error < exact_step
+            else:
+                assert 2 * error <= exact_step
+
+
+@pytest.mark.parametrize(
+    "weight_step",
+    (True, "0.1", 0.0, -0.1, math.inf, math.nan),
+)
+def test_union_find_rejects_invalid_weight_step(weight_step):
+    from decsim.union_find_decoder import UnionFindDecoder
+
+    with pytest.raises((TypeError, ValueError)):
+        UnionFindDecoder(_FixedLatency(), weight_step=weight_step)

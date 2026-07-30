@@ -20,6 +20,7 @@ COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
     growth_schedule="minimum_weight_matching",
     gap_units="log_likelihood_weight",
     correction="opposite_logical_constraint",
+    weight_step_natural_log=None,
     references=("arXiv:2510.25222v1 Section II.C",),
 )
 

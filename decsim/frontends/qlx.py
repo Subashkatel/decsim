@@ -170,6 +170,7 @@ def _prove_detector_routing(circuit, metadata, submission_count: int):
     terminal_data_count = measurement_count - syndrome_measurement_count
     terminal_ids = []
     detector_rounds = {}
+    ordinary_detector_ids_by_round = {}
 
     for detector_id, location in enumerate(locations):
         if type(location) is not list or len(location) != 3:
@@ -184,14 +185,19 @@ def _prove_detector_routing(circuit, metadata, submission_count: int):
                 raise ValueError("detector syndrome bit is out of range")
             expected = [submission * check_count + bit_or_check]
             if prior_submission >= 0:
-                if prior_submission >= submission_count:
-                    raise ValueError("detector baseline submission is out of range")
+                if not 0 <= prior_submission < submission:
+                    raise ValueError(
+                        "detector baseline must precede current submission"
+                    )
                 expected.append(
                     prior_submission * check_count + bit_or_check
                 )
             elif prior_submission != -1:
                 raise ValueError("detector baseline must be -1 or a submission")
             detector_rounds[detector_id] = submission + 1
+            ordinary_detector_ids_by_round.setdefault(
+                submission + 1, []
+            ).append(detector_id)
         elif submission in (-1, -2):
             if prior_submission != submission_count - 1:
                 raise ValueError("terminal detector must reference final submission")
@@ -218,6 +224,15 @@ def _prove_detector_routing(circuit, metadata, submission_count: int):
             raise ValueError(
                 f"detector {detector_id} disagrees with measurement records"
             )
+    emitted_detector_ids = tuple(
+        detector_id
+        for round_index in range(1, submission_count + 1)
+        for detector_id in ordinary_detector_ids_by_round.get(round_index, ())
+    ) + tuple(terminal_ids)
+    if emitted_detector_ids != tuple(range(circuit.num_detectors)):
+        raise ValueError(
+            "detector fragments do not preserve global detector order"
+        )
     return detector_rounds, tuple(terminal_ids), terminal_data_count
 
 

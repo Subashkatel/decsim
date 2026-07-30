@@ -1,5 +1,5 @@
-"""QLX structural frontend (Phase 1-2): the captured live fixture drives
-every mapping rule, plus one end-to-end engine run.
+"""QLX structural frontend: the captured live fixture drives every mapping
+rule, plus one end-to-end engine run.
 
 Fixture: tests/data/qlx/schedule_h_then_t.json — a real
 ``qlx.estimate.schedule()`` dump (h_then_t on Steane compute + Surface[15]
@@ -9,8 +9,9 @@ from the workspace root). 8 fabric ops:
 alloc -> prep_z -> h -> inject -> mz -> dealloc on compute cell (C0,0),
 produce_resource('T') on factory cell (F0,0) -> transport -> inject.
 
-STRUCTURAL coupling only: no stim, no syndromes, no QLX-origin LER claims
-(the frontend module docstring states the Phase-3 blocker).
+These tests cover structural coupling only. Whole-program Stim and syndrome
+coupling is covered by test_qlx_physical.py; neither suite supports per-operation
+physical coupling or QLX-origin LER claims.
 """
 import json
 import pathlib

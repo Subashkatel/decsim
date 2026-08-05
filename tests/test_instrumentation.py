@@ -1,4 +1,4 @@
-from typing import get_type_hints
+from typing import get_args, get_type_hints
 
 import pytest
 
@@ -7,6 +7,8 @@ from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
                              SAMPLED_CONFIDENCE_SOURCE,
                              SampledConfidenceDecoder, SwitchingRouter)
 from decsim.frontends.circuit import cnot_plus_two_t_circuit, three_cnot_circuit
+from decsim.links import (BoundaryTransferRelation, RequestTransferRelation,
+                          TrafficAttribution)
 from decsim.message import (
     DecodeResult,
     DecoderRequestKey,
@@ -43,9 +45,15 @@ def test_decoder_observability_keys_are_exact_immutable_carriers():
     assert completion.request_key.tier is DecoderTier.STRONG
 
 
-def test_switching_view_types_are_resolvable_on_supported_python():
+def test_switching_observability_types_are_resolvable_on_supported_python():
     assert get_type_hints(FinalWindowRow)["selected_request_key"] is not None
     assert get_type_hints(SwitchingRecordsView)["requests"] is not None
+    relation = get_type_hints(TrafficAttribution)["relation"]
+    assert set(get_args(relation)) == {
+        RequestTransferRelation,
+        BoundaryTransferRelation,
+        type(None),
+    }
 
 
 def test_decoder_observability_keys_reject_ambiguous_identity_values():

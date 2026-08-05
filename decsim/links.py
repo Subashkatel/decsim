@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import math
-from typing import Optional
+from typing import Optional, Union
 
 from .config import us
 from .message import (
@@ -290,7 +290,9 @@ class TrafficAttribution:
     window_id: Optional[int]
     round_lo: Optional[int]
     round_hi: Optional[int]
-    relation: Optional[RequestTransferRelation | BoundaryTransferRelation] = None
+    relation: Optional[
+        Union[RequestTransferRelation, BoundaryTransferRelation]
+    ] = None
 
     def __post_init__(self) -> None:
         if not is_stable_identity(self.operation_id):

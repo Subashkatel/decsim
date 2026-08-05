@@ -24,6 +24,7 @@ from decsim.metrics import (
 )
 from decsim.planner import FixedRounds
 from decsim.policies import Eager, Held, ExtendStream, SeparateDecodeJobs
+from decsim.protocols import DecodingStrategy
 from decsim.run_spec import RunSpec, simulate
 from decsim.schedulers import (
     EarliestDeadlineScheduler,
@@ -555,6 +556,82 @@ def test_static_decode_plan_selection_distinguishes_none_from_empty(
     ).build()
 
     assert strategy.selected_values == [expected_selected]
+
+
+@pytest.mark.parametrize(("member", "value"), [
+    ("requires_strong_context", "missing"), ("validate_operations", "missing"),
+    ("metrics", None), ("requires_strong_context", 1),
+    ("bulk_strong", 0), ("double_window", None), ("requires_strong_context", object()),
+])
+def test_strategy_contract_fails_before_user_effects(member, value):
+    effects = []
+    hooks = {
+        name: lambda *args, **kwargs: effects.append("strategy hook")
+        for name, declaration in DecodingStrategy.__dict__.items()
+        if not name.startswith("_") and callable(declaration)
+    }
+    attributes = dict(hooks, requires_strong_context=False,
+                      bulk_strong=False, double_window=False)
+    if value == "missing":
+        attributes.pop(member)
+    else:
+        attributes[member] = value
+    class HostileFrontend:
+        def build(self):
+            effects.append("frontend")
+            return []
+
+    with pytest.raises(TypeError, match=member):
+        RunSpec(frontend=HostileFrontend(), strategy=type(
+            "IncompleteStrategy", (), attributes)(), make_factory=lambda *_:
+            effects.append("provider")).build()
+    assert effects == []
+
+
+def test_strategy_selection_and_capabilities_are_resolved_once():
+    class OnceStrategy(Baseline):
+        def __init__(self):
+            self.reads = dict.fromkeys(DecodingStrategy.__annotations__, 0)
+
+        def __bool__(self):
+            raise AssertionError("strategy selection invoked truthiness")
+
+        def _read(self, name):
+            self.reads[name] += 1
+            if self.reads[name] > 1:
+                raise AssertionError(f"{name} was read twice")
+            return False
+
+        requires_strong_context = property(lambda self: self._read(
+            "requires_strong_context"))
+        bulk_strong = property(lambda self: self._read("bulk_strong"))
+        double_window = property(lambda self: self._read("double_window"))
+
+    strategy = OnceStrategy()
+    completed = RunSpec(ops=[], strategy=strategy).build()
+
+    assert completed.window_manager.strategy is strategy
+    assert tuple(strategy.reads.values()) == (1, 1, 1)
+
+
+def test_strategy_hooks_cannot_change_resolved_owner_modes():
+    class MutatingStrategy(Baseline):
+        requires_strong_context = bulk_strong = double_window = True
+
+        def validate_declared_run(self, **arguments):
+            self.requires_strong_context = False
+            self.bulk_strong = False
+            self.double_window = False
+
+    strategy = MutatingStrategy()
+    completed = RunSpec(ops=[], strategy=strategy).build()
+
+    assert (strategy.requires_strong_context, strategy.bulk_strong,
+            strategy.double_window) == (False, False, False)
+    owner_modes = (completed.window_manager.retain_strong_context,
+                   completed.decoder_manager.bulk_strong,
+                   completed.window_manager.speculative_recovery._double_window)
+    assert owner_modes == (True, True, True)
 
 
 def test_run_uses_private_operation_copy_without_mutating_caller():

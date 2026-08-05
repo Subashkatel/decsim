@@ -8,6 +8,8 @@ only as pre-built objects.
 import ast
 import pathlib
 
+from decsim.protocols import DecodingStrategy
+
 PKG = pathlib.Path(__file__).resolve().parent.parent / "decsim"
 CORE = {"engine", "message", "links", "pauli_frame", "window_manager",
         "speculative_recovery", "chip", "payload_store", "dynamic_windows",
@@ -56,7 +58,20 @@ def test_core_names_no_experiments():
 def test_spec_never_names_experiments_it_should_receive_prebuilt():
     # run_spec.py may import PART modules, but experiment classes (fabric,
     # speculation) must arrive pre-built — never be named.
-    tree = ast.parse((PKG / "run_spec.py").read_text())
+    source = (PKG / "run_spec.py").read_text()
+    tree = ast.parse(source)
     names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
     hit = names & {"DecoderFabric", "FabricRouter", "Speculation"}
     assert not hit, f"run_spec.py names experiments: {sorted(hit)}"
+    capability_names = {*DecodingStrategy.__annotations__, "keep_weak_result"}
+    for module in ("run_spec", "window_manager", "speculative_recovery"):
+        nodes = tuple(ast.walk(ast.parse((PKG / f"{module}.py").read_text())))
+        assert not any(getattr(node, "id", getattr(node, "attr", getattr(
+            node, "arg", None))) == "switching_active" for node in nodes)
+        for call in (node for node in nodes if isinstance(node, ast.Call)):
+            name = getattr(call.func, "id", None)
+            literals = {getattr(arg, "value", None) for arg in call.args}
+            assert not (name in {"getattr", "hasattr"} and
+                        literals & capability_names)
+            assert not (name == "isinstance" and "DecodingStrategy" in
+                        {getattr(arg, "id", None) for arg in call.args})

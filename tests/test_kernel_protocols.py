@@ -18,6 +18,8 @@ class _FakeServices:
 
 
 class _FakeStrategy:
+    requires_strong_context = bulk_strong = double_window = False
+
     def validate_declared_run(self, **kwargs): pass
     def validate_operations(self, operations): pass
     def validate_code_geometry(self, geometry): pass
@@ -44,6 +46,8 @@ class _NoFaultDecoder:
 
 
 def test_protocols_are_structural():
+    assert tuple(DecodingStrategy.__annotations__) == (
+        "requires_strong_context", "bulk_strong", "double_window")
     assert isinstance(_FakeStrategy(), DecodingStrategy)
     assert isinstance(_FakeServices(), StrategyServices)
     assert isinstance(_FakeBoundary(), BoundaryPolicy)

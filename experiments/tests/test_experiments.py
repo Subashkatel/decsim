@@ -298,6 +298,12 @@ def test_sample_digest_covers_detector_truth_shape_dtype_and_bytes():
     changed[0, 0] = 1
     assert sample_batch_sha256(changed, truth) != expected
     assert sample_batch_sha256(detectors.astype(np.int64), truth) != expected
+    assert sample_batch_sha256(detectors.reshape(1, 4), truth) != expected
+    changed_truth = truth.copy()
+    changed_truth[0, 0] = 0
+    assert sample_batch_sha256(detectors, changed_truth) != expected
+    assert sample_batch_sha256(detectors, truth.astype(np.int64)) != expected
+    assert sample_batch_sha256(detectors, truth.reshape(1, 2)) != expected
 
 
 def test_experiment_bytes_and_hash_are_canonical_and_seed_sensitive():

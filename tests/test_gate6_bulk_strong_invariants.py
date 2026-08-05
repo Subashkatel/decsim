@@ -473,6 +473,7 @@ def test_public_strategy_duplicate_strong_submission_is_rejected_end_to_end():
     real DecodingStrategy that escalates one weak window twice is refused."""
 
     class DuplicateStrongStrategy(Baseline):
+        requires_strong_context = True
         bulk_strong = True
 
         def on_window_ready(self, window, weak_job, services):
@@ -707,6 +708,7 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
     with nothing held, and a later wait finds nothing to consume."""
 
     class EscalateEveryWindowStrategy(Baseline):
+        requires_strong_context = True
         bulk_strong = True
 
         def on_window_ready(self, window, weak_job, services):
@@ -757,11 +759,40 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
         "a wait was released after finality without a decode of its own"
 
 
+def test_custom_strong_strategy_retains_its_exact_two_sided_payload():
+    captured = []
+
+    class ContextStrategy(Baseline):
+        requires_strong_context = True
+
+        def on_window_ready(self, window, weak_job, services):
+            strong = services.make_strong_job(
+                weak_job, weak_job.n_rounds, f"probe-{weak_job.label}")
+            if window.k == 1:
+                captured.append((strong.window.buffer_lo,
+                                 strong.window.buffer_hi, tuple(sorted(
+                                     {p.round_index for p in strong.payloads}))))
+            return [Submission(weak_job)]
+
+    strategy = ContextStrategy()
+    assert not hasattr(strategy, "keep_weak_result")
+    escalating_world(strategy, "explicit-strong-context")
+    assert captured == [(1, 9, tuple(range(1, 10)))]
+
+    class UnrelatedHelperStrategy(Baseline):
+        def keep_weak_result(self, result, job):
+            return True
+
+    helper_run = RunSpec(ops=[], strategy=UnrelatedHelperStrategy()).build()
+    assert helper_run.window_manager.retain_strong_context is False
+
+
 def test_public_strategy_cannot_supply_a_strong_transport_delay():
     """The fabric exclusively owns strong transport; strategy delays are not a
     compatibility path around WSD/CSD reservation."""
 
     class DelayedDuplicateStrongStrategy(Baseline):
+        requires_strong_context = True
         bulk_strong = True
 
         def on_window_ready(self, window, weak_job, services):
@@ -1028,6 +1059,8 @@ def test_public_strategy_may_list_its_submissions_in_either_order(strong_first):
     pair either way, to the same run."""
 
     class OrderedEscalationStrategy(Baseline):
+        requires_strong_context = True
+
         def on_window_ready(self, window, weak_job, services):
             strong = services.make_strong_job(
                 weak_job, weak_job.n_rounds, f"strong-{weak_job.label}")
@@ -1058,6 +1091,8 @@ def test_public_strategy_may_cancel_and_replace_inside_its_outcome_hook():
     that directive has already recorded as waiting."""
 
     class CancelAndReplaceStrategy(Baseline):
+        requires_strong_context = True
+
         def on_window_ready(self, window, weak_job, services):
             speculative = services.make_strong_job(
                 weak_job, weak_job.n_rounds, f"speculative-{weak_job.label}")

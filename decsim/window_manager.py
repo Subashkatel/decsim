@@ -237,7 +237,8 @@ class WindowManager:
                  planning_view_by_operation_id,
                  fault_model_requirement_for,
                  feedback_boundary_mode: str = "trailing_buffer",
-                 syndrome_source=None, switching_active: bool = False,
+                 syndrome_source=None, retain_strong_context: bool,
+                 double_window: bool,
                  store: Optional[PayloadStore] = None,
                  capture_enabled: bool = False):
         self.engine = engine
@@ -264,7 +265,7 @@ class WindowManager:
         self._fault_model_requirement_for_code = fault_model_requirement_for
         self.feedback_boundary_mode = feedback_boundary_mode
         self.syndrome_source = syndrome_source
-        self.switching_active = switching_active
+        self.retain_strong_context = retain_strong_context
         self._next_decoder_request_sequence = 0
         self._selected_request_keys = {} if capture_enabled else None
 
@@ -304,7 +305,7 @@ class WindowManager:
         self._finalize_gates: dict[int, Callable] = {}    # gate_finalize seam
         self._finished_ops: set[int] = set()
         self._workload_complete_sent = False
-        self.speculative_recovery = SpeculativeRecovery(self)
+        self.speculative_recovery = SpeculativeRecovery(self, double_window)
         self.window_models: dict = {}
         self.total_windows = 0
         self._windows_built = False
@@ -470,7 +471,7 @@ class WindowManager:
 
     def _strong_context_read_keys(self, window: Window, weak_reads: list) -> list:
         """Rounds retained until we know whether the strong decoder needs them."""
-        if not self.switching_active:
+        if not self.retain_strong_context:
             return []
         buffer_lo, _cl, _ch, buffer_hi = self._strong_context_bounds(window)
         weak = set(weak_reads)

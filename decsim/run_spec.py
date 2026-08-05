@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
+import inspect
 from numbers import Integral
 from typing import Any, Callable, Optional
 
@@ -145,11 +146,35 @@ class RunSpec:
             _validate_workload_identity,
         )
         from .policies import Eager, Ignore
+        from .protocols import DecodingStrategy
         from .schedulers import EnqueueTimeDeadline, FifoScheduler
         from .schemes import SlidingWindowScheme
         from .switching import Baseline
         from .window_interactions import DefaultWindowInteraction
         from .window_manager import WindowManager
+
+        strategy = self.strategy if self.strategy is not None else Baseline()
+        capability_names = tuple(DecodingStrategy.__annotations__)
+        hook_names = tuple(
+            name for name, member in DecodingStrategy.__dict__.items()
+            if not name.startswith("_") and callable(member)
+        )
+        for name in capability_names + hook_names:
+            try:
+                member = inspect.getattr_static(strategy, name)
+            except AttributeError as error:
+                raise TypeError(
+                    f"strategy is missing required member {name}") from error
+            if name in hook_names and member is None:
+                raise TypeError(f"strategy hook {name} must not be None")
+        requires_strong_context = strategy.requires_strong_context
+        bulk_strong = strategy.bulk_strong
+        double_window = strategy.double_window
+        for name, value in zip(capability_names, (
+            requires_strong_context, bulk_strong, double_window,
+        )):
+            if type(value) is not bool:
+                raise TypeError(f"strategy capability {name} must be an exact bool")
 
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
@@ -176,7 +201,6 @@ class RunSpec:
         code, layout = _select_code(self.d, self.code, self.layout)
         scheme = self.scheme or SlidingWindowScheme()
         rounds_policy = self.rounds_policy or GateRounds()
-        strategy = self.strategy or Baseline()
         boundary_policy = self.boundary_policy or Eager()
         if dynamic_streams and type(scheme) is not SlidingWindowScheme:
             raise ValueError("dynamic streams require SlidingWindowScheme")
@@ -238,13 +262,14 @@ class RunSpec:
             feedback_boundary_mode=self.feedback_boundary_mode,
             syndrome_source=device,
             store=PayloadStore(memory_model=self.memory_model),
-            switching_active=hasattr(strategy, "keep_weak_result"),
+            retain_strong_context=requires_strong_context,
+            double_window=double_window,
             capture_enabled=self.record_switching_windows)
         decoder_manager = DecoderManager(
             engine, router=router, scheduler=scheduler,
             unit_pools=self.unit_pools,
             num_units=self.num_units if self.num_units is not None else 1,
-            bulk_strong=getattr(strategy, "bulk_strong", False),
+            bulk_strong=bulk_strong,
             lane_policy=self.lane_policy,
             capture_enabled=self.record_switching_windows)
         services = StrategyServicesImpl(engine, window_manager, decoder_manager)

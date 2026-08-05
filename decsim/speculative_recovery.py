@@ -11,8 +11,9 @@ from __future__ import annotations
 class SpeculativeRecovery:
     """Own retained data and deterministic descendant replay for Eager mode."""
 
-    def __init__(self, runtime) -> None:
+    def __init__(self, runtime, double_window: bool) -> None:
         self.runtime = runtime
+        self._double_window = double_window
         self._pending: dict[tuple, dict] = {}
         self._finality_blockers: dict[int, int] = {}
         self._newly_unblocked_ops: set[int] = set()
@@ -22,7 +23,7 @@ class SpeculativeRecovery:
         """Retain a static descendant cone before its normal leases release."""
         if not getattr(self.runtime.boundary_policy, "speculative", False):
             return
-        if getattr(self.runtime.strategy, "double_window", False):
+        if self._double_window:
             return
         key = (job.op_id, job.window_id)
         selected = self.runtime.window_interaction.invalidated_windows(

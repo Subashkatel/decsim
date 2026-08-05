@@ -85,6 +85,10 @@ class ThresholdRegister:
 class Baseline:
     """Plain windowed decoding: submit the weak job, accept every outcome."""
 
+    requires_strong_context = False
+    bulk_strong = False
+    double_window = False
+
     def validate_declared_run(
         self,
         *,
@@ -143,6 +147,8 @@ class Switching:
     r_strong rounds it commits, so its decode cost is conservative
     against Theorem 1 rather than optimistic. The transfer cost of the
     extra context still belongs to the strong-data-path backlog item."""
+
+    requires_strong_context = True
 
     def __init__(self, confidence_threshold: float,
                  expected_source: SoftOutputSource,

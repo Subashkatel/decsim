@@ -90,6 +90,8 @@ def _runtime(
     deps=(),
     blocking=(),
     deadline_policy=None,
+    retain_strong_context=False,
+    double_window=False,
 ):
     eng = Engine(verbose=False)
     fb = _Feedback()
@@ -148,7 +150,9 @@ def _runtime(
                        },
                        fault_model_requirement_for=(
                            lambda _code: NO_FAULT_MODEL_REQUIRED
-                       ))
+                       ),
+                       retain_strong_context=retain_strong_context,
+                       double_window=double_window)
     rt.strategy = strategy or _RecordingStrategy()
     rt.services = object()
     submitted = []
@@ -431,6 +435,19 @@ def test_strong_job_two_sided_context_contract_2b6():
     assert strong.strong_decode_for == (0, 0)
     assert strong.window.t_first_round == rt.store.round_complete_tick(0, 1)
     assert strong.deadline == eng.now + 1_000
+
+
+def test_retention_capability_adds_only_strong_leading_rounds():
+    _, without_context, _, _ = _runtime(retain_strong_context=False)
+    _, with_context, _, _ = _runtime(retain_strong_context=True)
+    interior = Window(
+        op_id=0, k=1, commit_lo=4, commit_hi=4, buffer_hi=6, n_rounds=3)
+    for runtime in (without_context, with_context):
+        runtime._add_window_read_refs(interior.key, interior)
+    assert without_context.store.lease_round_keys(
+        (interior.key, "strong")) == ()
+    assert with_context.store.lease_round_keys(
+        (interior.key, "strong")) == ((0, 2), (0, 3))
 
 
 def test_strong_buffer_expiry_uses_the_context_start_round_arrival():

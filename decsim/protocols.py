@@ -145,6 +145,10 @@ class DecodingStrategy(Protocol):
     the core's commit bookkeeping, so its directive decides whether the
     result is held awaiting a strong redo."""
 
+    requires_strong_context: bool
+    bulk_strong: bool
+    double_window: bool
+
     def validate_declared_run(
         self,
         *,

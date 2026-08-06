@@ -51,7 +51,7 @@ def test_idle_stretch_carries_real_firing_syndromes():
     idle_seg = segments[1]                     # the middle (idle) segment
     dev = StimDevice(seed=1)
     for seg in segments:
-        dev.begin_operation(seg, rounds_map[seg.id])
+        dev.begin_operation(seg, rounds_map[seg.id], rounds_map[stream_op.id])
     fired = 0
     nbits = 0
     for r in range(1, IDLE + 1):

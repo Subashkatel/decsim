@@ -56,6 +56,7 @@ def _fails(circ, plan, dets, obs):
     models = build_window_error_models(
         circ,
         plan,
+        round_count=plan[-1][-1],
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )

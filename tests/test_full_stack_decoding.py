@@ -114,7 +114,7 @@ def test_stim_device_round_alignment():
     circuit = _circuit()
     device = StimDevice(seed=3)
     op = Operation(id=1, name="memory", qubits=(0,), clifford=True, circuit=circuit)
-    device.begin_operation(op, ROUNDS)
+    device.begin_operation(op, ROUNDS, ROUNDS)
     coords = circuit.get_detector_coordinates()
     layer = {}
     for det, c in coords.items():
@@ -185,6 +185,7 @@ def test_engine_matches_offline_reference_and_global_exactly():
     ref_models = build_window_error_models(
         circuit,
         plan,
+        round_count=ROUNDS,
         detector_rounds=folded,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
@@ -307,6 +308,7 @@ def test_engine_bposd_matches_offline_reference():
     ref_models = build_window_error_models(
         circuit,
         plan,
+        round_count=ROUNDS,
         detector_rounds=folded,
         fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),

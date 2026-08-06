@@ -32,7 +32,7 @@ from decsim.pauli_frame import PauliFrame
 class MyDevice:
     operation_circuit_scope = "none"
 
-    def begin_operation(self, op, resolved_round_count):
+    def begin_operation(self, op, segment_round_count, source_round_count):
         return None
 
     def round_payloads(self, op, r):

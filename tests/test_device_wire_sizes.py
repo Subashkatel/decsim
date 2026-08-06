@@ -61,6 +61,37 @@ def test_clocked_device_relay_does_not_mutate_source_fragment_counts():
     )
 
 
+def test_clocked_device_passes_segment_and_owner_zero_source_durations():
+    class Engine:
+        def schedule(self, *args, **kwargs):
+            pass
+
+    class Device:
+        def begin_operation(self, operation, segment_round_count,
+                            source_round_count):
+            self.call = operation, segment_round_count, source_round_count
+
+    operation = Operation(
+        5, "segment", (0,), stream_id=0, stream_offset=0,
+    )
+    device = Device()
+    ClockedDevice(
+        Engine(), device, None, {5: 12, 0: 24}
+    ).start(operation, round_ticks=1, on_body_done=lambda operation: None)
+
+    assert device.call == (operation, 12, 24)
+
+
+def test_clocked_device_rejects_missing_source_duration_before_sampling():
+    operation = Operation(
+        5, "segment", (0,), stream_id=0, stream_offset=0,
+    )
+    clocked = ClockedDevice(object(), object(), None, {5: 12})
+
+    with pytest.raises(ValueError, match="source operation 0"):
+        clocked.start(operation, round_ticks=1, on_body_done=lambda operation: None)
+
+
 def test_explicit_fragment_slot_rejects_multiple_payloads_before_relay():
     class RecordingController:
         def __init__(self):
@@ -121,7 +152,7 @@ def test_nonphysical_devices_fail_closed_on_terminal_finalization():
         SyndromeBitDevice(SurfaceCodeModel(d=3)),
     ):
         with pytest.raises(ValueError, match="cannot finalize"):
-            device.finalize_stream_round(operation)
+            device.finalize_stream_round(operation, 1)
 
 
 def test_idle_round_fake_payload_reports_its_bit_count():
@@ -185,7 +216,7 @@ def test_stim_payloads_report_their_bit_counts():
         after_clifford_depolarization=0.001)
     op = Operation(0, "mem", (0,), circuit=circuit)
     device = StimDevice(seed=0)
-    device.begin_operation(op, 3)
+    device.begin_operation(op, 3, 3)
     for round_index in (1, 2, 3):
         for payload in device.round_payloads(op, round_index):
             assert payload.size_bits == len(payload.bits)

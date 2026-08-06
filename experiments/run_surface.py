@@ -72,13 +72,6 @@ def _windows(configuration):
     return tuple(windows)
 
 
-def _detector_rounds(circuit, rounds):
-    return {
-        detector: min(int(coordinates[-1]) + 1, rounds)
-        for detector, coordinates in circuit.get_detector_coordinates().items()
-    }
-
-
 @dataclass(frozen=True)
 class _SurfaceMwpmFactory:
     configuration: dict
@@ -89,11 +82,9 @@ class _SurfaceMwpmFactory:
             circuit,
             _windows(self.configuration),
             matching_window_decoder(),
+            round_count=self.configuration["rounds"],
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
             fault_representation=FaultRepresentation.GRAPHLIKE,
-            detector_rounds=_detector_rounds(
-                circuit, self.configuration["rounds"]
-            ),
         )
 
 

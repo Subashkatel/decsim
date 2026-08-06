@@ -50,6 +50,7 @@ def _windowed_preds(circ, plan, shots):
     models = build_window_error_models(
         circ,
         plan,
+        round_count=plan[-1][-1],
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -75,12 +76,14 @@ def test_linked_requirement_leaves_graphlike_model_identical():
     base = build_window_error_models(
         circ,
         plan,
+        round_count=9,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
     bm = build_window_error_models(
         circ,
         plan,
+        round_count=9,
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -176,6 +179,7 @@ def test_engine_belief_matching_matches_offline():
     ref_models = build_window_error_models(
         circuit,
         plan,
+        round_count=R,
         detector_rounds=folded,
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
         fault_exclusion_ranges=(),

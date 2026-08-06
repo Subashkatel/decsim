@@ -367,8 +367,8 @@ def test_builtin_code_card_round_us_domain_and_planning():
                 factory(round_us=value)
 
 
-def test_bb_code_model_input_domain_and_exact_detector_quotient():
-    for field_name in ("n", "k", "d", "n_detectors"):
+def test_bb_code_model_uses_complete_check_width_and_exact_geometry():
+    for field_name in ("n", "k", "d"):
         for value in (True, 1.5, Fraction(1, 1)):
             with pytest.raises(TypeError, match=field_name):
                 BBCodeModel(**{field_name: value})
@@ -376,10 +376,37 @@ def test_bb_code_model_input_domain_and_exact_detector_quotient():
             BBCodeModel(**{field_name: 0})
 
     with pytest.raises(ValueError, match="k.*n"):
-        BBCodeModel(n=5, k=6, d=1, n_detectors=5)
+        BBCodeModel(n=6, k=7, d=1)
     with pytest.raises(ValueError, match="d.*n"):
-        BBCodeModel(n=5, k=1, d=6, n_detectors=12)
-    with pytest.raises(ValueError, match="n_detectors"):
-        BBCodeModel(n=20, k=4, d=6, n_detectors=25)
-    code = BBCodeModel(n=20, k=4, d=5, n_detectors=40)
-    assert code.spatial_nodes(1) == code.syndrome_bits_per_round(1) == 8
+        BBCodeModel(n=6, k=1, d=7)
+    with pytest.raises(ValueError, match="n.*even"):
+        BBCodeModel(n=5, k=1, d=3)
+
+    for field_name, invalid in (
+        ("commit_rounds_override", 0),
+        ("buffer_rounds_override", -1),
+    ):
+        for value in (True, 1.0, Fraction(1, 1)):
+            with pytest.raises(TypeError, match=field_name):
+                BBCodeModel(**{field_name: value})
+        with pytest.raises(ValueError, match=field_name):
+            BBCodeModel(**{field_name: invalid})
+
+    bb72 = BBCodeModel(n=72, k=12, d=6)
+    bb144 = BBCodeModel()
+    assert bb72.syndrome_bits_per_round(1) == bb72.spatial_nodes(1) == 72
+    assert bb144.syndrome_bits_per_round(2) == bb144.spatial_nodes(2) == 288
+    assert bb72.commit_rounds() == 6
+    assert bb72.buffer_rounds() == 0
+    assert bb72.buffering_floor() == (0, 0)
+    assert bb72.buffer_floor_override_active() is True
+
+    overridden = BBCodeModel(
+        n=72,
+        k=12,
+        d=6,
+        commit_rounds_override=4,
+        buffer_rounds_override=0,
+    )
+    assert overridden.commit_rounds() == 4
+    assert overridden.buffer_rounds() == 0

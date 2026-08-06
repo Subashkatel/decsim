@@ -45,6 +45,7 @@ from experiments.harness import (
 from experiments.decoding import (
     DecodedBatch,
     OfflineBatchDecoder,
+    load_layered_stim_input,
     read_stored_batch_result,
     run_offline_experiment,
     run_offline_parallel,
@@ -139,6 +140,55 @@ def _run_surface_module(tmp_path, configuration, *, output_name="output"):
 
 def _snapshot_directories(output_root):
     return sorted(output_root.glob("????-??-??/*"))
+
+
+def test_layered_stim_input_is_bound_to_bytes_and_declared_rounds(tmp_path):
+    source = b"M 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\nDETECTOR rec[-2]\n"
+    path = tmp_path / "layered.stim"
+    path.write_bytes(source)
+
+    circuit, detector_rounds, round_count = load_layered_stim_input(
+        path, hashlib.sha256(source).hexdigest(), (1, 2)
+    )
+
+    assert circuit.num_detectors == 3
+    assert detector_rounds == {0: 1, 1: 2, 2: 2}
+    assert round_count == 2
+
+
+@pytest.mark.parametrize(
+    ("counts", "message"),
+    [((), "nonempty tuple"), ([1, 2], "nonempty tuple"),
+     ((1, 0), "positive built-in"), ((True, 2), "positive built-in")],
+)
+def test_layered_stim_input_rejects_invalid_layer_declarations(
+    tmp_path, counts, message
+):
+    source = b"M 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\nDETECTOR rec[-2]\n"
+    path = tmp_path / "layered.stim"
+    path.write_bytes(source)
+
+    with pytest.raises((TypeError, ValueError), match=message):
+        load_layered_stim_input(path, hashlib.sha256(source).hexdigest(), counts)
+
+
+def test_layered_stim_input_rejects_a_detector_count_sum_mismatch(tmp_path):
+    source = b"M 0\nDETECTOR rec[-1]\nM 0\nDETECTOR rec[-1]\nDETECTOR rec[-2]\n"
+    path = tmp_path / "layered.stim"
+    path.write_bytes(source)
+
+    with pytest.raises(ValueError, match="declared detector counts"):
+        load_layered_stim_input(
+            path, hashlib.sha256(source).hexdigest(), (1, 1)
+        )
+
+
+def test_layered_stim_input_rejects_changed_bytes(tmp_path):
+    path = tmp_path / "layered.stim"
+    path.write_text("M 0\nDETECTOR rec[-1]\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="SHA-256"):
+        load_layered_stim_input(path, "0" * 64, (1,))
 
 
 _SELECTOR_FILES = {
@@ -336,14 +386,11 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
         rounds=6,
         after_clifford_depolarization=0.05,
     )
-    layers = 1 + max(
-        int(coordinates[-1])
-        for coordinates in circuit.get_detector_coordinates().values()
-    )
+    source_round_count = 6
     windows = [
         (window.commit_lo, window.commit_hi, window.buffer_hi)
         for window in SlidingWindowScheme().plan_operation(
-            0, layers, commit_round_count=3, buffer_round_count=3
+            0, source_round_count, commit_round_count=3, buffer_round_count=3
         ).windows
     ]
 
@@ -371,6 +418,7 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
         counted,
         windows,
         decode,
+        round_count=source_round_count,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_representation=FaultRepresentation.GRAPHLIKE,
     )

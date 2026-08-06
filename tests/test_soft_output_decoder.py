@@ -271,7 +271,7 @@ def test_hard_union_find_engine_path_reproduces_a_deterministic_logical_fault():
     decoder = CapturingUnionFind(_ZeroLatency())
     decoded = _naive_shot(
         circuit,
-        StimDevice(),
+        StimDevice(detector_rounds={1: {0: 1}}),
         decoder,
         d=3,
         rounds=1,

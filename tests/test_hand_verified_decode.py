@@ -84,8 +84,8 @@ def graphs():
     assert noisy.num_detectors == clean.num_detectors
     matching = pymatching.Matching.from_detector_error_model(
         noisy.detector_error_model(decompose_errors=True))
-    n_layers = 1 + max(int(c[-1])
-                       for c in noisy.get_detector_coordinates().values())
+    n_layers = max(int(c[-1])
+                   for c in noisy.get_detector_coordinates().values())
     plan = [
         (window.commit_lo, window.commit_hi, window.buffer_hi)
         for window in SlidingWindowScheme().plan_operation(
@@ -98,6 +98,7 @@ def graphs():
     models = build_window_error_models(
         noisy,
         plan,
+        round_count=n_layers,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )

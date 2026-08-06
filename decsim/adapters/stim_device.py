@@ -17,12 +17,8 @@ from ..message import (
 class StimDevice:
     """Sample Stim circuits and stream detection events by syndrome round.
 
-    ``seed=None`` delegates entropy selection to Stim and preserves legacy
-    hashable operation/stream identities. A numeric seed may be any
-    :class:`numbers.Integral` value in ``[0, 2**64)``; it enables stable
-    per-identity substreams and therefore requires the selected operation id or
-    stream id to be an exact built-in ``int`` or ``str``. Unsupported seeded
-    identities raise before sampler-cache or stream-alias lookup.
+    Numeric seeds create stable per-identity substreams; ``None`` lets Stim
+    choose entropy.
     """
 
     operation_circuit_scope = "per_operation"
@@ -79,17 +75,9 @@ class StimDevice:
         terminal_detector_ids: Optional[dict] = None,
         terminal_data_bits: Optional[dict] = None,
     ):
-        """Configure Stim sampling and optional detector-round overrides.
+        """Configure sampling and explicit chronology or terminal metadata.
 
-        ``detector_rounds`` maps an operation or stream identity to
-        ``{detector: 1-based round}`` for circuits whose DETECTORs carry no
-        coordinates (for example QLX-emitted circuits; the map comes from
-        ``emit_decoder_params()['dem_detector_locs']`` packet indices).
-        ``terminal_detector_ids`` removes declared final-readout detectors
-        from ordinary rounds; ``terminal_data_bits`` prices their raw wire part.
-
-        See the class contract for the root-seed domain and the conditional
-        seeded identity restriction.
+        Detector-round maps use one-based emitted rounds.
         """
         self._explicit_seed = seed
         self._seed = seed
@@ -110,6 +98,7 @@ class StimDevice:
         self._truth: dict = {}
         self._by_round: dict = {}
         self._stream_models: dict = {}
+        self._source_bindings: dict = {}
 
     def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
         """Prepare a run-root binding without changing active sampling state."""
@@ -157,6 +146,7 @@ class StimDevice:
                 {},
                 {},
                 {},
+                {},
             )
             reservation = RunSeedReservation(
                 proposed_seed_source=seed_source,
@@ -187,13 +177,13 @@ class StimDevice:
                 self._truth,
                 self._by_round,
                 self._stream_models,
+                self._source_bindings,
             ) = reservation.prepared_state
             self._pending_run_seed = None
             self._run_seed_claimed = True
 
     @staticmethod
     def _key(op: Operation):
-        """Sample key for a standalone operation or continuous stream."""
         return op.stream_id if op.stream_id is not None else op.id
 
     @staticmethod
@@ -240,19 +230,32 @@ class StimDevice:
     def begin_operation(
         self,
         op: Operation,
-        resolved_round_count: int,
+        segment_round_count: int,
+        source_round_count: int,
     ) -> None:
         """Sample one fresh shot, or reuse the stream shot for later segments."""
-        if (
-            type(resolved_round_count) is not int
-            or resolved_round_count < 1
+        for name, value in (
+            ("segment_round_count", segment_round_count),
+            ("source_round_count", source_round_count),
         ):
-            raise ValueError(
-                "resolved_round_count must be a positive built-in int"
-            )
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{name} must be a positive built-in int")
+        if op.circuit is None:
+            raise ValueError("StimDevice operations require a circuit")
+        if op.stream_id is None:
+            if op.stream_offset is not None or segment_round_count != source_round_count:
+                raise ValueError("standalone duration must equal its source duration")
+        else:
+            if type(op.stream_offset) is not int or op.stream_offset < 0:
+                raise ValueError("stream_offset must be a nonnegative built-in int")
+            if op.stream_offset + segment_round_count > source_round_count:
+                raise ValueError("stream segment extends beyond its finite source")
         key = self._key(op)
         if self._seed is not None:
             self._validate_sample_key(key)
+        detector_rounds = self._source_rounds(
+            key, op.circuit, source_round_count
+        )
         if op.stream_id is not None and op.stream_offset:
             self._dets[op.id] = self._dets[key]
             self._truth[op.id] = self._truth[key]
@@ -275,36 +278,11 @@ class StimDevice:
         dets, obs = sampler.sample(shots=1, separate_observables=True)
         self._dets[key] = dets[0]
         self._truth[key] = obs[0]
-        override = self._detector_rounds_override.get(key)
         terminal_ids = set(self._terminal_detector_ids.get(key, ()))
         buckets: dict[int, list[int]] = {}
-        if override is not None:
-            max_round = max(override.values(), default=0)
-            round_count = (
-                max_round
-                if op.stream_id is not None
-                else resolved_round_count
-            )
-            for detector_index, detector_round in override.items():
-                if detector_index in terminal_ids:
-                    continue
-                buckets.setdefault(
-                    min(detector_round, round_count), []).append(detector_index)
-        else:
-            coords = op.circuit.get_detector_coordinates()
-            max_time_coordinate = max(
-                (int(c[-1]) for c in coords.values()), default=0)
-            round_count = (
-                max_time_coordinate
-                if op.stream_id is not None
-                else resolved_round_count
-            )
-            for detector_index, coordinate in coords.items():
-                if detector_index in terminal_ids:
-                    continue
-                detector_round = int(coordinate[-1]) + 1
-                buckets.setdefault(
-                    min(detector_round, round_count), []).append(detector_index)
+        for detector_index, detector_round in detector_rounds.items():
+            if detector_index not in terminal_ids:
+                buckets.setdefault(detector_round, []).append(detector_index)
         for detector_ids in buckets.values():
             detector_ids.sort()
         self._by_round[key] = buckets
@@ -322,11 +300,27 @@ class StimDevice:
         return [SyndromePayload(target, patch, global_round, bits=bits,
                                 size_bits=len(bits))]
 
-    def finalize_stream_round(self, op: Operation) -> list[SyndromePayload]:
+    def finalize_stream_round(
+        self, op: Operation, source_round_count: int,
+    ) -> list[SyndromePayload]:
         """Emit terminal detector events from the already sampled stream."""
         key = self._key(op)
         if key not in self._dets:
             raise RuntimeError("terminal finalizer requires a sampled stream")
+        binding = self._source_bindings.get(key)
+        if binding is None:
+            raise RuntimeError("sampled stream has no source binding")
+        circuit_text, bound_round_count, _ = binding
+        if type(source_round_count) is not int or source_round_count < 1:
+            raise ValueError("source_round_count must be a positive built-in int")
+        if source_round_count != bound_round_count:
+            raise ValueError("finalizer source duration differs from its binding")
+        if op.circuit is None or str(op.circuit) != circuit_text:
+            raise ValueError("finalizer circuit differs from its source binding")
+        if type(op.stream_offset) is not int or op.stream_offset < 0:
+            raise ValueError("finalizer offset must be a nonnegative built-in int")
+        if op.stream_offset + 1 != source_round_count:
+            raise ValueError("finalizer is not at the final source round")
         detector_ids = self._terminal_detector_ids.get(key)
         if detector_ids is None:
             raise ValueError("terminal finalizer has no declared detector ids")
@@ -344,28 +338,38 @@ class StimDevice:
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
                             patch) -> list[SyndromePayload]:
         """Emit this feedback-idle stream round as one Stim-backed payload."""
+        binding = self._source_bindings.get(stream_id)
+        if stream_id not in self._dets or binding is None:
+            raise RuntimeError("idle emission requires a sampled bound stream")
+        if type(global_round) is not int or not 1 <= global_round <= binding[1]:
+            raise ValueError("idle round is outside the finite source")
         detector_indices = self._by_round.get(stream_id, {}).get(global_round, [])
         bits = self._dets[stream_id][detector_indices]
         return [SyndromePayload(stream_id, patch, global_round, bits=bits,
                                 size_bits=len(bits))]
 
-    @staticmethod
-    def _detector_rounds(circuit, round_count: int) -> dict:
-        """Map each detector to a 1-based round, folding final detectors to the cap."""
-        coords = circuit.get_detector_coordinates()
-        return {
-            detector_id: min(int(coordinate[-1]) + 1, round_count)
-            for detector_id, coordinate in coords.items()
-        }
+    def _source_rounds(self, key, circuit, source_round_count: int) -> dict:
+        """Bind one finite circuit, duration, and detector chronology per key."""
+        from ..detector_error_model import resolve_detector_rounds
 
-    def _detector_rounds_for_key(self, key, circuit, round_count: int) -> dict:
-        """The detector->round map for one op/stream: explicit override when
-        registered (coordinate-less circuits), else circuit coordinates."""
-        override = self._detector_rounds_override.get(key)
-        if override is not None:
-            return {detector_id: min(detector_round, round_count)
-                    for detector_id, detector_round in override.items()}
-        return self._detector_rounds(circuit, round_count)
+        resolved = resolve_detector_rounds(
+            circuit,
+            self._detector_rounds_override.get(key),
+            source_round_count,
+        )
+        circuit_text = str(circuit)
+        binding = self._source_bindings.get(key)
+        if binding is None:
+            private_rounds = dict(resolved)
+            self._source_bindings[key] = (
+                circuit_text, source_round_count, private_rounds
+            )
+            return private_rounds
+        if binding[0] != circuit_text:
+            raise ValueError("circuit differs from the bound finite source")
+        if binding[1] != source_round_count:
+            raise ValueError("source duration differs from the bound finite source")
+        return binding[2]
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
                                 *, fault_model_requirement):
@@ -375,12 +379,13 @@ class StimDevice:
 
         from ..detector_error_model import WindowSlicer
 
-        detector_rounds = self._detector_rounds_for_key(
+        detector_rounds = self._source_rounds(
             stream_op.id, stream_op.circuit, round_count)
         self._stream_models[stream_op.id] = {
             "round_count": round_count,
             "slicer": WindowSlicer(
                 stream_op.circuit,
+                round_count=round_count,
                 detector_rounds=detector_rounds,
                 fault_model_requirement=fault_model_requirement),
         }
@@ -413,7 +418,7 @@ class StimDevice:
 
         from ..detector_error_model import build_window_error_models
 
-        detector_rounds = self._detector_rounds_for_key(
+        detector_rounds = self._source_rounds(
             self._key(op), op.circuit, round_count)
         model_plan = [
             (window.start_round, window.commit_lo, window.commit_hi,
@@ -423,6 +428,7 @@ class StimDevice:
         return build_window_error_models(
             op.circuit,
             model_plan,
+            round_count=round_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=fault_exclusion_ranges)
@@ -448,12 +454,13 @@ class StimDevice:
 
         from ..detector_error_model import build_single_window_error_model
 
-        detector_rounds = self._detector_rounds_for_key(
+        detector_rounds = self._source_rounds(
             self._key(op), op.circuit, round_count)
         return build_single_window_error_model(
             op.circuit,
             (window.start_round, window.commit_lo,
              window.commit_hi, min(window.buffer_hi, round_count)),
+            round_count=round_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
             exclude_faults_touching=exclude_faults_touching)
@@ -470,12 +477,13 @@ class StimDevice:
             build_single_window_error_model_with_exclusions,
         )
 
-        detector_rounds = self._detector_rounds_for_key(
+        detector_rounds = self._source_rounds(
             self._key(op), op.circuit, round_count)
         return build_single_window_error_model_with_exclusions(
             op.circuit,
             (window.start_round, window.commit_lo,
              window.commit_hi, min(window.buffer_hi, round_count)),
+            round_count=round_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=fault_exclusion_ranges)

@@ -937,11 +937,9 @@ class DecodeJob:
     window: Optional[Window] = None          # back-reference to the source window
     strong_decode_for: Optional[tuple] = None      # (op_id, window_id) this strong job re-decodes
     awaiting_strong_result: bool = False     # weak result held non-final until the strong sibling lands
-    cancelled: bool = False                  # set when a speculative sibling is cancelled;
-                                             # the completion callback then discards the result
+    cancelled: bool = False                  # cancelled siblings discard completion
     completed: bool = False                  # guards against duplicate completion delivery
-    submitted: bool = False                  # set once the pool admits the job; a job holds one
-                                             # queue slot and one unit, so it is enqueued once
+    submitted: bool = False                  # admitted once to one queue slot and unit
     request_key: Optional[DecoderRequestKey] = None
     request_created_ticks: Optional[int] = None
     request_admitted_ticks: Optional[int] = None
@@ -950,19 +948,20 @@ class DecodeJob:
     service_cancelled_request_keys: set[DecoderRequestKey] = field(default_factory=set)
     service_dispatch_ticks: Optional[int] = None
 
+    @property
+    def detector_count(self) -> Optional[int]:
+        return None if self.dem is None else len(self.dem.detector_ids)
+
 
 @dataclass
 class DecodeResult:
-    """Decoder output for one window. Timing-only decoders leave every
-    optional field None; data-path decoders fill what they compute."""
+    """One window result; timing-only decoders leave optional fields unset."""
 
     op_id: int
     window_id: int
     correction: Optional[Any] = None         # correction operator (None = timing-only)
-    logical_observables: Optional[tuple[int, ...]] = None
-    # Complete predicted logical-observable vector; None is timing-only.
-    soft_output: Optional["SoftOutput"] = None
-    # Typed decoder confidence; below a source-compatible threshold escalates.
+    logical_observables: Optional[tuple[int, ...]] = None  # full prediction
+    soft_output: Optional["SoftOutput"] = None  # source-compatible confidence
     boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
 

@@ -5,7 +5,6 @@ objects for the code tasks we rely on (incl. toric, which stim's built-in genera
 and behaves sanely with/without noise.
 """
 from fractions import Fraction
-import math
 
 import pytest
 

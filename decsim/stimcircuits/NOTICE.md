@@ -9,7 +9,7 @@ This subpackage is **vendored third-party code**, not part of decsim's own autho
   dependency. We copy it here to make stim circuit generation a first-class, offline part of
   decsim (stim circuits are clean and well-tested; we use them directly for code/noise setup).
 - **Modifications**
-  - `surface_code.py` adds a module docstring and validates and normalizes public noise rates.
+  - `surface_code.py` adds a module docstring, validates noise rates, and delegates exact `repetition_code:memory` generation to Stim.
   - `__init__.py` is written by us; uses a relative import (`from .surface_code import
     generate_circuit`) appropriate to its place inside the decsim package.
   - `noise.py` is written by us; it carries decsim's Stim noise presets.

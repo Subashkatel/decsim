@@ -465,6 +465,7 @@ def generate_circuit(
         Args:
             code_task: A string identifying the type of circuit to generate. Available
                 code tasks are:
+                    - "repetition_code:memory"
                     - "surface_code:rotated_memory_x"
                     - "surface_code:rotated_memory_z"
                     - "surface_code:unrotated_memory_x"
@@ -515,6 +516,26 @@ def generate_circuit(
     if not has_square_distance and not has_rectangular_distance:
         raise ValueError('Either the distance parameter or x_distance and '
                          'z_distance parameters must be specified')
+    if code_task == "repetition_code:memory":
+        if x_distance is not None or z_distance is not None:
+            raise ValueError("repetition_code:memory requires square distance")
+        if exclude_other_basis_detectors:
+            raise ValueError("repetition_code:memory has no detector-basis filter")
+        clifford_probability = _check_probability(
+            after_clifford_depolarization, "after_clifford_depolarization")
+        data_probability = _check_probability(
+            before_round_data_depolarization, "before_round_data_depolarization")
+        measurement_probability = _check_probability(
+            before_measure_flip_probability, "before_measure_flip_probability")
+        reset_probability = _check_probability(
+            after_reset_flip_probability, "after_reset_flip_probability")
+        return stim.Circuit.generated(
+            code_task, distance=distance, rounds=rounds,
+            after_clifford_depolarization=clifford_probability,
+            before_round_data_depolarization=data_probability,
+            before_measure_flip_probability=measurement_probability,
+            after_reset_flip_probability=reset_probability,
+        )
     code_name, task = code_task.split(":")
     if code_name in ["surface_code", "toric_code"]:
         params = CircuitGenParameters(

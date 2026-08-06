@@ -231,7 +231,7 @@ def test_switching_decoder_latency_mix():
 def test_stochastic_decoder_probability_domains():
     weak = PresetLatencyDecoder(1.0)
     strong = PresetLatencyDecoder(10.0)
-    for value in (0, 1, -0.0, 0.25):
+    for value in (0, 1, -0.0, 0.25, Fraction(1, 2)):
         switching = SwitchingDecoder(weak, strong, gamma_switch=value)
         sampled = SampledConfidenceDecoder(
             weak,
@@ -246,20 +246,6 @@ def test_stochastic_decoder_probability_domains():
         with pytest.raises(ValueError, match="escalation_probability"):
             SampledConfidenceDecoder(weak, escalation_probability=value)
 
-    for value in (True, Fraction(1, 2)):
-        with pytest.raises(TypeError, match="gamma_switch"):
-            SwitchingDecoder(weak, strong, gamma_switch=value)
-        with pytest.raises(TypeError, match="escalation_probability"):
-            SampledConfidenceDecoder(weak, escalation_probability=value)
-
-
-def test_sampled_confidence_validates_fixed_probability_with_callback():
-    with pytest.raises(TypeError, match="escalation_probability"):
-        SampledConfidenceDecoder(
-            PresetLatencyDecoder(1.0),
-            escalation_probability=True,
-            probability_for=lambda job: 0.5,
-        )
 
 
 def test_switching_decoder_cannot_reroute_completion_from_latency():
@@ -406,16 +392,6 @@ def test_sampled_confidence_run_seed_binding_and_explicit_conflict():
         second.decode(DecodeJob(0, window_id, 3)).soft_output.gap
         for window_id in range(12)
     ]
-
-
-def test_sampled_confidence_rejects_foreign_callback_probability():
-    decoder = SampledConfidenceDecoder(
-        PresetLatencyDecoder(1.0),
-        escalation_probability=0.0,
-        probability_for=lambda job: Fraction(1, 2),
-    )
-    with pytest.raises(TypeError, match="probability_for"):
-        decoder.decode(DecodeJob(0, 0, 3))
 
 
 def test_sampled_confidence_rejects_invalid_callback_before_stochastic_state():

@@ -405,10 +405,6 @@ class PayloadStore:
     def backing_identities(self):
         return tuple(sorted(self._backing, key=stable_identity_order_key))
 
-    @property
-    def released_owner_count(self) -> int:
-        return len(self._released_owners)
-
     def connect_capacity_change_receiver(
         self, receiver: EndpointCapacityChangeReceiver) -> None:
         if self._capacity_change_receiver is not None:

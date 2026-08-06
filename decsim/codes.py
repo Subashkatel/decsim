@@ -27,25 +27,12 @@ def _require_positive_int(value, field_name: str) -> int:
 def _check_round_us(value) -> Optional[float]:
     if value is None:
         return None
-    if type(value) not in (int, float):
-        raise TypeError(
-            f"round_us must be a built-in int or float; got {value!r}"
-        )
-    if type(value) is float and not math.isfinite(value):
-        raise ValueError(f"round_us must be finite; got {value!r}")
-    if value <= 0:
-        raise ValueError(f"round_us must be positive; got {value!r}")
-    try:
-        normalized = float(value)
-        ticks = us(normalized)
-    except (OverflowError, ValueError) as error:
-        raise ValueError(
-            f"round_us must be finite and representable; got {value!r}"
-        ) from error
-    if not math.isfinite(normalized) or ticks < 1:
-        raise ValueError(
-            f"round_us must be finite and at least one tick; got {value!r}"
-        )
+    normalized = float(value)
+    if not math.isfinite(normalized):
+        raise ValueError("round_us must be finite and at least one tick")
+    ticks = us(normalized)
+    if ticks < 1:
+        raise ValueError("round_us must be finite and at least one tick")
     return normalized
 
 

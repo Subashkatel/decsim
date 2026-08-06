@@ -216,6 +216,7 @@ def test_single_level_factory_delivers_initial_stock_immediately():
     factory.request(0, lambda: delivered.append(engine.now))
     engine.run()
     assert delivered == [0]
+    assert MagicStateLatency(factory).result()["total"]["n"] == 0
 
 
 @pytest.mark.parametrize(
@@ -340,19 +341,18 @@ def test_demand_mode_produces_nothing_unasked():
     assert f.produced == 0                     # demand-driven: idle without requests
 
 
-def test_state_trace_provenance():
+def test_state_latency_uses_the_complete_delivery_timeline():
     eng = Engine(verbose=False)
     f = DistillationFactory(eng, num_units=1, cycle_ticks=us(10),
                             decode_service=ImmediateService(), corr_rounds=1, n_corr=2,
                             return_ticks=us(2.0))
     f.request(0, lambda: None)
     eng.run()
-    assert len(f.traces) == 1
-    tr = f.traces[0]
-    assert tr.t_phys_done - tr.t_distill_start == us(10)   # the distillation cycle
-    assert tr.t_corr_done == tr.t_phys_done                # immediate correction decodes
-    assert tr.t_released - tr.t_corr_done == us(2.0)       # the return trip
-    assert tr.t_delivered == tr.t_released                 # a consumer was waiting
+    result = MagicStateLatency(f).result()
+    assert result["distill"] == {"mean": us(10), "max": us(10), "n": 1}
+    assert result["corr_decode"] == {"mean": 0.0, "max": 0, "n": 1}
+    assert result["deliver"] == {"mean": us(2.0), "max": us(2.0), "n": 1}
+    assert result["total"] == {"mean": us(12.0), "max": us(12.0), "n": 1}
 
 
 def test_magic_state_latency_metric():
@@ -366,28 +366,77 @@ def test_magic_state_latency_metric():
     assert res["total"]["n"] == 1
 
 
-def test_magic_state_latency_keeps_every_delivered_state():
-    eng = Engine(verbose=False)
+def test_magic_state_latency_includes_inventory_dwell_until_delivery():
+    engine = Engine(verbose=False)
     factory = DistillationFactory(
-        eng,
+        engine,
         num_units=1,
-        cycle_ticks=1,
+        cycle_ticks=3,
         decode_service=None,
         corr_rounds=0,
         n_corr=0,
-        return_ticks=0,
+        return_ticks=2,
+        p_success=1.0,
+        production="continuous",
+        buffer_capacity=1,
+    )
+    engine.run()
+    engine.schedule(7, lambda: None)
+    engine.run()
+
+    factory.request(0, lambda: None)
+
+    result = MagicStateLatency(factory).result()
+    assert result["deliver"] == {"mean": 9.0, "max": 9, "n": 1}
+    assert result["total"] == {"mean": 12.0, "max": 12, "n": 1}
+
+
+def test_magic_state_latency_aggregates_all_deliveries_with_bounded_traces():
+    eng = Engine(verbose=False)
+
+    class SequenceService:
+        def __init__(self):
+            self.calls = 0
+
+        def submit_decode(self, round_count, on_done, label="", deadline=None,
+                          code=None, spatial_nodes=None):
+            delay = 100 if self.calls == 0 else self.calls % 7
+            self.calls += 1
+            eng.schedule(delay, on_done, label=label)
+
+    factory = DistillationFactory(
+        eng,
+        num_units=1,
+        cycle_ticks=3,
+        decode_service=SequenceService(),
+        corr_rounds=1,
+        n_corr=1,
+        return_ticks=2,
         p_success=1.0,
     )
     delivered = []
-    for _ in range(4_100):
+    for _ in range(4_101):
         factory.request(0, lambda: delivered.append(eng.now))
     eng.run()
 
     result = MagicStateLatency(factory).result()
 
-    assert len(delivered) == 4_100
-    assert len(factory.traces) == 4_100
-    assert result["total"]["n"] == 4_100
+    assert len(delivered) == 4_101
+    assert len(factory.traces) == factory.traces.maxlen == 4_096
+    assert len({trace.state_id for trace in factory.traces}) == 4_096
+    correction_sum = 12_400
+    assert result["distill"] == {"mean": 3.0, "max": 3, "n": 4_101}
+    assert result["corr_decode"] == {
+        "mean": correction_sum / 4_101,
+        "max": 100,
+        "n": 4_101,
+    }
+    assert result["deliver"] == {"mean": 2.0, "max": 2, "n": 4_101}
+    assert result["total"] == {
+        "mean": 5 + correction_sum / 4_101,
+        "max": 105,
+        "n": 4_101,
+    }
 
 
 def test_multilevel_continuous_fills_top_buffer():

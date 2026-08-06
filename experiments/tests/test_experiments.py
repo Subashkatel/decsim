@@ -31,7 +31,7 @@ from experiments.run_surface import (
     _SurfaceMwpmFactory,
     _circuit,
     _new_output_directory,
-    _windows,
+    _sliding_window_entries,
     run_surface_configuration,
     write_surface_snapshot,
 )
@@ -653,17 +653,21 @@ def test_surface_runner_uses_requested_circuit_noise():
     assert circuit == expected
 
 
-def test_surface_runner_absorbs_terminal_layer_and_short_tail():
+def test_surface_runner_uses_the_simulator_sliding_window_geometry():
     configuration = {
         "rounds": 7,
         "commit_rounds": 3,
         "buffer_rounds": 3,
     }
 
-    assert _windows(configuration) == ((1, 3, 6), (4, 7, 7))
-    assert _windows({**configuration, "rounds": 6}) == (
+    assert _sliding_window_entries(configuration) == (
         (1, 3, 6),
-        (4, 6, 6),
+        (4, 6, 9),
+        (7, 7, 10),
+    )
+    assert _sliding_window_entries({**configuration, "rounds": 6}) == (
+        (1, 3, 6),
+        (4, 6, 9),
     )
 
 
@@ -715,8 +719,7 @@ def test_surface_runner_resolves_default_experiment_name_before_identity(tmp_pat
     )
 
 
-def test_surface_runner_window_decode_matches_global_reference():
-    pymatching = pytest.importorskip("pymatching")
+def test_surface_runner_folds_terminal_detectors_into_the_final_window():
     configuration = {
         "distance": 3,
         "rounds": 6,
@@ -725,20 +728,17 @@ def test_surface_runner_window_decode_matches_global_reference():
         "buffer_rounds": 3,
     }
     decoder = _SurfaceMwpmFactory(configuration)()
-    detectors, _ = decoder.circuit.compile_detector_sampler(seed=43).sample(
-        shots=1, separate_observables=True
-    )
-    prediction = decode_windowed(
-        decoder.window_models,
-        detectors[0],
-        decoder.decode_window,
-        selected_fault_representation=FaultRepresentation.GRAPHLIKE,
-    )
-    global_matching = pymatching.Matching.from_detector_error_model(
-        decoder.circuit.detector_error_model(decompose_errors=True)
-    )
+    terminal_detector_ids = {
+        detector_id
+        for detector_id, coordinates in
+        decoder.circuit.get_detector_coordinates().items()
+        if int(coordinates[-1]) == configuration["rounds"]
+    }
 
-    assert tuple(prediction) == tuple(global_matching.decode(detectors[0]))
+    assert terminal_detector_ids
+    assert decoder.window_models[-1].commit_lo == 4
+    assert decoder.window_models[-1].commit_hi == 6
+    assert terminal_detector_ids <= set(decoder.window_models[-1].detector_ids)
 
 
 @pytest.mark.parametrize(

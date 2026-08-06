@@ -20,6 +20,7 @@ from decsim.detector_error_model import (
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
 from decsim.mwpm_decoder import matching_window_decoder
+from decsim.schemes import SlidingWindowScheme
 
 from .decoding import OfflineBatchDecoder, read_stored_batch_result, run_offline_parallel
 from .harness import (
@@ -56,20 +57,17 @@ def _circuit(configuration):
     )
 
 
-def _windows(configuration):
-    rounds = configuration["rounds"]
-    commit = configuration["commit_rounds"]
-    buffer = configuration["buffer_rounds"]
-    windows = []
-    for commit_lo in range(1, rounds + 1, commit):
-        remaining = rounds - commit_lo + 1
-        if remaining < commit and windows:
-            previous_lo, _, _ = windows[-1]
-            windows[-1] = (previous_lo, rounds, rounds)
-            break
-        commit_hi = min(commit_lo + commit - 1, rounds)
-        windows.append((commit_lo, commit_hi, min(commit_hi + buffer, rounds)))
-    return tuple(windows)
+def _sliding_window_entries(configuration):
+    plan = SlidingWindowScheme().plan_operation(
+        0,
+        configuration["rounds"],
+        commit_round_count=configuration["commit_rounds"],
+        buffer_round_count=configuration["buffer_rounds"],
+    )
+    return tuple(
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in plan.windows
+    )
 
 
 @dataclass(frozen=True)
@@ -80,7 +78,7 @@ class _SurfaceMwpmFactory:
         circuit = _circuit(self.configuration)
         return OfflineBatchDecoder.prepare(
             circuit,
-            _windows(self.configuration),
+            _sliding_window_entries(self.configuration),
             matching_window_decoder(),
             round_count=self.configuration["rounds"],
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
@@ -243,7 +241,7 @@ def write_surface_snapshot(requested_configuration, output_root, result,
             "config_id": result.config_id,
             "sample_set_id": sample_plan.sample_set_id,
             "batches": [asdict(batch) for batch in batches],
-            "windows": _windows(configuration),
+            "windows": _sliding_window_entries(configuration),
         }) + b"\n")
     if "invocation" in artifacts:
         write_bytes("invocation.json", canonical_json(invocation) + b"\n")

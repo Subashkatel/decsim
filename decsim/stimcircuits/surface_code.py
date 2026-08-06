@@ -21,19 +21,9 @@ import math
 
 
 def _check_probability(value, field_name: str) -> float:
-    if type(value) not in (int, float):
-        raise TypeError(
-            f"{field_name} must be a built-in int or float; got {value!r}"
-        )
-    if type(value) is float and not math.isfinite(value):
-        raise ValueError(f"{field_name} must be finite; got {value!r}")
-    if not 0 <= value <= 1:
-        raise ValueError(f"{field_name} must be in [0, 1]; got {value!r}")
     normalized = float(value)
     if not math.isfinite(normalized) or not 0 <= normalized <= 1:
-        raise ValueError(
-            f"{field_name} is not representable as a probability; got {value!r}"
-        )
+        raise ValueError(f"{field_name} must be finite and in [0, 1]")
     return normalized
 
 

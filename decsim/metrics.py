@@ -676,15 +676,12 @@ class MagicStateLatency:
 
     def result(self) -> dict:
         """Per-stage {mean, max, n} in ticks across all delivered states."""
-        traces = [t for t in getattr(self.factory, "traces", [])
-                  if t.t_delivered is not None and t.t_corr_done is not None]
-        stages = ("distill", "corr_decode", "deliver", "total")
-        if not traces:
-            return {stage: {"mean": 0.0, "max": 0, "n": 0} for stage in stages}
-        values = {"distill": [trace.t_phys_done - trace.t_distill_start for trace in traces],
-                  "corr_decode": [trace.t_corr_done - trace.t_phys_done for trace in traces],
-                  "deliver": [trace.t_delivered - trace.t_corr_done for trace in traces],
-                  "total": [trace.t_delivered - trace.t_distill_start for trace in traces]}
-        return {stage: {"mean": sum(stage_values) / len(stage_values),
-                        "max": max(stage_values), "n": len(stage_values)}
-                for stage, stage_values in values.items()}
+        totals = self.factory.latency_aggregate_snapshot()
+        return {
+            stage: {
+                "mean": row["sum"] / row["n"] if row["n"] else 0.0,
+                "max": row["max"],
+                "n": row["n"],
+            }
+            for stage, row in totals.items()
+        }

@@ -247,7 +247,7 @@ class DistillationFactory(_RandomSeedConsumer):
         )
 
     def _init_runtime_state(self, initial_store: int) -> None:
-        """Initialize queues, counters, and delivered-state traces."""
+        """Initialize queues, counters, and bounded diagnostic traces."""
         self.store = initial_store
         self.waiting: list[tuple[int, Callable[[], None]]] = []
         self.produced = 0
@@ -257,7 +257,12 @@ class DistillationFactory(_RandomSeedConsumer):
         self.total_stall = 0
         self._stall_start: dict[int, int] = {}
         self._shutdown = False
-        self.traces: deque = deque()
+        self.traces: deque = deque(maxlen=4096)
+        self._delivered_latency_count = 0
+        self._delivered_latency_sums = dict.fromkeys(
+            ("distill", "corr_decode", "deliver", "total"), 0
+        )
+        self._delivered_latency_maxima = self._delivered_latency_sums.copy()
         self._ready_traces: list[StateTrace] = []
         self._next_state_id = 0
 
@@ -361,6 +366,7 @@ class DistillationFactory(_RandomSeedConsumer):
             if self._ready_traces:             # warm-start states have no trace
                 trace = self._ready_traces.pop(0)
                 trace.t_delivered = self.engine.now
+                self._record_delivered_trace(trace)
                 self.traces.append(trace)
             op_id, callback = self.waiting.pop(0)
             waited = self.engine.now - self._stall_start.pop(op_id, self.engine.now)
@@ -370,6 +376,31 @@ class DistillationFactory(_RandomSeedConsumer):
                             f"  -> delivered to op#{op_id} (store now {self.store}){tag}")
             callback()
             self._maybe_start()                # continuous mode: refill the slot just taken
+
+    def _record_delivered_trace(self, trace: StateTrace) -> None:
+        values = {
+            "distill": trace.t_phys_done - trace.t_distill_start,
+            "corr_decode": trace.t_corr_done - trace.t_phys_done,
+            "deliver": trace.t_delivered - trace.t_corr_done,
+            "total": trace.t_delivered - trace.t_distill_start,
+        }
+        self._delivered_latency_count += 1
+        for stage, value in values.items():
+            self._delivered_latency_sums[stage] += value
+            self._delivered_latency_maxima[stage] = max(
+                self._delivered_latency_maxima[stage], value
+            )
+
+    def latency_aggregate_snapshot(self) -> dict:
+        """Return exact all-delivery totals independent of trace eviction."""
+        return {
+            stage: {
+                "sum": total,
+                "max": self._delivered_latency_maxima[stage],
+                "n": self._delivered_latency_count,
+            }
+            for stage, total in self._delivered_latency_sums.items()
+        }
 
 @dataclass
 class DistillLevel:

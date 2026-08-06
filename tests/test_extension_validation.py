@@ -55,7 +55,9 @@ class LegacyBoundaryPolicy:
 class StaticOnlyDevice:
     operation_circuit_scope = "none"
 
-    def begin_operation(self, operation, resolved_round_count):
+    def begin_operation(
+        self, operation, segment_round_count, source_round_count
+    ):
         return None
 
     def round_payloads(self, operation, round_index):
@@ -69,7 +71,9 @@ class StaticOnlyDevice:
 
 
 class MissingCircuitScopeDevice:
-    def begin_operation(self, operation, resolved_round_count):
+    def begin_operation(
+        self, operation, segment_round_count, source_round_count
+    ):
         return None
 
     def round_payloads(self, operation, round_index):
@@ -128,7 +132,9 @@ class CircuitRecordingTimingDevice(TimingOnlyDevice):
     def __init__(self):
         self.circuits_seen = []
 
-    def begin_operation(self, operation, resolved_round_count):
+    def begin_operation(
+        self, operation, segment_round_count, source_round_count
+    ):
         self.circuits_seen.append(operation.circuit)
 
 
@@ -415,8 +421,12 @@ def test_device_receives_the_exact_frozen_operation_round_count():
         def __init__(self):
             self.received = []
 
-        def begin_operation(self, operation, resolved_round_count):
-            self.received.append((operation.id, resolved_round_count))
+        def begin_operation(
+            self, operation, segment_round_count, source_round_count
+        ):
+            self.received.append(
+                (operation.id, segment_round_count, source_round_count)
+            )
 
     device = RoundRecordingDevice()
     RunSpec(
@@ -426,7 +436,7 @@ def test_device_receives_the_exact_frozen_operation_round_count():
         device=device,
     ).build()
 
-    assert device.received == [(9, 7)]
+    assert device.received == [(9, 7, 7)]
 
 
 def test_syndrome_bit_device_must_share_the_exact_resolved_code():

@@ -118,38 +118,39 @@ class SurfaceCodeModel:
 
 @dataclass(frozen=True)
 class BBCodeModel:
-    """Bivariate-bicycle gross-code estimate model ([[144,12,12]],
-    Bravyi et al. arXiv:2308.07915).
+    """Bivariate-bicycle timing card (Bravyi et al., arXiv:2308.07915).
 
-    This is the CodeModel port's second implementation: a code whose
-    decoding graph is NOT d^2 per patch keeps surface-code assumptions
-    from leaking into the planning seams.
-
-    n_detectors was captured from a reference gross-code memory-experiment
-    DEM; note n_detectors/d = 78 detectors per round, which is not the
-    code's 132 checks (DEM detectors differ from raw checks at the first/
-    last rounds). The same capture also recorded num_checks=132 and
-    n_faults=8784, kept here for the record since nothing consumes them."""
+    A complete CSS extraction cycle measures n/2 X checks and n/2 Z checks.
+    Exact window-local detector rows remain owned by the detector error model.
+    """
 
     n: int = 144                     # physical qubits
     k: int = 12                      # logical qubits
     d: int = 12                      # code distance
-    n_detectors: int = 936           # captured DEM detector count (see above)
     round_us: Optional[float] = None  # per-code round period; None = global cadence
+    commit_rounds_override: Optional[int] = None
+    buffer_rounds_override: Optional[int] = None
 
     def __post_init__(self) -> None:
         """Validate the built-in BB timing and sizing card."""
-        for field_name in ("n", "k", "d", "n_detectors"):
+        for field_name in ("n", "k", "d"):
             _require_positive_int(getattr(self, field_name), field_name)
+        if self.n % 2:
+            raise ValueError(f"n must be even; got {self.n!r}")
         if self.k > self.n:
             raise ValueError(f"k must not exceed n; got k={self.k!r}, n={self.n!r}")
         if self.d > self.n:
             raise ValueError(f"d must not exceed n; got d={self.d!r}, n={self.n!r}")
-        if self.n_detectors % self.d != 0:
-            raise ValueError(
-                "n_detectors must be divisible by d; "
-                f"got n_detectors={self.n_detectors!r}, d={self.d!r}"
+        if self.commit_rounds_override is not None:
+            _require_positive_int(
+                self.commit_rounds_override, "commit_rounds_override"
             )
+        if self.buffer_rounds_override is not None:
+            value = self.buffer_rounds_override
+            if type(value) is not int:
+                raise TypeError("buffer_rounds_override must be a built-in int")
+            if value < 0:
+                raise ValueError("buffer_rounds_override must be nonnegative")
         object.__setattr__(self, "round_us", _check_round_us(self.round_us))
 
     @property
@@ -170,25 +171,31 @@ class BBCodeModel:
         return self.round_us
 
     def buffering_floor(self) -> tuple[int, int]:
-        """Literature buffering floor per side: (lead, trail) = (d, d)
-        (Skoric n_buf=d, arXiv:2209.08552; Bombin b>=d, arXiv:2303.04846)."""
-        return (self.d, self.d)
+        return (0, 0)
 
     def buffer_floor_override_active(self) -> bool:
-        return False
+        return True
 
     def commit_rounds(self) -> int:
         """Rounds committed per decode window."""
-        return self.d
+        return (
+            self.d
+            if self.commit_rounds_override is None
+            else self.commit_rounds_override
+        )
 
     def buffer_rounds(self) -> int:
         """Look-ahead buffer rounds per window."""
-        return self.d
+        return (
+            0
+            if self.buffer_rounds_override is None
+            else self.buffer_rounds_override
+        )
 
     def spatial_nodes(self, num_patches: int) -> int:
-        """Per-round detector count used for accounting."""
-        return max(1, num_patches) * (self.n_detectors // self.d)
+        """Combined per-cycle check count used as a bulk timing proxy."""
+        return max(1, num_patches) * self.n
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
-        """Syndrome bits measured per round (~ checks per round)."""
-        return max(1, num_patches) * (self.n_detectors // self.d)
+        """Raw X-plus-Z check bits measured in one complete BB cycle."""
+        return max(1, num_patches) * self.n

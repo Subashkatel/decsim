@@ -71,6 +71,13 @@ def test_decode_job_has_no_rollback_fields():
     assert job.attempt == 0
 
 
+def test_decode_job_detector_count_comes_from_its_local_model():
+    local_model = type("LocalModel", (), {"detector_ids": tuple(range(216))})()
+
+    assert DecodeJob(1, 0, 3).detector_count is None
+    assert DecodeJob(1, 0, 3, dem=local_model).detector_count == 216
+
+
 def test_window_start_round_and_graph():
     w = Window(op_id=0, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=9,
                buffer_lo=1)

@@ -44,9 +44,10 @@ def _same(a, b):
     )
 
 
-def _incremental(circ, plan, folded):
+def _incremental(circ, plan, folded, round_count):
     slicer = WindowSlicer(
         circ,
+        round_count=round_count,
         detector_rounds=folded,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
     )
@@ -89,11 +90,12 @@ def test_slicer_identical_to_static_builder(scheme, R):
     ref = build_window_error_models(
         circ,
         plan,
+        round_count=R,
         detector_rounds=folded,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
-    inc = _incremental(circ, plan, folded)
+    inc = _incremental(circ, plan, folded, R)
     assert len(inc) == len(ref)
     assert all(_same(a, b) for a, b in zip(ref, inc))
 
@@ -114,7 +116,7 @@ def test_incremental_sliding_decode_equals_global_per_shot():
             buffer_round_count=D,
         ).windows
     ]
-    inc = _incremental(circ, plan, folded)
+    inc = _incremental(circ, plan, folded, R)
     gm = pymatching.Matching.from_detector_error_model(circ.detector_error_model(decompose_errors=True))
     inner = matching_window_decoder()
     shots = 1500
@@ -153,6 +155,7 @@ def test_matching_window_decoder_cache_survives_id_reuse():
         return build_window_error_models(
             circ,
             plan,
+            round_count=6,
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
             fault_exclusion_ranges=(),
         )[0]

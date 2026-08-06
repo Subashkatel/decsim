@@ -154,11 +154,12 @@ def _window_models(fault_model_requirement):
         after_reset_flip_probability=0.003,
         before_measure_flip_probability=0.003,
         before_round_data_depolarization=0.003)
-    n_layers = 1 + max(int(c[-1]) for c in
-                       circuit.get_detector_coordinates().values())
+    n_layers = max(int(c[-1]) for c in
+                   circuit.get_detector_coordinates().values())
     return build_window_error_models(
         circuit,
         [(1, n_layers, n_layers)],
+        round_count=n_layers,
         fault_model_requirement=fault_model_requirement,
         fault_exclusion_ranges=(),
     )

@@ -118,6 +118,7 @@ def test_windowed_tracks_global_on_walker_dem_samples():
     # BOTH sides of this comparison use the graphlike subset -- same
     # model, bit-for-bit comparable.
     circuit_for_slicing = SimpleNamespace(
+        num_detectors=graphlike_dem.num_detectors,
         num_observables=1,
         detector_error_model=lambda *, decompose_errors: graphlike_dem,
         get_detector_coordinates=lambda: {},
@@ -125,6 +126,7 @@ def test_windowed_tracks_global_on_walker_dem_samples():
     models = build_window_error_models(
         circuit_for_slicing,
         [(1, 3, 5), (4, 5, 6), (6, 7, 7)],
+        round_count=7,
         detector_rounds=rounds_of,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),

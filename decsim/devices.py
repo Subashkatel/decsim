@@ -1,8 +1,6 @@
-"""Clocked syndrome source (port 2): per-op round emission on the round clock.
+"""Clocked syndrome source: emit each operation on the round clock.
 
-Part module: the round-emission half of the QPU seam (the control half is
-chip.py's Chip). The Chip drives it via start(op, ...) and receives
-on_body_done(op) at the final round — in the SAME event (Contract 3 rule 1).
+The final round and ``on_body_done`` occur in the same event.
 """
 
 from __future__ import annotations
@@ -35,11 +33,8 @@ class TimingOnlyDevice:
 
     operation_circuit_scope = "none"
 
-    def begin_operation(
-        self,
-        op: Operation,
-        resolved_round_count: int,
-    ) -> None:
+    def begin_operation(self, op: Operation, segment_round_count: int,
+                        source_round_count: int) -> None:
         return None
 
     def round_payloads(self, op: Operation, round_index: int) -> list:
@@ -52,7 +47,8 @@ class TimingOnlyDevice:
                             patch) -> list:
         return [SyndromePayload(stream_id, patch, global_round)]
 
-    def finalize_stream_round(self, op: Operation) -> list:
+    def finalize_stream_round(self, op: Operation,
+                              source_round_count: int) -> list:
         raise ValueError("TimingOnlyDevice cannot finalize a physical stream")
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
@@ -110,6 +106,19 @@ class ClockedDevice:
             raise ValueError(
                 f"operation {operation.id} has no resolved round count"
             ) from error
+        source_operation_id = (
+            operation.stream_id
+            if operation.stream_id is not None
+            else operation.id
+        )
+        try:
+            source_round_count = self._round_count_by_operation_id[
+                source_operation_id
+            ]
+        except KeyError as error:
+            raise ValueError(
+                f"source operation {source_operation_id} has no resolved round count"
+            ) from error
         if not operation.emits_detector_data:
             self.engine.schedule(
                 total_rounds * round_ticks,
@@ -123,11 +132,16 @@ class ClockedDevice:
                     "zero-duration detector emitters must finalize a stream round"
                 )
             self.relay_payloads(
-                self.device.finalize_stream_round(operation), operation
+                self.device.finalize_stream_round(
+                    operation, source_round_count
+                ),
+                operation,
             )
             on_body_done(operation)
             return
-        self.device.begin_operation(operation, total_rounds)
+        self.device.begin_operation(
+            operation, total_rounds, source_round_count
+        )
         self.engine.schedule(
             round_ticks,
             lambda: self._round(
@@ -292,12 +306,8 @@ class SyndromeBitDevice:
             self._pending_run_seed = None
             self._run_seed_claimed = True
 
-    def begin_operation(
-        self,
-        op: Operation,
-        resolved_round_count: int,
-    ) -> None:
-        """Nothing to set up."""
+    def begin_operation(self, op: Operation, segment_round_count: int,
+                        source_round_count: int) -> None:
         return None
 
     def _bits(self, num_patches: int) -> list:
@@ -341,7 +351,8 @@ class SyndromeBitDevice:
         return [SyndromePayload(stream_id, patch, global_round, bits=bits,
                                 code=self.code.name, size_bits=len(bits))]
 
-    def finalize_stream_round(self, op: Operation) -> list[SyndromePayload]:
+    def finalize_stream_round(self, op: Operation,
+                              source_round_count: int) -> list[SyndromePayload]:
         raise ValueError("SyndromeBitDevice cannot finalize a physical stream")
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,
@@ -351,7 +362,6 @@ class SyndromeBitDevice:
 
     def validate_stream_length(self, stream_op: Operation,
                                stream_round_count: int) -> None:
-        """Fake-bit streams can seal at any runtime length."""
         return None
 
     def window_models_for_operation(self, op: Operation, windows: list,

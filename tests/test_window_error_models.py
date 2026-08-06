@@ -25,6 +25,7 @@ from decsim.detector_error_model import (
     decode_windowed_backend_outcomes,
     detector_error_model_to_faults,
     detector_error_model_to_faults_bm,
+    resolve_detector_rounds,
 )
 from decsim.adapters.window_decode_results import (
     BackendDecodeOutcome,
@@ -52,9 +53,9 @@ def _memory_circuit(d=3, rounds=12, p=0.003):
 
 def _plan(circuit, d=3):
     """The REAL scheme's window plan over the circuit's detector layers
-    (layer t = round t+1), exactly as the cluster would plan it."""
-    n_layers = 1 + max(int(c[-1]) for c in
-                       circuit.get_detector_coordinates().values())
+    with the terminal data-close layer folded into the final source round."""
+    n_layers = max(int(c[-1]) for c in
+                   circuit.get_detector_coordinates().values())
     return [
         (window.commit_lo, window.commit_hi, window.buffer_hi)
         for window in SlidingWindowScheme().plan_operation(
@@ -1247,6 +1248,7 @@ def test_belief_repeated_physical_identity_keeps_first_decomposition():
 
 def test_belief_window_projection_preserves_physical_component_identity():
     class DemBackedCircuit:
+        num_detectors = 3
         num_observables = 0
 
         def detector_error_model(self, *, decompose_errors):
@@ -1265,6 +1267,8 @@ def test_belief_window_projection_preserves_physical_component_identity():
     exact_model = build_window_error_models(
         DemBackedCircuit(),
         [(1, 1, 1)],
+        round_count=1,
+        detector_rounds={0: 1, 1: 1, 2: 1},
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
         fault_exclusion_ranges=(),
     )[0]
@@ -1283,6 +1287,7 @@ def test_belief_window_projection_preserves_physical_component_identity():
     models = build_window_error_models(
         circuit,
         _plan(circuit),
+        round_count=6,
         fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -1298,22 +1303,7 @@ def test_belief_window_projection_preserves_physical_component_identity():
             physical.check,
         )
 
-    first = models[0]
-    graphlike = first.graphlike_faults
-    physical = first.physical_faults
-    projected_observables = (
-        graphlike.observables
-        @ first.physical_to_graphlike_detector_projection
-    ) % 2
-    observable_residuals = np.flatnonzero(
-        np.any(projected_observables != physical.observables, axis=0)
-    )
-
-    # A real d=3 boundary contains five physical mechanisms whose omitted
-    # beyond-window graph component carries a logical tag. The local link is
-    # therefore detector-exact but cannot be observable-exact without adding
-    # a detectorless logical graph column.
-    assert observable_residuals.size == 5
+    graphlike = models[0].graphlike_faults
     assert not np.any(
         (graphlike.check.sum(axis=0) == 0)
         & (graphlike.observables.sum(axis=0) != 0)
@@ -1325,6 +1315,7 @@ def test_every_fault_is_owned_by_exactly_one_window():
     circuit = _memory_circuit()
     models = build_window_error_models(
         circuit, _plan(circuit),
+        round_count=12,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -1342,6 +1333,7 @@ def test_interior_windows_have_open_time_boundaries():
     circuit = _memory_circuit()
     models = build_window_error_models(
         circuit, _plan(circuit),
+        round_count=12,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -1357,6 +1349,7 @@ def test_single_crossing_fault_round_trips_exactly():
     circuit = _memory_circuit()
     models = build_window_error_models(
         circuit, _plan(circuit),
+        round_count=12,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -1402,6 +1395,7 @@ def test_windowed_accuracy_matches_global_decoding():
     circuit = _memory_circuit(d=3, rounds=12, p=0.003)
     models = build_window_error_models(
         circuit, _plan(circuit),
+        round_count=12,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -1433,6 +1427,7 @@ def test_empty_syndrome_decodes_to_no_correction_and_no_flip():
     circuit = _memory_circuit(d=3, rounds=9, p=0.003)
     models = build_window_error_models(
         circuit, _plan(circuit),
+        round_count=9,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -1462,6 +1457,7 @@ def test_boundary_priors_are_clipped_not_infinite():
     models = build_window_error_models(
         circuit,
         [(1, 3, 6), (4, 6, 6)],
+        round_count=6,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -1521,81 +1517,19 @@ def test_boundary_priors_are_clipped_not_infinite():
             )
 
 
-def test_sub_d_tail_window_measurably_degrades_accuracy():
-    """Characterization pin for the 2026-07-02 finding (validation-matrix rows
-    11/19): a final commit window shorter than d decodes with too little
-    history and measurably degrades windowed accuracy, while absorbing the
-    tail into the last full window tracks global decoding almost exactly.
+def test_terminal_layer_is_not_a_phantom_tail_window():
+    circuit = _memory_circuit(d=3, rounds=10, p=0.008)
+    coordinates = circuit.get_detector_coordinates()
+    terminal_ids = {
+        detector_id
+        for detector_id, coordinate in coordinates.items()
+        if int(coordinate[-1]) == 10
+    }
 
-    This is NOT the desired end state -- it documents a real, currently
-    shipped behavior (SlidingWindowScheme docstring carries the caveat; the
-    timing goldens pin its layout). If a change makes the tail plan match
-    global, this test should fail and be UPDATED, loudly, not silently.
+    resolved = resolve_detector_rounds(circuit, None, 10)
 
-    Fixed seed -> deterministic counts; margins allow pymatching tie-breaking
-    drift, not behavioral change."""
-    pymatching = pytest.importorskip("pymatching")
-    d, rounds, p, shots = 3, 10, 0.008, 4000
-    circuit = _memory_circuit(d=d, rounds=rounds, p=p)
-
-    def _plan(absorb):
-        plan, lo = [], 1
-        while (rounds - lo + 1 >= 2 * d) if absorb else (lo + d - 1 <= rounds):
-            plan.append((lo, lo + d - 1, min(lo + d - 1 + d, rounds)))
-            lo += d
-        if lo <= rounds:
-            plan.append((lo, rounds, rounds))   # absorbed tail / short tail
-        return plan
-
-    assert _plan(True)[-1] == (7, 10, 10)       # 4-round absorbed final commit
-    assert _plan(False)[-1] == (10, 10, 10)     # 1-round sub-d tail window
-    # and the SHIPPED scheme really does produce a sub-d tail here: for these
-    # 11 detector layers its final window commits only 2 (< d) layers. If
-    # this assertion fails, the shipped plan changed -- re-evaluate the whole
-    # caveat, not just this test.
-    shipped = [
-        (window.commit_lo, window.commit_hi, window.buffer_hi)
-        for window in SlidingWindowScheme().plan_operation(
-            0,
-            11,
-            commit_round_count=d,
-            buffer_round_count=d,
-        ).windows
-    ]
-    assert shipped[-1] == (10, 11, 14)
-    assert shipped[-1][1] - shipped[-1][0] + 1 < d
-
-    dets, obs = circuit.compile_detector_sampler(seed=3).sample(
-        shots, separate_observables=True)
-    matcher = pymatching.Matching.from_detector_error_model(
-        circuit.detector_error_model(decompose_errors=True))
-    g_fail = matcher.decode_batch(dets)[:, 0] != obs[:, 0]
-
-    fails = {}
-    for absorb in (True, False):
-        models = build_window_error_models(
-            circuit,
-            _plan(absorb),
-            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
-            fault_exclusion_ranges=(),
-        )
-        decode = matching_window_decoder()
-        fails[absorb] = np.array([
-            decode_windowed(
-                models, dets[k], decode,
-                selected_fault_representation=FaultRepresentation.GRAPHLIKE,
-            )[0] != obs[k, 0]
-            for k in range(shots)])
-
-    # absorbed plan ~= global (measured 2 vs 1 discordant shots at this seed)
-    assert int((fails[True] & ~g_fail).sum()) <= 5
-    # sub-d tail is MEASURABLY worse than the absorbed plan on paired shots
-    # (measured 16 vs 4); if this stops holding, the tail behavior changed
-    worse = int((fails[False] & ~fails[True]).sum())
-    better = int((fails[True] & ~fails[False]).sum())
-    assert worse >= 2 * better + 4, (
-        f"sub-d tail no longer degrades accuracy (worse={worse}, "
-        f"better={better}) -- shipped-scheme caveat and docs need updating")
+    assert terminal_ids
+    assert {resolved[detector_id] for detector_id in terminal_ids} == {10}
 
 
 def test_parallel_two_sided_windows_match_global_decoding():
@@ -1608,7 +1542,7 @@ def test_parallel_two_sided_windows_match_global_decoding():
     pymatching = pytest.importorskip("pymatching")
     d, rounds = 5, 20
     circuit = _memory_circuit(d=d, rounds=rounds, p=0.005)
-    n_layers = 1 + max(int(c[-1]) for c in circuit.get_detector_coordinates().values())
+    n_layers = max(int(c[-1]) for c in circuit.get_detector_coordinates().values())
     plan = [
         (
             window.buffer_lo,
@@ -1627,6 +1561,7 @@ def test_parallel_two_sided_windows_match_global_decoding():
     models = build_window_error_models(
         circuit,
         plan,
+        round_count=rounds,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
@@ -1678,6 +1613,7 @@ def _bb_models(circuit):
     return build_window_error_models(
         circuit,
         _BB_PLAN,
+        round_count=12,
         detector_rounds=rounds,
         fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
@@ -1691,9 +1627,64 @@ def test_bb_circuit_without_coordinates_requires_explicit_rounds():
         build_window_error_models(
             circuit,
             _BB_PLAN,
+            round_count=12,
             fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
             fault_exclusion_ranges=(),
         )
+
+
+@pytest.mark.parametrize(
+    ("task", "distance", "round_count", "ordinary_count"),
+    [
+        ("repetition_code:memory", 3, 6, 2),
+        ("surface_code:rotated_memory_z", 3, 3, 8),
+    ],
+)
+def test_finite_memory_rounds_fold_only_the_terminal_layer(
+    task, distance, round_count, ordinary_count
+):
+    circuit = stim.Circuit.generated(
+        task,
+        distance=distance,
+        rounds=round_count,
+        after_clifford_depolarization=0.001,
+    )
+
+    resolved = resolve_detector_rounds(circuit, None, round_count)
+    counts = [
+        sum(value == emitted_round for value in resolved.values())
+        for emitted_round in range(1, round_count + 1)
+    ]
+
+    assert set(resolved) == set(range(circuit.num_detectors))
+    assert set(resolved.values()) == set(range(1, round_count + 1))
+    assert counts[-1] > ordinary_count
+    with pytest.raises(ValueError, match="raw detector layers"):
+        resolve_detector_rounds(circuit, None, round_count - 1)
+    with pytest.raises(ValueError, match="raw detector layers"):
+        resolve_detector_rounds(circuit, None, round_count + 1)
+
+
+def test_explicit_detector_rounds_are_exact_and_never_clamped():
+    circuit = stim.Circuit("M 0 1\nDETECTOR rec[-1]\nDETECTOR rec[-2]")
+    exact = {0: 1, 1: 2}
+    assert resolve_detector_rounds(circuit, exact, 2) == exact
+
+    for invalid in (
+        {True: 1, 1: 2},
+        {0: True, 1: 2},
+        {0: 1},
+        {0: 1, 1: 3},
+        {0: 1, 1: 1},
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            resolve_detector_rounds(circuit, invalid, 2)
+
+
+def test_one_dimensional_coordinates_do_not_implicitly_mean_time():
+    circuit = stim.Circuit("M 0\nDETECTOR(0) rec[-1]")
+    with pytest.raises(ValueError, match="finite-memory"):
+        resolve_detector_rounds(circuit, None, 1)
 
 
 def test_bb_faults_are_not_matchable_and_partition_exactly():

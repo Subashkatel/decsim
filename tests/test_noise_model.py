@@ -88,8 +88,8 @@ def test_high_p_saturates_at_coin_flip_and_windows_survive_dense_syndromes():
     ler = float((matcher.decode_batch(dets)[:, 0] != obs[:, 0]).mean())
     assert 0.45 < ler < 0.55, f"saturation broken: global LER {ler}"
 
-    n_layers = 1 + max(int(cc[-1])
-                       for cc in c.get_detector_coordinates().values())
+    n_layers = max(int(cc[-1])
+                   for cc in c.get_detector_coordinates().values())
     plan = [
         (window.commit_lo, window.commit_hi, window.buffer_hi)
         for window in SlidingWindowScheme().plan_operation(
@@ -102,6 +102,7 @@ def test_high_p_saturates_at_coin_flip_and_windows_survive_dense_syndromes():
     models = build_window_error_models(
         c,
         plan,
+        round_count=n_layers,
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )

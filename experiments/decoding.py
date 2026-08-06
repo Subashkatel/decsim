@@ -2,12 +2,14 @@
 
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+import hashlib
 import os
 from pathlib import Path
 
 from decsim.detector_error_model import (
     build_window_error_models,
     decode_windowed,
+    resolve_detector_rounds,
 )
 
 from .harness import Batch, offline_batch_seed, sample_batch_sha256
@@ -31,6 +33,35 @@ class DecodedBatch:
     window_attempts: int
 
 
+def load_layered_stim_input(circuit_path, expected_sha256,
+                            detector_counts_by_round):
+    """Load immutable Stim bytes and expand per-round detector counts."""
+    import stim
+
+    source = Path(circuit_path).read_bytes()
+    if hashlib.sha256(source).hexdigest() != expected_sha256:
+        raise ValueError("Stim input SHA-256 does not match the declaration")
+    if type(detector_counts_by_round) is not tuple or not detector_counts_by_round:
+        raise TypeError("detector_counts_by_round must be a nonempty tuple")
+    if any(type(count) is not int or count < 1
+           for count in detector_counts_by_round):
+        raise ValueError("detector counts must be positive built-in ints")
+
+    circuit = stim.Circuit(source.decode("utf-8"))
+    if sum(detector_counts_by_round) != circuit.num_detectors:
+        raise ValueError("declared detector counts do not match the circuit")
+    detector_rounds = {}
+    detector_id = 0
+    for round_index, count in enumerate(detector_counts_by_round, start=1):
+        for _ in range(count):
+            detector_rounds[detector_id] = round_index
+            detector_id += 1
+    round_count = len(detector_counts_by_round)
+    return circuit, resolve_detector_rounds(
+        circuit, detector_rounds, round_count
+    ), round_count
+
+
 class OfflineBatchDecoder:
     """Reuse window models and a cached decoder while sampling fresh batches."""
 
@@ -47,6 +78,7 @@ class OfflineBatchDecoder:
         windows,
         decode_window,
         *,
+        round_count,
         fault_model_requirement,
         fault_representation,
         detector_rounds=None,
@@ -56,6 +88,7 @@ class OfflineBatchDecoder:
             circuit,
             windows,
             num_observables,
+            round_count=round_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=(),

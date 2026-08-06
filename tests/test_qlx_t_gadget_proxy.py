@@ -89,6 +89,7 @@ def test_windowed_decode_equals_global_on_t_gadget_proxy():
         build_window_error_models(
             circuit,
             plan,
+            round_count=total_rounds,
             detector_rounds=rounds_of,
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
             fault_exclusion_ranges=(),

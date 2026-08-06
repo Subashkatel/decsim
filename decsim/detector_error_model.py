@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import Optional
 
 
@@ -605,19 +606,65 @@ def detector_error_model_to_faults_bm(dem) -> tuple:
             hyperedge_to_edge)
 
 
-def _detector_rounds_from_circuit(circuit, detector_rounds: Optional[dict]) -> dict:
-    """Return global detector id -> 1-based syndrome round."""
-    if detector_rounds is not None:
-        return dict(detector_rounds)
+def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
+                            round_count: int) -> dict[int, int]:
+    """Resolve one finite source into decsim's one-based emitted rounds.
 
-    coords = circuit.get_detector_coordinates()
-    coordless = sum(1 for coord in coords.values() if not coord)
-    if coordless:
-        raise ValueError(
-            f"{coordless} detectors carry no coordinates; pass detector_rounds "
-            "(global detector id -> 1-based round) explicitly")
-    return {detector_id: int(coord[-1]) + 1
-            for detector_id, coord in coords.items()}
+    Without a map, accept Stim repetition or decsim surface/toric coordinates.
+    """
+    if type(round_count) is not int:
+        raise TypeError("round_count must be a built-in int")
+    if round_count < 1:
+        raise ValueError("round_count must be positive")
+    detector_count = circuit.num_detectors
+    if detector_count < 1:
+        raise ValueError("a finite decoding source must contain detectors")
+
+    if detector_rounds is None:
+        coordinates = circuit.get_detector_coordinates()
+        arities = {len(coordinates.get(detector_id, ()))
+                   for detector_id in range(detector_count)}
+        if len(arities) != 1:
+            raise ValueError("finite-memory detector coordinates need one arity")
+        coordinate_arity = next(iter(arities))
+        if coordinate_arity != 2 and coordinate_arity < 3:
+            raise ValueError(
+                "finite-memory chronology requires supported coordinates or "
+                "explicit detector_rounds"
+            )
+        raw_layers = {}
+        for detector_id in range(detector_count):
+            raw_value = coordinates[detector_id][-1]
+            if not math.isfinite(raw_value) or raw_value != int(raw_value):
+                raise ValueError("finite-memory detector layers must be finite integers")
+            raw_layer = int(raw_value)
+            if raw_layer < 0:
+                raise ValueError("finite-memory detector layers must be nonnegative")
+            raw_layers[detector_id] = raw_layer
+        expected_layers = set(range(round_count + 1))
+        if set(raw_layers.values()) != expected_layers:
+            raise ValueError(
+                "raw detector layers must equal the declared source duration"
+            )
+        resolved = {
+            detector_id: (
+                round_count if raw_layer == round_count else raw_layer + 1
+            )
+            for detector_id, raw_layer in raw_layers.items()
+        }
+    else:
+        resolved = dict(detector_rounds)
+
+    for detector_id, emitted_round in resolved.items():
+        if type(detector_id) is not int or type(emitted_round) is not int:
+            raise TypeError("detector ids and emitted rounds must be built-in ints")
+    if set(resolved) != set(range(detector_count)):
+        raise ValueError("detector-round map must cover every detector exactly")
+    if any(not 1 <= value <= round_count for value in resolved.values()):
+        raise ValueError("detector-round map contains an out-of-range round")
+    if set(resolved.values()) != set(range(1, round_count + 1)):
+        raise ValueError("detector-round map must fill every emitted round")
+    return resolved
 
 
 def _detector_position_in_round(round_of: dict) -> dict:
@@ -1063,6 +1110,7 @@ class WindowSlicer:
         circuit,
         num_observables: Optional[int] = None,
         *,
+        round_count: int,
         detector_rounds: Optional[dict] = None,
         fault_model_requirement: DecoderFaultModelRequirement,
     ):
@@ -1076,7 +1124,9 @@ class WindowSlicer:
             if num_observables is not None
             else circuit.num_observables
         )
-        self.round_of = _detector_rounds_from_circuit(circuit, detector_rounds)
+        self.round_of = resolve_detector_rounds(
+            circuit, detector_rounds, round_count
+        )
         self.pos_of = _detector_position_in_round(self.round_of)
         self.committed_elsewhere = {
             representation: set()
@@ -1166,6 +1216,7 @@ def build_window_error_models(
     plan: list,
     num_observables: Optional[int] = None,
     *,
+    round_count: int,
     detector_rounds: Optional[dict] = None,
     fault_model_requirement: DecoderFaultModelRequirement,
     fault_exclusion_ranges: tuple,
@@ -1174,6 +1225,7 @@ def build_window_error_models(
     slicer = WindowSlicer(
         circuit,
         num_observables,
+        round_count=round_count,
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
     )
@@ -1193,6 +1245,7 @@ def _build_single_window_error_model(
     window_entry: tuple,
     num_observables: Optional[int],
     *,
+    round_count: int,
     detector_rounds: Optional[dict],
     fault_model_requirement: DecoderFaultModelRequirement,
     fault_exclusion_ranges: tuple,
@@ -1201,6 +1254,7 @@ def _build_single_window_error_model(
     slicer = WindowSlicer(
         circuit,
         num_observables,
+        round_count=round_count,
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
     )
@@ -1213,7 +1267,8 @@ def _build_single_window_error_model(
 
 def build_single_window_error_model(circuit, window_entry: tuple,
                                     num_observables: Optional[int] = None,
-                                    *, detector_rounds: Optional[dict] = None,
+                                    *, round_count: int,
+                                    detector_rounds: Optional[dict] = None,
                                     fault_model_requirement:
                                     DecoderFaultModelRequirement,
                                     exclude_faults_touching: Optional[tuple] = None
@@ -1230,6 +1285,7 @@ def build_single_window_error_model(circuit, window_entry: tuple,
     )
     return _build_single_window_error_model(
         circuit, window_entry, num_observables,
+        round_count=round_count,
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
         fault_exclusion_ranges=fault_exclusion_ranges,
@@ -1238,6 +1294,7 @@ def build_single_window_error_model(circuit, window_entry: tuple,
 
 def build_single_window_error_model_with_exclusions(
     circuit, window_entry: tuple, num_observables: Optional[int] = None, *,
+    round_count: int,
     detector_rounds: Optional[dict] = None,
     fault_model_requirement: DecoderFaultModelRequirement,
     fault_exclusion_ranges: tuple,
@@ -1245,6 +1302,7 @@ def build_single_window_error_model_with_exclusions(
     """Build one independent model with multiple non-owned inclusive ranges."""
     return _build_single_window_error_model(
         circuit, window_entry, num_observables,
+        round_count=round_count,
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
         fault_exclusion_ranges=fault_exclusion_ranges,

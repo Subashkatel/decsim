@@ -209,6 +209,7 @@ def test_windowed_decode_equals_global_on_qlx_circuit(
         build_window_error_models(
             circuit,
             plan,
+            round_count=7,
             detector_rounds=detector_rounds,
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
             fault_exclusion_ranges=(),
@@ -274,11 +275,9 @@ def test_stim_device_no_override_path_unchanged(circuit):
     for device in (plain, other):
         op = Operation(id=1, name="m", qubits=(0,), clifford=True,
                        circuit=coord_circuit)
-        device.begin_operation(op, 6)
+        device.begin_operation(op, 6, 6)
     assert plain._by_round[1] == other._by_round[1]
-    assert (plain._detector_rounds_for_key(1, coord_circuit, 6)
-            == other._detector_rounds_for_key(1, coord_circuit, 6)
-            == StimDevice._detector_rounds(coord_circuit, 6))
+    assert plain._source_bindings[1][2] == other._source_bindings[1][2]
 
 
 def test_detection_rate_matches_twin(sampled):

@@ -122,6 +122,7 @@ def test_skoric_windowed_decode_matches_global_on_frozen_shots():
     models = build_window_error_models(
         circ,
         [tuple(w) for w in g["plan"]],
+        round_count=g["plan"][-1][-1],
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )

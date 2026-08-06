@@ -74,6 +74,7 @@ def test_golden_decoding(name):
         build_window_error_models(
             circ,
             plan,
+            round_count=plan[-1][-1],
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
             fault_exclusion_ranges=(),
         ),
@@ -91,6 +92,7 @@ def test_golden_decoding(name):
         build_window_error_models(
             circ,
             plan,
+            round_count=plan[-1][-1],
             fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
             fault_exclusion_ranges=(),
         ),
@@ -110,6 +112,7 @@ def test_golden_decoding(name):
         build_window_error_models(
             circ,
             plan,
+            round_count=plan[-1][-1],
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
             fault_exclusion_ranges=(),
         ),
@@ -143,6 +146,7 @@ def test_golden_bposd(name):
     models = build_window_error_models(
         circ,
         plan,
+        round_count=plan[-1][-1],
         detector_rounds=rounds,
         fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),

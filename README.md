@@ -81,3 +81,14 @@ whole-circuit DEM into per-window models for them.
 ```bash
 python -m pytest tests/
 ```
+
+## Experiments
+
+The experiment harness runs from a repository checkout and stays outside the
+installed simulator package. Install its optional dependencies, then invoke a
+runner with an explicit configuration and output directory:
+
+```bash
+python -m pip install -e ".[experiments]"
+python -m experiments.run_surface --config run.json --output experiment-results
+```

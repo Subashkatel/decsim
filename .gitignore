@@ -41,7 +41,7 @@ docs/*
 !docs/pitch/
 !docs/papers/
 tools/
-tmp/
+/tmp/
 
 # Experiments: artifact dirs are small text/json — tracked for audit
 # (same review finding); anything bulky must go under a raw_big/ dir

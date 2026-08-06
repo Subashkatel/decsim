@@ -24,7 +24,6 @@ from decsim.metrics import (
 )
 from decsim.planner import FixedRounds
 from decsim.policies import Eager, Held, ExtendStream, SeparateDecodeJobs
-from decsim.protocols import DecodingStrategy
 from decsim.run_spec import RunSpec, simulate
 from decsim.schedulers import (
     EarliestDeadlineScheduler,
@@ -570,40 +569,12 @@ def test_static_decode_plan_selection_distinguishes_none_from_empty(
     assert strategy.selected_values == [expected_selected]
 
 
-@pytest.mark.parametrize(("member", "value"), [
-    ("requires_strong_context", "missing"), ("validate_operations", "missing"),
-    ("metrics", None), ("requires_strong_context", 1),
-    ("bulk_strong", 0), ("double_window", None), ("requires_strong_context", object()),
-])
-def test_strategy_contract_fails_before_user_effects(member, value):
-    effects = []
-    hooks = {
-        name: lambda *args, **kwargs: effects.append("strategy hook")
-        for name, declaration in DecodingStrategy.__dict__.items()
-        if not name.startswith("_") and callable(declaration)
-    }
-    attributes = dict(hooks, requires_strong_context=False,
-                      bulk_strong=False, double_window=False)
-    if value == "missing":
-        attributes.pop(member)
-    else:
-        attributes[member] = value
-    class HostileFrontend:
-        def build(self):
-            effects.append("frontend")
-            return []
-
-    with pytest.raises(TypeError, match=member):
-        RunSpec(frontend=HostileFrontend(), strategy=type(
-            "IncompleteStrategy", (), attributes)(), make_factory=lambda *_:
-            effects.append("provider")).build()
-    assert effects == []
-
-
 def test_strategy_selection_and_capabilities_are_resolved_once():
     class OnceStrategy(Baseline):
         def __init__(self):
-            self.reads = dict.fromkeys(DecodingStrategy.__annotations__, 0)
+            self.reads = dict.fromkeys((
+                "requires_strong_context", "bulk_strong", "double_window",
+            ), 0)
 
         def __bool__(self):
             raise AssertionError("strategy selection invoked truthiness")

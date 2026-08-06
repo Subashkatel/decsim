@@ -212,9 +212,7 @@ def test_operation_close_rejects_live_owners_and_purges_released_history():
         store.close_operation(0)
 
     store.release_owner(EndpointRole.SB1, owner)
-    assert store.released_owner_count == 1
     store.close_operation(0)
-    assert store.released_owner_count == 0
 
     store.register_op(1)
     store.register_owner(EndpointRole.SB1, owner, ((1, 1),))
@@ -229,10 +227,12 @@ def test_close_keeps_cross_operation_release_history_until_all_ops_close():
     store.release_owner(EndpointRole.SB1, owner)
 
     store.close_operation(0)
-    assert store.released_owner_count == 1
     store.release_owner(EndpointRole.SB1, owner)
+    with pytest.raises(ValueError, match="duplicate endpoint owner"):
+        store.register_owner(EndpointRole.SB1, owner, ((1, 1),))
     store.close_operation(1)
-    assert store.released_owner_count == 0
+    store.register_op(2)
+    store.register_owner(EndpointRole.SB1, owner, ((2, 1),))
 
 
 def test_closed_replay_source_is_rejected_before_backed_slot_reservation(
@@ -250,11 +250,7 @@ def test_closed_replay_source_is_rejected_before_backed_slot_reservation(
     store.complete_cryo(packet_identity)
     store.close_operation("source")
 
-    before = (
-        tuple(store.endpoint_snapshot(role) for role in EndpointRole),
-        store.backing_identities,
-        store.released_owner_count,
-    )
+    before = _store_state(store)
     reserve_calls = 0
     ledger = store._ledgers[EndpointRole.SB1]
     original_reserve = ledger.reserve
@@ -271,11 +267,7 @@ def test_closed_replay_source_is_rejected_before_backed_slot_reservation(
 
     assert reserve_calls == 0
     assert not store.has_owner(EndpointRole.SB1, owner)
-    assert before == (
-        tuple(store.endpoint_snapshot(role) for role in EndpointRole),
-        store.backing_identities,
-        store.released_owner_count,
-    )
+    assert before == _store_state(store)
 
 
 def test_replay_replacement_refuses_closed_packet_before_release_or_reserve(

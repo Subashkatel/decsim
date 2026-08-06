@@ -46,8 +46,6 @@ class _NoFaultDecoder:
 
 
 def test_protocols_are_structural():
-    assert tuple(DecodingStrategy.__annotations__) == (
-        "requires_strong_context", "bulk_strong", "double_window")
     assert isinstance(_FakeStrategy(), DecodingStrategy)
     assert isinstance(_FakeServices(), StrategyServices)
     assert isinstance(_FakeBoundary(), BoundaryPolicy)

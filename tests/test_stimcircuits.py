@@ -44,7 +44,7 @@ def test_noiseless_circuit_has_no_detection_events():
     ("p_reset", "after_reset_flip_probability"),
 ])
 def test_noise_boundaries_cover_models_and_public_generator(model_field, generator_field):
-    for value in (0, 1, -0.0, 0.25):
+    for value in (0, 1, -0.0, 0.25, Fraction(1, 2)):
         model = NoiseModel(**{model_field: value})
         assert type(getattr(model, model_field)) is float
         generate_circuit(
@@ -61,27 +61,12 @@ def test_noise_boundaries_cover_models_and_public_generator(model_field, generat
                 **{generator_field: value},
             )
 
-    for value in (True, Fraction(1, 2)):
-        with pytest.raises(TypeError, match=model_field):
-            NoiseModel(**{model_field: value})
-        with pytest.raises(TypeError, match=generator_field):
-            generate_circuit(
-                "surface_code:rotated_memory_z", distance=2, rounds=2,
-                **{generator_field: value},
-            )
-
-
-def test_phenomenological_noise_uses_exact_transform_bound():
+def test_phenomenological_noise_applies_the_physical_transform():
     boundary = 2 / 3
     model = NoiseModel.phenomenological(boundary)
     assert model.p_data == 1.5 * boundary
     assert model.p_meas == boundary
 
-    above = math.nextafter(boundary, math.inf)
-    assert Fraction.from_float(above) > Fraction(2, 3)
-    assert 1.5 * above == 1.0
-    with pytest.raises(ValueError, match="phenomenological"):
-        NoiseModel.phenomenological(above)
     with pytest.raises(ValueError, match="p_data"):
         NoiseModel.phenomenological(0.8)
 

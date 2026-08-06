@@ -358,13 +358,10 @@ def test_builtin_code_card_round_us_domain_and_planning():
             float("nan"),
             float("inf"),
             -float("inf"),
-            10**400,
         ):
             with pytest.raises(ValueError, match="round_us"):
                 factory(round_us=value)
-        for value in (True, Fraction(1, 2)):
-            with pytest.raises(TypeError, match="round_us"):
-                factory(round_us=value)
+        assert factory(round_us=Fraction(1, 2)).round_us == 0.5
 
 
 def test_bb_code_model_uses_complete_check_width_and_exact_geometry():

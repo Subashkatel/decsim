@@ -44,19 +44,9 @@ if TYPE_CHECKING:
 
 
 def _check_probability(value, field_name: str) -> float:
-    if type(value) not in (int, float):
-        raise TypeError(
-            f"{field_name} must be a built-in int or float; got {value!r}"
-        )
-    if type(value) is float and not math.isfinite(value):
-        raise ValueError(f"{field_name} must be finite; got {value!r}")
-    if not 0 <= value <= 1:
-        raise ValueError(f"{field_name} must be in [0, 1]; got {value!r}")
     normalized = float(value)
     if not math.isfinite(normalized) or not 0 <= normalized <= 1:
-        raise ValueError(
-            f"{field_name} is not representable as a probability; got {value!r}"
-        )
+        raise ValueError(f"{field_name} must be finite and in [0, 1]")
     return normalized
 
 
@@ -454,7 +444,6 @@ def switch_probability_per_round(gamma_switch: float, d: int):
     committing more rounds is proportionally more likely to escalate."""
 
     gamma_switch = _check_probability(gamma_switch, "gamma_switch")
-    gamma_numerator, gamma_denominator = gamma_switch.as_integer_ratio()
     if type(d) is not int:
         raise TypeError(f"d must be a built-in int; got {d!r}")
     if d <= 0:
@@ -473,19 +462,8 @@ def switch_probability_per_round(gamma_switch: float, d: int):
             raise ValueError(
                 f"commit_rounds must be positive; got {commit_rounds!r}"
             )
-        if gamma_numerator * commit_rounds > gamma_denominator * d:
-            raise ValueError(
-                "switch probability must be in [0, 1]; "
-                f"got gamma_switch={gamma_switch!r}, "
-                f"commit_rounds={commit_rounds!r}, d={d!r}"
-            )
-        try:
-            scaled_probability = gamma_switch * commit_rounds / d
-        except OverflowError as error:
-            raise ValueError(
-                "switch probability is not representable; "
-                f"got gamma_switch={gamma_switch!r}, "
-                f"commit_rounds={commit_rounds!r}, d={d!r}"
-            ) from error
-        return _check_probability(scaled_probability, "switch probability")
+        return _check_probability(
+            gamma_switch * commit_rounds / d,
+            "switch probability",
+        )
     return probability

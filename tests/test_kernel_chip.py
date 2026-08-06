@@ -11,6 +11,7 @@ from decsim.message import (
     ResolvedOperationPlanning,
     ResolvedPatchPlanning,
     ResourceClaim,
+    SyndromePacketRouteKind,
     SyndromePayload,
 )
 from decsim.chip import Chip
@@ -78,8 +79,14 @@ class _Source:
 
 
 class _Controller:
-    def relay_syndrome(self, payload, deliver):
-        deliver(payload)
+    def __init__(self, cluster):
+        self.cluster = cluster
+
+    def relay_syndrome(self, payload, route):
+        if route.kind is SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND:
+            self.cluster.on_memory_round(route.source_operation_id)
+        else:
+            self.cluster.on_syndrome_arrival(payload)
 
 
 class _Factory:
@@ -110,7 +117,7 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
         buffer_floor_override_active=False,
     )
     gate = Chip(eng, source=_Source(eng, cluster),
-                        controller=_Controller(), window_manager=cluster,
+                        controller=_Controller(cluster), window_manager=cluster,
                         decode_service=cluster,
                         factory=factory, round_ticks=ROUND,
                         code_geometry=geometry,

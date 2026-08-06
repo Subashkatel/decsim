@@ -120,9 +120,11 @@ def test_decode_backlog_summary_is_consistent_with_its_own_trace():
         scheme=SlidingWindowScheme(),
         code=SurfaceCodeModel(d=3),
         links=fixed_latency_link_config(),
-        make_controller=lambda e, links: ModularController(
-            e, links=links,
-            log_syndromes=False),
+        make_controller=lambda e, links, buffering, window_manager: ModularController(
+            e, links=links, log_syndromes=False,
+            controller_capacity=buffering.controller_ingress_packet_slots,
+            window_input_receiver=window_manager,
+            feedback_memory_receiver=window_manager),
         make_metrics=make_metrics,
     ), verbose=False)
 

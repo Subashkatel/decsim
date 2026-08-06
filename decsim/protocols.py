@@ -21,7 +21,7 @@ from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
                       DecoderRequestKey,
                       DecodeOutcome, DecodeResult, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
-                      StrongRegionPlan, SyndromePayload, SyndromeRoundPacket,
+                      StrongRegionPlan, SyndromePacketRoute, SyndromePayload,
                       Window, WindowInfo)
 
 
@@ -442,18 +442,17 @@ class MultiFaultExclusionSyndromeDevice(Protocol):
 
 @runtime_checkable
 class Controller(Protocol):
-    """Port 14. Reserves and delivers QC/CWD and OC/CQ reaction-path hops
-    through the exact run-owned semantic link fabric."""
-
+    """Port 14. Owns controller staging and reaction-path link relays."""
     links: Any
-
-    def relay_syndrome(
-        self,
-        payload: SyndromePayload,
-        deliver: Callable[[SyndromeRoundPacket], None],
-    ) -> None: ...
+    def relay_syndrome(self, payload: SyndromePayload,
+                       route: SyndromePacketRoute) -> None: ...
 
     def relay_instruction(self, decision, deliver: Callable) -> None: ...
+
+
+@runtime_checkable
+class EndpointCapacityChangeReceiver(Protocol):
+    def on_endpoint_capacity_changed(self) -> None: ...
 
 @runtime_checkable
 class Orchestrator(Protocol):

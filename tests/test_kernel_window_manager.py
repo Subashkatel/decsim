@@ -14,10 +14,14 @@ from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import (
     DecodeJob,
     DecodeResult,
+    CsdInput,
     DecoderRequestKey,
     DecoderTier,
+    EndpointRole,
     Operation,
     OperationPlanningView,
+    PendingStrong,
+    PotentialStrong,
     ResolvedCodeGeometry,
     ResolvedOperationPlanning,
     ResolvedPatchPlanning,
@@ -28,6 +32,8 @@ from decsim.message import (
     Window,
     WindowPlan,
 )
+from decsim.payload_store import PayloadStore
+from decsim.planner import _plan_syndrome_buffering
 from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.schedulers import BufferExpiryDeadline
 from decsim.window_manager import LogicalContribution, WindowManager
@@ -92,6 +98,9 @@ def _runtime(
     deadline_policy=None,
     retain_strong_context=False,
     double_window=False,
+    round_count=6,
+    window_specs=None,
+    store=None,
 ):
     eng = Engine(verbose=False)
     fb = _Feedback()
@@ -118,7 +127,7 @@ def _runtime(
         ResolvedOperationPlanning(
             operation_id=op_id,
             code_geometry=geometry,
-            round_count=6,
+            round_count=round_count,
             round_ticks=1,
             spatial_node_count=9,
         )
@@ -152,7 +161,8 @@ def _runtime(
                            lambda _code: NO_FAULT_MODEL_REQUIRED
                        ),
                        retain_strong_context=retain_strong_context,
-                       double_window=double_window)
+                       double_window=double_window,
+                       store=store)
     rt.strategy = strategy or _RecordingStrategy()
     rt.services = object()
     submitted = []
@@ -160,38 +170,120 @@ def _runtime(
     windows, op_windows, count = {}, {}, {}
     for op_id, op in runtime_operations.items():
         rt.register_op(op)
-        w = Window(op_id=op_id, k=0, commit_lo=1, commit_hi=3, buffer_hi=6,
-                   n_rounds=6)
-        windows[(op_id, 0)] = w
-        op_windows[op_id] = [0]
-        count[op_id] = 1
+        specs = window_specs or ((1, 3, 6),)
+        op_windows[op_id] = list(range(len(specs)))
+        count[op_id] = len(specs)
+        for window_index, (commit_lo, commit_hi, buffer_hi) in enumerate(specs):
+            windows[(op_id, window_index)] = Window(
+                op_id=op_id, k=window_index, commit_lo=commit_lo,
+                commit_hi=commit_hi, buffer_hi=buffer_hi,
+                n_rounds=buffer_hi - commit_lo + 1)
     for src, dst in deps:
         windows[dst].deps.append(src)
         windows[dst].deps_remaining += 1
         windows[src].dependents.append(dst)
-    rt.load_execution_plan(WindowPlan(
+    execution_plan = WindowPlan(
         windows=windows, window_count=count, op_windows=op_windows,
         successors={op_id: [] for op_id in ops},
         spatial_nodes={op_id: 9 for op_id in ops},
-        rounds_by_operation={op_id: 6 for op_id in ops},
+        rounds_by_operation={op_id: round_count for op_id in ops},
         code_names={op_id: "fake" for op_id in ops},
         windowed_by_operation={op_id: True for op_id in ops},
         batch_preceding_idle_rounds_by_operation={
             op_id: False for op_id in ops
         },
-        total_windows=len(windows)))
+        total_windows=len(windows))
+    buffering_plan = _plan_syndrome_buffering(
+        execution_plan,
+        retain_strong_context=retain_strong_context,
+        double_window=double_window)
+    rt.load_execution_plan(execution_plan, buffering_plan)
     return eng, rt, fb, submitted
+
+
+def test_double_window_plan_registers_exact_w2_potential_context():
+    specs = tuple(
+        (start, min(start + 2, 21), min(start + 5, 24))
+        for start in range(1, 22, 3))
+    store = PayloadStore(sb0_capacity=64, sb1_capacity=64)
+    _, runtime, _, _ = _runtime(
+        retain_strong_context=True, double_window=True,
+        round_count=21, window_specs=specs, store=store)
+
+    assert store.owner_packet_identities(
+        EndpointRole.SB1, PotentialStrong((0, 2))) == tuple(
+            (0, round_index) for round_index in range(4, 19))
+
+
+def test_capacity_plan_separates_reachable_nine_from_sufficient_twenty_one():
+    specs = tuple(
+        (start, min(start + 2, 21), min(start + 5, 24))
+        for start in range(1, 22, 3))
+    store = PayloadStore(sb0_capacity=64, sb1_capacity=9)
+    _, runtime, _, _ = _runtime(
+        retain_strong_context=True, double_window=True,
+        round_count=21, window_specs=specs, store=store)
+
+    minimum, sufficient = runtime.buffering_capacity_rows[EndpointRole.SB1]
+    assert minimum == tuple(
+        (0, round_index) for round_index in range(1, 10))
+    assert sufficient == tuple(
+        (0, round_index) for round_index in range(1, 22))
+
+
+def test_pending_to_csd_owner_transfers_acquire_before_release(monkeypatch):
+    store = PayloadStore(sb0_capacity=64, sb1_capacity=64)
+    _, runtime, _, _ = _runtime(
+        retain_strong_context=True, store=store)
+    window_key = (0, 0)
+    pending_key = DecoderRequestKey(0, 0, DecoderTier.STRONG, 7)
+    expected_keys = store.owner_packet_identities(
+        EndpointRole.SB1, PotentialStrong(window_key))
+    acquisitions_seen = []
+    original_release = store.release_owner
+
+    def assert_replacement_exists(role, owner):
+        replacement = (
+            PendingStrong(pending_key)
+            if owner == PotentialStrong(window_key)
+            else CsdInput(pending_key))
+        acquisitions_seen.append(
+            store.owner_packet_identities(role, replacement))
+        original_release(role, owner)
+
+    monkeypatch.setattr(store, "release_owner", assert_replacement_exists)
+    runtime._transfer_potential_to_pending(window_key, pending_key)
+    runtime._transfer_pending_to_csd(pending_key)
+
+    assert acquisitions_seen == [expected_keys, expected_keys]
+    assert store.owner_packet_identities(
+        EndpointRole.SB1, CsdInput(pending_key)) == expected_keys
+    with pytest.raises(KeyError):
+        store.owner_packet_identities(
+            EndpointRole.SB1, PotentialStrong(window_key))
+    with pytest.raises(KeyError):
+        store.owner_packet_identities(
+            EndpointRole.SB1, PendingStrong(pending_key))
 
 
 def _feed_rounds(rt, op_id, n):
     for r in range(1, n + 1):
-        rt.on_syndrome_arrival(SyndromeRoundPacket(
+        _publish_round(rt, SyndromeRoundPacket(
             operation_id=op_id,
             round_index=r,
             fragments=(RetainedSyndromeFragment.from_payload(
                 SyndromePayload(op_id, 0, r)
             ),),
         ))
+
+
+def _publish_round(runtime, packet):
+    pair = runtime.store.prepare_pair(packet, runtime.engine.now)
+    assert pair is not None
+    pair.commit_unpublished()
+    pair.publish()
+    runtime.store.complete_cryo((packet.operation_id, packet.round_index))
+    runtime.on_syndrome_arrival(packet)
 
 
 def test_decoder_assembly_uses_structural_patch_order_not_transport_order():
@@ -228,7 +320,7 @@ def test_decoder_assembly_uses_structural_patch_order_not_transport_order():
                 for position, patch_id in enumerate(order)
             )
             engine.now = 7 if round_index == 1 else 100 + round_index
-            runtime.on_syndrome_arrival(SyndromeRoundPacket(
+            _publish_round(runtime, SyndromeRoundPacket(
                 operation_id=0,
                 round_index=round_index,
                 fragments=fragments,
@@ -250,6 +342,8 @@ def test_not_ready_until_data_and_deps():
     eng, rt, fb, submitted = _runtime(deps=[((0, 0), (1, 0))], ops=(0, 1))
     _feed_rounds(rt, 1, 6)                       # dependent has data...
     assert not submitted                          # ...but dep outstanding
+    assert rt.store.owner_packet_identities(
+        EndpointRole.SB0, (1, 0)) == tuple((1, r) for r in range(1, 7))
     _feed_rounds(rt, 0, 6)                        # predecessor ready & submits
     assert [j.op_id for j, _ in submitted] == [0]
 
@@ -262,6 +356,112 @@ def test_job_fields_match_contract_2a4():
     assert (job.op_id, job.window_id, job.n_rounds) == (0, 0, 6)
     assert job.deadline == eng.now + 1_000 and job.spatial_nodes == 9
     assert len(job.payloads) == 6 and job.strong_label == "strong(op0 W0)"
+
+
+class _OrderedWeakStrongStrategy:
+    def __init__(self, order):
+        self.order = order
+        self.runtime = None
+
+    def on_window_ready(self, _window, weak_job, _services):
+        strong_job = self.runtime.make_strong_decode_job(
+            weak_job, round_count=6, label="strong")
+        jobs = {"weak": weak_job, "strong": strong_job}
+        return [Submission(jobs[name]) for name in self.order]
+
+
+def _stage_final_round(runtime):
+    packet = SyndromeRoundPacket(
+        operation_id=0,
+        round_index=6,
+        fragments=(RetainedSyndromeFragment.from_payload(
+            SyndromePayload(0, 0, 6)
+        ),),
+    )
+    pair = runtime.store.prepare_pair(packet, runtime.engine.now)
+    assert pair is not None
+    pair.commit_unpublished()
+    pair.publish()
+    runtime.store.complete_cryo((0, 6))
+    return packet
+
+
+def _assert_window_input_retained(runtime, expected_fragments):
+    packet_ids = tuple((0, round_index) for round_index in range(1, 7))
+    assert runtime.store.owner_packet_identities(
+        EndpointRole.SB0, (0, 0)) == packet_ids
+    assert runtime.store.backing_identities == packet_ids
+    assert tuple(
+        runtime.store.fragments(0, round_index)
+        for round_index in range(1, 7)
+    ) == expected_fragments
+
+
+def test_successful_window_handoff_releases_sb0_before_decode_completion():
+    _, runtime, _, submitted = _runtime(retain_strong_context=True)
+
+    _feed_rounds(runtime, 0, 6)
+
+    assert len(submitted) == 1
+    assert not runtime.store.has_owner(EndpointRole.SB0, (0, 0))
+    assert runtime.store.has_owner(
+        EndpointRole.SB1, PotentialStrong((0, 0)))
+
+
+def test_weak_then_strong_failure_keeps_accepted_weak_and_window_input(
+    monkeypatch,
+):
+    strategy = _OrderedWeakStrongStrategy(("weak", "strong"))
+    _, runtime, _, submitted = _runtime(
+        strategy=strategy, retain_strong_context=True)
+    strategy.runtime = runtime
+    _feed_rounds(runtime, 0, 5)
+    final_packet = _stage_final_round(runtime)
+    expected_fragments = tuple(
+        runtime.store.fragments(0, round_index)
+        for round_index in range(1, 7)
+    )
+
+    def fail_strong_handoff(_job):
+        raise RuntimeError("injected strong handoff failure")
+
+    monkeypatch.setattr(runtime, "_submit_strong_with_csd", fail_strong_handoff)
+    with pytest.raises(RuntimeError, match="injected strong handoff failure"):
+        runtime.on_syndrome_arrival(final_packet)
+
+    assert len(submitted) == 1
+    assert submitted[0][0].strong_decode_for is None
+    _assert_window_input_retained(runtime, expected_fragments)
+
+
+def test_strong_then_weak_failure_keeps_accepted_strong_and_window_input():
+    strategy = _OrderedWeakStrongStrategy(("strong", "weak"))
+    _, runtime, _, submitted = _runtime(
+        strategy=strategy, retain_strong_context=True)
+    strategy.runtime = runtime
+    _feed_rounds(runtime, 0, 5)
+    final_packet = _stage_final_round(runtime)
+    expected_fragments = tuple(
+        runtime.store.fragments(0, round_index)
+        for round_index in range(1, 7)
+    )
+
+    def fail_weak_after_strong(job, delay):
+        if job.strong_decode_for is None:
+            raise RuntimeError("injected weak handoff failure")
+        submitted.append((job, delay))
+
+    runtime.submit_fn = fail_weak_after_strong
+    with pytest.raises(RuntimeError, match="injected weak handoff failure"):
+        runtime.on_syndrome_arrival(final_packet)
+
+    assert len(submitted) == 1
+    strong_job = submitted[0][0]
+    assert strong_job.strong_decode_for == (0, 0)
+    assert runtime.store.owner_packet_identities(
+        EndpointRole.SB1, CsdInput(strong_job.request_key)
+    ) == tuple((0, round_index) for round_index in range(1, 7))
+    _assert_window_input_retained(runtime, expected_fragments)
 
 
 def test_eager_ships_weak_boundary_unconditionally_contract_1_2():
@@ -425,7 +625,7 @@ def test_packet_operation_and_round_limit_reject_before_storage_mutates():
 
 
 def test_strong_job_two_sided_context_contract_2b6():
-    eng, rt, fb, submitted = _runtime()
+    eng, rt, fb, submitted = _runtime(retain_strong_context=True)
     _feed_rounds(rt, 0, 6)
     weak, _ = submitted[0]
     strong = rt.make_strong_decode_job(weak, round_count=9, label="strong")
@@ -444,15 +644,19 @@ def test_retention_capability_adds_only_strong_leading_rounds():
         op_id=0, k=1, commit_lo=4, commit_hi=4, buffer_hi=6, n_rounds=3)
     for runtime in (without_context, with_context):
         runtime._add_window_read_refs(interior.key, interior)
-    assert without_context.store.lease_round_keys(
-        (interior.key, "strong")) == ()
-    assert with_context.store.lease_round_keys(
-        (interior.key, "strong")) == ((0, 2), (0, 3))
+    assert not without_context.store.has_owner(
+        EndpointRole.SB1, PotentialStrong(interior.key))
+    assert without_context.store.owner_packet_identities(
+        EndpointRole.SB0, interior.key) == ((0, 4), (0, 5), (0, 6))
+    assert with_context.store.owner_packet_identities(
+        EndpointRole.SB1, PotentialStrong(interior.key)) == (
+            (0, 4), (0, 5), (0, 6), (0, 2), (0, 3))
 
 
 def test_strong_buffer_expiry_uses_the_context_start_round_arrival():
     policy = BufferExpiryDeadline(capacity_rounds=40, round_ticks=10)
-    eng, rt, _, submitted = _runtime(deadline_policy=policy)
+    eng, rt, _, submitted = _runtime(
+        deadline_policy=policy, retain_strong_context=True)
     eng.now = 17
     _feed_rounds(rt, 0, 6)
     weak, _ = submitted[0]
@@ -465,7 +669,8 @@ def test_strong_buffer_expiry_uses_the_context_start_round_arrival():
 
 def test_strong_job_rejects_missing_context_start_provenance(monkeypatch):
     policy = BufferExpiryDeadline(capacity_rounds=40, round_ticks=10)
-    _, rt, _, submitted = _runtime(deadline_policy=policy)
+    _, rt, _, submitted = _runtime(
+        deadline_policy=policy, retain_strong_context=True)
     _feed_rounds(rt, 0, 6)
     weak, _ = submitted[0]
     monkeypatch.setattr(rt.store, "round_complete_tick", lambda *_args: None)

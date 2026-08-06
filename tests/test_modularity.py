@@ -13,6 +13,7 @@ from decsim.message import (
     OperationWindowPlan,
     RetainedSyndromeFragment,
     SyndromePayload,
+    SyndromePacketRouteKind,
     SyndromeRoundPacket,
     WindowGeometry,
 )
@@ -157,18 +158,27 @@ class MyRouter:
         return self.decoder.fault_model_requirement
 
 class MyController:
-    def __init__(self, engine, links):
+    def __init__(self, engine, links, buffering, window_manager):
         self.engine = engine
         self.links = links
-    def relay_syndrome(self, payload, deliver):
+        self.buffering = buffering
+        self.window_manager = window_manager
+    def relay_syndrome(self, payload, route):
         packet = SyndromeRoundPacket(
             operation_id=payload.operation_id,
             round_index=payload.round_index,
             fragments=(RetainedSyndromeFragment.from_payload(payload),),
         )
-        self.engine.schedule(us(0.1), lambda: deliver(packet))
+        if route.kind is SyndromePacketRouteKind.WINDOW_INPUT:
+            deliver = lambda: self.window_manager.accept_window_input(packet)
+        else:
+            deliver = lambda: self.window_manager.accept_feedback_memory_round(
+                route.source_operation_id)
+        self.engine.schedule(us(0.1), deliver)
     def relay_instruction(self, decision, deliver):
         self.engine.schedule(us(0.1), lambda: deliver(decision))
+    def on_endpoint_capacity_changed(self):
+        pass
 
 class MyOrchestrator:
     """From-scratch Orchestrator: releases blocked ops without an effect."""

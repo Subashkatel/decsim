@@ -155,8 +155,12 @@ def test_engine_belief_matching_matches_offline():
         def latency(self, job):
             return 1
 
-    def _zero_links(engine, links):
-        return ModularController(engine, links=links, log_syndromes=False)
+    def _zero_links(engine, links, buffering, window_manager):
+        return ModularController(
+            engine, links=links, log_syndromes=False,
+            controller_capacity=buffering.controller_ingress_packet_slots,
+            window_input_receiver=window_manager,
+            feedback_memory_receiver=window_manager)
 
     coords = circuit.get_detector_coordinates()
     folded = {det: min(int(c[-1]) + 1, R) for det, c in coords.items()}

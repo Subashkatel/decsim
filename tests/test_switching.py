@@ -35,8 +35,9 @@ from decsim.decoders import (
 )
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import TimingOnlyDevice
-from decsim.message import (DecodeJob, DecodeResult, DecoderRequestKey,
-                            DecoderTier, Operation,
+from decsim.message import (CsdInput, DecodeJob, DecodeResult, DecoderRequestKey,
+                            DecoderTier, EndpointRole, Operation, PendingStrong,
+                            PotentialStrong, Replay, RephaseGuard,
                             ResolvedCodeGeometry,
                             SeamFaultOwner, StrongRegionPlan, Window,
                             WindowInfo)
@@ -45,6 +46,7 @@ from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
+from decsim.payload_store import PayloadStore
 from decsim.protocols import Directive, OutcomeDirective
 from decsim.window_interactions import DefaultWindowInteraction
 from decsim.window_manager import (
@@ -737,6 +739,96 @@ def _double_window_run(
     return res, weak, strong
 
 
+def test_real_deferred_escalation_transfers_potential_pending_csd_in_order(
+    monkeypatch,
+):
+    events = []
+    register_owner = PayloadStore.register_owner
+    release_owner = PayloadStore.release_owner
+
+    def record_register(store, role, owner, identities):
+        if role is EndpointRole.SB1:
+            events.append(("acquire", owner))
+        return register_owner(store, role, owner, identities)
+
+    def record_release(store, role, owner):
+        if role is EndpointRole.SB1:
+            events.append(("release", owner))
+        return release_owner(store, role, owner)
+
+    monkeypatch.setattr(PayloadStore, "register_owner", record_register)
+    monkeypatch.setattr(PayloadStore, "release_owner", record_release)
+    _double_window_run(escalate_window=2, rounds=21)
+
+    pending = next(owner for action, owner in events
+                   if action == "acquire" and type(owner) is PendingStrong)
+    request_key = pending.request_key
+    relevant = [(action, owner) for action, owner in events if owner in (
+        PotentialStrong((0, 2)), pending, CsdInput(request_key))]
+    assert relevant == [
+        ("acquire", PotentialStrong((0, 2))),
+        ("acquire", pending),
+        ("release", PotentialStrong((0, 2))),
+        ("acquire", CsdInput(request_key)),
+        ("release", pending),
+        ("release", CsdInput(request_key)),
+    ]
+
+
+def test_confident_and_absorbed_windows_release_potential_after_replacement(
+    monkeypatch,
+):
+    events = []
+    registrations = {}
+    register_owner = PayloadStore.register_owner
+    release_owner = PayloadStore.release_owner
+
+    def record_register(store, role, owner, identities):
+        if role is EndpointRole.SB1:
+            events.append(("acquire", owner))
+            registrations[owner] = tuple(identities)
+        return register_owner(store, role, owner, identities)
+
+    def record_release(store, role, owner):
+        if role is EndpointRole.SB1:
+            events.append(("release", owner))
+        return release_owner(store, role, owner)
+
+    monkeypatch.setattr(PayloadStore, "register_owner", record_register)
+    monkeypatch.setattr(PayloadStore, "release_owner", record_release)
+    _double_window_run(escalate_window=2, rounds=21)
+
+    pending_index = next(index for index, event in enumerate(events)
+                         if event[0] == "acquire"
+                         and type(event[1]) is PendingStrong)
+    for window_key in ((0, 0), (0, 1), (0, 3), (0, 4), (0, 5), (0, 6)):
+        release_index = events.index(("release", PotentialStrong(window_key)))
+        if window_key in ((0, 3), (0, 4)):
+            assert pending_index < release_index
+    pending = next(owner for owner in registrations
+                   if type(owner) is PendingStrong)
+    needed = set(registrations[PotentialStrong((0, 3))])
+    needed.update(registrations[PotentialStrong((0, 4))])
+    replacement = set(registrations[pending])
+    replacement.update(registrations[PotentialStrong((0, 5))])
+    assert needed <= replacement
+
+
+def test_absorption_rejects_partial_acquired_replacement(monkeypatch):
+    owner_packet_identities = PayloadStore.owner_packet_identities
+
+    def omit_restart_tail(store, role, owner):
+        keys = owner_packet_identities(store, role, owner)
+        if owner == PotentialStrong((0, 5)):
+            return keys[:-3]
+        return keys
+
+    monkeypatch.setattr(
+        PayloadStore, "owner_packet_identities", omit_restart_tail)
+    with pytest.raises(RuntimeError, match="replacement does not cover"):
+        _double_window_run(escalate_window=2, rounds=21)
+
+
 def _nonaligned_code():
     return SurfaceCodeModel(
         d=D,
@@ -1014,11 +1106,12 @@ def test_double_window_rephase_rejects_affected_far_readiness_owner():
             "registry_by_terminal": dict(
                 runtime._escalations._by_terminal_operation
             ),
-            "leases": {
-                lease_id: tuple(round_keys)
-                for lease_id, round_keys in runtime.store._leases.items()
-            },
-            "round_refs": dict(runtime.store._round_refs),
+            "owners": tuple(sorted(
+                ((role, owner, record.packet_identities)
+                 for (role, owner), record
+                 in runtime.store._future_owners.items()),
+                key=repr,
+            )),
         }
 
     class SeedAffectedFarOwner(DefaultWindowInteraction):
@@ -1128,40 +1221,78 @@ def test_double_window_rephase_rejects_historical_or_external_suffix_state(
     assert (0, 7) in runtime.windows
 
 
-def test_double_window_rephase_rolls_back_manager_and_lease_state():
+def test_double_window_rephase_rejects_a_queued_suffix_window():
+    captured = {}
+
+    def inject_queued_window(
+        engine, window_manager, decoder_manager, chip, factory,
+    ):
+        captured["runtime"] = window_manager
+        original_defer = window_manager.defer_strong_escalation
+
+        def defer_after_queue_started(weak_job):
+            window_manager.windows[(0, 2)].queued = True
+            original_defer(weak_job)
+
+        window_manager.defer_strong_escalation = defer_after_queue_started
+        return []
+
+    with pytest.raises(RuntimeError, match="decode lifecycle already started"):
+        _double_window_run(
+            escalate_window=1,
+            rounds=50,
+            code=_nonaligned_code(),
+            metrics=inject_queued_window,
+        )
+
+    runtime = captured["runtime"]
+    assert runtime.op_windows[0] == list(range(8))
+    assert runtime.pending_escalations == {}
+
+
+def test_double_window_rephase_rolls_back_manager_and_owner_state():
     captured = {}
 
     def inject_failure(engine, window_manager, decoder_manager, chip, factory):
         captured["runtime"] = window_manager
-        original_replace = window_manager.store.replace
-        target_ids = [
-            lease_id
+        register_guard = window_manager.store.register_rephase_guard
+
+        def capture_guard(guard, sb0_ids, sb1_ids):
+            captured["guard"] = guard
+            return register_guard(guard, sb0_ids, sb1_ids)
+
+        window_manager.store.register_rephase_guard = capture_guard
+        original_replace = window_manager.store.replace_owner_membership
+        target_tokens = [
+            token
             for window_index in range(2, 8)
-            for lease_id in (
-                (0, window_index),
-                ((0, window_index), "strong"),
+            for token in (
+                (EndpointRole.SB0, (0, window_index)),
+                (EndpointRole.SB1, PotentialStrong((0, window_index))),
             )
-        ] + [((0, 1), "strong")]
-        captured["old_leases"] = None
+        ]
+        captured["old_owners"] = None
         replacement_count = 0
 
-        def fail_second_replacement(lease_id, round_keys):
+        def fail_second_replacement(role, owner, packet_identities):
             nonlocal replacement_count
-            if lease_id in target_ids:
-                if captured["old_leases"] is None:
-                    captured["old_leases"] = {
-                        target_id: window_manager.store.lease_round_keys(target_id)
-                        for target_id in target_ids
+            token = (role, owner)
+            if token in target_tokens:
+                if captured["old_owners"] is None:
+                    captured["old_owners"] = {
+                        target: window_manager.store.owner_packet_identities(*target)
+                        for target in target_tokens
+                        if window_manager.store.has_owner(*target)
                     }
                 replacement_count += 1
                 if replacement_count == 2:
-                    raise RuntimeError("injected suffix lease failure")
-            original_replace(lease_id, round_keys)
+                    raise RuntimeError("injected suffix owner failure")
+            original_replace(role, owner, packet_identities)
 
-        window_manager.store.replace = fail_second_replacement
+        window_manager.store.replace_owner_membership = fail_second_replacement
         return []
 
-    with pytest.raises(RuntimeError, match="injected suffix lease failure"):
+    with pytest.raises(RuntimeError, match="injected suffix owner failure"):
         _double_window_run(
             escalate_window=1,
             rounds=50,
@@ -1193,10 +1324,14 @@ def test_double_window_rephase_rolls_back_manager_and_lease_state():
     assert runtime.pending_escalations == {}
     assert set(runtime.logical_contributions) == {(0, 0)}
     assert runtime.windows[(0, 1)].dependents == [(0, 2)]
-    for lease_id, old_round_keys in captured["old_leases"].items():
-        assert runtime.store.lease_round_keys(lease_id) == old_round_keys
-    with pytest.raises(KeyError):
-        runtime.store.lease_round_keys(((0, 1), "suffix-rephase-guard"))
+    for token, old_packet_identities in captured["old_owners"].items():
+        assert runtime.store.owner_packet_identities(*token) == \
+            old_packet_identities
+    assert type(captured["guard"]) is RephaseGuard
+    assert not any(runtime.store.has_owner(role, captured["guard"])
+                   for role in EndpointRole)
+    pending = PendingStrong(captured["guard"].request_key)
+    assert not runtime.store.has_owner(EndpointRole.SB1, pending)
 
 
 def test_double_window_rephase_rollback_restores_absent_commit_count():
@@ -1204,18 +1339,22 @@ def test_double_window_rephase_rollback_restores_absent_commit_count():
 
     def inject_failure(engine, window_manager, decoder_manager, chip, factory):
         captured["runtime"] = window_manager
-        original_replace = window_manager.store.replace
+        original_replace = window_manager.store.replace_owner_membership
+        targets = {
+            (EndpointRole.SB0, (0, 1)),
+            (EndpointRole.SB1, PotentialStrong((0, 1))),
+        }
         replacement_count = 0
 
-        def fail_second_replacement(lease_id, round_keys):
+        def fail_second_replacement(role, owner, packet_identities):
             nonlocal replacement_count
-            if lease_id in {(0, 1), ((0, 1), "strong")}:
+            if (role, owner) in targets:
                 replacement_count += 1
                 if replacement_count == 2:
                     raise RuntimeError("injected first-window suffix failure")
-            original_replace(lease_id, round_keys)
+            original_replace(role, owner, packet_identities)
 
-        window_manager.store.replace = fail_second_replacement
+        window_manager.store.replace_owner_membership = fail_second_replacement
         return []
 
     with pytest.raises(RuntimeError, match="first-window suffix failure"):
@@ -1360,7 +1499,8 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
                 "escalations": dict(runtime.pending_escalations),
                 "restart_buffer_lo": restart.buffer_lo,
                 "restart_deps": list(restart.deps),
-                "restart_refs": list(runtime.store._leases[(restart.key)]),
+                "restart_refs": runtime.store.owner_packet_identities(
+                    EndpointRole.SB0, restart.key),
             }
 
         engine.schedule(0, snapshot, label="capture restart plan")
@@ -1393,7 +1533,8 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
         "escalations": runtime.pending_escalations,
         "restart_buffer_lo": restart.buffer_lo,
         "restart_deps": restart.deps,
-        "restart_refs": runtime.store._leases[restart.key],
+        "restart_refs": runtime.store.owner_packet_identities(
+            EndpointRole.SB0, restart.key),
     } == captured["before"]
 
 

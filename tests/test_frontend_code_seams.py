@@ -183,8 +183,12 @@ class RecordingDecoder:
                             logical_observables=(0,))
 
 
-def _zero_link_controller(engine, links):
-    return ModularController(engine, links=links, log_syndromes=False)
+def _zero_link_controller(engine, links, buffering, window_manager):
+    return ModularController(
+        engine, links=links, log_syndromes=False,
+        controller_capacity=buffering.controller_ingress_packet_slots,
+        window_input_receiver=window_manager,
+        feedback_memory_receiver=window_manager)
 
 
 def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():

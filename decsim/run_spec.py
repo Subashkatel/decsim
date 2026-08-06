@@ -107,6 +107,7 @@ class RunSpec:
     links: Optional[Any] = None
     device: Optional[Any] = None
     memory_model: Optional[Any] = None
+    syndrome_buffering: Optional[Any] = None
     make_controller: Optional[Callable] = None
     make_factory: Optional[Callable] = None
     make_metrics: Optional[Callable] = None
@@ -138,7 +139,7 @@ class RunSpec:
         from .devices import ClockedDevice, SyndromeBitDevice, TimingOnlyDevice
         from .links import LinkModelConfig
         from .orchestrators import ExecutionOrchestrator
-        from .payload_store import PayloadStore
+        from .payload_store import PayloadStore, SyndromeBufferingConfig
         from .planner import (
             GateRounds,
             _plan_execution,
@@ -202,6 +203,7 @@ class RunSpec:
         scheme = self.scheme or SlidingWindowScheme()
         rounds_policy = self.rounds_policy or GateRounds()
         boundary_policy = self.boundary_policy or Eager()
+        window_interaction = self.window_interaction or DefaultWindowInteraction()
         if dynamic_streams and type(scheme) is not SlidingWindowScheme:
             raise ValueError("dynamic streams require SlidingWindowScheme")
         strategy.validate_declared_run(
@@ -220,7 +222,10 @@ class RunSpec:
             code=code, layout=layout, scheme=scheme,
             rounds_policy=rounds_policy,
             fallback_round_us=(self.round_us if self.round_us is not None
-                               else self.timing.round_us))
+                               else self.timing.round_us),
+            retain_strong_context=requires_strong_context,
+            double_window=double_window,
+            has_open_ended_dynamic_streams=bool(dynamic_streams))
         strategy.validate_code_geometry(plan.code_geometry)
         resource_claims = {
             op.id: tuple(layout.resources_for(view_by_id[op.id])) for op in ops}
@@ -239,17 +244,16 @@ class RunSpec:
         scheduler = self.scheduler or FifoScheduler()
         deadline_policy = self.deadline_policy or EnqueueTimeDeadline()
         idle_policy = self.idle_policy or Ignore()
-        window_interaction = self.window_interaction or DefaultWindowInteraction()
         orchestrator = (self.make_orchestrator(engine)
                         if self.make_orchestrator
                         else ExecutionOrchestrator(engine))
         link_config = (self.links if self.links is not None else
                        LinkModelConfig.reference_fixed_latency_profile())
         links = link_config.resolve()
-        controller = (self.make_controller(engine, links)
-                      if self.make_controller else
-                      ModularController(engine, links=links,
-                                        t_pack=self.timing.ticks("t_pack")))
+        buffering = self.syndrome_buffering or SyndromeBufferingConfig()
+        if type(buffering) is not SyndromeBufferingConfig:
+            raise TypeError("syndrome_buffering must be SyndromeBufferingConfig")
+        payload_store = PayloadStore(memory_model=self.memory_model, sb0_capacity=buffering.sb0_packet_slots, sb1_capacity=buffering.sb1_packet_slots)
         window_manager = WindowManager(
             engine, scheme=scheme, code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
@@ -261,10 +265,20 @@ class RunSpec:
             fault_model_requirement_for=router.fault_model_requirement_for,
             feedback_boundary_mode=self.feedback_boundary_mode,
             syndrome_source=device,
-            store=PayloadStore(memory_model=self.memory_model),
+            store=payload_store,
             retain_strong_context=requires_strong_context,
             double_window=double_window,
             capture_enabled=self.record_switching_windows)
+        controller = (
+            self.make_controller(engine, links, buffering, window_manager)
+            if self.make_controller else ModularController(
+                engine, links=links, t_pack=self.timing.ticks("t_pack"),
+                controller_capacity=buffering.controller_ingress_packet_slots,
+                window_input_receiver=window_manager,
+                feedback_memory_receiver=window_manager,
+            )
+        )
+        payload_store.connect_capacity_change_receiver(controller)
         decoder_manager = DecoderManager(
             engine, router=router, scheduler=scheduler,
             unit_pools=self.unit_pools,
@@ -288,7 +302,7 @@ class RunSpec:
                 f"{type(factory).__name__} uses a different engine")
         _check_factory_decode_service(factory, decoder_manager)
         source = ClockedDevice(
-            engine, device, controller, window_manager.on_syndrome_arrival,
+            engine, device, controller,
             {op.operation_id: op.round_count for op in plan.resolved_operations})
         chip = Chip(
             engine, source=source, controller=controller,
@@ -326,7 +340,7 @@ class RunSpec:
                 orchestrator.register_blocked_operation(op.id, op.blocked_by)
         for op in planned_operations:
             window_manager.register_op(op)
-        window_manager.load_execution_plan(plan.execution)
+        window_manager.load_execution_plan(plan.execution, plan.buffering)
         resolved_by_id = {op.operation_id: op for op in plan.resolved_operations}
         for stream in dynamic_streams:
             window_manager._register_dynamic_stream(stream, resolved_by_id[stream.id])
@@ -341,7 +355,8 @@ class RunSpec:
                 f"{window_manager.pending_escalations}")
         decoder_manager.check_decode_work_settled()
         engine._begin_finalization()
-        result = _capture_result(
+        from .views import capture_primary_result
+        result = capture_primary_result(
             engine, chip, window_manager, all_operations,
             metric_bindings, links)
         engine._complete()
@@ -479,35 +494,6 @@ def _check_factory_decode_service(factory, decoder_manager):
     if factory.decode_service is not expected:
         raise ValueError(
             f"{type(factory).__name__} decode_service must be run-owned")
-
-
-def _capture_result(engine, chip, window_manager, operations,
-                    metric_bindings, links):
-    operation_by_id = {operation.id: operation for operation in operations}
-    rows = []
-    for operation_id in sorted(operation_by_id):
-        logical = window_manager.op_results.get(operation_id)
-        rows.append(LogicalOperationResult(
-            operation_id,
-            "logical_observables" if logical is not None else "no_logical_output",
-            (tuple(_logical_bit(bit) for bit in logical)
-             if logical is not None else None),
-            operation_by_id[operation_id].stream_offset))
-    metric_rows = tuple(MetricResultRecord(
-        name, copy.deepcopy(engine._invoke_metric_callback(
-            metric.result, callback_kind="result")))
-        for name, metric in metric_bindings)
-    if engine._event_queue or not chip.workload_complete:
-        raise RuntimeError("primary run ended before workload completed")
-    return PrimaryRunResult(
-        "complete", True, True, True, chip.last_finish_time, engine.now,
-        tuple(rows), copy.deepcopy(links.traffic_json_value()), metric_rows)
-
-
-def _logical_bit(value):
-    if type(value) is not int or value not in (0, 1):
-        raise TypeError(f"logical observables must contain bits; got {value!r}")
-    return value
 
 
 def simulate(run: RunSpec, verbose: bool = False) -> CompletedRun:

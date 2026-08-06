@@ -25,9 +25,16 @@ from decsim.links import (
     LinkCapacityConfig,
     LinkConfig,
     LinkModelConfig,
+    LinkPath,
     LinkQuantityBasis,
+    TrafficAttribution,
 )
-from decsim.message import Operation, SyndromePayload
+from decsim.message import (
+    Operation,
+    SyndromePacketRoute,
+    SyndromePayload,
+    WINDOW_INPUT_ROUTE,
+)
 
 
 # ------------------------------------------------- finding 19: factory
@@ -63,8 +70,8 @@ def test_zero_correction_factory_still_releases_the_state():
 
 def test_packing_does_not_reserve_the_serialized_link_early():
     """A packed round must request the serialized cd bus when packing
-    FINISHES; a whole message that is ready during the packing gap uses
-    the idle link first."""
+    FINISHES; a whole message on an independent controller route uses the
+    shared idle link during the packing gap."""
     eng = Engine(verbose=False)
     config = LinkModelConfig.reference_fixed_latency_profile()
     cwd_channel = LinkConfig(
@@ -86,24 +93,45 @@ def test_packing_does_not_reserve_the_serialized_link_early():
         cwd=replace(config.cwd, channel=cwd_channel),
         profile_name="test_packing_serialization",
     ).resolve()
-    ctrl = ModularController(eng, links=links, log_syndromes=False,
-                             t_pack=us(1.0))
     arrivals = []
-    def deliver_packed(packet):
-        arrivals.append(("packed", eng.now))
+
+    class Receiver:
+        def accept_window_input(self, packet):
+            label = "packed" if packet.operation_id == 0 else "whole"
+            payload_bits = sum(
+                fragment.size_bits for fragment in packet.fragments)
+            transfer = links.reserve(
+                LinkPath.CWD, payload_bits=payload_bits, now_ticks=eng.now,
+                attribution=TrafficAttribution(
+                    packet.operation_id,
+                    tuple(fragment.patch_id for fragment in packet.fragments),
+                    None, packet.round_index, packet.round_index))
+            eng.schedule(
+                transfer.total_delay_ticks,
+                lambda: arrivals.append((label, eng.now)))
+            return True
+
+        def accept_feedback_memory_round(self, source_operation_id):
+            arrivals.append(("whole", eng.now))
+
+    receiver = Receiver()
+    ctrl = ModularController(
+        eng, links=links, log_syndromes=False, t_pack=us(1.0),
+        controller_capacity=None, window_input_receiver=receiver,
+        feedback_memory_receiver=receiver)
     for patch in (0, 1):
         fragment = SyndromePayload(
             0, patch, 1, n_fragments=2,
             fragment_index=patch, size_bits=500,
         )
         eng.schedule(0, lambda p=fragment: ctrl.relay_syndrome(
-            p, deliver_packed))
+            p, WINDOW_INPUT_ROUTE))
     whole = SyndromePayload(1, 2, 1, size_bits=500)
     eng.schedule(0, lambda: ctrl.relay_syndrome(
-        whole, lambda q: arrivals.append(("whole", eng.now))))
+        whole, SyndromePacketRoute.feedback_memory_round(1)))
     eng.run()
-    # idle link from 0 to 0.5 us while packing runs from 0 to 1 us;
-    # the packed 1000-bit round then transmits from 1 to 2 us
+    # Independent routes share CWD: feedback uses 0-0.5 us while the window
+    # packet packs for 0-1 us, then the packed 1000-bit round uses 1-2 us.
     assert ("whole", us(0.5)) in arrivals
     assert [a for a in arrivals if a[0] == "packed"] == \
         [("packed", us(2.0))]

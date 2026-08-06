@@ -9,6 +9,7 @@ reads). Each builder receives the state owners it actually consumes.
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Optional
 
@@ -338,3 +339,38 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
     return SwitchingRecordsView(
         tuple(rows), decoder_manager.terminal_request_records_snapshot(),
         decoder_manager.terminal_service_records_snapshot())
+
+
+def capture_primary_result(engine, chip, window_manager, operations,
+                           metric_bindings, links):
+    """Project terminal runtime owners into the immutable run result."""
+    from .run_spec import LogicalOperationResult, MetricResultRecord, PrimaryRunResult
+
+    operation_by_id = {operation.id: operation for operation in operations}
+    rows = []
+    for operation_id in sorted(operation_by_id):
+        logical = window_manager.op_results.get(operation_id)
+        if logical is not None:
+            bits = tuple(_logical_bit(bit) for bit in logical)
+            status = "logical_observables"
+        else:
+            bits = None
+            status = "no_logical_output"
+        rows.append(LogicalOperationResult(
+            operation_id, status, bits,
+            operation_by_id[operation_id].stream_offset))
+    metric_rows = tuple(MetricResultRecord(
+        name, copy.deepcopy(engine._invoke_metric_callback(
+            metric.result, callback_kind="result")))
+        for name, metric in metric_bindings)
+    if engine._event_queue or not chip.workload_complete:
+        raise RuntimeError("primary run ended before workload completed")
+    return PrimaryRunResult(
+        "complete", True, True, True, chip.last_finish_time, engine.now,
+        tuple(rows), copy.deepcopy(links.traffic_json_value()), metric_rows)
+
+
+def _logical_bit(value):
+    if type(value) is not int or value not in (0, 1):
+        raise TypeError(f"logical observables must contain bits; got {value!r}")
+    return value

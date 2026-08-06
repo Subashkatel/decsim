@@ -318,15 +318,17 @@ class SeedConsumingProviderOwner:
     def cancel_run_seed(self, reservation):
         raise AssertionError("pre-binding provider must not cancel")
 
-    def make_controller(self, engine):
+    def make_controller(self, engine, links, buffering, window_manager):
         self.entries += 1
         raise AssertionError("pre-binding provider must not be called")
 
 
 class PlainControllerProvider:
-    def __init__(self, engine, links):
+    def __init__(self, engine, links, buffering, window_manager):
         self.engine = engine
         self.links = links
+        self.buffering = buffering
+        self.window_manager = window_manager
 
 
 @pytest.mark.parametrize("seed", [True, 1.0, "1", object()])
@@ -934,7 +936,7 @@ def test_provider_failure_invalidates_the_root_engine_before_any_event_runs():
     sentinel_events = []
     originating_failure = RuntimeError("controller construction failed")
 
-    def failing_controller(engine, _links):
+    def failing_controller(engine, _links, _buffering, _window_manager):
         captured_engines.append(engine)
         engine.schedule(0, lambda: sentinel_events.append("ran"))
         raise originating_failure

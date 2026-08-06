@@ -45,8 +45,12 @@ class _FixedLatency:
                             logical_observables=(0,))
 
 
-def _controller(engine, links):
-    return ModularController(engine, links=links, log_syndromes=False)
+def _controller(engine, links, buffering, window_manager):
+    return ModularController(
+        engine, links=links, log_syndromes=False,
+        controller_capacity=buffering.controller_ingress_packet_slots,
+        window_input_receiver=window_manager,
+        feedback_memory_receiver=window_manager)
 
 
 def _links(t_qc=0.0, t_cwd=0.0, t_dd=0.0, t_wdo=0.0,

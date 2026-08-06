@@ -1,194 +1,322 @@
-"""Controller relay (port 14): the classical hop chains between components.
-
-Part module: ModularController delivery chains — qc->cd inbound
-with fragment buffering + t_pack; oc->cq decision path. The named links
-live in links.py.
-"""
+"""Typed controller staging and the classical reaction-path link relays."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+from enum import Enum, auto
 from typing import Callable, Optional
 
-from .links import (
-    LinkModel,
-    LinkModelConfig,
-    LinkPath,
-    TrafficAttribution,
-)
+from .links import LinkModel, LinkModelConfig, LinkPath, TrafficAttribution
 from .message import (
     RetainedSyndromeFragment,
+    SyndromePacketRoute,
+    SyndromePacketRouteKind,
     SyndromeRoundPacket,
     same_stable_identity,
     stable_identity_order_key,
 )
 
 
-def _delivery_sink_identity(deliver: Callable) -> tuple:
-    if not callable(deliver):
-        raise TypeError("syndrome delivery sink must be callable")
-    receiver = getattr(deliver, "__self__", None)
-    function = getattr(deliver, "__func__", None)
-    if receiver is not None and function is not None:
-        return ("bound", receiver, function)
-    return ("callable", deliver)
+@dataclass(frozen=True)
+class ControllerStagingSnapshot:
+    """Immutable observation of controller-owned capacity state."""
+    controller_capacity: Optional[int]
+    controller_occupancy: int
+    free_slot_indices: tuple[int, ...]
+    identity_to_slot: tuple[tuple[tuple, int], ...]
+    partial_identities: tuple[tuple, ...]
+    packed_wait_identities: tuple[tuple, ...]
+    draining_identities: tuple[tuple, ...]
 
 
-def _same_delivery_sink(left: tuple, right: tuple) -> bool:
-    return (
-        len(left) == len(right)
-        and left[0] == right[0]
-        and all(left_item is right_item
-                for left_item, right_item in zip(left[1:], right[1:]))
-    )
+class ControllerIngressOverflow(RuntimeError):
+    """A new packet could not claim a physical controller staging slot."""
+
+    status = "controller_ingress_overflow"
+
+    def __init__(self, *, tick, route, incoming_identity, capacity, snapshot):
+        self.tick = tick
+        self.route = route
+        self.incoming_packet_or_fragment_identity = incoming_identity
+        self.controller_capacity = capacity
+        self.controller_occupancy = snapshot.controller_occupancy
+        self.partial_identities = snapshot.partial_identities
+        self.packed_wait_identities = snapshot.packed_wait_identities
+        message = f"controller ingress capacity {capacity} is full at tick {tick}"
+        super().__init__(message)
+
+
+class _ControllerSlotState(Enum):
+    PARTIAL = auto()
+    PACKED_WAIT = auto()
+    DRAINING = auto()
 
 
 @dataclass
-class _PendingSyndromeRound:
+class _StagingSlot:
+    identity: tuple
+    route: SyndromePacketRoute
     fragment_count: int
-    sink_identity: tuple
-    deliver: Callable
     fragments: list[RetainedSyndromeFragment] = field(default_factory=list)
+    state: _ControllerSlotState = _ControllerSlotState.PARTIAL
+    packet: Optional[SyndromeRoundPacket] = None
+    packet_bits: Optional[int] = None
 
 
 class ModularController:
     """Relays payloads and decisions across the named classical links."""
 
-    def __init__(self, engine, links: Optional[LinkModel] = None,
-                 t_pack: int = 0, log_syndromes: bool = True):
+    def __init__(
+        self, engine, links: Optional[LinkModel] = None, t_pack: int = 0,
+        log_syndromes: bool = True, *, controller_capacity: Optional[int],
+        window_input_receiver, feedback_memory_receiver,
+    ):
+        if controller_capacity is not None and (
+            type(controller_capacity) is not int or controller_capacity < 1
+        ):
+            raise TypeError("controller_capacity must be a positive int or None")
         self.engine = engine
-        self.links = (
-            links
-            if links is not None
-            else LinkModelConfig.reference_fixed_latency_profile().resolve()
-        )
+        default_links = LinkModelConfig.reference_fixed_latency_profile().resolve()
+        self.links = links if links is not None else default_links
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes
-        self._pending: dict = {}
+        self.controller_capacity = controller_capacity
+        self.window_input_receiver = window_input_receiver
+        self.feedback_memory_receiver = feedback_memory_receiver
+        finite_slots = [None] * controller_capacity \
+            if controller_capacity is not None else []
+        self._slots: list[Optional[_StagingSlot]] = finite_slots
+        self._free_slot_indices = (
+            set(range(controller_capacity))
+            if controller_capacity is not None else set()
+        )
+        self._next_unbounded_slot_index = 0
+        self._identity_to_slot: dict[tuple, int] = {}
+        self._route_queues = {kind: [] for kind in SyndromePacketRouteKind}
+        self._next_route_index = 0
+        self._arbitration_pending = False
         self._completed_rounds: set = set()
 
     # ------------------------------------------------------- syndrome path
 
-    def relay_syndrome(self, payload, deliver: Callable) -> None:
+    def relay_syndrome(self, payload, route: SyndromePacketRoute) -> None:
         """Chip -> controller (t_qc) -> decoder (t_cd), buffering fragments."""
+        if type(route) is not SyndromePacketRoute:
+            raise TypeError("relay_syndrome requires a typed packet route")
         if type(payload.n_fragments) is not int:
             raise TypeError("n_fragments must be an exact built-in int")
         if payload.n_fragments < 1:
             raise ValueError("n_fragments must be at least one")
         fragment_count = payload.n_fragments
         fragment = RetainedSyndromeFragment.from_payload(payload)
-        sink_identity = _delivery_sink_identity(deliver)
         attribution = self._round_attribution(
-            fragment.operation_id,
-            (fragment.patch_id,),
-            fragment.round_index,
-        )
-        self.engine.schedule(self._reserve(
-                                 LinkPath.QC,
-                                 payload_bits=payload.size_bits,
-                                 attribution=attribution),
-                             lambda: self._receive_fragment(
-                                 fragment,
-                                 fragment_count,
-                                 sink_identity,
-                                 deliver,
-                             ),
-                             label="chip->controller")
+            fragment.operation_id, (fragment.patch_id,), fragment.round_index)
+        delay = self._reserve(
+            LinkPath.QC, payload_bits=payload.size_bits, attribution=attribution)
+        receive = lambda: self._receive_fragment(fragment, fragment_count, route)
+        self.engine.schedule(delay, receive, label="chip->controller")
 
     def _receive_fragment(
         self,
         fragment: RetainedSyndromeFragment,
         fragment_count: int,
-        sink_identity: tuple,
-        deliver: Callable,
+        route: SyndromePacketRoute,
     ) -> None:
         round_key = (fragment.operation_id, fragment.round_index)
         if round_key in self._completed_rounds:
             raise ValueError(f"syndrome round {round_key!r} already completed")
-        pending = self._pending.get(round_key)
-        if pending is None:
-            pending = _PendingSyndromeRound(
-                fragment_count=fragment_count,
-                sink_identity=sink_identity,
-                deliver=deliver,
-            )
-        else:
-            if fragment_count != pending.fragment_count:
-                raise ValueError("all fragments must declare the same count")
-            if not _same_delivery_sink(sink_identity, pending.sink_identity):
-                raise ValueError("all fragments must share one delivery sink")
-        if any(
-            fragment.fragment_index == candidate.fragment_index
-            for candidate in pending.fragments
-        ):
+        identity = (
+            route.kind.name, route.source_operation_id,
+            fragment.operation_id, fragment.round_index,
+        )
+        slot_index = self._identity_to_slot.get(identity)
+        if slot_index is None:
+            if any(
+                live_identity[-2:] == round_key
+                for live_identity in self._identity_to_slot
+            ):
+                raise ValueError("all fragments must share one typed route")
+            slot_index = self._allocate_slot(identity, route, fragment_count)
+        pending = self._slots[slot_index]
+        if fragment_count != pending.fragment_count:
+            raise ValueError("all fragments must declare the same count")
+        duplicate = any(fragment.fragment_index == candidate.fragment_index
+                        for candidate in pending.fragments)
+        if duplicate:
             raise ValueError("duplicate syndrome fragment index")
         if fragment.fragment_index >= pending.fragment_count:
             raise ValueError("syndrome fragment index exceeds declared count")
         if len(pending.fragments) >= pending.fragment_count:
             raise ValueError("too many distinct syndrome fragments")
 
-        if round_key not in self._pending:
-            self._pending[round_key] = pending
         pending.fragments.append(fragment)
         if len(pending.fragments) < pending.fragment_count:
             if self.log_syndromes:
-                self.engine.log("Controller",
-                                f"buffered fragment {len(pending.fragments)}/"
-                                f"{pending.fragment_count} of round "
-                                f"{fragment.round_index} of "
-                                f"op#{fragment.operation_id} (waiting for the rest)")
+                progress = f"{len(pending.fragments)}/{pending.fragment_count}"
+                self.engine.log(
+                    "Controller", f"buffered fragment {progress} of round "
+                    f"{fragment.round_index} of op#{fragment.operation_id}")
             return
         packet = SyndromeRoundPacket(
             operation_id=fragment.operation_id,
             round_index=fragment.round_index,
             fragments=self._collapse_fragments(pending.fragments),
         )
-        del self._pending[round_key]
-        self._completed_rounds.add(round_key)
         if self.log_syndromes:
-            self.engine.log("Controller",
-                            f"round {fragment.round_index} of "
-                            f"op#{fragment.operation_id} complete "
-                            f"({pending.fragment_count} fragments); forwarding "
-                            f"one packet to decoder")
+            self.engine.log(
+                "Controller", f"round {fragment.round_index} of "
+                f"op#{fragment.operation_id} complete; packet staged")
         fragment_sizes = [item.size_bits for item in packet.fragments]
-        packet_bits = sum(fragment_sizes) \
+        packet_bits = (
+            sum(fragment_sizes)
             if all(size is not None for size in fragment_sizes) else None
+        )
         if pending.fragment_count > 1 and self.t_pack:
-            # Packing happens off the wire: elapse t_pack as its own event, then
-            # arbitrate the cd bus at the real transmit time. Pricing the wire at
-            # now+t_pack while a single next_free_tick tracks the bus cannot model
-            # a future reservation -- it wrongly blocks (and reorders) traffic
-            # that is ready during the [now, now+t_pack] packing gap.
             self.engine.schedule(
                 self.t_pack,
-                lambda: self._transmit_round_packet(
-                    packet,
-                    packet_bits,
-                    pending.deliver,
-                ),
+                lambda: self._finish_packing(slot_index, packet, packet_bits),
                 label="controller pack")
         else:
-            self._transmit_round_packet(packet, packet_bits, pending.deliver)
+            self._finish_packing(slot_index, packet, packet_bits)
 
-    def _transmit_round_packet(
-        self,
-        packet: SyndromeRoundPacket,
-        packet_bits,
-        deliver: Callable,
+    def _allocate_slot(self, identity, route, fragment_count: int) -> int:
+        if self.controller_capacity is not None:
+            if not self._free_slot_indices:
+                raise ControllerIngressOverflow(
+                    tick=self.engine.now,
+                    route=route,
+                    incoming_identity=identity,
+                    capacity=self.controller_capacity,
+                    snapshot=self.staging_snapshot(),
+                )
+            slot_index = min(self._free_slot_indices)
+            self._free_slot_indices.remove(slot_index)
+        elif self._free_slot_indices:
+            slot_index = min(self._free_slot_indices)
+            self._free_slot_indices.remove(slot_index)
+        else:
+            slot_index = self._next_unbounded_slot_index
+            self._next_unbounded_slot_index += 1
+        slot = _StagingSlot(identity, route, fragment_count)
+        if slot_index == len(self._slots):
+            self._slots.append(slot)
+        else:
+            self._slots[slot_index] = slot
+        self._identity_to_slot[identity] = slot_index
+        self._route_queues[route.kind].append(slot_index)
+        return slot_index
+
+    def _finish_packing(self, slot_index, packet, packet_bits) -> None:
+        slot = self._slots[slot_index]
+        slot.packet = packet
+        slot.packet_bits = packet_bits
+        slot.state = _ControllerSlotState.PACKED_WAIT
+        self._schedule_arbitration()
+
+    def _schedule_arbitration(self) -> None:
+        if self._arbitration_pending:
+            return
+        self._arbitration_pending = True
+        self.engine.schedule(0, self._arbitrate,
+                             label="controller staging arbitration")
+
+    def _arbitrate(self) -> None:
+        self._arbitration_pending = False
+        kinds = tuple(SyndromePacketRouteKind)
+        ordered_kinds = kinds[self._next_route_index:] + kinds[:self._next_route_index]
+        progressed = False
+        for kind in ordered_kinds:
+            route_queue = self._route_queues[kind]
+            if not route_queue:
+                continue
+            slot_index = route_queue[0]
+            if self._attempt_head(slot_index):
+                progressed = True
+                self._next_route_index = (kinds.index(kind) + 1) % len(kinds)
+
+    def _attempt_head(self, slot_index: int) -> bool:
+        slot = self._slots[slot_index]
+        if slot.state is not _ControllerSlotState.PACKED_WAIT:
+            return False
+        if slot.route.kind is SyndromePacketRouteKind.WINDOW_INPUT:
+            accepted = self.window_input_receiver.accept_window_input(slot.packet)
+            if type(accepted) is not bool:
+                raise TypeError("window input receiver must return an exact bool")
+            if not accepted:
+                return False
+            slot.state = _ControllerSlotState.DRAINING
+            release = lambda: self._release_slot(slot_index)
+            self.engine.schedule(
+                0, release, label="window input publication complete")
+        else:
+            slot.state = _ControllerSlotState.DRAINING
+            self._transmit_feedback_memory_round(slot_index, slot)
+        return True
+
+    def _transmit_feedback_memory_round(
+        self, slot_index: int, slot: _StagingSlot,
     ) -> None:
-        """Send a packed round over the cd wire, arbitrating the bus at now."""
+        packet = slot.packet
         attribution = self._round_attribution(
             packet.operation_id,
             tuple(fragment.patch_id for fragment in packet.fragments),
             packet.round_index,
         )
-        self.engine.schedule(self._reserve(
-                                 LinkPath.CWD,
-                                 payload_bits=packet_bits,
-                                 attribution=attribution),
-                             lambda: deliver(packet),
-                             label="controller->decoder packet")
+        source_operation_id = slot.route.source_operation_id
+        self.engine.schedule(
+            self._reserve(
+                LinkPath.CWD,
+                payload_bits=slot.packet_bits,
+                attribution=attribution,
+            ),
+            lambda: self._deliver_feedback_memory_round(
+                slot_index, source_operation_id
+            ),
+            label="controller->feedback memory",
+        )
+
+    def _deliver_feedback_memory_round(
+        self, slot_index: int, source_operation_id,
+    ) -> None:
+        self.feedback_memory_receiver.accept_feedback_memory_round(
+            source_operation_id
+        )
+        self._release_slot(slot_index)
+
+    def _release_slot(self, slot_index: int) -> None:
+        slot = self._slots[slot_index]
+        route_queue = self._route_queues[slot.route.kind]
+        if not route_queue or route_queue.pop(0) != slot_index:
+            raise RuntimeError("controller released a non-head route slot")
+        del self._identity_to_slot[slot.identity]
+        round_key = (slot.packet.operation_id, slot.packet.round_index)
+        self._completed_rounds.add(round_key)
+        self._slots[slot_index] = None
+        self._free_slot_indices.add(slot_index)
+        if any(self._route_queues.values()):
+            self._schedule_arbitration()
+
+    def on_endpoint_capacity_changed(self) -> None:
+        self._schedule_arbitration()
+    def staging_snapshot(self) -> ControllerStagingSnapshot:
+        identities_by_state = {
+            state: tuple(slot.identity for slot in self._slots
+                         if slot is not None and slot.state is state)
+            for state in _ControllerSlotState}
+        return ControllerStagingSnapshot(
+            controller_capacity=self.controller_capacity,
+            controller_occupancy=len(self._identity_to_slot),
+            free_slot_indices=(
+                tuple(sorted(self._free_slot_indices))
+                if self.controller_capacity is not None else ()
+            ),
+            identity_to_slot=tuple(sorted(
+                self._identity_to_slot.items(), key=lambda item: item[1])),
+            partial_identities=identities_by_state[_ControllerSlotState.PARTIAL],
+            packed_wait_identities=identities_by_state[
+                _ControllerSlotState.PACKED_WAIT],
+            draining_identities=identities_by_state[_ControllerSlotState.DRAINING],
+        )
 
     @staticmethod
     def _collapse_fragments(fragments) -> tuple:
@@ -220,8 +348,6 @@ class ModularController:
             )
         return tuple(collapsed)
 
-    # ------------------------------------------------------- decision path
-
     def relay_instruction(self, decision, deliver: Callable) -> None:
         """Orchestrator -> controller (t_oc) -> chip (t_cq)."""
         attribution = TrafficAttribution(
@@ -239,40 +365,14 @@ class ModularController:
                             f"received {instruction} for "
                             f"op#{decision.target_operation_id} from "
                             f"orchestrator (t_oc); forwarding to chip (t_cq)")
-            self.engine.schedule(self._reserve(
-                                     LinkPath.CQ,
-                                     payload_bits=None,
-                                     attribution=attribution),
-                                 lambda: deliver(decision),
-                                 label="controller->chip")
-        self.engine.schedule(self._reserve(
-                                 LinkPath.OC,
-                                 payload_bits=None,
-                                 attribution=attribution), at_controller,
-                             label="orchestrator->controller")
-
-    # -------------------------------------------------- generic port surface
-
-    def send(
-        self,
-        path: LinkPath,
-        payload,
-        deliver: Callable,
-        now: int,
-        attribution: TrafficAttribution,
-    ) -> None:
-        """Generic Transport.send over a named edge (port 14)."""
-        if now != self.engine.now:
-            raise ValueError("controller sends reserve at the current engine tick")
+            delay = self._reserve(
+                LinkPath.CQ, payload_bits=None, attribution=attribution)
+            self.engine.schedule(
+                delay, lambda: deliver(decision), label="controller->chip")
+        delay = self._reserve(
+            LinkPath.OC, payload_bits=None, attribution=attribution)
         self.engine.schedule(
-            self._reserve(
-                path,
-                payload_bits=getattr(payload, "size_bits", None),
-                attribution=attribution,
-            ),
-            lambda: deliver(payload),
-            label=f"send:{path.value}",
-        )
+            delay, at_controller, label="orchestrator->controller")
 
     def _reserve(
         self,
@@ -290,11 +390,7 @@ class ModularController:
         return reservation.total_delay_ticks
 
     @staticmethod
-    def _round_attribution(
-        operation_id,
-        patch_ids: tuple,
-        round_index: int,
-    ) -> TrafficAttribution:
+    def _round_attribution(operation_id, patch_ids: tuple, round_index: int):
         return TrafficAttribution(
             operation_id=operation_id,
             patch_ids=tuple(sorted(patch_ids, key=stable_identity_order_key)),

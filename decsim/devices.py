@@ -19,6 +19,7 @@ from .message import (
     RunSeedPathSegment,
     RunSeedReservation,
     SyndromePayload,
+    WINDOW_INPUT_ROUTE,
 )
 
 
@@ -91,13 +92,11 @@ class ClockedDevice:
         engine,
         device,
         controller,
-        on_syndrome_arrival,
         round_count_by_operation_id,
     ):
         self.engine = engine
         self.device = device            # round_payloads / begin_operation / ...
         self.controller = controller    # relay path (t_qc + t_cd)
-        self.on_syndrome_arrival = on_syndrome_arrival
         self._round_count_by_operation_id = MappingProxyType(
             dict(round_count_by_operation_id)
         )
@@ -192,10 +191,7 @@ class ClockedDevice:
                 n_fragments=fragment_count,
                 fragment_index=fragment_index,
             )
-            self.controller.relay_syndrome(
-                relayed_payload,
-                self.on_syndrome_arrival,
-            )
+            self.controller.relay_syndrome(relayed_payload, WINDOW_INPUT_ROUTE)
 
     def idle_round_payloads(self, operation, stream_id, global_round, patch):
         """Idle-round payloads for extend_stream mode (delegates to the device)."""

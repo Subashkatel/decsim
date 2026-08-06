@@ -101,3 +101,58 @@ def test_surface_generator_keeps_distance_minimum_local():
         ),
         stim.Circuit,
     )
+
+
+def test_repetition_memory_matches_official_stim():
+    noise = {
+        "after_clifford_depolarization": 0.001,
+        "before_round_data_depolarization": 0.002,
+        "before_measure_flip_probability": 0.003,
+        "after_reset_flip_probability": 0.004,
+    }
+    actual = generate_circuit("repetition_code:memory", distance=3, rounds=3, **noise)
+    expected = stim.Circuit.generated("repetition_code:memory", distance=3, rounds=3, **noise)
+    assert actual == expected
+    assert (actual.num_detectors, actual.num_observables) == (8, 1)
+    assert actual.get_detector_coordinates() == expected.get_detector_coordinates()
+    assert actual.detector_error_model(decompose_errors=True).flattened() == (
+        expected.detector_error_model(decompose_errors=True).flattened()
+    )
+
+
+@pytest.mark.parametrize("geometry", [
+    {"x_distance": 3}, {"z_distance": 3},
+    {"x_distance": 3, "z_distance": 3},
+    {"distance": 3, "x_distance": 3, "z_distance": 3},
+])
+def test_repetition_memory_rejects_rectangular_geometry(geometry):
+    with pytest.raises(ValueError):
+        generate_circuit("repetition_code:memory", rounds=3, **geometry)
+
+
+def test_repetition_memory_rejects_surface_detector_filter():
+    with pytest.raises(ValueError):
+        generate_circuit(
+            "repetition_code:memory", distance=3, rounds=3,
+            exclude_other_basis_detectors=True,
+        )
+
+
+@pytest.mark.parametrize("distance,rounds", [(1, 3), (3, 0)])
+def test_repetition_memory_uses_stim_distance_and_round_bounds(distance, rounds):
+    with pytest.raises(ValueError):
+        generate_circuit(
+            "repetition_code:memory", distance=distance, rounds=rounds
+        )
+
+
+def test_repetition_memory_samples_matching_detector_and_observable_shots():
+    circuit = generate_circuit(
+        "repetition_code:memory", distance=3, rounds=3,
+        after_reset_flip_probability=1,
+    )
+    detectors, observables = circuit.compile_detector_sampler().sample(
+        4, separate_observables=True
+    )
+    assert detectors.tolist() == [[1, 1, 0, 0, 0, 0, 1, 1]] * 4
+    assert observables.tolist() == [[1]] * 4

@@ -17,6 +17,7 @@ from decsim.message import (
     DecodeResult,
     DecoderRequestKey,
     DecoderTier,
+    EndpointRole,
     SoftOutput,
     SyndromePayload,
     Window,
@@ -144,25 +145,28 @@ def test_payload_store_replace_strictly_frees_dropped_rounds():
 
     ps = PayloadStore()
     ps.register_op(0)
+    identities = tuple((0, r) for r in (1, 2, 3))
+    ps.register_owner(EndpointRole.SB0, "L", identities)
     for r in (1, 2, 3):
         payload = SyndromePayload(0, 0, r)
-        ps.store_round(
-            SyndromeRoundPacket(
-                operation_id=0,
-                round_index=r,
-                fragments=(RetainedSyndromeFragment.from_payload(payload),),
-            ),
-            completion_tick=r,
+        packet = SyndromeRoundPacket(
+            operation_id=0,
+            round_index=r,
+            fragments=(RetainedSyndromeFragment.from_payload(payload),),
         )
-    ps.lease("L", [(0, 1), (0, 2), (0, 3)])
+        pair = ps.prepare_pair(packet, completion_tick=r)
+        assert pair is not None
+        pair.commit_unpublished()
+        pair.publish()
+        ps.complete_cryo((0, r))
     assert ps.payloads_held == 3
-    ps.replace("L", [(0, 3)])
+    ps.replace_owner_membership(EndpointRole.SB0, "L", ((0, 3),))
     # rounds 1 and 2 lost their only lease and MUST be freed
     assert ps.fragments(0, 1) is None
     assert ps.fragments(0, 2) is None
     assert ps.fragments(0, 3) is not None       # still leased
     assert ps.payloads_held == 1
-    ps.release("L")
+    ps.release_owner(EndpointRole.SB0, "L")
     assert ps.fragments(0, 3) is None
     assert ps.payloads_held == 0
 

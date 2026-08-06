@@ -18,9 +18,13 @@ from decsim.planner import FixedRounds
 from decsim.policies import from_mode
 
 
-def _zero_link_controller(engine, links):
+def _zero_link_controller(engine, links, buffering, window_manager):
     """Controller whose fabric links take no simulated time."""
-    return ModularController(engine, links=links, log_syndromes=False)
+    return ModularController(
+        engine, links=links, log_syndromes=False,
+        controller_capacity=buffering.controller_ingress_packet_slots,
+        window_input_receiver=window_manager,
+        feedback_memory_receiver=window_manager)
 
 
 def _feedback_chain():

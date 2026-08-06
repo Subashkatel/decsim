@@ -25,7 +25,10 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import Optional
 
-from .message import Decision, FeedbackEffect, Operation, SyndromePayload
+from .message import (
+    Decision, FeedbackEffect, Operation, SyndromePacketRoute,
+    SyndromePayload, WINDOW_INPUT_ROUTE,
+)
 from .pauli_frame import PauliFrame
 
 
@@ -409,8 +412,8 @@ class Chip:
         payload = SyndromePayload(("idle", op_id, patch), patch, round_index)
         self.controller.relay_syndrome(
             payload,
-            lambda p, source_op_id=op_id:
-                self.window_manager.on_memory_round(source_op_id))
+            SyndromePacketRoute.feedback_memory_round(op_id),
+        )
 
     def _relay_idle_round_to_live_stream(self, op_id: int, patch) -> bool:
         if self.idle_policy.mode != "extend_stream":
@@ -438,10 +441,7 @@ class Chip:
                 n_fragments=fragment_count,
                 fragment_index=fragment_index,
             )
-            self.controller.relay_syndrome(
-                relayed_payload,
-                self.window_manager.on_syndrome_arrival,
-            )
+            self.controller.relay_syndrome(relayed_payload, WINDOW_INPUT_ROUTE)
 
     def _start_released_successors_on_boundary(self, op_id: int, patch) -> None:
         if self.gates_start_on_round_boundaries:

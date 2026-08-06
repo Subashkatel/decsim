@@ -87,7 +87,7 @@ def _assert_clean(result, guard):
     assert len(window_manager.committed_windows) == window_manager.total_windows, "not every window committed"
     assert sum(window_manager._committed_per_op.values()) == window_manager.total_windows, "double commit"
     assert window_manager.payloads_held == 0, "syndrome RAM not fully freed"
-    assert all(not rounds for rounds in window_manager.store._payloads.values()), "syndrome RAM leaked"
+    assert not window_manager.store.backing_identities, "syndrome RAM leaked"
 
 
 def _independent_patches(n):

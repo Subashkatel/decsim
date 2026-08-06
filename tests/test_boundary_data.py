@@ -13,7 +13,7 @@ from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.engine import Engine
 from decsim.frontends.circuit import CircuitFrontend
-from decsim.message import DecodeResult, Operation, SyndromePayload
+from decsim.message import DecodeResult, Operation, SyndromePayload, WINDOW_INPUT_ROUTE
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec
 from decsim.run_spec import RunSpec, simulate
@@ -121,30 +121,32 @@ def test_per_patch_fragments_gate_round_arrival():
     observed = []
     controllers = []
 
-    def make_controller(engine, links):
+    def make_controller(engine, links, buffering, window_manager):
         controller = ModularController(
             engine,
             links=links,
             log_syndromes=False,
+            controller_capacity=buffering.controller_ingress_packet_slots,
+            window_input_receiver=window_manager,
+            feedback_memory_receiver=window_manager,
         )
         controllers.append(controller)
         return controller
 
     def install_probe(engine, window_manager, decoder_manager, _chip, _factory):
         def probe():
-            deliver = window_manager.on_syndrome_arrival
             controllers[0].relay_syndrome(
                 SyndromePayload(
                     0, 0, 1, n_fragments=2, fragment_index=0
                 ),
-                deliver,
+                WINDOW_INPUT_ROUTE,
             )
             observed.append(window_manager.rounds_arrived[0])
             controllers[0].relay_syndrome(
                 SyndromePayload(
                     0, 1, 1, n_fragments=2, fragment_index=1
                 ),
-                deliver,
+                WINDOW_INPUT_ROUTE,
             )
             observed.append(window_manager.rounds_arrived[0])
             engine.schedule(

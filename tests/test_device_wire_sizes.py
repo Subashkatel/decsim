@@ -34,18 +34,14 @@ def test_clocked_device_relay_does_not_mutate_source_fragment_counts():
         def __init__(self):
             self.payloads = []
 
-        def relay_syndrome(self, payload, deliver):
+        def relay_syndrome(self, payload, route):
             self.payloads.append(payload)
-
-    def on_syndrome_arrival(packet):
-        raise AssertionError("recording controller must not deliver")
 
     controller = RecordingController()
     clocked = ClockedDevice(
         engine=None,
         device=None,
         controller=controller,
-        on_syndrome_arrival=on_syndrome_arrival,
         round_count_by_operation_id={},
     )
     source_payloads = [
@@ -70,13 +66,12 @@ def test_explicit_fragment_slot_rejects_multiple_payloads_before_relay():
         def __init__(self):
             self.payloads = []
 
-        def relay_syndrome(self, payload, deliver):
+        def relay_syndrome(self, payload, route):
             self.payloads.append(payload)
 
     controller = RecordingController()
     clocked = ClockedDevice(
         engine=None, device=None, controller=controller,
-        on_syndrome_arrival=lambda packet: None,
         round_count_by_operation_id={},
     )
     operation = Operation(

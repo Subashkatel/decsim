@@ -74,8 +74,12 @@ def test_per_window_release_holds_only_the_live_set():
             return DecodeResult(job.op_id, job.window_id,
                                 logical_observables=(0,))
 
-    def _links(engine, links):
-        return ModularController(engine, links=links, log_syndromes=False)
+    def _links(engine, links, buffering, window_manager):
+        return ModularController(
+            engine, links=links, log_syndromes=False,
+            controller_capacity=buffering.controller_ingress_packet_slots,
+            window_input_receiver=window_manager,
+            feedback_memory_receiver=window_manager)
 
     def peak_for(rounds):
         op = Operation(0, "mem", (0,), clifford=True, patches=(0,))

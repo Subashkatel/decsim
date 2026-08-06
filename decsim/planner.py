@@ -21,10 +21,12 @@ import math
 
 from .config import us
 from .message import (
+    EndpointRole,
     Operation,
     OperationPlanningView,
     OperationWindowPlan,
     OpKind,
+    PotentialStrong,
     ResolvedCodeGeometry,
     ResolvedOperationPlanning,
     ResolvedPatchPlanning,
@@ -44,6 +46,65 @@ class _RunPlan:
     resolved_patches: tuple[ResolvedPatchPlanning, ...]
     round_ticks: int
     execution: WindowPlan
+    buffering: _SyndromeBufferingPlan
+
+
+@dataclass(frozen=True)
+class _SyndromeBufferingPlan:
+    sb0_owners: tuple
+    potential_owners: tuple
+    capacity_rows: tuple
+
+
+def _plan_syndrome_buffering(execution, *, retain_strong_context, double_window,
+                             has_open_ended_dynamic_streams=False):
+    def read_keys(operation_id, lower, upper):
+        round_count = execution.rounds_by_operation[operation_id]
+        keys = [(operation_id, index)
+                for index in range(lower, min(upper, round_count) + 1)]
+        for successor_id in execution.successors.get(operation_id, ()):
+            overflow = min(upper - round_count,
+                           execution.rounds_by_operation[successor_id])
+            keys += [(successor_id, index) for index in range(1, overflow + 1)]
+        return tuple(keys)
+
+    weak_owners, potential_owners = [], []
+    lower_witnesses = {role: () for role in EndpointRole}
+    sufficient = {role: set() for role in EndpointRole}
+    for operation_id, indices in execution.op_windows.items():
+        windows = [execution.windows[(operation_id, index)] for index in indices]
+        round_count = execution.rounds_by_operation[operation_id]
+        for window in windows:
+            key = (operation_id, window.k)
+            weak = read_keys(operation_id, window.start_round, window.buffer_hi)
+            weak_owners.append((key, weak))
+            sufficient[EndpointRole.SB0].update(weak)
+            if len(weak) > len(lower_witnesses[EndpointRole.SB0]):
+                lower_witnesses[EndpointRole.SB0] = weak
+            if not retain_strong_context:
+                continue
+            buffer_rounds = max(0, window.buffer_hi - window.commit_hi)
+            commit_hi = window.commit_hi
+            if double_window:
+                commit_hi = min(
+                    round_count, window.commit_hi + 2 * buffer_rounds)
+            potential = read_keys(
+                operation_id, max(1, window.commit_lo - buffer_rounds),
+                commit_hi + buffer_rounds)
+            owner = PotentialStrong(key)
+            potential_owners.append((owner, potential))
+            sufficient[EndpointRole.SB1].update(potential)
+            arrived = tuple(identity for identity in potential
+                            if identity[0] != operation_id
+                            or identity[1] <= window.buffer_hi)
+            if len(arrived) > len(lower_witnesses[EndpointRole.SB1]):
+                lower_witnesses[EndpointRole.SB1] = arrived
+    rows = tuple((role, lower_witnesses[role], None if
+                  has_open_ended_dynamic_streams else tuple(sorted(
+                      sufficient[role], key=stable_identity_bytes)))
+                 for role in EndpointRole)
+    return _SyndromeBufferingPlan(
+        tuple(weak_owners), tuple(potential_owners), rows)
 
 
 def _validated(value: int, source: str) -> int:
@@ -166,7 +227,6 @@ def _validate_workload_identity(ops, decode_ops, dynamic_streams) -> None:
 
 class FixedRounds:
     """Every operation runs the same number of rounds."""
-
     def __init__(self, round_count: int):
         self.round_count = _validated(int(round_count), "FixedRounds")
 
@@ -176,7 +236,6 @@ class FixedRounds:
 
 class PerOpRounds:
     """Per-operation round counts with a fallback policy (the QLX adapter)."""
-
     def __init__(self, rounds_by_op: dict, fallback=None):
         self.rounds_by_op = {
             op_id: self._validated(int(r), op_id)
@@ -252,6 +311,9 @@ def _plan_execution(
     scheme,
     rounds_policy,
     fallback_round_us: float,
+    retain_strong_context: bool,
+    double_window: bool,
+    has_open_ended_dynamic_streams: bool = False,
 ) -> _RunPlan:
     """Resolve geometry, cadence, and windows once for one runtime code."""
     round_us = code.round_period_us()
@@ -356,16 +418,19 @@ def _plan_execution(
         )
         for operation in planned_resolved
     )
+    execution = _materialize_execution_plan(
+        planned_views, planned_resolved, window_ledgers)
     return _RunPlan(
         code_geometry=geometry,
         resolved_operations=tuple(resolved),
         resolved_patches=tuple(patches),
         round_ticks=round_ticks,
-        execution=_materialize_execution_plan(
-            planned_views,
-            planned_resolved,
-            window_ledgers,
-        ),
+        execution=execution,
+        buffering=_plan_syndrome_buffering(
+            execution,
+            retain_strong_context=retain_strong_context,
+            double_window=double_window,
+            has_open_ended_dynamic_streams=has_open_ended_dynamic_streams),
     )
 
 

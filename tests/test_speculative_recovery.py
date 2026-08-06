@@ -20,7 +20,8 @@ from decsim.codes import SurfaceCodeModel
 from decsim.config import TimingConfig, us
 from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
-from decsim.message import DecodeResult, Operation, SoftOutput
+from decsim.message import DecodeResult, EndpointRole, Operation, Replay, SoftOutput
+from decsim.payload_store import PayloadStore
 from decsim.planner import FixedRounds, PerOpRounds
 from decsim.policies import Eager, Held
 from decsim.run_spec import RunSpec, simulate
@@ -216,6 +217,41 @@ def test_eager_boundary_disagreement_replays_the_transitive_weak_cone():
                  for row in replacements]
     assert revisions[0] == (1, 1)
     assert revisions[1][0] == 2 and revisions[1][1] > revisions[0][1]
+
+
+def test_eager_replay_replaces_generation_before_release_and_held_has_none(
+    monkeypatch,
+):
+    events = []
+    register_owner = PayloadStore.register_owner
+    release_owner = PayloadStore.release_owner
+
+    def record_register(store, role, owner, identities):
+        if role is EndpointRole.SB1 and type(owner) is Replay:
+            events.append(("acquire", owner))
+        return register_owner(store, role, owner, identities)
+
+    def record_release(store, role, owner):
+        if role is EndpointRole.SB1 and type(owner) is Replay:
+            events.append(("release", owner))
+        return release_owner(store, role, owner)
+
+    monkeypatch.setattr(PayloadStore, "register_owner", record_register)
+    monkeypatch.setattr(PayloadStore, "release_owner", record_release)
+    eager, _ = _deterministic_run(Eager())
+    first = Replay((0, 1), 0)
+    replacement = Replay((0, 1), 1)
+    assert events == [
+        ("acquire", first),
+        ("acquire", replacement),
+        ("release", first),
+        ("release", replacement),
+    ]
+    assert eager.window_manager.speculative_recovery._next_generation == {}
+
+    events.clear()
+    _deterministic_run(Held())
+    assert events == []
 
 
 @pytest.mark.parametrize("strong_first", [True, False])
@@ -902,6 +938,7 @@ def test_overlapping_stream_roots_hold_segment_until_both_resolve():
     assert publications[0]["t"] >= replay_done
     assert publications[0]["t"] >= runtime.op_strong_commit_time[0]
     assert eager.chip.op_start_time[3] >= replay_done
+    assert runtime.speculative_recovery._next_generation == {}
     assert eager.orchestrator.frame.snapshot() == \
         held.orchestrator.frame.snapshot()
     assert not runtime.speculative_recovery.has_finality_blockers

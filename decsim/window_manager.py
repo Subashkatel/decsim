@@ -8,9 +8,10 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Callable, Optional
 
-from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecodeResult,
-                      DecoderRequestKey, DecoderTier, StrongDecodeCompletion,
-                      Operation, SeamFaultOwner, SyndromeRoundPacket,
+from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob,
+                      DecodeResult, DecoderRequestKey, DecoderTier, EndpointRole,
+                      PendingStrong, PotentialStrong, StrongDecodeCompletion,
+                      Operation, RephaseGuard, SeamFaultOwner, SyndromeRoundPacket,
                       StrongRegionPlan, Window, WindowInfo, WindowPlan,
                       is_stable_identity, stable_identity_order_key)
 from .links import (BoundaryTransferRelation, LinkPath,
@@ -266,6 +267,7 @@ class WindowManager:
         self.feedback_boundary_mode = feedback_boundary_mode
         self.syndrome_source = syndrome_source
         self.retain_strong_context = retain_strong_context
+        self.double_window = double_window
         self._next_decoder_request_sequence = 0
         self._selected_request_keys = {} if capture_enabled else None
 
@@ -405,7 +407,7 @@ class WindowManager:
                 f"operation {op.id} has no frozen planning view"
             ) from error
 
-    def load_execution_plan(self, plan: WindowPlan) -> None:
+    def load_execution_plan(self, plan: WindowPlan, buffering_plan) -> None:
         """Install the pre-computed compile-time window plan."""
         if self._windows_built:
             return
@@ -424,7 +426,60 @@ class WindowManager:
         )
         self.total_windows = plan.total_windows
         self._build_window_error_models()
-        self._build_round_leases()
+        self.buffering_capacity_rows = {
+            role: (minimum, sufficient)
+            for role, minimum, sufficient in buffering_plan.capacity_rows
+        }
+        for role, minimum, _ in buffering_plan.capacity_rows:
+            capacity = self.store.endpoint_capacity(role)
+            if capacity is not None and capacity < len(minimum):
+                raise ValueError(
+                    f"{role.name} needs {len(minimum)} packet slots, got {capacity}")
+        self._register_planned_endpoint_owners(buffering_plan)
+
+    def _register_planned_endpoint_owners(self, plan) -> None:
+        for owner, identities in plan.sb0_owners:
+            self.store.register_owner(EndpointRole.SB0, owner, identities)
+        for owner, identities in plan.potential_owners:
+            self.store.register_owner(EndpointRole.SB1, owner, identities)
+
+    def _transfer_sb1_owner(self, previous, replacement) -> tuple:
+        keys = self.store.owner_packet_identities(EndpointRole.SB1, previous)
+        self.store.register_owner(EndpointRole.SB1, replacement, keys)
+        self.store.release_owner(EndpointRole.SB1, previous)
+        return keys
+
+    def _release_owner_if_live(self, role, owner) -> None:
+        if self.store.has_owner(role, owner):
+            self.store.release_owner(role, owner)
+
+    def _transfer_potential_to_pending(
+        self, window_key, request_key,
+    ) -> tuple:
+        return self._transfer_sb1_owner(
+            PotentialStrong(window_key), PendingStrong(request_key))
+
+    def _transfer_pending_to_csd(self, request_key) -> tuple:
+        return self._transfer_sb1_owner(
+            PendingStrong(request_key), CsdInput(request_key))
+
+    def _transfer_potential_to_csd(self, window_key, request_key) -> tuple:
+        return self._transfer_sb1_owner(
+            PotentialStrong(window_key), CsdInput(request_key))
+
+    def _release_csd_at_delivery(self, request_key, arrival_tick) -> None:
+        def release_input():
+            self._release_owner_if_live(
+                EndpointRole.SB1, CsdInput(request_key))
+            operation = self._ops.get(request_key.operation_id)
+            if operation is not None:
+                self._finish_operation_if_ready(operation)
+                self.finish_workload_if_ready()
+
+        self.engine.schedule(
+            arrival_tick - self.engine.now,
+            release_input,
+            label="release delivered CSD input")
 
     def _build_window_error_models(self) -> None:
         """Ask the syndrome source for per-window detector error models."""
@@ -444,17 +499,15 @@ class WindowManager:
             for key, model in zip(keys, models):
                 self.window_models[key] = model
 
-    def _build_round_leases(self) -> None:
-        for key, window in self.windows.items():
-            self._add_window_read_refs(key, window)
-
     def _add_window_read_refs(self, key: tuple, window: Window) -> None:
-        """Retain rounds needed by the weak window and possible strong re-decode."""
+        """Register typed weak and possible-strong owners for a new window."""
         weak = self._read_keys_for_bounds(
             window.op_id, window.start_round, window.buffer_hi, window)
         strong = self._strong_context_read_keys(window, weak)
-        self.store.lease(key, weak)
-        self.store.lease((key, "strong"), strong)
+        self.store.register_owner(EndpointRole.SB0, key, weak)
+        if self.retain_strong_context:
+            self.store.register_owner(
+                EndpointRole.SB1, PotentialStrong(key), weak + strong)
 
     def _read_keys_for_bounds(self, op_id, start_round: int, buffer_hi: int,
                               window: Optional[Window] = None) -> list:
@@ -480,19 +533,15 @@ class WindowManager:
         return [rk for rk in strong if rk not in weak]
 
     def _replace_window_read_refs(self, key: tuple, window: Window) -> None:
-        """Replace retained-round references for an unqueued window.
-
-        A closed boundary shrinks the weak set, so rounds can MOVE from the
-        weak lease to the strong lease; a temporary guard lease keeps them
-        referenced across the two per-lease replacements (the original did
-        one merged old-vs-new diff, which never dropped a moved round)."""
+        """Move shrinking weak reads into strong retention before release."""
         weak = self._read_keys_for_bounds(
             window.op_id, window.start_round, window.buffer_hi, window)
         strong = self._strong_context_read_keys(window, weak)
-        self.store.lease((key, "replace-guard"), weak + strong)
-        self.store.replace(key, weak)
-        self.store.replace((key, "strong"), strong)
-        self.store.release((key, "replace-guard"))
+        potential = PotentialStrong(key)
+        if self.store.has_owner(EndpointRole.SB1, potential):
+            self.store.replace_owner_membership(
+                EndpointRole.SB1, potential, weak + strong)
+        self.store.replace_owner_membership(EndpointRole.SB0, key, weak)
 
     def _require_retained_payloads(
         self, round_keys: list, purpose: str,
@@ -526,7 +575,8 @@ class WindowManager:
         new_reads = sorted(
             (stream_id, r)
             for r in range(window.start_round, window.commit_hi + 1))
-        self.store.replace(key, new_reads)
+        self.store.replace_owner_membership(
+            EndpointRole.SB0, key, new_reads)
 
     def create_dynamic_window(self, stream_id, window_index, commit_lo,
                               commit_hi, buffer_hi, *, is_last) -> None:
@@ -589,6 +639,41 @@ class WindowManager:
         for predecessor_id in op.decoder_boundary_predecessors:
             self.check_windows_for_operation(predecessor_id)
 
+    def accept_window_input(self, packet: SyndromeRoundPacket) -> bool:
+        """Accept one controller-head packet through the typed window route."""
+        pair = self.store.prepare_pair(packet, self.engine.now)
+        if pair is None:
+            return False
+        fragment_bits = tuple(fragment.size_bits for fragment in packet.fragments)
+        packet_bits = (sum(fragment_bits)
+                       if all(bits is not None for bits in fragment_bits)
+                       else None)
+        reservation = self.links.reserve(
+            LinkPath.CWD, payload_bits=packet_bits, now_ticks=self.engine.now,
+            attribution=TrafficAttribution(
+                operation_id=packet.operation_id,
+                patch_ids=tuple(fragment.patch_id for fragment in packet.fragments),
+                window_id=None, round_lo=packet.round_index,
+                round_hi=packet.round_index))
+        arrival_tick = self.engine.now + reservation.total_delay_ticks
+        pair.set_completion_tick(arrival_tick)
+        pair.commit_unpublished()
+        pair.publish()
+        identity = (packet.operation_id, packet.round_index)
+        self.engine.schedule(
+            reservation.total_delay_ticks,
+            lambda: self._complete_window_input(identity, packet),
+            label="complete CRYO packet transfer")
+        return True
+
+    def _complete_window_input(self, identity, packet) -> None:
+        self.on_syndrome_arrival(packet)
+        self.store.complete_cryo(identity)
+
+    def accept_feedback_memory_round(self, source_operation_id) -> None:
+        """Accept one standalone feedback-memory notification after CWD."""
+        self.on_memory_round(source_operation_id)
+
     def _store_payload(
         self,
         packet: SyndromeRoundPacket,
@@ -608,7 +693,12 @@ class WindowManager:
                 f"round {packet.round_index} of {op.name} exceeds the device "
                 f"round limit {round_limit}"
             )
-        self.store.store_round(packet, completion_tick=self.engine.now)
+        if (
+            self.store.fragments(op.id, packet.round_index) != packet.fragments
+            or self.store.round_complete_tick(op.id, packet.round_index)
+            != self.engine.now
+        ):
+            raise RuntimeError("syndrome packet did not arrive through its pair")
         self.rounds_arrived[op.id] = max(
             self.rounds_arrived[op.id],
             packet.round_index,
@@ -796,6 +886,7 @@ class WindowManager:
                         "strong transport delay is owned by the link fabric"
                     )
                 self._submit_strong_with_csd(submission.job)
+        self._release_owner_if_live(EndpointRole.SB0, key)
 
     def _assemble_payloads(self, w: Window) -> list:
         """Collect this window's payloads, including successor overflow rounds."""
@@ -941,6 +1032,21 @@ class WindowManager:
             strong_job,
             payload_bits=self._job_payload_bits(strong_job),
         )
+        request_key = strong_job.request_key
+        window_key = strong_job.strong_decode_for
+        if self.store.has_owner(
+                EndpointRole.SB1, PotentialStrong(window_key)):
+            self._transfer_potential_to_csd(window_key, request_key)
+        elif self.store.has_owner(
+                EndpointRole.SB1, PendingStrong(request_key)):
+            self._transfer_pending_to_csd(request_key)
+        else:
+            packet_ids = tuple(dict.fromkeys(
+                (fragment.operation_id, fragment.round_index)
+                for fragment in strong_job.payloads))
+            self.store.register_owner(
+                EndpointRole.SB1, CsdInput(request_key), packet_ids)
+        self._release_csd_at_delivery(request_key, csd_arrival_ticks)
         ready_ticks = (
             csd_arrival_ticks
             if wsd_arrival_ticks is None
@@ -1132,11 +1238,21 @@ class WindowManager:
             resolved_region.strong_fault_exclusion_ranges)
         logical_candidate = self._strong_slab_ownership_candidate(
             key, resolved_region)
-        guard_lease = None
+        guard = None
         if restart_key is not None:
-            guard_lease = (key, "restart-plan-guard")
-            self.store.lease(
-                guard_lease, resolved_region.restart_read_keys)
+            guard = RephaseGuard(strong_request_key)
+            sb0_guard = list(self.store.owner_packet_identities(
+                EndpointRole.SB0, restart_key))
+            sb0_guard += list(resolved_region.restart_read_keys)
+            sb1_guard = list(self.store.owner_packet_identities(
+                EndpointRole.SB1, PotentialStrong(key)))
+            sb1_guard += list(self.store.owner_packet_identities(
+                EndpointRole.SB1, PotentialStrong(restart_key)))
+            sb1_guard += [(op_id, round_index) for round_index in
+                          range(plan.context_lo, plan.context_hi + 1)]
+            sb1_guard += self._strong_context_read_keys(
+                proposed_restart, list(resolved_region.restart_read_keys))
+            self.store.register_rephase_guard(guard, sb0_guard, sb1_guard)
         try:
             self.logical_contributions = logical_candidate
             phase = (
@@ -1160,11 +1276,15 @@ class WindowManager:
                 self._escalations.register_terminal(pending, op_id)
             else:
                 self._escalations.register_far(pending, restart_key)
-            self.store.replace((key, "strong"),
-                               [(op_id, r) for r in
-                                range(plan.context_lo, plan.context_hi + 1)])
+            self._transfer_potential_to_pending(key, strong_request_key)
+            self.store.replace_owner_membership(
+                EndpointRole.SB1, PendingStrong(strong_request_key),
+                [(op_id, round_index) for round_index in
+                 range(plan.context_lo, plan.context_hi + 1)])
             for absorbed_key in resolved_region.absorbed_window_keys:
-                self._absorb_window(absorbed_key, restart_key)
+                self._absorb_window(
+                    absorbed_key, restart_key,
+                    PendingStrong(strong_request_key))
             readiness_description = (
                 "terminal data"
                 if restart_key is None
@@ -1188,8 +1308,9 @@ class WindowManager:
                 self.check_window(restart_key)  # its absorbed dep is gone
             return strong_request_key
         finally:
-            if guard_lease is not None:
-                self.store.release(guard_lease)
+            if guard is not None:
+                for role in EndpointRole:
+                    self._release_owner_if_live(role, guard)
 
     def _defer_crossing_strong_escalation(
         self, weak_job: DecodeJob, weak_window: Window, later_windows: list,
@@ -1432,43 +1553,49 @@ class WindowManager:
             strong_request_created_ticks=strong_request_created_ticks,
         )
 
-        lease_ids = [
-            lease_id
-            for window_key in affected_keys
-            for lease_id in (window_key, (window_key, "strong"))
-        ]
-        lease_ids.append((key, "strong"))
-        lease_ids = list(dict.fromkeys(lease_ids))
         absent = object()
-        lease_snapshot = {}
-        for lease_id in lease_ids:
-            try:
-                lease_snapshot[lease_id] = self.store.lease_round_keys(lease_id)
-            except KeyError:
-                lease_snapshot[lease_id] = absent
-
-        replacement_leases = {}
+        owner_tokens = list(dict.fromkeys(
+            token for window_key in affected_keys for token in (
+                (EndpointRole.SB0, window_key),
+                (EndpointRole.SB1, PotentialStrong(window_key)),
+            )
+        ))
+        strong_token = (EndpointRole.SB1, PotentialStrong(key))
+        owner_tokens.append(strong_token)
+        owner_snapshot = {
+            token: self.store.owner_packet_identities(*token)
+            if self.store.has_owner(*token) else absent
+            for token in owner_tokens
+        }
+        if owner_snapshot[strong_token] is absent:
+            raise RuntimeError(f"strong owner for {key} is not live")
+        replacement_memberships = {}
         for window in replacement_windows:
             weak_reads = self._read_keys_for_bounds(
                 op_id, window.start_round, window.buffer_hi, window)
-            replacement_leases[window.key] = weak_reads
-            replacement_leases[(window.key, "strong")] = \
-                self._strong_context_read_keys(window, weak_reads)
-        replacement_leases[(key, "strong")] = [
+            replacement_memberships[(EndpointRole.SB0, window.key)] = weak_reads
+            replacement_memberships[
+                (EndpointRole.SB1, PotentialStrong(window.key))
+            ] = weak_reads + self._strong_context_read_keys(window, weak_reads)
+        pending_reads = [
             (op_id, round_index)
             for round_index in range(plan.context_lo, plan.context_hi + 1)
         ]
-        guarded_reads = []
-        for old_reads in lease_snapshot.values():
-            if old_reads is not absent:
-                guarded_reads.extend(old_reads)
-        for new_reads in replacement_leases.values():
-            guarded_reads.extend(new_reads)
-        guarded_reads = list(dict.fromkeys(guarded_reads))
+        replacement_memberships[strong_token] = pending_reads
+        guarded_by_role = {role: [] for role in EndpointRole}
+        for (role, _), reads in owner_snapshot.items():
+            if reads is not absent:
+                guarded_by_role[role].extend(reads)
+        for (role, _), reads in replacement_memberships.items():
+            guarded_by_role[role].extend(reads)
+        guarded_by_role[EndpointRole.SB1].extend(pending_reads)
+        guarded_reads = list(dict.fromkeys(
+            guarded_by_role[EndpointRole.SB0]
+            + guarded_by_role[EndpointRole.SB1]))
         self._require_retained_payloads(
             guarded_reads, f"suffix rephase guard for {key}")
 
-        guard_lease = (key, "suffix-rephase-guard")
+        guard = RephaseGuard(strong_request_key)
         windows_snapshot = dict(self.windows)
         op_window_indices = self.op_windows[op_id]
         op_window_snapshot = list(op_window_indices)
@@ -1479,7 +1606,11 @@ class WindowManager:
         logical_snapshot = self.logical_contributions
         escalated_dependents = list(weak_window.dependents)
 
-        self.store.lease(guard_lease, guarded_reads)
+        self.store.register_rephase_guard(
+            guard,
+            guarded_by_role[EndpointRole.SB0],
+            guarded_by_role[EndpointRole.SB1],
+        )
         registered = False
         try:
             weak_window.dependents[:] = [restart_window.key]
@@ -1515,17 +1646,15 @@ class WindowManager:
             self.logical_contributions = logical_candidate
             self._escalations.register_far(pending, restart_window.key)
             registered = True
-            for lease_id in lease_ids:
-                if lease_id in replacement_leases:
-                    self.store.replace(lease_id, replacement_leases[lease_id])
-                else:
-                    self.store.release(lease_id)
-        except Exception:
-            for lease_id, old_reads in lease_snapshot.items():
+            for token, old_reads in owner_snapshot.items():
                 if old_reads is absent:
-                    self.store.release(lease_id)
-                else:
-                    self.store.replace(lease_id, old_reads)
+                    continue
+                self.store.replace_owner_membership(
+                    *token, replacement_memberships.get(token, ()))
+        except Exception:
+            for token, old_reads in owner_snapshot.items():
+                if old_reads is not absent:
+                    self.store.replace_owner_membership(*token, old_reads)
             weak_window.dependents[:] = escalated_dependents
             self.windows.clear()
             self.windows.update(windows_snapshot)
@@ -1543,9 +1672,20 @@ class WindowManager:
             self.logical_contributions = logical_snapshot
             if registered:
                 self._escalations.take_far(restart_window.key, pending)
+            for role in EndpointRole:
+                self._release_owner_if_live(role, guard)
             raise
-        finally:
-            self.store.release(guard_lease)
+
+        self._transfer_potential_to_pending(key, strong_request_key)
+        for token, old_reads in owner_snapshot.items():
+            if (
+                old_reads is not absent
+                and token not in replacement_memberships
+                and self.store.has_owner(*token)
+            ):
+                self.store.release_owner(*token)
+        for role in EndpointRole:
+            self._release_owner_if_live(role, guard)
 
         self.engine.log(
             "DecoderCluster",
@@ -1760,7 +1900,9 @@ class WindowManager:
                         f"{restart.buffer_hi}; crossing faults owned by "
                         f"{seam_owner.name.lower()})")
 
-    def _absorb_window(self, key: tuple, restart_key: Optional[tuple]) -> None:
+    def _absorb_window(
+        self, key: tuple, restart_key: Optional[tuple], replacement,
+    ) -> None:
         """A slab-covered window is never weak-decoded: count it committed
         with no logical contribution and unhook the restart window."""
         window = self.windows[key]
@@ -1779,8 +1921,18 @@ class WindowManager:
                 restart.deps_remaining -= 1
             if restart_key in window.dependents:
                 window.dependents.remove(restart_key)
-        self.store.release(key)
-        self.store.release((key, "strong"))
+        self._release_owner_if_live(EndpointRole.SB0, key)
+        absorbed = PotentialStrong(key)
+        needed = set(self.store.owner_packet_identities(
+            EndpointRole.SB1, absorbed))
+        replacements = set(self.store.owner_packet_identities(
+            EndpointRole.SB1, replacement))
+        if restart_key is not None:
+            replacements.update(self.store.owner_packet_identities(
+                EndpointRole.SB1, PotentialStrong(restart_key)))
+        if not needed <= replacements:
+            raise RuntimeError("absorption replacement does not cover packets")
+        self.store.release_owner(EndpointRole.SB1, absorbed)
         self.engine.log("DecoderCluster",
                         f"window {key} absorbed into the strong slab "
                         f"(weak chain skips it)")
@@ -1836,7 +1988,6 @@ class WindowManager:
             strong_job,
             wsd_arrival_ticks=pending.wsd_arrival_ticks,
         )
-        self.store.release((pending.key, "strong"))
         self.engine.log(
             "DecoderCluster",
             f"{pending.label}: far-side weak boundary determined -> strong "
@@ -1857,7 +2008,6 @@ class WindowManager:
             strong_job,
             wsd_arrival_ticks=pending.wsd_arrival_ticks,
         )
-        self.store.release((pending.key, "strong"))
         self.engine.log(
             "DecoderCluster",
             f"{pending.label}: terminal data complete -> strong slab submitted",
@@ -1927,7 +2077,9 @@ class WindowManager:
         else:
             self._held_boundary[key] = _HeldBoundary(
                 job.request_key, op.id, boundary)
-        self.store.release(key)
+        if not job.awaiting_strong_result:
+            self._release_owner_if_live(
+                EndpointRole.SB1, PotentialStrong(key))
         self._check_deferred_strong_after_commit(key)
         self.speculative_recovery.after_commit()
         self._finish_operation_if_ready(op)
@@ -1959,8 +2111,6 @@ class WindowManager:
             )
         if job.awaiting_strong_result:
             self._mark_window_waiting_for_strong(key, op.id)
-        if self._escalations.peek_key(key) is None:
-            self.store.release((key, "strong"))
 
     def _install_logical_contribution(
         self,
@@ -2422,6 +2572,8 @@ class WindowManager:
             return
         if self.speculative_recovery.blocks_finality(op.id):
             return
+        if self.store.has_live_operation_reference(op.id):
+            return
         predicate = self._finalize_gates.get(op.id)
         if predicate is not None and not predicate(op):
             return
@@ -2429,7 +2581,7 @@ class WindowManager:
                 and self.lifecycle.sealed(op.id)):
             self._finished_ops.add(op.id)
             self._deliver_result(op)
-            self.store.free_op(op.id)
+            self.store.close_operation(op.id)
 
     def finish_workload_if_ready(self) -> None:
         if self._workload_complete_sent:

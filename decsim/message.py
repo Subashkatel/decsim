@@ -1,15 +1,6 @@
 """The typed messages the simulator's modules pass to each other.
 
-Ordered by pipeline stage: syndrome rounds measured on the chip
-(SyndromePayload), the decode windows planned over them (Window, WindowPlan),
-the jobs and results that flow through the decoder cluster (DecodeJob,
-DecodeResult), and the feedback decisions sent back toward the chip
-(Decision). Operation, at the bottom, describes the workload itself.
-
-This module imports nothing from the rest of decsim, so any module can
-depend on it without creating an import cycle.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -18,9 +9,7 @@ import math
 from numbers import Real
 from typing import Any, Callable, Optional
 
-
 def is_stable_string(value: Any) -> bool:
-    """Whether a value is an exact Unicode-scalar string."""
     return (
         type(value) is str
         and all(
@@ -31,7 +20,6 @@ def is_stable_string(value: Any) -> bool:
 
 
 def is_stable_identity(value: Any) -> bool:
-    """Whether a value has deterministic, recursively typed identity."""
     value_type = type(value)
     if value_type is int:
         return True
@@ -60,7 +48,6 @@ def same_stable_identity(left: Any, right: Any) -> bool:
 
 
 def stable_identity_bytes(identity: Any) -> bytes:
-    """Encode one stable identity with exact recursive type framing."""
     if not is_stable_identity(identity):
         raise TypeError(
             "stable identities are exact int, Unicode scalar str, or "
@@ -84,12 +71,10 @@ def stable_identity_bytes(identity: Any) -> bytes:
 
 
 def stable_identity_order_key(identity: Any) -> bytes:
-    """Return the version-stable structural ordering key for an identity."""
     return stable_identity_bytes(identity)
 
 
 def stable_identity_json(identity: Any) -> dict:
-    """Serialize a stable identity with explicit recursive type framing."""
     if type(identity) is int:
         return {"kind": "integer", "value": str(identity), "items": None}
     if type(identity) is str:
@@ -202,8 +187,52 @@ class RunSeedReservation:
             )
 
 
-# ----------------------------------------------------------------- syndrome
+class SyndromePacketRouteKind(Enum):
+    WINDOW_INPUT = auto()
+    FEEDBACK_MEMORY_ROUND = auto()
 
+class EndpointRole(Enum):
+    SB0 = auto()
+    SB1 = auto()
+
+class EndpointState(Enum):
+    FREE, PREPARED, CRYO_IN_FLIGHT, RESIDENT, RELEASED = (auto() for _ in range(5))
+@dataclass(frozen=True)
+class PotentialStrong:
+    window_key: tuple
+@dataclass(frozen=True)
+class PendingStrong:
+    request_key: DecoderRequestKey
+@dataclass(frozen=True)
+class CsdInput:
+    request_key: DecoderRequestKey
+@dataclass(frozen=True)
+class Replay:
+    window_key: tuple
+    boundary_generation: int
+@dataclass(frozen=True)
+class RephaseGuard:
+    request_key: DecoderRequestKey
+@dataclass(frozen=True)
+class SyndromePacketRoute:
+    kind: SyndromePacketRouteKind
+    source_operation_id: Optional[Any] = None
+
+    def __post_init__(self) -> None:
+        if type(self.kind) is not SyndromePacketRouteKind:
+            raise TypeError("packet route kind must be SyndromePacketRouteKind")
+        is_window = self.kind is SyndromePacketRouteKind.WINDOW_INPUT
+        if is_window and self.source_operation_id is not None:
+            raise ValueError("window input route has no source operation")
+        if not is_window and not is_stable_identity(self.source_operation_id):
+            raise TypeError("feedback route needs a stable source operation identity")
+
+    @classmethod
+    def feedback_memory_round(cls, source_operation_id) -> "SyndromePacketRoute":
+        return cls(SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND,
+                   source_operation_id)
+
+WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
 @dataclass
 class SyndromePayload:
     """One measured syndrome round for one logical operation."""

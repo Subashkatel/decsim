@@ -1,4 +1,4 @@
-"""Run one offline BB72 Z-memory BP-OSD experiment."""
+"""Run one offline QUITS-1.1 BB-memory BP-OSD experiment."""
 
 from __future__ import annotations
 
@@ -15,21 +15,19 @@ from decsim.detector_error_model import (
 )
 from decsim.schemes import SlidingWindowScheme
 
-from .bb import build_bb72_memory_z
+from .bb import build_quits11_bb_memory
 from .decoding import OfflineBatchDecoder, run_offline_parallel
 from .harness import Experiment, SamplePlan, exact_batches
 
 
 _FIXED_CONFIGURATION = {
-    "code": "bb72-12-6",
-    "basis": "Z",
-    "noise_model": "standard",
+    "circuit_model": "quits-1.1-custom",
     "decoder": "bposd",
 }
 _VARIABLE_FIELDS = {
-    "physical_error_rate", "syndrome_rounds", "commit_rounds",
-    "buffer_rounds", "shots", "batch_shots", "seed", "workers",
-    "experiment_id",
+    "definition_id", "basis", "noise_profile", "physical_error_rate",
+    "syndrome_rounds", "commit_rounds", "buffer_rounds", "shots",
+    "batch_shots", "seed", "workers", "experiment_id",
 }
 
 
@@ -56,7 +54,7 @@ def _scientific_configuration(configuration):
         if name in resolved and resolved[name] != value:
             raise ValueError(f"{name} must be {value}")
         resolved[name] = value
-    resolved.setdefault("experiment_id", "bb72-z-standard-bposd")
+    resolved.setdefault("experiment_id", "bb-offline")
     for name in ("commit_rounds", "buffer_rounds", "shots", "batch_shots"):
         value = resolved[name]
         if type(value) is not int or value <= 0:
@@ -66,15 +64,22 @@ def _scientific_configuration(configuration):
     return resolved
 
 
+def _build_circuit(configuration):
+    return build_quits11_bb_memory(
+        definition_id=configuration["definition_id"],
+        basis=configuration["basis"],
+        noise_profile=configuration["noise_profile"],
+        physical_error_rate=configuration["physical_error_rate"],
+        syndrome_round_count=configuration["syndrome_rounds"],
+    )
+
+
 @dataclass(frozen=True)
 class _BbBposdFactory:
     configuration: dict
 
     def __call__(self):
-        circuit, detector_rounds, layer_count = build_bb72_memory_z(
-            physical_error_rate=self.configuration["physical_error_rate"],
-            syndrome_round_count=self.configuration["syndrome_rounds"],
-        )
+        circuit, detector_rounds, layer_count = _build_circuit(self.configuration)
         return OfflineBatchDecoder.prepare(
             circuit,
             _sliding_window_entries(self.configuration, layer_count),
@@ -88,10 +93,7 @@ class _BbBposdFactory:
 
 def _run_parts(configuration):
     resolved = _scientific_configuration(configuration)
-    circuit, _, _ = build_bb72_memory_z(
-        physical_error_rate=resolved["physical_error_rate"],
-        syndrome_round_count=resolved["syndrome_rounds"],
-    )
+    circuit, _, _ = _build_circuit(resolved)
     experiment = Experiment(
         experiment_id=resolved["experiment_id"],
         experiment_seed=resolved["seed"],
@@ -104,6 +106,12 @@ def _run_parts(configuration):
         resolved["experiment_id"],
         resolved["seed"],
         {
+            "definition_id": resolved["definition_id"],
+            "circuit_model": resolved["circuit_model"],
+            "basis": resolved["basis"],
+            "noise_profile": resolved["noise_profile"],
+            "physical_error_rate": resolved["physical_error_rate"],
+            "syndrome_rounds": resolved["syndrome_rounds"],
             "circuit_sha256": hashlib.sha256(str(circuit).encode()).hexdigest(),
             "shots": resolved["shots"],
             "batch_shots": resolved["batch_shots"],
@@ -115,7 +123,7 @@ def _run_parts(configuration):
 
 
 def run_bb_configuration(configuration, output_directory):
-    """Run or resume one fixed-shot BB72 physical BP-OSD configuration."""
+    """Run or resume one fixed-shot QUITS-1.1 BB physical BP-OSD configuration."""
     workers = configuration.get("workers", 1)
     if type(workers) is not int or workers <= 0:
         raise ValueError("workers must be a positive integer")

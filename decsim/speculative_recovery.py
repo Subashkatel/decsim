@@ -117,7 +117,7 @@ class SpeculativeRecovery:
         return bool(self._finality_blockers)
 
     def blocks_stream_segment(self, stream_id, segment_end: int) -> bool:
-        """Whether a segment overlaps a stream suffix awaiting recovery."""
+        """Whether an inclusive segment overlaps an invalidated suffix."""
         for record in self._records.values():
             invalidated_start = record.blocked_stream_starts.get(stream_id)
             if invalidated_start is not None and segment_end >= invalidated_start:

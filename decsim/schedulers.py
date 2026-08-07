@@ -1,4 +1,18 @@
-"""Decode queue ordering, deadline, and lane policies."""
+"""How queued decode work is ordered, timed, and routed.
+
+Three separate, independently swappable policy kinds live here. The decoder
+manager holds one of each.
+
+1. Schedulers (`insert` / `pop`) decide the ORDER jobs leave the queue.
+2. Deadline policies (`deadline`) stamp each job with the tick by which it
+   ought to be finished. Schedulers may then order by that stamp.
+3. Lane policies (`pool_for`) decide WHICH pool of decoder hardware a job
+   runs on.
+
+Vocabulary used throughout: a *job* is one window of syndrome data waiting to
+be decoded; *ticks* are simulator time units; a *pool* is a named group of
+decoder units (e.g. a bank of FPGAs).
+"""
 
 from __future__ import annotations
 
@@ -6,66 +20,85 @@ from .message import DecodeJob
 
 
 class FifoScheduler:
-    """First-in, first-out."""
+    """Decode in arrival order.
+
+    The simplest policy and the usual baseline: no job ever overtakes an
+    earlier one, so a single slow job holds up everything behind it.
+    """
 
     def insert(self, queue: list, job: DecodeJob) -> None:
-        """Add a job to the back of the queue."""
+        """Put the job at the back of the queue."""
         queue.append(job)
 
     def pop(self, queue: list, now_ticks: int) -> DecodeJob:
-        """Take the oldest job (first in, first out)."""
+        """Take the job that has been waiting longest."""
         return queue.pop(0)
 
 
 class EarliestDeadlineScheduler:
-    """Send the job with the nearest deadline first."""
+    """Decode whichever job is closest to its deadline (classic EDF).
+
+    Lets an urgent job overtake jobs that arrived earlier but have more time
+    left, so work is likelier to finish before it is needed. Deadlines come
+    from whichever deadline policy is installed.
+    """
 
     def insert(self, queue: list, job: DecodeJob) -> None:
-        """Add a job to the queue."""
+        """Put the job in the queue; ordering happens at pop time."""
         queue.append(job)
 
     def pop(self, queue: list, now_ticks: int) -> DecodeJob:
-        """Take the job with the earliest deadline."""
+        """Take the job with the nearest deadline."""
         queue.sort(key=lambda j: j.deadline)
         return queue.pop(0)
 
 
 class WeightedUrgencyCostScheduler:
-    """Triage steady-mode priority function at the job level.
+    """Balance "due soonest" against "quickest to finish".
 
-    Pops the queued job maximizing
-        P(job) = w_u * urgency + w_c * cost_efficiency
-    with urgency = 1 / max(deadline - now, 1 tick) and
-    cost_efficiency = 1 / n_rounds — the decsim mapping of Triage's
-    Eq. 2 (arXiv:2605.04459: slices -> jobs, decode cost -> window
-    rounds). w_u + w_c = 1. w_c = 0 degenerates to EDF ordering
-    (strictly, nearest-deadline-first among unexpired jobs); w_u = 0
-    to shortest-job-first.
+    Pure EDF always serves the most urgent job even when it is huge and will
+    block the queue. This policy scores every waiting job on two things and
+    serves the highest score:
 
-    SCOPE: steady mode ONLY. Triage's dual-mode emergency scheduler
-    (predictive causal-cone coloring) and the Min-Degree-First policy
-    (needs decoding-graph degree, which decsim jobs do not carry) are
-    NOT implemented; the paper remains a qualitative anchor for those.
-    The decoder manager supplies the exact current dispatch tick to `pop`.
+        score = w_u * urgency + w_c * cheapness
+        urgency   = 1 / time left until the deadline   (nearer  -> higher)
+        cheapness = 1 / number of rounds in the window (smaller -> higher)
+
+    The two weights must sum to 1 and set where you sit between the extremes:
+    `w_c = 0` behaves like EarliestDeadlineScheduler, `w_u = 0` behaves like
+    shortest-job-first. Ties are broken toward the job queued earliest.
+
+    This is the decsim mapping of the Triage steady-mode priority function
+    (arXiv:2605.04459 Eq. 2), with the paper's slices read as jobs and its
+    decode cost read as window rounds.
+
+    Steady mode only. Triage's emergency dual-mode scheduler and its
+    Min-Degree-First policy are deliberately not implemented -- the latter
+    needs decoding-graph degree, which decsim jobs do not carry.
     """
 
     def __init__(self, w_u: float = 0.5, w_c: float = 0.5):
+        """Set the urgency/cheapness split. The two weights must sum to 1."""
         if abs(w_u + w_c - 1.0) > 1e-9:
             raise ValueError(f"w_u + w_c must be 1 (got {w_u} + {w_c})")
         self.w_u = float(w_u)
         self.w_c = float(w_c)
 
     def insert(self, queue: list, job: DecodeJob) -> None:
-        """Add a job to the queue."""
+        """Put the job in the queue; scoring happens at pop time."""
         queue.append(job)
 
     def priority(self, job: DecodeJob, now_ticks: int) -> float:
-        """Triage Eq.2 mapped to decsim jobs (higher = served first)."""
+        """Score this job right now. Higher means served sooner.
+
+        Time left is floored at one tick so an overdue job scores high
+        rather than dividing by zero or going negative.
+        """
         slack = max(job.deadline - now_ticks, 1)
         return self.w_u / slack + self.w_c / max(job.n_rounds, 1)
 
     def pop(self, queue: list, now_ticks: int) -> DecodeJob:
-        """Take the highest-priority job."""
+        """Take the highest-scoring job, breaking ties toward the oldest."""
         best = max(range(len(queue)),
                    key=lambda i: (
                        self.priority(queue[i], now_ticks),
@@ -75,45 +108,59 @@ class WeightedUrgencyCostScheduler:
 
 
 class EnqueueTimeDeadline:
-    """Default deadline at window-job construction/logical admission."""
+    """Give every job the same deadline: the moment it was created.
+
+    The default. Since no job is more urgent than any other, a deadline-aware
+    scheduler falls back to arrival order.
+    """
 
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
-        """Return the policy-stamp tick (all newly built jobs equally urgent)."""
+        """Return now, so all newly built jobs are equally urgent."""
         return now
 
 
 class ReactionPathDeadline:
-    """Reaction-path windows get a tight deadline; others get now + slack."""
+    """Rush the jobs the computation is actually waiting on.
+
+    A window is "on the reaction path" when a later quantum operation cannot
+    proceed until this decode returns. Those get an immediate deadline;
+    everything else gets a fixed grace period.
+    """
 
     def __init__(self, slack_ticks: int):
+        """Set the grace period granted to jobs off the reaction path."""
         self.slack_ticks = int(slack_ticks)
 
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
-        """Tight deadline on the reaction path; now + slack off it."""
+        """Due immediately on the reaction path, now + slack otherwise."""
         return now if on_reaction_path else now + self.slack_ticks
 
 
 class BufferExpiryDeadline:
-    """Deadline = the tick the window's oldest buffered round expires.
+    """Finish each decode before its syndrome data is overwritten.
 
-    Models a bounded per-patch syndrome buffer of capacity_rounds rounds:
-    the buffer entry holding the window's FIRST round is overwritten
-    capacity_rounds * round_ticks after that round arrived, so the decode
-    must complete by window.t_first_round + capacity_rounds * round_ticks.
-    Larger/older windows therefore carry TIGHTER deadlines than fresh
-    ones (their data expires sooner) — the opposite of uniform slack.
+    Hardware holds syndrome rounds in a buffer that fits only
+    `capacity_rounds` of them. Once that many newer rounds arrive, the
+    oldest is overwritten and any decode still needing it has lost its
+    input. So the real deadline is when the window's FIRST round expires:
 
-    Pure buffer semantics: on_reaction_path is ignored here (reaction
-    tightening stays ReactionPathDeadline's job). A window without its
-    first-round arrival stamp cannot define a buffer-expiry deadline.
+        deadline = arrival of first round + capacity_rounds * round_ticks
+
+    Note this makes older windows MORE urgent than fresh ones, because their
+    data expires sooner -- the reverse of handing everyone equal slack.
+
+    Reaction-path urgency is deliberately ignored here; that belongs to
+    ReactionPathDeadline. A window that never recorded when its first round
+    arrived has no definable expiry, and asking for one raises.
     """
 
     def __init__(self, capacity_rounds: int, round_ticks: int):
+        """Set the buffer depth in rounds and the duration of one round."""
         self.capacity_rounds = int(capacity_rounds)
         self.round_ticks = int(round_ticks)
 
     def deadline(self, op, window, now: int, on_reaction_path: bool) -> int:
-        """Expiry tick of the window's first buffered round."""
+        """Return the tick this window's oldest buffered round is overwritten."""
         first = getattr(window, "t_first_round", None)
         if first is None:
             raise RuntimeError(
@@ -124,19 +171,24 @@ class BufferExpiryDeadline:
 
 
 class DistanceLanes:
-    """Assign decode jobs to unit pools ("lanes") keyed by code distance.
+    """Send jobs to different hardware pools based on code distance.
 
-    lanes maps distance -> pool name; distance_of(job) supplies the
-    job's distance (return None for unknown). Jobs whose distance has
-    no lane — or whose distance is unknown — go to the default pool.
-    An explicit job.hint always wins (DecoderManager.pool_for), so
-    strong-decode routing is untouched by lane assignment.
+    Bigger code distances mean bigger, slower decodes, so it can pay to give
+    them their own units instead of letting them clog the queue shared with
+    small ones.
+
+    `lanes` maps a distance to a pool name; `distance_of(job)` reports a
+    job's distance, or None if it is unknown. A job whose distance is unknown
+    or has no lane falls through to the default pool. A job carrying an
+    explicit `hint` bypasses this entirely (see DecoderManager.pool_for), so
+    lane routing never interferes with strong-decoder escalation.
     """
 
     def __init__(self, lanes: dict, distance_of):
+        """Set the distance -> pool map and how to read a job's distance."""
         self.lanes = dict(lanes)
         self.distance_of = distance_of
 
     def pool_for(self, job: DecodeJob):
-        """Lane pool name for the job, or None for the default pool."""
+        """Return this job's pool name, or None to use the default pool."""
         return self.lanes.get(self.distance_of(job))

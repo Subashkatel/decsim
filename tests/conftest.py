@@ -64,7 +64,7 @@ def _segment_operation(circuit, *, segment_id: int, stream_id: int,
         stream_offset=offset,
         predecessors=predecessor,
         decoder_boundary_predecessors=predecessor,
-        has_successor=(segment_index < segment_count - 1))
+    )
 
 
 def _segments_and_rounds(circuit, segment_rounds, *, stream_id: int,

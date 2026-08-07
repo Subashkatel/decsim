@@ -67,7 +67,7 @@ def test_per_op_passthrough_and_fallback():
 
 
 def test_materializer_uses_only_ledger_and_direct_operation_edges():
-    a = Operation(0, "a", (0,), has_successor=True)
+    a = Operation(0, "a", (0,))
     b = Operation(
         1,
         "b",
@@ -123,14 +123,13 @@ def test_materializer_uses_only_ledger_and_direct_operation_edges():
 
 def test_materializer_adds_no_transitive_boundary_edge():
     operations = (
-        Operation(0, "a", (0,), has_successor=True),
+        Operation(0, "a", (0,)),
         Operation(
             1,
             "b",
             (0,),
             predecessors=(0,),
             decoder_boundary_predecessors=(0,),
-            has_successor=True,
         ),
         Operation(
             2,
@@ -192,7 +191,6 @@ def test_materializer_uses_decoder_boundaries_not_workload_order():
         "source",
         (0,),
         decoder_boundary_predecessors=(),
-        has_successor=True,
     )
     destination = Operation(
         1,

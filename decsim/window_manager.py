@@ -10,10 +10,11 @@ from typing import Callable, Optional
 
 from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob,
                       DecodeResult, DecoderRequestKey, DecoderTier, EndpointRole,
-                      PendingStrong, PotentialStrong, StrongDecodeCompletion,
-                      Operation, RephaseGuard, SeamFaultOwner, SyndromeRoundPacket,
-                      StrongRegionPlan, Window, WindowInfo, WindowPlan,
-                      is_stable_identity, stable_identity_order_key)
+                      Operation, PendingStrong, PotentialStrong, RephaseGuard,
+                      SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
+                      SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
+                      WindowPlan, WindowReadiness, is_stable_identity,
+                      stable_identity_order_key)
 from .links import (BoundaryTransferRelation, LinkPath,
                     RequestTransferRelation, TrafficAttribution)
 from .payload_store import PayloadStore
@@ -292,6 +293,7 @@ class WindowManager:
         self._committed_per_op: dict[int, int] = {}
         self.blocking_ops: set[int] = set()
         self.op_results: dict[int, tuple[int, ...]] = {}
+        self._required_stream_end_by_operation_id: dict[int, int] = {}
         self.logical_contributions: dict[tuple, LogicalContribution] = {}
         self._observable_arity_by_stream: dict[object, int] = {}
         self._committed_boundaries: dict[tuple, object] = {}
@@ -757,13 +759,8 @@ class WindowManager:
 
     def _window_data_complete(self, w: Window) -> bool:
         op = self._ops[w.op_id]
-        succ_rounds = self._successor_rounds_available(w)
-        round_count = self._effective_round_count_for_window(w.op_id, w)
-        has_successor = op.has_successor and not self._window_has_closed_boundary(w)
         return self.scheme.data_complete(
-            w, rounds_arrived=self.rounds_arrived[w.op_id],
-            successor_rounds=succ_rounds, memory_rounds=self.memory_rounds[w.op_id],
-            round_count=round_count, has_successor=has_successor,
+            w, readiness=self._window_readiness(w),
             operation=self._planning_view(op))
 
     def _job_desc(self, w: Window, op: Operation) -> str:
@@ -811,18 +808,25 @@ class WindowManager:
             return round_count
         return None
 
-    def _successor_rounds_available(self, window: Window) -> int:
-        successor_ids = self.successors[window.op_id]
-        successor_rounds = max((self.rounds_arrived[s] for s in successor_ids),
-                               default=0)
-        overflow = window.buffer_hi - self._round_count_for_window(
-            window.op_id, window)
-        if overflow <= 0 or not successor_ids or successor_rounds >= overflow:
-            return successor_rounds
-        successors_exhausted = all(
-            self.rounds_arrived[s] >= self._round_count_for_window(s)
-            for s in successor_ids)
-        return overflow if successors_exhausted else successor_rounds
+    def _window_readiness(self, window: Window) -> WindowReadiness:
+        successor_ids = sorted(
+            self.successors[window.op_id], key=stable_identity_order_key)
+        successors = tuple(
+            SuccessorReadiness(
+                successor_id,
+                self.rounds_arrived[successor_id],
+                self._round_count_for_window(successor_id),
+            )
+            for successor_id in successor_ids
+        )
+        return WindowReadiness(
+            local_rounds_arrived=self.rounds_arrived[window.op_id],
+            local_round_count=self._effective_round_count_for_window(
+                window.op_id, window),
+            successors=successors,
+            memory_rounds_arrived=self.memory_rounds[window.op_id],
+            tail_closed=self._window_has_closed_boundary(window),
+        )
 
     def _deadline_for_window(self, op: Operation, window: Window) -> int:
         """Stamp one window, copying retained start-round provenance when present."""
@@ -2655,7 +2659,16 @@ class WindowManager:
                 return True
         return False
 
+    def bind_required_stream_end(self, operation_id: int,
+                                 required_stream_end: int) -> None:
+        if operation_id in self._required_stream_end_by_operation_id:
+            raise RuntimeError("protected feedback stream end is already bound")
+        self._required_stream_end_by_operation_id[operation_id] = required_stream_end
+
     def _stream_segment_end(self, operation: Operation) -> Optional[int]:
+        required_end = self._required_stream_end_by_operation_id.get(operation.id)
+        if required_end is not None:
+            return required_end
         if operation.stream_offset is None:
             return None
         return operation.stream_offset + self.rounds_for(operation)

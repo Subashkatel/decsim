@@ -2255,7 +2255,7 @@ def test_double_window_rejects_unsupported_runspec_shapes():
                 dynamic_streams=[Operation(7, "stream", (1,))],
                 **base).build()
     chained = [
-        Operation(0, "a", (0,), has_successor=True),
+        Operation(0, "a", (0,)),
         Operation(
             1,
             "b",
@@ -2287,7 +2287,7 @@ def test_double_window_rejects_decoder_boundary_operation_chains():
         double_window=True,
     )
     operations = [
-        Operation(0, "first stream", (0,), has_successor=True),
+        Operation(0, "first stream", (0,)),
         Operation(
             1,
             "second stream",

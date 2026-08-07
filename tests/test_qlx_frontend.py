@@ -22,7 +22,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 import pytest
 
 from decsim.frontends.qlx import qlx_frontend
-from decsim.message import OpKind
+from decsim.message import OpKind, ProtectedRegion
 from decsim.run_spec import RunSpec, simulate
 from decsim.decoders import PerRoundDecoder
 
@@ -59,9 +59,7 @@ def test_dependency_dag_matches_the_diagram(program):
     assert deps["inject_0"] == ("h_0", "transport_0")
     assert deps["mz_0"] == ("inject_0",)
     assert deps["dealloc_0"] == ("mz_0",)
-    ops = {op.id: op for op in program.operations}
-    assert ops[by_qlx["dealloc_0"]].has_successor is False
-    assert ops[by_qlx["mz_0"]].has_successor is False
+    assert (program.streams, [(op.id, op.patches) for op in program.dynamic_streams]) == ((ProtectedRegion(0, 8, 0, 6),), [(8, (0,))])
     assert all(op.decoder_boundary_predecessors == ()
                for op in program.operations)
 
@@ -258,7 +256,7 @@ def test_artifact_confirms_real_feedback_program():
     # the measurement heuristic wired the candidate under artifact consent
     wired = [op for op in prog.operations if op.blocked_by is not None]
     assert len(wired) == len(prog.feedback_candidates) > 0
-    assert len(prog.streams) == 1                 # single (region,slot) patch
+    assert prog.op_ids[prog.streams[0].end_operation_id] == "mz_0"
 
 
 def test_artifact_kind_is_checked():

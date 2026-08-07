@@ -300,7 +300,6 @@ class Switching:
     def validate_operations(self, operations) -> None:
         if self.double_window and any(
             operation.decoder_boundary_predecessors
-            or operation.has_successor
             for operation in operations
         ):
             raise ValueError(

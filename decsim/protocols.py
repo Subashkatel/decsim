@@ -22,7 +22,7 @@ from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
                       DecodeOutcome, DecodeResult, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
                       StrongRegionPlan, SyndromePacketRoute, SyndromePayload,
-                      Window, WindowInfo)
+                      Window, WindowInfo, WindowReadiness)
 
 
 # ------------------------------------------------------ run seed capabilities
@@ -554,9 +554,7 @@ class DecodingScheme(Protocol):
         buffer_round_count: int,
     ): ...
 
-    def data_complete(self, window: Window, *, rounds_arrived: int,
-                      successor_rounds: int, memory_rounds: int,
-                      round_count: int, has_successor: bool,
+    def data_complete(self, window: Window, *, readiness: WindowReadiness,
                       operation: OperationPlanningView) -> bool: ...
 
     def validate_buffer(self, geometry: ResolvedCodeGeometry) -> None: ...

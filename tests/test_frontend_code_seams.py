@@ -51,14 +51,6 @@ class PhysicalPatchIRFrontend:
             )
             operations.append(operation)
 
-        predecessor_ids = {
-            predecessor_id
-            for operation in operations
-            for predecessor_id in operation.predecessors
-        }
-        for operation in operations:
-            operation.has_successor = operation.id in predecessor_ids
-
         self.operations = operations
         return operations
 
@@ -123,14 +115,6 @@ class BBCodeISAFrontend:
                 decoder_boundary_predecessors=tuple(sorted(predecessors)),
             )
             operations.append(operation)
-
-        predecessor_ids = {
-            predecessor_id
-            for operation in operations
-            for predecessor_id in operation.predecessors
-        }
-        for operation in operations:
-            operation.has_successor = operation.id in predecessor_ids
 
         self.operations = operations
         return operations

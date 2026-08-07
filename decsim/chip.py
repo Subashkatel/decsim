@@ -11,8 +11,8 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import Optional
 
-from .message import (Decision, Operation, SyndromePacketRoute,
-                      SyndromePayload, WINDOW_INPUT_ROUTE)
+from .message import (Decision, Operation, SyndromePacketRoute, SyndromePayload,
+                      WINDOW_INPUT_ROUTE, stable_identity_order_key)
 
 
 class Chip:
@@ -24,7 +24,7 @@ class Chip:
                  resolved_patches, idle_policy,
                  resource_claims_by_operation_id,
                  max_idle_rounds: Optional[int] = None,
-                 gates_start_on_round_boundaries: bool = False):
+                 gates_start_on_round_boundaries: bool = False, protected_regions=()):
         self.engine = engine
         self.source = source
         self.controller = controller
@@ -48,6 +48,17 @@ class Chip:
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
         self.max_idle_rounds = max_idle_rounds if max_idle_rounds is not None \
             else 100 * code_geometry.distance
+        self._protected_regions = tuple(protected_regions)
+        self._regions_starting_at = {}
+        self._regions_ending_at = {}
+        self._stream_owner_by_id = {}
+        self._active_region_by_stream_id = {}
+        self._active_stream_id_by_patch = {}
+        self._next_boundary_tick_by_stream_id = {}
+        self._close_requested_stream_ids = set()
+        self._boundary_open_patches = set()
+        self._last_emission_tick_by_stream_id = {}
+        self._feedback_source_ids = set()
 
         self._ops: dict[int, Operation] = {}
         self._deps_remaining: dict[int, int] = {}
@@ -99,8 +110,53 @@ class Chip:
                 f"operation {operation.id} has no resolved round count"
             ) from error
 
-    def _load(self, ops: list[Operation]) -> None:
+    def _index_protected_regions(self, ops, dynamic_streams) -> None:
+        operations_by_id = {operation.id: operation for operation in ops}
+        stream_owners = {operation.id: operation for operation in dynamic_streams}
+        for region in sorted(self._protected_regions, key=lambda item: item.stream_id):
+            stream_id = region.stream_id
+            if stream_id in self._stream_owner_by_id:
+                raise ValueError(f"duplicate protected stream {stream_id}")
+            owner = stream_owners.get(stream_id)
+            if owner is None or tuple(owner.patches) != (region.patch_id,):
+                raise ValueError(f"protected stream {stream_id} owner/patch mismatch")
+            for endpoint, operation_id in (
+                ("start", region.start_operation_id),
+                ("end", region.end_operation_id),
+            ):
+                operation = operations_by_id.get(operation_id)
+                if operation is None or region.patch_id not in operation.patches:
+                    raise ValueError(
+                        f"protected stream {stream_id} invalid {endpoint}")
+            self._stream_owner_by_id[stream_id] = owner
+            self._regions_starting_at.setdefault(region.start_operation_id, []).append(region)
+            self._regions_ending_at.setdefault(region.end_operation_id, []).append(region)
+
+    def _load(self, ops: list[Operation], *, decode_ops=(), dynamic_streams=()) -> None:
         """Register operations, build dependencies, then start dependency roots."""
+        feedback_source_ids = {op.blocked_by for op in ops if op.blocked_by is not None}
+        self._feedback_source_ids = feedback_source_ids
+        executable_ids = {op.id for op in ops}
+        protected_stream_ids = {region.stream_id for region in self._protected_regions}
+        protected_patch_ids = {region.patch_id for region in self._protected_regions}
+        for source_role, sources in (("decode_ops", decode_ops), ("dynamic_streams", dynamic_streams)):
+            for source in sources:
+                if source.id not in feedback_source_ids or source.id in executable_ids:
+                    continue
+                intersecting_patches = protected_patch_ids.intersection(source.patches)
+                relevant_stream_ids = {region.stream_id for region in self._protected_regions
+                                       if region.patch_id in intersecting_patches}
+                if source.id in protected_stream_ids:
+                    relevant_stream_ids.add(source.id)
+                if not relevant_stream_ids:
+                    continue
+                ordered_streams = tuple(sorted(relevant_stream_ids))
+                ordered_patches = tuple(sorted(intersecting_patches, key=stable_identity_order_key))
+                raise ValueError(
+                    f"external source {source.id} from {source_role} participates "
+                    f"in protected feedback for protected streams "
+                    f"{ordered_streams} and patches {ordered_patches}")
+        self._index_protected_regions(ops, dynamic_streams)
         for operation in ops:
             self._ops[operation.id] = operation
             self.window_manager.register_op(operation)
@@ -211,18 +267,87 @@ class Chip:
         self._begin(operation)
 
     def _must_wait_for_round_boundary(self, operation: Operation) -> bool:
+        active_patches = set(operation.patches).intersection(self._active_stream_id_by_patch)
+        if any(region.patch_id in active_patches
+               for region in self._regions_starting_at.get(operation.id, ())):
+            return True
+        if active_patches:
+            return not active_patches.issubset(self._boundary_open_patches)
         if not self.gates_start_on_round_boundaries:
             return False
         return self._patch_for_operation(operation) in self._patches_emitting
 
+    def _protected_feedback_stream(self, operation: Operation):
+        if operation.id not in self._feedback_source_ids:
+            return None
+        relevant_stream_ids = {
+            self._active_stream_id_by_patch[patch]
+            for patch in operation.patches
+            if patch in self._active_stream_id_by_patch
+        }
+        relevant_stream_ids.update(
+            region.stream_id
+            for region in self._regions_starting_at.get(operation.id, ())
+            if region.patch_id in operation.patches
+        )
+        ordered_stream_ids = tuple(sorted(relevant_stream_ids))
+        if len(ordered_stream_ids) > 1:
+            raise ValueError(
+                f"feedback source {operation.id} spans protected streams "
+                f"{ordered_stream_ids}")
+        if not ordered_stream_ids:
+            return None
+        stream_id = ordered_stream_ids[0]
+        if operation.stream_id not in (None, stream_id):
+            raise ValueError(
+                f"feedback source {operation.id} has conflicting stream_id")
+        current_round = self.stream_next_round.get(stream_id, 0)
+        if operation.stream_offset not in (None, current_round):
+            raise ValueError(
+                f"feedback source {operation.id} has conflicting stream_offset")
+        return stream_id
+
+    def _activate_protected_regions(self, operation: Operation) -> None:
+        starting_regions = self._regions_starting_at.get(operation.id, ())
+        protected_patches = set(operation.patches).intersection(self._active_stream_id_by_patch)
+        protected_patches.update(region.patch_id for region in starting_regions)
+        if protected_patches and operation.emits_detector_data:
+            raise ValueError(
+                f"operation {operation.id} duplicates protected detector emission")
+        pending_patches = set()
+        for region in starting_regions:
+            if (region.patch_id in self._active_stream_id_by_patch
+                    or region.patch_id in pending_patches):
+                raise RuntimeError(
+                    f"protected patch {region.patch_id!r} already has a stream")
+            pending_patches.add(region.patch_id)
+        for region in starting_regions:
+            stream_id = region.stream_id
+            self._active_region_by_stream_id[stream_id] = region
+            self._active_stream_id_by_patch[region.patch_id] = stream_id
+            self.stream_next_round.setdefault(stream_id, 0)
+            cadence = self._round_ticks_for_patch(region.patch_id)
+            self._next_boundary_tick_by_stream_id[stream_id] = self.engine.now + cadence
+            self.engine.schedule(
+                cadence,
+                lambda active_stream_id=stream_id:
+                    self._open_protected_boundary(active_stream_id),
+                label=f"protected-boundary({stream_id},1)",
+            )
+
     def _begin(self, operation: Operation) -> None:
         """Consume idle rounds, reserve stream range, hand off to the Source."""
+        protected_stream_id = self._protected_feedback_stream(operation)
+        self._activate_protected_regions(operation)
         self.started.add(operation.id)
         self.op_start_time[operation.id] = self.engine.now
         idle_rounds = self._consume_idle_rounds(operation)
         if idle_rounds:
             self.window_manager.prepend_idle_rounds(operation.id, idle_rounds)
-        self._reserve_stream_rounds(operation)
+        if protected_stream_id is None:
+            self._reserve_stream_rounds(operation)
+        else:
+            self._bind_protected_feedback_source(operation, protected_stream_id)
         kind = "Clifford" if operation.clifford else "non-Clifford"
         release_note = "" if operation.blocked_by is None \
             else f" [unblocked by op#{operation.blocked_by}]"
@@ -230,6 +355,93 @@ class Chip:
                                 f"{operation.qubits}){release_note}")
         self.source.start(operation, self._round_ticks_for(operation),
                           on_body_done=self._body_done)
+
+    def _bind_protected_feedback_source(self, operation: Operation,
+                                        stream_id: int) -> None:
+        stream_offset = self.stream_next_round.get(stream_id, 0)
+        operation.stream_id = stream_id
+        operation.stream_offset = stream_offset
+        resolved_round_count = self._round_count_for(operation)
+        required_stream_end = stream_offset + max(resolved_round_count, 1)
+        self.window_manager.bind_required_stream_end(operation.id, required_stream_end)
+
+    def _open_protected_boundary(self, stream_id: int) -> None:
+        region = self._active_region_by_stream_id.get(stream_id)
+        if region is None:
+            raise RuntimeError(f"protected stream {stream_id} is not active")
+        expected_tick = self._next_boundary_tick_by_stream_id.get(stream_id)
+        if expected_tick != self.engine.now:
+            raise RuntimeError(
+                f"protected stream {stream_id} boundary tick mismatch: "
+                f"{expected_tick} != {self.engine.now}")
+        if region.patch_id in self._boundary_open_patches:
+            raise RuntimeError(
+                f"protected stream {stream_id} boundary already open")
+        self._boundary_open_patches.add(region.patch_id)
+        for operation_id in sorted(self.state_ready):
+            self._maybe_begin(self._ops[operation_id])
+        next_round = self.stream_next_round.get(stream_id, 0) + 1
+        self.engine.schedule(
+            0,
+            lambda active_stream_id=stream_id:
+                self._emit_protected_round(active_stream_id),
+            label=f"protected-round({stream_id},{next_round})",
+            priority=1,
+        )
+
+    def _emit_protected_round(self, stream_id: int) -> None:
+        region = self._active_region_by_stream_id.get(stream_id)
+        if region is None:
+            raise RuntimeError(f"protected stream {stream_id} is not active")
+        if region.patch_id not in self._boundary_open_patches:
+            raise RuntimeError(
+                f"protected stream {stream_id} boundary is not open")
+        self._boundary_open_patches.remove(region.patch_id)
+        global_round = self.stream_next_round.get(stream_id, 0) + 1
+        owner = self._stream_owner_by_id[stream_id]
+        payloads = self.source.idle_round_payloads(
+            owner, stream_id, global_round, region.patch_id
+        )
+        self.relay_syndrome_payloads(payloads)
+        self.stream_next_round[stream_id] = global_round
+        self._last_emission_tick_by_stream_id[stream_id] = self.engine.now
+        if stream_id in self._close_requested_stream_ids:
+            self._next_boundary_tick_by_stream_id.pop(stream_id, None)
+            self.engine.schedule(
+                0,
+                lambda active_stream_id=stream_id:
+                    self._seal_protected_region(active_stream_id),
+                label=f"protected-seal({stream_id})",
+                priority=2,
+            )
+            return
+        cadence = self._round_ticks_for_patch(region.patch_id)
+        self._next_boundary_tick_by_stream_id[stream_id] = self.engine.now + cadence
+        self.engine.schedule(
+            cadence,
+            lambda active_stream_id=stream_id:
+                self._open_protected_boundary(active_stream_id),
+            label=f"protected-boundary({stream_id},{global_round + 1})",
+        )
+
+    def _seal_protected_region(self, stream_id: int) -> None:
+        region = self._active_region_by_stream_id.get(stream_id)
+        if region is None:
+            raise RuntimeError(f"protected stream {stream_id} is not active")
+        if stream_id not in self._close_requested_stream_ids:
+            raise RuntimeError(f"protected stream {stream_id} was not closed")
+        if stream_id in self._next_boundary_tick_by_stream_id:
+            raise RuntimeError(f"protected stream {stream_id} has a pending boundary")
+        if self._last_emission_tick_by_stream_id.get(stream_id) != self.engine.now:
+            raise RuntimeError(
+                f"protected stream {stream_id} lacks final-round evidence")
+        self.window_manager.seal_stream(stream_id, self.stream_next_round[stream_id])
+        self._active_region_by_stream_id.pop(stream_id)
+        self._active_stream_id_by_patch.pop(region.patch_id)
+        self._close_requested_stream_ids.remove(stream_id)
+        self._last_emission_tick_by_stream_id.pop(stream_id, None)
+        for operation_id in sorted(self.state_ready):
+            self._maybe_begin(self._ops[operation_id])
 
     def _consume_idle_rounds(self, operation: Operation) -> int:
         """Sum-and-pop the idle rounds counted on this op's patches/qubits."""
@@ -273,6 +485,7 @@ class Chip:
         self.last_finish_time = max(self.last_finish_time, self.engine.now)
         self.engine.log("Chip", f"{operation.name} body done")
         self._free_resources(operation)
+        self._request_protected_region_closes(operation)
         self._release_successors(operation)
         if len(self.done_bodies) == len(self._ops):
             self.engine.log("Chip",
@@ -281,6 +494,23 @@ class Chip:
         self._close_feedback_boundary_if_needed(operation)
         self._start_idle_stream_if_needed(operation)
         self._seal_finished_streams_if_needed()
+
+    def _request_protected_region_closes(self, operation: Operation) -> None:
+        ending_regions = self._regions_ending_at.get(operation.id, ())
+        for region in ending_regions:
+            stream_id = region.stream_id
+            if self._active_region_by_stream_id.get(stream_id) is not region:
+                raise RuntimeError(
+                    f"protected stream {stream_id} ended while inactive")
+            if self._active_stream_id_by_patch.get(region.patch_id) != stream_id:
+                raise RuntimeError(
+                    f"protected stream {stream_id} lost patch ownership")
+            if self._next_boundary_tick_by_stream_id.get(stream_id) != self.engine.now:
+                raise RuntimeError(
+                    f"protected stream {stream_id} ended off boundary")
+        self._close_requested_stream_ids.update(
+            region.stream_id for region in ending_regions
+        )
 
     def _close_feedback_boundary_if_needed(self, operation: Operation) -> None:
         if operation.feedback_boundary_mode != "measurement_closed":
@@ -299,13 +529,16 @@ class Chip:
     def _seal_finished_streams_if_needed(self) -> None:
         if len(self.done_bodies) != len(self._ops):
             return
+        protected_stream_ids = self._stream_owner_by_id
         for stream_id, total_rounds in list(self.stream_next_round.items()):
+            if stream_id in protected_stream_ids:
+                continue
             if not self.window_manager.has_dynamic_stream(stream_id):
                 continue
             self.window_manager.seal_stream(stream_id, total_rounds)
 
     def _start_idle_stream_if_needed(self, operation: Operation) -> None:
-        if not operation.has_successor:
+        if set(operation.patches).intersection(self._active_stream_id_by_patch):
             return
         if not self._has_waiting_blocked_successor(operation.id):
             return

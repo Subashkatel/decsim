@@ -39,7 +39,7 @@ import ast
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
-from ..message import Operation, OpKind
+from ..message import Operation, OpKind, ProtectedRegion
 from ..planner import PerOpRounds
 
 _KIND_BY_NAME = {"mz": OpKind.MEASURE, "mx": OpKind.MEASURE,
@@ -80,7 +80,8 @@ class QLXProgram:
     decoder_latency_rounds: Optional[int] = None
     idle_rounds_for_decoder_wait: Optional[int] = None
     runtime_ops: list = field(default_factory=list)
-    streams: list = field(default_factory=list)   # patch-local (region,slot)
+    streams: tuple = ()             # protected allocation generations
+    dynamic_streams: tuple = ()      # syndrome owners for those generations
     decoder_operations: tuple = ()
     detector_rounds_by_stream: dict = field(default_factory=dict)
     terminal_detector_ids_by_stream: dict = field(default_factory=dict)
@@ -437,7 +438,8 @@ def qlx_frontend(diagram: Any, *,
     for task in parsed:
         for cell in task["cells"]:
             tasks_by_cell.setdefault(cell, []).append(task)
-    for cell_tasks in tasks_by_cell.values():
+    generations = []
+    for cell, cell_tasks in tasks_by_cell.items():
         ordered = sorted(
             cell_tasks, key=lambda task: (task["start_round"], task["pos"])
         )
@@ -451,6 +453,15 @@ def qlx_frontend(diagram: Any, *,
                 raise ValueError("positive-duration QLX tasks overlap one cell")
             if prior["pos"] not in current["deps"]:
                 current["deps"] = current["deps"] + (prior["pos"],)
+        start = None
+        for task in ordered:
+            if task["name"] == "alloc":
+                if start is not None:
+                    raise ValueError("QLX cell allocated twice")
+                start = task["pos"]
+            elif start is not None and task["name"] in ("mz", "mx", "dealloc"):
+                generations.append((patch_of_cell[cell], start, task["pos"]))
+                start = None
 
     for task in parsed:
         for predecessor_id in task["deps"]:
@@ -541,7 +552,6 @@ def qlx_frontend(diagram: Any, *,
             consumes_magic_state=False,
             predecessors=p["deps"],
             decoder_boundary_predecessors=(),
-            has_successor=False,
             scheduled_start_round=p["start_round"],
             emits_detector_data=False,
             blocked_by=blocked,
@@ -553,6 +563,11 @@ def qlx_frontend(diagram: Any, *,
 
     if has_explicit_if:
         feedback_candidates = explicit_if_candidates
+    generations.sort()
+    dynamic_streams = tuple(Operation(len(parsed) + index, f"protected[{patch}]",
+                                      (patch,), patches=(patch,)) for index, (patch, _, _) in enumerate(generations))
+    streams = tuple(ProtectedRegion(patch, owner.id, start, end)
+                    for owner, (patch, start, end) in zip(dynamic_streams, generations))
     rounds = PerOpRounds({op.id: raw_durations[op.id]
                           for op in operations})
     program = QLXProgram(
@@ -560,7 +575,8 @@ def qlx_frontend(diagram: Any, *,
         op_ids={p["pos"]: p["qlx_id"] for p in parsed},
         patch_of_cell=dict(patch_of_cell), raw_durations=raw_durations,
         resource_flows=flows, feedback_candidates=feedback_candidates,
-        protocols=protocols, start_rounds=start_rounds)
+        protocols=protocols, start_rounds=start_rounds,
+        streams=streams, dynamic_streams=dynamic_streams)
     if physical_circuit is not None:
         _add_physical_stream(
             program, physical_circuit, detector_metadata, decode_operation_id
@@ -573,5 +589,4 @@ def qlx_frontend(diagram: Any, *,
         program.idle_rounds_for_decoder_wait = idle.get(
             "idle_rounds_for_decoder_wait")
         program.runtime_ops = list(artifact.get("runtime_ops", []))
-        program.streams = list(artifact.get("streams", []))
     return program

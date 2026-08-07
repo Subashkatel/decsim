@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from .message import (
     OperationWindowPlan,
+    WindowReadiness,
     ResolvedCodeGeometry,
     WindowGeometry,
 )
@@ -87,25 +88,28 @@ class SlidingWindowScheme:
         self,
         window: "Window",
         *,
-        rounds_arrived: int,
-        successor_rounds: int,
-        memory_rounds: int,
-        round_count: int,
-        has_successor: bool,
+        readiness: WindowReadiness,
         operation,
     ) -> bool:
         """Return True once commit and buffer data are present."""
-        in_operation_needed = min(window.buffer_hi, round_count)
-        if rounds_arrived < in_operation_needed:
+        local_rounds_needed = min(window.buffer_hi, readiness.local_round_count)
+        if readiness.local_rounds_arrived < local_rounds_needed:
             return False
-        overflow = window.buffer_hi - round_count
-        if overflow > 0:
-            if not has_successor:
-                return True
-            successor_has_data = successor_rounds >= overflow
-            memory_has_data = memory_rounds >= overflow
-            return successor_has_data or memory_has_data
-        return True
+        overflow_rounds = window.buffer_hi - readiness.local_round_count
+        if overflow_rounds <= 0 or readiness.tail_closed:
+            return True
+        if not readiness.successors:
+            return True
+        successor_has_data = any(
+            successor.rounds_arrived >= overflow_rounds
+            for successor in readiness.successors
+        )
+        memory_has_data = readiness.memory_rounds_arrived >= overflow_rounds
+        all_successors_exhausted = all(
+            successor.rounds_arrived >= successor.round_count
+            for successor in readiness.successors
+        )
+        return successor_has_data or memory_has_data or all_successors_exhausted
 
 
 class NaiveOnlineScheme(SlidingWindowScheme):

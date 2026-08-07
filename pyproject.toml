@@ -14,6 +14,7 @@ dependencies = []
 stim = ["stim"]
 pymatching = ["pymatching"]
 experiments = ["stim", "pymatching", "numpy", "scipy", "matplotlib"]
+bb-experiments = ["quits==1.1.0"]
 
 # Flat layout: the decsim/ package sits at the repo root. Discover it (and its
 # subpackages decsim.adapters / decsim.frontends) from there. No package-dir remap.

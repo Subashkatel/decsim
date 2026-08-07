@@ -1,4 +1,5 @@
 from dataclasses import asdict
+from importlib.metadata import PackageNotFoundError
 import hashlib
 import json
 import subprocess
@@ -10,16 +11,24 @@ import pytest
 import stim
 
 from experiments.bb import build_quits11_bb_memory
+from decsim.adapters.window_decode_results import (
+    BackendDecodeOutcome,
+    BackendDecodeStatus,
+    BackendFailureReason,
+)
 from decsim.bposd_decoder import bposd_window_decoder
 from decsim.detector_error_model import (
     FaultRepresentation,
     PHYSICAL_FAULT_MODEL_REQUIRED,
     decode_windowed,
 )
-from experiments.decoding import OfflineBatchDecoder
-from experiments.harness import SamplePlan, sample_batch_sha256
+from experiments.decoding import (
+    OfflineBackendBatchDecoder, OfflineBatchDecoder, _chunk_row,
+)
+from experiments.harness import Batch, SamplePlan, sample_batch_sha256
+from experiments.results import read_chunk_csv
 from experiments.run_bb import (
-    _run_parts,
+    _BbDecoderFactory, _run_parts,
     _sliding_window_entries,
     run_bb_configuration,
 )
@@ -94,6 +103,140 @@ def _configuration(**changes):
     return configuration
 
 
+_FAILED_OUTCOMES = (
+    (BackendDecodeStatus.LOW_CONFIDENCE,
+     BackendFailureReason.SEARCH_LIMIT_EXHAUSTED, "backend_low_confidence"),
+    (BackendDecodeStatus.NONCONVERGED,
+     BackendFailureReason.NO_CONVERGED_RELAY_SOLUTION, "backend_nonconverged"),
+    (BackendDecodeStatus.INVALID_CORRECTION,
+     BackendFailureReason.CORRECTION_NOT_BINARY, "backend_invalid_correction"),
+    (BackendDecodeStatus.EMPTY_MODEL_UNSATISFIABLE,
+     BackendFailureReason.NONZERO_SYNDROME_WITHOUT_FAULTS, "backend_empty_model_unsatisfiable"),
+    (BackendDecodeStatus.BACKEND_ERROR,
+     BackendFailureReason.UPSTREAM_EXCEPTION, "backend_error"),
+)
+
+_BACKEND_COUNTERS = tuple(case[2] for case in _FAILED_OUTCOMES)
+_BACKEND_OUTCOMES = _FAILED_OUTCOMES + ((BackendDecodeStatus.SUCCEEDED, None, None),)
+
+
+@pytest.mark.parametrize("status, reason, counter", _BACKEND_OUTCOMES)
+def test_backend_batch_maps_each_terminal_status_exactly(
+    monkeypatch, status, reason, counter
+):
+    class Sampler:
+        def sample(self, *, shots, separate_observables):
+            return np.zeros((shots, 2), dtype=np.uint8), np.zeros(
+                (shots, 1), dtype=np.uint8
+            )
+
+    class Circuit:
+        def compile_detector_sampler(self, *, seed):
+            return Sampler()
+
+    outcome = BackendDecodeOutcome(
+        status=status,
+        failure_reason=reason,
+        physical_correction=() if status is BackendDecodeStatus.SUCCEEDED else None,
+        component_correction=None,
+        reconstructed_syndrome=() if status is BackendDecodeStatus.SUCCEEDED else None,
+        iterations=None,
+        iteration_limit=None,
+        posterior_log_likelihood_ratios=None,
+        fault_model_fingerprint="1" * 64,
+        decoder_configuration_fingerprint="2" * 64,
+    )
+    calls = 0
+
+    def failed_walk(models, detectors, decode_window):
+        nonlocal calls
+        calls += 1
+        return type("Walk", (), {
+            "window_outcomes": (outcome,),
+            "logical_prediction": (0,) if outcome.succeeded else None,
+        })()
+
+    monkeypatch.setattr(
+        "experiments.decoding.decode_windowed_backend_outcomes", failed_walk
+    )
+    decoded = OfflineBackendBatchDecoder(
+        Circuit(), (object(), object()), object(), FaultRepresentation.PHYSICAL
+    ).run(Batch(index=0, first_shot=0, shots=1), sample_seed=5)
+
+    row = _chunk_row(
+        decoded, type("Experiment", (), {"experiment_id": "e"})(),
+        type("Plan", (), {"sample_set_id": "s"})(), "3" * 64, "4" * 64,
+    )
+    counters = {name: getattr(row, name) for name in _BACKEND_COUNTERS}
+    assert counters == {name: int(name == counter) for name in counters}
+    assert (calls, decoded.window_attempts) == (1, 1)
+    expected_failure = int(status is not BackendDecodeStatus.SUCCEEDED)
+    assert (decoded.attempted_shots, decoded.primary_failures) == (1, expected_failure)
+    assert (decoded.accepted_shots, decoded.accepted_logical_failures) == (
+        1 - expected_failure, 0
+    )
+
+
+def _minimum_corrections(check, observables, priors, syndrome):
+    fault_count = check.shape[1]
+    assert fault_count <= 16
+    assert check.shape[0] <= 8
+    assert check.shape[0] < 65_535
+    candidates = np.asarray([
+        [(mask >> index) & 1 for index in range(fault_count)]
+        for mask in range(1 << fault_count)
+    ], dtype=np.uint8)
+    feasible = np.all(candidates @ check.T % 2 == syndrome, axis=1)
+    costs = candidates @ np.log((1 - priors) / priors)
+    minimum = np.min(costs[feasible])
+    corrections = candidates[feasible & np.isclose(costs, minimum, rtol=0.0, atol=1e-12)]
+    correction_set = {tuple(int(bit) for bit in row) for row in corrections}
+    logical_set = {
+        tuple(int(bit) for bit in observables @ row % 2)
+        for row in corrections
+    }
+    return correction_set, logical_set
+
+
+@pytest.mark.parametrize("priors, expected_logicals", [
+    (np.array([0.05, 0.2]), {(1,)}),
+    (np.array([0.1, 0.1]), {(0,), (1,)}),
+])
+def test_exact_tesseract_result_belongs_to_complete_minimum_set(
+    priors, expected_logicals
+):
+    import tesseract_decoder
+
+    check = np.array([[1, 1]], dtype=np.uint8)
+    observables = np.array([[0, 1]], dtype=np.uint8)
+    syndrome = np.array([1], dtype=np.uint8)
+    corrections, logicals = _minimum_corrections(
+        check, observables, priors, syndrome
+    )
+    dem = stim.DetectorErrorModel()
+    for column, probability in enumerate(priors):
+        targets = [stim.DemTarget.relative_detector_id(0)]
+        if observables[0, column]:
+            targets.append(stim.DemTarget.logical_observable_id(0))
+        dem.append(stim.DemInstruction("error", [probability], targets))
+    configuration = tesseract_decoder.tesseract.TesseractConfig(
+        dem=dem, det_beam=tesseract_decoder.tesseract.INF_DET_BEAM,
+        beam_climbing=False, no_revisit_dets=False, verbose=False,
+        merge_errors=False, pqlimit=int(np.iinfo(np.uintp).max),
+        det_orders=[[0]], det_penalty=0.0, create_visualization=False,
+        sparsify_errors=False, sparsify_base_degree=-1,
+        sparsify_max_degree=-1, sparsify_reactivate_limit=-1,
+    )
+    backend = configuration.compile_decoder()
+    selected = set(backend.decode_to_errors(syndrome.astype(bool)))
+    correction = tuple(int(index in selected) for index in range(2))
+
+    assert correction in corrections
+    assert tuple(check @ correction % 2) == tuple(syndrome)
+    assert tuple(observables @ correction % 2) in logicals
+    assert logicals == expected_logicals
+
+
 @pytest.mark.parametrize("changes", [
     {"definition_id": "bb126"},
     {"definition_id": "bb-l7m9-a-1_x1y1_x2y4-b-1_x6y4_x6y5"},
@@ -101,6 +244,10 @@ def _configuration(**changes):
     {"noise_profile": "standard"},
     {"circuit_model": "bravyi-table5"},
     {"decoder": "uf"},
+    {"decoder": "relay_bp"},
+    {"decoder": "tesseract", "decoder_seed": True},
+    {"decoder": "bposd", "decoder_seed": 0},
+    {"decoder": "relay_bp", "decoder_seed": 2**64},
     {"unknown_field": 1},
     {"physical_error_rate": True},
     {"physical_error_rate": float("nan")},
@@ -270,6 +417,13 @@ def test_sample_identity_tracks_physics_but_not_decode_execution(monkeypatch):
     configuration, experiment, sample_plan, _ = run_parts(workers=2)
     assert sample_plan.sample_set_id == baseline.sample_set_id
     assert experiment.config_sha256(configuration) == baseline_configuration_id
+    for decoder in ("relay_bp", "tesseract"):
+        configuration, experiment, sample_plan, _ = run_parts(
+            decoder=decoder, decoder_seed=17
+        )
+        assert sample_plan.sample_set_id == baseline.sample_set_id
+        assert experiment.config_sha256(configuration) != baseline_configuration_id
+        assert configuration["decoder_profile"]["name"] == decoder
 
 
 def test_bb_runner_uses_the_normal_four_window_plan_and_exact_batches(tmp_path):
@@ -285,20 +439,25 @@ def test_bb_runner_uses_the_normal_four_window_plan_and_exact_batches(tmp_path):
     assert [path.name for path in chunk_paths] == ["0.csv", "1.csv"]
 
 
-def test_bb_runner_resume_and_worker_count_preserve_chunk_bytes(tmp_path):
+@pytest.mark.parametrize("decoder", ["bposd", "relay_bp", "tesseract"])
+def test_bb_runner_resume_and_worker_count_preserve_chunk_bytes(tmp_path, decoder):
+    seed = {} if decoder == "bposd" else {"decoder_seed": 17}
+    configuration = _configuration(
+        decoder=decoder, **seed, syndrome_rounds=1, commit_rounds=1,
+        buffer_rounds=1, shots=2, batch_shots=1,
+    )
     one_worker = tmp_path / "one-worker"
     two_workers = tmp_path / "two-workers"
-    first = run_bb_configuration(_configuration(workers=1), one_worker)
+    first = run_bb_configuration(dict(configuration, workers=1), one_worker)
     first_chunks = {
         path.name: path.read_bytes() for path in sorted(one_worker.glob("**/*.csv"))
     }
 
-    resumed = run_bb_configuration(_configuration(workers=1), one_worker)
-    parallel = run_bb_configuration(_configuration(workers=2), two_workers)
+    resumed = run_bb_configuration(dict(configuration, workers=1), one_worker)
+    parallel = run_bb_configuration(dict(configuration, workers=2), two_workers)
     parallel_chunks = {
         path.name: path.read_bytes() for path in sorted(two_workers.glob("**/*.csv"))
     }
-
     assert resumed == first == parallel
     assert first_chunks == parallel_chunks
 
@@ -366,6 +525,67 @@ def test_bb_matched_windows_agree_with_quits_on_the_same_400_shots():
     )
     assert int(np.any(decsim_predictions != truth, axis=1).sum()) == 60
 
+
+def test_bb_tesseract_factory_disables_backend_output(monkeypatch):
+    import tesseract_decoder
+
+    captured = {}
+    original = tesseract_decoder.tesseract.TesseractConfig
+
+    def recording_configuration(**arguments):
+        captured.update(arguments)
+        return original(**arguments)
+
+    monkeypatch.setattr(
+        tesseract_decoder.tesseract, "TesseractConfig", recording_configuration
+    )
+    resolved = _run_parts(_configuration(
+        decoder="tesseract", decoder_seed=17, syndrome_rounds=1,
+        commit_rounds=1, buffer_rounds=1, shots=1, batch_shots=1,
+    ))[0]
+    decoder = _BbDecoderFactory(resolved)()
+    model = decoder.window_models[0]
+    assert model.physical_faults is not None and model.graphlike_faults is None
+    decoder.decode_window(model, np.zeros(len(model.detector_ids), dtype=np.uint8))
+    assert (captured["verbose"], captured["create_visualization"]) == (False, False)
+
+
+@pytest.mark.parametrize("decoder", ["relay_bp", "tesseract"])
+def test_optional_backend_dependency_fails_before_output(
+    monkeypatch, tmp_path, decoder
+):
+    def missing(_):
+        raise PackageNotFoundError
+
+    monkeypatch.setattr("experiments.run_bb.package_version", missing)
+    monkeypatch.setattr(
+        "experiments.run_bb._run_parts",
+        lambda _: ({"decoder": decoder}, None, None, None),
+    )
+    output = tmp_path / decoder
+    with pytest.raises(ImportError, match="requires"):
+        run_bb_configuration(
+            _configuration(decoder=decoder, decoder_seed=3), output
+        )
+    assert not output.exists()
+
+
+def test_real_optional_backends_share_one_bb_sample(tmp_path):
+    results = []
+    rows = []
+    for decoder in ("bposd", "relay_bp", "tesseract"):
+        output = tmp_path / decoder
+        seed = {} if decoder == "bposd" else {"decoder_seed": 17}
+        results.append(run_bb_configuration(_configuration(
+            decoder=decoder, **seed, syndrome_rounds=1,
+            commit_rounds=1, buffer_rounds=1, shots=1, batch_shots=1,
+        ), output))
+        rows.append(read_chunk_csv(next(output.glob("**/*.csv"))))
+
+    assert len({result.sample_set_id for result in results}) == 1
+    assert len({row.sample_batch_sha256 for row in rows}) == 1
+    assert all(result.attempted_shots == 1 for result in results)
+    assert len({result.config_id for result in results}) == 3
 
 def test_bb_cli_matches_the_direct_runner(tmp_path):
     configuration = _configuration()

@@ -1,10 +1,11 @@
-"""Run one offline QUITS-1.1 BB-memory BP-OSD experiment."""
+"""Run one offline QUITS-1.1 BB-memory experiment."""
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
 import hashlib
+from importlib.metadata import PackageNotFoundError, version as package_version
 import json
 from pathlib import Path
 
@@ -14,20 +15,39 @@ from decsim.detector_error_model import (
     PHYSICAL_FAULT_MODEL_REQUIRED,
 )
 from decsim.schemes import SlidingWindowScheme
+from decsim.relay_bp_decoder import RelayBpWindowDecoder
+from decsim.tesseract_decoder import TesseractDecoderConfig, TesseractWindowDecoder
 
 from .bb import build_quits11_bb_memory
-from .decoding import OfflineBatchDecoder, run_offline_parallel
+from .decoding import (
+    OfflineBackendBatchDecoder, OfflineBatchDecoder, run_offline_parallel,
+)
 from .harness import Experiment, SamplePlan, exact_batches
 
 
-_FIXED_CONFIGURATION = {
-    "circuit_model": "quits-1.1-custom",
-    "decoder": "bposd",
+_FIXED_CONFIGURATION = {"circuit_model": "quits-1.1-custom"}
+_DECODERS = frozenset({"bposd", "relay_bp", "tesseract"})
+_RELAY_PROFILE = {
+    "alpha": None, "alpha_iteration_scaling_factor": 1.0, "gamma0": 0.1,
+    "pre_iterations": 80, "relay_set_count": 300,
+    "iterations_per_set": 60, "gamma_interval": (-0.24, 0.66),
+    "converged_solution_count": 1,
+}
+_TESSERACT_PROFILE = {
+    "detector_beam": 15, "beam_climbing": True,
+    "no_revisit_detectors": True, "priority_queue_limit": 200_000,
+    "detector_order_method": "index", "detector_order_count": 16,
+}
+_BACKEND_PACKAGES = {
+    "relay_bp": ("relay-bp", "relay_bp", "0.2.2"),
+    "tesseract": ("tesseract-decoder", "tesseract_decoder",
+                  "0.1.1.dev20260802231159"),
 }
 _VARIABLE_FIELDS = {
     "definition_id", "basis", "noise_profile", "physical_error_rate",
     "syndrome_rounds", "commit_rounds", "buffer_rounds", "shots",
-    "batch_shots", "seed", "workers", "experiment_id",
+    "batch_shots", "seed", "workers", "experiment_id", "decoder",
+    "decoder_seed",
 }
 
 
@@ -55,6 +75,22 @@ def _scientific_configuration(configuration):
             raise ValueError(f"{name} must be {value}")
         resolved[name] = value
     resolved.setdefault("experiment_id", "bb-offline")
+    decoder = resolved.setdefault("decoder", "bposd")
+    if decoder not in _DECODERS:
+        raise ValueError("decoder must be bposd, relay_bp, or tesseract")
+    decoder_seed = resolved.get("decoder_seed")
+    if decoder == "bposd" and "decoder_seed" in resolved:
+        raise ValueError("decoder_seed is not valid for bposd")
+    if decoder != "bposd":
+        if type(decoder_seed) is not int or not 0 <= decoder_seed < 2**64:
+            raise ValueError("decoder_seed must be an unsigned 64-bit integer")
+        profile = _RELAY_PROFILE if decoder == "relay_bp" else _TESSERACT_PROFILE
+        resolved_profile = {
+            "name": decoder, **profile, "decoder_seed": decoder_seed,
+        }
+        if decoder == "tesseract":
+            resolved_profile.update(verbose=False, create_visualization=False)
+        resolved["decoder_profile"] = resolved_profile
     for name in ("commit_rounds", "buffer_rounds", "shots", "batch_shots"):
         value = resolved[name]
         if type(value) is not int or value <= 0:
@@ -75,15 +111,30 @@ def _build_circuit(configuration):
 
 
 @dataclass(frozen=True)
-class _BbBposdFactory:
+class _BbDecoderFactory:
     configuration: dict
 
     def __call__(self):
         circuit, detector_rounds, layer_count = _build_circuit(self.configuration)
-        return OfflineBatchDecoder.prepare(
+        decoder = self.configuration["decoder"]
+        if decoder == "relay_bp":
+            batch_decoder = OfflineBackendBatchDecoder
+            decode_window = RelayBpWindowDecoder(
+                **_RELAY_PROFILE, gamma_table_seed=self.configuration["decoder_seed"]
+            ).decode
+        elif decoder == "tesseract":
+            batch_decoder = OfflineBackendBatchDecoder
+            decode_window = TesseractWindowDecoder(TesseractDecoderConfig(
+                **_TESSERACT_PROFILE,
+                detector_order_seed=self.configuration["decoder_seed"],
+            )).decode
+        else:
+            batch_decoder = OfflineBatchDecoder
+            decode_window = bposd_window_decoder()
+        return batch_decoder.prepare(
             circuit,
             _sliding_window_entries(self.configuration, layer_count),
-            bposd_window_decoder(),
+            decode_window,
             round_count=layer_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
@@ -122,14 +173,30 @@ def _run_parts(configuration):
     )
 
 
+def _check_backend_dependency(decoder):
+    if decoder == "bposd":
+        return
+    distribution, module, expected = _BACKEND_PACKAGES[decoder]
+    try:
+        installed = package_version(distribution)
+        __import__(module)
+    except (PackageNotFoundError, ImportError) as error:
+        raise ImportError(f"{decoder} requires {distribution}=={expected}") from error
+    if installed != expected:
+        raise RuntimeError(
+            f"{decoder} requires {distribution}=={expected}; found {installed}"
+        )
+
+
 def run_bb_configuration(configuration, output_directory):
-    """Run or resume one fixed-shot QUITS-1.1 BB physical BP-OSD configuration."""
+    """Run or resume one fixed-shot QUITS-1.1 BB physical configuration."""
     workers = configuration.get("workers", 1)
     if type(workers) is not int or workers <= 0:
         raise ValueError("workers must be a positive integer")
     resolved, experiment, sample_plan, batches = _run_parts(configuration)
+    _check_backend_dependency(resolved["decoder"])
     return run_offline_parallel(
-        _BbBposdFactory(resolved),
+        _BbDecoderFactory(resolved),
         experiment,
         sample_plan,
         resolved,

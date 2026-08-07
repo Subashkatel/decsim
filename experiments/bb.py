@@ -1,16 +1,31 @@
 """Licensed QUITS construction for the first BB-code experiment."""
 
 import math
+from importlib.metadata import PackageNotFoundError, version as package_version
 import sys
 
 
 _CHECKS_PER_LAYER = 36
 
 
+def _require_quits_1_1_0():
+    try:
+        installed = package_version("quits")
+    except PackageNotFoundError as error:
+        raise RuntimeError(
+            "BB experiments require the optional quits==1.1.0 dependency"
+        ) from error
+    if installed != "1.1.0":
+        raise RuntimeError(
+            f"BB experiments require quits==1.1.0; installed quits version {installed}"
+        )
+
+
 def build_bb72_memory_z(*, physical_error_rate, syndrome_round_count):
     """Build the Bravyi [[72,12,6]] Z-memory circuit and detector chronology."""
     if sys.version_info < (3, 10):
         raise RuntimeError("BB experiments require Python 3.10 or newer")
+    _require_quits_1_1_0()
     if (type(physical_error_rate) not in (int, float)
             or not math.isfinite(physical_error_rate)
             or not 0 <= physical_error_rate <= 1):

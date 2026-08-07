@@ -62,6 +62,28 @@ def test_bb_runner_accepts_seed_zero():
     assert _scientific_configuration(_configuration(seed=0))["seed"] == 0
 
 
+def test_bb_provider_rejects_the_wrong_quits_distribution(monkeypatch):
+    monkeypatch.setattr("experiments.bb.package_version", lambda _: "9.9.9")
+
+    with pytest.raises(RuntimeError, match="installed quits version 9.9.9"):
+        build_bb72_memory_z(
+            physical_error_rate=0.003,
+            syndrome_round_count=2,
+        )
+
+
+@pytest.mark.parametrize("workers", [True, False, 0, -1, 1.5, "2"])
+def test_bb_runner_rejects_invalid_worker_counts_before_output(
+    tmp_path, workers
+):
+    output = tmp_path / "output"
+
+    with pytest.raises(ValueError, match="workers must be a positive integer"):
+        run_bb_configuration(_configuration(workers=workers), output)
+
+    assert not output.exists()
+
+
 def test_bb72_provider_matches_the_frozen_quits_circuit():
     circuit, detector_rounds, detector_layer_count = build_bb72_memory_z(
         physical_error_rate=0.003,
@@ -210,3 +232,27 @@ def test_bb_cli_matches_the_direct_runner(tmp_path):
 
     assert completed.returncode == 0, completed.stderr
     assert json.loads(completed.stdout) == asdict(direct)
+
+
+def test_bb_cli_rejects_a_boolean_worker_count_before_output(tmp_path):
+    configuration = _configuration(workers=True)
+    configuration_path = tmp_path / "configuration.json"
+    configuration_path.write_text(json.dumps(configuration), encoding="utf-8")
+    output = tmp_path / "cli"
+    command = [
+        sys.executable,
+        "-m",
+        "experiments.run_bb",
+        "--config",
+        str(configuration_path),
+        "--output",
+        str(output),
+    ]
+
+    completed = subprocess.run(
+        command, cwd=REPOSITORY, text=True, capture_output=True
+    )
+
+    assert completed.returncode != 0
+    assert "workers must be a positive integer" in completed.stderr
+    assert not output.exists()

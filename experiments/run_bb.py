@@ -117,6 +117,8 @@ def _run_parts(configuration):
 def run_bb_configuration(configuration, output_directory):
     """Run or resume one fixed-shot BB72 physical BP-OSD configuration."""
     workers = configuration.get("workers", 1)
+    if type(workers) is not int or workers <= 0:
+        raise ValueError("workers must be a positive integer")
     resolved, experiment, sample_plan, batches = _run_parts(configuration)
     return run_offline_parallel(
         _BbBposdFactory(resolved),

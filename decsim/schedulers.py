@@ -123,52 +123,6 @@ class BufferExpiryDeadline:
         return first + self.capacity_rounds * self.round_ticks
 
 
-class ReservedCapacityLanes:
-    """Route burst-hit patches to a reserved pool once activated.
-
-    Inactive (the default), every job goes to the default pool and
-    the reserved units sit idle — that idle slice IS the reservation;
-    its cost is the premium an experiment must measure. activate()
-    latches routing of the given patches' jobs to the reserved pool;
-    extend() grows the hit set while active. patch_of(job) supplies
-    the job's patch (None -> default pool). Explicit job.hint still
-    wins (DecoderManager.pool_for precedence), and jobs already
-    queued keep their enqueue-time placement.
-
-    deactivate() releases the reservation (Gate 7 P16); the
-    activation itself still latches until the caller's rule fires.
-    """
-
-    def __init__(self, pool: str, patch_of):
-        self.pool = pool
-        self.patch_of = patch_of
-        self.active = False
-        self.hit_patches = frozenset()
-
-    def activate(self, patches) -> None:
-        """Latch reserved routing for these patches."""
-        self.active = True
-        self.hit_patches = frozenset(patches)
-
-    def extend(self, patches) -> None:
-        """Grow the hit set (no-op unless active)."""
-        if self.active:
-            self.hit_patches = self.hit_patches | frozenset(patches)
-
-    def deactivate(self) -> None:
-        """Release the reservation: routing returns to default for
-        all patches; extend() becomes a no-op until a fresh
-        activate(). (Gate 7 P16 — the V18 latch's counterpart.)"""
-        self.active = False
-        self.hit_patches = frozenset()
-
-    def pool_for(self, job: DecodeJob):
-        """Reserved pool for active hit patches; None -> default."""
-        if self.active and self.patch_of(job) in self.hit_patches:
-            return self.pool
-        return None
-
-
 class DistanceLanes:
     """Assign decode jobs to unit pools ("lanes") keyed by code distance.
 

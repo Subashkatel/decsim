@@ -7,6 +7,7 @@ must be replayed from the same retained syndrome data before finality.
 """
 
 from dataclasses import replace
+from types import SimpleNamespace
 import pathlib
 import sys
 
@@ -26,6 +27,7 @@ from decsim.planner import FixedRounds, PerOpRounds
 from decsim.policies import Eager, Held
 from decsim.run_spec import RunSpec, simulate
 from decsim.schemes import SlidingWindowScheme
+from decsim.speculative_recovery import SpeculativeRecovery
 from decsim.switching import Switching
 from decsim.window_interactions import DefaultWindowInteraction
 
@@ -905,6 +907,16 @@ def test_static_stream_segment_waits_for_its_corrected_replay_cone():
     assert segment_publications[0]["t"] >= replay_done
     assert eager.chip.op_start_time[3] >= replay_done
     assert held_publication_states[0]["committed"][2]
+
+
+def test_stream_segment_overlap_uses_inclusive_round_bounds():
+    recovery = SpeculativeRecovery(SimpleNamespace(), double_window=False)
+    recovery._records[(0, 0)] = SimpleNamespace(
+        blocked_stream_starts={"stream": 10})
+
+    assert not recovery.blocks_stream_segment("stream", 9)
+    assert recovery.blocks_stream_segment("stream", 10)
+    assert recovery.blocks_stream_segment("stream", 11)
 
 
 def test_overlapping_stream_roots_hold_segment_until_both_resolve():

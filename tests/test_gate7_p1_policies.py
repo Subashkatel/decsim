@@ -1,4 +1,4 @@
-"""Gate 7 P1: BufferExpiryDeadline + DistanceLanes focused tests.
+"""Gate 7 P1: BufferExpiryDeadline + lane-routing focused tests.
 
 Predeclaration: docs/validation/2026-07-03-gate7-p1-predeclaration.md.
 Covers: deadline-stamp semantics, EDF-under-expiry ordering, lane
@@ -23,7 +23,7 @@ from decsim.message import (Operation, RunSeedPathSegment, RunSeedReservation,
                             Window)
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec, simulate
-from decsim.schedulers import (BufferExpiryDeadline, DistanceLanes,
+from decsim.schedulers import (BufferExpiryDeadline,
                                EarliestDeadlineScheduler, FifoScheduler)
 from decsim.seeding import derive_component_seed
 
@@ -95,11 +95,18 @@ def test_edf_completes_in_buffer_expiry_order():
 
 # ---------------------------------------------------------- lane routing
 
-def dist_of(job):
-    """Test-side distance extraction: code names like 'surface_d7'."""
-    if job.code and "_d" in job.code:
-        return int(job.code.rsplit("_d", 1)[1])
-    return None
+class _CodeNameLanes:
+    """Lane policy for these tests: route on the distance in code names
+    like 'surface_d7'. Exercises the manager's lane port, not any
+    particular routing rule."""
+
+    def __init__(self, lanes: dict):
+        self.lanes = dict(lanes)
+
+    def pool_for(self, job):
+        if job.code and "_d" in job.code:
+            return self.lanes.get(int(job.code.rsplit("_d", 1)[1]))
+        return None
 
 
 def build_laned(units_by_pool: dict):
@@ -107,7 +114,7 @@ def build_laned(units_by_pool: dict):
     manager = DecoderManager(
         eng, router=CodeRouter(default=PerRoundDecoder(tau_us=1.0)),
         scheduler=FifoScheduler(), unit_pools=units_by_pool,
-        lane_policy=DistanceLanes({7: "mid", 11: "heavy"}, dist_of))
+        lane_policy=_CodeNameLanes({7: "mid", 11: "heavy"}))
     return eng, manager
 
 
@@ -132,7 +139,7 @@ def test_lane_naming_a_missing_pool_falls_back_to_default():
     manager = DecoderManager(
         eng, router=CodeRouter(default=PerRoundDecoder(tau_us=1.0)),
         scheduler=FifoScheduler(), unit_pools={"default": 1},
-        lane_policy=DistanceLanes({5: "nonexistent"}, dist_of))
+        lane_policy=_CodeNameLanes({5: "nonexistent"}))
     from decsim.message import DecodeJob, DecoderRequestKey, DecoderTier
     j = DecodeJob(op_id=-1, window_id=0, n_rounds=1, code="surface_d5")
     assert manager.pool_for(j) == "default"
@@ -193,7 +200,7 @@ def test_strong_hint_routes_to_strong_pool_despite_lanes():
         eng, router=CodeRouter(default=PerRoundDecoder(tau_us=1.0)),
         scheduler=FifoScheduler(),
         unit_pools={"default": 1, "heavy": 1, "strong": 1},
-        lane_policy=DistanceLanes({11: "heavy"}, dist_of))
+        lane_policy=_CodeNameLanes({11: "heavy"}))
     from decsim.message import DecodeJob
     j = DecodeJob(op_id=9, window_id=1, n_rounds=4, code="surface_d11",
                   hint="strong", strong_decode_for=(9, 1))
@@ -257,7 +264,7 @@ def test_lanes_protect_short_jobs_from_heavy_flood_deterministic():
 
     shared = run({"default": 2}, None)
     laned = run({"default": 1, "heavy": 1},
-                DistanceLanes({11: "heavy"}, dist_of))
+                _CodeNameLanes({11: "heavy"}))
     assert laned == us(4)              # 1us arrival + 3 rounds, no wait
     assert shared >= us(100)           # starved behind a long job
 

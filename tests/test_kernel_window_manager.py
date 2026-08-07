@@ -524,20 +524,24 @@ def test_default_boundary_revisions_replace_one_sources_contribution():
 
 def test_strong_revises_logical_only_contract_1_4():
     eng, rt, fb, submitted = _runtime(deps=[((0, 0), (1, 0))], ops=(0, 1))
+    rt._selected_request_keys = {}
     _feed_rounds(rt, 0, 6)
     job, _ = submitted[0]
     job.awaiting_strong_result = True
     rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(1,),
                                         boundary_defects={7: [1]}))
     eng.run(until=T_DD)
+    rt._selected_request_keys[(0, 0)] = job.request_key
     dep_boundary_before = dict(rt.windows[(1, 0)].boundary_in)
+    strong_key = DecoderRequestKey(0, 0, DecoderTier.STRONG, 37)
     rt.on_strong_decode_done(StrongDecodeCompletion(
-        DecoderRequestKey(0, 0, DecoderTier.STRONG, 1), DecodeResult(
+        strong_key, DecodeResult(
             0, 0, logical_observables=(0,), boundary_defects={7: [1, 1]})))
     eng.run(until=eng.now + T_DO)
     assert rt.logical_contributions[(0, 0)].logical_observables == (0,)
     assert rt.windows[(1, 0)].boundary_in == dep_boundary_before  # untouched
     assert rt.op_strong_commit_time[0] == eng.now
+    assert rt._selected_request_keys[(0, 0)] is strong_key
 
 
 def test_op_delivery_gated_on_pending_strong_contract_1_5():
@@ -557,13 +561,265 @@ def test_op_delivery_gated_on_pending_strong_contract_1_5():
 
 def test_op_delivery_immediate_when_not_awaiting():
     eng, rt, fb, submitted = _runtime()
+    rt._selected_request_keys = {}
     _feed_rounds(rt, 0, 6)
     job, _ = submitted[0]
+    weak_key = job.request_key
     rt.on_decode_done(job, DecodeResult(0, 0, logical_observables=(1,)))
     assert fb.integrated == []                    # travels t_do
     eng.run(until=T_DO)
     assert [op_id for op_id, _ in fb.integrated] == [0]
     assert fb.integrated[0][1].logical_observables == (1,)
+    assert rt._selected_request_keys[(0, 0)] is weak_key
+
+
+def test_finish_waits_for_every_committed_window(monkeypatch):
+    _, runtime, _, _ = _runtime()
+    operation = runtime._ops[0]
+    events = []
+    monkeypatch.setattr(runtime, "_deliver_result", lambda _operation:
+                        events.append("deliver"))
+    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id:
+                        events.append("close"))
+    monkeypatch.setattr(
+        runtime.store,
+        "has_live_operation_reference",
+        lambda _operation_id: False,
+    )
+    runtime._committed_per_op[0] = 0
+
+    runtime._finish_operation_if_ready(operation)
+
+    assert events == []
+    assert runtime._finished_ops == set()
+
+    runtime._committed_per_op[0] = 1
+    runtime._finish_operation_if_ready(operation)
+
+    assert events == ["deliver", "close"]
+    assert runtime._finished_ops == {0}
+
+
+def test_finish_waits_for_dynamic_stream_seal(monkeypatch):
+    _, runtime, _, _ = _runtime()
+    operation = runtime._ops[0]
+    runtime.lifecycle.register(
+        operation,
+        commit_round_count=3,
+        buffer_round_count=3,
+        source_round_limit=6,
+    )
+    runtime._committed_per_op[0] = 1
+    events = []
+    monkeypatch.setattr(runtime, "_deliver_result", lambda _operation:
+                        events.append("deliver"))
+    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id:
+                        events.append("close"))
+    monkeypatch.setattr(
+        runtime.store,
+        "has_live_operation_reference",
+        lambda _operation_id: False,
+    )
+
+    runtime._finish_operation_if_ready(operation)
+
+    assert events == []
+    assert runtime._finished_ops == set()
+
+    runtime.lifecycle.state(0)["sealed"] = True
+    runtime.lifecycle.unsealed.discard(0)
+    runtime._finish_operation_if_ready(operation)
+
+    assert events == ["deliver", "close"]
+    assert runtime._finished_ops == {0}
+
+
+def test_finish_waits_for_live_payload_and_delivers_before_close(monkeypatch):
+    _, runtime, _, _ = _runtime()
+    operation = runtime._ops[0]
+    runtime._committed_per_op[0] = 1
+    live = {"value": True}
+    closed = {"value": False}
+    observations = []
+    monkeypatch.setattr(
+        runtime.store,
+        "has_live_operation_reference",
+        lambda _operation_id: live["value"],
+    )
+
+    def deliver(_operation):
+        observations.append(("deliver", closed["value"]))
+
+    def close(_operation_id):
+        closed["value"] = True
+        observations.append(("close", closed["value"]))
+
+    monkeypatch.setattr(runtime, "_deliver_result", deliver)
+    monkeypatch.setattr(runtime.store, "close_operation", close)
+
+    runtime._finish_operation_if_ready(operation)
+    assert observations == []
+
+    live["value"] = False
+    runtime._finish_operation_if_ready(operation)
+
+    assert observations == [("deliver", False), ("close", True)]
+
+
+def test_finish_waits_for_operation_recovery_blocker(monkeypatch):
+    _, runtime, _, _ = _runtime()
+    operation = runtime._ops[0]
+    runtime._committed_per_op[0] = 1
+    recovery_active = {"value": True}
+    events = []
+    monkeypatch.setattr(
+        runtime.speculative_recovery,
+        "blocks_finality",
+        lambda _operation_id: recovery_active["value"],
+    )
+    monkeypatch.setattr(
+        runtime.store,
+        "has_live_operation_reference",
+        lambda _operation_id: False,
+    )
+    monkeypatch.setattr(runtime, "_deliver_result", lambda _operation:
+                        events.append("deliver"))
+    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id:
+                        events.append("close"))
+
+    runtime._finish_operation_if_ready(operation)
+
+    assert events == []
+    assert runtime._finished_ops == set()
+
+    recovery_active["value"] = False
+    runtime._finish_operation_if_ready(operation)
+
+    assert events == ["deliver", "close"]
+    assert runtime._finished_ops == {0}
+
+
+def test_finish_marks_before_synchronous_delivery_reentry(monkeypatch):
+    _, runtime, _, _ = _runtime()
+    operation = runtime._ops[0]
+    runtime._committed_per_op[0] = 1
+    events = []
+
+    def deliver(reentered_operation):
+        events.append("deliver")
+        runtime._finish_operation_if_ready(reentered_operation)
+
+    monkeypatch.setattr(runtime, "_deliver_result", deliver)
+    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id:
+                        events.append("close"))
+    monkeypatch.setattr(
+        runtime.store,
+        "has_live_operation_reference",
+        lambda _operation_id: False,
+    )
+
+    runtime._finish_operation_if_ready(operation)
+
+    assert events == ["deliver", "close"]
+    assert runtime._finished_ops == {0}
+
+
+def _segment_finality_runtime():
+    _, runtime, feedback, _ = _runtime(
+        round_count=6,
+        window_specs=((1, 6, 6),),
+    )
+    operation = runtime._ops[0]
+    operation.stream_id = operation.id
+    operation.stream_offset = 0
+    runtime.blocking_ops.add(operation.id)
+    runtime.logical_contributions = {
+        (operation.id, 0): LogicalContribution(
+            owner_key=(operation.id, 0),
+            commit_lo=1,
+            commit_hi=6,
+            ownership_kind="ordinary_window",
+            logical_observables=(1, 0, 1),
+        ),
+    }
+    return runtime, operation, feedback
+
+
+def test_stream_segment_waits_for_overlapping_strong_window():
+    runtime, operation, feedback = _segment_finality_runtime()
+    runtime._pending_strong_windows.add((operation.id, 0))
+
+    runtime.release_stream_segments_at_commit(operation.id, 6)
+
+    assert feedback.integrated == []
+    assert runtime.lifecycle.segment_results_sent == set()
+
+    runtime._pending_strong_windows.clear()
+    runtime.release_stream_segments_at_commit(operation.id, 6)
+
+    assert len(feedback.integrated) == 1
+    assert runtime.lifecycle.segment_results_sent == {operation.id}
+
+
+def test_stream_segment_waits_for_operation_recovery_blocker(monkeypatch):
+    runtime, operation, feedback = _segment_finality_runtime()
+    recovery_active = {"value": True}
+    monkeypatch.setattr(
+        runtime.speculative_recovery,
+        "blocks_finality",
+        lambda _operation_id: recovery_active["value"],
+    )
+    monkeypatch.setattr(
+        runtime.speculative_recovery,
+        "blocks_stream_segment",
+        lambda _stream_id, _segment_end: False,
+    )
+
+    runtime.release_stream_segments_at_commit(operation.id, 6)
+
+    assert feedback.integrated == []
+    assert runtime.lifecycle.segment_results_sent == set()
+
+    recovery_active["value"] = False
+    runtime.release_stream_segments_at_commit(operation.id, 6)
+
+    assert len(feedback.integrated) == 1
+    assert runtime.lifecycle.segment_results_sent == {operation.id}
+
+
+def test_stream_segment_marks_before_delivery_and_does_not_suppress_whole(
+    monkeypatch,
+):
+    runtime, operation, feedback = _segment_finality_runtime()
+    integrated_marker_states = []
+    integrate = feedback.integrate
+
+    def observe_marker(integrated_operation, result):
+        integrated_marker_states.append(
+            integrated_operation.id in runtime.lifecycle.segment_results_sent
+        )
+        integrate(integrated_operation, result)
+
+    monkeypatch.setattr(feedback, "integrate", observe_marker)
+
+    runtime.release_stream_segments_at_commit(operation.id, 6)
+    runtime.release_stream_segments_at_commit(operation.id, 6)
+
+    assert integrated_marker_states == [True]
+    assert len(feedback.integrated) == 1
+
+    runtime._committed_per_op[operation.id] = 1
+    monkeypatch.setattr(
+        runtime.store,
+        "has_live_operation_reference",
+        lambda _operation_id: False,
+    )
+    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id: None)
+    runtime._finish_operation_if_ready(operation)
+
+    assert len(feedback.integrated) == 2
+    assert feedback.integrated[-1][1].logical_observables == (1, 0, 1)
+    assert runtime._finished_ops == {operation.id}
 
 
 def test_held_ships_only_when_final():

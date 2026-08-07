@@ -135,3 +135,56 @@ def test_dynamic_matches_static_decode_unit_per_shot():
              ), verbose=False)
         assert rd.window_manager.op_results[stream_d.id] == \
                rs.window_manager.op_results[stream_s.id]
+
+
+def test_dynamic_window_created_during_held_boundary_still_depends_on_it():
+    """A late dynamic successor waits for its predecessor held boundary."""
+    from types import MappingProxyType
+
+    from decsim.decoders import PerRoundDecoder
+    from decsim.message import (
+        Operation,
+        OperationPlanningView,
+        ResolvedOperationPlanning,
+    )
+    from decsim.planner import FixedRounds
+
+    completed_run = RunSpec(
+        ops=[Operation(9, "memory", (9,))],
+        d=3,
+        rounds_policy=FixedRounds(11),
+        num_units=1,
+        decoder=PerRoundDecoder(0.2),
+    ).build()
+    window_manager = completed_run.window_manager
+    stream_operation = Operation(0, "stream", (0,))
+    resolved_operation = ResolvedOperationPlanning(
+        operation_id=stream_operation.id,
+        code_geometry=window_manager._code_geometry,
+        round_count=3,
+        round_ticks=1,
+        spatial_node_count=9,
+    )
+    window_manager._resolved_operations = MappingProxyType({
+        **window_manager._resolved_operations,
+        stream_operation.id: resolved_operation,
+    })
+    window_manager._planning_view_by_operation_id = MappingProxyType({
+        **window_manager._planning_view_by_operation_id,
+        stream_operation.id: OperationPlanningView.from_operation(
+            stream_operation
+        ),
+    })
+    window_manager._register_dynamic_stream(
+        stream_operation,
+        resolved_operation,
+    )
+
+    window_manager.create_dynamic_window(0, 0, 1, 3, 6, is_last=False)
+    window_manager.committed_windows.add((0, 0))
+    window_manager._held_boundary[(0, 0)] = (0, {4: [1]})
+    window_manager.create_dynamic_window(0, 1, 4, 6, 9, is_last=False)
+
+    successor = window_manager.windows[(0, 1)]
+    assert successor.deps_remaining == 1
+    assert (0, 1) in window_manager.windows[(0, 0)].dependents

@@ -301,8 +301,7 @@ class RunSpec:
             idle_policy=idle_policy,
             resource_claims_by_operation_id=resource_claims,
             max_idle_rounds=self.max_idle_rounds,
-            gates_start_on_round_boundaries=self.gates_start_on_round_boundaries,
-            frame=orchestrator.frame)
+            gates_start_on_round_boundaries=self.gates_start_on_round_boundaries)
         metrics = (self.make_metrics(
             engine, window_manager, decoder_manager, chip, factory)
             if self.make_metrics else [])

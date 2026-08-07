@@ -304,7 +304,6 @@ class WindowManager:
         self._escalations = _EscalationRegistry()
         self.absorbed_windows: set[tuple] = set()        # skipped by the weak chain
         self.op_strong_commit_time: dict[int, int] = {}
-        self._finalize_gates: dict[int, Callable] = {}    # gate_finalize seam
         self._finished_ops: set[int] = set()
         self._workload_complete_sent = False
         self.speculative_recovery = SpeculativeRecovery(self, double_window)
@@ -2549,20 +2548,6 @@ class WindowManager:
             for key, window in self.windows.items()
         })
 
-    def gate_finalize(self, op_id, predicate: Callable) -> None:
-        """Hold this op's result publication (and so its non-Clifford
-        feed-forward) until predicate(op) is true, on top of the built-in
-        pending-strong gate. Used by the Switching and Speculation parts.
-        The check re-runs at every commit and strong completion; a part
-        whose predicate flips outside those events calls recheck_finalize()."""
-        self._finalize_gates[op_id] = predicate
-
-    def recheck_finalize(self, op_id) -> None:
-        """Re-evaluate a gated op's finish check after its predicate flips."""
-        op = self._ops.get(op_id)
-        if op is not None:
-            self._finish_operation_if_ready(op)
-
     def _finish_operation_if_ready(self, op: Operation) -> None:
         """Deliver an op result once every window is committed, no strong
         redo or speculative ancestor is pending, and the stream is sealed."""
@@ -2573,9 +2558,6 @@ class WindowManager:
         if self.speculative_recovery.blocks_finality(op.id):
             return
         if self.store.has_live_operation_reference(op.id):
-            return
-        predicate = self._finalize_gates.get(op.id)
-        if predicate is not None and not predicate(op):
             return
         if (self._committed_per_op.get(op.id, 0) == self.window_count[op.id]
                 and self.lifecycle.sealed(op.id)):

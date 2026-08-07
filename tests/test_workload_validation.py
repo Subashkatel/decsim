@@ -9,8 +9,7 @@
 import pytest
 import numpy as np
 
-from decsim.decoders import PresetLatencyDecoder
-from decsim.message import IntrinsicMeasurement, Operation
+from decsim.message import Operation
 from decsim.planner import _validate_operation_graph
 from decsim.run_spec import RunSpec
 
@@ -100,45 +99,6 @@ def test_duplicate_ids_within_decode_ops_are_rejected():
     assert "42" in message and "decode_ops" in message
 
 
-def test_direct_operation_rejects_non_exact_logical_observable_index():
-    with pytest.raises(TypeError, match="logical_observable_index"):
-        Operation(0, "op0", (0,), logical_observable_index=True)
-
-
-def test_intrinsic_measurement_must_match_operation_and_stream_identity():
-    with pytest.raises(ValueError, match="trajectory_id"):
-        Operation(
-            3,
-            "op3",
-            (0,),
-            stream_id=3,
-            intrinsic_measurement=IntrinsicMeasurement(
-                operation_id=3,
-                trajectory_id=4,
-                value=0,
-                source="controlled fixture",
-            ),
-        )
-
-
-def test_run_spec_rejects_stream_identity_without_a_declared_owner():
-    operation = Operation(
-        3,
-        "op3",
-        (0,),
-        stream_id=("stream", (3, "branch")),
-        intrinsic_measurement=IntrinsicMeasurement(
-            operation_id=3,
-            trajectory_id=("stream", (3, "branch")),
-            value=0,
-            source="controlled fixture",
-        ),
-    )
-
-    with pytest.raises(ValueError, match="does not name a declared stream owner"):
-        RunSpec(ops=[operation]).build()
-
-
 @pytest.mark.parametrize("operation_id", [True, 1.0, np.int64(1), "1"])
 def test_run_spec_requires_exact_integer_operation_ids(operation_id):
     with pytest.raises(TypeError, match="operation id.*exact built-in int"):
@@ -196,25 +156,3 @@ def test_stream_reference_must_name_a_declared_stream_owner():
 
     with pytest.raises(ValueError, match="stream_id 99.*declared stream owner"):
         RunSpec(ops=[operation]).build()
-
-
-class _InvalidFeedbackFrontend:
-    def build(self):
-        return [
-            Operation(
-                0,
-                "frontend op",
-                (0,),
-                logical_observable_index=-1,
-            )
-        ]
-
-
-def test_frontend_materialized_operation_uses_same_feedback_validation():
-    spec = RunSpec(
-        frontend=_InvalidFeedbackFrontend(),
-        decoder=PresetLatencyDecoder(0.0),
-    )
-
-    with pytest.raises(ValueError, match="logical_observable_index"):
-        spec.build()

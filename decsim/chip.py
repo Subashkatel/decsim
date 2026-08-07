@@ -1,22 +1,8 @@
-"""The chip-side gate: starts ops, consumes decisions, injects idle rounds.
+"""QPU control gate for operation starts, decisions, and idle rounds.
 
-This is the control half of the QPU seam. The other half — the clocked
-per-op syndrome stream — is the Source (devices.py): the gate calls
-``source.start(op)`` and hears ``on_body_done(op)`` back in the same event
-as the op's final round. Everything pluggable arrives injected: idle
-policy, controller relay, window manager, decoder service, factory, source.
-
-Behavior frozen by the timing goldens:
-  - any Decision(releases_operation=True) releases the waiting op,
-    unconditionally; requires_strong_commit marks the op but gates nothing.
-  - while an op waits for feedback, idle rounds are emitted on the round
-    clock (capped, 100*d by default), counted per qubit set, and at the
-    next op's begin folded into its first window via
-    window_manager.prepend_idle_rounds.
-  - the magic-state wait overlaps the feedback wait: an op starts once both
-    are clear; the two waits never add.
-  - resource reservation uses typed ResourceClaims; the default layout
-    claims qubits only, and duplicate claims on a qubit raise.
+Magic-state and feedback waits overlap. Blocked patches emit bounded idle
+rounds until a release arrives, and resource claims remain exclusive until
+the operation body completes.
 """
 
 from __future__ import annotations
@@ -25,11 +11,8 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import Optional
 
-from .message import (
-    Decision, FeedbackEffect, Operation, SyndromePacketRoute,
-    SyndromePayload, WINDOW_INPUT_ROUTE,
-)
-from .pauli_frame import PauliFrame
+from .message import (Decision, Operation, SyndromePacketRoute,
+                      SyndromePayload, WINDOW_INPUT_ROUTE)
 
 
 class Chip:
@@ -41,8 +24,7 @@ class Chip:
                  resolved_patches, idle_policy,
                  resource_claims_by_operation_id,
                  max_idle_rounds: Optional[int] = None,
-                 gates_start_on_round_boundaries: bool = False,
-                 frame: Optional[PauliFrame] = None):
+                 gates_start_on_round_boundaries: bool = False):
         self.engine = engine
         self.source = source
         self.controller = controller
@@ -64,7 +46,6 @@ class Chip:
             dict(resource_claims_by_operation_id)
         )
         self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
-        self.frame = frame if frame is not None else PauliFrame()
         self.max_idle_rounds = max_idle_rounds if max_idle_rounds is not None \
             else 100 * code_geometry.distance
 
@@ -81,11 +62,6 @@ class Chip:
         self.body_done_time: dict[int, int] = {}
         self.decode_release_time: dict[int, int] = {}
         self.result_return_time_by_operation: dict[int, int] = {}
-        self.applied_basis: dict[int, str] = {}
-        self.applied_pauli: dict[int, str] = {}
-        self.applied_s: dict[int, bool] = {}
-        self.applied_frame_delta: dict[int, tuple] = {}
-        self.frame_applied_time: dict[int, int] = {}
         self.op_start_time: dict[int, int] = {}
         self.idle_rounds_by_patch: dict = {}
         self.idle_rounds_emitted = 0
@@ -93,8 +69,6 @@ class Chip:
         self._patches_emitting: set = set()
         self.stream_next_round: dict = {}
         self.last_finish_time = 0
-
-    # -------------------------------------------------------------- loading
 
     @property
     def workload_complete(self) -> bool:
@@ -152,8 +126,6 @@ class Chip:
                 )
         for operation in ops:
             self._attempt_start(operation)
-
-    # ---------------------------------------------------------------- start
 
     def _release_successors(self, operation: Operation) -> None:
         """Magic-state/feedback waits overlap in _maybe_begin (arXiv:2411.04270)."""
@@ -294,12 +266,8 @@ class Chip:
             return operation.qubits[0]
         return 0
 
-    # ------------------------------------------------------------ body done
-
     def _body_done(self, operation: Operation) -> None:
-        """The op's last body round arrived. Step order is frozen by the
-        timing goldens: record -> free -> release -> log -> close boundary
-        -> idle stream -> seal."""
+        """Finish in order: record, free, release, close, idle, then seal."""
         self.done_bodies.add(operation.id)
         self.body_done_time[operation.id] = self.engine.now
         self.last_finish_time = max(self.last_finish_time, self.engine.now)
@@ -336,8 +304,6 @@ class Chip:
                 continue
             self.window_manager.seal_stream(stream_id, total_rounds)
 
-    # --------------------------------------------------------- idle emission
-
     def _start_idle_stream_if_needed(self, operation: Operation) -> None:
         if not operation.has_successor:
             return
@@ -367,9 +333,7 @@ class Chip:
         return False
 
     def _emit_idle_round(self, op_id: int, patch, round_index: int) -> None:
-        """Emit one idle round. Step order is frozen by the timing goldens:
-        guard -> cap -> relay -> account -> boundary-start -> separate-decode
-        -> reschedule."""
+        """Emit, account, start boundary work, decode, then reschedule."""
         if not self._has_waiting_blocked_successor(op_id):
             self._patches_emitting.discard(patch)
             return
@@ -469,78 +433,26 @@ class Chip:
                 spatial_nodes=patch_record.spatial_node_count,
                 label=f"mem({self._ops[op_id].name},r{round_index})")
 
-    # ------------------------------------------------------------- decisions
-
     def on_decision(self, decision: Decision) -> None:
-        """Receive feedback from the controller. Release is unconditional
-        on releases_operation=True."""
-        effect = decision.effect
-        if effect is not None and type(effect) is not FeedbackEffect:
-            raise TypeError(
-                f"decision for operation {decision.target_operation_id} "
-                "effect must be FeedbackEffect or None")
+        """Receive feedback from the controller."""
         if decision.releases_operation:
             self._release_blocked_operation(decision)
             return
         operation_id = decision.target_operation_id
         self.result_return_time_by_operation[operation_id] = self.engine.now
         target = self._ops[operation_id]
-        detail = "timing-only" if effect is None \
-            else (
-                f"observable {effect.logical_observable_index}, "
-                f"basis '{effect.basis}'"
-            )
         self.engine.log(
             "Chip",
-            f"received result return for {target.name}: {detail}",
+            f"received result return for {target.name}",
         )
 
     def _release_blocked_operation(self, decision: Decision) -> None:
         operation_id = decision.target_operation_id
         target = self._ops[operation_id]
-        effect = decision.effect
-        if effect is not None:
-            self._consume_effect(target, effect)
         self.decode_released.add(operation_id)
         self.decode_release_time[operation_id] = self.engine.now
-        if effect is None:
-            self.engine.log(
-                "Chip",
-                f"CONSUMED timing-only release for {target.name}"
-                f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
-                "no basis or frame effect, now trying to start",
-            )
-        else:
-            self.engine.log(
-                "Chip",
-                f"CONSUMED decision for {target.name}: observable "
-                f"{effect.logical_observable_index}, measure basis "
-                f"'{effect.basis}', frame byproduct '{effect.pauli}'"
-                f"{' + S' if effect.apply_s else ''} on qubits "
-                f"{target.qubits}"
-                f"{' [strong-commit marker]' if decision.strong_committed else ''}; "
-                "successor steered, now trying to start",
-            )
+        self.engine.log(
+            "Chip",
+            f"CONSUMED release for {target.name}; now trying to start",
+        )
         self._maybe_begin(target)
-
-    def _consume_effect(
-        self,
-        target: Operation,
-        effect: FeedbackEffect,
-    ) -> None:
-        op_id = target.id
-        self.applied_basis[op_id] = effect.basis
-        self.applied_pauli[op_id] = effect.pauli
-        self.applied_s[op_id] = effect.apply_s
-        primary = target.qubits[0] if target.qubits else None
-        x_before = self.frame.x_of(primary) if primary is not None else 0
-        z_before = self.frame.z_of(primary) if primary is not None else 0
-        for qubit in target.qubits:
-            self.frame.apply_pauli(qubit, effect.pauli)
-            if effect.apply_s:
-                self.frame.apply_s(qubit)
-        delta = (0, 0) if primary is None else (
-            self.frame.x_of(primary) ^ x_before,
-            self.frame.z_of(primary) ^ z_before)
-        self.applied_frame_delta[op_id] = delta
-        self.frame_applied_time[op_id] = self.engine.now

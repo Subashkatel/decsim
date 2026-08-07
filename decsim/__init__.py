@@ -16,7 +16,6 @@ from .frontends.circuit import (CircuitFrontend, SurgeryIRFrontend,
 from .metrics import (DecoderUtilization, ReadyQueueStats,
                       WindowLatencyBreakdown, MagicStateLatency,
                       StrongDecoderBacklog, ConditionalReactionTime)
-from .pauli_frame import PauliFrame
 from .schedulers import EarliestDeadlineScheduler, ReactionPathDeadline
 from .schemes import ParallelWindowScheme
 from .run_spec import RunSpec, simulate
@@ -33,7 +32,6 @@ __all__ = [
     "SwitchingDecoder",
     "SwitchingRouter", "SampledConfidenceDecoder", "switch_probability_per_round",
     "InfiniteFactory", "DistillationFactory", "MultiLevelDistillationFactory",
-    "PauliFrame",
     "ParallelWindowScheme",
     "Switching",
     "EarliestDeadlineScheduler", "ReactionPathDeadline",

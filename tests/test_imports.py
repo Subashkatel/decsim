@@ -12,7 +12,6 @@ def test_core_modules_import_from_package_context():
         "decsim.layouts",
         "decsim.metrics",
         "decsim.message",
-        "decsim.pauli_frame",
         "decsim.links",
         "decsim.controllers",
         "decsim.payload_store",

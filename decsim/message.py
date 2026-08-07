@@ -1001,87 +1001,12 @@ class ResourceClaim:
     ids: frozenset
 
 
-# ----------------------------------------------------------------- feedback
-
-@dataclass(frozen=True)
-class IntrinsicMeasurement:
-    """Supplied intrinsic measurement with stable trajectory provenance."""
-
-    operation_id: Any
-    trajectory_id: Any
-    value: int
-    source: str
-
-    def __post_init__(self) -> None:
-        if not is_stable_identity(self.operation_id):
-            raise TypeError(
-                "intrinsic measurement operation_id must be a stable "
-                "built-in int, str, or recursive tuple")
-        if not is_stable_identity(self.trajectory_id):
-            raise TypeError(
-                "intrinsic measurement trajectory_id must be a stable "
-                "built-in int, str, or recursive tuple")
-        if type(self.value) is not int:
-            raise TypeError(
-                "intrinsic measurement value must be an exact int bit")
-        if self.value not in (0, 1):
-            raise ValueError(
-                f"intrinsic measurement value must be 0 or 1, got "
-                f"{self.value}")
-        if type(self.source) is not str:
-            raise TypeError("intrinsic measurement source must be a string")
-        if not self.source.strip():
-            raise ValueError(
-                "intrinsic measurement source must be nonempty")
-
-
-@dataclass(frozen=True)
-class FeedbackEffect:
-    """One complete functional consequence selected from a decode vector."""
-
-    logical_observable_index: int
-    decoded_value: int
-    intrinsic_measurement: Optional[IntrinsicMeasurement]
-    correction_value: int
-    basis: str
-    pauli: str
-    apply_s: bool
-
-    def __post_init__(self) -> None:
-        if type(self.logical_observable_index) is not int:
-            raise TypeError(
-                "logical_observable_index must be an exact int")
-        if self.logical_observable_index < 0:
-            raise ValueError(
-                "logical_observable_index must be nonnegative")
-        for field_name in ("decoded_value", "correction_value"):
-            value = getattr(self, field_name)
-            if type(value) is not int:
-                raise TypeError(f"{field_name} must be an exact int bit")
-            if value not in (0, 1):
-                raise ValueError(f"{field_name} must be 0 or 1, got {value}")
-        if (
-            self.intrinsic_measurement is not None
-            and type(self.intrinsic_measurement) is not IntrinsicMeasurement
-        ):
-            raise TypeError(
-                "intrinsic_measurement must be IntrinsicMeasurement or None")
-        if type(self.basis) is not str or not self.basis:
-            raise ValueError("basis must be a nonempty string")
-        if type(self.pauli) is not str or not self.pauli:
-            raise ValueError("pauli must be a nonempty string")
-        if type(self.apply_s) is not bool:
-            raise TypeError("apply_s must be an exact bool")
-
-
 @dataclass(frozen=True)
 class Decision:
-    """Feedback timing plus an optional functional effect."""
+    """Feedback timing route for one target operation."""
 
     target_operation_id: int
-    effect: Optional[FeedbackEffect] = None
-    releases_operation: bool = True   # False = result-return only, no op waiting
-    strong_committed: bool = False    # mirrors op.requires_strong_commit (marker)
+    releases_operation: bool = True
 
 
 # ----------------------------------------------------------------- workload
@@ -1125,11 +1050,6 @@ class Operation:
     blocked_by: Optional[int] = None  # op id whose Decision must release this op
     feedback_boundary_mode: Optional[str] = None  # per-op override of the RunSpec mode
     requires_result_return_to_chip: bool = False  # decision must travel back to the QPU
-    requires_strong_commit: bool = False  # marker only; release stays unconditional
-    byproduct_pauli: str = "X"        # Pauli applied to the successor on measurement 1
-    measurement_basis: str = "Z"
-    logical_observable_index: Optional[int] = None
-    intrinsic_measurement: Optional[IntrinsicMeasurement] = None
     kind: OpKind = OpKind.GENERIC     # rounds-policy vocabulary (see OpKind)
 
     def __post_init__(self) -> None:
@@ -1199,31 +1119,6 @@ class Operation:
             raise TypeError(
                 f"operation {self.id} stream_id must be a stable built-in "
                 "identity or None")
-        if self.logical_observable_index is not None:
-            if type(self.logical_observable_index) is not int:
-                raise TypeError(
-                    f"operation {self.id} logical_observable_index must be "
-                    "an exact int")
-            if self.logical_observable_index < 0:
-                raise ValueError(
-                    f"operation {self.id} logical_observable_index must be "
-                    "nonnegative")
-        measurement = self.intrinsic_measurement
-        if measurement is None:
-            return
-        if type(measurement) is not IntrinsicMeasurement:
-            raise TypeError(
-                f"operation {self.id} intrinsic_measurement must be "
-                "IntrinsicMeasurement")
-        trajectory_id = self.stream_id if self.stream_id is not None else self.id
-        if not same_stable_identity(measurement.operation_id, self.id):
-            raise ValueError(
-                f"operation {self.id} intrinsic_measurement operation_id "
-                "does not match")
-        if not same_stable_identity(measurement.trajectory_id, trajectory_id):
-            raise ValueError(
-                f"operation {self.id} intrinsic_measurement trajectory_id "
-                "does not match")
 
     @property
     def needs_magic_state(self) -> bool:
@@ -1256,11 +1151,6 @@ class OperationPlanningView:
     blocked_by: Optional[int]
     feedback_boundary_mode: str
     requires_result_return_to_chip: bool
-    requires_strong_commit: bool
-    byproduct_pauli: str
-    measurement_basis: str
-    logical_observable_index: Optional[int]
-    intrinsic_measurement: Optional[IntrinsicMeasurement]
     kind: OpKind
 
     @classmethod
@@ -1299,11 +1189,6 @@ class OperationPlanningView:
             requires_result_return_to_chip=(
                 operation.requires_result_return_to_chip
             ),
-            requires_strong_commit=operation.requires_strong_commit,
-            byproduct_pauli=operation.byproduct_pauli,
-            measurement_basis=operation.measurement_basis,
-            logical_observable_index=operation.logical_observable_index,
-            intrinsic_measurement=operation.intrinsic_measurement,
             kind=operation.kind,
         )
 

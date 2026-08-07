@@ -114,22 +114,3 @@ class BufferExpiryDeadline:
                 "first-round arrival provenance is missing"
             )
         return first + self.capacity_rounds * self.round_ticks
-
-
-class DistanceLanes:
-    """Route jobs to hardware pools by code distance, so big slow decodes
-    do not clog the queue shared with small ones.
-
-    lanes maps distance -> pool name; distance_of(job) reports the distance.
-    Unknown distance or no matching lane means the default pool. A job with
-    an explicit hint skips this entirely.
-    """
-
-    def __init__(self, lanes: dict, distance_of):
-        """Set the distance -> pool map and how to read a job's distance."""
-        self.lanes = dict(lanes)
-        self.distance_of = distance_of
-
-    def pool_for(self, job: DecodeJob):
-        """The job's pool name, or None for the default pool."""
-        return self.lanes.get(self.distance_of(job))

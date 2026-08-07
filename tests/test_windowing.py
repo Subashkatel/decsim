@@ -190,7 +190,7 @@ def test_cross_op_deps_use_entry_and_exit_defaults():
     a = Operation(0, "A", (0,), clifford=True)
     b = Operation(1, "B", (0,), clifford=True)
     a.patches, b.patches = (0,), (0,)
-    b.predecessors, a.has_successor = (0,), True
+    b.predecessors = (0,)
     b.decoder_boundary_predecessors = (0,)
     plan = _plan(SlidingWindowScheme(), [a, b], rounds_per_op=11, d=3)
     assert plan.windows[(1, 0)].deps == [(0, plan.window_count[0] - 1)]
@@ -284,7 +284,6 @@ def test_short_successor_closes_cross_operation_buffer():
     second = Operation(1, "short", (0,), clifford=True, patches=(0,),
                        predecessors=(0,),
                        decoder_boundary_predecessors=(0,))
-    first.has_successor = True
     rounds_map = {0: 3, 1: 1}
     result = simulate(RunSpec(
                  ops=[first, second],

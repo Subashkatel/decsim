@@ -9,7 +9,8 @@
 import pytest
 import numpy as np
 
-from decsim.message import Operation
+from decsim.decoders import PresetLatencyDecoder
+from decsim.message import Operation, ProtectedRegion
 from decsim.planner import _validate_operation_graph
 from decsim.run_spec import RunSpec
 
@@ -156,3 +157,62 @@ def test_stream_reference_must_name_a_declared_stream_owner():
 
     with pytest.raises(ValueError, match="stream_id 99.*declared stream owner"):
         RunSpec(ops=[operation]).build()
+
+def _protected_external_spec(source_role, stream_id):
+    start = Operation(0, "alloc", (0,), patches=(0,), emits_detector_data=False)
+    patch = 1 if stream_id < 0 else 0
+    source = Operation(42, "external source", (patch,), patches=(patch,))
+    consumer = Operation(2, "conditional", (1,), patches=(0,),
+                         predecessors=(start.id,), blocked_by=source.id,
+                         emits_detector_data=False)
+    return RunSpec(
+        ops=[start, consumer],
+        protected_regions=(ProtectedRegion(0, 99 if stream_id < 0 else stream_id, start.id, consumer.id),),
+        decoder=PresetLatencyDecoder(0),
+        **{source_role: [source]},
+    ), (start, source, consumer)
+
+@pytest.mark.parametrize("source_role,stream_id",
+                         [(role, stream) for role in ("decode_ops", "dynamic_streams")
+                          for stream in (42, 99, -1)])
+def test_external_protected_feedback_source_is_rejected_before_chip_admission(source_role, stream_id, monkeypatch):
+    spec, operations = _protected_external_spec(source_role, stream_id)
+    snapshots = tuple(operation.__dict__.copy() for operation in operations)
+    if stream_id < 0:
+        monkeypatch.setattr("decsim.chip.Chip._index_protected_regions", lambda *args: (_ for _ in ()).throw(RuntimeError("index reached")))
+        with pytest.raises(RuntimeError, match="index reached"): spec.build()
+        return
+    with pytest.raises(ValueError, match=rf"external source 42.*protected stream.*{stream_id}"):
+        spec.build()
+    assert tuple(operation.__dict__ for operation in operations) == snapshots
+
+def test_protected_region_has_exact_generation_identity():
+    region = ProtectedRegion(("compute", 0), 7, 1, 4)
+    assert (region.patch_id, region.stream_id) == (("compute", 0), 7)
+    invalid_regions = (
+        ((0, True, 1, 4), "stream_id.*exact built-in int"),
+        ((object(), 7, 1, 4), "patch_id.*stable built-in identity"),
+    )
+    for arguments, message in invalid_regions:
+        with pytest.raises(TypeError, match=message):
+            ProtectedRegion(*arguments)
+
+def test_executable_feedback_source_rejects_two_protected_streams_before_start():
+    streams = (Operation(100, "first stream", (0,), patches=(0,)),
+               Operation(200, "second stream", (1,), patches=(1,)))
+    starts = (Operation(1, "first alloc", (0,), patches=(0,), emits_detector_data=False),
+              Operation(2, "second alloc", (1,), patches=(1,), emits_detector_data=False))
+    source = Operation(3, "joint measurement", (0, 1), patches=(0, 1),
+                       predecessors=tuple(op.id for op in starts), emits_detector_data=False)
+    consumer = Operation(4, "conditional", (2,), patches=(0,),
+                         predecessors=(source.id,), blocked_by=source.id, emits_detector_data=False)
+    regions = (ProtectedRegion(1, streams[1].id, starts[1].id, source.id),
+               ProtectedRegion(0, streams[0].id, starts[0].id, source.id))
+    with pytest.raises(
+        ValueError, match=r"feedback source 3.*protected streams \(100, 200\)"
+    ):
+        RunSpec(ops=[*starts, source, consumer],
+                dynamic_streams=list(reversed(streams)),
+                protected_regions=regions,
+                decoder=PresetLatencyDecoder(0)).build(verbose=False)
+    assert (source.stream_id, source.stream_offset) == (None, None)

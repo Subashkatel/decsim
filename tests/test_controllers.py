@@ -213,7 +213,7 @@ def test_different_first_fragment_overflow_is_atomic_and_terminal(monkeypatch):
     monkeypatch.setattr("decsim.engine.Engine", CapturingEngine)
     monkeypatch.setattr("decsim.controllers.ModularController", CapturingController)
     first = Operation(
-        0, "partial window", (0,), has_successor=True,
+        0, "partial window", (0,),
         syndrome_fragment_index=0, syndrome_fragment_count=2,
     )
     blocked = Operation(

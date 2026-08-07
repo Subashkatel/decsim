@@ -10,7 +10,7 @@ from decsim.run_spec import RunSpec
 
 
 def _two_op_clifford():
-    a = Operation(0, "A:CNOT(q0,q1)", (0, 1), clifford=True, has_successor=True)
+    a = Operation(0, "A:CNOT(q0,q1)", (0, 1), clifford=True)
     b = Operation(
         1,
         "B:CNOT(q0,q1)",
@@ -64,7 +64,7 @@ def test_completed_run_is_replayable():
 
 
 def test_simulate_blocked_t_reaction_path():
-    ops = [Operation(0, "A:T(q0)", (0,), clifford=False, has_successor=True),
+    ops = [Operation(0, "A:T(q0)", (0,), clifford=False),
            Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0,
                      predecessors=(0,),
                      decoder_boundary_predecessors=(0,))]

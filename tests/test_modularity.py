@@ -107,18 +107,8 @@ class MyScheme:
             batch_preceding_idle_rounds=False,
         )
 
-    def data_complete(
-        self,
-        window,
-        *,
-        rounds_arrived,
-        successor_rounds,
-        memory_rounds,
-        round_count,
-        has_successor,
-        operation,
-    ):
-        return rounds_arrived >= window.commit_hi
+    def data_complete(self, window, *, readiness, operation):
+        return readiness.local_rounds_arrived >= window.commit_hi
 
     def validate_buffer(self, geometry):
         return None
@@ -223,7 +213,6 @@ def _blocked_ops():
     b.predecessors, c.predecessors = (0,), (1,)
     b.decoder_boundary_predecessors = (0,)
     c.decoder_boundary_predecessors = (1,)
-    a.has_successor = b.has_successor = True
     return [a, b, c]
 
 

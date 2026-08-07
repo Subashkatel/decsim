@@ -20,7 +20,9 @@ from decsim.message import (
     EndpointRole,
     SoftOutput,
     SyndromePayload,
+    SuccessorReadiness,
     Window,
+    WindowReadiness,
 )
 from decsim.decoder_manager import StrategyServicesImpl, DecoderManager
 from decsim.payload_store import PayloadStore
@@ -272,25 +274,23 @@ def test_switching_threshold_equality_keeps_weak():
 # ------------------------------- hidden assumption: data_complete overflow
 
 def test_data_complete_overflow_branches():
-    scheme = SlidingWindowScheme()
-    w = Window(op_id=0, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=9)
-    round_count = 6                              # overflow = 9 - 6 = 3
-    common = dict(round_count=round_count, operation=None)
-    # not enough in-op data yet -> False regardless of overflow sources
-    assert not scheme.data_complete(w, rounds_arrived=5, successor_rounds=9,
-                                    memory_rounds=9, has_successor=True, **common)
-    # overflow with NO successor -> complete once in-op data present
-    assert scheme.data_complete(w, rounds_arrived=6, successor_rounds=0,
-                                memory_rounds=0, has_successor=False, **common)
-    # successor exists: successor data covers overflow -> complete
-    assert scheme.data_complete(w, rounds_arrived=6, successor_rounds=3,
-                                memory_rounds=0, has_successor=True, **common)
-    # successor exists: memory rounds cover overflow -> complete
-    assert scheme.data_complete(w, rounds_arrived=6, successor_rounds=0,
-                                memory_rounds=3, has_successor=True, **common)
-    # successor exists but neither source covers overflow -> incomplete
-    assert not scheme.data_complete(w, rounds_arrived=6, successor_rounds=2,
-                                    memory_rounds=2, has_successor=True, **common)
+    window = Window(0, 1, 4, 6, 9, 9)
+    live = (SuccessorReadiness(9, 2, 9),)
+    cases = (
+        (5, live, 3, False, False),  # local commit data missing
+        (6, (), 0, False, True),     # terminal operation
+        (6, live, 2, False, False),  # live successor is short
+        (6, (SuccessorReadiness(9, 3, 9),), 0, False, True),
+        (6, live, 3, False, True),   # memory covers overflow
+        (6, (SuccessorReadiness(9, 2, 2),), 0, False, True),
+        (6, (SuccessorReadiness(9, 2, 2),
+             SuccessorReadiness(10, 1, 6)), 0, False, False),
+        (6, live, 0, True, True),    # explicit closed tail
+    )
+    for local, successors, memory, closed, expected in cases:
+        readiness = WindowReadiness(local, 6, successors, memory, closed)
+        assert SlidingWindowScheme().data_complete(
+            window, readiness=readiness, operation=None) is expected
 
 
 # --------------------------- hidden assumption: multi-observable guard

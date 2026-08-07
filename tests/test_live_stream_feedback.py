@@ -13,7 +13,7 @@ from decsim.detector_error_model import (
     NO_FAULT_MODEL_REQUIRED,
 )
 from decsim.devices import TimingOnlyDevice
-from decsim.message import DecodeResult, Operation
+from decsim.message import DecodeResult, Operation, ProtectedRegion
 from decsim.layouts import UniformLayout
 from decsim.planner import PerOpRounds
 from decsim.schemes import SlidingWindowScheme
@@ -31,7 +31,6 @@ def _live_stream_pair():
         consumes_magic_state=False,
         patches=(0,),
         stream_id=stream.id,
-        has_successor=True,
     )
     second = Operation(
         2,
@@ -373,3 +372,56 @@ def test_real_syndrome_live_stream_rejects_inexact_circuit_length():
             round_us=1.0,
             seed=17,
         ), verbose=False)
+
+def _run_protected_chain(*, feedback: bool):
+    stream = Operation(100, "protected stream", (0,), patches=(0,))
+    start = Operation(1, "allocate", (0,), patches=(0,), emits_detector_data=False)
+    source = Operation(2, "compute", (0,), patches=(0,), predecessors=(start.id,),
+                       emits_detector_data=False)
+    end = Operation(3, "conditional", (0,), patches=(0,), predecessors=(source.id,),
+                    blocked_by=source.id if feedback else None, emits_detector_data=False)
+    source_rounds = 0 if feedback else 2
+    rounds = {stream.id: 40, start.id: 1, source.id: source_rounds, end.id: 1}
+    ops, streams = [start, source, end], [stream]
+    regions = [ProtectedRegion(0, stream.id, start.id, end.id)]
+    if not feedback:
+        streams.append(Operation(101, "reopened stream", (0,), patches=(0,)))
+        ops += [Operation(4, "reopen", (0,), predecessors=(end.id,), patches=(0,), emits_detector_data=False),
+                Operation(5, "finish", (0,), predecessors=(4,), patches=(0,), emits_detector_data=False)]
+        regions.append(ProtectedRegion(0, 101, 4, 5))
+        rounds.update({101: 40, 4: 1, 5: 1})
+    result = simulate(RunSpec(
+        ops=ops, dynamic_streams=streams, protected_regions=tuple(regions),
+        code=SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1),
+        rounds_policy=PerOpRounds(rounds),
+        decoder=PresetLatencyDecoder(5.0 if feedback else 0),
+        round_us=1.0,
+    ), verbose=False)
+    return result, stream, start, source, end
+
+def test_protected_region_emits_each_patch_round_until_exact_end_boundary():
+    result, stream, start, source, end = _run_protected_chain(feedback=False)
+    assert result.window_manager.rounds_arrived[stream.id] == 4
+    assert all(result.window_manager.lifecycle.sealed(i) for i in (stream.id, 101))
+    assert result.chip.op_start_time[4] == result.chip.body_done_time[end.id]
+    cadence_ticks = result.chip.round_ticks
+    assert result.chip.op_start_time == {
+        start.id: 0, source.id: cadence_ticks, end.id: 3 * cadence_ticks,
+        4: 4 * cadence_ticks, 5: 5 * cadence_ticks,
+    }
+
+def test_protected_region_keeps_emitting_while_feedback_is_pending():
+    result, stream, _, source, end = _run_protected_chain(feedback=True)
+    cadence_ticks = result.chip.round_ticks
+    emitted_round_count = result.window_manager.rounds_arrived[stream.id]
+    assert result.result.stream_offsets()[source.id] == 0
+    assert result.window_manager._required_stream_end_by_operation_id == {
+        source.id: 1,
+    }
+    assert emitted_round_count > 3
+    assert emitted_round_count == (
+        result.chip.body_done_time[end.id] // cadence_ticks
+    )
+    assert result.chip.op_start_time[end.id] > (
+        result.chip.body_done_time[source.id]
+    )

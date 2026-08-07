@@ -1011,6 +1011,42 @@ class Decision:
 
 # ----------------------------------------------------------------- workload
 
+@dataclass(frozen=True)
+class ProtectedRegion:
+    """One patch allocation generation with inclusive operation endpoints."""
+
+    patch_id: Any
+    stream_id: int
+    start_operation_id: int
+    end_operation_id: int
+
+    def __post_init__(self) -> None:
+        if not is_stable_identity(self.patch_id):
+            raise TypeError(
+                "protected region patch_id must be a stable built-in identity")
+        integer_fields = ("stream_id", "start_operation_id", "end_operation_id")
+        for field_name in integer_fields:
+            if type(getattr(self, field_name)) is not int:
+                raise TypeError(
+                    f"protected region {field_name} must be an exact built-in int")
+
+
+@dataclass(frozen=True)
+class SuccessorReadiness:
+    operation_id: int
+    rounds_arrived: int
+    round_count: int
+
+
+@dataclass(frozen=True)
+class WindowReadiness:
+    local_rounds_arrived: int
+    local_round_count: int
+    successors: tuple[SuccessorReadiness, ...]
+    memory_rounds_arrived: int
+    tail_closed: bool
+
+
 class OpKind(Enum):
     """Logical-op kind vocabulary: lets a RoundsPolicy distinguish a
     measurement (1 round) from a merge (m·d rounds) from an injection (O(1))."""
@@ -1036,7 +1072,6 @@ class Operation:
     patches: tuple = ()               # patch ids whose syndrome streams feed the op
     predecessors: tuple = ()          # workload op ids that must complete first
     decoder_boundary_predecessors: tuple = ()  # prior decode streams at a boundary
-    has_successor: bool = False       # a later op consumes this op's boundary
     # Decode stream this segment's rounds fold into. Seeded StimDevice runs
     # require an exact built-in int/str; unseeded and non-Stim devices may use
     # another identity type accepted by that device.
@@ -1140,7 +1175,6 @@ class OperationPlanningView:
     patches: tuple
     predecessors: tuple
     decoder_boundary_predecessors: tuple
-    has_successor: bool
     stream_id: Optional[int]
     stream_offset: Optional[int]
     scheduled_start_round: int
@@ -1172,7 +1206,6 @@ class OperationPlanningView:
             decoder_boundary_predecessors=tuple(
                 operation.decoder_boundary_predecessors
             ),
-            has_successor=operation.has_successor,
             stream_id=operation.stream_id,
             stream_offset=operation.stream_offset,
             scheduled_start_round=operation.scheduled_start_round,

@@ -99,7 +99,6 @@ def _live_stream_pair():
         consumes_magic_state=False,
         patches=(0,),
         stream_id=stream.id,
-        has_successor=True,
     )
     second = Operation(
         2,

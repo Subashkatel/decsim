@@ -262,17 +262,7 @@ class UnenteredCustomScheme:
         self.calls.append("plan_operation")
         raise AssertionError("custom scheme behavior was entered")
 
-    def data_complete(
-        self,
-        window,
-        *,
-        rounds_arrived,
-        successor_rounds,
-        memory_rounds,
-        round_count,
-        has_successor,
-        operation,
-    ):
+    def data_complete(self, window, *, readiness, operation):
         self.calls.append("data_complete")
         raise AssertionError("custom scheme behavior was entered")
 

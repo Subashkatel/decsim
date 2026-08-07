@@ -44,10 +44,11 @@ T_DO = 1_000_000
 
 
 class _Scheme:
-    def data_complete(self, w, *, rounds_arrived, successor_rounds,
-                      memory_rounds, round_count, has_successor, operation):
+    def data_complete(self, w, *, readiness, operation):
         # sliding-window rule: all rounds up to buffer_hi present (or op ended)
-        return rounds_arrived + memory_rounds >= min(w.buffer_hi, round_count)
+        return (readiness.local_rounds_arrived
+                + readiness.memory_rounds_arrived
+                >= min(w.buffer_hi, readiness.local_round_count))
 
 
 class _Deadline:

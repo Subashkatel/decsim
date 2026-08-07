@@ -42,10 +42,9 @@ def _operation_patches(operation: Operation, qubit_to_patch: Optional[dict]) -> 
 
 
 def _wire_patch_dependencies(operations: list[Operation],
-                             qubit_to_patch: Optional[dict]) -> tuple:
-    """Return predecessor and successor maps from patch program order."""
+                             qubit_to_patch: Optional[dict]) -> dict:
+    """Return predecessors from patch program order."""
     last_operation_on_patch = {}
-    has_successor = {operation.id: False for operation in operations}
     predecessors = {operation.id: set() for operation in operations}
 
     for operation in operations:
@@ -54,23 +53,21 @@ def _wire_patch_dependencies(operations: list[Operation],
             if patch in last_operation_on_patch:
                 previous_op_id = last_operation_on_patch[patch]
                 predecessors[operation.id].add(previous_op_id)
-                has_successor[previous_op_id] = True
             last_operation_on_patch[patch] = operation.id
 
-    return predecessors, has_successor
+    return predecessors
 
 
 def _wire_circuit(operations: list[Operation],
                   qubit_to_patch: Optional[dict] = None) -> list[Operation]:
-    """Fill operation patches, predecessors, and successor flags in schedule order."""
+    """Fill operation patches and predecessors in schedule order."""
     _validate_unique_qubits(operations)
     _validate_patch_mapping(operations, qubit_to_patch)
-    predecessors, has_successor = _wire_patch_dependencies(operations, qubit_to_patch)
+    predecessors = _wire_patch_dependencies(operations, qubit_to_patch)
 
     for operation in operations:
         operation.predecessors = tuple(sorted(predecessors[operation.id]))
         operation.decoder_boundary_predecessors = operation.predecessors
-        operation.has_successor = has_successor[operation.id]
     return operations
 
 

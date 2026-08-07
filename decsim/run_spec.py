@@ -81,6 +81,7 @@ class RunSpec:
     frontend: Optional[Any] = None
     decode_ops: Optional[list] = None
     dynamic_streams: Optional[list] = None
+    protected_regions: tuple = ()
     code: Optional[Any] = None
     layout: Optional[Any] = None
     d: Optional[int] = None
@@ -167,6 +168,7 @@ class RunSpec:
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
         source_ops = self.frontend.build() if self.frontend is not None else self.ops
+        protected_regions = tuple(self.protected_regions)
         ops, decode_ops, dynamic_streams = _copy_workload(
             source_ops, self.decode_ops or (), self.dynamic_streams or (),
             self.feedback_boundary_mode)
@@ -301,7 +303,8 @@ class RunSpec:
             idle_policy=idle_policy,
             resource_claims_by_operation_id=resource_claims,
             max_idle_rounds=self.max_idle_rounds,
-            gates_start_on_round_boundaries=self.gates_start_on_round_boundaries)
+            gates_start_on_round_boundaries=self.gates_start_on_round_boundaries,
+            protected_regions=protected_regions)
         metrics = (self.make_metrics(
             engine, window_manager, decoder_manager, chip, factory)
             if self.make_metrics else [])
@@ -332,7 +335,7 @@ class RunSpec:
             window_manager._register_dynamic_stream(stream, resolved_by_id[stream.id])
         for _, metric in metric_bindings:
             engine.add_metric(metric)
-        chip._load(list(ops))
+        chip._load(list(ops), decode_ops=decode_ops, dynamic_streams=dynamic_streams)
         engine._start_running()
         engine.run()
         if window_manager.pending_escalations:

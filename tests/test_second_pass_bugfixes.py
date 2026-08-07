@@ -5,11 +5,8 @@ serialized-link order (finding 21), decoder-cache cleanup on model GC for
 both BP-OSD and belief matching (finding 16), and QLX measure_product
 feedback inference on and off (finding 20).
 
-Deliberately NOT covered: the Clifford X/Y/Z frame routing (finding 18)
-stays unconfirmed until Operation.measurement_basis is specified for
-Clifford decoder results and exercised end to end, and fan-out readiness
-(finding 17) stays open until the program records which successor
-continues each predecessor patch.
+Fan-out readiness (finding 17) stays open until the program records which
+successor continues each predecessor patch.
 """
 import gc
 from dataclasses import replace

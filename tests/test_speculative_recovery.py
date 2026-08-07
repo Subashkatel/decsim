@@ -750,8 +750,6 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
     assert len(publications) == 1
     assert publications[0]["logical_observables"] == (0,)
     assert publications[0]["t"] >= runtime.op_strong_commit_time[0]
-    assert eager.orchestrator.frame.snapshot() == \
-        held.orchestrator.frame.snapshot()
 
 
 class _StreamWeakDecoder:
@@ -907,8 +905,6 @@ def test_static_stream_segment_waits_for_its_corrected_replay_cone():
     assert segment_publications[0]["t"] >= replay_done
     assert eager.chip.op_start_time[3] >= replay_done
     assert held_publication_states[0]["committed"][2]
-    assert eager.orchestrator.frame.snapshot() == \
-        held.orchestrator.frame.snapshot()
 
 
 def test_overlapping_stream_roots_hold_segment_until_both_resolve():
@@ -939,8 +935,6 @@ def test_overlapping_stream_roots_hold_segment_until_both_resolve():
     assert publications[0]["t"] >= runtime.op_strong_commit_time[0]
     assert eager.chip.op_start_time[3] >= replay_done
     assert runtime.speculative_recovery._next_generation == {}
-    assert eager.orchestrator.frame.snapshot() == \
-        held.orchestrator.frame.snapshot()
     assert not runtime.speculative_recovery.has_finality_blockers
 
 

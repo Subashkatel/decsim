@@ -458,12 +458,8 @@ class EndpointCapacityChangeReceiver(Protocol):
 
 @runtime_checkable
 class Orchestrator(Protocol):
-    """Port 15. Turns final decoded measurements into Decisions (the Pauli
-    byproduct / S-gate algebra) and releases the operations they block."""
-
+    """Port 15. Records final predictions and releases blocked operations."""
     engine: Any
-    frame: Any
-
     def connect(self, controller, decision_sink: Callable) -> None: ...
 
     def register_blocked_operation(self, blocked_op_id: int,

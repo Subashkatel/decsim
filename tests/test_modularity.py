@@ -24,7 +24,6 @@ from decsim.codes import SurfaceCodeModel
 from decsim.run_spec import RunSpec, simulate
 from decsim.decoders import PerRoundDecoder
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
-from decsim.pauli_frame import PauliFrame
 
 
 # ---- a researcher's from-scratch stack: no defaults, port surface only ----
@@ -186,7 +185,6 @@ class MyOrchestrator:
         self.engine = engine
         self.blocked = {}; self.controller = None; self.sink = None
         self.integrated = 0
-        self.frame = PauliFrame()
     def connect(self, controller, decision_sink):
         self.controller = controller; self.sink = decision_sink
     def register_blocked_operation(self, blocked_op_id, blocking_op_id):

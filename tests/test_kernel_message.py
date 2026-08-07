@@ -1,16 +1,14 @@
-"""Kernel domain model: typed records, PauliFrame purity, no rollback fields."""
+"""Kernel domain model: typed records and no rollback fields."""
 from dataclasses import FrozenInstanceError
 
 import pytest
 
 from decsim.message import (Decision, DecodeJob, DecodeOutcome,
-                            DecodeResult, FeedbackEffect,
-                            IntrinsicMeasurement, OpKind, Operation,
+                            DecodeResult, OpKind, Operation,
                             ResourceClaim, SoftOutput, SoftOutputSource,
                             SyndromePayload, Window, WindowGraph,
                             stable_identity_bytes,
                             stable_identity_order_key)
-from decsim.pauli_frame import PauliFrame
 
 
 def test_syndrome_round_matches_todays_payload_shape():
@@ -112,17 +110,9 @@ def test_outcome_claim_decision_shapes():
     assert out.result.logical_observables == (1, 0)
     c = ResourceClaim("qubits", frozenset({0, 1}))
     assert c.kind == "qubits"
-    effect = FeedbackEffect(
-        logical_observable_index=1,
-        decoded_value=0,
-        intrinsic_measurement=None,
-        correction_value=0,
-        basis="Z",
-        pauli="I",
-        apply_s=False,
-    )
-    d = Decision(4, effect)
-    assert d.releases_operation and d.effect is effect
+    decision = Decision(4, releases_operation=False)
+    assert decision.target_operation_id == 4
+    assert decision.releases_operation is False
 
 
 def _confidence_source(**changes):
@@ -185,55 +175,3 @@ def test_soft_output_source_rejects_missing_or_unstable_provenance(
 def test_soft_output_rejects_invalid_gap(gap):
     with pytest.raises((TypeError, ValueError)):
         SoftOutput(gap=gap, source=_confidence_source())
-
-
-@pytest.mark.parametrize(
-    ("field", "value", "error"),
-    [
-        ("operation_id", True, TypeError),
-        ("operation_id", object(), TypeError),
-        ("trajectory_id", (1, object()), TypeError),
-        ("value", True, TypeError),
-        ("value", 1.0, TypeError),
-        ("value", 2, ValueError),
-        ("source", "", ValueError),
-    ],
-)
-def test_intrinsic_measurement_rejects_unstable_identity_or_non_exact_bit(
-        field, value, error):
-    kwargs = {
-        "operation_id": 3,
-        "trajectory_id": ("stream", 3),
-        "value": 1,
-        "source": "controlled fixture",
-    }
-    kwargs[field] = value
-
-    with pytest.raises(error):
-        IntrinsicMeasurement(**kwargs)
-
-
-def test_intrinsic_measurement_accepts_recursive_stable_identity():
-    measurement = IntrinsicMeasurement(
-        operation_id=3,
-        trajectory_id=("stream", (3, "branch")),
-        value=0,
-        source="controlled fixture",
-    )
-
-    assert measurement.value == 0
-
-
-def test_pauli_frame_behavior():
-    f = PauliFrame()
-    f.apply_pauli(0, "X")
-    assert f.measurement_flip(0, "Z") == 1 and f.measurement_flip(0, "X") == 0
-    f.apply_s(0)                                  # X -> Y: z ^= x
-    assert f.z_of(0) == 1
-    assert f.fold(0, "MZ", raw_bit=0) == 1
-    f.apply_pauli(0, "Y")                         # cancels x and z
-    assert f.snapshot() == {}
-    with pytest.raises(ValueError):
-        f.apply_pauli(0, "Q")
-    with pytest.raises(ValueError):
-        f.measurement_flip(0, "W")

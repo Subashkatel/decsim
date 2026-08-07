@@ -202,7 +202,7 @@ def test_committed_stream_round_count_releases_blocked_operation_before_stream_r
     assert chip.decode_release_time[second.id] < chip.body_done_time[second.id]
 
 
-def test_exact_live_segment_publishes_functional_vector_and_effect():
+def test_exact_live_segment_publishes_complete_vector_and_releases_successor():
     stream, operations = _live_stream_pair()
     code = SurfaceCodeModel(
         d=3,
@@ -229,8 +229,13 @@ def test_exact_live_segment_publishes_functional_vector_and_effect():
 
     first, second = operations
     assert result.window_manager.op_results[first.id] == (1,)
-    assert result.chip.applied_basis[second.id] == "X"
-    assert result.chip.applied_frame_delta[second.id] != (0, 0)
+    first_record = next(
+        record
+        for record in result.orchestrator.history
+        if record["op_id"] == first.id
+    )
+    assert first_record["logical_observables"] == (1,)
+    assert second.id in result.chip.decode_release_time
 
 
 def test_functional_live_segment_rejects_contribution_boundary_crossing():

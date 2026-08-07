@@ -8,8 +8,14 @@ from pathlib import Path
 
 from decsim.detector_error_model import (
     build_window_error_models,
+    decode_windowed_backend_outcomes,
     decode_windowed,
     resolve_detector_rounds,
+)
+from decsim.adapters.window_decode_results import (
+    BackendDecodeStatus,
+    OfflineShotRecord,
+    summarize_offline_shots,
 )
 
 from .harness import Batch, offline_batch_seed, sample_batch_sha256
@@ -31,6 +37,11 @@ class DecodedBatch:
     accepted_shots: int
     accepted_logical_failures: int
     window_attempts: int
+    backend_low_confidence: int = 0
+    backend_nonconverged: int = 0
+    backend_invalid_correction: int = 0
+    backend_empty_model_unsatisfiable: int = 0
+    backend_error: int = 0
 
 
 def load_layered_stim_input(circuit_path, expected_sha256,
@@ -165,6 +176,55 @@ class OfflineBatchDecoder:
         return tuple(records)
 
 
+_BACKEND_FAILURE_FIELDS = {
+    BackendDecodeStatus.LOW_CONFIDENCE: "backend_low_confidence",
+    BackendDecodeStatus.NONCONVERGED: "backend_nonconverged",
+    BackendDecodeStatus.INVALID_CORRECTION: "backend_invalid_correction",
+    BackendDecodeStatus.EMPTY_MODEL_UNSATISFIABLE:
+        "backend_empty_model_unsatisfiable",
+    BackendDecodeStatus.BACKEND_ERROR: "backend_error",
+}
+
+
+class OfflineBackendBatchDecoder(OfflineBatchDecoder):
+    """Preserve typed physical-backend failures in offline batch evidence."""
+
+    def run(self, batch: Batch, sample_seed: int) -> DecodedBatch:
+        sampler = self.circuit.compile_detector_sampler(seed=sample_seed)
+        detectors, truth = sampler.sample(
+            shots=batch.shots, separate_observables=True
+        )
+        records = []
+        counts = {status: 0 for status in _BACKEND_FAILURE_FIELDS}
+        window_attempts = 0
+        for index in range(batch.shots):
+            decoded = decode_windowed_backend_outcomes(
+                self.window_models, detectors[index], self.decode_window
+            )
+            window_attempts += len(decoded.window_outcomes)
+            terminal_status = decoded.window_outcomes[-1].status
+            if terminal_status is not BackendDecodeStatus.SUCCEEDED:
+                counts[terminal_status] += 1
+            records.append(OfflineShotRecord(
+                batch.first_shot + index,
+                tuple(int(bit) for bit in truth[index]),
+                decoded.window_outcomes,
+                decoded.logical_prediction,
+            ))
+        summary = summarize_offline_shots(records)
+        return DecodedBatch(
+            batch=batch,
+            sample_batch_sha256=sample_batch_sha256(detectors, truth),
+            attempted_shots=summary.attempted_shots,
+            primary_failures=summary.primary_failures,
+            accepted_shots=summary.accepted_shots,
+            accepted_logical_failures=summary.accepted_logical_failures,
+            window_attempts=window_attempts,
+            **{field: counts[status]
+               for status, field in _BACKEND_FAILURE_FIELDS.items()},
+        )
+
+
 def _chunk_row(decoded, experiment, sample_plan, experiment_sha256, config_id):
     batch = decoded.batch
     return ChunkResult(
@@ -181,11 +241,12 @@ def _chunk_row(decoded, experiment, sample_plan, experiment_sha256, config_id):
         primary_failures=decoded.primary_failures,
         accepted_shots=decoded.accepted_shots,
         accepted_logical_failures=decoded.accepted_logical_failures,
-        backend_low_confidence=0,
-        backend_nonconverged=0,
-        backend_invalid_correction=0,
-        backend_empty_model_unsatisfiable=0,
-        backend_error=0,
+        backend_low_confidence=decoded.backend_low_confidence,
+        backend_nonconverged=decoded.backend_nonconverged,
+        backend_invalid_correction=decoded.backend_invalid_correction,
+        backend_empty_model_unsatisfiable=
+            decoded.backend_empty_model_unsatisfiable,
+        backend_error=decoded.backend_error,
         window_attempts=decoded.window_attempts,
     )
 

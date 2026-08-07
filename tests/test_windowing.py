@@ -318,7 +318,7 @@ def test_parallel_scheme_reaction_matches_eq13():
     # after the last round: chip->controller->decoders hops, the last layer-A window
     # (3d rounds), WDO + t_dd, the layer-B window (3d rounds), then WDO.
     # This is Eq. 13's two-window 6d*tau_d(d^2) plus the one-way hops (a Clifford memory
-    # op pays no t_oc + t_cq return path -- Pauli-frame updates stay in the orchestrator).
+    # op pays no t_oc + t_cq return path -- no result return is requested).
     expected = (us(0.15) + us(2.0)              # QC + CWD
                 + us(3 * d * 1.0) + us(1.0)     # layer A + WDO
                 + us(0.5)                       # DD

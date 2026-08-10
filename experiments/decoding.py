@@ -278,6 +278,28 @@ def _publish_row(directory, row):
     return row
 
 
+def _validate_stored_row(
+    row, batch, experiment, sample_plan, experiment_sha256, config_id
+):
+    expected = {
+        "schema_version": 1,
+        "experiment_id": experiment.experiment_id,
+        "experiment_sha256": experiment_sha256,
+        "config_id": config_id,
+        "sample_set_id": sample_plan.sample_set_id,
+        "batch_index": batch.index,
+        "first_shot_index": batch.first_shot,
+        "requested_shots": batch.shots,
+    }
+    for field, value in expected.items():
+        if getattr(row, field) != value:
+            raise ValueError(
+                f"stored batch {batch.index} has stale {field}; "
+                "refusing to mix scientific samples"
+            )
+    return row
+
+
 def run_offline_experiment(
     decoder,
     experiment,
@@ -294,7 +316,10 @@ def run_offline_experiment(
     for batch in batches:
         path = directory / f"{batch.index}.csv"
         if path.exists():
-            row = read_chunk_csv(path)
+            row = _validate_stored_row(
+                read_chunk_csv(path), batch, experiment, sample_plan,
+                experiment_sha256, config_id,
+            )
         else:
             decoded = decoder.run(
                 batch,
@@ -346,10 +371,16 @@ def run_offline_parallel(
     experiment_sha256 = experiment.sha256()
     config_id = experiment.config_sha256(configuration)
     directory = _result_directory(output_directory, experiment_sha256, config_id)
-    missing = [
-        batch for batch in batches
-        if not (directory / f"{batch.index}.csv").exists()
-    ]
+    missing = []
+    for batch in batches:
+        path = directory / f"{batch.index}.csv"
+        if path.exists():
+            _validate_stored_row(
+                read_chunk_csv(path), batch, experiment, sample_plan,
+                experiment_sha256, config_id,
+            )
+        else:
+            missing.append(batch)
     if missing:
         allocated = int(os.environ.get("SLURM_CPUS_PER_TASK", workers))
         worker_count = min(workers, allocated, len(missing))
@@ -382,6 +413,9 @@ def run_offline_parallel(
                     ),
                 )
     return reduce_chunks(
-        read_chunk_csv(directory / f"{batch.index}.csv")
+        _validate_stored_row(
+            read_chunk_csv(directory / f"{batch.index}.csv"),
+            batch, experiment, sample_plan, experiment_sha256, config_id,
+        )
         for batch in batches
     )

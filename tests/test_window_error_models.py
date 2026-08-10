@@ -19,12 +19,12 @@ from decsim.detector_error_model import (
     PHYSICAL_FAULT_MODEL_REQUIRED,
     PlacedFaultModel,
     WindowErrorModel,
+    build_single_window_error_model,
     build_window_error_models,
     canonical_error_instructions,
     decode_windowed,
     decode_windowed_backend_outcomes,
     detector_error_model_to_faults,
-    detector_error_model_to_faults_bm,
     resolve_detector_rounds,
 )
 from decsim.adapters.window_decode_results import (
@@ -70,6 +70,7 @@ def _plan(circuit, d=3):
 def _placed(representation, check, priors, observables, *, owned=None,
             future_flips=None):
     check = np.asarray(check, dtype=np.uint8)
+    future_flips = {} if future_flips is None else future_flips
     return PlacedFaultModel(
         representation=representation,
         check=check,
@@ -77,7 +78,8 @@ def _placed(representation, check, priors, observables, *, owned=None,
         observables=np.asarray(observables, dtype=np.uint8),
         owned=(np.ones(check.shape[1], dtype=bool)
                if owned is None else np.asarray(owned, dtype=bool)),
-        future_flips={} if future_flips is None else future_flips,
+        future_flips=future_flips,
+        boundary_flips=dict(future_flips),
         source_fault_ids=tuple(range(check.shape[1])),
     )
 
@@ -760,6 +762,21 @@ def test_composite_errors_split_into_matchable_components():
     assert max(len(s) for s in sets) <= 2
 
 
+def test_repeated_components_cancel_before_probability_merging():
+    """Separators do not make repeated components independent mechanisms."""
+    dem = stim.DetectorErrorModel("error(0.1) D0 ^ D0 ^ D1")
+
+    det_sets, obs_sets, priors = detector_error_model_to_faults(dem)
+    assert det_sets == [(1,)]
+    assert obs_sets == [()]
+    assert priors == [0.1]
+
+    from decsim.soft_output.complementary import dem_to_matrices
+    check, observables, _ = dem_to_matrices(dem)
+    assert check.tolist() == [[0], [1]]
+    assert observables.shape == (0, 1)
+
+
 @pytest.mark.parametrize(
     ("instruction", "expected_detectors", "expected_logicals"),
     [
@@ -816,7 +833,6 @@ def test_every_raw_graph_consumer_shares_instruction_wide_validation():
     )
     consumers = (
         detector_error_model_to_faults,
-        detector_error_model_to_faults_bm,
         dem_to_matrices,
     )
 
@@ -1100,36 +1116,40 @@ def test_belief_inner_rejects_invalid_physical_priors(priors, message):
 
 
 def _belief_converter_matrices(dem):
-    (
-        edge_detectors,
-        edge_logicals,
-        _edge_priors,
-        physical_detectors,
-        physical_priors,
-        physical_to_edge,
-    ) = detector_error_model_to_faults_bm(dem)
-    check = np.zeros(
-        (dem.num_detectors, len(edge_detectors)),
-        dtype=np.uint8,
+    class DemCircuit:
+        num_detectors = dem.num_detectors
+        num_observables = dem.num_observables
+
+        def detector_error_model(self, *, decompose_errors):
+            return dem
+
+        def get_detector_coordinates(self):
+            return {
+                detector_id: [detector_id, 0, 0]
+                for detector_id in range(self.num_detectors)
+            }
+
+    model = build_single_window_error_model(
+        DemCircuit(),
+        (1, 1, 1),
+        round_count=1,
+        detector_rounds={
+            detector_id: 1 for detector_id in range(dem.num_detectors)
+        },
+        fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
     )
-    obs = np.zeros(
-        (dem.num_observables, len(edge_logicals)),
-        dtype=np.uint8,
+    graphlike = model.graphlike_faults
+    physical = model.physical_faults
+    return (
+        graphlike.check,
+        graphlike.observables,
+        physical.check,
+        physical.priors,
+        model.physical_to_graphlike_detector_projection,
     )
-    h_check = np.zeros(
-        (dem.num_detectors, len(physical_detectors)),
-        dtype=np.uint8,
-    )
-    for column, detector_ids in enumerate(edge_detectors):
-        check[list(detector_ids), column] = 1
-    for column, logical_ids in enumerate(edge_logicals):
-        obs[list(logical_ids), column] = 1
-    for column, detector_ids in enumerate(physical_detectors):
-        h_check[list(detector_ids), column] = 1
-    return check, obs, h_check, np.asarray(physical_priors), physical_to_edge
 
 
-def test_belief_first_decomposition_component_multiplicity_is_gf2():
+def test_linked_decomposition_component_multiplicity_is_gf2():
     for instruction, expected_logical in (
         ("error(0.1) D0 ^ D0 ^ D1", []),
         ("error(0.1) D0 L0 ^ D0 ^ D1", [[1]]),
@@ -1174,7 +1194,7 @@ def test_belief_converter_matches_upstream_on_unambiguous_identities():
         "rsc-d5-r10-p0.005.stim",
     ],
 )
-def test_belief_converter_matches_upstream_on_frozen_surface_fixtures(
+def test_linked_catalog_matches_upstream_marginals_on_surface_fixtures(
     fixture_name,
 ):
     from beliefmatching.belief_matching import (
@@ -1197,12 +1217,31 @@ def test_belief_converter_matches_upstream_on_frozen_surface_fixtures(
     )
     assert np.array_equal(check, upstream_edge_check)
     assert np.array_equal(obs, upstream_edge_observables)
-    assert np.array_equal(h_check, upstream_check)
-    assert np.array_equal(priors, upstream.priors)
-    assert np.array_equal(h2e, upstream_h2e)
-    assert np.array_equal(
-        (obs @ h2e) % 2,
-        upstream.observables_matrix.toarray(),
+    assert np.array_equal((check @ h2e) % 2, h_check)
+    local_physical_observables = (obs @ h2e) % 2
+    upstream_physical_observables = upstream.observables_matrix.toarray()
+
+    def merged_physical_marginals(check_matrix, observable_matrix, values):
+        merged = {}
+        for column, probability in enumerate(values):
+            key = (
+                tuple(check_matrix[:, column]),
+                tuple(observable_matrix[:, column]),
+            )
+            previous = merged.get(key, 0.0)
+            merged[key] = (
+                1 - (1 - 2 * previous) * (1 - 2 * float(probability))
+            ) / 2
+        return merged
+
+    local_marginals = merged_physical_marginals(
+        h_check, local_physical_observables, priors)
+    upstream_marginals = merged_physical_marginals(
+        upstream_check, upstream_physical_observables, upstream.priors)
+    assert set(local_marginals) == set(upstream_marginals)
+    assert all(
+        local_marginals[key] == pytest.approx(upstream_marginals[key])
+        for key in local_marginals
     )
 
 
@@ -1226,24 +1265,59 @@ def test_belief_physical_merge_key_includes_logical_identity(instructions):
     assert np.array_equal((check @ h2e) % 2, h_check)
 
 
-def test_belief_repeated_physical_identity_keeps_first_decomposition():
-    dem = stim.DetectorErrorModel(
-        """
-        error(0.1) D0 D1
-        error(0.2) D0 ^ D1
-        """
-    )
-    edge_detectors, _, _, physical_detectors, priors, h2e = (
-        detector_error_model_to_faults_bm(dem)
-    )
+@pytest.mark.parametrize("reverse", [False, True])
+def test_linked_catalog_preserves_inequivalent_physical_mechanisms(reverse):
+    class AmbiguousCircuit:
+        num_detectors = 2
+        num_observables = 1
 
-    assert physical_detectors == [(0, 1)]
-    assert priors == pytest.approx([0.26])
-    selected_edges = {
-        edge_detectors[index]
-        for index in np.nonzero(h2e[:, 0])[0]
+        def detector_error_model(self, *, decompose_errors):
+            if not decompose_errors:
+                return stim.DetectorErrorModel(
+                    "error(0.1) D0 D1 L0\nerror(0.2) D0 D1 L0"
+                )
+            instructions = [
+                "error(0.1) D0 L0 ^ D1",
+                "error(0.2) D0 D1 L0",
+            ]
+            if reverse:
+                instructions.reverse()
+            return stim.DetectorErrorModel("\n".join(instructions))
+
+        def get_detector_coordinates(self):
+            return {0: [0, 0, 0], 1: [1, 0, 0]}
+
+    model = build_single_window_error_model(
+        AmbiguousCircuit(),
+        (1, 1, 1),
+        round_count=1,
+        detector_rounds={0: 1, 1: 1},
+        fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+    )
+    graphlike = model.graphlike_faults
+    physical = model.physical_faults
+    link = model.physical_to_graphlike_detector_projection
+    mechanisms = {
+        (
+            (
+                tuple(physical.check[:, physical_column]),
+                tuple(physical.observables[:, physical_column]),
+            ),
+            tuple(sorted(
+                (
+                    tuple(graphlike.check[:, graphlike_column]),
+                    tuple(graphlike.observables[:, graphlike_column]),
+                )
+                for graphlike_column in np.nonzero(link[:, physical_column])[0]
+            )),
+            round(float(physical.priors[physical_column]), 12),
+        )
+        for physical_column in range(physical.check.shape[1])
     }
-    assert selected_edges == {(0, 1)}
+    assert mechanisms == {
+        (((1, 1), (1,)), (((0, 1), (0,)), ((1, 0), (1,))), 0.1),
+        (((1, 1), (1,)), (((1, 1), (1,)),), 0.2),
+    }
 
 
 def test_belief_window_projection_preserves_physical_component_identity():
@@ -1517,6 +1591,34 @@ def test_boundary_priors_are_clipped_not_infinite():
             )
 
 
+@pytest.mark.parametrize(
+    ("plan", "exception", "message"),
+    [
+        ([], ValueError, "at least one"),
+        ([(1, 1, 1), (3, 3, 3)], ValueError, "without gaps or overlaps"),
+        ([(1, 2, 2), (2, 3, 3)], ValueError, "without gaps or overlaps"),
+        ([(1, 4, 4)], ValueError, "exceeds round_count"),
+        ([(1, 2, 1)], ValueError, "bounds are not ordered"),
+        ([[1, 3, 3]], TypeError, "exact 3- or 4-int tuple"),
+    ],
+)
+def test_static_window_plan_fails_closed_when_commit_segment_is_invalid(
+    plan,
+    exception,
+    message,
+):
+    circuit = _memory_circuit(d=3, rounds=3, p=0.001)
+
+    with pytest.raises(exception, match=message):
+        build_window_error_models(
+            circuit,
+            plan,
+            round_count=3,
+            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+            fault_exclusion_ranges=(),
+        )
+
+
 def test_terminal_layer_is_not_a_phantom_tail_window():
     circuit = _memory_circuit(d=3, rounds=10, p=0.008)
     coordinates = circuit.get_detector_coordinates()
@@ -1532,17 +1634,10 @@ def test_terminal_layer_is_not_a_phantom_tail_window():
     assert {resolved[detector_id] for detector_id in terminal_ids} == {10}
 
 
-def test_parallel_two_sided_windows_match_global_decoding():
-    """Two-sided parallel A/B windows (Skoric sec. III.C / Tan Eq. S10, w = s + 2b)
-    carry a lookback buffer, so each window must decode its raw syndrome independently
-    and commit only its core -- forward-passing artificial defects (the sliding-window
-    technique) double-counts the boundary error and inflates the LER. This pins the
-    two-sided path against global decoding for d=5, where the bug was glaring (windowed
-    LER ~0.10 vs global ~0.06 before the fix). Fixed seed -> deterministic counts."""
-    pymatching = pytest.importorskip("pymatching")
-    d, rounds = 5, 20
+def test_list_ordered_decode_rejects_parallel_two_sided_windows():
+    """A/B windows need dependency-aware seam reconciliation, not raw decoding."""
+    d, rounds = 5, 30
     circuit = _memory_circuit(d=d, rounds=rounds, p=0.005)
-    n_layers = max(int(c[-1]) for c in circuit.get_detector_coordinates().values())
     plan = [
         (
             window.buffer_lo,
@@ -1552,12 +1647,11 @@ def test_parallel_two_sided_windows_match_global_decoding():
         )
         for window in ParallelWindowScheme().plan_operation(
             0,
-            n_layers,
+            rounds,
             commit_round_count=d,
             buffer_round_count=d,
         ).windows
     ]
-    assert any(len(w) == 4 and w[0] < w[1] for w in plan), "expected two-sided windows"
     models = build_window_error_models(
         circuit,
         plan,
@@ -1565,29 +1659,15 @@ def test_parallel_two_sided_windows_match_global_decoding():
         fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
         fault_exclusion_ranges=(),
     )
-    assert any(m.has_leading_buffer for m in models)
-    shots = 2000
-    dets, obs = circuit.compile_detector_sampler(seed=11).sample(
-        shots, separate_observables=True)
-    global_m = pymatching.Matching.from_detector_error_model(
-        circuit.detector_error_model(decompose_errors=True))
-    global_pred = global_m.decode_batch(dets)
-    decode = matching_window_decoder()
-    windowed_pred = np.array([decode_windowed(
-        models, dets[i], decode,
-        selected_fault_representation=FaultRepresentation.GRAPHLIKE)
-                              for i in range(shots)])
-    disagree = int((windowed_pred != global_pred).any(axis=1).sum())
-    g_fail = (global_pred != obs).any(axis=1)
-    w_fail = (windowed_pred != obs).any(axis=1)
-    only_w = int((w_fail & ~g_fail).sum())
-    only_g = int((g_fail & ~w_fail).sum())
-    # paired-shot pins (fixed seed; measured 1 disagreement, only_w=1,
-    # only_g=0 -- margins allow pymatching tie-break drift, not regression)
-    assert disagree <= 5, \
-        f"two-sided windowed drifted from global: {disagree}/{shots} shots differ"
-    assert only_w - only_g <= 4, \
-        f"windowed strictly worse on paired shots: only_w={only_w} only_g={only_g}"
+    assert any(model.has_leading_buffer for model in models)
+
+    with pytest.raises(ValueError, match="dependency-aware seam reconciliation"):
+        decode_windowed(
+            models,
+            np.zeros(circuit.num_detectors, dtype=np.uint8),
+            matching_window_decoder(),
+            selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+        )
 
 
 # ---------------------------------------------------------------------------------
@@ -1751,3 +1831,29 @@ def test_bb_windowed_accuracy_matches_global_decoding():
     assert agree > 0.9, f"windowed disagrees with global too often: {agree}"
     assert ler_w <= ler_g + 2 * (ler_g * (1 - ler_g) / shots) ** 0.5 + 0.005, \
         f"windowed LER {ler_w} vs global {ler_g}"
+
+
+def test_partial_plan_last_window_does_not_absorb_buffer_only_faults():
+    class PartialCircuit:
+        num_detectors = 3
+        num_observables = 0
+
+        def detector_error_model(self, *, decompose_errors):
+            return stim.DetectorErrorModel("error(0.1) D2")
+
+        def get_detector_coordinates(self):
+            return {
+                detector_id: [float(detector_id), 0.0]
+                for detector_id in range(3)
+            }
+
+    model = build_window_error_models(
+        PartialCircuit(),
+        [(1, 1, 3)],
+        round_count=3,
+        detector_rounds={0: 1, 1: 2, 2: 3},
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
+    )[0]
+    assert model.detector_ids == (0, 1, 2)
+    assert tuple(model.graphlike_faults.owned) == (False,)

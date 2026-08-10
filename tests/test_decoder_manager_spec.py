@@ -20,7 +20,7 @@ from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
 from decsim.engine import Engine
 from decsim.message import DecodeJob, DecodeResult, Operation
 from decsim.schedulers import FifoScheduler
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
@@ -49,7 +49,7 @@ def _switch_run(switching, low_confidence_probability, *, rounds=60, tau_weak=0.
                d=D,
                rounds_policy=FixedRounds(rounds),
                round_us=TAU,
-               scheme=SlidingWindowScheme(),
+               scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                strategy=switching,
                router=SwitchingRouter(weak, strong),
                unit_pools=pools or {"default": 1, "strong": 1},

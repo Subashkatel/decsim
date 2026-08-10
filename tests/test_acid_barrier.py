@@ -21,6 +21,7 @@ from decsim.message import Operation
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec
 from decsim.switching import Switching
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 
 K = 4                   # non-Clifford layers in the chain
 P_ESCALATE = 0.1        # per-window weak->strong escalation probability
@@ -38,6 +39,9 @@ def _run_chain(p_escalate, seed, **overrides):
     weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), p_escalate)
     return simulate(RunSpec(
         ops=_chain(), d=3, rounds_policy=FixedRounds(11),
+        scheme=SlidingWindowScheme(
+            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD,
+        ),
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         router=SwitchingRouter(weak, PerRoundDecoder(3.0)),
         unit_pools={"default": 1, "strong": 1}, seed=seed, **overrides))

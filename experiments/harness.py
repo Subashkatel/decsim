@@ -53,6 +53,7 @@ class SamplePlan:
         experiment_seed: int,
         trajectory,
     ) -> "SamplePlan":
+        _validate_seed(experiment_seed)
         input_sha256 = _sha256(trajectory)
         sample_set_id = _sha256({
             "schema_version": 1,
@@ -68,10 +69,20 @@ class SamplePlan:
         )
 
 
+def _validate_seed(seed: int) -> None:
+    if type(seed) is not int or not 0 <= seed < (1 << 64):
+        raise TypeError(
+            "experiment seed must be an unsigned 64-bit built-in integer"
+        )
+
+
 def offline_batch_seed(
     experiment_seed: int, sample_set_id: str, batch_index: int
 ) -> int:
     """Derive one fresh Stim sampler seed for a deterministic batch."""
+    _validate_seed(experiment_seed)
+    if type(batch_index) is not int or batch_index < 0:
+        raise TypeError("batch index must be a nonnegative built-in integer")
     path = (
         RunSeedPathSegment("field", "experiments"),
         RunSeedPathSegment("string_key", sample_set_id),

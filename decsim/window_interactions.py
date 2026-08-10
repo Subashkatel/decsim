@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .message import BoundaryUpdate, SeamFaultOwner, StrongRegionPlan
+from .message import (
+    BoundaryUpdate,
+    DependencyResidual,
+    SeamFaultOwner,
+    StrongRegionPlan,
+)
 
 
 class _DefectBoundaryState(dict):
@@ -29,12 +34,16 @@ class DefaultWindowInteraction:
     def boundary_from_result(self, result, fallback):
         if result is None:
             return fallback
+        if isinstance(result.boundary_data, DependencyResidual):
+            return result.boundary_data
         if result.boundary_defects is not None or result.correction is not None:
             return result.boundary_defects
         return fallback
 
     @staticmethod
     def _canonical_boundary(boundary):
+        if isinstance(boundary, DependencyResidual):
+            boundary = boundary.defects
         if not boundary:
             return None
         return {
@@ -73,7 +82,29 @@ class DefaultWindowInteraction:
     @staticmethod
     def _map_defects(delivery, destination):
         mapped = {}
-        defects = delivery.payload
+        payload = delivery.payload
+        if (
+            isinstance(payload, DependencyResidual)
+            and payload.detector_ids
+            and delivery.source_key[0] == destination.op_id
+            and destination.detector_positions is not None
+        ):
+            # Same-operation A/B delivery uses stable global detector identity.
+            # Intersecting with the destination model is the exact residual
+            # H_destination * committed_source_correction.
+            positions = destination.detector_positions
+            for detector_id in payload.detector_ids:
+                if detector_id not in positions:
+                    continue
+                round_index, position = positions[detector_id]
+                mask = mapped.setdefault(round_index, [])
+                if len(mask) <= position:
+                    mask.extend([0] * (position + 1 - len(mask)))
+                mask[position] ^= 1
+            return mapped
+
+        defects = payload.defects if isinstance(
+            payload, DependencyResidual) else payload
         if not defects:
             return mapped
         shift = 0
@@ -82,7 +113,7 @@ class DefaultWindowInteraction:
         for key, mask in defects.items():
             round_index, patch = key if isinstance(key, tuple) else (key, None)
             round_index += shift
-            if round_index < 1:
+            if not destination.start_round <= round_index <= destination.buffer_hi:
                 continue
             destination_key = (
                 (round_index, patch) if patch is not None else round_index

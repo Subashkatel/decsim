@@ -123,7 +123,8 @@ class RunSpec:
         from .engine import Engine
         engine = Engine(verbose=verbose, construction_guarded=True)
         try:
-            completed = self._build_once(engine)
+            root_seed = _root_seed(self.seed)
+            completed = self._build_once(engine, root_seed)
         except BaseException as error:
             engine._invalidate(error)
             self._build_state = "invalid"
@@ -131,7 +132,7 @@ class RunSpec:
         self._build_state = "complete"
         return completed
 
-    def _build_once(self, engine) -> CompletedRun:
+    def _build_once(self, engine, root_seed) -> CompletedRun:
         from .chip import Chip
         from .controllers import ModularController
         from .decoder_manager import DecoderManager, StrategyServicesImpl
@@ -312,15 +313,15 @@ class RunSpec:
             from .metrics import WindowSwitchingRecords
             metrics.append(WindowSwitchingRecords(window_manager, decoder_manager))
         metric_bindings = _metric_bindings(metrics)
-        bind_run_seed(_root_seed(self.seed), _seed_roots(
-            self, code=code, layout=layout, scheme=scheme,
-            rounds_policy=rounds_policy, device=device, decoder_router=router,
+        bind_run_seed(root_seed, _seed_roots(
+            code=code, scheme=scheme,
+            device=device, decoder_router=router,
             factory=factory, strategy=strategy, scheduler=scheduler,
             lane_policy=self.lane_policy,
             deadline_policy=deadline_policy, boundary_policy=boundary_policy,
             window_interaction=window_interaction, idle_policy=idle_policy,
             orchestrator=orchestrator, controller=controller,
-            metrics=metric_bindings, operations=all_operations))
+            memory_model=self.memory_model, metrics=metric_bindings))
 
         orchestrator.connect(controller, chip.on_decision)
         window_manager.on_workload_complete = factory.shutdown
@@ -447,26 +448,13 @@ def _root_seed(value):
     return value
 
 
-def _seed_roots(spec, **parts):
+def _seed_roots(**parts):
     field_path = lambda name: (RunSeedPathSegment("field", name),)
     metrics = parts.pop("metrics")
-    operations = parts.pop("operations")
     roots = [(field_path(name), value) for name, value in parts.items()]
-    if spec.frontend is not None:
-        roots.append((field_path("frontend"), spec.frontend))
-    if spec.memory_model is not None:
-        roots.append((field_path("memory_model"), spec.memory_model))
     for name, metric in metrics:
         roots.append((field_path("metrics") +
                       (RunSeedPathSegment("string_key", name),), metric))
-    if getattr(parts["device"], "operation_circuit_scope", "none") == "per_operation":
-        seen = set()
-        for operation in operations:
-            if operation.id not in seen and operation.circuit is not None:
-                seen.add(operation.id)
-                roots.append((field_path("workload_circuits") +
-                              (RunSeedPathSegment("integer_key", operation.id),),
-                              operation.circuit))
     return tuple(roots)
 
 

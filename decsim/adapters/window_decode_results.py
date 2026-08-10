@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from enum import Enum
 import hashlib
@@ -9,7 +10,7 @@ import math
 from numbers import Integral, Real
 import struct
 
-from ..message import DecodeJob, DecodeResult
+from ..message import DecodeJob, DecodeResult, DependencyResidual
 
 
 class BackendDecodeStatus(Enum):
@@ -255,7 +256,7 @@ def _canonical_bytes(value) -> bytes:
                 (field.name, getattr(value, field.name))
                 for field in fields(value)
             ))
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         items = sorted(
             ((_canonical_bytes(key), _canonical_bytes(item))
              for key, item in value.items()),
@@ -285,6 +286,7 @@ def fault_model_fingerprint(placed_faults) -> str:
         "observables": placed_faults.observables,
         "owned": placed_faults.owned,
         "future_flips": placed_faults.future_flips,
+        "boundary_flips": placed_faults.boundary_flips,
         "source_fault_ids": placed_faults.source_fault_ids,
     })
 
@@ -542,25 +544,53 @@ def result_from_selected_faults(
     observable_flips = (
         placed_faults.observables @ committed.astype(np.uint8)
     ) % 2
+    residual_detector_ids = _detector_ids_from_columns(
+        placed_faults.boundary_flips,
+        committed,
+    )
     return DecodeResult(
         job.op_id,
         job.window_id,
         correction=committed.astype(np.uint8),
         logical_observables=tuple(int(bit) for bit in observable_flips),
-        boundary_defects=_boundary_defects(model, placed_faults, committed),
+        boundary_defects=_defects_from_columns(
+            model,
+            placed_faults.future_flips,
+            committed,
+        ),
+        boundary_data=DependencyResidual(
+            detector_ids=residual_detector_ids,
+            defects=_defects_from_detector_ids(model, residual_detector_ids),
+        ),
     )
 
 
-def _boundary_defects(model, placed_faults, committed) -> dict | None:
-    """Artificial defects that cross this window's commit boundary."""
+def _detector_ids_from_columns(detector_flips, committed) -> tuple[int, ...]:
+    """XOR complete global detector identities across selected columns."""
     import numpy as np
 
-    defects: dict = {}
+    detector_ids = set()
     for column_index in np.nonzero(committed)[0]:
-        for detector_id in placed_faults.future_flips.get(int(column_index), ()):
-            round_index, position = model.defect_positions[detector_id]
-            mask = defects.setdefault(round_index, [])
-            if len(mask) <= position:
-                mask.extend([0] * (position + 1 - len(mask)))
-            mask[position] ^= 1
+        detector_ids.symmetric_difference_update(
+            detector_flips.get(int(column_index), ())
+        )
+    return tuple(sorted(detector_ids))
+
+
+def _defects_from_detector_ids(model, detector_ids) -> dict | None:
+    defects: dict = {}
+    for detector_id in detector_ids:
+        round_index, position = model.defect_positions[detector_id]
+        mask = defects.setdefault(round_index, [])
+        if len(mask) <= position:
+            mask.extend([0] * (position + 1 - len(mask)))
+        mask[position] ^= 1
     return defects or None
+
+
+def _defects_from_columns(model, detector_flips, committed) -> dict | None:
+    """Convert selected correction columns into round-indexed detector masks."""
+    return _defects_from_detector_ids(
+        model,
+        _detector_ids_from_columns(detector_flips, committed),
+    )

@@ -91,6 +91,7 @@ def test_window_adapter_preserves_every_logical_observable_row():
         observables=obs,
         owned=np.ones(3, dtype=bool),
         future_flips={},
+        boundary_flips={},
         source_fault_ids=(0, 1, 2),
     )
     model = SimpleNamespace(defect_positions={})
@@ -231,12 +232,17 @@ def test_engine_matches_offline_reference_and_global_exactly():
 
 
 def test_parallel_engine_matches_global_decode_on_real_syndromes():
-    """Parallel A/B windows preserve the global logical prediction.
-
-    Geometry and dependency tests separately pin the A/B topology. This gate
-    forces noisy detector data and nonzero seam defects through that topology.
-    """
-    circuit = _circuit()
+    """Statistical smoke test for a genuine two-predecessor A/B join."""
+    parallel_rounds = 18
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=D,
+        rounds=parallel_rounds,
+        after_clifford_depolarization=P,
+        after_reset_flip_probability=P,
+        before_measure_flip_probability=P,
+        before_round_data_depolarization=P,
+    )
     global_matching = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True)
     )
@@ -247,10 +253,9 @@ def test_parallel_engine_matches_global_decode_on_real_syndromes():
         def decode(self, job):
             nonlocal boundary_defect_count
             result = super().decode(job)
-            if result.boundary_defects:
-                boundary_defect_count += sum(
-                    sum(bits)
-                    for bits in result.boundary_defects.values()
+            if result.boundary_data is not None:
+                boundary_defect_count += len(
+                    result.boundary_data.detector_ids
                 )
             return result
 
@@ -267,7 +272,7 @@ def test_parallel_engine_matches_global_decode_on_real_syndromes():
             RunSpec(
                 ops=[operation],
                 num_units=4,
-                rounds_policy=FixedRounds(ROUNDS),
+                rounds_policy=FixedRounds(parallel_rounds),
                 code=SurfaceCodeModel(d=D),
                 scheme=ParallelWindowScheme(),
                 device=device,

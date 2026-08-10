@@ -259,8 +259,18 @@ class Switching:
         has_frontend,
     ) -> None:
         from .policies import Eager, Held
-        from .schemes import SlidingWindowScheme
+        from .schemes import SlidingTerminalPolicy, SlidingWindowScheme
 
+        if (
+            type(scheme) is SlidingWindowScheme
+            and scheme.terminal_policy
+            is not SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+        ):
+            raise ValueError(
+                "switching and strong-slab recovery require the explicit "
+                "REGULAR_STRIDE_LOOKAHEAD terminal policy; the literature-exact "
+                "QUITS/Tan all-core flush has no trailing tail context"
+            )
         if self.weak_keepup_ratio is not None and (
             type(scheme) is not SlidingWindowScheme
         ):

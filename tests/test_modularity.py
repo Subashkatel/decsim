@@ -50,7 +50,7 @@ class MyDevice:
 
     def window_models_for_operation(self, op, windows, round_count,
                                     *, fault_model_requirement,
-                                    fault_exclusion_ranges):
+                                    fault_exclusion_ranges, window_protocol):
         return []
 
     def window_model_for_stream(self, stream_id, window, *, is_last):

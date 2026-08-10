@@ -52,6 +52,7 @@ def _unit_window_model(
         observables=observables,
         owned=np.ones(len(edge_endpoints), dtype=bool),
         future_flips={},
+        boundary_flips={},
         source_fault_ids=tuple(range(len(edge_endpoints))),
     )
     return WindowErrorModel(

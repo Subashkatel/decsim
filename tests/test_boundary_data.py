@@ -17,6 +17,7 @@ from decsim.message import DecodeResult, Operation, SyndromePayload, WINDOW_INPU
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec
 from decsim.run_spec import RunSpec, simulate
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 
 
 MASK = (1, 0, 1, 0, 1, 0, 1, 0)
@@ -63,6 +64,9 @@ def _run(ops, emit, device=None, seed=0):
         decoder=dec,
         device=device,
         seed=seed,
+        scheme=SlidingWindowScheme(
+            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD,
+        ),
         **code_selection,
     ), verbose=False)
     return dec.seen

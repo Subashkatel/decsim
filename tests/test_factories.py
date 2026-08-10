@@ -189,11 +189,7 @@ def test_factory_correction_service_presence_matches_correction_count(
 
     service = ImmediateService()
     active = construct(service, 1)
-    assert active.run_seed_children()[0].child is service
-    assert active.run_seed_children()[0].relative_path[0].value == (
-        "decode_service"
-    )
-    assert construct(None, 0).run_seed_children() == ()
+    assert active.decode_service is service
 
 
 def test_single_level_factory_delivers_initial_stock_immediately():

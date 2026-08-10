@@ -381,6 +381,13 @@ class SyndromeRoundPacket:
 
 # ------------------------------------------------------------------ windows
 
+class WindowProtocol(Enum):
+    """Scientific model-building contract for one operation's window plan."""
+
+    GENERIC = auto()
+    TAN_ZERO_SEAM_GRAPHLIKE = auto()
+
+
 @dataclass
 class Window:
     """One decoder window inside an operation's syndrome stream.
@@ -395,7 +402,8 @@ class Window:
     commit_hi: int                    # last round this window commits
     buffer_hi: int                    # last round it reads (trailing buffer)
     n_rounds: int                     # rounds the decode spans (sets job size)
-    buffer_lo: Optional[int] = None   # leading-buffer start (parallel-scheme layer B)
+    buffer_lo: Optional[int] = None   # leading-buffer start (for two-sided A windows)
+    closed_temporal_boundaries: bool = False
     batched_preceding_idle_round_count: int = 0
     deps: list = field(default_factory=list)        # window keys this one waits on
     dependents: list = field(default_factory=list)  # window keys waiting on this one
@@ -434,9 +442,15 @@ class WindowInfo:
     buffer_lo: Optional[int]
     deps: tuple
     dependents: tuple
+    detector_positions: Optional[dict] = None
 
     @classmethod
-    def from_window(cls, window: Window) -> "WindowInfo":
+    def from_window(
+        cls,
+        window: Window,
+        *,
+        detector_positions: Optional[dict] = None,
+    ) -> "WindowInfo":
         return cls(
             op_id=window.op_id,
             k=window.k,
@@ -447,6 +461,10 @@ class WindowInfo:
             buffer_lo=window.buffer_lo,
             deps=tuple(window.deps),
             dependents=tuple(window.dependents),
+            detector_positions=(
+                None if detector_positions is None
+                else dict(detector_positions)
+            ),
         )
 
     @property
@@ -456,25 +474,6 @@ class WindowInfo:
     @property
     def key(self) -> tuple:
         return (self.op_id, self.k)
-
-
-class WindowGraph:
-    """Windows plus dependency edges; mutated only by WindowManager/DynamicWindows."""
-
-    def __init__(self) -> None:
-        self.windows: dict[tuple, Window] = {}
-
-    def add_window(self, window: Window) -> None:
-        if window.key in self.windows:
-            raise ValueError(f"duplicate window {window.key}")
-        self.windows[window.key] = window
-
-    def wire_dep(self, src_key: tuple, dst_key: tuple) -> None:
-        """src must hand its boundary to dst before dst may decode."""
-        src, dst = self.windows[src_key], self.windows[dst_key]
-        src.dependents.append(dst_key)
-        dst.deps.append(src_key)
-        dst.deps_remaining += 1
 
 
 def _exact_positive_int(value, label: str) -> None:
@@ -570,6 +569,7 @@ class WindowGeometry:
     commit_lo: int
     commit_hi: int
     buffer_hi: int
+    closed_temporal_boundaries: bool = False
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -579,6 +579,8 @@ class WindowGeometry:
             ("buffer_hi", self.buffer_hi),
         ):
             _exact_positive_int(value, label)
+        if type(self.closed_temporal_boundaries) is not bool:
+            raise TypeError("closed_temporal_boundaries must be an exact bool")
         if not (
             self.buffer_lo
             <= self.commit_lo
@@ -603,6 +605,7 @@ class OperationWindowPlan:
     exit_window_indices: tuple[int, ...]
     windowed: bool
     batch_preceding_idle_rounds: bool
+    protocol: WindowProtocol = WindowProtocol.GENERIC
 
     def __post_init__(self) -> None:
         if type(self.operation_id) is not int:
@@ -675,6 +678,8 @@ class OperationWindowPlan:
                     ready.append(destination)
         if visited != window_count:
             raise ValueError("operation window graph must be acyclic")
+        if type(self.protocol) is not WindowProtocol:
+            raise TypeError("protocol must be an exact WindowProtocol")
         if type(self.windowed) is not bool:
             raise TypeError("windowed must be an exact bool")
         if type(self.batch_preceding_idle_rounds) is not bool:
@@ -710,9 +715,34 @@ class WindowPlan:
     total_windows: int
     windowed_by_operation: dict
     batch_preceding_idle_rounds_by_operation: dict
+    protocol_by_operation: dict = field(default_factory=dict)
 
 
 # ------------------------------------------------------ window interaction
+
+@dataclass(frozen=True)
+class DependencyResidual:
+    """Complete global detector effect plus its compatibility mask view."""
+
+    detector_ids: tuple[int, ...] = ()
+    defects: dict | None = None
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.detector_ids) is not tuple
+            or any(type(detector_id) is not int or detector_id < 0
+                   for detector_id in self.detector_ids)
+        ):
+            raise TypeError(
+                "dependency residual detector_ids must be a tuple of nonnegative exact ints"
+            )
+        if tuple(sorted(set(self.detector_ids))) != self.detector_ids:
+            raise ValueError(
+                "dependency residual detector_ids must be unique and ascending"
+            )
+        if self.defects is not None and type(self.defects) is not dict:
+            raise TypeError("dependency residual defects must be an exact dict or None")
+
 
 @dataclass(frozen=True)
 class BoundaryDelivery:

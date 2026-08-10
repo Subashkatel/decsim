@@ -10,8 +10,6 @@ decoders return empty results; data-path decoders also compute corrections.
 from __future__ import annotations
 
 import math
-import random
-import threading
 from typing import TYPE_CHECKING, Optional
 
 from .message import (
@@ -19,11 +17,11 @@ from .message import (
     DecodeResult,
     RunSeedChild,
     RunSeedPathSegment,
-    RunSeedReservation,
     SoftOutput,
     SoftOutputSource,
 )
 from .config import us
+from .seeding import _RandomSeedConsumer
 from .detector_error_model import (
     DecoderFaultModelRequirement,
     NO_FAULT_MODEL_REQUIRED,
@@ -48,93 +46,6 @@ def _check_probability(value, field_name: str) -> float:
     if not math.isfinite(normalized) or not 0 <= normalized <= 1:
         raise ValueError(f"{field_name} must be finite and in [0, 1]")
     return normalized
-
-
-class _RandomSeedConsumer:
-    """Leaf-owned atomic run-seed state for random.Random decoder models."""
-
-    def _initialize_run_seed_state(self, seed: Optional[int]) -> None:
-        self._explicit_seed = seed
-        self._rng = random.Random(seed)
-        self._run_seed_lock = threading.Lock()
-        self._pending_run_seed = None
-        self._run_seed_claimed = False
-        self._stochastic_use_started = False
-
-    def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
-        component_name = type(self).__name__
-        if seed is not None and (
-            type(seed) is not int or not 0 <= seed < (1 << 64)
-        ):
-            raise TypeError(
-                f"{component_name} run root must be an unsigned 64-bit "
-                f"built-in integer or None; got {seed!r}"
-            )
-        with self._run_seed_lock:
-            if self._stochastic_use_started:
-                raise ValueError(
-                    f"{component_name} was already used and cannot be rebound"
-                )
-            if self._run_seed_claimed:
-                raise ValueError(
-                    f"{component_name} is already claimed by a built run"
-                )
-            if self._pending_run_seed is not None:
-                raise ValueError(
-                    f"{component_name} already has a pending run-seed "
-                    "reservation"
-                )
-            if seed is not None and self._explicit_seed is not None:
-                raise ValueError(
-                    f"{component_name} has an explicit seed that conflicts "
-                    f"with numeric run root {seed}"
-                )
-            if seed is not None:
-                seed_source = "derived"
-                effective_seed = seed
-            elif self._explicit_seed is not None:
-                if type(self._explicit_seed) is not int:
-                    raise TypeError(
-                        f"{component_name} explicit seed must be a built-in "
-                        "integer for run provenance"
-                    )
-                seed_source = "explicit_local"
-                effective_seed = self._explicit_seed
-            else:
-                seed_source = "entropy"
-                effective_seed = None
-            reservation = RunSeedReservation(
-                proposed_seed_source=seed_source,
-                proposed_seed=effective_seed,
-                prepared_state=random.Random(effective_seed),
-            )
-            self._pending_run_seed = reservation
-            return reservation
-
-    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._run_seed_lock:
-            if self._pending_run_seed is reservation:
-                self._pending_run_seed = None
-
-    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._run_seed_lock:
-            if self._pending_run_seed is not reservation:
-                raise ValueError(
-                    f"{type(self).__name__} can commit only its exact pending "
-                    "run-seed reservation"
-                )
-            self._rng = reservation.prepared_state
-            self._pending_run_seed = None
-            self._run_seed_claimed = True
-
-    def _mark_stochastic_use(self) -> None:
-        with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    f"{type(self).__name__} cannot draw while a run-seed "
-                    "reservation is pending"
-                )
-            self._stochastic_use_started = True
 
 
 class CodeRouter:

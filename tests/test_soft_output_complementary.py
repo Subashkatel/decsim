@@ -67,6 +67,7 @@ def test_both_model_types_use_the_matching_weight_owner(monkeypatch):
         observables=np.array([[1]], dtype=np.uint8),
         owned=np.array([True]),
         future_flips={0: ()},
+        boundary_flips={},
         source_fault_ids=(0,),
     )
     window_model = WindowErrorModel(

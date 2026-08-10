@@ -30,7 +30,7 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
     import numpy as np
 
     from ..detector_error_model import (
-        canonical_error_instructions,
+        detector_error_model_to_faults,
         validate_graphlike_fault,
     )
     num_det = dem.num_detectors
@@ -48,25 +48,20 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
         o_cols.append(ocol)
         weights.append(weight)
 
-    for record in canonical_error_instructions(dem):
-        prob = record.probability
-        weight = float(matching_weights([prob])[0])
-        for component in record.components:
-            fault = validate_graphlike_fault(
-                component.detectors,
-                component.logical_observables,
-                location=(
-                    f"error {record.error_ordinal} component "
-                    f"{component.component_ordinal}"
-                ),
-            )
-            assert fault is not None
-            detectors, logical_observables = fault
-            append_component(
-                detectors,
-                logical_observables,
-                weight,
-            )
+    detector_sets, observable_sets, priors = detector_error_model_to_faults(dem)
+    for fault_index, (detectors, logical_observables, probability) in enumerate(
+        zip(detector_sets, observable_sets, priors)
+    ):
+        validate_graphlike_fault(
+            detectors,
+            logical_observables,
+            location=f"fault {fault_index}",
+        )
+        append_component(
+            detectors,
+            logical_observables,
+            float(matching_weights([probability])[0]),
+        )
 
     h = np.array(h_cols, dtype=np.uint8).T if h_cols else np.zeros((num_det, 0), np.uint8)
     o = np.array(o_cols, dtype=np.uint8).T if o_cols else np.zeros((num_obs, 0), np.uint8)

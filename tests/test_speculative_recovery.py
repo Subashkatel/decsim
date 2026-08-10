@@ -26,7 +26,7 @@ from decsim.payload_store import PayloadStore
 from decsim.planner import FixedRounds, PerOpRounds
 from decsim.policies import Eager, Held
 from decsim.run_spec import RunSpec, simulate
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.speculative_recovery import SpeculativeRecovery
 from decsim.switching import Switching
 from decsim.window_interactions import DefaultWindowInteraction
@@ -98,7 +98,9 @@ def _deterministic_run(boundary_policy, *, uncertain=(1,), strong=None,
              else Operation(0, "memory", (0,))],
         d=3,
         rounds_policy=FixedRounds(rounds),
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=strategy if strategy is not None
         else Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5,
                        run_both_at_once=run_both_at_once),
@@ -181,6 +183,9 @@ def test_interaction_cannot_invalidate_unrelated_finished_work():
             ],
             d=3,
             rounds_policy=FixedRounds(3),
+            scheme=SlidingWindowScheme(
+                terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD,
+            ),
             strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=Eager(),
             window_interaction=UnrelatedFinishedTarget(),
@@ -319,7 +324,9 @@ def test_a_replayed_window_has_only_one_weak_decode_in_flight(run_both_at_once):
         ops=[Operation(0, "memory", (0,))],
         d=3,
         rounds_policy=FixedRounds(15),
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5,
                            run_both_at_once=run_both_at_once),
         boundary_policy=Eager(),
@@ -412,7 +419,9 @@ def test_strong_can_add_a_defect_to_an_empty_weak_boundary():
             ops=[Operation(0, "memory", (0,))],
             d=3,
             rounds_policy=FixedRounds(15),
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
             strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=policy,
             router=SwitchingRouter(weak, strong),
@@ -543,7 +552,9 @@ def test_replay_invalidates_inflight_boundaries_from_unaffected_parents():
             ],
             code=SurfaceCodeModel(d=3),
             rounds_policy=PerOpRounds({0: 3, 1: 3, 2: 3}),
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
             strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=policy,
             router=SwitchingRouter(weak, _MergeStrongDecoder()),
@@ -611,6 +622,9 @@ def test_dynamic_streams_reject_eager_speculative_recovery():
         RunSpec(
             ops=[Operation(0, "driver", (1,))],
             dynamic_streams=[stream],
+            scheme=SlidingWindowScheme(
+                terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD,
+            ),
             strategy=strategy,
             decoder=_WeakBoundaryDecoder(),
         ).build()
@@ -618,6 +632,9 @@ def test_dynamic_streams_reject_eager_speculative_recovery():
     RunSpec(
         ops=[Operation(0, "driver", (1,))],
         dynamic_streams=[Operation(10, "stream", (0,))],
+        scheme=SlidingWindowScheme(
+            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD,
+        ),
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         boundary_policy=Held(),
         decoder=_WeakBoundaryDecoder(),
@@ -649,7 +666,9 @@ def test_static_operation_seam_replays_without_a_data_dependent_crash():
         ],
         d=3,
         rounds_policy=FixedRounds(6),
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         boundary_policy=Eager(),
         router=SwitchingRouter(weak, strong),
@@ -728,7 +747,9 @@ def test_cross_operation_result_is_published_only_after_ancestor_recovery():
             ],
             d=3,
             rounds_policy=FixedRounds(6),
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
             strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=policy,
             router=SwitchingRouter(weak, strong),
@@ -864,7 +885,9 @@ def _run_static_stream_recovery(policy, *, first_segment_rounds,
             second_segment.id: stream_rounds - first_segment_rounds,
             feedback_consumer.id: 1,
         }),
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         boundary_policy=policy,
         router=SwitchingRouter(weak, strong),
@@ -1003,7 +1026,9 @@ def test_real_stim_recovery_uses_same_shot_truth_and_matches_held():
             ops=[operation],
             d=3,
             rounds_policy=FixedRounds(rounds),
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
             strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             boundary_policy=policy,
             device=device,

@@ -42,7 +42,7 @@ from decsim.message import (CsdInput, DecodeJob, DecodeResult, DecoderRequestKey
                             SeamFaultOwner, StrongRegionPlan, Window,
                             WindowInfo)
 from decsim.metrics import DecodeBacklog, StrongDecoderBacklog
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
@@ -101,7 +101,9 @@ def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=Non
                d=D,
                rounds_policy=FixedRounds(rounds),
                round_us=TAU_GEN_US,
-               scheme=SlidingWindowScheme(),
+               scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
                strategy=switching,
                router=SwitchingRouter(weak, strong),
                unit_pools=pools or {"default": 1, "strong": 1},
@@ -214,7 +216,9 @@ def test_weak_keepup_ratio_must_be_below_one():
 
 def test_strong_reprocess_region_is_commit_plus_two_buffers():
     """The strong decoder reprocesses commit + 2*buffer = 3d rounds for the standard d/d window."""
-    geometry = SlidingWindowScheme().plan_operation(
+    geometry = SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ).plan_operation(
         0,
         4 * D,
         commit_round_count=D,
@@ -259,7 +263,9 @@ def test_escalated_window_uses_strong_logical_result():
               d=D,
               rounds_policy=FixedRounds(27),
               round_us=TAU_GEN_US,
-              scheme=SlidingWindowScheme(),
+              scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
               strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
@@ -281,7 +287,9 @@ def test_parallel_strong_result_can_finish_before_weak_decision():
               d=D,
               rounds_policy=FixedRounds(27),
               round_us=TAU_GEN_US,
-              scheme=SlidingWindowScheme(),
+              scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
               strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, run_both_at_once=True),
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
@@ -301,7 +309,9 @@ def test_switching_requires_a_router_to_reach_the_strong_decoder():
             d=D,
             rounds_policy=FixedRounds(9),
             round_us=TAU_GEN_US,
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
             strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
             decoder=weak,
             unit_pools={"default": 1, "strong": 1},
@@ -320,7 +330,9 @@ def test_strong_redecode_receives_two_sided_context_payloads():
         d=D,
         rounds_policy=FixedRounds(9),
         round_us=TAU_GEN_US,
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
@@ -359,7 +371,9 @@ def test_stim_strong_redecode_receives_two_sided_window_model():
         d=D,
         rounds_policy=FixedRounds(9),
         round_us=TAU_GEN_US,
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
         device=StimDevice(),
         router=SwitchingRouter(weak, strong),
@@ -389,7 +403,9 @@ def test_no_switching_matches_plain_sliding():
                 d=D,
                 rounds_policy=FixedRounds(rounds),
                 round_us=TAU_GEN_US,
-                scheme=SlidingWindowScheme(),
+                scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
                 decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US),
             ), verbose=False)
     assert switched.decoder_manager.strong_needed == 0
@@ -433,7 +449,9 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
                 d=D,
                 rounds_policy=FixedRounds(rounds),
                 round_us=TAU_GEN_US,
-                scheme=SlidingWindowScheme(),
+                scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
                 decoder=naive_decoder,
                 make_metrics=lambda e, wm, dm, ch, fa: [DecodeBacklog(wm, dm)],
                 seed=1,
@@ -475,7 +493,9 @@ def test_run_both_at_once_keeps_the_weak_decode_work_identical_to_plain_sliding(
                 d=D,
                 rounds_policy=FixedRounds(rounds),
                 round_us=TAU_GEN_US,
-                scheme=SlidingWindowScheme(),
+                scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
                 decoder=PerRoundDecoder(F_WEAK * TAU_GEN_US),
             ), verbose=False)
     weak_durations = lambda r: [
@@ -536,7 +556,9 @@ def test_decode_backlog_trace_tracks_the_rising_backlog():
         d=D,
         rounds_policy=FixedRounds(400),
         round_us=TAU_GEN_US,
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         decoder=naive_decoder,
         make_metrics=metrics,
         seed=1,
@@ -557,7 +579,9 @@ def test_commit_buffer_override_sizes_the_window_and_strong_redo():
     commit + 2*buffer = 9 rounds."""
     code = SurfaceCodeModel(d=3, commit_rounds_override=5, buffer_rounds_override=2)
     assert (code.commit_rounds(), code.buffer_rounds()) == (5, 2)
-    geometry = SlidingWindowScheme().plan_operation(
+    geometry = SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ).plan_operation(
         0,
         20,
         commit_round_count=code.commit_rounds(),
@@ -642,7 +666,9 @@ def test_sampled_soft_output_uses_the_probability_for_callback():
               d=D,
               rounds_policy=FixedRounds(60),
               round_us=TAU_GEN_US,
-              scheme=SlidingWindowScheme(),
+              scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
               strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
@@ -706,7 +732,9 @@ def _double_window_run(
               code=code,
               rounds_policy=FixedRounds(rounds),
               round_us=TAU_GEN_US,
-              scheme=SlidingWindowScheme(),
+              scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
               strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5,
                                  double_window=True),
               router=SwitchingRouter(weak, strong),
@@ -921,7 +949,7 @@ def test_double_window_rephases_and_clamps_complete_nonaligned_suffix():
     class RecordingDevice(TimingOnlyDevice):
         def window_models_for_operation(
             self, op, windows, round_count, *,
-            fault_model_requirement, fault_exclusion_ranges,
+            fault_model_requirement, fault_exclusion_ranges, window_protocol,
         ):
             recorded_model_windows.append((
                 tuple(
@@ -1491,7 +1519,9 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
             ops=[_memory_op()],
             d=D,
             rounds_policy=FixedRounds(21),
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
             strategy=Switching(
                 expected_source=SAMPLED_CONFIDENCE_SOURCE,
                 confidence_threshold=0.5,
@@ -1540,7 +1570,9 @@ def test_strong_decoder_result_identity_is_checked_before_finalization():
             ops=[_memory_op()],
             d=D,
             rounds_policy=FixedRounds(21),
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
             strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True),
             router=SwitchingRouter(weak, strong),
             unit_pools={"default": 1, "strong": 1},
@@ -1777,7 +1809,9 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
     res = simulate(RunSpec(
         ops=[_memory_op()], num_units=1, code=code,
         rounds_policy=FixedRounds(30), round_us=TAU_GEN_US,
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True),
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1},
@@ -2118,7 +2152,9 @@ def test_double_window_strong_result_owns_the_whole_slab():
               d=D,
               rounds_policy=FixedRounds(30),
               round_us=TAU_GEN_US,
-              scheme=SlidingWindowScheme(),
+              scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
               strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5, double_window=True),
               router=SwitchingRouter(weak, strong),
               unit_pools={"default": 1, "strong": 1},
@@ -2245,15 +2281,22 @@ def test_double_window_rejects_unsupported_runspec_shapes():
     base = dict(num_units=1, d=D, rounds_policy=FixedRounds(30),
                 round_us=TAU_GEN_US, strategy=strategy)
     with pytest.raises(ValueError, match="Held"):
-        RunSpec(ops=[_memory_op()], scheme=SlidingWindowScheme(),
+        RunSpec(ops=[_memory_op()], scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
                 boundary_policy=Held(), **base).build()
     with pytest.raises(ValueError, match="SlidingWindowScheme"):
         RunSpec(ops=[_memory_op()], scheme=ParallelWindowScheme(),
                 **base).build()
     with pytest.raises(ValueError, match="dynamic_streams"):
-        RunSpec(ops=[_memory_op()],
-                dynamic_streams=[Operation(7, "stream", (1,))],
-                **base).build()
+        RunSpec(
+            ops=[_memory_op()],
+            dynamic_streams=[Operation(7, "stream", (1,))],
+            scheme=SlidingWindowScheme(
+                terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD,
+            ),
+            **base,
+        ).build()
     chained = [
         Operation(0, "a", (0,)),
         Operation(
@@ -2265,7 +2308,13 @@ def test_double_window_rejects_unsupported_runspec_shapes():
         ),
     ]
     with pytest.raises(ValueError, match="single-patch"):
-        RunSpec(ops=chained, **base).build()
+        RunSpec(
+            ops=chained,
+            scheme=SlidingWindowScheme(
+                terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD,
+            ),
+            **base,
+        ).build()
 
 
 def test_double_window_allows_workload_only_operation_ordering():

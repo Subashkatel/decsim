@@ -456,6 +456,7 @@ def _materialize_execution_plan(
     code_names = {}
     windowed_by_operation = {}
     batch_idle_by_operation = {}
+    protocol_by_operation = {}
     plan_by_operation_id = {}
 
     for operation, resolved, operation_plan in zip(
@@ -481,6 +482,7 @@ def _materialize_execution_plan(
         batch_idle_by_operation[operation_id] = (
             operation_plan.batch_preceding_idle_rounds
         )
+        protocol_by_operation[operation_id] = operation_plan.protocol
         for window_index, geometry in enumerate(operation_plan.windows):
             windows[(operation_id, window_index)] = Window(
                 op_id=operation_id,
@@ -490,6 +492,9 @@ def _materialize_execution_plan(
                 buffer_hi=geometry.buffer_hi,
                 n_rounds=geometry.round_count,
                 buffer_lo=geometry.buffer_lo,
+                closed_temporal_boundaries=(
+                    geometry.closed_temporal_boundaries
+                ),
             )
         for source_index, destination_index in (
             operation_plan.internal_dependencies
@@ -531,5 +536,6 @@ def _materialize_execution_plan(
         code_names=code_names,
         windowed_by_operation=windowed_by_operation,
         batch_preceding_idle_rounds_by_operation=batch_idle_by_operation,
+        protocol_by_operation=protocol_by_operation,
         total_windows=len(windows),
     )

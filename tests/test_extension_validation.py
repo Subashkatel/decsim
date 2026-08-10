@@ -64,7 +64,7 @@ class StaticOnlyDevice:
 
     def window_models_for_operation(
         self, operation, windows, round_count, *, fault_model_requirement,
-        fault_exclusion_ranges,
+        fault_exclusion_ranges, window_protocol,
     ):
         return []
 
@@ -80,7 +80,7 @@ class MissingCircuitScopeDevice:
 
     def window_models_for_operation(
         self, operation, windows, round_count, *, fault_model_requirement,
-        fault_exclusion_ranges,
+        fault_exclusion_ranges, window_protocol,
     ):
         return []
 
@@ -213,6 +213,7 @@ class CircuitRejectingRounds(FixedRounds):
 
 class CircuitRejectingScheme(SlidingWindowScheme):
     def __init__(self):
+        super().__init__()
         self.data_complete_calls = 0
         self.plan_calls = []
 
@@ -282,42 +283,6 @@ class EngineBoundFactory:
         return None
 
 
-class PrebindingSeedConsumer:
-    def __init__(self):
-        self.entries = 0
-
-    def reserve_run_seed(self, seed):
-        raise AssertionError("pre-binding consumer must not reserve")
-
-    def commit_run_seed(self, reservation):
-        raise AssertionError("pre-binding consumer must not commit")
-
-    def cancel_run_seed(self, reservation):
-        raise AssertionError("pre-binding consumer must not cancel")
-
-    def build(self):
-        self.entries += 1
-        return []
-
-
-class SeedConsumingProviderOwner:
-    def __init__(self):
-        self.entries = 0
-
-    def reserve_run_seed(self, seed):
-        raise AssertionError("pre-binding provider must not reserve")
-
-    def commit_run_seed(self, reservation):
-        raise AssertionError("pre-binding provider must not commit")
-
-    def cancel_run_seed(self, reservation):
-        raise AssertionError("pre-binding provider must not cancel")
-
-    def make_controller(self, engine, links, buffering, window_manager):
-        self.entries += 1
-        raise AssertionError("pre-binding provider must not be called")
-
-
 class PlainControllerProvider:
     def __init__(self, engine, links, buffering, window_manager):
         self.engine = engine
@@ -328,13 +293,19 @@ class PlainControllerProvider:
 
 @pytest.mark.parametrize("seed", [True, 1.0, "1", object()])
 def test_run_seed_rejects_non_integral_values_before_build(seed):
-    spec = RunSpec(ops=[], seed=seed)
+    provider_calls = []
+    spec = RunSpec(
+        ops=[],
+        seed=seed,
+        make_controller=lambda *_args: provider_calls.append("entered"),
+    )
 
     with pytest.raises(
         TypeError,
         match=r"seed.*64-bit unsigned integer or None",
     ):
         spec.build()
+    assert provider_calls == []
 
 
 @pytest.mark.parametrize("seed", [-1, 1 << 64])

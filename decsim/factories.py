@@ -5,103 +5,14 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 import math
-import random
-import threading
 from typing import Callable, Optional, TYPE_CHECKING
 
 from .config import fmt
+from .seeding import _RandomSeedConsumer
 from .engine import Engine
-from .message import RunSeedChild, RunSeedPathSegment, RunSeedReservation
 
 if TYPE_CHECKING:
     from .protocols import ResourcePool as DecodeService
-
-
-class _RandomSeedConsumer:
-    """Leaf-owned atomic run-seed state for random.Random factory models."""
-
-    def _initialize_run_seed_state(self, seed: Optional[int]) -> None:
-        self._explicit_seed = seed
-        self._rng = random.Random(seed)
-        self._run_seed_lock = threading.Lock()
-        self._pending_run_seed = None
-        self._run_seed_claimed = False
-        self._stochastic_use_started = False
-
-    def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
-        component_name = type(self).__name__
-        if seed is not None and (
-            type(seed) is not int or not 0 <= seed < (1 << 64)
-        ):
-            raise TypeError(
-                f"{component_name} run root must be an unsigned 64-bit "
-                f"built-in integer or None; got {seed!r}"
-            )
-        with self._run_seed_lock:
-            if self._stochastic_use_started:
-                raise ValueError(
-                    f"{component_name} was already used and cannot be rebound"
-                )
-            if self._run_seed_claimed:
-                raise ValueError(
-                    f"{component_name} is already claimed by a built run"
-                )
-            if self._pending_run_seed is not None:
-                raise ValueError(
-                    f"{component_name} already has a pending run-seed "
-                    "reservation"
-                )
-            if seed is not None and self._explicit_seed is not None:
-                raise ValueError(
-                    f"{component_name} has an explicit seed that conflicts "
-                    f"with numeric run root {seed}"
-                )
-            if seed is not None:
-                seed_source = "derived"
-                effective_seed = seed
-            elif self._explicit_seed is not None:
-                if type(self._explicit_seed) is not int:
-                    raise TypeError(
-                        f"{component_name} explicit seed must be a built-in "
-                        "integer for run provenance"
-                    )
-                seed_source = "explicit_local"
-                effective_seed = self._explicit_seed
-            else:
-                seed_source = "entropy"
-                effective_seed = None
-            reservation = RunSeedReservation(
-                proposed_seed_source=seed_source,
-                proposed_seed=effective_seed,
-                prepared_state=random.Random(effective_seed),
-            )
-            self._pending_run_seed = reservation
-            return reservation
-
-    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._run_seed_lock:
-            if self._pending_run_seed is reservation:
-                self._pending_run_seed = None
-
-    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._run_seed_lock:
-            if self._pending_run_seed is not reservation:
-                raise ValueError(
-                    f"{type(self).__name__} can commit only its exact pending "
-                    "run-seed reservation"
-                )
-            self._rng = reservation.prepared_state
-            self._pending_run_seed = None
-            self._run_seed_claimed = True
-
-    def _mark_stochastic_use(self) -> None:
-        with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    f"{type(self).__name__} cannot draw while a run-seed "
-                    "reservation is pending"
-                )
-            self._stochastic_use_started = True
 
 
 def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -> None:
@@ -234,17 +145,6 @@ class DistillationFactory(_RandomSeedConsumer):
 
         if production == "continuous":
             self.engine.schedule(0, self._maybe_start, label="factory_start")
-
-    def run_seed_children(self):
-        """Expose the active correction service that affects completion."""
-        if self.decode_service is None:
-            return ()
-        return (
-            RunSeedChild(
-                (RunSeedPathSegment("field", "decode_service"),),
-                self.decode_service,
-            ),
-        )
 
     def _init_runtime_state(self, initial_store: int) -> None:
         """Initialize queues, counters, and bounded diagnostic traces."""
@@ -481,17 +381,6 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
 
         if production == "continuous":
             self.engine.schedule(0, self._drive, label="factory_start")
-
-    def run_seed_children(self):
-        """Expose the active correction service that affects completion."""
-        if self.decode_service is None:
-            return ()
-        return (
-            RunSeedChild(
-                (RunSeedPathSegment("field", "decode_service"),),
-                self.decode_service,
-            ),
-        )
 
     def _init_multilevel_state(self, W_ticks: int) -> None:
         """Initialize buffers, busy counts, counters, and round times."""

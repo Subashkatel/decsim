@@ -29,7 +29,9 @@ from decsim.decoders import (
 )
 from decsim.message import Operation
 from decsim.schedulers import EarliestDeadlineScheduler
-from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
+from decsim.schemes import (
+    ParallelWindowScheme, SlidingTerminalPolicy, SlidingWindowScheme,
+)
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
@@ -105,7 +107,7 @@ def test_many_patches_few_units_stays_consistent():
                  d=3,
                  rounds_policy=FixedRounds(40),
                  round_us=TAU,
-                 scheme=SlidingWindowScheme(),
+                 scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                  decoder=PerRoundDecoder(3.0),
                  make_metrics=lambda e, wm, dm, ch, fa: [guard_box.setdefault("g", InvariantGuard(wm, dm))],
              ), verbose=False)
@@ -145,7 +147,7 @@ def _switching_run(low_confidence_probability, rounds, patches, pools, seed=3,
                d=3,
                rounds_policy=FixedRounds(rounds),
                round_us=TAU,
-               scheme=SlidingWindowScheme(),
+               scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                strategy=switching or Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5),
                router=SwitchingRouter(weak, strong),
                unit_pools=pools,

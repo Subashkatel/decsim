@@ -1,12 +1,10 @@
-"""WindowSlicer -- the per-window slicer shared by the static builder and the RUNTIME round-driven
-window builder (the core of dynamic idle-stream decoding, 5-real dynamic part).
+"""Regression tests for static and round-driven window model slicing.
 
-Grounding: SWIPER (arXiv:2412.05115 Sec 2.4/5.1, Fig. 9) cuts decode windows from rounds AS THEY
-ARRIVE, so an idle stretch of runtime-unknown length is absorbed by creating more windows. For that
-to be correct, slicing one window at a time (threading fault ownership) must reproduce BOTH (a) the
-all-at-once build_window_error_models decoding problems exactly, and (b) the global decode.
-
-Requires stim + pymatching."""
+SWIPER (arXiv:2412.05115 Sections 2.4 and 5.1, Figure 9) motivates
+constructing windows as rounds arrive. These tests compare both construction
+paths exactly and include a fixed-shot decoding regression. The sampled
+agreement test is supporting evidence, not a proof for arbitrary models.
+"""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -22,6 +20,7 @@ from decsim.codes import SurfaceCodeModel
 from decsim.detector_error_model import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    LINKED_FAULT_MODELS_REQUIRED,
     WindowSlicer,
     build_window_error_models,
     decode_windowed,
@@ -44,12 +43,15 @@ def _same(a, b):
     )
 
 
-def _incremental(circ, plan, folded, round_count):
+def _incremental(
+    circ, plan, folded, round_count,
+    fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+):
     slicer = WindowSlicer(
         circ,
         round_count=round_count,
         detector_rounds=folded,
-        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_model_requirement=fault_model_requirement,
     )
     out = []
     for k, win in enumerate(plan):
@@ -100,10 +102,8 @@ def test_slicer_identical_to_static_builder(scheme, R):
     assert all(_same(a, b) for a, b in zip(ref, inc))
 
 
-def test_incremental_sliding_decode_equals_global_per_shot():
-    """Windows built ONE AT A TIME (round-driven) decode equal to the global decoder, per shot --
-    the SWIPER round-driven WindowBuilder is correct on real syndromes (what SWIPER-SIM itself,
-    a timing-only simulator, never does)."""
+def test_incremental_sliding_matches_global_on_fixed_shot_sample():
+    """Pin agreement on one seeded surface-code sample without generalizing it."""
     R = 24
     circ = NoiseModel.circuit_level(0.003).circuit(distance=D, rounds=R)
     folded = {det: min(int(c[-1]) + 1, R) for det, c in circ.get_detector_coordinates().items()}
@@ -133,7 +133,7 @@ def test_incremental_sliding_decode_equals_global_per_shot():
         )
         pg = int(gm.decode(dets[s])[0])
         agree += (pw == pg)
-    assert agree == shots                          # incremental == global, exactly, every shot
+    assert agree == shots
 
 
 def test_matching_window_decoder_cache_survives_id_reuse():
@@ -142,7 +142,7 @@ def test_matching_window_decoder_cache_survives_id_reuse():
     dead model's matching (shape errors or silently wrong corrections)."""
     import gc
     import numpy as np
-    from decsim.detector_error_model import build_window_error_models
+    from decsim.detector_error_model import build_single_window_error_model
     from decsim.mwpm_decoder import matching_window_decoder
 
     import pathlib
@@ -151,14 +151,13 @@ def test_matching_window_decoder_cache_survives_id_reuse():
     inner = matching_window_decoder()
 
     def one_model(buffer_rounds):
-        plan = [(1, 3, min(3 + buffer_rounds, 6))]
-        return build_window_error_models(
+        entry = (1, 3, min(3 + buffer_rounds, 6))
+        return build_single_window_error_model(
             circ,
-            plan,
+            entry,
             round_count=6,
             fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
-            fault_exclusion_ranges=(),
-        )[0]
+        )
 
     a = one_model(0)
     a_faults = a.require_faults(FaultRepresentation.GRAPHLIKE)
@@ -180,3 +179,127 @@ def test_matching_window_decoder_cache_survives_id_reuse():
         pytest.skip("could not provoke an id() reuse on this platform")
     # with the stale cache this raised ValueError (wrong matching graph)
     inner(b, np.zeros(b_faults.check.shape[0], dtype=np.uint8))
+
+
+def test_slicer_rejects_partial_explicit_ownership_and_boolean_exclusions():
+    rounds = 6
+    circuit = NoiseModel.circuit_level(0.003).circuit(
+        distance=D, rounds=rounds)
+    folded = {
+        detector_id: min(int(coordinates[-1]) + 1, rounds)
+        for detector_id, coordinates in circuit.get_detector_coordinates().items()
+    }
+    slicer = WindowSlicer(
+        circuit,
+        round_count=rounds,
+        detector_rounds=folded,
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    )
+    with pytest.raises(TypeError, match="num_observables"):
+        WindowSlicer(
+            circuit,
+            True,
+            round_count=rounds,
+            detector_rounds=folded,
+            fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        )
+
+    owners = {FaultRepresentation.GRAPHLIKE: set()}
+    with pytest.raises(ValueError, match="must be supplied together"):
+        slicer.slice_window(
+            1, 1, 3, 6, is_last=True,
+            explicitly_owned_faults=owners,
+        )
+    wrong_maps = {
+        FaultRepresentation.GRAPHLIKE: set(),
+        FaultRepresentation.PHYSICAL: set(),
+    }
+    with pytest.raises(ValueError, match="exactly match"):
+        slicer.slice_window(
+            1, 1, 3, 6, is_last=True,
+            explicitly_owned_faults=wrong_maps,
+            explicitly_prior_faults=wrong_maps,
+        )
+    with pytest.raises(TypeError, match="built-in integer"):
+        slicer.slice_window(
+            1, 1, 3, 6, is_last=True,
+            fault_exclusion_ranges=((True, 2),),
+        )
+
+
+def _complete_model_equal(left, right):
+    if (
+        left.detector_ids != right.detector_ids
+        or left.detector_coordinates != right.detector_coordinates
+        or left.commit_lo != right.commit_lo
+        or left.commit_hi != right.commit_hi
+        or left.buffer_lo != right.buffer_lo
+    ):
+        return False
+    for representation in (
+        FaultRepresentation.GRAPHLIKE,
+        FaultRepresentation.PHYSICAL,
+    ):
+        left_faults = left.require_faults(representation)
+        right_faults = right.require_faults(representation)
+        if not (
+            left_faults.representation is right_faults.representation
+            and np.array_equal(left_faults.check, right_faults.check)
+            and np.array_equal(left_faults.observables, right_faults.observables)
+            and np.array_equal(left_faults.priors, right_faults.priors)
+            and np.array_equal(left_faults.owned, right_faults.owned)
+            and left_faults.source_fault_ids == right_faults.source_fault_ids
+            and dict(left_faults.future_flips) == dict(right_faults.future_flips)
+            and dict(left_faults.boundary_flips) == dict(right_faults.boundary_flips)
+        ):
+            return False
+    return np.array_equal(
+        left.physical_to_graphlike_detector_projection,
+        right.physical_to_graphlike_detector_projection,
+    )
+
+
+def test_production_sliding_static_and_incremental_linked_models_are_identical():
+    rounds = 12
+    circuit = NoiseModel.circuit_level(0.003).circuit(
+        distance=D, rounds=rounds)
+    folded = {
+        detector_id: min(int(coordinates[-1]) + 1, rounds)
+        for detector_id, coordinates in circuit.get_detector_coordinates().items()
+    }
+    planned = SlidingWindowScheme().plan_operation(
+        0,
+        rounds,
+        commit_round_count=D,
+        buffer_round_count=D,
+    ).windows
+    plan = [
+        (window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in planned
+    ]
+    static = build_window_error_models(
+        circuit,
+        plan,
+        round_count=rounds,
+        detector_rounds=folded,
+        fault_model_requirement=LINKED_FAULT_MODELS_REQUIRED,
+        fault_exclusion_ranges=(),
+    )
+    incremental = _incremental(
+        circuit,
+        plan,
+        folded,
+        rounds,
+        LINKED_FAULT_MODELS_REQUIRED,
+    )
+    assert len(static) == len(incremental)
+    assert all(
+        _complete_model_equal(left, right)
+        for left, right in zip(static, incremental)
+    )
+
+    graphlike = static[0].graphlike_faults
+    with pytest.raises(TypeError):
+        graphlike.future_flips[0] = (1,)
+    with pytest.raises(TypeError):
+        graphlike.boundary_flips[0] = (1,)

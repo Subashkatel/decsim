@@ -11,7 +11,7 @@ released.
 
 Holds a back-reference to WindowManager rather than owning windows itself:
 window creation, read-ref bookkeeping, and readiness checks stay there so
-both sides mutate one WindowGraph.
+both sides mutate the window manager's one authoritative window mapping.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ class DynamicWindows:
         commit_round_count,
         buffer_round_count,
         source_round_limit,
+        finite_geometries=None,
     ) -> None:
         """Track a stream whose windows are created from arriving rounds."""
         self._streams[stream_op.id] = {
@@ -50,6 +51,7 @@ class DynamicWindows:
             "sealed": False,
             "source_round_limit": source_round_limit,
             "sealed_round_count": None,
+            "finite_geometries": finite_geometries,
         }
         self.unsealed.add(stream_op.id)
         self.closed_boundaries.setdefault(stream_op.id, set())
@@ -90,6 +92,24 @@ class DynamicWindows:
         buffer_rounds = stream_state["buffer_rounds"]
         highest_known_round = wm.rounds_arrived[stream_id] \
             if rounds_to_plan is None else rounds_to_plan
+        finite_geometries = stream_state["finite_geometries"]
+        if finite_geometries is not None:
+            while stream_state["next_window"] < len(finite_geometries):
+                window_index = stream_state["next_window"]
+                geometry = finite_geometries[window_index]
+                if geometry.commit_lo > highest_known_round:
+                    break
+                wm.create_dynamic_window(
+                    stream_id,
+                    window_index,
+                    geometry.commit_lo,
+                    geometry.commit_hi,
+                    geometry.buffer_hi,
+                    is_last=(window_index == len(finite_geometries) - 1),
+                )
+                stream_state["next_window"] += 1
+            return
+
         while stream_state["next_window"] * commit_rounds + 1 <= highest_known_round:
             window_index = stream_state["next_window"]
             commit_lo = window_index * commit_rounds + 1
@@ -134,7 +154,8 @@ class DynamicWindows:
         wm.validate_stream_length(stream_id, stream_round_count)
         stream_state["sealed_round_count"] = stream_round_count
         self.grow(stream_id, rounds_to_plan=stream_round_count)
-        self._trim_tail(stream_id, stream_round_count)
+        if stream_state["finite_geometries"] is None:
+            self._trim_tail(stream_id, stream_round_count)
         stream_state["sealed"] = True
         self.unsealed.discard(stream_id)
         wm.check_windows_for_operation(stream_id)

@@ -1,17 +1,146 @@
 """Deterministic, atomic run-seed binding for a runtime component graph."""
 
 import hashlib
+import random
+import threading
+
 from .message import RunSeedChild, RunSeedPathSegment, RunSeedReservation
 from .protocols import RunSeedComposite, RunSeedConsumer
+
 _NAMESPACE = b"decsim.run-seed.v1"
 
+
+class _AtomicRunSeedConsumer:
+    """Shared two-phase seed binding for stochastic runtime leaves."""
+
+    _explicit_seed_label = "seed"
+
+    def _initialize_run_seed_binding(self, explicit_seed) -> None:
+        self._explicit_seed = explicit_seed
+        self._run_seed_lock = threading.Lock()
+        self._pending_run_seed = None
+        self._run_seed_claimed = False
+        self._stochastic_use_started = False
+
+    def _explicit_run_seed(self):
+        return self._explicit_seed
+
+    def _entropy_seed(self):
+        return None
+
+    def _prepare_run_seed_state(self, effective_seed):
+        return effective_seed
+
+    def _install_run_seed_state(self, prepared_state) -> None:
+        raise NotImplementedError
+
+    def reserve_run_seed(self, seed) -> RunSeedReservation:
+        component_name = type(self).__name__
+        if seed is not None and (
+            type(seed) is not int or not 0 <= seed < (1 << 64)
+        ):
+            raise TypeError(
+                f"{component_name} run root must be an unsigned 64-bit "
+                f"built-in integer or None; got {seed!r}"
+            )
+        with self._run_seed_lock:
+            if self._stochastic_use_started:
+                raise ValueError(
+                    f"{component_name} was already used and cannot be rebound"
+                )
+            if self._run_seed_claimed:
+                raise ValueError(
+                    f"{component_name} is already claimed by a built run"
+                )
+            if self._pending_run_seed is not None:
+                raise ValueError(
+                    f"{component_name} already has a pending run-seed reservation"
+                )
+            if seed is not None and self._explicit_seed is not None:
+                raise ValueError(
+                    f"{component_name} has an explicit "
+                    f"{self._explicit_seed_label} that conflicts with "
+                    f"numeric run root {seed}"
+                )
+            if seed is not None:
+                source = "derived"
+                effective_seed = seed
+            elif self._explicit_seed is not None:
+                source = "explicit_local"
+                effective_seed = self._explicit_run_seed()
+            else:
+                source = "entropy"
+                effective_seed = self._entropy_seed()
+            if effective_seed is not None and (
+                type(effective_seed) is not int
+                or not 0 <= effective_seed < (1 << 64)
+            ):
+                raise TypeError(
+                    f"{component_name} explicit seed must be an unsigned "
+                    "64-bit built-in integer for run provenance"
+                )
+            reservation = RunSeedReservation(
+                proposed_seed_source=source,
+                proposed_seed=None if source == "entropy" else effective_seed,
+                prepared_state=self._prepare_run_seed_state(effective_seed),
+            )
+            self._pending_run_seed = reservation
+            return reservation
+
+    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
+        with self._run_seed_lock:
+            if self._pending_run_seed is reservation:
+                self._pending_run_seed = None
+
+    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
+        with self._run_seed_lock:
+            if self._pending_run_seed is not reservation:
+                raise ValueError(
+                    f"{type(self).__name__} can commit only its exact pending "
+                    "run-seed reservation"
+                )
+            self._install_run_seed_state(reservation.prepared_state)
+            self._pending_run_seed = None
+            self._run_seed_claimed = True
+
+    def _mark_stochastic_use(self) -> None:
+        with self._run_seed_lock:
+            if self._pending_run_seed is not None:
+                raise RuntimeError(
+                    f"{type(self).__name__} cannot draw while a run-seed "
+                    "reservation is pending"
+                )
+            self._stochastic_use_started = True
+
+
+class _RandomSeedConsumer(_AtomicRunSeedConsumer):
+    """Atomic run-seed ownership for random.Random components."""
+
+    def _initialize_run_seed_state(self, seed) -> None:
+        self._initialize_run_seed_binding(seed)
+        self._rng = random.Random(seed)
+
+    def _prepare_run_seed_state(self, effective_seed):
+        return random.Random(effective_seed)
+
+    def _install_run_seed_state(self, prepared_state) -> None:
+        self._rng = prepared_state
+
+
 def derive_component_seed(root_seed: int, path) -> int:
+    """Derive one unsigned 64-bit seed from a framed semantic path."""
+    if type(root_seed) is not int or not 0 <= root_seed < (1 << 64):
+        raise TypeError(
+            "root seed must be an unsigned 64-bit built-in integer"
+        )
     encoded_path = b"".join(segment.canonical_bytes() for segment in path)
     digest = hashlib.blake2b(
         _NAMESPACE + root_seed.to_bytes(8, "big") + encoded_path,
         digest_size=8,
     ).digest()
     return int.from_bytes(digest, "big")
+
+
 def bind_run_seed(root_seed, roots) -> None:
     """Bind each stochastic leaf once, cancelling every claim on failure."""
     if root_seed is not None and (
@@ -22,6 +151,7 @@ def bind_run_seed(root_seed, roots) -> None:
     active = set()
     paths = set()
     plan = []
+
     def encoded(path):
         return b"".join(segment.canonical_bytes() for segment in path)
 
@@ -91,6 +221,8 @@ def bind_run_seed(root_seed, roots) -> None:
         raise
     for component, reservation in acquired:
         component.commit_run_seed(reservation)
+
+
 def _render(path: tuple[RunSeedPathSegment, ...]) -> str:
     return ".".join(
         segment.value

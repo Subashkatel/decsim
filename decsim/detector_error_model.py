@@ -10,7 +10,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import math
+from types import MappingProxyType
 from typing import Optional
+
+from .message import WindowProtocol
 
 
 class FaultRepresentation(Enum):
@@ -79,7 +82,14 @@ LINKED_FAULT_MODELS_REQUIRED = DecoderFaultModelRequirement(
 
 @dataclass(frozen=True)
 class PlacedFaultModel:
-    """Column-aligned arrays for one explicitly named fault domain."""
+    """One decoder matrix whose columns all describe the same fault domain.
+
+    ``owned`` says which selected columns this window may commit.
+    ``future_flips`` is the forward-only handoff used by Sliding decoding.
+    ``boundary_flips`` stores each owned column's complete global detector
+    effect for dependency-aware delivery in either time direction.
+    ``source_fault_ids`` maps every local column back to the global catalog.
+    """
 
     representation: FaultRepresentation
     check: "object"
@@ -88,6 +98,7 @@ class PlacedFaultModel:
     owned: "object"
     future_flips: dict
     source_fault_ids: tuple[int, ...]
+    boundary_flips: dict
 
     def __post_init__(self) -> None:
         import numpy as np
@@ -99,6 +110,13 @@ class PlacedFaultModel:
                 dtype=source.dtype,
             ).reshape(source.shape)
             object.__setattr__(self, field_name, frozen)
+        object.__setattr__(self, "source_fault_ids", tuple(self.source_fault_ids))
+        for field_name in ("future_flips", "boundary_flips"):
+            frozen_mapping = MappingProxyType({
+                int(column): tuple(int(detector_id) for detector_id in detector_ids)
+                for column, detector_ids in getattr(self, field_name).items()
+            })
+            object.__setattr__(self, field_name, frozen_mapping)
 
 
 @dataclass(frozen=True)
@@ -146,8 +164,8 @@ class WindowErrorModel:
 
     @property
     def has_leading_buffer(self) -> bool:
-        """True when ``buffer_lo < commit_lo`` (two-sided parallel A/B window with lookback)."""
-        # ref: Skoric 2209.08552 sec. III.C, Tan 2209.09219 Eq. S10 (w = s + 2b)
+        """True when ``buffer_lo < commit_lo`` (a two-sided buffered window)."""
+        # ref: Skoric 2209.08552 sec. I.C; Tan 2209.09219 supp. sec. S2.D
         return self.buffer_lo < self.commit_lo
 
 
@@ -521,20 +539,36 @@ def validate_belief_matching_matrices(
             )
 
 
+def _odd_component_keys(record, validator) -> tuple:
+    """Return component identities that occur oddly within one instruction.
+
+    Stim's ``^`` separator partitions one correlated error mechanism; it does
+    not create independent Bernoulli faults. Equal components therefore cancel
+    modulo two before probabilities are merged across independent instructions.
+    """
+    odd: dict = {}
+    for component in record.components:
+        key = validator(
+            component.detectors,
+            component.logical_observables,
+            location=(
+                f"error {record.error_ordinal} component "
+                f"{component.component_ordinal}"
+            ),
+        )
+        assert key is not None
+        if key in odd:
+            del odd[key]
+        else:
+            odd[key] = None
+    return tuple(odd)
+
+
 def detector_error_model_to_faults(dem) -> tuple:
     """Convert a Stim detector error model into merged fault columns."""
     merged: dict = {}
     for record in canonical_error_instructions(dem):
-        for component in record.components:
-            key = validate_fault_identity(
-                component.detectors,
-                component.logical_observables,
-                location=(
-                    f"error {record.error_ordinal} component "
-                    f"{component.component_ordinal}"
-                ),
-            )
-            assert key is not None
+        for key in _odd_component_keys(record, validate_fault_identity):
             current_probability = merged.get(key, 0.0)
             merged[key] = _merge_probability(
                 current_probability,
@@ -545,65 +579,6 @@ def detector_error_model_to_faults(dem) -> tuple:
     priors = list(merged.values())
     return det_sets, obs_sets, priors
 
-
-def detector_error_model_to_faults_bm(dem) -> tuple:
-    """Return decomposed edge faults plus belief-matching hyperedge data."""
-    import numpy as np
-
-    edge_merged: dict = {}
-    hyper_merged: dict = {}
-    hyper_list: list = []
-    h2e_pairs: set = set()
-
-    for record in canonical_error_instructions(dem):
-        hyperedge_key = (
-            record.aggregate_detectors,
-            record.aggregate_logical_observables,
-        )
-
-        hyperedge_index = hyper_merged.get(hyperedge_key)
-        is_first_decomposition = hyperedge_index is None
-        if is_first_decomposition:
-            hyperedge_index = len(hyper_list)
-            hyper_merged[hyperedge_key] = hyperedge_index
-            hyper_list.append([hyperedge_key[0], hyperedge_key[1], 0.0])
-        hyper_list[hyperedge_index][2] = _merge_probability(
-            hyper_list[hyperedge_index][2],
-            record.probability,
-        )
-
-        for component in record.components:
-            component_key = validate_graphlike_fault(
-                component.detectors,
-                component.logical_observables,
-                location=(
-                    f"error {record.error_ordinal} component "
-                    f"{component.component_ordinal}"
-                ),
-            )
-            assert component_key is not None
-            current = edge_merged.get(component_key, 0.0)
-            edge_merged[component_key] = _merge_probability(
-                current,
-                record.probability,
-            )
-            if is_first_decomposition:
-                pair = (hyperedge_index, component_key)
-                if pair in h2e_pairs:
-                    h2e_pairs.remove(pair)
-                else:
-                    h2e_pairs.add(pair)
-
-    edge_keys = list(edge_merged)
-    edge_index = {k: i for i, k in enumerate(edge_keys)}
-    hyperedge_to_edge = np.zeros((len(edge_keys), len(hyper_list)), dtype=np.uint8)
-    for hyperedge_index, component_key in h2e_pairs:
-        hyperedge_to_edge[edge_index[component_key], hyperedge_index] = 1
-
-    return ([k[0] for k in edge_keys], [k[1] for k in edge_keys],
-            [edge_merged[k] for k in edge_keys],
-            [h[0] for h in hyper_list], [h[2] for h in hyper_list],
-            hyperedge_to_edge)
 
 
 def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
@@ -679,12 +654,20 @@ def _detector_position_in_round(round_of: dict) -> dict:
 
 
 def _parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
-    """Normalize a 3-value or 4-value window plan entry."""
+    """Normalize and validate a 3-value or 4-value window plan entry."""
+    if type(window_entry) is not tuple or len(window_entry) not in (3, 4):
+        raise TypeError("window entry must be an exact 3- or 4-int tuple")
+    if any(type(bound) is not int for bound in window_entry):
+        raise TypeError("window bounds must be built-in ints")
+    if any(bound < 1 for bound in window_entry):
+        raise ValueError("window bounds must be positive")
     if len(window_entry) == 4:
-        return window_entry
-
-    commit_lo, commit_hi, buffer_hi = window_entry
-    buffer_lo = commit_lo
+        buffer_lo, commit_lo, commit_hi, buffer_hi = window_entry
+    else:
+        commit_lo, commit_hi, buffer_hi = window_entry
+        buffer_lo = commit_lo
+    if not buffer_lo <= commit_lo <= commit_hi <= buffer_hi:
+        raise ValueError("window geometry bounds are not ordered")
     return buffer_lo, commit_lo, commit_hi, buffer_hi
 
 
@@ -701,9 +684,15 @@ def _detectors_in_window(round_of: dict, buffer_lo: int, buffer_hi: int,
                   if buffer_lo <= round_index <= buffer_hi)
 
 
-def _fault_columns_for_window(det_sets: list, row_index: dict, lead_rows: set,
-                              committed_elsewhere: set) -> list:
-    """Choose the fault columns this window can use."""
+def _fault_columns_for_window(
+    det_sets: list,
+    row_index: dict,
+    lead_rows: set,
+    committed_elsewhere: set,
+    *,
+    include_committed_leading: bool = True,
+) -> list:
+    """Choose candidate columns, excluding causally prior committed faults."""
     columns: list = []
     for fault_index, detectors in enumerate(det_sets):
         touches_window = any(detector_id in row_index for detector_id in detectors)
@@ -716,7 +705,7 @@ def _fault_columns_for_window(det_sets: list, row_index: dict, lead_rows: set,
 
         touches_leading_buffer = any(detector_id in lead_rows
                                      for detector_id in detectors)
-        if touches_leading_buffer:
+        if include_committed_leading and touches_leading_buffer:
             columns.append(fault_index)
     return columns
 
@@ -726,7 +715,24 @@ def _catalog_from_dem(
     representation: FaultRepresentation,
 ) -> _FaultCatalog:
     """Build one independently sourced global fault catalog."""
-    detector_sets, observable_sets, priors = detector_error_model_to_faults(dem)
+    if representation is FaultRepresentation.GRAPHLIKE:
+        detector_sets, observable_sets, priors = detector_error_model_to_faults(dem)
+    else:
+        merged = {}
+        for record in canonical_error_instructions(dem):
+            key = (
+                record.aggregate_detectors,
+                record.aggregate_logical_observables,
+            )
+            validate_fault_identity(
+                *key,
+                location=f"physical Stim error {record.error_ordinal}",
+            )
+            merged[key] = _merge_probability(
+                merged.get(key, 0.0), record.probability)
+        detector_sets = [key[0] for key in merged]
+        observable_sets = [key[1] for key in merged]
+        priors = list(merged.values())
     return _FaultCatalog(
         representation=representation,
         detector_sets=tuple(tuple(values) for values in detector_sets),
@@ -735,14 +741,14 @@ def _catalog_from_dem(
     )
 
 
-def _physical_to_graphlike_catalog_link(
-    decomposed_dem,
-    graphlike_catalog: _FaultCatalog,
-    physical_catalog: _FaultCatalog,
-):
-    """Relate independent catalogs by complete canonical Stim identities."""
+def _prepare_linked_fault_catalogs(decomposed_dem, physical_dem):
+    """Keep distinct physical mechanisms when their graph decompositions differ."""
     import numpy as np
 
+    graphlike_catalog = _catalog_from_dem(
+        decomposed_dem,
+        FaultRepresentation.GRAPHLIKE,
+    )
     graphlike_index = {
         (detectors, observables): index
         for index, (detectors, observables) in enumerate(zip(
@@ -750,71 +756,116 @@ def _physical_to_graphlike_catalog_link(
             graphlike_catalog.observable_sets,
         ))
     }
-    physical_index = {
-        (detectors, observables): index
-        for index, (detectors, observables) in enumerate(zip(
-            physical_catalog.detector_sets,
-            physical_catalog.observable_sets,
-        ))
-    }
-    link = np.zeros(
-        (
-            len(graphlike_catalog.detector_sets),
-            len(physical_catalog.detector_sets),
-        ),
-        dtype=np.uint8,
-    )
-    decomposed_identities: set[tuple[tuple[int, ...], tuple[int, ...]]] = set()
+    mechanisms: dict[
+        tuple[
+            tuple[tuple[int, ...], tuple[int, ...]],
+            tuple[tuple[tuple[int, ...], tuple[int, ...]], ...],
+        ],
+        float,
+    ] = {}
     for record in canonical_error_instructions(decomposed_dem):
         physical_key = (
             record.aggregate_detectors,
             record.aggregate_logical_observables,
         )
-        if physical_key in decomposed_identities:
-            continue
-        decomposed_identities.add(physical_key)
-        try:
-            target_column = physical_index[physical_key]
-        except KeyError as error:
-            raise ValueError(
-                "decomposed Stim model contains a physical identity absent "
-                "from the undecomposed model"
-            ) from error
-        for component in record.components:
-            component_key = (
-                component.detectors,
-                component.logical_observables,
-            )
+        component_keys = tuple(sorted(_odd_component_keys(
+            record,
+            validate_graphlike_fault,
+        )))
+        mechanism_key = (physical_key, component_keys)
+        mechanisms[mechanism_key] = _merge_probability(
+            mechanisms.get(mechanism_key, 0.0),
+            record.probability,
+        )
+
+    physical_detector_sets = []
+    physical_observable_sets = []
+    physical_priors = []
+    link = np.zeros(
+        (len(graphlike_catalog.detector_sets), len(mechanisms)),
+        dtype=np.uint8,
+    )
+    for physical_column, ((physical_key, component_keys), prior) in enumerate(
+        mechanisms.items()
+    ):
+        physical_detector_sets.append(physical_key[0])
+        physical_observable_sets.append(physical_key[1])
+        physical_priors.append(prior)
+        for component_key in component_keys:
             try:
-                component_column = graphlike_index[component_key]
+                graphlike_column = graphlike_index[component_key]
             except KeyError as error:
                 raise ValueError(
-                    "decomposed Stim component is absent from the graphlike "
-                    "fault catalog"
+                    "decomposed Stim component is absent from the graphlike catalog"
                 ) from error
-            link[component_column, target_column] ^= 1
-    if len(decomposed_identities) != len(physical_index):
+            link[graphlike_column, physical_column] = 1
+
+    physical_catalog = _FaultCatalog(
+        representation=FaultRepresentation.PHYSICAL,
+        detector_sets=tuple(physical_detector_sets),
+        observable_sets=tuple(physical_observable_sets),
+        priors=tuple(physical_priors),
+    )
+    undecomposed_catalog = _catalog_from_dem(
+        physical_dem,
+        FaultRepresentation.PHYSICAL,
+    )
+    undecomposed = {
+        (detectors, observables): prior
+        for detectors, observables, prior in zip(
+            undecomposed_catalog.detector_sets,
+            undecomposed_catalog.observable_sets,
+            undecomposed_catalog.priors,
+        )
+    }
+    reconstructed: dict = {}
+    for detectors, observables, prior in zip(
+        physical_catalog.detector_sets,
+        physical_catalog.observable_sets,
+        physical_catalog.priors,
+    ):
+        key = (detectors, observables)
+        reconstructed[key] = _merge_probability(
+            reconstructed.get(key, 0.0), prior)
+    if set(reconstructed) != set(undecomposed) or any(
+        not math.isclose(reconstructed[key], undecomposed[key], rel_tol=0, abs_tol=1e-15)
+        for key in reconstructed
+    ):
         raise ValueError(
-            "not every physical fault has a canonical graphlike decomposition"
+            "decomposed and undecomposed Stim models disagree on physical faults"
         )
-    for physical_key, target_column in physical_index.items():
-        component_columns = np.nonzero(link[:, target_column])[0]
-        derived_detectors = _xor_target_ids(
-            detector_id
-            for component_column in component_columns
-            for detector_id in graphlike_catalog.detector_sets[component_column]
+
+    derived_check = np.zeros(
+        (max((detector_id for detectors in physical_catalog.detector_sets
+              for detector_id in detectors), default=-1) + 1,
+         len(physical_catalog.detector_sets)),
+        dtype=np.uint8,
+    )
+    graph_check = np.zeros(
+        (derived_check.shape[0], len(graphlike_catalog.detector_sets)),
+        dtype=np.uint8,
+    )
+    for column, detectors in enumerate(graphlike_catalog.detector_sets):
+        graph_check[list(detectors), column] = 1
+    for column, detectors in enumerate(physical_catalog.detector_sets):
+        derived_check[list(detectors), column] = 1
+    if not np.array_equal((graph_check @ link) % 2, derived_check):
+        raise ValueError(
+            "physical detector effects do not equal their graphlike components"
         )
+    for physical_column, observable_ids in enumerate(
+        physical_catalog.observable_sets
+    ):
         derived_observables = _xor_target_ids(
             observable_id
-            for component_column in component_columns
-            for observable_id in graphlike_catalog.observable_sets[component_column]
+            for graphlike_column in np.nonzero(link[:, physical_column])[0]
+            for observable_id in graphlike_catalog.observable_sets[graphlike_column]
         )
-        if (derived_detectors, derived_observables) != physical_key:
+        if derived_observables != observable_ids:
             raise ValueError(
-                f"physical fault {target_column} does not equal the complete "
-                "detector-and-observable XOR of its graphlike components"
+                "physical logical effects do not equal their graphlike components"
             )
-    return link
+    return graphlike_catalog, physical_catalog, link
 
 
 def _prepare_fault_catalogs(
@@ -827,37 +878,45 @@ def _prepare_fault_catalogs(
             "fault_model_requirement must be a DecoderFaultModelRequirement"
         )
     catalogs: dict[FaultRepresentation, _FaultCatalog] = {}
-    decomposed_dem = None
+    if requirement.require_physical_to_graphlike_link:
+        graphlike, physical, link = _prepare_linked_fault_catalogs(
+            circuit.detector_error_model(decompose_errors=True),
+            circuit.detector_error_model(decompose_errors=False),
+        )
+        catalogs[FaultRepresentation.GRAPHLIKE] = graphlike
+        catalogs[FaultRepresentation.PHYSICAL] = physical
+        return catalogs, link
+
     if FaultRepresentation.GRAPHLIKE in requirement.representations:
-        decomposed_dem = circuit.detector_error_model(decompose_errors=True)
         catalogs[FaultRepresentation.GRAPHLIKE] = _catalog_from_dem(
-            decomposed_dem,
+            circuit.detector_error_model(decompose_errors=True),
             FaultRepresentation.GRAPHLIKE,
         )
     if FaultRepresentation.PHYSICAL in requirement.representations:
-        physical_dem = circuit.detector_error_model(decompose_errors=False)
         catalogs[FaultRepresentation.PHYSICAL] = _catalog_from_dem(
-            physical_dem,
+            circuit.detector_error_model(decompose_errors=False),
             FaultRepresentation.PHYSICAL,
         )
-    link = None
-    if requirement.require_physical_to_graphlike_link:
-        assert decomposed_dem is not None
-        link = _physical_to_graphlike_catalog_link(
-            decomposed_dem,
-            catalogs[FaultRepresentation.GRAPHLIKE],
-            catalogs[FaultRepresentation.PHYSICAL],
-        )
-    return catalogs, link
+    return catalogs, None
 
 
-def _fault_owned_by_window(fault_index: int, fault_rounds: list,
-                           committed_elsewhere: set, unowned_faults: set,
-                           commit_lo: int,
-                           commit_hi: int, *, is_last: bool) -> bool:
+def _fault_owned_by_window(
+    fault_index: int,
+    fault_rounds: list,
+    committed_elsewhere: set,
+    unowned_faults: set,
+    explicitly_owned_faults: Optional[set],
+    commit_lo: int,
+    commit_hi: int,
+    *,
+    is_last: bool,
+) -> bool:
     """True when this window is responsible for committing the fault."""
-    if (fault_index in committed_elsewhere
-            or fault_index in unowned_faults):
+    if fault_index in unowned_faults:
+        return False
+    if explicitly_owned_faults is not None:
+        return fault_index in explicitly_owned_faults
+    if fault_index in committed_elsewhere:
         return False
     if is_last:
         return True
@@ -892,15 +951,17 @@ def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
                          det_sets: list, obs_sets: list, n_obs: int,
                          round_of: dict, fault_rounds: list,
                          committed_elsewhere: set, unowned_faults: set,
+                         explicitly_owned_faults: Optional[set],
                          commit_lo: int,
                          commit_hi: int, is_last: bool) -> tuple:
-    """Build check, observable, ownership, and future-defect arrays."""
+    """Build check, observable, ownership, and residual-defect arrays."""
     import numpy as np
 
     check = np.zeros((len(rows), len(columns)), dtype=np.uint8)
     obs = np.zeros((n_obs, len(columns)), dtype=np.uint8)
     owned = np.zeros(len(columns), dtype=bool)
     future_flips: dict = {}
+    boundary_flips: dict = {}
 
     for column_index, fault_index in enumerate(columns):
         _fill_detector_and_observable_columns(
@@ -909,46 +970,24 @@ def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
 
         owns_fault = _fault_owned_by_window(
             fault_index, fault_rounds, committed_elsewhere, unowned_faults,
-            commit_lo, commit_hi, is_last=is_last)
+            explicitly_owned_faults, commit_lo, commit_hi, is_last=is_last)
         if not owns_fault:
             continue
 
         owned[column_index] = True
-        committed_elsewhere.add(fault_index)
+        if explicitly_owned_faults is None:
+            committed_elsewhere.add(fault_index)
         beyond_commit = _future_flips_after_commit(
             det_sets, round_of, fault_index, commit_hi, is_last=is_last)
         if beyond_commit:
             future_flips[column_index] = beyond_commit
+        # Keep the complete global detector effect. The destination intersects
+        # it with its own rows, so the same correction can travel left or right.
+        detector_effect = tuple(det_sets[fault_index])
+        if detector_effect:
+            boundary_flips[column_index] = detector_effect
 
-    return check, obs, owned, future_flips
-
-
-def _defect_positions(future_flips: dict, round_of: dict, pos_of: dict) -> dict:
-    """Return detector positions for artificial defects handed forward."""
-    return {
-        detector_id: (round_of[detector_id], pos_of[detector_id])
-        for flips in future_flips.values()
-        for detector_id in flips
-    }
-
-
-def _window_geometry(round_of: dict, det_sets: list, committed_elsewhere: set,
-                     buffer_lo: int, commit_lo: int,
-                     buffer_hi: int, *, is_last: bool) -> tuple:
-    """Return rows, row index, and columns for one sliced window."""
-    rows = _detectors_in_window(round_of, buffer_lo, buffer_hi, is_last=is_last)
-    row_index = {
-        detector_id: row_number
-        for row_number, detector_id in enumerate(rows)
-    }
-    lead_rows = {
-        detector_id
-        for detector_id in rows
-        if round_of[detector_id] < commit_lo
-    }
-    columns = _fault_columns_for_window(
-        det_sets, row_index, lead_rows, committed_elsewhere)
-    return rows, row_index, columns
+    return check, obs, owned, future_flips, boundary_flips
 
 
 def _validate_fault_exclusion_ranges(fault_exclusion_ranges: tuple) -> None:
@@ -960,10 +999,10 @@ def _validate_fault_exclusion_ranges(fault_exclusion_ranges: tuple) -> None:
             raise TypeError(
                 "each fault-exclusion range must be an integer "
                 f"(lo, hi) pair, got {exclusion!r}") from error
-        if not all(isinstance(endpoint, int)
+        if not all(type(endpoint) is int
                    for endpoint in (exclude_lo, exclude_hi)):
             raise TypeError(
-                "each fault-exclusion range must be an integer "
+                "each fault-exclusion range must use built-in integer "
                 f"(lo, hi) pair, got {exclusion!r}")
         if exclude_lo > exclude_hi:
             raise ValueError(
@@ -996,12 +1035,14 @@ def _placed_faults_for_window(
     n_obs: int,
     round_of: dict[int, int],
     committed_elsewhere: set[int],
+    explicitly_owned_faults: Optional[set[int]],
+    explicitly_prior_faults: Optional[set[int]],
     fault_exclusion_ranges: tuple,
     commit_lo: int,
     commit_hi: int,
     is_last: bool,
 ) -> PlacedFaultModel:
-    """Place one requested catalog using the shared window geometry owner."""
+    """Build one window's local matrix from one global fault catalog."""
     import numpy as np
 
     detector_sets = list(catalog.detector_sets)
@@ -1014,25 +1055,33 @@ def _placed_faults_for_window(
         detector_sets,
         row_index,
         lead_rows,
-        committed_elsewhere,
-    )
-    check, observables, owned, future_flips = _build_window_arrays(
-        rows=rows,
-        columns=columns,
-        row_index=row_index,
-        det_sets=detector_sets,
-        obs_sets=observable_sets,
-        n_obs=n_obs,
-        round_of=round_of,
-        fault_rounds=list(fault_rounds),
-        committed_elsewhere=committed_elsewhere,
-        unowned_faults=_unowned_faults(
-            fault_rounds,
-            fault_exclusion_ranges,
+        (
+            committed_elsewhere
+            if explicitly_prior_faults is None
+            else explicitly_prior_faults
         ),
-        commit_lo=commit_lo,
-        commit_hi=commit_hi,
-        is_last=is_last,
+        include_committed_leading=(explicitly_prior_faults is None),
+    )
+    check, observables, owned, future_flips, boundary_flips = (
+        _build_window_arrays(
+            rows=rows,
+            columns=columns,
+            row_index=row_index,
+            det_sets=detector_sets,
+            obs_sets=observable_sets,
+            n_obs=n_obs,
+            round_of=round_of,
+            fault_rounds=list(fault_rounds),
+            committed_elsewhere=committed_elsewhere,
+            unowned_faults=_unowned_faults(
+                fault_rounds,
+                fault_exclusion_ranges,
+            ),
+            explicitly_owned_faults=explicitly_owned_faults,
+            commit_lo=commit_lo,
+            commit_hi=commit_hi,
+            is_last=is_last,
+        )
     )
     placed = PlacedFaultModel(
         representation=catalog.representation,
@@ -1045,6 +1094,7 @@ def _placed_faults_for_window(
         owned=owned,
         future_flips=future_flips,
         source_fault_ids=tuple(columns),
+        boundary_flips=boundary_flips,
     )
     if catalog.representation is FaultRepresentation.GRAPHLIKE:
         validate_graphlike_matrices(
@@ -1103,7 +1153,12 @@ def _coordinates_for_rows(circuit, rows: list[int]):
 
 
 class WindowSlicer:
-    """Incremental single owner of window geometry and per-domain placement."""
+    """Build local matrices from one global model in every requested domain.
+
+    Direct callers may advance ownership window by window. Static planners can
+    instead supply a precomputed owner set so construction order cannot change
+    which window commits a fault.
+    """
 
     def __init__(
         self,
@@ -1119,11 +1174,14 @@ class WindowSlicer:
             circuit,
             fault_model_requirement,
         )
-        self.n_obs = (
-            num_observables
-            if num_observables is not None
-            else circuit.num_observables
-        )
+        if num_observables is not None:
+            if type(num_observables) is not int:
+                raise TypeError("num_observables must be a built-in int")
+            if num_observables != circuit.num_observables:
+                raise ValueError(
+                    "num_observables must equal the circuit observable count"
+                )
+        self.n_obs = circuit.num_observables
         self.round_of = resolve_detector_rounds(
             circuit, detector_rounds, round_count
         )
@@ -1142,8 +1200,27 @@ class WindowSlicer:
         *,
         is_last: bool,
         fault_exclusion_ranges: tuple = (),
+        explicitly_owned_faults: Optional[dict] = None,
+        explicitly_prior_faults: Optional[dict] = None,
     ) -> WindowErrorModel:
-        """Create one model and advance ownership in every requested domain."""
+        """Create one local model and update incremental ownership if used."""
+        explicit_values = (
+            explicitly_owned_faults,
+            explicitly_prior_faults,
+        )
+        if (explicit_values[0] is None) != (explicit_values[1] is None):
+            raise ValueError(
+                "explicit owner and predecessor fault maps must be supplied together"
+            )
+        if explicit_values[0] is not None:
+            expected_representations = set(self.catalogs)
+            if (
+                set(explicitly_owned_faults) != expected_representations
+                or set(explicitly_prior_faults) != expected_representations
+            ):
+                raise ValueError(
+                    "explicit fault maps must exactly match the requested representations"
+                )
         _validate_fault_exclusion_ranges(fault_exclusion_ranges)
         rows = _detectors_in_window(
             self.round_of,
@@ -1169,6 +1246,16 @@ class WindowSlicer:
                 n_obs=self.n_obs,
                 round_of=self.round_of,
                 committed_elsewhere=self.committed_elsewhere[representation],
+                explicitly_owned_faults=(
+                    None
+                    if explicitly_owned_faults is None
+                    else explicitly_owned_faults[representation]
+                ),
+                explicitly_prior_faults=(
+                    None
+                    if explicitly_prior_faults is None
+                    else explicitly_prior_faults[representation]
+                ),
                 fault_exclusion_ranges=fault_exclusion_ranges,
                 commit_lo=commit_lo,
                 commit_hi=commit_hi,
@@ -1186,10 +1273,10 @@ class WindowSlicer:
                 physical,
                 self.catalog_link,
             )
-        future_flips = {
+        residual_rows = set(rows) | {
             detector_id
             for fault_view in placed.values()
-            for flips in fault_view.future_flips.values()
+            for flips in fault_view.boundary_flips.values()
             for detector_id in flips
         }
         return WindowErrorModel(
@@ -1201,13 +1288,242 @@ class WindowSlicer:
                     self.round_of[detector_id],
                     self.pos_of[detector_id],
                 )
-                for detector_id in future_flips
+                for detector_id in residual_rows
             },
             graphlike_faults=graphlike,
             physical_faults=physical,
             physical_to_graphlike_detector_projection=local_link,
             commit_lo=commit_lo,
             buffer_lo=buffer_lo,
+        )
+
+
+def _dependency_depths(window_count: int, dependency_edges: tuple) -> tuple[int, ...]:
+    """Validate the dependency DAG and return each window's depth."""
+    predecessors = [set() for _ in range(window_count)]
+    seen = set()
+    for edge in dependency_edges:
+        if (
+            type(edge) is not tuple
+            or len(edge) != 2
+            or any(type(index) is not int for index in edge)
+        ):
+            raise TypeError("window dependencies must be exact (int, int) pairs")
+        source, destination = edge
+        if (
+            source < 0
+            or destination < 0
+            or source >= window_count
+            or destination >= window_count
+            or source == destination
+        ):
+            raise ValueError("window dependency is out of range or self-directed")
+        if edge in seen:
+            raise ValueError("window dependencies must be unique")
+        seen.add(edge)
+        predecessors[destination].add(source)
+
+    depths: list[Optional[int]] = [None] * window_count
+    while any(depth is None for depth in depths):
+        progressed = False
+        for window_index, incoming in enumerate(predecessors):
+            if depths[window_index] is not None:
+                continue
+            if any(depths[source] is None for source in incoming):
+                continue
+            depths[window_index] = (
+                0
+                if not incoming
+                else 1 + max(depths[source] for source in incoming)
+            )
+            progressed = True
+        if not progressed:
+            raise ValueError("window dependencies must form an acyclic graph")
+    return tuple(depth for depth in depths if depth is not None)
+
+
+def _dependency_ancestors(
+    window_count: int,
+    dependency_edges: tuple,
+    depths: tuple[int, ...],
+) -> tuple[frozenset[int], ...]:
+    """Return every direct and indirect predecessor of each window."""
+    incoming = [set() for _ in range(window_count)]
+    for source, destination in dependency_edges:
+        incoming[destination].add(source)
+    ancestors = [set() for _ in range(window_count)]
+    for destination in sorted(range(window_count), key=depths.__getitem__):
+        for source in incoming[destination]:
+            ancestors[destination].add(source)
+            ancestors[destination].update(ancestors[source])
+    return tuple(frozenset(nodes) for nodes in ancestors)
+
+
+def _explicit_prior_faults(
+    ownership: tuple[dict[FaultRepresentation, set[int]], ...],
+    ancestors: tuple[frozenset[int], ...],
+) -> tuple[dict[FaultRepresentation, set[int]], ...]:
+    """Collect the faults owned by each window's predecessors."""
+    representations = tuple(ownership[0])
+    return tuple(
+        {
+            representation: set().union(*(
+                ownership[ancestor][representation]
+                for ancestor in ancestor_indices
+            ))
+            for representation in representations
+        }
+        for ancestor_indices in ancestors
+    )
+
+
+def _explicit_fault_ownership(
+    slicer: WindowSlicer,
+    entries: tuple[tuple[int, int, int, int], ...],
+    depths: tuple[int, ...],
+    *,
+    round_count: int,
+) -> tuple[dict[FaultRepresentation, set[int]], ...]:
+    """Assign each fault to one shallowest commit window in the DAG.
+
+    Equal-depth ambiguity is rejected. A plan that covers the full operation
+    must assign every fault in every requested representation.
+    """
+    ownership = [
+        {representation: set() for representation in slicer.catalogs}
+        for _ in entries
+    ]
+    covers_full_operation = (
+        entries[0][1] == 1 and entries[-1][2] == round_count
+    )
+    for representation, catalog in slicer.catalogs.items():
+        for fault_index, detector_ids in enumerate(catalog.detector_sets):
+            candidates = [
+                window_index
+                for window_index, (_, commit_lo, commit_hi, _) in enumerate(entries)
+                if any(
+                    commit_lo <= slicer.round_of[detector_id] <= commit_hi
+                    for detector_id in detector_ids
+                )
+            ]
+            if not candidates:
+                if covers_full_operation:
+                    raise ValueError(
+                        f"{representation.value} fault {fault_index} touches no "
+                        "window commit region"
+                    )
+                continue
+            earliest_depth = min(depths[index] for index in candidates)
+            earliest = [
+                index for index in candidates
+                if depths[index] == earliest_depth
+            ]
+            if len(earliest) != 1:
+                raise ValueError(
+                    f"{representation.value} fault {fault_index} straddles "
+                    "independent commit regions without a causal owner"
+                )
+            ownership[earliest[0]][representation].add(fault_index)
+    return tuple(ownership)
+
+
+def _validate_closed_temporal_boundary_windows(
+    slicer: WindowSlicer,
+    models: list[WindowErrorModel],
+    dependency_edges: Optional[tuple],
+    closed_windows: tuple[int, ...],
+) -> None:
+    """Reject a declared closed time boundary if it cuts a global fault."""
+    if type(closed_windows) is not tuple:
+        raise TypeError(
+            "closed_temporal_boundary_windows must be an exact tuple"
+        )
+    if (
+        any(type(window_index) is not int for window_index in closed_windows)
+        or len(set(closed_windows)) != len(closed_windows)
+    ):
+        raise TypeError(
+            "closed temporal boundary window indices must be unique exact ints"
+        )
+    if not closed_windows:
+        return
+    if dependency_edges is None:
+        raise ValueError(
+            "closed temporal boundaries require explicit dependency edges"
+        )
+    destinations = {destination for _, destination in dependency_edges}
+    for window_index in closed_windows:
+        if window_index < 0 or window_index >= len(models):
+            raise ValueError("closed temporal boundary window is out of range")
+        if window_index not in destinations:
+            raise ValueError(
+                "closed temporal boundary window must be a dependency destination"
+            )
+        model = models[window_index]
+        local_detector_ids = set(model.detector_ids)
+        for representation, catalog in slicer.catalogs.items():
+            faults = model.require_faults(representation)
+            for source_fault_id in faults.source_fault_ids:
+                global_detector_ids = set(
+                    catalog.detector_sets[source_fault_id]
+                )
+                local_effect = global_detector_ids & local_detector_ids
+                if local_effect and local_effect != global_detector_ids:
+                    raise ValueError(
+                        f"{representation.value} closed temporal boundary "
+                        f"window {window_index} truncates global fault "
+                        f"{source_fault_id}; a smooth B boundary cannot "
+                        "contain an artificial boundary generator"
+                    )
+
+
+def _validate_window_protocol(
+    entries: tuple[tuple[int, int, int, int], ...],
+    window_protocol: WindowProtocol,
+    dependency_edges: Optional[tuple],
+    closed_windows: tuple[int, ...],
+    fault_model_requirement: DecoderFaultModelRequirement,
+) -> None:
+    """Fail closed unless a Tan plan has the exact zero-seam contract."""
+    if type(window_protocol) is not WindowProtocol:
+        raise TypeError("window_protocol must be an exact WindowProtocol")
+    if window_protocol is WindowProtocol.GENERIC:
+        return
+    if window_protocol is not WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE:
+        raise ValueError("unsupported window protocol")
+
+    seam_indices = tuple(range(1, len(entries), 2))
+    if seam_indices and fault_model_requirement.representations != frozenset({
+        FaultRepresentation.GRAPHLIKE
+    }):
+        raise ValueError(
+            "Tan's validated zero-seam memory construction requires exactly the "
+            "graphlike correction-edge representation"
+        )
+    if tuple(sorted(closed_windows)) != seam_indices:
+        raise ValueError(
+            "every Tan type-2 seam, and only a seam, must be temporally closed"
+        )
+    for seam_index in seam_indices:
+        buffer_lo, commit_lo, commit_hi, buffer_hi = entries[seam_index]
+        if not buffer_lo == commit_lo == commit_hi == buffer_hi:
+            raise ValueError("a zero-offset Tan type-2 seam must be one detector layer")
+    expected_edges = tuple(
+        edge
+        for seam_index in seam_indices
+        for edge in ((seam_index - 1, seam_index),
+                     (seam_index + 1, seam_index))
+    )
+    if (
+        dependency_edges is None and expected_edges
+        or dependency_edges is not None
+        and (
+            set(dependency_edges) != set(expected_edges)
+            or len(dependency_edges) != len(expected_edges)
+        )
+    ):
+        raise ValueError(
+            "each Tan type-2 seam must depend on its two adjacent type-1 tasks"
         )
 
 
@@ -1220,8 +1536,43 @@ def build_window_error_models(
     detector_rounds: Optional[dict] = None,
     fault_model_requirement: DecoderFaultModelRequirement,
     fault_exclusion_ranges: tuple,
+    dependency_edges: Optional[tuple] = None,
+    closed_temporal_boundary_windows: tuple[int, ...] = (),
+    window_protocol: WindowProtocol = WindowProtocol.GENERIC,
 ) -> list:
-    """Slice an operation circuit into one typed model per planned window."""
+    """Slice one operation's global model into local decoder matrices.
+
+    With ``dependency_edges``, ownership is compiled from the dependency DAG
+    and predecessor-owned faults are removed from successor candidates. Without
+    those edges, the slicer advances ownership in list order; that path is used
+    by forward-only and dynamic Sliding construction. Indices listed in
+    ``closed_temporal_boundary_windows`` are checked after slicing and rejected
+    if any local column cuts a global fault into an artificial boundary edge.
+    A contiguous partial plan is allowed for runtime suffix re-slicing. Its last
+    window is terminal only when its commit region reaches ``round_count``;
+    faults wholly outside the segment remain unowned.
+    """
+    entries = tuple(_parse_window_entry(window_entry) for window_entry in plan)
+    if not entries:
+        raise ValueError("window plan must contain at least one entry")
+    _validate_window_protocol(
+        entries,
+        window_protocol,
+        dependency_edges,
+        closed_temporal_boundary_windows,
+        fault_model_requirement,
+    )
+    next_commit_round = entries[0][1]
+    for _, commit_lo, commit_hi, _ in entries:
+        if commit_lo != next_commit_round:
+            raise ValueError(
+                "window commit regions must be contiguous in plan order "
+                "without gaps or overlaps"
+            )
+        if commit_hi > round_count:
+            raise ValueError("window commit region exceeds round_count")
+        next_commit_round = commit_hi + 1
+
     slicer = WindowSlicer(
         circuit,
         num_observables,
@@ -1229,15 +1580,66 @@ def build_window_error_models(
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
     )
-    last_window = len(plan) - 1
-    return [
-        slicer.slice_window(
-            *_parse_window_entry(window_entry),
-            is_last=(window_index == last_window),
-            fault_exclusion_ranges=fault_exclusion_ranges,
+    ownership = None
+    prior_faults = None
+    if dependency_edges is not None:
+        depths = _dependency_depths(len(entries), dependency_edges)
+        ancestors = _dependency_ancestors(
+            len(entries), dependency_edges, depths)
+        ownership = _explicit_fault_ownership(
+            slicer,
+            entries,
+            depths,
+            round_count=round_count,
         )
-        for window_index, window_entry in enumerate(plan)
+        prior_faults = _explicit_prior_faults(ownership, ancestors)
+    last_window = len(entries) - 1
+    models = [
+        slicer.slice_window(
+            *window_entry,
+            is_last=(
+                window_index == last_window
+                and entries[-1][2] == round_count
+            ),
+            fault_exclusion_ranges=fault_exclusion_ranges,
+            explicitly_owned_faults=(
+                None if ownership is None else ownership[window_index]
+            ),
+            explicitly_prior_faults=(
+                None if prior_faults is None else prior_faults[window_index]
+            ),
+        )
+        for window_index, window_entry in enumerate(entries)
     ]
+    _validate_closed_temporal_boundary_windows(
+        slicer,
+        models,
+        dependency_edges,
+        closed_temporal_boundary_windows,
+    )
+    if (
+        ownership is not None
+        and entries[0][1] == 1
+        and entries[-1][2] == round_count
+        and not fault_exclusion_ranges
+    ):
+        for representation, catalog in slicer.catalogs.items():
+            owned = {
+                source_fault_id
+                for model in models
+                for faults in [model.require_faults(representation)]
+                for source_fault_id, is_owned in zip(
+                    faults.source_fault_ids,
+                    faults.owned,
+                )
+                if is_owned
+            }
+            if owned != set(range(len(catalog.detector_sets))):
+                raise RuntimeError(
+                    f"{representation.value} dependency ownership does not "
+                    "partition the full fault catalog"
+                )
+    return models
 
 
 def _build_single_window_error_model(
@@ -1316,13 +1718,13 @@ def decode_windowed(
     *,
     selected_fault_representation: FaultRepresentation,
 ) -> "object":
-    """Decode one shot by walking the committed windows in order.
+    """Decode one shot through a forward-only sliding-window chain.
 
-    Two-sided/parallel A/B windows (any window with a leading buffer) decode
-    independently and must NOT forward artificial defects -- that would double-count
-    the boundary error; forward-only sliding windows push them forward instead.
+    Parallel block A/B decoding needs a dependency-aware seam stage and
+    residual-syndrome handoff. This list-ordered helper intentionally rejects
+    leading-buffer models instead of approximating that different algorithm.
     """
-    # ref: Skoric 2209.08552, Tan 2209.09219
+    # ref: Skoric 2209.08552 sec. I.B; Tan 2209.09219 supp. sec. S2.C
     logical_prediction, _ = _walk_windowed(
         window_models,
         detection_events,
@@ -1377,20 +1779,29 @@ def _walk_windowed(
 
     if not window_models:
         raise ValueError("windowed decode requires at least one window model")
-    two_sided = any(model.has_leading_buffer for model in window_models)
+    if any(model.has_leading_buffer for model in window_models):
+        raise ValueError(
+            "list-ordered decode_windowed supports only forward sliding windows; "
+            "parallel A/B windows require dependency-aware seam reconciliation"
+        )
     pending: set = set()
+    last_window_for_detector = {
+        detector_id: window_index
+        for window_index, model in enumerate(window_models)
+        for detector_id in model.detector_ids
+    }
     first_faults = window_models[0].require_faults(
         selected_fault_representation
     )
     total = np.zeros(first_faults.observables.shape[0], dtype=np.uint8)
     outcomes = []
-    for model in window_models:
+    for window_index, model in enumerate(window_models):
         faults = model.require_faults(selected_fault_representation)
         syndrome = detection_events[list(model.detector_ids)].astype(np.uint8).copy()
-        if not two_sided:
-            for detector_index, detector_id in enumerate(model.detector_ids):
-                if detector_id in pending:
-                    syndrome[detector_index] ^= 1
+        for detector_index, detector_id in enumerate(model.detector_ids):
+            if detector_id in pending:
+                syndrome[detector_index] ^= 1
+                if last_window_for_detector[detector_id] == window_index:
                     pending.discard(detector_id)
 
         decoded = decode_window(model, syndrome)
@@ -1415,11 +1826,10 @@ def _walk_windowed(
             )
         committed = selected.astype(bool) & faults.owned
         total ^= (faults.observables @ committed.astype(np.uint8)) % 2
-        if not two_sided:
-            for column_index in np.nonzero(committed)[0]:
-                for detector_id in faults.future_flips.get(int(column_index), ()):
-                    pending.symmetric_difference_update({detector_id})
-    if not two_sided and pending:
+        for column_index in np.nonzero(committed)[0]:
+            for detector_id in faults.future_flips.get(int(column_index), ()):
+                pending.symmetric_difference_update({detector_id})
+    if pending:
         raise RuntimeError(f"artificial defects were never consumed: {sorted(pending)}"
                            ". The plan does not cover the full detector stream.")
     return total, tuple(outcomes)

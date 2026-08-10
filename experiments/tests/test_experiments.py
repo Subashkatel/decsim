@@ -324,6 +324,21 @@ def test_sample_plan_is_stable_and_separates_experiment_seeds():
     assert offline.sample_set_id != other_seed.sample_set_id
 
 
+@pytest.mark.parametrize("seed", [True, -1, 1 << 64, 1.0])
+def test_offline_seed_domain_is_explicit(seed):
+    with pytest.raises(TypeError, match="unsigned 64-bit"):
+        SamplePlan.create("experiment", seed, {"circuit": "memory"})
+    with pytest.raises(TypeError, match="unsigned 64-bit"):
+        offline_batch_seed(seed, "sample-set", 0)
+
+
+def test_offline_batch_seed_rejects_invalid_batch_index():
+    with pytest.raises(TypeError, match="nonnegative"):
+        offline_batch_seed(7, "sample-set", True)
+    with pytest.raises(TypeError, match="nonnegative"):
+        offline_batch_seed(7, "sample-set", -1)
+
+
 def test_offline_batch_seed_depends_on_batch_but_not_execution_order():
     plan = SamplePlan.create("experiment", 7, {"circuit": "memory"})
 
@@ -510,6 +525,18 @@ def test_offline_experiment_writes_chunks_and_resumes_without_redecoding(tmp_pat
     ) == summary
     assert len(decoder.calls) == 2
 
+    for chunk_path in tmp_path.rglob("*.csv"):
+        chunk_path.write_text(
+            chunk_path.read_text().replace(
+                plan.sample_set_id, "stale-samples"
+            ),
+            encoding="utf-8",
+        )
+    with pytest.raises(ValueError, match="stale sample_set_id"):
+        run_offline_experiment(
+            decoder, experiment, plan, {"decoder": "test"}, batches, tmp_path
+        )
+
 
 def test_parallel_offline_run_matches_one_worker_byte_for_byte(tmp_path):
     experiment = Experiment(
@@ -628,7 +655,8 @@ def test_surface_runner_executes_real_mwpm_batches(tmp_path):
     result = run_surface_configuration(configuration, tmp_path)
 
     assert result.attempted_shots == 7
-    assert result.window_attempts > result.attempted_shots
+    # R=W is one final all-core QUITS/Tan window per shot.
+    assert result.window_attempts == result.attempted_shots
     assert len(list(tmp_path.rglob("*.csv"))) == 2
 
 
@@ -662,12 +690,10 @@ def test_surface_runner_uses_the_simulator_sliding_window_geometry():
 
     assert _sliding_window_entries(configuration) == (
         (1, 3, 6),
-        (4, 6, 9),
-        (7, 7, 10),
+        (4, 7, 7),
     )
     assert _sliding_window_entries({**configuration, "rounds": 6}) == (
-        (1, 3, 6),
-        (4, 6, 9),
+        (1, 6, 6),
     )
 
 
@@ -736,7 +762,7 @@ def test_surface_runner_folds_terminal_detectors_into_the_final_window():
     }
 
     assert terminal_detector_ids
-    assert decoder.window_models[-1].commit_lo == 4
+    assert decoder.window_models[-1].commit_lo == 1
     assert decoder.window_models[-1].commit_hi == 6
     assert terminal_detector_ids <= set(decoder.window_models[-1].detector_ids)
 

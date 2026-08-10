@@ -6,7 +6,7 @@ import pytest
 from decsim.message import (Decision, DecodeJob, DecodeOutcome,
                             DecodeResult, OpKind, Operation,
                             ResourceClaim, SoftOutput, SoftOutputSource,
-                            SyndromePayload, Window, WindowGraph,
+                            SyndromePayload, Window,
                             stable_identity_bytes,
                             stable_identity_order_key)
 
@@ -76,18 +76,13 @@ def test_decode_job_detector_count_comes_from_its_local_model():
     assert DecodeJob(1, 0, 3, dem=local_model).detector_count == 216
 
 
-def test_window_start_round_and_graph():
-    w = Window(op_id=0, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=9,
-               buffer_lo=1)
-    assert w.start_round == 1
-    w2 = Window(op_id=0, k=0, commit_lo=1, commit_hi=3, buffer_hi=6, n_rounds=6)
-    assert w2.start_round == 1                   # no leading buffer -> commit_lo
-    g = WindowGraph()
-    g.add_window(w2)
-    g.add_window(w)
-    g.wire_dep((0, 0), (0, 1))
-    assert g.windows[(0, 1)].deps_remaining == 1
-    assert (0, 1) in g.windows[(0, 0)].dependents
+def test_window_start_round_uses_leading_buffer_when_present():
+    window = Window(op_id=0, k=1, commit_lo=4, commit_hi=6,
+                    buffer_hi=9, n_rounds=9, buffer_lo=1)
+    assert window.start_round == 1
+    no_leading_buffer = Window(op_id=0, k=0, commit_lo=1, commit_hi=3,
+                               buffer_hi=6, n_rounds=6)
+    assert no_leading_buffer.start_round == 1
 
 
 def test_operation_kind_and_magic_state_rule():

@@ -6,16 +6,14 @@ The final round and ``on_body_done`` occur in the same event.
 from __future__ import annotations
 
 from dataclasses import replace
-import random
-import threading
 from types import MappingProxyType
 from typing import Callable, Optional
 
+from .seeding import _RandomSeedConsumer
 from .message import (
     Operation,
     RunSeedChild,
     RunSeedPathSegment,
-    RunSeedReservation,
     SyndromePayload,
     WINDOW_INPUT_ROUTE,
 )
@@ -61,7 +59,8 @@ class TimingOnlyDevice:
 
     def window_models_for_operation(self, op: Operation, windows: list,
                                     round_count: int, *, fault_model_requirement,
-                                    fault_exclusion_ranges: tuple) -> list:
+                                    fault_exclusion_ranges: tuple,
+                                    window_protocol) -> list:
         return []
 
     def window_model_for_stream(self, stream_id, window, *, is_last: bool):
@@ -213,7 +212,7 @@ class ClockedDevice:
                                                global_round, patch)
 
 
-class SyndromeBitDevice:
+class SyndromeBitDevice(_RandomSeedConsumer):
     """Emit deterministic fake bits to exercise the payload path."""
 
     operation_circuit_scope = "none"
@@ -224,12 +223,7 @@ class SyndromeBitDevice:
         self.code = code
         self.max_bits = max_bits
         self.per_patch = per_patch
-        self._explicit_seed = seed
-        self._rng = random.Random(seed)
-        self._run_seed_lock = threading.Lock()
-        self._pending_run_seed = None
-        self._run_seed_claimed = False
-        self._stochastic_use_started = False
+        self._initialize_run_seed_state(seed)
 
     def run_seed_children(self):
         """Expose the code model that determines payload shape."""
@@ -240,72 +234,6 @@ class SyndromeBitDevice:
             ),
         )
 
-    def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
-        """Prepare a replacement RNG without advancing the active one."""
-        if seed is not None and (
-            type(seed) is not int or not 0 <= seed < (1 << 64)
-        ):
-            raise TypeError(
-                "SyndromeBitDevice run root must be an unsigned 64-bit "
-                f"built-in integer or None; got {seed!r}"
-            )
-        with self._run_seed_lock:
-            if self._stochastic_use_started:
-                raise ValueError(
-                    "SyndromeBitDevice was already used and cannot be rebound"
-                )
-            if self._run_seed_claimed:
-                raise ValueError(
-                    "SyndromeBitDevice is already claimed by a built run"
-                )
-            if self._pending_run_seed is not None:
-                raise ValueError(
-                    "SyndromeBitDevice already has a pending run-seed "
-                    "reservation"
-                )
-            if seed is not None and self._explicit_seed is not None:
-                raise ValueError(
-                    "SyndromeBitDevice has an explicit seed that conflicts "
-                    f"with numeric run root {seed}"
-                )
-            if seed is not None:
-                seed_source = "derived"
-                effective_seed = seed
-            elif self._explicit_seed is not None:
-                if type(self._explicit_seed) is not int:
-                    raise TypeError(
-                        "SyndromeBitDevice explicit seed must be a built-in "
-                        "integer for run provenance"
-                    )
-                seed_source = "explicit_local"
-                effective_seed = self._explicit_seed
-            else:
-                seed_source = "entropy"
-                effective_seed = None
-            reservation = RunSeedReservation(
-                proposed_seed_source=seed_source,
-                proposed_seed=effective_seed,
-                prepared_state=random.Random(effective_seed),
-            )
-            self._pending_run_seed = reservation
-            return reservation
-
-    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._run_seed_lock:
-            if self._pending_run_seed is reservation:
-                self._pending_run_seed = None
-
-    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._run_seed_lock:
-            if self._pending_run_seed is not reservation:
-                raise ValueError(
-                    "SyndromeBitDevice can commit only its exact pending "
-                    "run-seed reservation"
-                )
-            self._rng = reservation.prepared_state
-            self._pending_run_seed = None
-            self._run_seed_claimed = True
-
     def begin_operation(self, op: Operation, segment_round_count: int,
                         source_round_count: int) -> None:
         return None
@@ -313,13 +241,7 @@ class SyndromeBitDevice:
     def _bits(self, num_patches: int) -> list:
         """Fake bits for one payload covering this many patches."""
         bit_count = min(self.code.syndrome_bits_per_round(num_patches), self.max_bits)
-        with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    "SyndromeBitDevice cannot draw while a run-seed "
-                    "reservation is pending"
-                )
-            self._stochastic_use_started = True
+        self._mark_stochastic_use()
         return [self._rng.randint(0, 1) for _ in range(bit_count)]
 
     def round_payloads(self, op: Operation, round_index: int) -> list[SyndromePayload]:
@@ -366,7 +288,8 @@ class SyndromeBitDevice:
 
     def window_models_for_operation(self, op: Operation, windows: list,
                                     round_count: int, *, fault_model_requirement,
-                                    fault_exclusion_ranges: tuple) -> list:
+                                    fault_exclusion_ranges: tuple,
+                                    window_protocol) -> list:
         """Fake-bit decode jobs carry no detector error model."""
         return []
 

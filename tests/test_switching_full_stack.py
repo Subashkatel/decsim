@@ -26,7 +26,7 @@ from decsim.detector_error_model import FaultRepresentation
 from decsim.message import Operation, SeamFaultOwner
 from decsim.mwpm_decoder import PyMatchingDecoder, UnweightedPyMatchingDecoder
 from decsim.planner import FixedRounds
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.soft_output import (
     COMPLEMENTARY_GAP_SOURCE,
     ComplementaryGapMetricFactory,
@@ -82,7 +82,9 @@ def _run(threshold, d=3, rounds=9, seed=7, double_window=False, device=None):
               num_units=1,
               rounds_policy=FixedRounds(rounds),
               code=SurfaceCodeModel(d=d),
-              scheme=SlidingWindowScheme(),
+              scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
               strategy=Switching(confidence_threshold=threshold,
                                  expected_source=COMPLEMENTARY_GAP_SOURCE,
                                  double_window=double_window),
@@ -144,7 +146,9 @@ def test_never_escalating_matches_weak_only():
                    num_units=1,
                    rounds_policy=FixedRounds(9),
                    code=SurfaceCodeModel(d=3),
-                   scheme=SlidingWindowScheme(),
+                   scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
                    device=StimDevice(),
                    decoder=SoftOutputDecoder(UnweightedPyMatchingDecoder(_Latency()),
                                   ComplementaryGapMetricFactory()),
@@ -279,10 +283,7 @@ def test_double_window_full_stack_faithful_start_and_same_shot_truth():
 def test_nonaligned_double_window_partitions_linked_fault_models_exactly():
     """The strong slab plus rephased suffix own every global fault once."""
     from decsim.decoders import SampledConfidenceDecoder
-    from decsim.detector_error_model import (
-        LINKED_FAULT_MODELS_REQUIRED,
-        detector_error_model_to_faults,
-    )
+    from decsim.detector_error_model import LINKED_FAULT_MODELS_REQUIRED
     from decsim.message import DecodeResult
 
     class LinkedFixedDecoder:
@@ -323,7 +324,9 @@ def test_nonaligned_double_window_partitions_linked_fault_models_exactly():
             commit_rounds_override=7,
             buffer_rounds_override=3,
         ),
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=Switching(
             confidence_threshold=0.5,
             expected_source=SAMPLED_CONFIDENCE_SOURCE,
@@ -339,13 +342,17 @@ def test_nonaligned_double_window_partitions_linked_fault_models_exactly():
         runtime.window_models[(0, window_index)]
         for window_index in range(2, 7)
     ] + [strong.jobs[0].dem]
-    catalog_sizes = {
-        FaultRepresentation.GRAPHLIKE: len(detector_error_model_to_faults(
-            circuit.detector_error_model(decompose_errors=True))[0]),
-        FaultRepresentation.PHYSICAL: len(detector_error_model_to_faults(
-            circuit.detector_error_model(decompose_errors=False))[0]),
-    }
-    for representation, catalog_size in catalog_sizes.items():
+    for representation in (
+        FaultRepresentation.GRAPHLIKE,
+        FaultRepresentation.PHYSICAL,
+    ):
+        placed_source_ids = {
+            source_fault_id
+            for model in final_models
+            for source_fault_id in model.require_faults(
+                representation).source_fault_ids
+        }
+        assert placed_source_ids == set(range(max(placed_source_ids) + 1))
         owned_source_ids = [
             source_fault_id
             for model in final_models
@@ -356,7 +363,7 @@ def test_nonaligned_double_window_partitions_linked_fault_models_exactly():
             )
             if owned
         ]
-        assert sorted(owned_source_ids) == list(range(catalog_size))
+        assert set(owned_source_ids) == placed_source_ids
         assert len(owned_source_ids) == len(set(owned_source_ids))
 
     for model in final_models:
@@ -404,7 +411,9 @@ def test_double_window_seam_models_are_decodable_and_partition_ownership(
         num_units=1,
         rounds_policy=FixedRounds(rounds),
         code=SurfaceCodeModel(d=3),
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
         strategy=Switching(
             confidence_threshold=0.5,
             expected_source=SAMPLED_CONFIDENCE_SOURCE,

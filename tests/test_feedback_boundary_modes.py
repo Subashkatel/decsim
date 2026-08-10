@@ -12,7 +12,7 @@ from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import Operation
 from decsim.metrics import ConditionalReactionTime
 from decsim.planner import PerOpRounds
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
 from decsim.policies import from_mode
@@ -49,7 +49,7 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
                  rounds_policy=FixedRounds(3),
                  round_us=1.0,
                  code=SurfaceCodeModel(d=3),
-                 scheme=SlidingWindowScheme(),
+                 scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                  decoder=PresetLatencyDecoder(2.0),
                  links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
@@ -72,7 +72,7 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
                  rounds_policy=FixedRounds(3),
                  round_us=1.0,
                  code=SurfaceCodeModel(d=3),
-                 scheme=SlidingWindowScheme(),
+                 scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                  decoder=PresetLatencyDecoder(2.0),
                  links=fixed_latency_link_config(),
                  make_controller=_zero_link_controller,
@@ -129,7 +129,7 @@ def _run_live_stream_pair(mode: str):
                device=TimingOnlyDevice(),
                code=SurfaceCodeModel(d=3, commit_rounds_override=2, buffer_rounds_override=1),
                rounds_policy=PerOpRounds(rounds),
-               scheme=SlidingWindowScheme(),
+               scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                decoder=PresetLatencyDecoder(0.0),
                num_units=1,
                round_us=1.0,
@@ -180,7 +180,7 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
                  ops=operations,
                  device=StimDevice(),
                  code=code,
-                 scheme=SlidingWindowScheme(),
+                 scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                  decoder=PyMatchingDecoder(PresetLatencyDecoder(0.0)),
                  num_units=1,
                  rounds_policy=FixedRounds(code.commit_rounds()),
@@ -225,7 +225,7 @@ def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
             device=StimDevice(),
             code=code,
             rounds_policy=PerOpRounds(rounds),
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
             decoder=PyMatchingDecoder(PresetLatencyDecoder(0.0)),
             num_units=1,
             round_us=1.0,

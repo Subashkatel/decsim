@@ -31,7 +31,7 @@ from decsim.decoders import (
     SampledConfidenceDecoder,
     SwitchingRouter,
 )
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.switching import Switching
 
 
@@ -334,7 +334,7 @@ def _switching_run(*, low_confidence_probability, run_both_at_once=False,
         ops=[Operation(0, "memory", (0,))],
         d=3,
         rounds_policy=FixedRounds(rounds),
-        scheme=SlidingWindowScheme(),
+        scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
         strategy=Switching(
             expected_source=SAMPLED_CONFIDENCE_SOURCE,
             confidence_threshold=0.5,

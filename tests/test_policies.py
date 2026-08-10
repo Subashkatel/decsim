@@ -20,7 +20,7 @@ from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
 from decsim.policies import from_mode
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec, simulate
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.switching import Switching
 
 
@@ -132,7 +132,7 @@ def test_switching_strong_jobs_keep_their_policy_deadline(switching):
             d=3,
             rounds_policy=FixedRounds(12),
             round_us=1.0,
-            scheme=SlidingWindowScheme(),
+            scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
             strategy=switching,
             router=SwitchingRouter(
                 SampledConfidenceDecoder(

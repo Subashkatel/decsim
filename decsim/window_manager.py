@@ -13,7 +13,8 @@ from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob,
                       Operation, PendingStrong, PotentialStrong, RephaseGuard,
                       SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
                       SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
-                      WindowPlan, WindowReadiness, is_stable_identity,
+                      WindowPlan, WindowProtocol, WindowReadiness,
+                      is_stable_identity,
                       stable_identity_order_key)
 from .links import (BoundaryTransferRelation, LinkPath,
                     RequestTransferRelation, TrafficAttribution)
@@ -377,6 +378,18 @@ class WindowManager:
             source_round_limit = self.syndrome_source.register_dynamic_stream(
                 stream_op, self.rounds_for(stream_op),
                 fault_model_requirement=self._fault_model_requirement(stream_op))
+        finite_geometries = None
+        if source_round_limit is not None:
+            finite_geometries = self.scheme.plan_operation(
+                stream_id,
+                source_round_limit,
+                commit_round_count=(
+                    resolved_operation.code_geometry.commit_round_count
+                ),
+                buffer_round_count=(
+                    resolved_operation.code_geometry.buffer_round_count
+                ),
+            ).windows
         self.lifecycle.register(
             stream_op,
             commit_round_count=(
@@ -386,6 +399,7 @@ class WindowManager:
                 resolved_operation.code_geometry.buffer_round_count
             ),
             source_round_limit=source_round_limit,
+            finite_geometries=finite_geometries,
         )
 
     def rounds_for(self, op: Operation) -> int:
@@ -425,6 +439,11 @@ class WindowManager:
         self._batch_preceding_idle_rounds_by_operation = (
             plan.batch_preceding_idle_rounds_by_operation
         )
+        self._protocol_by_operation = {
+            operation_id: plan.protocol_by_operation.get(
+                operation_id, WindowProtocol.GENERIC)
+            for operation_id in plan.op_windows
+        }
         self.total_windows = plan.total_windows
         self._build_window_error_models()
         self.buffering_capacity_rows = {
@@ -494,7 +513,9 @@ class WindowManager:
             models = self.syndrome_source.window_models_for_operation(
                 op, wins, self.rounds_for(op),
                 fault_model_requirement=self._fault_model_requirement(op),
-                fault_exclusion_ranges=())
+                fault_exclusion_ranges=(),
+                window_protocol=self._protocol_by_operation[op.id],
+            )
             if not models:
                 continue
             for key, model in zip(keys, models):
@@ -1119,12 +1140,18 @@ class WindowManager:
         op = self._ops[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
         deadline = self._deadline_for_window(op, strong_window)
-        dem = None
-        if self.syndrome_source is not None:
-            dem = self.syndrome_source.strong_window_model_for_operation(
-                op, strong_window,
-                self._round_count_for_window(op.id, strong_window),
-                fault_model_requirement=self._fault_model_requirement(op))
+        model_round_count = self._round_count_for_window(op.id, strong_window)
+        left_exclusions = (
+            ((1, strong_window.commit_lo - 1),)
+            if strong_window.commit_lo > 1
+            else ()
+        )
+        dem = self._build_strong_window_model(
+            op,
+            strong_window,
+            model_round_count,
+            left_exclusions,
+        )
         request_key = self._new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
         return DecodeJob(
@@ -1510,6 +1537,7 @@ class WindowManager:
                 round_count,
                 fault_model_requirement=self._fault_model_requirement(operation),
                 fault_exclusion_ranges=suffix_exclusions,
+                window_protocol=self._protocol_by_operation[operation.id],
             )
             if suffix_models and len(suffix_models) != len(replacement_windows):
                 raise RuntimeError(
@@ -2527,8 +2555,18 @@ class WindowManager:
                 f"boundary state for {delivery.destination_key} must support "
                 "deep copying before merge_boundary"
             ) from error
+        destination_model = self.window_models.get(destination.key)
         update = self.window_interaction.merge_boundary(
-            delivery, WindowInfo.from_window(destination), candidate_state)
+            delivery,
+            WindowInfo.from_window(
+                destination,
+                detector_positions=(
+                    None if destination_model is None
+                    else destination_model.defect_positions
+                ),
+            ),
+            candidate_state,
+        )
         self._validate_boundary_update(delivery, update)
         return update
 

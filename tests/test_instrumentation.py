@@ -20,7 +20,7 @@ from decsim.message import (
 from decsim.metrics import BacklogTrajectory, WindowLatencyBreakdown
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
-from decsim.schemes import SlidingWindowScheme
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.switching import Switching
 from decsim.views import FinalWindowRow, SwitchingRecordsView
 
@@ -77,9 +77,9 @@ def test_window_switching_records_capture_terminal_weak_requests_and_services():
     records = completed.result.metric_values()["window_switching_records"]
     assert records["identity_scope"] == "single_primary_run"
     assert records["tick_unit"] == "ticks"
-    assert len(records["windows"]) == 12
-    assert len(records["requests"]) == len({row["request_key"]["run_sequence"] for row in records["requests"]}) == 12
-    assert len(records["services"]) == len({row["service_key"]["run_sequence"] for row in records["services"]}) == 12
+    assert len(records["windows"]) == 9
+    assert len(records["requests"]) == len({row["request_key"]["run_sequence"] for row in records["requests"]}) == 9
+    assert len(records["services"]) == len({row["service_key"]["run_sequence"] for row in records["services"]}) == 9
     assert {row["terminal_processing_outcome"] for row in records["requests"]} == {
         "weak_forwarded_for_delivery"
     }
@@ -102,7 +102,9 @@ def test_switching_capture_is_same_seed_execution_and_traffic_neutral():
         weak = SampledConfidenceDecoder(PerRoundDecoder(0.1), 0.0)
         return simulate(RunSpec(
             ops=[Operation(0, "memory", (0,))], d=3, seed=17,
-            rounds_policy=FixedRounds(12), scheme=SlidingWindowScheme(),
+            rounds_policy=FixedRounds(12), scheme=SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    ),
             strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE,
                                confidence_threshold=0.5, run_both_at_once=True),
             router=SwitchingRouter(weak, PerRoundDecoder(1.0)),
@@ -133,7 +135,7 @@ def test_window_latency_breakdown_stages():
         ), verbose=False)
     breakdown = r.result.metric_values()["window_latency"]
     rows = WindowLatencyBreakdown(r.window_manager).rows()
-    assert breakdown["total"]["n"] == 12 and len(rows) == 12
+    assert breakdown["total"]["n"] == 9 and len(rows) == 9
     for row in rows:
         assert row["buffer_fill"] >= 0 and row["dep_block"] >= 0
         assert row["queue_wait"] >= 0

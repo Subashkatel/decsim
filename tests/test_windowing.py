@@ -1,6 +1,8 @@
 #==================================================================
 # TESTS FOR WINDOWING (dependency seam + parallel A/B scheme)
 #==================================================================
+import math
+
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
 from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
@@ -22,11 +24,72 @@ from decsim.planner import (
 from decsim.schemes import (
     NaiveOnlineScheme,
     ParallelWindowScheme,
+    SlidingTerminalPolicy,
     SlidingWindowScheme,
 )
 from conftest import continuous_stream
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
+
+
+def test_regular_stride_tail_is_available_only_by_explicit_legacy_policy():
+    plan = SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD,
+    ).plan_operation(
+        7,
+        5,
+        commit_round_count=2,
+        buffer_round_count=1,
+    )
+    assert plan.windows == (
+        WindowGeometry(1, 1, 2, 3),
+        WindowGeometry(3, 3, 4, 5),
+        WindowGeometry(5, 5, 5, 6),
+    )
+
+
+def test_default_sliding_matches_quits_tan_finite_forward_geometry():
+    """Pin the finite QUITS/Tan tail independently of the implementation."""
+    for commit_round_count, buffer_round_count in ((3, 3), (2, 3), (3, 0)):
+        width = commit_round_count + buffer_round_count
+        for round_count in range(1, 3 * width + commit_round_count + 1):
+            regular_count = max(
+                0,
+                math.ceil((round_count - width) / commit_round_count),
+            )
+            expected = tuple(
+                WindowGeometry(
+                    i * commit_round_count + 1,
+                    i * commit_round_count + 1,
+                    (i + 1) * commit_round_count,
+                    i * commit_round_count + width,
+                )
+                for i in range(regular_count)
+            ) + (
+                WindowGeometry(
+                    regular_count * commit_round_count + 1,
+                    regular_count * commit_round_count + 1,
+                    round_count,
+                    round_count,
+                ),
+            )
+            plan = SlidingWindowScheme().plan_operation(
+                7,
+                round_count,
+                commit_round_count=commit_round_count,
+                buffer_round_count=buffer_round_count,
+            )
+            assert plan.windows == expected
+            assert plan.internal_dependencies == tuple(
+                (i, i + 1) for i in range(len(expected) - 1)
+            )
+            committed = tuple(
+                r
+                for window in plan.windows
+                for r in range(window.commit_lo, window.commit_hi + 1)
+            )
+            assert committed == tuple(range(1, round_count + 1))
+            assert max(window.buffer_hi for window in plan.windows) <= round_count
 
 
 def _memory_op(rounds_unused=None):
@@ -44,12 +107,11 @@ def test_typed_scheme_ledgers_pin_mode_idle_policy_and_parallel_boundaries():
         operation_id=7,
         windows=(
             WindowGeometry(1, 1, 2, 3),
-            WindowGeometry(3, 3, 4, 5),
-            WindowGeometry(5, 5, 5, 6),
+            WindowGeometry(3, 3, 5, 5),
         ),
-        internal_dependencies=((0, 1), (1, 2)),
+        internal_dependencies=((0, 1),),
         entry_window_indices=(0,),
-        exit_window_indices=(2,),
+        exit_window_indices=(1,),
         windowed=True,
         batch_preceding_idle_rounds=False,
     )
@@ -65,14 +127,11 @@ def test_typed_scheme_ledgers_pin_mode_idle_policy_and_parallel_boundaries():
 
     expected = {
         1: ((), (0,), (0,)),
-        2: (((0, 1),), (0,), (1,)),
-        3: (((0, 1), (2, 1)), (0, 2), (1,)),
-        4: (((0, 1), (2, 1), (2, 3)), (0, 2), (1, 3)),
-        5: (
-            ((0, 1), (2, 1), (2, 3), (4, 3)),
-            (0, 2, 4),
-            (1, 3),
-        ),
+        2: ((), (0,), (0,)),
+        3: ((), (0,), (0,)),
+        4: (((0, 1),), (0,), (1,)),
+        5: (((0, 1),), (0,), (1,)),
+        6: (((0, 1), (2, 1)), (0, 2), (1,)),
     }
     for window_count, (edges, roots, sinks) in expected.items():
         plan = ParallelWindowScheme().plan_operation(
@@ -174,13 +233,13 @@ def _timing_stream_plan(segment_rounds, d=3):
     return plan, segments, stream_op, rounds_map
 
 
-# ---- structural: the default chain is unchanged by the seam refactor ----------------
+# ---- structural: the finite QUITS/Tan forward plan remains a chain -------------------
 
 def test_sequential_chain_deps_unchanged():
     plan = _plan(SlidingWindowScheme(), _memory_op(), rounds_per_op=11, d=3)
-    assert plan.window_count[0] == 4                      # ceil(11/3)
+    assert plan.window_count[0] == 3
     assert plan.windows[(0, 0)].deps == []
-    for k in range(1, 4):
+    for k in range(1, 3):
         assert plan.windows[(0, k)].deps == [(0, k - 1)]
     # no leading buffers in the sequential scheme
     assert all(w.start_round == w.commit_lo for w in plan.windows.values())
@@ -196,37 +255,37 @@ def test_cross_op_deps_use_entry_and_exit_defaults():
     assert plan.windows[(1, 0)].deps == [(0, plan.window_count[0] - 1)]
 
 
-# ---- structural: parallel A/B layout per Skoric 2209.08552 / Tan 2209.09219 ---------
+# ---- structural: Skoric 2209.08552 sec. I.C block A/B layout ----------------------
 
 def test_parallel_scheme_layout_and_deps():
-    # d=3: commit and buffer are both 3 rounds. Commit regions tile the stream as
-    # alternating A/B blocks, each of size d except a short final tail.
-    plan = _plan(ParallelWindowScheme(), _memory_op(), rounds_per_op=15, d=3)
-    assert plan.window_count[0] == 5
-    a0, b0, a1, b1, a2 = (plan.windows[(0, k)] for k in range(5))
-    assert (a0.start_round, a0.commit_lo, a0.commit_hi, a0.buffer_hi) == (1, 1, 3, 6)
-    assert (b0.start_round, b0.commit_lo, b0.commit_hi, b0.buffer_hi) == (1, 4, 6, 9)
-    assert (a1.start_round, a1.commit_lo, a1.commit_hi, a1.buffer_hi) == (4, 7, 9, 12)
-    assert (b1.start_round, b1.commit_lo, b1.commit_hi, b1.buffer_hi) == (7, 10, 12, 15)
-    assert (a2.start_round, a2.commit_lo, a2.commit_hi, a2.buffer_hi) == (10, 13, 15, 18)
-    # layer-A windows are independent; layer-B waits on its neighboring A windows.
-    assert a0.deps == [] and a1.deps == [] and a2.deps == []
+    # Skoric block schedule, d=3: the first A commits 2d; the intervening
+    # B commits the full 3d gap; the next A commits its middle d.
+    plan = _plan(ParallelWindowScheme(), _memory_op(), rounds_per_op=18, d=3)
+    assert plan.window_count[0] == 3
+    a0, b0, a1 = (plan.windows[(0, k)] for k in range(3))
+    assert (a0.start_round, a0.commit_lo, a0.commit_hi, a0.buffer_hi) == (1, 1, 6, 9)
+    assert (b0.start_round, b0.commit_lo, b0.commit_hi, b0.buffer_hi) == (7, 7, 15, 15)
+    assert (a1.start_round, a1.commit_lo, a1.commit_hi, a1.buffer_hi) == (13, 16, 18, 18)
+    assert a0.deps == [] and a1.deps == []
+    assert not a0.closed_temporal_boundaries
+    assert b0.closed_temporal_boundaries
+    assert not a1.closed_temporal_boundaries
     assert sorted(b0.deps) == [(0, 0), (0, 2)]
-    assert sorted(b1.deps) == [(0, 2), (0, 4)]
-    assert b0.n_rounds == 9 and a1.n_rounds == 9 and b1.n_rounds == 9
+    assert a0.n_rounds == b0.n_rounds == 9
+    assert a1.n_rounds == 6
 
 
 def test_parallel_scheme_tail_window():
-    # R=23 leaves a short layer-B tail after A_3.
+    # R=23 ends in a reduced terminal B after the second A block.
     plan = _plan(ParallelWindowScheme(), _memory_op(), rounds_per_op=23, d=3)
-    assert plan.window_count[0] == 8
-    tail = plan.windows[(0, 7)]
-    assert (tail.start_round, tail.commit_lo, tail.commit_hi, tail.buffer_hi) == (19, 22, 23, 26)
-    assert tail.deps == [(0, 6)]
-    # every round 1..R is committed by exactly one window
+    assert plan.window_count[0] == 4
+    tail = plan.windows[(0, 3)]
+    assert (tail.start_round, tail.commit_lo, tail.commit_hi, tail.buffer_hi) == (19, 19, 23, 23)
+    assert tail.deps == [(0, 2)]
+    assert tail.closed_temporal_boundaries
     committed = []
-    for w in plan.windows.values():
-        committed += list(range(w.commit_lo, w.commit_hi + 1))
+    for window in plan.windows.values():
+        committed += list(range(window.commit_lo, window.commit_hi + 1))
     assert sorted(committed) == list(range(1, 24))
 
 
@@ -244,7 +303,7 @@ def test_parallel_stream_bounds_depth_across_short_scheduled_ops():
     assert plan.windows[(stream_id, 2)].deps == []
     assert plan.windows[(stream_id, 1)].n_rounds == 3 * d
     assert plan.windows[(stream_id, 2)].n_rounds == 3 * d
-    assert plan.windows[(stream_id, 0)].n_rounds == 2 * d
+    assert plan.windows[(stream_id, 0)].n_rounds == 3 * d
 
 
 def test_timing_only_stream_runs_through_normal_parallel_scheme():
@@ -301,28 +360,24 @@ def test_short_successor_closes_cross_operation_buffer():
 
 # ---- ACCEPTANCE: reaction tail reproduces gamma_mem = 6d*tau_d(d^2) + hops (Eq. 13) --
 
-def test_parallel_scheme_reaction_matches_eq13():
-    d = 3
-    # tau_d = 1 us per round (Eq. 12 shape at this operating point)
-    r = simulate(RunSpec(
-            ops=_memory_op(),
-            num_units=4,
-            d=d,
-            rounds_policy=FixedRounds(15),
-            round_us=1.1,
-            decoder=PerRoundDecoder(tau_us=1.0),
-            scheme=ParallelWindowScheme(),
-        ), verbose=False)
-    tail = r.result.fully_done_ticks - r.result.chip_done_ticks
-    # after the last round: chip->controller->decoders hops, the last layer-A window
-    # (3d rounds), WDO + t_dd, the layer-B window (3d rounds), then WDO.
-    # This is Eq. 13's two-window 6d*tau_d(d^2) plus the one-way hops (a Clifford memory
-    # op pays no t_oc + t_cq return path -- no result return is requested).
-    expected = (us(0.15) + us(2.0)              # QC + CWD
-                + us(3 * d * 1.0) + us(1.0)     # layer A + WDO
-                + us(0.5)                       # DD
-                + us(3 * d * 1.0) + us(1.0))    # layer B + WDO
-    assert abs(tail - expected) <= 4          # integer-tick rounding only
+def test_parallel_scheme_has_two_decode_layers_and_waits_for_both_A_results():
+    result = simulate(RunSpec(
+        ops=_memory_op(),
+        num_units=4,
+        d=3,
+        rounds_policy=FixedRounds(18),
+        round_us=1.1,
+        decoder=PerRoundDecoder(tau_us=2.0),
+        scheme=ParallelWindowScheme(),
+    ), verbose=False)
+    a0 = result.window_manager.windows[(0, 0)]
+    b0 = result.window_manager.windows[(0, 1)]
+    a1 = result.window_manager.windows[(0, 2)]
+
+    assert a0.t_dispatch < a1.t_done
+    assert a1.t_dispatch < a0.t_done
+    assert b0.t_dispatch >= max(a0.t_done, a1.t_done)
+    assert b0.deps_remaining == 0
 
 
 # ---- backlog vs units sweep: parallelism helps A/B, cannot help the chain -----------

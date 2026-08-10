@@ -45,7 +45,11 @@ Custom stochastic runtime parts participate in run-level seeding through
 [`decsim/protocols.py`](decsim/protocols.py). Reservation prepares all work
 that can fail without changing the active random state. Once reservation
 succeeds, commit is a total, failure-free installation of that prepared state:
-it must not allocate, draw randomness, or invoke callbacks.
+it must not allocate, draw randomness, or invoke callbacks. Providers and
+planning hooks run before binding and therefore must not draw randomness;
+stochastic state belongs in the returned runtime component. A numeric seed
+replays Stim sampling only for the same Stim version, machine SIMD width, and
+sampler call shape; `seed=None` is intentionally non-reproducible.
 
 ## Module map
 

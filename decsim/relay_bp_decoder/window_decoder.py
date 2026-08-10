@@ -21,7 +21,7 @@ from ..adapters.window_decode_results import (
     fault_model_fingerprint,
 )
 from ..detector_error_model import FaultRepresentation
-from ..message import RunSeedReservation
+from ..seeding import _AtomicRunSeedConsumer
 
 
 def _finite_real(value, name: str, *, allow_none: bool = False):
@@ -64,7 +64,7 @@ class _CompiledRelayModel:
     configuration_fingerprint: str
 
 
-class RelayBpWindowDecoder:
+class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
     """Decode physical fault columns with one fixed-gamma Relay-BP profile.
 
     SCOPE:
@@ -80,6 +80,8 @@ class RelayBpWindowDecoder:
     of being silently transformed. The algorithm follows Relay-BP-S from
     Müller et al., arXiv:2506.01779v2, Algorithm 1.
     """
+
+    _explicit_seed_label = "gamma-table seed"
 
     def __init__(
         self,
@@ -132,11 +134,10 @@ class RelayBpWindowDecoder:
             gamma_table_seed,
             "gamma_table_seed",
         )
-        self._effective_gamma_table_seed = self._explicit_gamma_table_seed
-        self._seed_lock = threading.Lock()
-        self._pending_run_seed = None
-        self._run_seed_claimed = False
-        self._stochastic_use_started = False
+        self._initialize_run_seed_binding(
+            self._explicit_gamma_table_seed
+        )
+        self._effective_gamma_table_seed = self._explicit_seed
         self._thread_state = threading.local()
 
     @staticmethod
@@ -147,62 +148,11 @@ class RelayBpWindowDecoder:
             raise TypeError(f"{name} must be an unsigned 64-bit integer or None")
         return value
 
-    def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
-        """Prepare one semantic run-root-derived gamma-table seed."""
-        seed = self._validate_seed(seed, "RelayBpWindowDecoder run root")
-        with self._seed_lock:
-            if self._stochastic_use_started:
-                raise ValueError(
-                    "RelayBpWindowDecoder was already used and cannot be rebound"
-                )
-            if self._run_seed_claimed:
-                raise ValueError(
-                    "RelayBpWindowDecoder is already claimed by a built run"
-                )
-            if self._pending_run_seed is not None:
-                raise ValueError(
-                    "RelayBpWindowDecoder already has a pending run-seed reservation"
-                )
-            if seed is not None and self._explicit_gamma_table_seed is not None:
-                raise ValueError(
-                    "RelayBpWindowDecoder has an explicit gamma-table seed that "
-                    "conflicts with the numeric run root"
-                )
-            if seed is not None:
-                source = "derived"
-                effective_seed = seed
-                reported_seed = seed
-            elif self._explicit_gamma_table_seed is not None:
-                source = "explicit_local"
-                effective_seed = self._explicit_gamma_table_seed
-                reported_seed = effective_seed
-            else:
-                source = "entropy"
-                effective_seed = secrets.randbits(64)
-                reported_seed = None
-            reservation = RunSeedReservation(
-                proposed_seed_source=source,
-                proposed_seed=reported_seed,
-                prepared_state=effective_seed,
-            )
-            self._pending_run_seed = reservation
-            return reservation
+    def _entropy_seed(self):
+        return secrets.randbits(64)
 
-    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._seed_lock:
-            if self._pending_run_seed is reservation:
-                self._pending_run_seed = None
-
-    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._seed_lock:
-            if self._pending_run_seed is not reservation:
-                raise ValueError(
-                    "RelayBpWindowDecoder can commit only its exact pending "
-                    "run-seed reservation"
-                )
-            self._effective_gamma_table_seed = reservation.prepared_state
-            self._pending_run_seed = None
-            self._run_seed_claimed = True
+    def _install_run_seed_state(self, prepared_state) -> None:
+        self._effective_gamma_table_seed = prepared_state
 
     def decode(self, window_model, syndrome) -> BackendDecodeOutcome:
         """Call the official detailed API once and snapshot its evidence."""
@@ -397,7 +347,7 @@ class RelayBpWindowDecoder:
         return RelayDecoderF32
 
     def _gamma_seed(self) -> int:
-        with self._seed_lock:
+        with self._run_seed_lock:
             if self._pending_run_seed is not None:
                 raise RuntimeError(
                     "RelayBpWindowDecoder cannot compile while a run-seed "

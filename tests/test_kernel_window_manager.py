@@ -1086,3 +1086,36 @@ def test_operation_observable_arity_cannot_change_between_windows():
                 logical_observables=(1,),
             )
         )
+
+
+def test_serial_strong_redecode_excludes_predecessor_owned_faults():
+    _, runtime, _, submitted = _runtime(
+        retain_strong_context=True,
+        round_count=9,
+        window_specs=((1, 3, 6), (4, 6, 9)),
+    )
+    _feed_rounds(runtime, 0, 9)
+    weak = next(job for job, _ in submitted if job.window_id == 1)
+
+    class RecordingSource:
+        def __init__(self):
+            self.calls = []
+
+        def strong_window_model_for_operation(
+            self, operation, window, round_count, *,
+            fault_model_requirement, exclude_faults_touching=None,
+        ):
+            self.calls.append((
+                window.commit_lo,
+                window.commit_hi,
+                exclude_faults_touching,
+            ))
+            return "strong-model"
+
+    source = RecordingSource()
+    runtime.syndrome_source = source
+    strong = runtime.make_strong_decode_job(
+        weak, round_count=9, label="strong")
+
+    assert strong.dem == "strong-model"
+    assert source.calls == [(4, 6, (1, 3))]

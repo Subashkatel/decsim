@@ -22,7 +22,7 @@ from ..detector_error_model import (
     FaultRepresentation,
     validate_placed_fault_matrices,
 )
-from ..message import RunSeedReservation
+from ..seeding import _AtomicRunSeedConsumer
 
 
 _DETECTOR_ORDER_METHODS = frozenset({
@@ -281,7 +281,7 @@ def _failed_outcome(
     )
 
 
-class TesseractWindowDecoder:
+class TesseractWindowDecoder(_AtomicRunSeedConsumer):
     """Decode one physical fault view with the official Tesseract backend."""
 
     def __init__(
@@ -297,78 +297,20 @@ class TesseractWindowDecoder:
             raise TypeError(
                 "configuration must be a TesseractDecoderConfig"
             )
-        self._explicit_seed = self.configuration.detector_order_seed
+        self._initialize_run_seed_binding(
+            self.configuration.detector_order_seed
+        )
         self._effective_seed = self._explicit_seed
-        self._seed_lock = threading.Lock()
-        self._pending_run_seed = None
-        self._run_seed_claimed = False
-        self._stochastic_use_started = False
         self._compiled_decoders: dict = {}
         self._worker_process_id = os.getpid()
         self._worker_thread_id = None
 
-    def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
-        """Prepare deterministic detector-order state for one built run."""
-        if seed is not None and (
-            type(seed) is not int or not 0 <= seed < (1 << 64)
-        ):
-            raise TypeError(
-                "TesseractWindowDecoder run root must be an unsigned 64-bit "
-                "built-in integer or None"
-            )
-        with self._seed_lock:
-            if self._stochastic_use_started:
-                raise ValueError(
-                    "TesseractWindowDecoder was already used and cannot be rebound"
-                )
-            if self._run_seed_claimed:
-                raise ValueError(
-                    "TesseractWindowDecoder is already claimed by a built run"
-                )
-            if self._pending_run_seed is not None:
-                raise ValueError(
-                    "TesseractWindowDecoder already has a pending run seed"
-                )
-            if seed is not None and self._explicit_seed is not None:
-                raise ValueError(
-                    "TesseractWindowDecoder has an explicit seed that conflicts "
-                    "with the numeric run root"
-                )
-            if seed is not None:
-                source = "derived"
-                effective_seed = seed
-            elif self._explicit_seed is not None:
-                source = "explicit_local"
-                effective_seed = self._explicit_seed
-            else:
-                source = "entropy"
-                effective_seed = secrets.randbits(64)
-            reported_seed = (
-                None if source == "entropy" else effective_seed
-            )
-            reservation = RunSeedReservation(
-                proposed_seed_source=source,
-                proposed_seed=reported_seed,
-                prepared_state=effective_seed,
-            )
-            self._pending_run_seed = reservation
-            return reservation
+    def _entropy_seed(self):
+        return secrets.randbits(64)
 
-    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._seed_lock:
-            if self._pending_run_seed is reservation:
-                self._pending_run_seed = None
-
-    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
-        with self._seed_lock:
-            if self._pending_run_seed is not reservation:
-                raise ValueError(
-                    "TesseractWindowDecoder can commit only its pending run seed"
-                )
-            self._effective_seed = reservation.prepared_state
-            self._pending_run_seed = None
-            self._run_seed_claimed = True
-            self._compiled_decoders.clear()
+    def _install_run_seed_state(self, prepared_state) -> None:
+        self._effective_seed = prepared_state
+        self._compiled_decoders.clear()
 
     def decode(self, model, syndrome) -> BackendDecodeOutcome:
         """Return an immutable, parity-validated outcome from one backend call."""
@@ -502,7 +444,12 @@ class TesseractWindowDecoder:
         return outcome
 
     def _resolved_detector_order_seed(self) -> int:
-        with self._seed_lock:
+        with self._run_seed_lock:
+            if self._pending_run_seed is not None:
+                raise RuntimeError(
+                    "TesseractWindowDecoder cannot draw while a run-seed "
+                    "reservation is pending"
+                )
             if self._effective_seed is None:
                 self._effective_seed = secrets.randbits(64)
             self._stochastic_use_started = True

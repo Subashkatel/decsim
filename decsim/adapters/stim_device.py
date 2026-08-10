@@ -4,17 +4,13 @@ from __future__ import annotations
 
 import hashlib
 from numbers import Integral
-import threading
 from typing import Optional
 
-from ..message import (
-    Operation,
-    RunSeedReservation,
-    SyndromePayload,
-)
+from ..message import Operation, SyndromePayload
+from ..seeding import _AtomicRunSeedConsumer
 
 
-class StimDevice:
+class StimDevice(_AtomicRunSeedConsumer):
     """Sample Stim circuits and stream detection events by syndrome round.
 
     Numeric seeds create stable per-identity substreams; ``None`` lets Stim
@@ -22,51 +18,6 @@ class StimDevice:
     """
 
     operation_circuit_scope = "per_operation"
-
-    @staticmethod
-    def _manifest_identity(value):
-        if type(value) is int:
-            return {"kind": "integer", "value": str(value), "items": None}
-        if type(value) is str:
-            return {"kind": "string", "value": value, "items": None}
-        if type(value) is tuple:
-            return {
-                "kind": "tuple",
-                "value": None,
-                "items": [
-                    StimDevice._manifest_identity(item)
-                    for item in value
-                ],
-            }
-        raise TypeError(
-            "StimDevice detector-round keys must use stable built-in "
-            "int, str, or recursive tuple identities"
-        )
-
-    @staticmethod
-    def _manifest_identity_bytes(value):
-        if type(value) is int:
-            encoded = str(value).encode("ascii")
-            return b"I" + len(encoded).to_bytes(8, "big") + encoded
-        if type(value) is str:
-            encoded = value.encode("utf-8")
-            return b"S" + len(encoded).to_bytes(8, "big") + encoded
-        if type(value) is tuple:
-            encoded_items = []
-            for item in value:
-                encoded = StimDevice._manifest_identity_bytes(item)
-                encoded_items.append(
-                    len(encoded).to_bytes(8, "big") + encoded
-                )
-            return (
-                b"T"
-                + len(encoded_items).to_bytes(8, "big")
-                + b"".join(encoded_items)
-            )
-        raise TypeError(
-            "StimDevice detector-round keys must use stable built-in "
-            "int, str, or recursive tuple identities"
-        )
 
     def __init__(
         self,
@@ -79,12 +30,8 @@ class StimDevice:
 
         Detector-round maps use one-based emitted rounds.
         """
-        self._explicit_seed = seed
+        self._initialize_run_seed_binding(seed)
         self._seed = seed
-        self._run_seed_lock = threading.Lock()
-        self._pending_run_seed = None
-        self._run_seed_claimed = False
-        self._stochastic_use_started = False
         self._detector_rounds_override = {
             key: dict(rounds_map)
             for key, rounds_map in (detector_rounds or {}).items()}
@@ -100,87 +47,22 @@ class StimDevice:
         self._stream_models: dict = {}
         self._source_bindings: dict = {}
 
-    def reserve_run_seed(self, seed: Optional[int]) -> RunSeedReservation:
-        """Prepare a run-root binding without changing active sampling state."""
-        if seed is not None and (
-            type(seed) is not int or not 0 <= seed < (1 << 64)
-        ):
-            raise TypeError(
-                "StimDevice run root must be an unsigned 64-bit built-in "
-                f"integer or None; got {seed!r}"
-            )
-        with self._run_seed_lock:
-            if self._stochastic_use_started:
-                raise ValueError(
-                    "StimDevice was already used and cannot be rebound to a "
-                    "run root; construct a fresh device"
-                )
-            if self._run_seed_claimed:
-                raise ValueError(
-                    "StimDevice is already claimed by a built run"
-                )
-            if self._pending_run_seed is not None:
-                raise ValueError(
-                    "StimDevice already has a pending run-seed reservation"
-                )
-            if seed is not None and self._explicit_seed is not None:
-                raise ValueError(
-                    "StimDevice has an explicit seed that conflicts with the "
-                    f"numeric run root {seed}; move the seed to RunSpec"
-                )
+    def _explicit_run_seed(self):
+        return self._validated_root_seed()
 
-            if seed is not None:
-                seed_source = "derived"
-                effective_seed = seed
-            elif self._explicit_seed is not None:
-                seed_source = "explicit_local"
-                effective_seed = self._validated_root_seed()
-            else:
-                seed_source = "entropy"
-                effective_seed = None
+    def _prepare_run_seed_state(self, effective_seed):
+        return (effective_seed, {}, {}, {}, {}, {}, {})
 
-            prepared_state = (
-                effective_seed,
-                {},
-                {},
-                {},
-                {},
-                {},
-                {},
-            )
-            reservation = RunSeedReservation(
-                proposed_seed_source=seed_source,
-                proposed_seed=effective_seed,
-                prepared_state=prepared_state,
-            )
-            self._pending_run_seed = reservation
-            return reservation
-
-    def cancel_run_seed(self, reservation: RunSeedReservation) -> None:
-        """Release only the matching reversible run-seed reservation."""
-        with self._run_seed_lock:
-            if self._pending_run_seed is reservation:
-                self._pending_run_seed = None
-
-    def commit_run_seed(self, reservation: RunSeedReservation) -> None:
-        """Install one prepared component seed after the root owns all leaves."""
-        with self._run_seed_lock:
-            if self._pending_run_seed is not reservation:
-                raise ValueError(
-                    "StimDevice can commit only its exact pending run-seed "
-                    "reservation"
-                )
-            (
-                self._seed,
-                self._samplers,
-                self._dets,
-                self._truth,
-                self._by_round,
-                self._stream_models,
-                self._source_bindings,
-            ) = reservation.prepared_state
-            self._pending_run_seed = None
-            self._run_seed_claimed = True
+    def _install_run_seed_state(self, prepared_state) -> None:
+        (
+            self._seed,
+            self._samplers,
+            self._dets,
+            self._truth,
+            self._by_round,
+            self._stream_models,
+            self._source_bindings,
+        ) = prepared_state
 
     @staticmethod
     def _key(op: Operation):
@@ -268,13 +150,7 @@ class StimDevice:
                 sample_seed = self._sample_seed(key)
                 sampler = op.circuit.compile_detector_sampler(seed=sample_seed)
             self._samplers[key] = sampler
-        with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    "StimDevice cannot sample while a run-seed reservation "
-                    "is pending"
-                )
-            self._stochastic_use_started = True
+        self._mark_stochastic_use()
         dets, obs = sampler.sample(shots=1, separate_observables=True)
         self._dets[key] = dets[0]
         self._truth[key] = obs[0]
@@ -411,7 +287,8 @@ class StimDevice:
 
     def window_models_for_operation(self, op: Operation, windows: list,
                                     round_count: int, *, fault_model_requirement,
-                                    fault_exclusion_ranges: tuple) -> list:
+                                    fault_exclusion_ranges: tuple,
+                                    window_protocol) -> list:
         """Build detector error models for one finite Stim operation."""
         if op.circuit is None or not windows:
             return []
@@ -425,13 +302,31 @@ class StimDevice:
              min(window.buffer_hi, round_count))
             for window in windows
         ]
+        local_index = {
+            window.key: window_index
+            for window_index, window in enumerate(windows)
+        }
+        dependency_edges = tuple(
+            (local_index[dependency], destination_index)
+            for destination_index, window in enumerate(windows)
+            for dependency in window.deps
+            if dependency in local_index
+        )
         return build_window_error_models(
             op.circuit,
             model_plan,
             round_count=round_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
-            fault_exclusion_ranges=fault_exclusion_ranges)
+            fault_exclusion_ranges=fault_exclusion_ranges,
+            dependency_edges=dependency_edges,
+            closed_temporal_boundary_windows=tuple(
+                window_index
+                for window_index, window in enumerate(windows)
+                if window.closed_temporal_boundaries
+            ),
+            window_protocol=window_protocol,
+        )
 
     def window_model_for_stream(self, stream_id, window, *, is_last: bool):
         """Build the detector error model for one dynamic stream window."""

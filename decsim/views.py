@@ -342,11 +342,12 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
 
 
 def capture_primary_result(engine, chip, window_manager, operations,
-                           metric_bindings, links):
+                           metric_bindings, links, syndrome_source):
     """Project terminal runtime owners into the immutable run result."""
     from .run_spec import LogicalOperationResult, MetricResultRecord, PrimaryRunResult
 
     operation_by_id = {operation.id: operation for operation in operations}
+    truth_for = getattr(syndrome_source, "logical_observable_truth", None)
     rows = []
     for operation_id in sorted(operation_by_id):
         logical = window_manager.op_results.get(operation_id)
@@ -356,9 +357,19 @@ def capture_primary_result(engine, chip, window_manager, operations,
         else:
             bits = None
             status = "no_logical_output"
+        actual = None if truth_for is None else truth_for(operation_id)
+        if actual is not None:
+            actual = tuple(_logical_bit(bit) for bit in actual)
+        failure = None
+        if bits is not None and actual is not None:
+            if len(bits) != len(actual):
+                raise RuntimeError(
+                    f"operation {operation_id} predicted {len(bits)} logical "
+                    f"observables but the syndrome source sampled {len(actual)}")
+            failure = bits != actual
         rows.append(LogicalOperationResult(
             operation_id, status, bits,
-            operation_by_id[operation_id].stream_offset))
+            operation_by_id[operation_id].stream_offset, actual, failure))
     metric_rows = tuple(MetricResultRecord(
         name, copy.deepcopy(engine._invoke_metric_callback(
             metric.result, callback_kind="result")))

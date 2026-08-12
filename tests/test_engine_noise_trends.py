@@ -55,8 +55,10 @@ def _engine_failures(p: float, shots: int, seed0: int) -> int:
                   decoder=PyMatchingDecoder(_ZeroLatency()),
                   seed=seed0 + shot,
               ), verbose=False)
-        predicted = res.window_manager.op_results[1][0]
-        failures += int(predicted != int(device._truth[1][0]))
+        result_row, = res.result.operation_results
+        assert result_row.observable_truth is not None
+        assert result_row.logical_failure is not None
+        failures += int(result_row.logical_failure)
     return failures
 
 

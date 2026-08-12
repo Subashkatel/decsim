@@ -724,10 +724,6 @@ def _catalog_from_dem(
                 record.aggregate_detectors,
                 record.aggregate_logical_observables,
             )
-            validate_fault_identity(
-                *key,
-                location=f"physical Stim error {record.error_ordinal}",
-            )
             merged[key] = _merge_probability(
                 merged.get(key, 0.0), record.probability)
         detector_sets = [key[0] for key in merged]

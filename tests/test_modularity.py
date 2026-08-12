@@ -128,11 +128,7 @@ class MyDecoder:
 
 class MyScheduler:
     """LIFO -- a genuinely different policy than the default FIFO."""
-    def insert(self, queue, job): queue.append(job)
-    def pop(self, queue, now_ticks): return queue.pop()
-
-class MyDeadline:
-    def deadline(self, op, window, now, on_reaction_path): return now
+    def pop(self, queue): return queue.pop()
 
 class MyRouter:
     def __init__(self, decoder):
@@ -219,7 +215,7 @@ def _blocked_ops():
 def test_every_seam_accepts_a_from_scratch_implementation():
     """The standard wiring runs end to end with the seams replaced by the
     from-scratch stack above (device, code, layout, scheme, rounds, decoder,
-    router, scheduler, deadline policy, controller, orchestrator, factory, metric
+    router, scheduler, controller, orchestrator, factory, metric
     -- all at once), with assertions that each custom piece participated."""
     decoder, metric = MyDecoder(), MyMetric()
     orchestrators = []
@@ -246,7 +242,6 @@ def test_every_seam_accepts_a_from_scratch_implementation():
             rounds_policy=MyRounds(),
             router=router,
             scheduler=MyScheduler(),
-            deadline_policy=MyDeadline(),
             make_controller=MyController,
             make_orchestrator=make_orchestrator,
             make_factory=make_factory,

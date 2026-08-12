@@ -87,28 +87,13 @@ class Chip:
         return set(self._ops) == self.done_bodies
 
     def _round_ticks_for(self, operation: Operation) -> int:
-        try:
-            return self._resolved_operations[operation.id].round_ticks
-        except KeyError as error:
-            raise ValueError(
-                f"operation {operation.id} has no resolved round cadence"
-            ) from error
+        return self._resolved_operations[operation.id].round_ticks
 
     def _round_ticks_for_patch(self, patch) -> int:
-        try:
-            return self._resolved_patches[patch].round_ticks
-        except KeyError as error:
-            raise ValueError(
-                f"patch {patch!r} has no resolved round cadence"
-            ) from error
+        return self._resolved_patches[patch].round_ticks
 
     def _round_count_for(self, operation: Operation) -> int:
-        try:
-            return self._resolved_operations[operation.id].round_count
-        except KeyError as error:
-            raise ValueError(
-                f"operation {operation.id} has no resolved round count"
-            ) from error
+        return self._resolved_operations[operation.id].round_count
 
     def _index_protected_regions(self, ops, dynamic_streams) -> None:
         operations_by_id = {operation.id: operation for operation in ops}
@@ -244,12 +229,7 @@ class Chip:
                 self.busy_claims.pop((claim.kind, rid), None)
 
     def _resource_claims(self, operation: Operation):
-        try:
-            return self._resource_claims_by_operation_id[operation.id]
-        except KeyError as error:
-            raise ValueError(
-                f"operation {operation.id} has no resolved resource claims"
-            ) from error
+        return self._resource_claims_by_operation_id[operation.id]
 
     def _on_state_ready(self, operation: Operation) -> None:
         self.state_ready.add(operation.id)

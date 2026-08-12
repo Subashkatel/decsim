@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING
 from .message import (
     OperationWindowPlan,
     WindowReadiness,
-    ResolvedCodeGeometry,
     WindowGeometry,
     WindowProtocol,
 )
@@ -128,10 +127,6 @@ class SlidingWindowScheme:
 
     def validate_buffer(self, geometry) -> None:
         """Reject buffers below the literature floor (lead, trail) ~ (d, d)."""
-        if type(geometry) is not ResolvedCodeGeometry:
-            raise TypeError(
-                "geometry must be an exact ResolvedCodeGeometry"
-            )
         if geometry.buffer_floor_override_active:
             return
         if (
@@ -198,10 +193,6 @@ class NaiveOnlineScheme(SlidingWindowScheme):
         )
 
     def validate_buffer(self, geometry) -> None:
-        if type(geometry) is not ResolvedCodeGeometry:
-            raise TypeError(
-                "geometry must be an exact ResolvedCodeGeometry"
-            )
         pass
 
 
@@ -312,10 +303,6 @@ class ParallelWindowScheme(SlidingWindowScheme):
         )
 
     def validate_buffer(self, geometry) -> None:
-        if type(geometry) is not ResolvedCodeGeometry:
-            raise TypeError(
-                "geometry must be an exact ResolvedCodeGeometry"
-            )
         if geometry.buffer_floor_override_active:
             return
         required = max(
@@ -407,8 +394,6 @@ class TanSandwichScheme(SlidingWindowScheme):
         )
 
     def validate_buffer(self, geometry) -> None:
-        if type(geometry) is not ResolvedCodeGeometry:
-            raise TypeError("geometry must be an exact ResolvedCodeGeometry")
         if geometry.commit_round_count < 2:
             raise ValueError("Tan sandwich decoding requires step size s >= 2")
         if geometry.buffer_round_count < 1:

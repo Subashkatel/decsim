@@ -75,6 +75,15 @@ validation rules, and a custom window-interaction example.
 - Pluggable parts: `decoders.py`, `schedulers.py`, `schemes.py`,
   `policies.py`, `switching.py`, `factories.py`, `controllers.py`.
 
+The decoder resource model is deliberately small: each configured pool has
+identical non-preemptive service units and one FIFO ready queue. It models
+queueing and service occupancy, not a particular CPU, GPU, FPGA, or ASIC
+microarchitecture. Published EDF, elastic-decoder, or Triage policies require
+real task deadlines, service estimates, and dependency/conflict metadata and
+are not approximated by synthetic priority scores. Finite syndrome storage
+uses explicit lossless backpressure; it does not silently overwrite packets at
+a fabricated expiry time.
+
 Real-decoder adapters (needing `stim`/`pymatching`) live in
 `decsim/adapters/`, `decsim/mwpm_decoder/`, `decsim/bposd_decoder/`, and
 `decsim/belief_matching_decoder/`; `detector_error_model.py` slices the

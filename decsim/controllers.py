@@ -146,8 +146,6 @@ class ModularController:
             raise ValueError("duplicate syndrome fragment index")
         if fragment.fragment_index >= pending.fragment_count:
             raise ValueError("syndrome fragment index exceeds declared count")
-        if len(pending.fragments) >= pending.fragment_count:
-            raise ValueError("too many distinct syndrome fragments")
 
         pending.fragments.append(fragment)
         if len(pending.fragments) < pending.fragment_count:

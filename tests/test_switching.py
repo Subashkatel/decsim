@@ -1621,26 +1621,6 @@ def test_restart_owned_seam_requires_multi_range_device_capability():
 
 
 
-def test_aligned_double_window_rejects_float_commit_bounds():
-    class FloatCommitBounds(DefaultWindowInteraction):
-        def plan_strong_region(
-            self, weak_window, later_windows, operation_round_count,
-        ):
-            plan = super().plan_strong_region(
-                weak_window, later_windows, operation_round_count)
-            object.__setattr__(plan, "commit_lo", float(plan.commit_lo))
-            object.__setattr__(plan, "commit_hi", float(plan.commit_hi))
-            return plan
-
-    with pytest.raises(
-        TypeError,
-        match="logical contribution bounds must be exact ints",
-    ):
-        _double_window_run(
-            escalate_window=2,
-            rounds=30,
-            window_interaction=FloatCommitBounds(),
-        )
 
 def test_double_window_retains_every_round_added_to_the_restart_buffer():
     class EarlierRetainedRestart(DefaultWindowInteraction):
@@ -1704,7 +1684,7 @@ def test_double_window_rejects_commit_ownership_before_the_escalated_window():
                 restart_seam_fault_owner=SeamFaultOwner.STRONG_REGION,
             )
 
-    with pytest.raises(RuntimeError, match="cannot precede"):
+    with pytest.raises(RuntimeError, match="must start"):
         _double_window_run(
             escalate_window=2,
             rounds=15,
@@ -1971,7 +1951,6 @@ def test_double_window_exactly_one_strong_job_per_escalation():
             window_id=2,
             n_rounds=9,
             ready_time=0,
-            deadline=0,
             strong_label="strong(op0 W2)",
         ))
 

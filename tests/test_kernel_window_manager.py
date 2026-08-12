@@ -12,7 +12,6 @@ from conftest import fixed_latency_links
 from decsim.engine import Engine
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import (
-    DecodeJob,
     DecodeResult,
     CsdInput,
     DecoderRequestKey,
@@ -35,7 +34,6 @@ from decsim.message import (
 from decsim.payload_store import PayloadStore
 from decsim.planner import _plan_syndrome_buffering
 from decsim.protocols import Directive, OutcomeDirective, Submission
-from decsim.schedulers import BufferExpiryDeadline
 from decsim.window_manager import LogicalContribution, WindowManager
 from decsim.window_interactions import DefaultWindowInteraction
 
@@ -49,11 +47,6 @@ class _Scheme:
         return (readiness.local_rounds_arrived
                 + readiness.memory_rounds_arrived
                 >= min(w.buffer_hi, readiness.local_round_count))
-
-
-class _Deadline:
-    def deadline(self, op, window, now, on_reaction_path):
-        return now + 1_000
 
 
 class _Feedback:
@@ -96,7 +89,6 @@ def _runtime(
     ops=(0,),
     deps=(),
     blocking=(),
-    deadline_policy=None,
     retain_strong_context=False,
     double_window=False,
     round_count=6,
@@ -146,7 +138,6 @@ def _runtime(
     rt = WindowManager(eng, scheme=_Scheme(), code_geometry=geometry,
                        resolved_operations=resolved_operations,
                        resolved_patches=resolved_patches,
-                       deadline_policy=deadline_policy or _Deadline(),
                        links=fixed_latency_links(
                            dd=T_DD,
                            do=T_DO,
@@ -355,7 +346,7 @@ def test_job_fields_match_contract_2a4():
     job, delay = submitted[0]
     assert delay == 0
     assert (job.op_id, job.window_id, job.n_rounds) == (0, 0, 6)
-    assert job.deadline == eng.now + 1_000 and job.spatial_nodes == 9
+    assert job.spatial_nodes == 9
     assert len(job.payloads) == 6 and job.strong_label == "strong(op0 W0)"
 
 
@@ -891,7 +882,6 @@ def test_strong_job_two_sided_context_contract_2b6():
     assert strong.hint == "strong" and strong.attempt == 1
     assert strong.strong_decode_for == (0, 0)
     assert strong.window.t_first_round == rt.store.round_complete_tick(0, 1)
-    assert strong.deadline == eng.now + 1_000
 
 
 def test_retention_capability_adds_only_strong_leading_rounds():
@@ -908,35 +898,6 @@ def test_retention_capability_adds_only_strong_leading_rounds():
     assert with_context.store.owner_packet_identities(
         EndpointRole.SB1, PotentialStrong(interior.key)) == (
             (0, 4), (0, 5), (0, 6), (0, 2), (0, 3))
-
-
-def test_strong_buffer_expiry_uses_the_context_start_round_arrival():
-    policy = BufferExpiryDeadline(capacity_rounds=40, round_ticks=10)
-    eng, rt, _, submitted = _runtime(
-        deadline_policy=policy, retain_strong_context=True)
-    eng.now = 17
-    _feed_rounds(rt, 0, 6)
-    weak, _ = submitted[0]
-
-    strong = rt.make_strong_decode_job(weak, round_count=9, label="strong")
-
-    assert strong.window.t_first_round == 17
-    assert strong.deadline == 17 + 40 * 10
-
-
-def test_strong_job_rejects_missing_context_start_provenance(monkeypatch):
-    policy = BufferExpiryDeadline(capacity_rounds=40, round_ticks=10)
-    _, rt, _, submitted = _runtime(
-        deadline_policy=policy, retain_strong_context=True)
-    _feed_rounds(rt, 0, 6)
-    weak, _ = submitted[0]
-    monkeypatch.setattr(rt.store, "round_complete_tick", lambda *_args: None)
-
-    with pytest.raises(
-        RuntimeError,
-        match=r"window \(0, 0\).*arrival provenance is missing",
-    ):
-        rt.make_strong_decode_job(weak, round_count=9, label="strong")
 
 
 def test_logical_contributions_xor_vectors_over_exact_round_coverage():

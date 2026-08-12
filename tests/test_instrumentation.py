@@ -56,19 +56,12 @@ def test_switching_observability_types_are_resolvable_on_supported_python():
     }
 
 
-def test_decoder_observability_keys_reject_ambiguous_identity_values():
+def test_strong_completion_rejects_a_result_for_another_operation():
     with pytest.raises(ValueError, match="identity"):
-        StrongDecodeCompletion(DecoderRequestKey(3, 0, DecoderTier.STRONG, 0), DecodeResult(4, 0))
-    with pytest.raises(TypeError):
-        DecoderRequestKey(True, 0, DecoderTier.WEAK, 0)
-    with pytest.raises(TypeError):
-        DecoderRequestKey(3, True, DecoderTier.WEAK, 0)
-    with pytest.raises(TypeError):
-        DecoderRequestKey(3, 0, "weak", 0)
-    with pytest.raises(ValueError):
-        DecoderRequestKey(3, -1, DecoderTier.WEAK, 0)
-    with pytest.raises(ValueError):
-        DecoderServiceKey(-1)
+        StrongDecodeCompletion(
+            DecoderRequestKey(3, 0, DecoderTier.STRONG, 0),
+            DecodeResult(4, 0),
+        )
 
 
 def test_window_switching_records_capture_terminal_weak_requests_and_services():

@@ -9,8 +9,6 @@ item B1, docs/validation/2026-07-03-gate6-plan.md):
      nonempty queue has zero free units;
   I3 clean drain: at engine exhaustion all queues are empty, all units
      free, every job completed exactly once;
-  I4 EDF policy: with all deadlines distinct and all jobs queued while
-     the single unit is busy, completion order == deadline order.
 
 Seeded synthetic workload; no latency claims (PerRoundDecoder synthetic
 service times only).
@@ -25,7 +23,7 @@ from decsim.config import us
 from decsim.engine import Engine
 from decsim.decoders import CodeRouter, PerRoundDecoder
 from decsim.decoder_manager import DecoderManager
-from decsim.schedulers import FifoScheduler, EarliestDeadlineScheduler
+from decsim.schedulers import FifoScheduler
 
 
 def build(units: int, scheduler):
@@ -59,7 +57,7 @@ def test_conservation_and_drain_under_burst():
             check()
         state["submitted"] += 1
         manager.submit_decode(rng.randint(1, 12), on_done,
-                              label=f"job{i}", deadline=eng.now + us(50))
+                              label=f"job{i}")
         check()
 
     t = 0
@@ -98,22 +96,23 @@ def test_work_conservation_no_idle_unit_with_nonempty_queue():
     assert len(done) == 120
 
 
-def test_edf_completes_in_deadline_order():
-    eng, manager = build(units=1, scheduler=EarliestDeadlineScheduler())
-    order = []
-    # busy the single unit so all subsequent jobs queue up first
-    manager.submit_decode(50, lambda: order.append("head"), label="head",
-                          deadline=us(1))
-    deadlines = [us(x) for x in (90, 30, 70, 10, 50, 20, 80, 40, 60, 100)]
-    for k, dl in enumerate(deadlines):
-        manager.submit_decode(1, lambda k=k: order.append(k),
-                              label=f"edf{k}", deadline=dl)
+def test_one_dispatch_pass_fills_every_free_unit():
+    eng, manager = build(units=3, scheduler=FifoScheduler())
+    manager.pool_free["default"] = 0
+    completed = []
+    for index in range(3):
+        manager.submit_decode(
+            1, lambda index=index: completed.append(index), label=f"held{index}"
+        )
+    assert len(manager.ready) == 3
+
+    manager.pool_free["default"] = 3
+    manager.try_dispatch()
+    assert manager.ready == []
+    assert manager.pool_free["default"] == 0
     eng.run()
-    assert order[0] == "head"
-    completed = order[1:]
-    by_deadline = [k for k, _ in sorted(enumerate(deadlines),
-                                        key=lambda kv: kv[1])]
-    assert completed == by_deadline, (completed, by_deadline)
+    assert completed == [0, 1, 2]
+    assert manager.pool_free["default"] == 3
 
 
 def test_fifo_completes_in_arrival_order():
@@ -122,7 +121,7 @@ def test_fifo_completes_in_arrival_order():
     manager.submit_decode(50, lambda: order.append("head"), label="head")
     for k in range(10):
         manager.submit_decode(1, lambda k=k: order.append(k),
-                              label=f"fifo{k}", deadline=us(100 - k))
+                              label=f"fifo{k}")
     eng.run()
     assert order == ["head"] + list(range(10))
 
@@ -190,7 +189,7 @@ def test_delayed_enqueue_conservation():
         scheduler=FifoScheduler(), unit_pools={"default": 1})
     done = []
     job = DecodeJob(op_id=-1, window_id=0, n_rounds=3,
-                    ready_time=0, deadline=us(100),
+                    ready_time=0,
                     on_done=lambda: done.append(eng.now), label="handoff")
     manager.enqueue(job, delay_ticks=us(5))
     assert manager.queued_total() == 0            # in the link, not queued

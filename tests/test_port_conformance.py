@@ -26,8 +26,7 @@ from decsim.metrics import (DecodeBacklog, DecoderUtilization, ReadyQueueStats,
 from decsim.run_spec import RunSpec
 from decsim.planner import (CodeRounds, FixedRounds,
                            GateRounds, PerOpRounds, TemporalRounds)
-from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
-                               FifoScheduler, ReactionPathDeadline)
+from decsim.schedulers import FifoScheduler
 from decsim.schemes import (NaiveOnlineScheme, ParallelWindowScheme,
                             SlidingWindowScheme)
 from decsim.switching import Baseline, Switching
@@ -67,7 +66,6 @@ def completed_run():
 def test_wired_completed_run_parts_satisfy_their_ports(completed_run):
     checks = [
         (completed_run.window_manager.scheme, protocols.DecodingScheme),          # port 6
-        (completed_run.window_manager.deadline_policy, protocols.DeadlinePolicy),  # port 13
         (completed_run.window_manager.boundary_policy, protocols.BoundaryPolicy),  # port 16
         (completed_run.window_manager.window_interaction,
          protocols.WindowInteraction),                         # port 21
@@ -103,9 +101,7 @@ def test_every_shipped_part_family_satisfies_its_port():
                         UnionFindDecoder(PerRoundDecoder(0.5))],  # 8
         protocols.DecodingStrategy: [Baseline(),
                                  Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5)],  # 10
-        protocols.Scheduler: [FifoScheduler(), EarliestDeadlineScheduler()],  # 11
-        protocols.DeadlinePolicy: [EnqueueTimeDeadline(),
-                               ReactionPathDeadline(slack_ticks=100)],  # 13
+        protocols.Scheduler: [FifoScheduler()],  # port 11
         protocols.BoundaryPolicy: [Eager(), Held()],                     # port 16
         protocols.WindowInteraction: [DefaultWindowInteraction()],        # port 21
         protocols.IdlePolicy: [Ignore(), ExtendStream(), SeparateDecodeJobs()],  # 17

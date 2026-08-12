@@ -587,8 +587,6 @@ class LinkModel:
     """One run-owned semantic fabric and its immutable traffic ledger."""
 
     def __init__(self, config: LinkModelConfig, bindings: dict):
-        if type(config) is not LinkModelConfig:
-            raise TypeError("LinkModel requires an exact LinkModelConfig")
         self._config = config
         self._bindings = dict(bindings)
         self._semantic_counters = {
@@ -849,37 +847,3 @@ class LinkModel:
             "total_delay_ticks": reservation.total_delay_ticks,
             "physical_sequence": reservation.physical_sequence,
         }
-
-
-def link_compression_decision(raw_bits_per_msg: float,
-                              packed_bits_per_msg: float,
-                              msgs_per_us: float,
-                              bandwidth_bits_per_us: float,
-                              headroom: float = 0.9,
-                              buffer_bound: bool = False) -> dict:
-    """The deck's row-22 rule: compress ON THE LINK only when
-    BANDWIDTH is the binding constraint (Gate 7 P18).
-
-    util_* = offered bits/us over bandwidth. When the buffer is the
-    binding constraint instead, compression belongs in the STORE
-    (V23 packed retention), not the wire — the rule returns
-    compress_link=False with binding="buffer" so callers route the
-    effort to the right place. sufficient=False flags bandwidth-
-    binding cases packing alone cannot relieve.
-    """
-    if bandwidth_bits_per_us <= 0 or msgs_per_us < 0:
-        raise ValueError("need bandwidth > 0 and msgs_per_us >= 0")
-    util_raw = raw_bits_per_msg * msgs_per_us / bandwidth_bits_per_us
-    util_packed = packed_bits_per_msg * msgs_per_us / bandwidth_bits_per_us
-    bandwidth_binding = util_raw > headroom
-    if bandwidth_binding:
-        binding = "bandwidth"
-    elif buffer_bound:
-        binding = "buffer"
-    else:
-        binding = "none"
-    compress_link = bandwidth_binding and util_packed <= headroom
-    sufficient = (not bandwidth_binding) or util_packed <= headroom
-    return {"util_raw": util_raw, "util_packed": util_packed,
-            "binding": binding, "compress_link": compress_link,
-            "sufficient": sufficient}

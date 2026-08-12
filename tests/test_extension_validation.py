@@ -25,12 +25,6 @@ from decsim.metrics import (
 from decsim.planner import FixedRounds
 from decsim.policies import Eager, Held, ExtendStream, SeparateDecodeJobs
 from decsim.run_spec import RunSpec, simulate
-from decsim.schedulers import (
-    EarliestDeadlineScheduler,
-    BufferExpiryDeadline,
-    ReactionPathDeadline,
-    WeightedUrgencyCostScheduler,
-)
 from decsim.schemes import (
     NaiveOnlineScheme,
     ParallelWindowScheme,
@@ -289,6 +283,19 @@ class PlainControllerProvider:
         self.links = links
         self.buffering = buffering
         self.window_manager = window_manager
+
+
+def test_falsey_scheduler_is_not_replaced_by_the_fifo_default():
+    class FalseyScheduler:
+        def __bool__(self):
+            return False
+
+        def pop(self, queue):
+            return queue.pop(0)
+
+    scheduler = FalseyScheduler()
+    completed = RunSpec(ops=[], scheduler=scheduler).build()
+    assert completed.decoder_manager.scheduler is scheduler
 
 
 @pytest.mark.parametrize("seed", [True, 1.0, "1", object()])

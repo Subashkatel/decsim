@@ -73,8 +73,6 @@ class Engine:
 
     def _invalidate(self, cause: BaseException) -> None:
         """Prevent further use while retaining the first originating failure."""
-        if not isinstance(cause, BaseException):
-            raise TypeError("engine invalidation requires an exception cause")
         if self._phase != "completed":
             if self._failure_cause is None:
                 self._failure_cause = cause

@@ -999,6 +999,62 @@ def test_metric_cannot_schedule_work_after_primary_drain():
         spec.build()
 
 
+@pytest.mark.parametrize(
+    ("prediction", "truth", "failure"),
+    [
+        ((0, 1), (0, 1), False),
+        ((0, 1), (0, 0), True),
+        ((0, 1), (1, 0), True),
+    ],
+)
+def test_primary_result_classifies_the_complete_logical_vector(
+    prediction, truth, failure
+):
+    # Higgott-Gidney, arXiv:2303.15933v2 Sec. 2.1; Stim/Sinter
+    # v1.16.0 classifies a shot by any observable prediction mismatch.
+    truth_queries = []
+
+    class TruthDevice(TimingOnlyDevice):
+        def logical_observable_truth(self, operation_id):
+            truth_queries.append(operation_id)
+            return truth
+
+    class VectorDecoder(StaticDecoder):
+        def decode(self, job):
+            assert truth_queries == []
+            assert not hasattr(job, "observable_truth")
+            return DecodeResult(
+                job.op_id, job.window_id, logical_observables=prediction
+            )
+
+    completed = RunSpec(
+        ops=[Operation(0, "memory", (0,))],
+        decoder=VectorDecoder(),
+        device=TruthDevice(),
+        rounds_policy=FixedRounds(3),
+    ).build()
+
+    row, = completed.result.operation_results
+    assert row.logical_observables == prediction
+    assert row.observable_truth == truth
+    assert row.logical_failure is failure
+    assert truth_queries == [0]
+
+
+def test_primary_result_rejects_logical_vector_width_mismatch():
+    class TruthDevice(TimingOnlyDevice):
+        def logical_observable_truth(self, operation_id):
+            return (0, 1)
+
+    with pytest.raises(RuntimeError, match="predicted 1 logical observables"):
+        RunSpec(
+            ops=[Operation(0, "memory", (0,))],
+            decoder=StaticDecoder(),
+            device=TruthDevice(),
+            rounds_policy=FixedRounds(3),
+        ).build()
+
+
 def test_primary_result_freezes_logical_outputs_separately_from_diagnostics():
     completed_run = RunSpec(
         ops=[Operation(0, "memory", (0,))],
@@ -1007,6 +1063,9 @@ def test_primary_result_freezes_logical_outputs_separately_from_diagnostics():
     ).build()
 
     assert completed_run.result.logical_results() == {0: (0,)}
+    result_row, = completed_run.result.operation_results
+    assert result_row.observable_truth is None
+    assert result_row.logical_failure is None
     completed_run.window_manager.op_results[0] = (1,)
     assert completed_run.result.logical_results() == {0: (0,)}
 

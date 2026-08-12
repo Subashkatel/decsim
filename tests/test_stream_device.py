@@ -71,6 +71,21 @@ def test_stream_segment_serves_its_global_rounds():
         assert np.array_equal(got, want), r
 
 
+def test_logical_observable_truth_is_an_immutable_public_snapshot():
+    circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
+    op = Operation(3, "mem", (0,), circuit=circ)
+    dev = StimDevice(seed=2)
+
+    assert dev.logical_observable_truth(op.id) is None
+    dev.begin_operation(op, R1, R1)
+    truth = dev.logical_observable_truth(op.id)
+
+    assert isinstance(truth, tuple)
+    assert all(type(bit) is int and bit in (0, 1) for bit in truth)
+    dev._truth[op.id][0] ^= True
+    assert dev.logical_observable_truth(op.id) != truth
+
+
 def test_standalone_op_unchanged():
     circ = NoiseModel.circuit_level(0.01).circuit(distance=D, rounds=R1)
     op = Operation(3, "mem", (0,), circuit=circ)          # no stream_id

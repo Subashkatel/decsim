@@ -19,10 +19,18 @@ from .seeding import bind_run_seed
 
 @dataclass(frozen=True)
 class LogicalOperationResult:
+    """One prediction and its optional sampled logical-observable truth.
+
+    ``logical_failure`` follows arXiv:2303.15933v2 Sec. 2.1 and Stim/Sinter
+    v1.16.0: it is true when any predicted bit differs from the sampled vector.
+    """
+
     operation_id: int
     result_status: str
     logical_observables: Optional[tuple[int, ...]]
     stream_offset: Optional[int]
+    observable_truth: Optional[tuple[int, ...]] = None
+    logical_failure: Optional[bool] = None
 
 
 @dataclass(frozen=True)
@@ -346,7 +354,7 @@ class RunSpec:
         from .views import capture_primary_result
         result = capture_primary_result(
             engine, chip, window_manager, all_operations,
-            metric_bindings, links)
+            metric_bindings, links, device)
         engine._complete()
         return CompletedRun(
             result, engine, window_manager, decoder_manager, chip,

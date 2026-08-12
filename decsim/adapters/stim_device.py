@@ -68,6 +68,15 @@ class StimDevice(_AtomicRunSeedConsumer):
     def _key(op: Operation):
         return op.stream_id if op.stream_id is not None else op.id
 
+    def logical_observable_truth(
+        self, operation_id: int
+    ) -> Optional[tuple[int, ...]]:
+        """Return Stim's sampled observable-flip vector, when available."""
+        sampled = self._truth.get(operation_id)
+        if sampled is None:
+            return None
+        return tuple(int(bit) for bit in sampled)
+
     @staticmethod
     def _validate_sample_key(key) -> None:
         """Reject identities whose equality can alias a legal cache key."""

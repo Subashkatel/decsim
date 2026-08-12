@@ -91,7 +91,6 @@ class RunSpec:
     strategy: Optional[Any] = None
     scheduler: Optional[Any] = None
     lane_policy: Optional[Any] = None
-    deadline_policy: Optional[Any] = None
     unit_pools: Optional[dict] = None
     num_units: Optional[int] = None
     scheme: Optional[Any] = None
@@ -148,7 +147,7 @@ class RunSpec:
             _validate_workload_identity,
         )
         from .policies import Eager, Ignore
-        from .schedulers import EnqueueTimeDeadline, FifoScheduler
+        from .schedulers import FifoScheduler
         from .schemes import SlidingWindowScheme
         from .switching import Baseline
         from .window_interactions import DefaultWindowInteraction
@@ -179,8 +178,6 @@ class RunSpec:
             raise ValueError("invalid feedback_boundary_mode")
         if type(self.record_switching_windows) is not bool:
             raise TypeError("record_switching_windows must be an exact bool")
-        if {op.id for op in decode_ops} & {op.id for op in dynamic_streams}:
-            raise ValueError("an operation cannot be in decode_ops and dynamic_streams")
         all_operations = _unique_operations(ops + decode_ops + dynamic_streams)
         views = tuple(OperationPlanningView.from_operation(op)
                       for op in all_operations)
@@ -231,8 +228,9 @@ class RunSpec:
             raise ValueError("decoder is required when router is omitted")
         router = self.router or CodeRouter(
             default=self.decoder, by_code=dict(self.decoders))
-        scheduler = self.scheduler or FifoScheduler()
-        deadline_policy = self.deadline_policy or EnqueueTimeDeadline()
+        scheduler = (
+            FifoScheduler() if self.scheduler is None else self.scheduler
+        )
         idle_policy = self.idle_policy or Ignore()
         orchestrator = (self.make_orchestrator(engine)
                         if self.make_orchestrator
@@ -248,7 +246,7 @@ class RunSpec:
             engine, scheme=scheme, code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches,
-            deadline_policy=deadline_policy, links=links,
+            links=links,
             orchestrator=orchestrator, boundary_policy=boundary_policy,
             window_interaction=window_interaction,
             planning_view_by_operation_id=view_by_id,
@@ -318,7 +316,7 @@ class RunSpec:
             device=device, decoder_router=router,
             factory=factory, strategy=strategy, scheduler=scheduler,
             lane_policy=self.lane_policy,
-            deadline_policy=deadline_policy, boundary_policy=boundary_policy,
+            boundary_policy=boundary_policy,
             window_interaction=window_interaction, idle_policy=idle_policy,
             orchestrator=orchestrator, controller=controller,
             memory_model=self.memory_model, metrics=metric_bindings))

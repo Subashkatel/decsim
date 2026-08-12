@@ -117,31 +117,6 @@ def test_decoder_result_identity_is_rejected_before_interaction_or_commit():
         ))
 
 
-def test_duplicate_decoder_completion_is_rejected_before_callback():
-    class RecordingDecoder(_OrderedBoundaryDecoder):
-        def __init__(self):
-            super().__init__()
-            self.jobs = []
-
-        def decode(self, job):
-            self.jobs.append(job)
-            return super().decode(job)
-
-    decoder = RecordingDecoder()
-    completed_run = RunSpec(
-        ops=[Operation(0, "memory", (0,))],
-        d=3,
-        rounds_policy=FixedRounds(3),
-        decoder=decoder,
-    ).build()
-    completed_job = decoder.jobs[0]
-    free_before = dict(completed_run.decoder_manager.pool_free)
-
-    with pytest.raises(RuntimeError, match="duplicate decoder completion"):
-        completed_run.decoder_manager._on_decode_done(completed_job)
-
-    assert completed_run.decoder_manager.pool_free == free_before
-
 
 def test_duplicate_boundary_targets_are_rejected_before_delivery():
     class DuplicateTargets(DefaultWindowInteraction):

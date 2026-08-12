@@ -42,7 +42,7 @@ class _RecordingService:
     def __init__(self):
         self.labels = []
 
-    def submit_decode(self, round_count, on_done, label="", deadline=None,
+    def submit_decode(self, round_count, on_done, label="",
                       code=None, spatial_nodes=None):
         self.labels.append(label)
         on_done()

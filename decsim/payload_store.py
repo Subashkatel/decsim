@@ -351,10 +351,7 @@ class PayloadStore:
                     self._notify_capacity_change()
 
     def owner_packet_identities(self, role, owner) -> tuple:
-        try:
-            return self._future_owners[(role, owner)].packet_identities
-        except KeyError as error:
-            raise KeyError((role, owner)) from error
+        return self._future_owners[(role, owner)].packet_identities
 
     def has_owner(self, role, owner) -> bool:
         return (role, owner) in self._future_owners

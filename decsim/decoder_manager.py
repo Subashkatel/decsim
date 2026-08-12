@@ -51,7 +51,6 @@ class TerminalRequestRecord:
     ready_ticks: int
     dispatch_ticks: Optional[int]
     decode_output_ticks: Optional[int]
-    scheduler_priority_ticks: int
     service_key: Optional[DecoderServiceKey]
     soft_output: Optional[SoftOutput]
     terminal_processing_outcome: RequestProcessingOutcome
@@ -217,7 +216,7 @@ class DecoderManager:
             job.request_admitted_ticks = self.engine.now
         pool = self.pool_for(job)
         queue = self.queue_for(pool)
-        self.scheduler.insert(queue, job)
+        queue.append(job)
         self.engine.log(self.log_name,
                         f"{job.label} READY -> enqueue "
                         f"({self.pool_tag(pool)}ready-queue length = {len(queue)})")
@@ -225,18 +224,16 @@ class DecoderManager:
         self.try_dispatch()
 
     def submit_decode(self, round_count: int, on_done: Callable[[], None],
-                      label: str = "external", deadline: Optional[int] = None,
-                      code: Optional[str] = None,
+                      label: str = "external", code: Optional[str] = None,
                       spatial_nodes: Optional[int] = None,
                       hint: Optional[str] = None) -> None:
         """Submit a self-contained external decode job (factory corrections,
         separate idle decodes)."""
         job = DecodeJob(op_id=-1, window_id=0, n_rounds=round_count,
                         ready_time=self.engine.now,
-                        deadline=self.engine.now if deadline is None else deadline,
                         on_done=on_done, label=label, code=code,
                         spatial_nodes=spatial_nodes, hint=hint)
-        self.scheduler.insert(self.queue_for(self.pool_for(job)), job)
+        self.queue_for(self.pool_for(job)).append(job)
         self.queue_log.append((self.engine.now, self.queued_total()))
         self.try_dispatch()
 
@@ -308,12 +305,12 @@ class DecoderManager:
         if self.bulk_strong and pool != "default":
             job = self._merge_strong_batch(queue)
             return job
-        return self.scheduler.pop(queue, self.engine.now)
+        return self.scheduler.pop(queue)
 
     def _merge_strong_batch(self, queue: list) -> DecodeJob:
         """Batch queued strong jobs (timing-only) into one decode."""
         jobs = [
-            self.scheduler.pop(queue, self.engine.now)
+            self.scheduler.pop(queue)
             for _ in range(len(queue))
         ]
         if len(jobs) > 1:
@@ -333,7 +330,6 @@ class DecoderManager:
         total = sum(j.n_rounds for j in jobs)
         batch = DecodeJob(op_id=-1, window_id=0, n_rounds=total,
                           ready_time=min(j.ready_time for j in jobs),
-                          deadline=min(j.deadline for j in jobs),
                           on_done=lambda: None,
                           label=f"strong-batch x{len(jobs)} ({total}r)",
                           hint="strong", spatial_nodes=jobs[0].spatial_nodes,
@@ -378,11 +374,6 @@ class DecoderManager:
         """Contract 2b pipeline with the strategy seam in the switching slots."""
         if job.cancelled:
             return
-        if job.completed:
-            raise RuntimeError(
-                f"duplicate decoder completion for job "
-                f"({job.op_id}, {job.window_id})")
-
         if job.strong_decode_for is not None:
             result = self._decode_and_validate_result(job)
             strong_result_deliveries = self._prepare_strong_result_deliveries(
@@ -685,7 +676,7 @@ class DecoderManager:
             job.request_key, window.start_round, window.buffer_hi, job.n_rounds,
             bit_count, weight, job.request_created_ticks,
             job.request_admitted_ticks, job.ready_time,
-            job.service_dispatch_ticks, decode_output_ticks, job.deadline,
+            job.service_dispatch_ticks, decode_output_ticks,
             job.service_key, None if result is None else result.soft_output,
             outcome))
 

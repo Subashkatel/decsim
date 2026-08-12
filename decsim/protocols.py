@@ -85,11 +85,11 @@ class RunSeedComposite(Protocol):
 
 @dataclass
 class Submission:
-    """One decode job a strategy wants enqueued, optionally after a delay
-    (e.g. the weak->strong ws hop). A strong redo job gets its
-    ready_time stamped when it reaches the ready queue, so the delay does not
-    count as queue wait. Its configured deadline remains the physical
-    obligation stamped from the source window before the hop."""
+    """One decode job a strategy wants enqueued, optionally after a delay.
+
+    A strong redo job gets its ready time when it reaches the queue, so link
+    delay is not charged as queue wait.
+    """
 
     job: DecodeJob
     delay_ticks: int = 0
@@ -255,16 +255,6 @@ class IdlePolicy(Protocol):
     def account(self, idle_rounds: int, op) -> None: ...
 
 
-@runtime_checkable
-class DeadlinePolicy(Protocol):
-    """Port 13. Stamps DecodeJob.deadline when the job is built; the EDF
-    scheduler dispatches by it. Window.t_first_round may be absent; policies
-    that require arrival provenance must reject that incomplete input."""
-
-    def deadline(self, op, window: Window, now: int, *,
-                 on_reaction_path: bool) -> int: ...
-
-
 # -------------------------------------------------------------- decode stage
 
 @runtime_checkable
@@ -294,13 +284,9 @@ class DecoderRouter(Protocol):
 
 @runtime_checkable
 class Scheduler(Protocol):
-    """Port 11. Queue discipline for one decode lane (FIFO or EDF):
-    insert() places a job in the ready queue, and pop() picks the next job
-    using the dispatch owner's exact current tick."""
+    """Port 11. Select the next ready job from one decoder-pool queue."""
 
-    def insert(self, queue: list, job: DecodeJob) -> None: ...
-
-    def pop(self, queue: list, now_ticks: int) -> DecodeJob: ...
+    def pop(self, queue: list[DecodeJob]) -> DecodeJob: ...
 
 
 @runtime_checkable

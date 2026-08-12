@@ -346,12 +346,6 @@ class SyndromeRoundPacket:
     fragments: tuple[RetainedSyndromeFragment, ...]
 
     def __post_init__(self) -> None:
-        if not is_stable_identity(self.operation_id):
-            raise TypeError("packet operation_id must be a stable identity")
-        if type(self.round_index) is not int:
-            raise TypeError("packet round_index must be an exact built-in int")
-        if self.round_index < 1:
-            raise ValueError("packet round_index must be at least one")
         if (
             type(self.fragments) is not tuple
             or not self.fragments
@@ -366,7 +360,7 @@ class SyndromeRoundPacket:
         for fragment in self.fragments:
             if not same_stable_identity(fragment.operation_id, self.operation_id):
                 raise ValueError("packet fragments must share operation identity")
-            if fragment.round_index != self.round_index:
+            if not same_stable_identity(fragment.round_index, self.round_index):
                 raise ValueError("packet fragments must share round_index")
             if fragment.fragment_index in seen_fragment_indices:
                 raise ValueError("packet fragment indices must be distinct")
@@ -644,16 +638,6 @@ class OperationWindowPlan:
             predecessors[destination].add(source)
             dependents[source].add(destination)
 
-        self._validate_boundary_indices(
-            self.entry_window_indices,
-            "entry_window_indices",
-            window_count,
-        )
-        self._validate_boundary_indices(
-            self.exit_window_indices,
-            "exit_window_indices",
-            window_count,
-        )
         expected_entries = tuple(
             index for index, sources in enumerate(predecessors) if not sources
         )
@@ -661,9 +645,9 @@ class OperationWindowPlan:
             index for index, destinations in enumerate(dependents)
             if not destinations
         )
-        if self.entry_window_indices != expected_entries:
+        if not same_stable_identity(self.entry_window_indices, expected_entries):
             raise ValueError("entry_window_indices must equal all graph roots")
-        if self.exit_window_indices != expected_exits:
+        if not same_stable_identity(self.exit_window_indices, expected_exits):
             raise ValueError("exit_window_indices must equal all graph sinks")
 
         indegree = [len(sources) for sources in predecessors]
@@ -684,22 +668,6 @@ class OperationWindowPlan:
             raise TypeError("windowed must be an exact bool")
         if type(self.batch_preceding_idle_rounds) is not bool:
             raise TypeError("batch_preceding_idle_rounds must be an exact bool")
-
-    @staticmethod
-    def _validate_boundary_indices(indices, label, window_count) -> None:
-        if (
-            type(indices) is not tuple
-            or not indices
-            or any(type(index) is not int for index in indices)
-        ):
-            raise TypeError(f"{label} must be a nonempty tuple of exact ints")
-        if len(set(indices)) != len(indices):
-            raise ValueError(f"{label} must contain unique indices")
-        if tuple(sorted(indices)) != indices:
-            raise ValueError(f"{label} must be ascending")
-        if any(index < 0 or index >= window_count for index in indices):
-            raise ValueError(f"{label} contains an out-of-range index")
-
 
 @dataclass
 class WindowPlan:
@@ -923,26 +891,10 @@ class DecoderRequestKey:
     tier: DecoderTier
     run_sequence: int
 
-    def __post_init__(self) -> None:
-        if not is_stable_identity(self.operation_id):
-            raise TypeError("decoder request operation_id must be a stable identity")
-        if type(self.window_id) is not int or type(self.run_sequence) is not int:
-            raise TypeError("decoder request indices must be exact built-in ints")
-        if self.window_id < 0 or self.run_sequence < 0:
-            raise ValueError("decoder request indices must be nonnegative")
-        if type(self.tier) is not DecoderTier:
-            raise TypeError("decoder request tier must be a DecoderTier")
-
 
 @dataclass(frozen=True)
 class DecoderServiceKey:
     run_sequence: int
-
-    def __post_init__(self) -> None:
-        if type(self.run_sequence) is not int:
-            raise TypeError("decoder service sequence must be an exact built-in int")
-        if self.run_sequence < 0:
-            raise ValueError("decoder service sequence must be nonnegative")
 
 
 @dataclass
@@ -955,7 +907,6 @@ class DecodeJob:
     dem: Optional[Any] = None                # window detector error model (data-path decoders)
     payloads: list = field(default_factory=list)   # SyndromePayloads with the window's bits
     ready_time: int = 0                      # tick the job was enqueued (queue-wait accounting)
-    deadline: int = 0                        # tick stamped by the DeadlinePolicy (EDF)
     on_done: Optional[Callable[[], None]] = None   # completion callback
     label: str = ""                          # log label
     strong_label: Optional[str] = None       # manager-owned label for a strong sibling
@@ -968,7 +919,7 @@ class DecodeJob:
     strong_decode_for: Optional[tuple] = None      # (op_id, window_id) this strong job re-decodes
     awaiting_strong_result: bool = False     # weak result held non-final until the strong sibling lands
     cancelled: bool = False                  # cancelled siblings discard completion
-    completed: bool = False                  # guards against duplicate completion delivery
+    completed: bool = False                  # terminal flag; admission refuses reuse of a completed job
     submitted: bool = False                  # admitted once to one queue slot and unit
     request_key: Optional[DecoderRequestKey] = None
     request_created_ticks: Optional[int] = None

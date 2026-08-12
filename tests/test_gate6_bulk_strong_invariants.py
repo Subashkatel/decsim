@@ -18,7 +18,7 @@ from decsim.message import (DecodeJob, DecodeResult, DecoderRequestKey,
 from decsim.planner import FixedRounds
 from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.run_spec import RunSpec, simulate
-from decsim.schedulers import EarliestDeadlineScheduler, FifoScheduler
+from decsim.schedulers import FifoScheduler
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Baseline
 
@@ -172,16 +172,14 @@ def test_bulk_merge_delivers_every_key_and_frees_units():
     assert not manager._windows_waiting_for_strong_result
 
 
-def test_strong_handoff_changes_readiness_without_renewing_deadline():
+def test_strong_handoff_updates_ready_time_at_admission():
     eng, manager, _ = build()
     job = strong_job(2, 5)
-    job.deadline = us(99)
 
     manager.enqueue(job, delay_ticks=us(2))
     eng.run(until=us(2))
 
     assert job.ready_time == us(2)
-    assert job.deadline == us(99)
 
 
 def test_in_transit_strong_snapshot_never_consults_prospective_lane_policy():
@@ -199,47 +197,6 @@ def test_in_transit_strong_snapshot_never_consults_prospective_lane_policy():
     assert manager.admitted_strong_work_snapshot() == (
         (((2, 0),), "in_transit", 5),
     )
-
-
-@pytest.mark.parametrize("deadlines", [(us(20), us(70)), (us(70), us(20))])
-def test_timing_only_strong_batch_keeps_earliest_member_deadline(deadlines):
-    _, manager, _ = build()
-    first = strong_job(2, 5)
-    second = strong_job(3, 5)
-    first.deadline, second.deadline = deadlines
-
-    batch = manager._merge_strong_batch([first, second])
-
-    assert batch.deadline == min(deadlines)
-
-
-def test_preserved_strong_deadlines_drive_edf_ahead_of_admission_order():
-    eng = Engine(verbose=False)
-    decoder = _RecordingDecoder(tau_us=1.0)
-    manager = DecoderManager(
-        eng,
-        router=CodeRouter(default=decoder),
-        scheduler=EarliestDeadlineScheduler(),
-        unit_pools={"default": 1, "strong": 1},
-        bulk_strong=False,
-    )
-    manager.strategy = _NullStrategy()
-    manager.on_strong_window_decoded = lambda _completion: None
-    blocker = strong_job(1, 10, "blocker")
-    admitted_first = strong_job(2, 1, "later-deadline")
-    urgent = strong_job(3, 1, "earlier-deadline")
-    blocker.deadline = us(1)
-    admitted_first.deadline = us(70)
-    urgent.deadline = us(20)
-    for job in (blocker, admitted_first, urgent):
-        wait_for(manager, job)
-
-    manager.enqueue(blocker)
-    manager.enqueue(admitted_first)
-    manager.enqueue(urgent)
-    eng.run()
-
-    assert decoder.decoded == ["blocker", "earlier-deadline", "later-deadline"]
 
 
 @pytest.mark.parametrize(
@@ -690,7 +647,7 @@ def test_a_destination_that_adopted_a_result_escalates_again_on_its_next_attempt
     assert [key for _, key in results] == [(2, 0)]
 
     replayed_weak = weak_job(2, 50, "w2 replay")
-    replayed_weak.ready_time = replayed_weak.deadline = eng.now
+    replayed_weak.ready_time = eng.now
     replayed_weak.attempt = 1
     manager.enqueue(replayed_weak)                # slow: the strong lands first
     manager.enqueue(strong_job(2, 5, "s-replay"))

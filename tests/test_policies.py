@@ -1,7 +1,7 @@
 from fractions import Fraction
 
 #==================================================================
-# TESTS FOR POLICY SEAMS (deadlines, routing, switching, round time, idle decode)
+# TESTS FOR POLICY SEAMS (routing, switching, round time, idle decode)
 #==================================================================
 import pytest
 
@@ -9,19 +9,14 @@ from decsim.codes import SurfaceCodeModel
 from decsim.config import us
 from decsim.decoders import (CodeRouter, FunctionLatencyDecoder,
                              PerRoundDecoder, PresetLatencyDecoder,
-                             SAMPLED_CONFIDENCE_SOURCE,
                              SampledConfidenceDecoder, SwitchingDecoder,
                              SwitchingRouter)
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import CircuitFrontend, cnot_plus_two_t_circuit
 from decsim.message import DecodeJob, DecodeResult, Operation
-from decsim.schedulers import (EarliestDeadlineScheduler, EnqueueTimeDeadline,
-                               ReactionPathDeadline)
 from decsim.policies import from_mode
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec, simulate
-from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
-from decsim.switching import Switching
 
 
 class _RecordingTimingChild:
@@ -43,121 +38,6 @@ class _RecordingTimingChild:
             correction=(self.logical_bit,),
             logical_observables=(self.logical_bit,),
         )
-
-
-# ---- deadline policies ----------------------------------------------------------------
-
-def test_deadline_policies():
-    assert EnqueueTimeDeadline().deadline(None, None, 42, on_reaction_path=True) == 42
-    pol = ReactionPathDeadline(slack_ticks=100)
-    assert pol.deadline(None, None, 42, on_reaction_path=True) == 42
-    assert pol.deadline(None, None, 42, on_reaction_path=False) == 142
-
-
-def _contended_circuit():
-    """Four background CNOTs registered before a feedback-blocked T chain, so under FIFO the
-    reaction-path windows queue behind the Clifford windows."""
-    ops = [Operation(i, f"CNOT(q{2*i+2},q{2*i+3})", (2*i + 2, 2*i + 3), clifford=True)
-           for i in range(4)]
-    ops.append(Operation(4, "T(q0)", (0,), clifford=False))
-    ops.append(Operation(5, "T2(q0)", (0,), clifford=False, blocked_by=4))
-    return CircuitFrontend(ops).build()
-
-
-def test_reaction_path_deadline_beats_fifo_under_contention():
-    def run(scheduler=None, deadline_policy=None):
-        r = simulate(RunSpec(ops=_contended_circuit(), num_units=1, d=3,
-                             rounds_policy=FixedRounds(11),
-                             decoder=PresetLatencyDecoder(5.0), scheduler=scheduler,
-                             deadline_policy=deadline_policy), verbose=False)
-        return r.result.chip_done_ticks                  # ends with the blocked T's last round
-
-    fifo = run()
-    edf = run(scheduler=EarliestDeadlineScheduler(),
-              deadline_policy=ReactionPathDeadline(slack_ticks=us(100.0)))
-    assert edf < fifo                          # reaction-path-first shrinks the stall
-
-
-@pytest.mark.parametrize(
-    "switching",
-    [
-        Switching(
-            confidence_threshold=0.5,
-            expected_source=SAMPLED_CONFIDENCE_SOURCE,
-        ),
-        Switching(
-            confidence_threshold=0.5,
-            expected_source=SAMPLED_CONFIDENCE_SOURCE,
-            run_both_at_once=True,
-        ),
-        Switching(
-            confidence_threshold=0.5,
-            expected_source=SAMPLED_CONFIDENCE_SOURCE,
-            double_window=True,
-        ),
-    ],
-    ids=["serial", "parallel", "double-window"],
-)
-def test_switching_strong_jobs_keep_their_policy_deadline(switching):
-    slack_ticks = 123_456_789
-
-    class RecordingPolicy(ReactionPathDeadline):
-        def __init__(self):
-            super().__init__(slack_ticks)
-            self.deadline_by_window = {}
-
-        def deadline(self, op, window, now, on_reaction_path):
-            value = super().deadline(
-                op,
-                window,
-                now,
-                on_reaction_path=on_reaction_path,
-            )
-            self.deadline_by_window[id(window)] = value
-            return value
-
-    class RecordingScheduler(EarliestDeadlineScheduler):
-        def __init__(self):
-            self.insertions = []
-
-        def insert(self, queue, job):
-            self.insertions.append(job)
-            super().insert(queue, job)
-
-    policy = RecordingPolicy()
-    scheduler = RecordingScheduler()
-    execution = simulate(
-        RunSpec(
-            ops=[Operation(0, "memory", (0,), clifford=True)],
-            d=3,
-            rounds_policy=FixedRounds(12),
-            round_us=1.0,
-            scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
-            strategy=switching,
-            router=SwitchingRouter(
-                SampledConfidenceDecoder(
-                    PerRoundDecoder(0.2),
-                    escalation_probability=1.0,
-                ),
-                PerRoundDecoder(5.0),
-            ),
-            unit_pools={"default": 1, "strong": 1},
-            scheduler=scheduler,
-            deadline_policy=policy,
-            seed=7,
-        ),
-        verbose=False,
-    )
-
-    strong_jobs = [
-        job for job in scheduler.insertions
-        if job.strong_decode_for is not None
-    ]
-    assert len(strong_jobs) == execution.decoder_manager.strong_needed
-    assert strong_jobs
-    for job in strong_jobs:
-        assert job.window.t_first_round is not None
-        assert job.deadline == policy.deadline_by_window[id(job.window)]
 
 
 # ---- decoder routing --------------------------------------------------------------------

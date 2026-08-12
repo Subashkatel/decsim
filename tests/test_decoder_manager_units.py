@@ -94,25 +94,6 @@ def test_units_conserved_for_inline_switching_timing_paths():
             f"seed {seed}: a unit leaked into the wrong pool"
 
 
-def test_pools_with_deadline_scheduler_complete_and_conserve():
-    """EDF sorts each pool's queue independently; every job finishes and every pool's
-    units all come back."""
-    from decsim.schedulers import EarliestDeadlineScheduler
-    engine = Engine(verbose=False)
-    cluster = DecoderManager(engine, router=CodeRouter(PresetLatencyDecoder(7.0)),
-                       scheduler=EarliestDeadlineScheduler(),
-                       unit_pools={"default": 2, "strong": 2})
-    done = []
-    for i in range(6):
-        cluster.submit_decode(6, lambda i=i: done.append(i), label=f"s{i}",
-                              hint="strong", deadline=us(100 - i))
-        cluster.submit_decode(6, lambda i=i: done.append(i + 10), label=f"d{i}",
-                              deadline=us(100 - i))
-    engine.run()
-    assert len(done) == 12
-    assert cluster.pool_free == cluster.unit_totals
-
-
 def test_metrics_see_every_pool():
     """Utilization and queue depth must count ALL pools: with traffic ONLY on the
     strong pool, a default-pool-only metric would read 0.0 / 0 (the blind spot this

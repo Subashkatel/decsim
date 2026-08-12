@@ -12,7 +12,7 @@ from decsim.metrics import MagicStateLatency
 
 class ImmediateService:
     """DecodeService test helper: every correction decode completes instantly."""
-    def submit_decode(self, round_count, on_done, label="", deadline=None,
+    def submit_decode(self, round_count, on_done, label="",
                       code=None, spatial_nodes=None):
         on_done()
 
@@ -24,7 +24,7 @@ class DelayedService:
         self.latency_ticks = latency_ticks
         self.submit_times = []
 
-    def submit_decode(self, round_count, on_done, label="", deadline=None,
+    def submit_decode(self, round_count, on_done, label="",
                       code=None, spatial_nodes=None):
         self.submit_times.append(self.engine.now)
         self.engine.schedule(self.latency_ticks, on_done, label=label)
@@ -394,7 +394,7 @@ def test_magic_state_latency_aggregates_all_deliveries_with_bounded_traces():
         def __init__(self):
             self.calls = 0
 
-        def submit_decode(self, round_count, on_done, label="", deadline=None,
+        def submit_decode(self, round_count, on_done, label="",
                           code=None, spatial_nodes=None):
             delay = 100 if self.calls == 0 else self.calls % 7
             self.calls += 1

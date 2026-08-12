@@ -235,7 +235,7 @@ class WindowManager:
 
     def __init__(self, engine, *, scheme, code_geometry,
                  resolved_operations, resolved_patches,
-                 deadline_policy, links, orchestrator, boundary_policy,
+                 links, orchestrator, boundary_policy,
                  window_interaction,
                  planning_view_by_operation_id,
                  fault_model_requirement_for,
@@ -255,7 +255,6 @@ class WindowManager:
             patch.patch_identity: patch
             for patch in resolved_patches
         })
-        self.deadline_policy = deadline_policy
         self.links = links
         self.orchestrator = orchestrator
         self.boundary_policy = boundary_policy
@@ -339,17 +338,6 @@ class WindowManager:
         resolved_operation,
     ) -> None:
         """Register a stream whose windows are created at runtime."""
-        if stream_op.id != resolved_operation.operation_id:
-            raise ValueError(
-                "dynamic stream and resolved operation identities differ"
-            )
-        if (
-            self._resolved_operations.get(stream_op.id)
-            is not resolved_operation
-        ):
-            raise ValueError(
-                "dynamic stream must use the root-resolved operation record"
-            )
         resolved_feedback_mode = (
             stream_op.feedback_boundary_mode
             if stream_op.feedback_boundary_mode is not None
@@ -360,10 +348,6 @@ class WindowManager:
             feedback_boundary_mode=resolved_feedback_mode,
         )
         stream_id = stream_op.id
-        if stream_id not in self._planning_view_by_operation_id:
-            raise ValueError(
-                "dynamic stream must have a root-resolved planning view"
-            )
         self._ops[stream_id] = stream_op
         self.rounds_arrived.setdefault(stream_id, 0)
         self.memory_rounds.setdefault(stream_id, 0)
@@ -415,12 +399,7 @@ class WindowManager:
         return self._resolved_operations[op.id].spatial_node_count
 
     def _planning_view(self, op: Operation):
-        try:
-            return self._planning_view_by_operation_id[op.id]
-        except KeyError as error:
-            raise ValueError(
-                f"operation {op.id} has no frozen planning view"
-            ) from error
+        return self._planning_view_by_operation_id[op.id]
 
     def load_execution_plan(self, plan: WindowPlan, buffering_plan) -> None:
         """Install the pre-computed compile-time window plan."""
@@ -636,7 +615,6 @@ class WindowManager:
             if model is not None:
                 self.window_models[(stream_id, window_index)] = model
         self._add_window_read_refs((stream_id, window_index), window)
-        self.check_window((stream_id, window_index))
 
     def validate_stream_length(self, stream_id, stream_round_count: int) -> None:
         if self.syndrome_source is None:
@@ -849,21 +827,12 @@ class WindowManager:
             tail_closed=self._window_has_closed_boundary(window),
         )
 
-    def _deadline_for_window(self, op: Operation, window: Window) -> int:
-        """Stamp one window, copying retained start-round provenance when present."""
+    def _stamp_first_round_tick(self, window: Window) -> None:
+        """Retain arrival provenance for latency accounting."""
         if window.t_first_round is None:
-            first_round_tick = self.store.round_complete_tick(
-                window.op_id,
-                window.start_round,
+            window.t_first_round = self.store.round_complete_tick(
+                window.op_id, window.start_round
             )
-            if first_round_tick is not None:
-                window.t_first_round = first_round_tick
-        return self.deadline_policy.deadline(
-            op,
-            window,
-            self.engine.now,
-            on_reaction_path=(op.id in self.blocking_ops),
-        )
 
     def _new_request_key(
         self, operation_id, window_id: int, tier: DecoderTier,
@@ -876,7 +845,7 @@ class WindowManager:
     def _submit_window_decode(self, key: tuple, window: Window,
                               op: Operation) -> None:
         """Build the weak job, ask the strategy, and enqueue its submissions."""
-        deadline = self._deadline_for_window(op, window)
+        self._stamp_first_round_tick(window)
         window.t_queued = self.engine.now
         request_key = self._new_request_key(
             window.op_id, window.k, DecoderTier.WEAK)
@@ -886,7 +855,7 @@ class WindowManager:
                             window.n_rounds
                             + window.batched_preceding_idle_round_count
                         ),
-                        ready_time=self.engine.now, deadline=deadline,
+                        ready_time=self.engine.now,
                         spatial_nodes=self._spatial_nodes(op),
                         payloads=self._assemble_payloads(window),
                         dem=self.window_models.get(key),
@@ -1139,7 +1108,6 @@ class WindowManager:
         weak_window = self.windows[key]
         op = self._ops[weak_job.op_id]
         strong_window = self._strong_context_window(weak_window)
-        deadline = self._deadline_for_window(op, strong_window)
         model_round_count = self._round_count_for_window(op.id, strong_window)
         left_exclusions = (
             ((1, strong_window.commit_lo - 1),)
@@ -1154,10 +1122,11 @@ class WindowManager:
         )
         request_key = self._new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
+        self._stamp_first_round_tick(strong_window)
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
             n_rounds=round_count, ready_time=self.engine.now,
-            deadline=deadline, label=label, hint="strong",
+            label=label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=self._assemble_payloads(strong_window),
             attempt=1, window=strong_window, strong_decode_for=key,
@@ -1351,10 +1320,6 @@ class WindowManager:
         """Atomically replace a non-aligned post-slab suffix before deferral."""
         key = weak_window.key
         op_id = key[0]
-        if self._escalations.peek_key(key) is not None:
-            raise RuntimeError(
-                f"duplicate strong escalation for window {key}: one switching "
-                "event creates exactly one strong job")
         if not (
             1 <= plan.context_lo <= plan.commit_lo
             <= weak_window.commit_lo <= weak_window.commit_hi
@@ -1734,12 +1699,6 @@ class WindowManager:
     ) -> dict:
         """Prepare the complete logical-owner map without changing live state."""
         plan = resolved_region.plan
-        if (
-            type(plan.commit_lo) is not int
-            or type(plan.commit_hi) is not int
-        ):
-            raise TypeError(
-                "logical contribution bounds must be exact ints")
         replaced_owner_keys = {
             key, *resolved_region.absorbed_window_keys,
         }
@@ -1773,11 +1732,6 @@ class WindowManager:
         self, key: tuple, weak_window: Window, later_windows: list,
         round_count: int, plan,
     ) -> _ResolvedStrongRegion:
-        if not isinstance(plan, StrongRegionPlan):
-            raise TypeError(
-                f"window interaction must return StrongRegionPlan for "
-                f"double-window escalation {key}, got "
-                f"{type(plan).__name__}")
         if not (
             1 <= plan.context_lo <= plan.commit_lo
             <= weak_window.commit_lo
@@ -1788,10 +1742,6 @@ class WindowManager:
                 f"invalid strong-region bounds for {key}: context "
                 f"{plan.context_lo}-{plan.context_hi}, commit "
                 f"{plan.commit_lo}-{plan.commit_hi}, operation 1-{round_count}")
-        if plan.commit_lo < weak_window.commit_lo:
-            raise RuntimeError(
-                f"strong-region commit for {key} cannot precede the "
-                f"escalated window's commit start {weak_window.commit_lo}")
         if plan.commit_lo != weak_window.commit_lo:
             raise RuntimeError(
                 f"strong-region commit for {key} must start at the "
@@ -1982,7 +1932,6 @@ class WindowManager:
         weak_job = pending.weak_job
         slab = pending.strong_window
         op = self._ops[key[0]]
-        deadline = self._deadline_for_window(op, slab)
         dem = pending.strong_model
         payloads = self._assemble_payloads(slab)
         covered = {payload.round_index for payload in payloads}
@@ -1994,10 +1943,11 @@ class WindowManager:
                 f"{sorted(covered)} but it needs "
                 f"{plan.context_lo}-{plan.context_hi}; a slab may "
                 f"only start once every stored block exists (Fig. 12)")
+        self._stamp_first_round_tick(slab)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
             n_rounds=slab.n_rounds,
-            ready_time=self.engine.now, deadline=deadline,
+            ready_time=self.engine.now,
             label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,

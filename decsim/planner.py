@@ -333,8 +333,6 @@ def _plan_execution(
         )
         for operation in operations
     }
-    if len(patch_count_by_id) != len(operations):
-        raise ValueError("operation planning ids must be unique")
     base_nodes = {
         count: code.spatial_nodes(count)
         for count in {1, *patch_count_by_id.values()}
@@ -440,13 +438,6 @@ def _materialize_execution_plan(
     operation_window_plans: tuple[OperationWindowPlan, ...],
 ) -> WindowPlan:
     """Materialize exactly the typed scheme ledgers and direct DAG edges."""
-    if not (
-        len(operations)
-        == len(resolved_operations)
-        == len(operation_window_plans)
-    ):
-        raise ValueError("operation planning inputs must have equal lengths")
-
     windows = {}
     op_windows = {}
     window_count = {}
@@ -464,14 +455,9 @@ def _materialize_execution_plan(
         resolved_operations,
         operation_window_plans,
     ):
-        if (
-            operation.id != resolved.operation_id
-            or operation.id != operation_plan.operation_id
-        ):
+        if operation.id != operation_plan.operation_id:
             raise ValueError("operation planning inputs must match by position")
         operation_id = operation.id
-        if operation_id in plan_by_operation_id:
-            raise ValueError(f"duplicate operation id {operation_id}")
         plan_by_operation_id[operation_id] = operation_plan
         window_count[operation_id] = len(operation_plan.windows)
         op_windows[operation_id] = list(range(len(operation_plan.windows)))
@@ -506,11 +492,6 @@ def _materialize_execution_plan(
     for operation in operations:
         destination_plan = plan_by_operation_id[operation.id]
         for predecessor_id in operation.decoder_boundary_predecessors:
-            if predecessor_id not in plan_by_operation_id:
-                raise ValueError(
-                    f"operation {operation.id} has unknown predecessor "
-                    f"{predecessor_id}"
-                )
             successors[predecessor_id].append(operation.id)
             predecessor_plan = plan_by_operation_id[predecessor_id]
             for source_index in predecessor_plan.exit_window_indices:

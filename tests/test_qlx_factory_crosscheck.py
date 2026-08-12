@@ -29,7 +29,7 @@ QLX_ANALYTIC = {1e-4: 0.033283, 1e-3: 0.032833, 1e-2: 0.028333}
 
 
 class ImmediateService:
-    def submit_decode(self, round_count, on_done, label="", deadline=None,
+    def submit_decode(self, round_count, on_done, label="",
                       code=None, spatial_nodes=None):
         on_done()
 

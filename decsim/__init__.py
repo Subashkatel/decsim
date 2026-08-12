@@ -16,7 +16,6 @@ from .frontends.circuit import (CircuitFrontend, SurgeryIRFrontend,
 from .metrics import (DecoderUtilization, ReadyQueueStats,
                       WindowLatencyBreakdown, MagicStateLatency,
                       StrongDecoderBacklog, ConditionalReactionTime)
-from .schedulers import EarliestDeadlineScheduler, ReactionPathDeadline
 from .schemes import ParallelWindowScheme
 from .run_spec import RunSpec, simulate
 from .switching import Switching
@@ -34,7 +33,6 @@ __all__ = [
     "InfiniteFactory", "DistillationFactory", "MultiLevelDistillationFactory",
     "ParallelWindowScheme",
     "Switching",
-    "EarliestDeadlineScheduler", "ReactionPathDeadline",
     "DecoderUtilization", "ReadyQueueStats",
     "WindowLatencyBreakdown", "MagicStateLatency", "StrongDecoderBacklog",
     "ConditionalReactionTime",

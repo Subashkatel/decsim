@@ -28,7 +28,7 @@ from decsim.decoders import (
     SwitchingRouter,
 )
 from decsim.message import Operation
-from decsim.schedulers import EarliestDeadlineScheduler
+from decsim.schedulers import FifoScheduler
 from decsim.schemes import (
     ParallelWindowScheme, SlidingTerminalPolicy, SlidingWindowScheme,
 )
@@ -185,13 +185,12 @@ def test_run_both_at_once_cancel_under_load_stays_consistent():
             == result.window_manager.total_windows)
 
 
-def test_switching_with_deadline_scheduler_stays_consistent():
-    """The same switching stress under the EDF scheduler (a different queue-ordering policy)
-    must keep every invariant -- the scheduler swap must not break unit accounting."""
+def test_switching_with_fifo_scheduler_stays_consistent():
+    """FIFO switching stress must preserve unit accounting under load."""
     box = {}
     result = _switching_run(0.3, rounds=200, patches=4,
                             pools={"default": 2, "strong": 1},
-                            scheduler=EarliestDeadlineScheduler(), metrics_box=box)
+                            scheduler=FifoScheduler(), metrics_box=box)
     _assert_clean(result, box["g"])
     assert result.decoder_manager.strong_needed > 0
 

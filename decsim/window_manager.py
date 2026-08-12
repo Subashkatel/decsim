@@ -648,11 +648,15 @@ class WindowManager:
         packet_bits = (sum(fragment_bits)
                        if all(bits is not None for bits in fragment_bits)
                        else None)
+        # Canonicalize metadata only; packet fragment order remains unchanged.
         reservation = self.links.reserve(
             LinkPath.CWD, payload_bits=packet_bits, now_ticks=self.engine.now,
             attribution=TrafficAttribution(
                 operation_id=packet.operation_id,
-                patch_ids=tuple(fragment.patch_id for fragment in packet.fragments),
+                patch_ids=tuple(sorted(
+                    (fragment.patch_id for fragment in packet.fragments),
+                    key=stable_identity_order_key,
+                )),
                 window_id=None, round_lo=packet.round_index,
                 round_hi=packet.round_index))
         arrival_tick = self.engine.now + reservation.total_delay_ticks

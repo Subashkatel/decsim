@@ -119,8 +119,8 @@ def test_end_to_end_timing_run_through_the_engine(program):
               round_us=1.0,
               decoder=PerRoundDecoder(tau_us=1.0),
           ), verbose=False)
-    assert res.result.chip_done_ticks >= 120 * 1_000_000   # >= the 120-round distill
-    assert res.result.fully_done_ticks >= res.result.chip_done_ticks
+    assert res.result.execution_done_ticks >= 120 * 1_000_000   # >= the 120-round distill
+    assert res.result.fully_done_ticks >= res.result.execution_done_ticks
     cluster = res.window_manager
     assert len(cluster.committed_windows) == cluster.total_windows, \
         "not every QLX-derived window was decoded and committed"
@@ -194,15 +194,15 @@ def test_timing_cross_validation_against_real_qlx_schedules(path):
               round_us=1.0,
               decoder=PerRoundDecoder(tau_us=1.0),
           ), verbose=False)
-    decsim_rounds = res.result.chip_done_ticks / 1_000_000
+    decsim_rounds = res.result.execution_done_ticks / 1_000_000
     qlx_makespan = max(prog.start_rounds[op.id] +
                        prog.raw_durations[op.id] for op in prog.operations)
     assert decsim_rounds == qlx_makespan
     for operation in prog.operations:
-        assert res.chip.op_start_time[operation.id] == (
+        assert res.execution_runtime.op_start_time[operation.id] == (
             prog.start_rounds[operation.id] * 1_000_000
         )
-        assert res.chip.body_done_time[operation.id] == (
+        assert res.execution_runtime.body_done_time[operation.id] == (
             (prog.start_rounds[operation.id]
              + prog.raw_durations[operation.id]) * 1_000_000
         )

@@ -438,7 +438,7 @@ def test_physical_runtime_adapters_commit_correction_and_inject_latency(
     monkeypatch.setattr(
         decoder.window_decoder,
         "decode",
-        lambda received_model, syndrome: outcome,
+        lambda _received_model, syndrome: outcome,
     )
     router = CodeRouter(decoder)
 

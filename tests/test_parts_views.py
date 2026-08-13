@@ -36,16 +36,16 @@ def t_then_blocked_t():
     ]).build()
 
 
-def _full_metrics(engine, window_manager, decoder_manager, chip, factory):
+def _full_metrics(engine, window_manager, decoder_manager, execution_runtime, factory):
     return [DecoderUtilization(decoder_manager), ReadyQueueStats(decoder_manager),
             WindowLatencyBreakdown(window_manager),
             DecodeBacklog(window_manager, decoder_manager),
-            BacklogTrajectory(chip), ConditionalReactionTime(chip)]
+            BacklogTrajectory(execution_runtime), ConditionalReactionTime(execution_runtime)]
 
 
-def _switch_metrics(engine, window_manager, decoder_manager, chip, factory):
+def _switch_metrics(engine, window_manager, decoder_manager, execution_runtime, factory):
     return _full_metrics(
-        engine, window_manager, decoder_manager, chip, factory
+        engine, window_manager, decoder_manager, execution_runtime, factory
     ) + [StrongDecoderBacklog(window_manager, decoder_manager)]
 
 
@@ -106,8 +106,8 @@ def test_reaction_view_populated_by_real_run():
     res = simulate(RunSpec(ops=t_then_blocked_t(), d=3,
                            rounds_policy=FixedRounds(11),
                            decoder=PerRoundDecoder(3.0), num_units=1))
-    view = reaction_view(res.chip)
-    assert view.chip_done == res.result.chip_done_ticks
+    view = reaction_view(res.execution_runtime)
+    assert view.execution_done == res.result.execution_done_ticks
     assert view.fully_done == res.result.fully_done_ticks
     body_done = dict(view.body_done_time)
     released = dict(view.decode_release_time)
@@ -120,7 +120,7 @@ def test_reaction_view_populated_by_real_run():
 
 
 def test_backlog_window_truth_strong_views_populated_by_real_run():
-    def with_strong(engine, window_manager, decoder_manager, chip, factory):
+    def with_strong(engine, window_manager, decoder_manager, execution_runtime, factory):
         return [StrongDecoderBacklog(window_manager, decoder_manager)]
 
     weak = SampledConfidenceDecoder(PerRoundDecoder(0.2), 0.6)

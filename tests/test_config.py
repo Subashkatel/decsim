@@ -20,8 +20,26 @@ def test_fmt():
 
 
 def test_link_timing_is_not_owned_by_timing_config():
-    profile = LinkModelConfig.reference_fixed_latency_profile()
+    profile = LinkModelConfig.logical_reference_profile()
     assert profile.dd.channel.propagation_latency_ticks == us(0.5)
     assert profile.wsd.channel.propagation_latency_ticks == us(0.5)
     with pytest.raises(TypeError):
         TimingConfig(t_dd_us=0.7)
+
+
+def test_controller_readout_cost_is_explicit_non_link_timing():
+    assert TimingConfig().ticks("t_binary_availability") == 0
+    assert TimingConfig(t_binary_availability_us=0.4).ticks("t_binary_availability") == 400_000
+
+
+@pytest.mark.parametrize("value", [-0.1, float("inf"), float("nan")])
+def test_non_link_timing_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match="finite nonnegative"):
+        TimingConfig(t_binary_availability_us=value)
+
+
+def test_non_link_timing_rejects_wrong_type_and_subtick_values():
+    with pytest.raises(TypeError, match="int or float"):
+        TimingConfig(t_binary_availability_us="1")
+    with pytest.raises(ValueError, match="rounds to zero"):
+        TimingConfig(t_binary_availability_us=0.0000001)

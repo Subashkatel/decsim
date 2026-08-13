@@ -35,18 +35,18 @@ from decsim.decoders import (
 )
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import TimingOnlyDevice
-from decsim.message import (CsdInput, DecodeJob, DecodeResult, DecoderRequestKey,
-                            DecoderTier, EndpointRole, Operation, PendingStrong,
-                            PotentialStrong, Replay, RephaseGuard,
-                            ResolvedCodeGeometry,
-                            SeamFaultOwner, StrongRegionPlan, Window,
-                            WindowInfo)
+from decsim.message import (CsdInput, DecodeJob, DecodeResult, DecoderInputHold,
+                            DecoderRequestKey,
+                            DecoderTier, Operation, PendingStrong,
+                            PotentialStrong, RephaseGuard, ResolvedCodeGeometry,
+                            SeamFaultOwner,
+                            StrongRegionPlan, Window, WindowInfo)
 from decsim.metrics import DecodeBacklog, StrongDecoderBacklog
 from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.switching import Switching
 from decsim.run_spec import RunSpec, simulate
 from decsim.planner import FixedRounds
-from decsim.payload_store import PayloadStore
+from decsim.syndrome_buffer import SyndromeBuffer
 from decsim.protocols import Directive, OutcomeDirective
 from decsim.window_interactions import DefaultWindowInteraction
 from decsim.window_manager import (
@@ -60,6 +60,13 @@ from decsim.window_manager import (
 TAU_GEN_US = 1.0          # syndrome round time
 D = 3
 
+
+def _input_rounds(job):
+    """Round indices of the decoder input: materialized rounds when the
+    transfer has completed, otherwise the submitted payload view."""
+    if job.decoder_input is not None:
+        return [entry.round_index for entry in job.decoder_input.rounds]
+    return [payload.round_index for payload in job.payloads]
 
 def _code_geometry(commit_rounds, buffer_rounds):
     return ResolvedCodeGeometry(
@@ -91,7 +98,8 @@ def _memory_op():
     return Operation(0, "memory", (0,), clifford=True)
 
 
-def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=None, metrics=None):
+def _switch_run(switching, low_confidence_probability, rounds, seed=1,
+                pools=None, metrics=None, links=None):
     weak = SampledConfidenceDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
                                     low_confidence_probability)
     strong = PerRoundDecoder(F_STRONG * TAU_GEN_US)
@@ -108,6 +116,7 @@ def _switch_run(switching, low_confidence_probability, rounds, seed=1, pools=Non
                router=SwitchingRouter(weak, strong),
                unit_pools=pools or {"default": 1, "strong": 1},
                make_metrics=metrics,
+               links=links,
                seed=seed,
            ), verbose=False)
 
@@ -345,7 +354,7 @@ def test_strong_redecode_receives_two_sided_context_payloads():
     assert middle_job.window.commit_lo == 4
     assert middle_job.window.commit_hi == 6
     assert middle_job.window.buffer_hi == 9
-    assert [payload.round_index for payload in middle_job.payloads] == list(range(1, 10))
+    assert _input_rounds(middle_job) == list(range(1, 10))
 
 
 def test_stim_strong_redecode_receives_two_sided_window_model():
@@ -440,6 +449,9 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
     so a switch stalls the whole weak stream and its backlog blows up; serial double-window
     switching runs the strong decoder in parallel, so the weak stream stays on pace."""
     rounds, rate = 400, 0.05
+    # Isolate the scheduling claim from the configurable decoder-input path.
+    # A fixed per-window CWD latency can itself overload either weak stream.
+    isolated_links = fixed_latency_link_config()
     naive_decoder = SwitchingDecoder(PerRoundDecoder(F_WEAK * TAU_GEN_US),
                                      PerRoundDecoder(F_STRONG * TAU_GEN_US),
                                      gamma_switch=rate)
@@ -453,11 +465,16 @@ def test_serial_keeps_weak_stream_on_pace_unlike_naive():
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     ),
                 decoder=naive_decoder,
+                links=isolated_links,
                 make_metrics=lambda e, wm, dm, ch, fa: [DecodeBacklog(wm, dm)],
                 seed=1,
             ), verbose=False)
-    double = _switch_run(Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE, confidence_threshold=0.5), rate, rounds,
-                         metrics=lambda e, wm, dm, ch, fa: [DecodeBacklog(wm, dm)])
+    double = _switch_run(
+        Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE,
+                  confidence_threshold=0.5),
+        rate, rounds, links=isolated_links,
+        metrics=lambda e, wm, dm, ch, fa: [DecodeBacklog(wm, dm)],
+    )
     assert naive.result.metric_values()["decode_backlog"]["peak_rounds"] > 100
     assert (double.result.metric_values()["decode_backlog"]["peak_rounds"]
             < naive.result.metric_values()["decode_backlog"]["peak_rounds"] / 5)
@@ -719,11 +736,11 @@ def _double_window_run(
         else 0.0), env)
     strong = _DispatchRecorder(PerRoundDecoder(strong_tau * TAU_GEN_US), env)
 
-    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+    def make_metrics(engine, window_manager, decoder_manager, execution_runtime, factory):
         env["engine"] = engine
         if metrics is None:
             return []
-        return metrics(engine, window_manager, decoder_manager, chip, factory)
+        return metrics(engine, window_manager, decoder_manager, execution_runtime, factory)
 
     res = simulate(RunSpec(
               ops=[_memory_op()],
@@ -752,35 +769,43 @@ def test_real_deferred_escalation_transfers_potential_pending_csd_in_order(
     monkeypatch,
 ):
     events = []
-    register_owner = PayloadStore.register_owner
-    release_owner = PayloadStore.release_owner
+    register_hold = SyndromeBuffer.register_hold
+    release_hold = SyndromeBuffer.release_hold
+    transfer_hold = SyndromeBuffer.transfer_hold
 
-    def record_register(store, role, owner, identities):
-        if role is EndpointRole.SB1:
-            events.append(("acquire", owner))
-        return register_owner(store, role, owner, identities)
+    def record_register(buffer, holder, identities):
+        events.append(("acquire", holder))
+        return register_hold(buffer, holder, identities)
 
-    def record_release(store, role, owner):
-        if role is EndpointRole.SB1:
-            events.append(("release", owner))
-        return release_owner(store, role, owner)
+    def record_release(buffer, holder):
+        events.append(("release", holder))
+        return release_hold(buffer, holder)
 
-    monkeypatch.setattr(PayloadStore, "register_owner", record_register)
-    monkeypatch.setattr(PayloadStore, "release_owner", record_release)
+    def record_transfer(buffer, old_holder, new_holder):
+        events.append(("transfer", old_holder, new_holder))
+        return transfer_hold(buffer, old_holder, new_holder)
+
+    monkeypatch.setattr(SyndromeBuffer, "register_hold", record_register)
+    monkeypatch.setattr(SyndromeBuffer, "release_hold", record_release)
+    monkeypatch.setattr(SyndromeBuffer, "transfer_hold", record_transfer)
     _double_window_run(escalate_window=2, rounds=21)
 
-    pending = next(owner for action, owner in events
-                   if action == "acquire" and type(owner) is PendingStrong)
+    pending = next(
+        holder for event in events for holder in event[1:]
+        if type(holder) is PendingStrong)
     request_key = pending.request_key
-    relevant = [(action, owner) for action, owner in events if owner in (
-        PotentialStrong((0, 2)), pending, CsdInput(request_key))]
+    tracked = (PotentialStrong((0, 2)), pending, CsdInput(request_key),
+               DecoderInputHold(request_key))
+    relevant = [event for event in events
+                if any(holder in tracked for holder in event[1:])]
+    # one retention lifetime: the membership moves between typed holds with
+    # no acquire/release window, then the admitted input hold releases once.
     assert relevant == [
         ("acquire", PotentialStrong((0, 2))),
-        ("acquire", pending),
-        ("release", PotentialStrong((0, 2))),
-        ("acquire", CsdInput(request_key)),
-        ("release", pending),
-        ("release", CsdInput(request_key)),
+        ("transfer", PotentialStrong((0, 2)), pending),
+        ("transfer", pending, CsdInput(request_key)),
+        ("transfer", CsdInput(request_key), DecoderInputHold(request_key)),
+        ("release", DecoderInputHold(request_key)),
     ]
 
 
@@ -789,22 +814,35 @@ def test_confident_and_absorbed_windows_release_potential_after_replacement(
 ):
     events = []
     registrations = {}
-    register_owner = PayloadStore.register_owner
-    release_owner = PayloadStore.release_owner
+    register_hold = SyndromeBuffer.register_hold
+    release_hold = SyndromeBuffer.release_hold
+    transfer_hold = SyndromeBuffer.transfer_hold
+    replace_hold = SyndromeBuffer.replace_hold
 
-    def record_register(store, role, owner, identities):
-        if role is EndpointRole.SB1:
-            events.append(("acquire", owner))
-            registrations[owner] = tuple(identities)
-        return register_owner(store, role, owner, identities)
+    def record_register(buffer, holder, identities):
+        events.append(("acquire", holder))
+        registrations[holder] = tuple(identities)
+        return register_hold(buffer, holder, identities)
 
-    def record_release(store, role, owner):
-        if role is EndpointRole.SB1:
-            events.append(("release", owner))
-        return release_owner(store, role, owner)
+    def record_release(buffer, holder):
+        events.append(("release", holder))
+        return release_hold(buffer, holder)
 
-    monkeypatch.setattr(PayloadStore, "register_owner", record_register)
-    monkeypatch.setattr(PayloadStore, "release_owner", record_release)
+    def record_transfer(buffer, old_holder, new_holder):
+        events.append(("acquire", new_holder))
+        events.append(("release", old_holder))
+        registrations[new_holder] = tuple(
+            buffer.hold_round_identities(old_holder))
+        return transfer_hold(buffer, old_holder, new_holder)
+
+    def record_replace(buffer, holder, identities):
+        registrations[holder] = tuple(identities)
+        return replace_hold(buffer, holder, identities)
+
+    monkeypatch.setattr(SyndromeBuffer, "register_hold", record_register)
+    monkeypatch.setattr(SyndromeBuffer, "release_hold", record_release)
+    monkeypatch.setattr(SyndromeBuffer, "transfer_hold", record_transfer)
+    monkeypatch.setattr(SyndromeBuffer, "replace_hold", record_replace)
     _double_window_run(escalate_window=2, rounds=21)
 
     pending_index = next(index for index, event in enumerate(events)
@@ -824,16 +862,16 @@ def test_confident_and_absorbed_windows_release_potential_after_replacement(
 
 
 def test_absorption_rejects_partial_acquired_replacement(monkeypatch):
-    owner_packet_identities = PayloadStore.owner_packet_identities
+    hold_round_identities = SyndromeBuffer.hold_round_identities
 
-    def omit_restart_tail(store, role, owner):
-        keys = owner_packet_identities(store, role, owner)
-        if owner == PotentialStrong((0, 5)):
+    def omit_restart_tail(buffer, holder):
+        keys = hold_round_identities(buffer, holder)
+        if holder == PotentialStrong((0, 5)):
             return keys[:-3]
         return keys
 
     monkeypatch.setattr(
-        PayloadStore, "owner_packet_identities", omit_restart_tail)
+        SyndromeBuffer, "hold_round_identities", omit_restart_tail)
     with pytest.raises(RuntimeError, match="replacement does not cover"):
         _double_window_run(escalate_window=2, rounds=21)
 
@@ -849,7 +887,7 @@ def _nonaligned_code():
 def test_strong_selection_is_not_published_before_do_delivery():
     selections_before_delivery = []
 
-    def inspect_commit(engine, window_manager, decoder_manager, chip, factory):
+    def inspect_commit(engine, window_manager, decoder_manager, execution_runtime, factory):
         original = window_manager._commit_strong_decode_done
         def commit(completion):
             key = (completion.request_key.operation_id,
@@ -869,7 +907,7 @@ def test_strong_selection_is_not_published_before_do_delivery():
 def test_deferred_directive_key_must_match_registered_pending_key():
     exposed = {}
 
-    def expose_state(engine, window_manager, decoder_manager, chip, factory):
+    def expose_state(engine, window_manager, decoder_manager, execution_runtime, factory):
         exposed.update(window_manager=window_manager,
                        decoder_manager=decoder_manager)
         return []
@@ -1004,9 +1042,9 @@ def test_double_window_rephases_and_clamps_complete_nonaligned_suffix():
         if job.window_id in {2, 3, 4, 5, 6}
     ]
     assert max(
-        payload.round_index
+        round_index
         for job in suffix_jobs
-        for payload in job.payloads
+        for round_index in _input_rounds(job)
     ) <= 50
     rows = result.result.metric_values()["window_switching_records"]["windows"]
     assert len(rows) == 7
@@ -1053,7 +1091,7 @@ def test_double_window_rephase_preserves_conflicting_registry_owner():
     interaction = SeedConflict()
     captured = {}
 
-    def connect_interaction(engine, window_manager, decoder_manager, chip, factory):
+    def connect_interaction(engine, window_manager, decoder_manager, execution_runtime, factory):
         interaction.runtime = window_manager
         captured["runtime"] = window_manager
         return []
@@ -1116,9 +1154,9 @@ def test_double_window_rephase_rejects_affected_far_readiness_owner():
                 runtime._escalations._by_terminal_operation
             ),
             "owners": tuple(sorted(
-                ((role, owner, record.packet_identities)
-                 for (role, owner), record
-                 in runtime.store._future_owners.items()),
+                ((holder, record.round_identities)
+                 for holder, record
+                 in runtime.syndrome_buffer._live_holds.items()),
                 key=repr,
             )),
         }
@@ -1162,7 +1200,7 @@ def test_double_window_rephase_rejects_affected_far_readiness_owner():
     interaction = SeedAffectedFarOwner()
 
     def connect_interaction(
-        engine, window_manager, decoder_manager, chip, factory,
+        engine, window_manager, decoder_manager, execution_runtime, factory,
     ):
         interaction.runtime = window_manager
         return []
@@ -1201,7 +1239,7 @@ def test_double_window_rephase_rejects_historical_or_external_suffix_state(
 ):
     captured = {}
 
-    def inject_state(engine, window_manager, decoder_manager, chip, factory):
+    def inject_state(engine, window_manager, decoder_manager, execution_runtime, factory):
         captured["runtime"] = window_manager
         original_defer = window_manager.defer_strong_escalation
 
@@ -1234,7 +1272,7 @@ def test_double_window_rephase_rejects_a_queued_suffix_window():
     captured = {}
 
     def inject_queued_window(
-        engine, window_manager, decoder_manager, chip, factory,
+        engine, window_manager, decoder_manager, execution_runtime, factory,
     ):
         captured["runtime"] = window_manager
         original_defer = window_manager.defer_strong_escalation
@@ -1262,43 +1300,44 @@ def test_double_window_rephase_rejects_a_queued_suffix_window():
 def test_double_window_rephase_rolls_back_manager_and_owner_state():
     captured = {}
 
-    def inject_failure(engine, window_manager, decoder_manager, chip, factory):
+    def inject_failure(engine, window_manager, decoder_manager, execution_runtime, factory):
         captured["runtime"] = window_manager
-        register_guard = window_manager.store.register_rephase_guard
+        buffer = window_manager.syndrome_buffer
+        original_register = buffer.register_hold
 
-        def capture_guard(guard, sb0_ids, sb1_ids):
-            captured["guard"] = guard
-            return register_guard(guard, sb0_ids, sb1_ids)
+        def capture_guard(holder, round_identities):
+            if type(holder) is RephaseGuard:
+                captured["guard"] = holder
+            return original_register(holder, round_identities)
 
-        window_manager.store.register_rephase_guard = capture_guard
-        original_replace = window_manager.store.replace_owner_membership
+        buffer.register_hold = capture_guard
+        original_replace = buffer.replace_hold
         target_tokens = [
             token
             for window_index in range(2, 8)
             for token in (
-                (EndpointRole.SB0, (0, window_index)),
-                (EndpointRole.SB1, PotentialStrong((0, window_index))),
+                (0, window_index),
+                PotentialStrong((0, window_index)),
             )
         ]
         captured["old_owners"] = None
         replacement_count = 0
 
-        def fail_second_replacement(role, owner, packet_identities):
+        def fail_second_replacement(holder, round_identities):
             nonlocal replacement_count
-            token = (role, owner)
-            if token in target_tokens:
+            if holder in target_tokens:
                 if captured["old_owners"] is None:
                     captured["old_owners"] = {
-                        target: window_manager.store.owner_packet_identities(*target)
+                        target: buffer.hold_round_identities(target)
                         for target in target_tokens
-                        if window_manager.store.has_owner(*target)
+                        if buffer.has_hold(target)
                     }
                 replacement_count += 1
                 if replacement_count == 2:
                     raise RuntimeError("injected suffix owner failure")
-            original_replace(role, owner, packet_identities)
+            original_replace(holder, round_identities)
 
-        window_manager.store.replace_owner_membership = fail_second_replacement
+        buffer.replace_hold = fail_second_replacement
         return []
 
     with pytest.raises(RuntimeError, match="injected suffix owner failure"):
@@ -1334,36 +1373,36 @@ def test_double_window_rephase_rolls_back_manager_and_owner_state():
     assert set(runtime.logical_contributions) == {(0, 0)}
     assert runtime.windows[(0, 1)].dependents == [(0, 2)]
     for token, old_packet_identities in captured["old_owners"].items():
-        assert runtime.store.owner_packet_identities(*token) == \
+        assert runtime.syndrome_buffer.hold_round_identities(token) ==\
             old_packet_identities
     assert type(captured["guard"]) is RephaseGuard
-    assert not any(runtime.store.has_owner(role, captured["guard"])
-                   for role in EndpointRole)
+    assert not runtime.syndrome_buffer.has_hold(captured["guard"])
     pending = PendingStrong(captured["guard"].request_key)
-    assert not runtime.store.has_owner(EndpointRole.SB1, pending)
+    assert not runtime.syndrome_buffer.has_hold(pending)
 
 
 def test_double_window_rephase_rollback_restores_absent_commit_count():
     captured = {}
 
-    def inject_failure(engine, window_manager, decoder_manager, chip, factory):
+    def inject_failure(engine, window_manager, decoder_manager, execution_runtime, factory):
         captured["runtime"] = window_manager
-        original_replace = window_manager.store.replace_owner_membership
+        buffer = window_manager.syndrome_buffer
+        original_replace = buffer.replace_hold
         targets = {
-            (EndpointRole.SB0, (0, 1)),
-            (EndpointRole.SB1, PotentialStrong((0, 1))),
+            (0, 1),
+            PotentialStrong((0, 1)),
         }
         replacement_count = 0
 
-        def fail_second_replacement(role, owner, packet_identities):
+        def fail_second_replacement(holder, round_identities):
             nonlocal replacement_count
-            if (role, owner) in targets:
+            if holder in targets:
                 replacement_count += 1
                 if replacement_count == 2:
                     raise RuntimeError("injected first-window suffix failure")
-            original_replace(role, owner, packet_identities)
+            original_replace(holder, round_identities)
 
-        window_manager.store.replace_owner_membership = fail_second_replacement
+        buffer.replace_hold = fail_second_replacement
         return []
 
     with pytest.raises(RuntimeError, match="first-window suffix failure"):
@@ -1385,7 +1424,7 @@ def test_double_window_backlog_records_pending_assignment_before_admission():
     its far boundary, before the decoder manager owns the admitted job."""
     captured = {}
 
-    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+    def make_metrics(engine, window_manager, decoder_manager, execution_runtime, factory):
         metric = StrongDecoderBacklog(window_manager, decoder_manager)
         captured["metric"] = metric
         return [metric]
@@ -1400,7 +1439,9 @@ def test_double_window_backlog_records_pending_assignment_before_admission():
         if row["waiting_far_boundary_jobs"] > 0
     ]
     assert waiting_rows == [{
-        "t_ticks": 14_750_000,
+        # W2 is admitted at 14.35 us, materialized after the 2 us CWD
+        # transfer, decoded for 0.6 us, and escalates at 16.95 us.
+        "t_ticks": 16_950_000,
         "waiting_far_boundary_jobs": 1,
         "waiting_far_boundary_full_input_rounds": 15,
         "waiting_terminal_data_jobs": 0,
@@ -1472,7 +1513,7 @@ def test_double_window_uses_the_interaction_region_plan():
     ) == (7, 12)
     # priced for the rounds it is handed (context 4-15), not its commit extent
     assert strong_job.n_rounds == 12
-    assert len({p.round_index for p in strong_job.payloads}) == 12
+    assert len(set(_input_rounds(strong_job))) == 12
     assert device.exclusions == [
         (13, 15, (1, 12)),
         (7, 12, (1, 6)),
@@ -1508,8 +1549,8 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
                 "escalations": dict(runtime.pending_escalations),
                 "restart_buffer_lo": restart.buffer_lo,
                 "restart_deps": list(restart.deps),
-                "restart_refs": runtime.store.owner_packet_identities(
-                    EndpointRole.SB0, restart.key),
+                "restart_refs": runtime.syndrome_buffer.hold_round_identities(
+                    restart.key),
             }
 
         engine.schedule(0, snapshot, label="capture restart plan")
@@ -1530,9 +1571,9 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
             router=SwitchingRouter(weak, strong),
             device=FailingDevice(),
             unit_pools={"default": 1, "strong": 1},
-            make_metrics=lambda engine, window_manager, decoder_manager, chip, factory: (
+            make_metrics=lambda engine, window_manager, decoder_manager, execution_runtime, factory: (
                 configure(
-                    engine, window_manager, decoder_manager, chip, factory
+                    engine, window_manager, decoder_manager, execution_runtime, factory
                 ) or []
             ),
         ).build(verbose=False)
@@ -1544,8 +1585,8 @@ def test_restart_model_failure_leaves_strong_plan_state_unchanged():
         "escalations": runtime.pending_escalations,
         "restart_buffer_lo": restart.buffer_lo,
         "restart_deps": restart.deps,
-        "restart_refs": runtime.store.owner_packet_identities(
-            EndpointRole.SB0, restart.key),
+        "restart_refs": runtime.syndrome_buffer.hold_round_identities(
+            restart.key),
     } == captured["before"]
 
 
@@ -1645,7 +1686,7 @@ def test_double_window_retains_every_round_added_to_the_restart_buffer():
     restart_job = next(
         job for _, job in weak.starts if job.window_id == restart.k)
     assert restart.start_round == 4
-    assert [payload.round_index for payload in restart_job.payloads] == \
+    assert _input_rounds(restart_job) ==\
         list(range(restart.start_round, restart.buffer_hi + 1))
 
 
@@ -1741,7 +1782,7 @@ def test_double_window_slab_extends_forward_and_absorbs_the_weak_chain():
     # Thm 1 bounds tau_strong against rounds of decoder INPUT, so the job is
     # priced for the context it reads (4-18), not for the slab it commits.
     assert job.n_rounds == 3 * D + 2 * D
-    assert len({p.round_index for p in job.payloads}) == job.n_rounds
+    assert len(set(_input_rounds(job))) == job.n_rounds
     assert runtime.absorbed_windows == {(0, 3), (0, 4)}
     weak_windows_decoded = [j.window_id for _, j in weak.starts]
     assert weak_windows_decoded == [0, 1, 2, 5, 6, 7, 8, 9]
@@ -1768,7 +1809,7 @@ def test_double_window_restart_window_is_priced_for_its_widened_read():
 
     restart_job = next(job for _, job in weak.starts if job.window_id == 5)
     assert restart_job.n_rounds == 3 * D                # r_buf + r_com + r_buf
-    assert len({p.round_index for p in restart_job.payloads}) == 3 * D
+    assert len(set(_input_rounds(restart_job))) == 3 * D
 
     ordinary_job = next(job for _, job in weak.starts if job.window_id == 6)
     assert ordinary_job.n_rounds == 2 * D               # r_com + r_buf
@@ -1824,7 +1865,7 @@ def test_double_window_restart_pricing_separates_commit_and_buffer():
     # r_buf + r_com + r_buf = 3 + 2 + 3, NOT 3 * r_com = 6
     assert restart_job.n_rounds == 8
     assert restart_job.n_rounds != 3 * commit
-    assert len({p.round_index for p in restart_job.payloads}) == 8
+    assert len(set(_input_rounds(restart_job))) == 8
 
     # and the slab is still priced for its whole context, r_strong + 2*r_buf
     commit_extent = slab.window.commit_hi - slab.window.commit_lo + 1
@@ -1875,7 +1916,7 @@ def test_double_window_weak_pipeline_never_stalls_on_strong_work():
     fast, _, _ = _double_window_run(escalate_window=2, strong_tau=F_STRONG)
     slow, _, _ = _double_window_run(escalate_window=2,
                                     strong_tau=10 * F_STRONG)
-    assert {k: w.t_done for k, w in fast.window_manager.windows.items()} \
+    assert {k: w.t_done for k, w in fast.window_manager.windows.items()}\
         == {k: w.t_done for k, w in slow.window_manager.windows.items()}
 
 
@@ -1906,7 +1947,7 @@ def test_double_window_last_window_uses_the_terminal_boundary(monkeypatch):
     assert (job.window.commit_lo, job.window.commit_hi) == (28, 30)
     # clamped r_strong is 3 committed rounds; the decoder reads 25-30
     assert job.n_rounds == 6
-    assert len({p.round_index for p in job.payloads}) == 6
+    assert len(set(_input_rounds(job))) == 6
     assert start_tick == w9.t_done
     assert events == [("prepare", w9.t_done), ("submit", w9.t_done)]
     requests = res.result.metric_values()["window_switching_records"]["requests"]
@@ -1928,7 +1969,7 @@ def test_double_window_end_clamped_slab_absorbs_the_tail():
     assert (job.window.commit_lo, job.window.commit_hi) == (25, 30)
     # 6 committed rounds, read with one buffer of leading context (22-30)
     assert job.n_rounds == 9
-    assert len({p.round_index for p in job.payloads}) == 9
+    assert len(set(_input_rounds(job))) == 9
     assert runtime.absorbed_windows == {(0, 9)}
     assert [j.window_id for _, j in weak.starts] == [0, 1, 2, 3, 4, 5, 6, 7, 8]
     w8 = res.window_manager.windows[(0, 8)]
@@ -2212,7 +2253,9 @@ def test_double_window_installs_slab_owner_before_every_submission_path(
             "commit_hi": 14,
             "kind": "strong_slab",
             "prediction": None,
-            "weak_committed": True,
+            # The terminal slab is submitted as soon as W2's weak outcome
+            # escalates; WDO publication has not committed W2 yet.
+            "weak_committed": False,
             "absorbed_have_contributions": set(),
         },
         {
@@ -2237,8 +2280,7 @@ def test_double_window_slab_payloads_cover_slab_plus_two_sided_context():
     (start_tick, job), = strong.starts
     assert (job.window.start_round, job.window.buffer_hi) == (4, 18)
     assert job.window.boundary_in == {}
-    assert [payload.round_index for payload in job.payloads] \
-        == list(range(4, 19))
+    assert _input_rounds(job) == list(range(4, 19))
 
 
 def test_double_window_rejects_contradictory_switch_flags():
@@ -2336,12 +2378,12 @@ def test_double_window_terminal_slab_waits_for_its_final_rounds():
     runtime = res.window_manager
     (start_tick, job), = strong.starts
     assert (job.window.commit_lo, job.window.commit_hi) == (7, 14)
-    assert [payload.round_index for payload in job.payloads] \
-        == list(range(4, 15))
+    assert _input_rounds(job) == list(range(4, 15))
     w2 = res.window_manager.windows[(0, 2)]
     assert start_tick > w2.t_done + us(0.5)   # NOT submitted at escalation
-    # round 14 reaches the cluster at 14.0 (generation) + 2.15 (t_qc + t_cd);
-    # the slab then crosses the controller-to-strong data path
-    assert start_tick == us(14.0 + 2.15 + 2.0)
+    # Per-round retention owns only QC. W2 first crosses the window-level
+    # CWD input path and finishes its weak decode at 16.95 us; the terminal
+    # slab is admitted then and crosses the 2 us CSD path.
+    assert start_tick == us(16.95 + 2.0)
     assert runtime.absorbed_windows == {(0, 3), (0, 4)}
     assert runtime.pending_escalations == {}

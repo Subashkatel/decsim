@@ -16,7 +16,7 @@ np = pytest.importorskip("numpy")
 pymatching = pytest.importorskip("pymatching")
 
 from decsim.message import Operation
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.adapters.stim_device import StimDevice
 from decsim.mwpm_decoder import PyMatchingDecoder, matching_window_decoder
@@ -50,9 +50,9 @@ def _single_payload(device, operation, round_index):
 
 
 def _zero_link_controller(engine, links, buffering, window_manager):
-    return ModularController(
+    return SyndromeIngress(
         engine, links=links, log_syndromes=False,
-        controller_capacity=buffering.controller_ingress_packet_slots,
+        ingress_context_capacity=buffering.upstream_packet_slots,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager)
 
@@ -124,9 +124,10 @@ def test_stim_device_round_alignment():
     assert len(r1.bits) == len(layer[0])
     last = _single_payload(device, op, ROUNDS)
     assert len(last.bits) == len(layer[ROUNDS - 1]) + len(layer[ROUNDS])
-    # nothing beyond the chip's rounds, nothing at round 0
+    # nothing beyond the execution runtime's rounds, nothing at round 0
     assert len(_single_payload(device, op, ROUNDS + 1).bits) == 0
-    assert len(_single_payload(device, op, 0).bits) == 0
+    with pytest.raises(TypeError, match="round_index"):
+        _single_payload(device, op, 0)
     # every detector bit is emitted exactly once across rounds 1..R
     total = sum(len(_single_payload(device, op, r).bits)
                 for r in range(1, ROUNDS + 1))
@@ -138,7 +139,7 @@ def test_same_seed_double_run_is_bit_identical():
     3): two complete engine runs with the same StimDevice seed must produce
     identical per-shot syndromes, identical decoded logical values, and
     identical completion times -- not just the same aggregate LER. A hidden
-    ordering/caching nondeterminism anywhere chip -> controller -> windows ->
+    ordering/caching nondeterminism anywhere execution runtime -> controller -> windows ->
     decoder -> orchestrator would break the exact match."""
     circuit = _circuit()
 
@@ -159,7 +160,7 @@ def test_same_seed_double_run_is_bit_identical():
                       seed=100 + shot,
                   ), verbose=False)
             results.append((res.window_manager.op_results[1],
-                            res.result.chip_done_ticks, res.result.fully_done_ticks,
+                            res.result.execution_done_ticks, res.result.fully_done_ticks,
                             device._dets[1].tobytes()))
         return results
 
@@ -398,7 +399,7 @@ def test_blocked_successor_waits_for_real_pymatching_result():
               device=device,
               decoder=decoder,
               links=fixed_latency_link_config(),
-              make_controller=_zero_link_controller,
+              make_syndrome_ingress=_zero_link_controller,
               seed=23,
           ), verbose=False)
 
@@ -412,8 +413,8 @@ def test_blocked_successor_waits_for_real_pymatching_result():
     assert res.window_manager.op_results[0] == (
         int(global_m.decode(device._dets[0])[0]),
     )
-    assert res.chip.decode_release_time[1] == res.window_manager.windows[(0, window_count - 1)].t_done
-    assert res.chip.decode_release_time[1] <= res.chip.body_done_time[1]
+    assert res.execution_runtime.decode_release_time[1] == res.window_manager.windows[(0, window_count - 1)].t_done
+    assert res.execution_runtime.decode_release_time[1] <= res.execution_runtime.body_done_time[1]
 
 
 def test_timing_only_ops_still_run():

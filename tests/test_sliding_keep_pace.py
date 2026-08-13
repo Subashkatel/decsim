@@ -18,7 +18,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from decsim.config import us
 from conftest import fixed_latency_link_config
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.decoders import PerRoundDecoder
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import Operation
@@ -81,9 +81,9 @@ def _run_memory(tau_us, commit, buffer, n_windows=20):
             round_us=TAU_GEN_US,
             decoder=PerRoundDecoder(tau_us),
             links=fixed_latency_link_config(),
-            make_controller=lambda e, links, buffering, window_manager: ModularController(
+            make_syndrome_ingress=lambda e, links, buffering, window_manager: SyndromeIngress(
                 e, links=links, log_syndromes=False,
-                controller_capacity=buffering.controller_ingress_packet_slots,
+                ingress_context_capacity=buffering.upstream_packet_slots,
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager),
         ), verbose=False)

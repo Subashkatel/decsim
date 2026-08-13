@@ -1,7 +1,7 @@
 """Full-ENGINE zero-noise and increasing-noise checks (Gate 2b §2).
 
 test_noise_model.py covers these trends on the offline decode path; these
-tests drive the complete simulator (chip -> controller -> windows ->
+tests drive the complete simulator (execution runtime -> controller -> windows ->
 PyMatchingDecoder -> orchestrator) per shot. Fixed seeds make the shot
 outcomes deterministic, so the assertions are frozen regressions, not
 statistical gambles.

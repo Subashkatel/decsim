@@ -3,7 +3,7 @@ import time
 from conftest import fixed_latency_link_config, trace_time
 
 from decsim.config import TICKS_PER_US, us
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
@@ -35,9 +35,9 @@ class BlockingDecoder:
 
 
 def _zero_link_controller(engine, links, buffering, window_manager):
-    return ModularController(
+    return SyndromeIngress(
         engine, links=links, log_syndromes=False,
-        controller_capacity=buffering.controller_ingress_packet_slots,
+        ingress_context_capacity=buffering.upstream_packet_slots,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager)
 
@@ -56,7 +56,7 @@ def test_wall_clock_decode_work_does_not_advance_simulated_service_time():
               round_us=1.0,
               decoder=decoder,
               links=fixed_latency_link_config(),
-              make_controller=_zero_link_controller,
+              make_syndrome_ingress=_zero_link_controller,
               make_metrics=lambda e, wm, dm, ch, f: [WindowLatencyBreakdown(wm)],
           ), verbose=False)
     elapsed = time.perf_counter() - t0
@@ -85,11 +85,11 @@ def test_blocked_operation_waits_for_modeled_decode_time_not_wall_clock_runtime(
               decoder=decoder,
               scheme=NaiveOnlineScheme(),
               links=fixed_latency_link_config(),
-              make_controller=_zero_link_controller,
+              make_syndrome_ingress=_zero_link_controller,
           ), verbose=False)
 
     first_window = res.window_manager.windows[(0, 0)]
     assert first_window.t_done - first_window.t_dispatch == us(1.0)
-    assert res.chip.decode_release_time[1] == first_window.t_done
+    assert res.execution_runtime.decode_release_time[1] == first_window.t_done
     assert trace_time(res.engine.log_lines, "START T1") == (
         first_window.t_done / TICKS_PER_US)

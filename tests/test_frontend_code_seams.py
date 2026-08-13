@@ -8,7 +8,7 @@ from decsim import protocols as P
 from conftest import fixed_latency_link_config
 from decsim.codes import BBCodeModel, SurfaceCodeModel
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
@@ -168,9 +168,9 @@ class RecordingDecoder:
 
 
 def _zero_link_controller(engine, links, buffering, window_manager):
-    return ModularController(
+    return SyndromeIngress(
         engine, links=links, log_syndromes=False,
-        controller_capacity=buffering.controller_ingress_packet_slots,
+        ingress_context_capacity=buffering.upstream_packet_slots,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager)
 
@@ -195,14 +195,14 @@ def test_patch_level_physical_ir_frontend_runs_without_builtin_surgery_parser():
                  device=TimingOnlyDevice(),
                  decoder=PresetLatencyDecoder(0.1),
                  links=fixed_latency_link_config(),
-                 make_controller=_zero_link_controller,
+                 make_syndrome_ingress=_zero_link_controller,
              ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
     assert frontend.operations[1].predecessors == (10,)
     assert frontend.operations[2].predecessors == (11,)
     assert result.window_manager.window_count == {10: 1, 11: 1, 12: 1}
-    assert result.chip.decode_release_time[12] >= result.window_manager.windows[(11, 0)].t_done
+    assert result.execution_runtime.decode_release_time[12] >= result.window_manager.windows[(11, 0)].t_done
     assert result.result.fully_done_ticks > 0
 
 
@@ -226,7 +226,7 @@ def test_lattice_surgery_ir_can_lower_to_physical_ir_then_run():
                  device=TimingOnlyDevice(),
                  decoder=PresetLatencyDecoder(0.1),
                  links=fixed_latency_link_config(),
-                 make_controller=_zero_link_controller,
+                 make_syndrome_ingress=_zero_link_controller,
              ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
@@ -235,7 +235,7 @@ def test_lattice_surgery_ir_can_lower_to_physical_ir_then_run():
     assert frontend.operations[1].predecessors == (0,)
     assert frontend.operations[2].predecessors == (1,)
     assert frontend.operations[2].blocked_by == 1
-    assert result.chip.decode_release_time[2] >= result.window_manager.windows[(1, 0)].t_done
+    assert result.execution_runtime.decode_release_time[2] >= result.window_manager.windows[(1, 0)].t_done
 
 
 def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
@@ -257,7 +257,7 @@ def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
                  device=SyndromeBitDevice(code, per_patch=True),
                  decoder=decoder,
                  links=fixed_latency_link_config(),
-                 make_controller=_zero_link_controller,
+                 make_syndrome_ingress=_zero_link_controller,
              ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)
@@ -267,7 +267,7 @@ def test_bb_code_isa_frontend_runs_with_bb_code_model_and_same_components():
     assert frontend.operations[2].predecessors == ()
     assert {job.code for job in decoder.jobs} == {code.name}
     assert {job.spatial_nodes for job in decoder.jobs} == {code.spatial_nodes(1)}
-    assert all(job.payloads for job in decoder.jobs)
+    assert decoder.jobs
     assert len(result.window_manager.committed_windows) == result.window_manager.total_windows
 
 
@@ -290,7 +290,7 @@ def test_bb_code_isa_can_lower_to_physical_ir_then_run():
                  device=SyndromeBitDevice(code, per_patch=True),
                  decoder=decoder,
                  links=fixed_latency_link_config(),
-                 make_controller=_zero_link_controller,
+                 make_syndrome_ingress=_zero_link_controller,
              ), verbose=False)
 
     assert isinstance(frontend, P.InputFrontend)

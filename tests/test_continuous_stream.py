@@ -2,7 +2,7 @@
 
 A continuous patch is several scheduling operations on one logical qubit whose syndrome stream is
 unbroken (no destructive measurement between them). decsim decodes it as ONE continuous record:
-the chip schedules the segment ops, the device tags each segment's rounds to the stream at the
+the execution runtime schedules the segment ops, the device tags each segment's rounds to the stream at the
 right global round, and the cluster windows + decodes the single stream (one observable) across
 the seams.
 

@@ -5,7 +5,7 @@ import pytest
 from conftest import fixed_latency_link_config
 
 from decsim.codes import SurfaceCodeModel
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.decoders import PresetLatencyDecoder
 from decsim.devices import TimingOnlyDevice
 from decsim.frontends.circuit import CircuitFrontend
@@ -20,9 +20,9 @@ from decsim.policies import from_mode
 
 def _zero_link_controller(engine, links, buffering, window_manager):
     """Controller whose fabric links take no simulated time."""
-    return ModularController(
+    return SyndromeIngress(
         engine, links=links, log_syndromes=False,
-        controller_capacity=buffering.controller_ingress_packet_slots,
+        ingress_context_capacity=buffering.upstream_packet_slots,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager)
 
@@ -38,7 +38,7 @@ def _feedback_chain():
 
 def _reaction_rows(result):
     """Return conditional reaction rows for a completed run."""
-    return ConditionalReactionTime(result.chip).rows()
+    return ConditionalReactionTime(result.execution_runtime).rows()
 
 
 def test_trailing_buffer_boundary_keeps_existing_static_wait():
@@ -52,9 +52,9 @@ def test_trailing_buffer_boundary_keeps_existing_static_wait():
                  scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                  decoder=PresetLatencyDecoder(2.0),
                  links=fixed_latency_link_config(),
-                 make_controller=_zero_link_controller,
-                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
-            ConditionalReactionTime(chip)
+                 make_syndrome_ingress=_zero_link_controller,
+                 make_metrics=lambda _engine, _wm, _dm, execution_runtime, _factory: [
+            ConditionalReactionTime(execution_runtime)
         ],
              ), verbose=False)
 
@@ -75,9 +75,9 @@ def test_measurement_closed_boundary_removes_only_static_buffer_wait():
                  scheme=SlidingWindowScheme(terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                  decoder=PresetLatencyDecoder(2.0),
                  links=fixed_latency_link_config(),
-                 make_controller=_zero_link_controller,
-                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
-            ConditionalReactionTime(chip)
+                 make_syndrome_ingress=_zero_link_controller,
+                 make_metrics=lambda _engine, _wm, _dm, execution_runtime, _factory: [
+            ConditionalReactionTime(execution_runtime)
         ],
                  feedback_boundary_mode="measurement_closed",
              ), verbose=False)
@@ -134,7 +134,7 @@ def _run_live_stream_pair(mode: str):
                num_units=1,
                round_us=1.0,
                links=fixed_latency_link_config(),
-               make_controller=_zero_link_controller,
+               make_syndrome_ingress=_zero_link_controller,
                feedback_boundary_mode=mode,
            ), verbose=False)
 
@@ -186,14 +186,14 @@ def test_real_syndrome_measurement_closed_finite_operation_uses_stim_circuit():
                  rounds_policy=FixedRounds(code.commit_rounds()),
                  round_us=1.0,
                  links=fixed_latency_link_config(),
-                 make_controller=_zero_link_controller,
+                 make_syndrome_ingress=_zero_link_controller,
                  feedback_boundary_mode="measurement_closed",
                  seed=19,
              ), verbose=False)
 
     assert result.window_manager.rounds_arrived[operations[0].id] == code.commit_rounds()
     assert operations[0].id in result.window_manager.op_results
-    assert operations[1].id in result.chip.decode_release_time
+    assert operations[1].id in result.execution_runtime.decode_release_time
 
 
 def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
@@ -230,7 +230,7 @@ def test_real_syndrome_measurement_closed_internal_stream_boundary_rejected():
             num_units=1,
             round_us=1.0,
             links=fixed_latency_link_config(),
-            make_controller=_zero_link_controller,
+            make_syndrome_ingress=_zero_link_controller,
             feedback_boundary_mode="measurement_closed",
             seed=19,
         ), verbose=False)

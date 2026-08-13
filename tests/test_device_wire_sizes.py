@@ -9,8 +9,10 @@
 import pytest
 
 from decsim.codes import SurfaceCodeModel
-from decsim.devices import ClockedDevice, SyndromeBitDevice, TimingOnlyDevice
-from decsim.message import Operation, SyndromePayload
+from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
+from decsim.qpu import QPUDevice
+from decsim.message import RunOperationBody
+from decsim.message import Operation, QPUReadout, SyndromePayload
 
 
 def test_aggregate_fake_payload_reports_its_bit_count():
@@ -29,27 +31,22 @@ def test_per_patch_fake_payloads_report_their_bit_counts():
         assert payload.size_bits == len(payload.bits) == 5
 
 
-def test_clocked_device_relay_does_not_mutate_source_fragment_counts():
+def test_qpu_device_relay_does_not_mutate_source_fragment_counts():
     class RecordingController:
         def __init__(self):
             self.payloads = []
 
-        def relay_syndrome(self, payload, route):
+        def accept_qpu_readout(self, payload, route):
             self.payloads.append(payload)
 
     controller = RecordingController()
-    clocked = ClockedDevice(
-        engine=None,
-        device=None,
-        controller=controller,
-        round_count_by_operation_id={},
-    )
+    qpu = QPUDevice(None, None, controller)
     source_payloads = [
-        SyndromePayload(0, "north", 1),
-        SyndromePayload(0, "south", 1),
+        QPUReadout(0, "north", 1),
+        QPUReadout(0, "south", 1),
     ]
 
-    clocked.relay_payloads(
+    qpu._emit(
         source_payloads, Operation(0, "round", ("north", "south"))
     )
 
@@ -61,7 +58,7 @@ def test_clocked_device_relay_does_not_mutate_source_fragment_counts():
     )
 
 
-def test_clocked_device_passes_segment_and_owner_zero_source_durations():
+def test_qpu_device_passes_segment_and_owner_zero_source_durations():
     class Engine:
         def schedule(self, *args, **kwargs):
             pass
@@ -75,22 +72,15 @@ def test_clocked_device_passes_segment_and_owner_zero_source_durations():
         5, "segment", (0,), stream_id=0, stream_offset=0,
     )
     device = Device()
-    ClockedDevice(
-        Engine(), device, None, {5: 12, 0: 24}
-    ).start(operation, round_ticks=1, on_body_done=lambda operation: None)
+    QPUDevice(Engine(), device, None, lambda operation: None).issue(
+        RunOperationBody(operation, 1, 12, 24))
 
     assert device.call == (operation, 12, 24)
 
 
-def test_clocked_device_rejects_missing_source_duration_before_sampling():
-    operation = Operation(
-        5, "segment", (0,), stream_id=0, stream_offset=0,
-    )
-    clocked = ClockedDevice(object(), object(), None, {5: 12})
-
-    with pytest.raises(ValueError, match="source operation 0"):
-        clocked.start(operation, round_ticks=1, on_body_done=lambda operation: None)
-
+def test_qpu_command_carries_source_duration_without_plan_lookup():
+    command = RunOperationBody(Operation(5, "segment", (0,)), 1, 12, 24)
+    assert command.source_round_count == 24
 
 def test_explicit_fragment_slot_rejects_multiple_payloads_before_relay():
     class RecordingController:
@@ -101,16 +91,13 @@ def test_explicit_fragment_slot_rejects_multiple_payloads_before_relay():
             self.payloads.append(payload)
 
     controller = RecordingController()
-    clocked = ClockedDevice(
-        engine=None, device=None, controller=controller,
-        round_count_by_operation_id={},
-    )
+    qpu = QPUDevice(None, None, controller)
     operation = Operation(
         0, "declared fragment", (0,),
         syndrome_fragment_index=0, syndrome_fragment_count=2,
     )
     with pytest.raises(ValueError, match="one payload"):
-        clocked.relay_payloads(
+        qpu._emit(
             [SyndromePayload(0, 0, 1), SyndromePayload(0, 1, 1)],
             operation,
         )

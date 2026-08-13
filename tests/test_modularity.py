@@ -12,17 +12,11 @@ from decsim.message import (
     Operation,
     OperationWindowPlan,
     RetainedSyndromeFragment,
-    SyndromePayload,
+    QPUReadout, SyndromePayload,
     SyndromePacketRouteKind,
-    SyndromeRoundPacket,
     WindowGeometry,
 )
-from decsim.planner import FixedRounds
-from decsim.schemes import SlidingWindowScheme
-from decsim.layouts import UniformLayout
-from decsim.codes import SurfaceCodeModel
 from decsim.run_spec import RunSpec, simulate
-from decsim.decoders import PerRoundDecoder
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 
 
@@ -35,10 +29,10 @@ class MyDevice:
         return None
 
     def round_payloads(self, op, r):
-        return [SyndromePayload(op.id, op.patches[0], r)]
+        return [QPUReadout(op.id, op.patches[0], r)]
 
     def idle_round_payloads(self, op, stream_id, global_round, patch):
-        return [SyndromePayload(stream_id, patch, global_round)]
+        return [QPUReadout(stream_id, patch, global_round)]
 
     def register_dynamic_stream(
         self, stream_op, round_count, *, fault_model_requirement,
@@ -148,13 +142,19 @@ class MyController:
         self.links = links
         self.buffering = buffering
         self.window_manager = window_manager
-    def relay_syndrome(self, payload, route):
-        packet = SyndromeRoundPacket(
-            operation_id=payload.operation_id,
-            round_index=payload.round_index,
-            fragments=(RetainedSyndromeFragment.from_payload(payload),),
+    def relay_qpu_readout(self, payload, route, *, processing_ticks):
+        self.engine.schedule(
+            processing_ticks,
+            lambda: self.relay_syndrome(payload, route),
         )
+    def relay_syndrome(self, payload, route):
         if route.kind is SyndromePacketRouteKind.WINDOW_INPUT:
+            fragment = RetainedSyndromeFragment.from_payload(payload)
+            identity = (payload.operation_id, payload.round_index)
+            self.syndrome_buffer.accept_fragment(fragment, expected_fragments=1)
+            packet = self.syndrome_buffer.finish_packing(
+                identity, publication_tick=self.engine.now + us(0.1)
+            )
             deliver = lambda: self.window_manager.accept_window_input(packet)
         else:
             deliver = lambda: self.window_manager.accept_feedback_memory_round(
@@ -162,8 +162,6 @@ class MyController:
         self.engine.schedule(us(0.1), deliver)
     def relay_instruction(self, decision, deliver):
         self.engine.schedule(us(0.1), lambda: deliver(decision))
-    def on_endpoint_capacity_changed(self):
-        pass
 
 class MyOrchestrator:
     """From-scratch Orchestrator: releases blocked ops without an effect."""
@@ -242,18 +240,18 @@ def test_every_seam_accepts_a_from_scratch_implementation():
             rounds_policy=MyRounds(),
             router=router,
             scheduler=MyScheduler(),
-            make_controller=MyController,
+            make_syndrome_ingress=MyController,
             make_orchestrator=make_orchestrator,
             make_factory=make_factory,
             make_metrics=lambda e, wm, dm, ch, f: [metric],
         ), verbose=False)
     factory = built_factories[0]
     orchestrator = orchestrators[0]
-    chip = r.chip
-    assert len(chip.done_bodies) == 3          # all ops ran, including the blocked T
+    execution_runtime = r.execution_runtime
+    assert len(execution_runtime.done_bodies) == 3          # all ops ran, including the blocked T
     assert decoder.decodes >= 3                # the custom decoder decoded every window
     assert router.calls >= 3                   # routed per job
     assert factory.requests == 2               # both T gates drew a state
     assert metric.count > 0                    # the custom metric observed events
     assert orchestrator.integrated == 3        # the custom orchestrator saw every result
-    assert r.result.fully_done_ticks > r.result.chip_done_ticks >= 0
+    assert r.result.fully_done_ticks > r.result.execution_done_ticks >= 0

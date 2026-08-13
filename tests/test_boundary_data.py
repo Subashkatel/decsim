@@ -7,7 +7,7 @@
 from decsim.codes import SurfaceCodeModel
 from decsim.config import us
 from conftest import fixed_latency_link_config
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.decoders import PresetLatencyDecoder
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
@@ -15,7 +15,6 @@ from decsim.engine import Engine
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation, SyndromePayload, WINDOW_INPUT_ROUTE
 from decsim.planner import FixedRounds
-from decsim.run_spec import RunSpec
 from decsim.run_spec import RunSpec, simulate
 from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 
@@ -114,65 +113,38 @@ def test_timing_only_payload_becomes_defect_mask():
 
 
 def test_per_patch_fragments_gate_round_arrival():
-    # The controller is the sole fragment-completion owner; the manager sees
-    # exactly one complete round after both patch fragments arrive.
-    class SilentDevice(TimingOnlyDevice):
-        def round_payloads(self, operation, round_index):
-            return []
-
-    op = Operation(0, "CNOT(q0,q1)", (0, 1), clifford=True)
-    op.patches = (0, 1)
+    # Ingress publishes exactly one complete round after both fragments arrive.
+    engine = Engine(verbose=False)
     observed = []
-    controllers = []
 
-    def make_controller(engine, links, buffering, window_manager):
-        controller = ModularController(
-            engine,
-            links=links,
-            log_syndromes=False,
-            controller_capacity=buffering.controller_ingress_packet_slots,
-            window_input_receiver=window_manager,
-            feedback_memory_receiver=window_manager,
-        )
-        controllers.append(controller)
-        return controller
+    class Receiver:
+        def __init__(self):
+            self.rounds_arrived = {0: 0}
+        def accept_window_input(self, packet):
+            self.rounds_arrived[0] += 1
+            return True
 
-    def install_probe(engine, window_manager, decoder_manager, _chip, _factory):
-        def probe():
-            controllers[0].relay_syndrome(
-                SyndromePayload(
-                    0, 0, 1, n_fragments=2, fragment_index=0
-                ),
-                WINDOW_INPUT_ROUTE,
-            )
-            observed.append(window_manager.rounds_arrived[0])
-            controllers[0].relay_syndrome(
-                SyndromePayload(
-                    0, 1, 1, n_fragments=2, fragment_index=1
-                ),
-                WINDOW_INPUT_ROUTE,
-            )
-            observed.append(window_manager.rounds_arrived[0])
-            engine.schedule(
-                1,
-                lambda: observed.append(window_manager.rounds_arrived[0]),
-                label="observe complete packet",
-            )
-
-        engine.schedule(0, probe, label="fragment arrival probe")
-        return []
-
-    RunSpec(
-        ops=[op],
-        d=3,
-        rounds_policy=FixedRounds(11),
-        decoder=PresetLatencyDecoder(1.0),
-        num_units=1,
-        device=SilentDevice(),
-        links=fixed_latency_link_config(),
-        make_controller=make_controller,
-        make_metrics=install_probe,
-    ).build()
+    receiver = Receiver()
+    ingress = SyndromeIngress(
+        engine,
+        links=fixed_latency_link_config().resolve(),
+        log_syndromes=False,
+        ingress_context_capacity=None,
+        window_input_receiver=receiver,
+        feedback_memory_receiver=receiver,
+    )
+    ingress.relay_syndrome(
+        SyndromePayload(0, 0, 1, n_fragments=2, fragment_index=0),
+        WINDOW_INPUT_ROUTE,
+    )
+    observed.append(receiver.rounds_arrived[0])
+    ingress.relay_syndrome(
+        SyndromePayload(0, 1, 1, n_fragments=2, fragment_index=1),
+        WINDOW_INPUT_ROUTE,
+    )
+    observed.append(receiver.rounds_arrived[0])
+    engine.run()
+    observed.append(receiver.rounds_arrived[0])
 
     assert observed == [0, 0, 1]
 

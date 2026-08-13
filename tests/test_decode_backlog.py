@@ -20,7 +20,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from decsim.codes import SurfaceCodeModel
 from conftest import fixed_latency_link_config
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import DecodeBacklog, ReadyQueueStats
@@ -49,9 +49,9 @@ class _FixedLatencyDecoder:
 
 
 def _zero_link_controller(engine, links, buffering, window_manager):
-    return ModularController(
+    return SyndromeIngress(
         engine, links=links, log_syndromes=False,
-        controller_capacity=buffering.controller_ingress_packet_slots,
+        ingress_context_capacity=buffering.upstream_packet_slots,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager)
 
@@ -68,7 +68,7 @@ def _run(latency_us, rounds):
               scheme=SlidingWindowScheme(),
               code=SurfaceCodeModel(d=D),
               links=fixed_latency_link_config(),
-              make_controller=_zero_link_controller,
+              make_syndrome_ingress=_zero_link_controller,
               make_metrics=lambda e, wm, dm, ch, f: [DecodeBacklog(wm, dm), ReadyQueueStats(dm)],
           ), verbose=False)
     m = res.result.metric_values()

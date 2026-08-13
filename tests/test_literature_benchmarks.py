@@ -9,6 +9,7 @@ setup: pick RunSpec parts, state the paper's observable and tolerance, run.
      matches the analytic per-layer period within ±15% (QLX's own tolerance).
 """
 import pytest
+from conftest import fixed_latency_link_config
 
 from decsim.decoders import PresetLatencyDecoder
 from decsim.frontends.circuit import CircuitFrontend
@@ -17,7 +18,7 @@ from decsim.metrics import DecodeBacklog
 from decsim.message import Operation
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec
-from decsim.config import TICKS_PER_US, TimingConfig, us
+from decsim.config import TICKS_PER_US, us
 
 D = 3
 COMMIT = D                       # d=3 surface code: commit_rounds == d
@@ -50,7 +51,7 @@ def _backlog_run(rho, rounds):
     ρ = (E[S] + t_wdo + t_dd) / (commit·t_round)."""
     backlog = {}
 
-    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+    def make_metrics(engine, window_manager, decoder_manager, execution_runtime, factory):
         backlog["m"] = DecodeBacklog(window_manager, decoder_manager)
         return [backlog["m"]]
 
@@ -59,6 +60,8 @@ def _backlog_run(rho, rounds):
                            rounds_policy=FixedRounds(rounds),
                            round_us=ROUND_US, num_units=1,
                            decoder=PresetLatencyDecoder(service_us),
+                           links=fixed_latency_link_config(
+                               cwd=0, wdo=us(T_WDO_US), dd=us(T_DD_US)),
                            make_metrics=make_metrics))
     return res, backlog["m"]
 
@@ -78,7 +81,7 @@ def test_skoric_supercritical_backlog_grows_at_lambda_minus_mu():
     mu = COMMIT / (rho * COMMIT * ROUND_US)     # rounds decoded per us
     expected = (lam - mu) / TICKS_PER_US        # rounds per tick
 
-    t1, t2 = 0.25 * res.result.chip_done_ticks, 0.95 * res.result.chip_done_ticks
+    t1, t2 = 0.25 * res.result.execution_done_ticks, 0.95 * res.result.execution_done_ticks
     b1 = max(b for t, b in metric.trace if t <= t1)
     b2 = max(b for t, b in metric.trace if t <= t2)
     measured = (b2 - b1) / (t2 - t1)
@@ -88,7 +91,7 @@ def test_skoric_supercritical_backlog_grows_at_lambda_minus_mu():
 def test_skoric_subcritical_backlog_bounded():
     """ρ<1: the p99 backlog is pipeline-sized and flat across the run."""
     res, metric = _backlog_run(0.8, rounds=600)
-    during = sorted(b for t, b in metric.trace if t <= res.result.chip_done_ticks)
+    during = sorted(b for t, b in metric.trace if t <= res.result.execution_done_ticks)
     p99 = during[int(0.99 * (len(during) - 1))]
     assert p99 <= 4 * COMMIT                    # ~a window, not ~the run length
     assert metric.trace[-1][1] == 0             # drains completely
@@ -158,13 +161,13 @@ def test_gidney_ekera_reaction_limited_runtime_within_15_percent():
     from decsim.schemes import NaiveOnlineScheme
     from decsim.links import LinkModelConfig
     k, rounds, decode_us = 6, 11, 5.0
-    links = LinkModelConfig.reference_fixed_latency_profile()
+    links = LinkModelConfig.logical_reference_profile()
     res = simulate(RunSpec(ops=_chain(k), d=D,
                            rounds_policy=FixedRounds(rounds),
                            round_us=ROUND_US, num_units=1,
                            scheme=NaiveOnlineScheme(),   # one window per layer
                            decoder=PresetLatencyDecoder(decode_us)))
-    gate = res.chip
+    gate = res.execution_runtime
 
     body = rounds * us(ROUND_US)
     reaction = (

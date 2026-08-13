@@ -14,9 +14,9 @@ from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import (
     DecodeResult,
     CsdInput,
+    DecoderInputHold,
     DecoderRequestKey,
     DecoderTier,
-    EndpointRole,
     Operation,
     OperationPlanningView,
     PendingStrong,
@@ -31,7 +31,7 @@ from decsim.message import (
     Window,
     WindowPlan,
 )
-from decsim.payload_store import PayloadStore
+from decsim.syndrome_buffer import SyndromeBuffer
 from decsim.planner import _plan_syndrome_buffering
 from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.window_manager import LogicalContribution, WindowManager
@@ -93,7 +93,7 @@ def _runtime(
     double_window=False,
     round_count=6,
     window_specs=None,
-    store=None,
+    syndrome_buffer=None,
 ):
     eng = Engine(verbose=False)
     fb = _Feedback()
@@ -154,11 +154,19 @@ def _runtime(
                        ),
                        retain_strong_context=retain_strong_context,
                        double_window=double_window,
-                       store=store)
+                       syndrome_buffer=syndrome_buffer)
     rt.strategy = strategy or _RecordingStrategy()
     rt.services = object()
     submitted = []
-    rt.submit_fn = lambda job, delay: submitted.append((job, delay))
+
+    def submit(job, delay):
+        """Fake transport: admit and materialize the decoder input at once."""
+        submitted.append((job, delay))
+        if job.input_hold is not None:
+            job.input_hold()
+            job.input_hold = None
+
+    rt.submit_fn = submit
     windows, op_windows, count = {}, {}, {}
     for op_id, op in runtime_operations.items():
         rt.register_op(op)
@@ -197,65 +205,60 @@ def test_double_window_plan_registers_exact_w2_potential_context():
     specs = tuple(
         (start, min(start + 2, 21), min(start + 5, 24))
         for start in range(1, 22, 3))
-    store = PayloadStore(sb0_capacity=64, sb1_capacity=64)
+    buffer = SyndromeBuffer(capacity=64)
     _, runtime, _, _ = _runtime(
         retain_strong_context=True, double_window=True,
-        round_count=21, window_specs=specs, store=store)
+        round_count=21, window_specs=specs, syndrome_buffer=buffer)
 
-    assert store.owner_packet_identities(
-        EndpointRole.SB1, PotentialStrong((0, 2))) == tuple(
-            (0, round_index) for round_index in range(4, 19))
+    assert buffer.hold_round_identities(PotentialStrong((0, 2))) == tuple(
+        (0, round_index) for round_index in range(4, 19))
 
 
 def test_capacity_plan_separates_reachable_nine_from_sufficient_twenty_one():
     specs = tuple(
         (start, min(start + 2, 21), min(start + 5, 24))
         for start in range(1, 22, 3))
-    store = PayloadStore(sb0_capacity=64, sb1_capacity=9)
+    buffer = SyndromeBuffer(capacity=9)
     _, runtime, _, _ = _runtime(
         retain_strong_context=True, double_window=True,
-        round_count=21, window_specs=specs, store=store)
+        round_count=21, window_specs=specs, syndrome_buffer=buffer)
 
-    minimum, sufficient = runtime.buffering_capacity_rows[EndpointRole.SB1]
+    minimum, sufficient = runtime.buffering_capacity_rows["upstream"]
     assert minimum == tuple(
         (0, round_index) for round_index in range(1, 10))
     assert sufficient == tuple(
         (0, round_index) for round_index in range(1, 22))
 
 
-def test_pending_to_csd_owner_transfers_acquire_before_release(monkeypatch):
-    store = PayloadStore(sb0_capacity=64, sb1_capacity=64)
+def test_pending_to_csd_hold_transfers_move_membership_without_release(
+    monkeypatch,
+):
+    buffer = SyndromeBuffer(capacity=64)
     _, runtime, _, _ = _runtime(
-        retain_strong_context=True, store=store)
+        retain_strong_context=True, syndrome_buffer=buffer)
     window_key = (0, 0)
     pending_key = DecoderRequestKey(0, 0, DecoderTier.STRONG, 7)
-    expected_keys = store.owner_packet_identities(
-        EndpointRole.SB1, PotentialStrong(window_key))
-    acquisitions_seen = []
-    original_release = store.release_owner
+    expected_keys = buffer.hold_round_identities(PotentialStrong(window_key))
+    released_holders = []
+    original_release = buffer.release_hold
 
-    def assert_replacement_exists(role, owner):
-        replacement = (
-            PendingStrong(pending_key)
-            if owner == PotentialStrong(window_key)
-            else CsdInput(pending_key))
-        acquisitions_seen.append(
-            store.owner_packet_identities(role, replacement))
-        original_release(role, owner)
+    def record_release(holder):
+        released_holders.append(holder)
+        original_release(holder)
 
-    monkeypatch.setattr(store, "release_owner", assert_replacement_exists)
+    monkeypatch.setattr(buffer, "release_hold", record_release)
     runtime._transfer_potential_to_pending(window_key, pending_key)
     runtime._transfer_pending_to_csd(pending_key)
 
-    assert acquisitions_seen == [expected_keys, expected_keys]
-    assert store.owner_packet_identities(
-        EndpointRole.SB1, CsdInput(pending_key)) == expected_keys
+    # transfer_hold moves the membership atomically; nothing is released,
+    # so the retained rounds never see a free window between owners.
+    assert released_holders == []
+    assert buffer.hold_round_identities(
+        CsdInput(pending_key)) == expected_keys
     with pytest.raises(KeyError):
-        store.owner_packet_identities(
-            EndpointRole.SB1, PotentialStrong(window_key))
+        buffer.hold_round_identities(PotentialStrong(window_key))
     with pytest.raises(KeyError):
-        store.owner_packet_identities(
-            EndpointRole.SB1, PendingStrong(pending_key))
+        buffer.hold_round_identities(PendingStrong(pending_key))
 
 
 def _feed_rounds(rt, op_id, n):
@@ -270,12 +273,17 @@ def _feed_rounds(rt, op_id, n):
 
 
 def _publish_round(runtime, packet):
-    pair = runtime.store.prepare_pair(packet, runtime.engine.now)
-    assert pair is not None
-    pair.commit_unpublished()
-    pair.publish()
-    runtime.store.complete_cryo((packet.operation_id, packet.round_index))
-    runtime.on_syndrome_arrival(packet)
+    """Assemble, pack, and publish one round through the one upstream buffer."""
+    buffer = runtime.syndrome_buffer
+    identity = (packet.operation_id, packet.round_index)
+    for fragment in packet.fragments:
+        buffer.accept_fragment(
+            fragment, expected_fragments=len(packet.fragments))
+    published = buffer.finish_packing(
+        identity, publication_tick=runtime.engine.now)
+    runtime.on_syndrome_arrival(published)
+    buffer.release_round_if_unheld(identity)
+    return published
 
 
 def test_decoder_assembly_uses_structural_patch_order_not_transport_order():
@@ -334,20 +342,37 @@ def test_not_ready_until_data_and_deps():
     eng, rt, fb, submitted = _runtime(deps=[((0, 0), (1, 0))], ops=(0, 1))
     _feed_rounds(rt, 1, 6)                       # dependent has data...
     assert not submitted                          # ...but dep outstanding
-    assert rt.store.owner_packet_identities(
-        EndpointRole.SB0, (1, 0)) == tuple((1, r) for r in range(1, 7))
+    assert rt.syndrome_buffer.hold_round_identities(
+        (1, 0)) == tuple((1, r) for r in range(1, 7))
     _feed_rounds(rt, 0, 6)                        # predecessor ready & submits
     assert [j.op_id for j, _ in submitted] == [0]
 
 
 def test_job_fields_match_contract_2a4():
-    eng, rt, fb, submitted = _runtime()
+    class RecordingBuffer(SyndromeBuffer):
+        def __init__(self):
+            super().__init__()
+            self.read_fragments = {}
+
+        def retained_fragments(self, round_identity):
+            fragments = super().retained_fragments(round_identity)
+            if fragments is not None:
+                self.read_fragments[round_identity] = fragments
+            return fragments
+
+    buffer = RecordingBuffer()
+    eng, rt, fb, submitted = _runtime(syndrome_buffer=buffer)
     _feed_rounds(rt, 0, 6)
     job, delay = submitted[0]
     assert delay == 0
     assert (job.op_id, job.window_id, job.n_rounds) == (0, 0, 6)
     assert job.spatial_nodes == 9
     assert len(job.payloads) == 6 and job.strong_label == "strong(op0 W0)"
+    assert all(
+        job.payloads[round_index - 1]
+        is buffer.read_fragments[(0, round_index)][0]
+        for round_index in range(1, 7)
+    )
 
 
 class _OrderedWeakStrongStrategy:
@@ -370,34 +395,31 @@ def _stage_final_round(runtime):
             SyndromePayload(0, 0, 6)
         ),),
     )
-    pair = runtime.store.prepare_pair(packet, runtime.engine.now)
-    assert pair is not None
-    pair.commit_unpublished()
-    pair.publish()
-    runtime.store.complete_cryo((0, 6))
-    return packet
+    buffer = runtime.syndrome_buffer
+    for fragment in packet.fragments:
+        buffer.accept_fragment(fragment, expected_fragments=1)
+    return buffer.finish_packing((0, 6), publication_tick=runtime.engine.now)
 
 
-def _assert_window_input_retained(runtime, expected_fragments):
+def _assert_window_input_retained(runtime, holder, expected_fragments):
     packet_ids = tuple((0, round_index) for round_index in range(1, 7))
-    assert runtime.store.owner_packet_identities(
-        EndpointRole.SB0, (0, 0)) == packet_ids
-    assert runtime.store.backing_identities == packet_ids
+    buffer = runtime.syndrome_buffer
+    assert buffer.hold_round_identities(holder) == packet_ids
+    assert buffer.snapshot().retained_identities == packet_ids
     assert tuple(
-        runtime.store.fragments(0, round_index)
+        buffer.retained_fragments((0, round_index))
         for round_index in range(1, 7)
     ) == expected_fragments
 
 
-def test_successful_window_handoff_releases_sb0_before_decode_completion():
+def test_successful_window_handoff_releases_weak_hold_before_decode_completion():
     _, runtime, _, submitted = _runtime(retain_strong_context=True)
 
     _feed_rounds(runtime, 0, 6)
 
     assert len(submitted) == 1
-    assert not runtime.store.has_owner(EndpointRole.SB0, (0, 0))
-    assert runtime.store.has_owner(
-        EndpointRole.SB1, PotentialStrong((0, 0)))
+    assert not runtime.syndrome_buffer.has_hold((0, 0))
+    assert runtime.syndrome_buffer.has_hold(PotentialStrong((0, 0)))
 
 
 def test_weak_then_strong_failure_keeps_accepted_weak_and_window_input(
@@ -410,7 +432,7 @@ def test_weak_then_strong_failure_keeps_accepted_weak_and_window_input(
     _feed_rounds(runtime, 0, 5)
     final_packet = _stage_final_round(runtime)
     expected_fragments = tuple(
-        runtime.store.fragments(0, round_index)
+        runtime.syndrome_buffer.retained_fragments((0, round_index))
         for round_index in range(1, 7)
     )
 
@@ -423,7 +445,8 @@ def test_weak_then_strong_failure_keeps_accepted_weak_and_window_input(
 
     assert len(submitted) == 1
     assert submitted[0][0].strong_decode_for is None
-    _assert_window_input_retained(runtime, expected_fragments)
+    _assert_window_input_retained(
+        runtime, PotentialStrong((0, 0)), expected_fragments)
 
 
 def test_strong_then_weak_failure_keeps_accepted_strong_and_window_input():
@@ -434,7 +457,7 @@ def test_strong_then_weak_failure_keeps_accepted_strong_and_window_input():
     _feed_rounds(runtime, 0, 5)
     final_packet = _stage_final_round(runtime)
     expected_fragments = tuple(
-        runtime.store.fragments(0, round_index)
+        runtime.syndrome_buffer.retained_fragments((0, round_index))
         for round_index in range(1, 7)
     )
 
@@ -450,10 +473,12 @@ def test_strong_then_weak_failure_keeps_accepted_strong_and_window_input():
     assert len(submitted) == 1
     strong_job = submitted[0][0]
     assert strong_job.strong_decode_for == (0, 0)
-    assert runtime.store.owner_packet_identities(
-        EndpointRole.SB1, CsdInput(strong_job.request_key)
+    # the CSD retention hold moves onward to the admitted strong input hold
+    assert runtime.syndrome_buffer.hold_round_identities(
+        DecoderInputHold(strong_job.request_key)
     ) == tuple((0, round_index) for round_index in range(1, 7))
-    _assert_window_input_retained(runtime, expected_fragments)
+    _assert_window_input_retained(
+        runtime, DecoderInputHold(strong_job.request_key), expected_fragments)
 
 
 def test_eager_ships_weak_boundary_unconditionally_contract_1_2():
@@ -571,10 +596,10 @@ def test_finish_waits_for_every_committed_window(monkeypatch):
     events = []
     monkeypatch.setattr(runtime, "_deliver_result", lambda _operation:
                         events.append("deliver"))
-    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id:
+    monkeypatch.setattr(runtime.syndrome_buffer, "close_operation", lambda _operation_id:
                         events.append("close"))
     monkeypatch.setattr(
-        runtime.store,
+        runtime.syndrome_buffer,
         "has_live_operation_reference",
         lambda _operation_id: False,
     )
@@ -605,10 +630,10 @@ def test_finish_waits_for_dynamic_stream_seal(monkeypatch):
     events = []
     monkeypatch.setattr(runtime, "_deliver_result", lambda _operation:
                         events.append("deliver"))
-    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id:
+    monkeypatch.setattr(runtime.syndrome_buffer, "close_operation", lambda _operation_id:
                         events.append("close"))
     monkeypatch.setattr(
-        runtime.store,
+        runtime.syndrome_buffer,
         "has_live_operation_reference",
         lambda _operation_id: False,
     )
@@ -634,7 +659,7 @@ def test_finish_waits_for_live_payload_and_delivers_before_close(monkeypatch):
     closed = {"value": False}
     observations = []
     monkeypatch.setattr(
-        runtime.store,
+        runtime.syndrome_buffer,
         "has_live_operation_reference",
         lambda _operation_id: live["value"],
     )
@@ -647,7 +672,7 @@ def test_finish_waits_for_live_payload_and_delivers_before_close(monkeypatch):
         observations.append(("close", closed["value"]))
 
     monkeypatch.setattr(runtime, "_deliver_result", deliver)
-    monkeypatch.setattr(runtime.store, "close_operation", close)
+    monkeypatch.setattr(runtime.syndrome_buffer, "close_operation", close)
 
     runtime._finish_operation_if_ready(operation)
     assert observations == []
@@ -670,13 +695,13 @@ def test_finish_waits_for_operation_recovery_blocker(monkeypatch):
         lambda _operation_id: recovery_active["value"],
     )
     monkeypatch.setattr(
-        runtime.store,
+        runtime.syndrome_buffer,
         "has_live_operation_reference",
         lambda _operation_id: False,
     )
     monkeypatch.setattr(runtime, "_deliver_result", lambda _operation:
                         events.append("deliver"))
-    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id:
+    monkeypatch.setattr(runtime.syndrome_buffer, "close_operation", lambda _operation_id:
                         events.append("close"))
 
     runtime._finish_operation_if_ready(operation)
@@ -702,10 +727,10 @@ def test_finish_marks_before_synchronous_delivery_reentry(monkeypatch):
         runtime._finish_operation_if_ready(reentered_operation)
 
     monkeypatch.setattr(runtime, "_deliver_result", deliver)
-    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id:
+    monkeypatch.setattr(runtime.syndrome_buffer, "close_operation", lambda _operation_id:
                         events.append("close"))
     monkeypatch.setattr(
-        runtime.store,
+        runtime.syndrome_buffer,
         "has_live_operation_reference",
         lambda _operation_id: False,
     )
@@ -802,11 +827,11 @@ def test_stream_segment_marks_before_delivery_and_does_not_suppress_whole(
 
     runtime._committed_per_op[operation.id] = 1
     monkeypatch.setattr(
-        runtime.store,
+        runtime.syndrome_buffer,
         "has_live_operation_reference",
         lambda _operation_id: False,
     )
-    monkeypatch.setattr(runtime.store, "close_operation", lambda _operation_id: None)
+    monkeypatch.setattr(runtime.syndrome_buffer, "close_operation", lambda _operation_id: None)
     runtime._finish_operation_if_ready(operation)
 
     assert len(feedback.integrated) == 2
@@ -869,7 +894,7 @@ def test_packet_operation_and_round_limit_reject_before_storage_mutates():
         ))
 
     assert runtime.rounds_arrived[0] == 0
-    assert runtime.store.fragments(0, 7) is None
+    assert runtime.syndrome_buffer.retained_fragments((0, 7)) is None
 
 
 def test_strong_job_two_sided_context_contract_2b6():
@@ -881,7 +906,7 @@ def test_strong_job_two_sided_context_contract_2b6():
     assert (w.buffer_lo, w.commit_lo, w.commit_hi, w.buffer_hi) == (1, 1, 3, 6)
     assert strong.hint == "strong" and strong.attempt == 1
     assert strong.strong_decode_for == (0, 0)
-    assert strong.window.t_first_round == rt.store.round_complete_tick(0, 1)
+    assert strong.window.t_first_round == rt.syndrome_buffer.publication_tick((0, 1))
 
 
 def test_retention_capability_adds_only_strong_leading_rounds():
@@ -891,12 +916,12 @@ def test_retention_capability_adds_only_strong_leading_rounds():
         op_id=0, k=1, commit_lo=4, commit_hi=4, buffer_hi=6, n_rounds=3)
     for runtime in (without_context, with_context):
         runtime._add_window_read_refs(interior.key, interior)
-    assert not without_context.store.has_owner(
-        EndpointRole.SB1, PotentialStrong(interior.key))
-    assert without_context.store.owner_packet_identities(
-        EndpointRole.SB0, interior.key) == ((0, 4), (0, 5), (0, 6))
-    assert with_context.store.owner_packet_identities(
-        EndpointRole.SB1, PotentialStrong(interior.key)) == (
+    assert not without_context.syndrome_buffer.has_hold(
+        PotentialStrong(interior.key))
+    assert without_context.syndrome_buffer.hold_round_identities(
+        interior.key) == ((0, 4), (0, 5), (0, 6))
+    assert with_context.syndrome_buffer.hold_round_identities(
+        PotentialStrong(interior.key)) == (
             (0, 4), (0, 5), (0, 6), (0, 2), (0, 3))
 
 
@@ -1074,7 +1099,7 @@ def test_serial_strong_redecode_excludes_predecessor_owned_faults():
             return "strong-model"
 
     source = RecordingSource()
-    runtime.syndrome_source = source
+    runtime.error_model_provider = source
     strong = runtime.make_strong_decode_job(
         weak, round_count=9, label="strong")
 

@@ -175,11 +175,11 @@ def _protected_external_spec(source_role, stream_id):
 @pytest.mark.parametrize("source_role,stream_id",
                          [(role, stream) for role in ("decode_ops", "dynamic_streams")
                           for stream in (42, 99, -1)])
-def test_external_protected_feedback_source_is_rejected_before_chip_admission(source_role, stream_id, monkeypatch):
+def test_external_protected_feedback_source_is_rejected_before_execution_admission(source_role, stream_id, monkeypatch):
     spec, operations = _protected_external_spec(source_role, stream_id)
     snapshots = tuple(operation.__dict__.copy() for operation in operations)
     if stream_id < 0:
-        monkeypatch.setattr("decsim.chip.Chip._index_protected_regions", lambda *args: (_ for _ in ()).throw(RuntimeError("index reached")))
+        monkeypatch.setattr("decsim.controller.Controller._index_protected_regions", lambda *args: (_ for _ in ()).throw(RuntimeError("index reached")))
         with pytest.raises(RuntimeError, match="index reached"): spec.build()
         return
     with pytest.raises(ValueError, match=rf"external source 42.*protected stream.*{stream_id}"):

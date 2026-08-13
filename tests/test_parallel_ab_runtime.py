@@ -22,7 +22,7 @@ from decsim.message import (
     DecodeResult,
     DependencyResidual,
     Operation,
-    SyndromePayload,
+    QPUReadout, SyndromePayload,
 )
 from decsim.mwpm_decoder import PyMatchingDecoder
 from decsim.planner import FixedRounds
@@ -203,7 +203,7 @@ class _FixedRoundDevice(TimingOnlyDevice):
         self.raw_by_round = dict(raw_by_round)
 
     def round_payloads(self, op, round_index):
-        return [SyndromePayload(
+        return [QPUReadout(
             op.id,
             op.qubits[0],
             round_index,

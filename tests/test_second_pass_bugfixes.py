@@ -14,7 +14,7 @@ from dataclasses import replace
 import pytest
 
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.engine import Engine
 from decsim.factories import DistillationFactory
 from decsim.frontends.qlx import qlx_frontend
@@ -35,18 +35,6 @@ from decsim.message import (
 
 
 # ------------------------------------------------- finding 19: factory
-
-class _RecordingService:
-    """DecodeService test helper: instant decodes, records every submit."""
-
-    def __init__(self):
-        self.labels = []
-
-    def submit_decode(self, round_count, on_done, label="",
-                      code=None, spatial_nodes=None):
-        self.labels.append(label)
-        on_done()
-
 
 def test_zero_correction_factory_still_releases_the_state():
     """n_corr=0: the state must be released right after physical
@@ -70,7 +58,7 @@ def test_packing_does_not_reserve_the_serialized_link_early():
     FINISHES; a whole message on an independent controller route uses the
     shared idle link during the packing gap."""
     eng = Engine(verbose=False)
-    config = LinkModelConfig.reference_fixed_latency_profile()
+    config = LinkModelConfig.logical_reference_profile()
     cwd_channel = LinkConfig(
         0,
         LinkCapacityConfig(
@@ -112,9 +100,9 @@ def test_packing_does_not_reserve_the_serialized_link_early():
             arrivals.append(("whole", eng.now))
 
     receiver = Receiver()
-    ctrl = ModularController(
+    ctrl = SyndromeIngress(
         eng, links=links, log_syndromes=False, t_pack=us(1.0),
-        controller_capacity=None, window_input_receiver=receiver,
+        ingress_context_capacity=None, window_input_receiver=receiver,
         feedback_memory_receiver=receiver)
     for patch in (0, 1):
         fragment = SyndromePayload(

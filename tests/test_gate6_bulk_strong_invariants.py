@@ -3,7 +3,6 @@ import sys
 import pathlib
 from dataclasses import replace
 from itertools import count
-from types import SimpleNamespace
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -14,7 +13,8 @@ from decsim.engine import Engine
 from decsim.decoders import CodeRouter, PerRoundDecoder, SwitchingRouter
 from decsim.decoder_manager import DecoderManager, StrategyServicesImpl
 from decsim.message import (DecodeJob, DecodeResult, DecoderRequestKey,
-                            DecoderTier, Operation, Window)
+                            DecoderTier, Operation, Window,
+                            RetainedSyndromeFragment)
 from decsim.planner import FixedRounds
 from decsim.protocols import Directive, OutcomeDirective, Submission
 from decsim.run_spec import RunSpec, simulate
@@ -102,7 +102,7 @@ def weak_job(op, rounds, label=None):
 
 
 def wait_for(manager, job):
-    manager._windows_waiting_for_strong_result[job.strong_decode_for] = \
+    manager._windows_waiting_for_strong_result[job.strong_decode_for] =\
         job.request_key
 
 
@@ -135,9 +135,9 @@ def escalating_world(
         make_metrics=(
             None
             if configure is None
-            else lambda engine, window_manager, decoder_manager, chip, factory: (
+            else lambda engine, window_manager, decoder_manager, execution_runtime, factory: (
                 configure(
-                    engine, window_manager, decoder_manager, chip, factory
+                    engine, window_manager, decoder_manager, execution_runtime, factory
                 ) or []
             )
         ),
@@ -157,7 +157,7 @@ def occupy_then_merge(eng, manager):
     jobs = [strong_job(1, 10, "s-block"), strong_job(2, 5), strong_job(3, 5)]
     for job in jobs:
         manager.enqueue(job)
-        manager._windows_waiting_for_strong_result[job.strong_decode_for] = \
+        manager._windows_waiting_for_strong_result[job.strong_decode_for] =\
             job.request_key
 
 
@@ -165,7 +165,7 @@ def test_bulk_merge_delivers_every_key_and_frees_units():
     eng, manager, results = build()
     occupy_then_merge(eng, manager)
     eng.run()
-    assert [(t / us(1), k) for t, k in results] == \
+    assert [(t / us(1), k) for t, k in results] ==\
         [(10.0, (1, 0)), (20.0, (2, 0)), (20.0, (3, 0))]
     assert manager.pool_free == {"default": 1, "strong": 1}
     assert manager.admitted_strong_work_snapshot() == ()
@@ -339,7 +339,10 @@ def test_terminal_syndrome_facts_distinguish_missing_from_sampled_all_zero():
     manager.strategy = _AdoptTheWeakResult()
     manager.on_window_decoded = lambda job, result: None
     missing, zero = weak_job(10, 2), weak_job(11, 2)
-    zero.payloads = [SimpleNamespace(bits=(0, 0, 0))]
+    zero.payloads = [RetainedSyndromeFragment(
+        operation_id=zero.op_id, patch_id=0, round_index=1,
+        bits=(0, 0, 0), code=None, size_bits=3, fragment_index=0,
+    )]
     manager.enqueue(missing)
     manager.enqueue(zero)
     eng.run()
@@ -474,7 +477,7 @@ def test_early_strong_result_is_held_until_its_destination_asks(bulk_strong):
 
     eng.run()
 
-    assert while_the_weak_still_runs == [({(2, 0)}, [])], \
+    assert while_the_weak_still_runs == [({(2, 0)}, [])],\
         "the early strong result was not held for the running weak attempt"
     assert [key for _, key in results] == [(2, 0)]
     assert manager._completed_strong_results == {}
@@ -521,7 +524,7 @@ def test_time_separated_duplicate_is_refused_however_it_is_timed(bulk_strong):
     with pytest.raises(RuntimeError, match="duplicate strong decode"):
         manager.enqueue(strong_job(2, 7, "s-second"), delay_ticks=us(20))
 
-    assert len(eng.log_lines) == log_lines_before, \
+    assert len(eng.log_lines) == log_lines_before,\
         "a refused request announced a handoff that never happened"
     eng.run()
     assert [key for _, key in results] == [(2, 0)]
@@ -712,7 +715,7 @@ def test_public_strategy_run_finalizes_with_nothing_held_end_to_end():
         finalized_key, synthetic_key)
     assert set(completed_run.decoder_manager._windows_waiting_for_strong_result) == {
         finalized_key}
-    assert delivered.count(finalized_key) == 1, \
+    assert delivered.count(finalized_key) == 1,\
         "a wait was released after finality without a decode of its own"
 
 
@@ -799,7 +802,7 @@ def test_a_request_cancelled_across_the_link_is_replaced_by_one_decode(
     eng.schedule(us(5), cancel_then_replace)
     eng.run()
 
-    assert decoder.decoded == ["s-replacement"], \
+    assert decoder.decoded == ["s-replacement"],\
         "the cancelled request enqueued alongside its replacement"
     assert [key for _, key in results] == [(2, 0)]
     assert manager.strong_cancelled == 1
@@ -827,7 +830,7 @@ def test_a_destination_that_keeps_its_weak_result_discards_its_held_strong(
 
     eng.run()
 
-    assert while_the_weak_still_runs == [{(2, 0)}], \
+    assert while_the_weak_still_runs == [{(2, 0)}],\
         "the early strong result was never held, so the discard is untested"
     assert results == []
     assert manager._completed_strong_results == {}
@@ -876,7 +879,7 @@ def test_a_later_attempt_cannot_consume_an_earlier_requests_result(bulk_strong):
     with pytest.raises(RuntimeError, match="parallel strong selection"):
         eng.run()
 
-    assert results == [], \
+    assert results == [],\
         "a later attempt was released by an earlier request's result"
     assert not manager._windows_waiting_for_strong_result
 
@@ -1385,7 +1388,7 @@ def test_a_request_cancelled_across_the_link_is_refused_and_replaced(
     manager.enqueue(crossing, delay_ticks=30)
 
     manager.cancel_strong((5, 0))
-    assert not crossing.cancelled, \
+    assert not crossing.cancelled,\
         "a job still crossing the link is dropped by identity, not by flag"
     assert crossing.submitted
 

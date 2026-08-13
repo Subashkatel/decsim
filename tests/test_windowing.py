@@ -92,7 +92,7 @@ def test_default_sliding_matches_quits_tan_finite_forward_geometry():
             assert max(window.buffer_hi for window in plan.windows) <= round_count
 
 
-def _memory_op(rounds_unused=None):
+def _memory_op():
     """One single-patch Clifford op -- a quantum-memory stream."""
     op = Operation(0, "M(q0)", (0,), clifford=True)
     op.patches = (0,)

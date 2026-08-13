@@ -3,41 +3,22 @@ from dataclasses import fields
 import numpy as np
 import pytest
 
-from decsim.decoders import PerRoundDecoder, SAMPLED_CONFIDENCE_SOURCE
+from decsim.decoders import SAMPLED_CONFIDENCE_SOURCE
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.devices import TimingOnlyDevice
 from decsim.codes import SurfaceCodeModel
 from decsim.engine import Engine
-from decsim.frontends.circuit import CircuitFrontend, SurgeryIRFrontend
 from decsim.layouts import UniformLayout
 from decsim.message import DecodeResult, Operation, RunSeedReservation
-from decsim.metrics import (
-    BacklogEarlyWarning,
-    BacklogTrajectory,
-    ConditionalReactionTime,
-    DecodeBacklog,
-    DecoderUtilization,
-    MagicStateLatency,
-    ReadyQueueStats,
-    StrongDecoderBacklog,
-    WindowLatencyBreakdown,
-)
 from decsim.planner import FixedRounds
-from decsim.policies import Eager, Held, ExtendStream, SeparateDecodeJobs
+from decsim.policies import Eager
 from decsim.run_spec import RunSpec, simulate
 from decsim.schemes import (
     NaiveOnlineScheme,
     ParallelWindowScheme,
     SlidingWindowScheme,
 )
-from decsim.switching import Baseline, Switching, ThresholdRegister
-
-
-class WrongBoundarySignature:
-    speculative = False
-
-    def on_commit(self):
-        return True
+from decsim.switching import Baseline, Switching
 
 
 class LegacyBoundaryPolicy:
@@ -304,7 +285,7 @@ def test_run_seed_rejects_non_integral_values_before_build(seed):
     spec = RunSpec(
         ops=[],
         seed=seed,
-        make_controller=lambda *_args: provider_calls.append("entered"),
+        make_syndrome_ingress=lambda *_args: provider_calls.append("entered"),
     )
 
     with pytest.raises(
@@ -337,7 +318,7 @@ def test_run_seed_accepts_none_and_unsigned_integral_values(seed):
 def test_plain_class_controller_provider_is_accepted_without_instantiation():
     spec = RunSpec(
         ops=[],
-        make_controller=PlainControllerProvider,
+        make_syndrome_ingress=PlainControllerProvider,
     )
 
     spec.build()
@@ -816,10 +797,9 @@ def test_runtime_owners_retain_frozen_resolved_lookup_maps():
         completed.window_manager._resolved_operations,
         completed.window_manager._resolved_patches,
         completed.window_manager._planning_view_by_operation_id,
-        completed.chip._resolved_operations,
-        completed.chip._resolved_patches,
-        completed.chip._resource_claims_by_operation_id,
-        completed.chip.source._round_count_by_operation_id,
+        completed.controller._resolved_operations,
+        completed.controller._resolved_patches,
+        completed.execution_runtime._claims,
     )
     for frozen_map in frozen_maps:
         with pytest.raises(TypeError):
@@ -833,7 +813,7 @@ def test_completed_diagnostic_handles_do_not_expose_executable_operations():
         decoder=StaticDecoder(),
     ).build()
 
-    assert not hasattr(completed.chip, "ops")
+    assert not hasattr(completed.controller, "ops")
     assert not hasattr(completed.window_manager, "ops")
     assert not hasattr(completed.decoder_manager, "ops")
 
@@ -893,7 +873,7 @@ def test_provider_failure_invalidates_the_root_engine_before_any_event_runs():
     spec = RunSpec(
         ops=[],
         decoder=StaticDecoder(),
-        make_controller=failing_controller,
+        make_syndrome_ingress=failing_controller,
     )
 
     with pytest.raises(RuntimeError) as raised:
@@ -1349,7 +1329,7 @@ def test_legacy_boundary_policy_defaults_to_non_speculative_delivery():
         boundary_policy=LegacyBoundaryPolicy(),
     ))
 
-    assert result.result.chip_done_ticks is not None
+    assert result.result.execution_done_ticks is not None
 
 
 def test_static_device_needs_only_static_run_capabilities():
@@ -1360,4 +1340,4 @@ def test_static_device_needs_only_static_run_capabilities():
         device=StaticOnlyDevice(),
     ))
 
-    assert result.result.chip_done_ticks is not None
+    assert result.result.execution_done_ticks is not None

@@ -1,9 +1,9 @@
-"""The idle-round emitter's safety cap (chip.max_idle_rounds).
+"""The idle-round emitter's safety cap (controller.max_idle_rounds).
 
 Regression for a silent-distortion hazard: the emitter used to stop at a hard-coded
 100*d rounds with NO trace of having done so -- a long-reaction (backlog/divergence)
 study would read artificially stable numbers. The cap is now a constructor knob and
-the chip logs a loud WARNING when it fires while a blocked successor is still waiting."""
+the execution runtime logs a loud WARNING when it fires while a blocked successor is still waiting."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -50,5 +50,5 @@ def test_default_cap_is_unchanged_and_silent():
             rounds_policy=FixedRounds(11),
             decoder=PresetLatencyDecoder(1.0),
         ), verbose=False)
-    assert r.chip.max_idle_rounds == 100 * 3
+    assert r.controller.max_idle_rounds == 100 * 3
     assert not any("hit the idle-round cap" in l for l in r.engine.log_lines)

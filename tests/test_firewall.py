@@ -1,7 +1,7 @@
 """AST firewall: the frozen core never imports or names parts/experiments.
 
 CORE = {engine, message, links, window_manager, speculative_recovery,
-chip, payload_store, dynamic_windows, protocols, run_spec, config}. Only
+execution_runtime, syndrome_buffer, dynamic_windows, protocols, run_spec, config}. Only
 run_spec.py may import parts (never experiments); experiments reach run_spec.py
 only as pre-built objects.
 """
@@ -12,7 +12,7 @@ from decsim.protocols import DecodingStrategy
 
 PKG = pathlib.Path(__file__).resolve().parent.parent / "decsim"
 CORE = {"engine", "message", "links", "window_manager",
-        "speculative_recovery", "chip", "payload_store", "dynamic_windows",
+        "speculative_recovery", "controller", "syndrome_buffer", "dynamic_windows",
         "protocols", "run_spec", "config"}
 PARTS_ALLOWED_IN = {"run_spec"}
 # Experiment-flavored identifiers the core must never name (fabric/speculation

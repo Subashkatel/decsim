@@ -2,7 +2,7 @@
 
 Each test pins a branch the 2026-07-03 review found uncovered:
   7  held-early-strong result discarded when the weak proves confident
-  8  PayloadStore.replace strictly frees rounds the new lease drops
+  8  SyndromeBuffer.replace_hold strictly frees rounds the new lease drops
   9  dem.decode_windowed raises when artificial defects are never consumed
   HA switching threshold equality keeps weak (>= semantics)
   HA SlidingWindowScheme.data_complete overflow branches
@@ -17,15 +17,13 @@ from decsim.message import (
     DecodeResult,
     DecoderRequestKey,
     DecoderTier,
-    EndpointRole,
     SoftOutput,
-    SyndromePayload,
     SuccessorReadiness,
     Window,
     WindowReadiness,
 )
 from decsim.decoder_manager import StrategyServicesImpl, DecoderManager
-from decsim.payload_store import PayloadStore
+from decsim.syndrome_buffer import SyndromeBuffer
 from decsim.schemes import SlidingWindowScheme
 from decsim.switching import Switching
 
@@ -126,50 +124,38 @@ def test_held_early_strong_discarded_on_confident_weak():
     assert rt.commits == [(0, 0, False)]        # weak committed, not awaiting
     assert rt.strong_commits == []              # held strong never applied
     assert pool._completed_strong_results == {} # held result discarded
-    # Counter semantics (documented, not a bug): strong_cancelled counts
-    # queued/running cancellations only; a held COMPLETED result that gets
-    # discarded is invisible to it (the strong unit's service time was
-    # spent). Utilization/gamma accounting must use strong_needed +
-    # completions, not strong_cancelled, for the parallel-mode discard case.
-    assert pool.strong_cancelled == 0
+    # Discarding a held completion cancels the request even though its service
+    # time was already spent.
+    assert pool.strong_cancelled == 1
     assert pool.strong_needed == 0
 
 
 # ------------------------------------------------- finding 8: strict replace
 
-def test_payload_store_replace_strictly_frees_dropped_rounds():
-    from decsim.message import (
-        RetainedSyndromeFragment,
-        SyndromePayload,
-        SyndromeRoundPacket,
-    )
+def test_syndrome_buffer_replace_strictly_frees_dropped_rounds():
+    from decsim.message import RetainedSyndromeFragment, SyndromePayload
 
-    ps = PayloadStore()
-    ps.register_op(0)
+    buffer = SyndromeBuffer()
+    buffer.open_operation(0)
     identities = tuple((0, r) for r in (1, 2, 3))
-    ps.register_owner(EndpointRole.SB0, "L", identities)
+    buffer.register_hold("L", identities)
     for r in (1, 2, 3):
         payload = SyndromePayload(0, 0, r)
-        packet = SyndromeRoundPacket(
-            operation_id=0,
-            round_index=r,
-            fragments=(RetainedSyndromeFragment.from_payload(payload),),
+        buffer.accept_fragment(
+            RetainedSyndromeFragment.from_payload(payload),
+            expected_fragments=1,
         )
-        pair = ps.prepare_pair(packet, completion_tick=r)
-        assert pair is not None
-        pair.commit_unpublished()
-        pair.publish()
-        ps.complete_cryo((0, r))
-    assert ps.payloads_held == 3
-    ps.replace_owner_membership(EndpointRole.SB0, "L", ((0, 3),))
+        buffer.finish_packing((0, r), publication_tick=r)
+    assert buffer.payloads_held == 3
+    buffer.replace_hold("L", ((0, 3),))
     # rounds 1 and 2 lost their only lease and MUST be freed
-    assert ps.fragments(0, 1) is None
-    assert ps.fragments(0, 2) is None
-    assert ps.fragments(0, 3) is not None       # still leased
-    assert ps.payloads_held == 1
-    ps.release_owner(EndpointRole.SB0, "L")
-    assert ps.fragments(0, 3) is None
-    assert ps.payloads_held == 0
+    assert buffer.retained_fragments((0, 1)) is None
+    assert buffer.retained_fragments((0, 2)) is None
+    assert buffer.retained_fragments((0, 3)) is not None    # still leased
+    assert buffer.payloads_held == 1
+    buffer.release_hold("L")
+    assert buffer.retained_fragments((0, 3)) is None
+    assert buffer.payloads_held == 0
 
 
 # ------------------------------------- finding 9: unconsumed-defect negative

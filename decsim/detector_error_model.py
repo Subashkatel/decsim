@@ -165,7 +165,6 @@ class WindowErrorModel:
     @property
     def has_leading_buffer(self) -> bool:
         """True when ``buffer_lo < commit_lo`` (a two-sided buffered window)."""
-        # ref: Skoric 2209.08552 sec. I.C; Tan 2209.09219 supp. sec. S2.D
         return self.buffer_lo < self.commit_lo
 
 
@@ -1720,7 +1719,6 @@ def decode_windowed(
     residual-syndrome handoff. This list-ordered helper intentionally rejects
     leading-buffer models instead of approximating that different algorithm.
     """
-    # ref: Skoric 2209.08552 sec. I.B; Tan 2209.09219 supp. sec. S2.C
     logical_prediction, _ = _walk_windowed(
         window_models,
         detection_events,

@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from .message import EndpointRole, Replay
+from .message import Replay
 
 
 class _RecoveryState(Enum):
@@ -65,8 +65,7 @@ class SpeculativeRecovery:
         retained_rounds = self._replay_packet_identities(descendants)
         generation = self._next_generation.get(key, 0)
         replay_owner = Replay(key, generation)
-        self.runtime.store.register_owner(
-            EndpointRole.SB1, replay_owner, retained_rounds)
+        self.runtime.syndrome_buffer.register_hold(replay_owner, retained_rounds)
         blocked_ops = frozenset(item[0] for item in descendants)
         for op_id in blocked_ops:
             self._finality_blockers[op_id] = (
@@ -174,16 +173,16 @@ class SpeculativeRecovery:
             self._records[item].replay_owner for item in superseded)
         replacement_set = set(replacement_ids)
         for owner in covered_owners:
-            if not set(runtime.store.owner_packet_identities(
-                    EndpointRole.SB1, owner)) <= replacement_set:
+            if not set(runtime.syndrome_buffer.hold_round_identities(
+                    owner)) <= replacement_set:
                 raise RuntimeError(
                     f"replacement Replay for {key} does not cover {owner!r}")
         generation = self._next_generation[key]
         replacement_owner = Replay(key, generation)
-        runtime.store.register_owner(
-            EndpointRole.SB1, replacement_owner, replacement_ids)
+        runtime.syndrome_buffer.register_hold(
+            replacement_owner, replacement_ids)
         self._next_generation[key] = generation + 1
-        runtime.store.release_owner(EndpointRole.SB1, record.replay_owner)
+        runtime.syndrome_buffer.release_hold(record.replay_owner)
         record.replay_owner = replacement_owner
         for item in superseded:
             self._release_record(item, source_will_replay=True)
@@ -236,7 +235,7 @@ class SpeculativeRecovery:
                 if source != key
             )
         record = self._records.pop(key)
-        self.runtime.store.release_owner(EndpointRole.SB1, record.replay_owner)
+        self.runtime.syndrome_buffer.release_hold(record.replay_owner)
         if not source_will_replay:
             self._next_generation.pop(key)
         self._drop_finality_blockers(record.blocked_ops)
@@ -300,7 +299,7 @@ class SpeculativeRecovery:
                 runtime._window_infos()[key])
         runtime._committed_boundaries.pop(key, None)
         runtime._held_boundary.pop(key, None)
-        if runtime.store.has_owner(EndpointRole.SB0, key):
+        if runtime.syndrome_buffer.has_hold(key):
             runtime._replace_window_read_refs(key, window)
 
     def _restore_dependencies(self, key: tuple, root: tuple,

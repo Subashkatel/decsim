@@ -128,8 +128,8 @@ class Switching:
     batches queued serial redos (timing-only). Redo covers commit + 2*buffer
     rounds (the paper's two-sided context).
 
-    double_window=True is the faithful double-window protocol (arXiv:
-    2510.25222 Sec. III C, Fig. 12): the slab of commit + 2*buffer rounds
+    With ``double_window=True``, the slab contains the suspicious commit
+    region plus one buffer on each side. The slab
     starts at the suspicious commit and extends forward; the weak chain
     skips the windows the slab absorbs and restarts past the slab; the
     strong result owns the whole slab; the strong job starts only after
@@ -226,9 +226,8 @@ class Switching:
         extra = None
         strong_request_key = None
         if self.double_window:
-            # Faithful protocol: register the escalation only. The window
-            # manager builds and submits the slab once the far-side weak
-            # boundary is determined (paper Fig. 12 start condition).
+            # Register now. The window manager submits the slab after the
+            # far-side weak boundary is ready.
             strong_request_key = services.defer_strong_escalation(job)
         elif not self.run_both_at_once:        # serial: redo after ws (dm:153-154)
             strong = services.make_strong_job(
@@ -313,10 +312,9 @@ class Switching:
             for operation in operations
         ):
             raise ValueError(
-                "double_window models one single-patch stream per operation "
-                "(arXiv:2510.25222 Fig. 12); decoder-boundary chains would "
-                "let a slab cross an op seam where no far-boundary gate "
-                "exists yet")
+                "double_window supports one single-patch stream per operation; "
+                "decoder-boundary chains would let a slab cross an operation "
+                "seam before its far boundary exists")
 
     def validate_code_geometry(self, geometry) -> None:
         if self.weak_keepup_ratio is None:

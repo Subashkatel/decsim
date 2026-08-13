@@ -31,11 +31,7 @@ def union_find_cluster_gap_source(weight_step=0.1) -> SoftOutputSource:
         gap_units="decibels",
         correction="none",
         weight_step_natural_log=_normalize_weight_step(weight_step),
-        references=(
-            "arXiv:2004.04693 Section II",
-            "arXiv:2405.07433v2 Definition 9 / Algorithm 2",
-            "arXiv:2510.25222v1 Section II-C",
-        ),
+        references=("cluster-gap method",),
     )
 
 
@@ -154,7 +150,7 @@ class UnionFindClusterGapDecoder:
     - Confidence requires exactly one nonzero logical-observable row.
     - The public gap is in decibels; hard growth uses natural-log-odds lengths.
     - The exact likelihood-ratio interpretation applies only to the uniform
-      repetition-code setting of arXiv:2405.07433v2, Theorem 10.
+      repetition-code setting.
     - Surface-code cluster gap is confidence, not a calibrated failure
       probability or a general Union-Find likelihood bound.
     - Confidence consumes immutable intervals from the same hard decode.

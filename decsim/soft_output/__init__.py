@@ -1,5 +1,4 @@
 """Soft-output confidence for decoder switching."""
-# ref: Toshio et al. 2510.25222 Sec. II.B
 from typing import Protocol, runtime_checkable
 
 from ..message import SoftOutput
@@ -8,7 +7,7 @@ from ..message import SoftOutput
 @runtime_checkable
 class SoftOutputMetric(Protocol):
     """Computes a soft output g per window (smaller g = lower confidence);
-    swappable across metrics."""  # ref: paper Sec. II.B
+    swappable across metrics."""
 
     @property
     def name(self) -> str: ...

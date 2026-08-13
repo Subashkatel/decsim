@@ -191,12 +191,6 @@ class SyndromePacketRouteKind(Enum):
     WINDOW_INPUT = auto()
     FEEDBACK_MEMORY_ROUND = auto()
 
-class EndpointRole(Enum):
-    SB0 = auto()
-    SB1 = auto()
-
-class EndpointState(Enum):
-    FREE, PREPARED, CRYO_IN_FLIGHT, RESIDENT, RELEASED = (auto() for _ in range(5))
 @dataclass(frozen=True)
 class PotentialStrong:
     window_key: tuple
@@ -205,6 +199,9 @@ class PendingStrong:
     request_key: DecoderRequestKey
 @dataclass(frozen=True)
 class CsdInput:
+    request_key: DecoderRequestKey
+@dataclass(frozen=True)
+class DecoderInputHold:
     request_key: DecoderRequestKey
 @dataclass(frozen=True)
 class Replay:
@@ -233,9 +230,50 @@ class SyndromePacketRoute:
                    source_operation_id)
 
 WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
+@dataclass(frozen=True)
+class QPUReadout:
+    """One QPU-side result awaiting controller availability handling.
+
+    Values are detector events or timing-only markers; decsim does not simulate the preceding analog or measurement-to-detection stages.
+    """
+
+    operation_id: Any
+    patch_id: Any
+    round_index: int
+    bits: Optional[Any] = None
+    code: Optional[str] = None
+    n_fragments: int = 1
+    fragment_index: int = 0
+    size_bits: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        if not is_stable_identity(self.operation_id):
+            raise TypeError("operation_id must be a stable identity")
+        if not is_stable_identity(self.patch_id):
+            raise TypeError("patch_id must be a stable identity")
+        if type(self.round_index) is not int or self.round_index < 1:
+            raise TypeError("round_index must be a positive exact int")
+        if self.code is not None and (
+            not is_stable_string(self.code) or not self.code
+        ):
+            raise TypeError("code must be a nonempty stable string or None")
+        if self.size_bits is not None and (
+            type(self.size_bits) is not int or self.size_bits < 0
+        ):
+            raise TypeError("size_bits must be a nonnegative exact int or None")
+        if type(self.n_fragments) is not int:
+            raise TypeError("n_fragments must be an exact built-in int")
+        if self.n_fragments < 1:
+            raise ValueError(f"n_fragments must be >= 1 (got {self.n_fragments})")
+        if type(self.fragment_index) is not int:
+            raise TypeError("fragment_index must be an exact built-in int")
+        if not 0 <= self.fragment_index < self.n_fragments:
+            raise ValueError("fragment_index must be within n_fragments")
+
+
 @dataclass
 class SyndromePayload:
-    """One measured syndrome round for one logical operation."""
+    """One binary detector-data round accepted by the controller."""
 
     operation_id: int                 # op whose stream this round belongs to
     patch_id: int                     # patch that produced the round
@@ -257,7 +295,7 @@ class SyndromePayload:
             raise ValueError("fragment_index must be within n_fragments")
 
 
-def _retained_bits(bits: Any) -> Optional[tuple[int, ...]]:
+def normalize_binary_bits(bits: Any) -> Optional[tuple[int, ...]]:
     if bits is None:
         return None
     if type(bits) is list or type(bits) is tuple:
@@ -330,7 +368,7 @@ class RetainedSyndromeFragment:
             operation_id=payload.operation_id,
             patch_id=payload.patch_id,
             round_index=payload.round_index,
-            bits=_retained_bits(payload.bits),
+            bits=normalize_binary_bits(payload.bits),
             code=payload.code,
             size_bits=payload.size_bits,
             fragment_index=payload.fragment_index,
@@ -899,13 +937,21 @@ class DecoderServiceKey:
 
 @dataclass
 class DecodeJob:
-    """One unit of decoder work."""
+    """One unit of decoder work in the ``logical_reference`` profile.
+
+    During the Phase-A migration, ``payloads`` is an upstream source view used
+    to construct the decoder-local input. Decoders must not observe it before
+    input-transfer completion. Boundary processing may replace an entry with a
+    new immutable transformed fragment. The field is removed in Phase B.
+    """
 
     op_id: int                               # operation the window belongs to
     window_id: int                           # window index within that op
     n_rounds: int                            # syndrome rounds in the window
     dem: Optional[Any] = None                # window detector error model (data-path decoders)
-    payloads: list = field(default_factory=list)   # SyndromePayloads with the window's bits
+    payloads: list = field(default_factory=list)   # transfer-source view; cleared after materialization
+    decoder_input: Optional[Any] = None             # decoder-local materialized input
+    input_hold: Optional[Any] = None                # upstream hold released at transfer completion
     ready_time: int = 0                      # tick the job was enqueued (queue-wait accounting)
     on_done: Optional[Callable[[], None]] = None   # completion callback
     label: str = ""                          # log label
@@ -990,6 +1036,50 @@ class Decision:
     releases_operation: bool = True
 
 
+@dataclass(frozen=True)
+class ExecutionProgram:
+    """Immutable controller program-load artifact."""
+
+    operations: tuple
+    decode_operations: tuple = ()
+    dynamic_streams: tuple = ()
+    protected_regions: tuple = ()
+
+    def __post_init__(self) -> None:
+        for name in ("operations", "decode_operations", "dynamic_streams", "protected_regions"):
+            if type(getattr(self, name)) is not tuple:
+                raise TypeError(f"ExecutionProgram.{name} must be a tuple")
+
+
+@dataclass(frozen=True)
+class StreamBinding:
+    """Immutable runtime association between an operation and stream range."""
+    stream_id: Any
+    stream_offset: int
+
+    def __post_init__(self) -> None:
+        if self.stream_offset < 0:
+            raise ValueError("stream_offset must be nonnegative")
+
+
+@dataclass(frozen=True)
+class RunOperationBody:
+    """Immutable controller-to-QPU command for one operation body."""
+
+    operation: Any
+    round_ticks: int
+    round_count: int
+    source_round_count: int
+    emits_detector_data: bool = True
+    finalizes_stream_round: bool = False
+
+    def __post_init__(self) -> None:
+        if self.round_ticks <= 0:
+            raise ValueError("round_ticks must be positive")
+        if self.round_count < 0 or self.source_round_count < 0:
+            raise ValueError("round counts must be nonnegative")
+
+
 # ----------------------------------------------------------------- workload
 
 @dataclass(frozen=True)
@@ -1065,7 +1155,7 @@ class Operation:
     syndrome_fragment_count: Optional[int] = None
     blocked_by: Optional[int] = None  # op id whose Decision must release this op
     feedback_boundary_mode: Optional[str] = None  # per-op override of the RunSpec mode
-    requires_result_return_to_chip: bool = False  # decision must travel back to the QPU
+    requires_result_return_to_qpu: bool = False  # decision must travel back to the QPU
     kind: OpKind = OpKind.GENERIC     # rounds-policy vocabulary (see OpKind)
 
     def __post_init__(self) -> None:
@@ -1165,7 +1255,7 @@ class OperationPlanningView:
     syndrome_fragment_count: Optional[int]
     blocked_by: Optional[int]
     feedback_boundary_mode: str
-    requires_result_return_to_chip: bool
+    requires_result_return_to_qpu: bool
     kind: OpKind
 
     @classmethod
@@ -1200,8 +1290,8 @@ class OperationPlanningView:
                 if operation.feedback_boundary_mode is not None
                 else default_feedback_boundary_mode
             ),
-            requires_result_return_to_chip=(
-                operation.requires_result_return_to_chip
+            requires_result_return_to_qpu=(
+                operation.requires_result_return_to_qpu
             ),
             kind=operation.kind,
         )

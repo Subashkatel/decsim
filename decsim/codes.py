@@ -83,8 +83,7 @@ class SurfaceCodeModel:
         return self.buffer_rounds_override if self.buffer_rounds_override is not None else self.d
 
     def buffering_floor(self) -> tuple[int, int]:
-        """Literature buffering floor per side: (lead, trail) = (d, d)
-        (Skoric n_buf=d, arXiv:2209.08552; Bombin b>=d, arXiv:2303.04846)."""
+        """Return the minimum leading and trailing buffers: ``(d, d)``."""
         return (self.d, self.d)
 
     def buffer_floor_override_active(self) -> bool:
@@ -105,9 +104,9 @@ class SurfaceCodeModel:
 
 @dataclass(frozen=True)
 class BBCodeModel:
-    """Bivariate-bicycle timing card (Bravyi et al., arXiv:2308.07915).
+    """Timing model for a bivariate-bicycle CSS code.
 
-    A complete CSS extraction cycle measures n/2 X checks and n/2 Z checks.
+    One extraction cycle measures ``n/2`` X checks and ``n/2`` Z checks.
     Exact window-local detector rows remain owned by the detector error model.
     """
 

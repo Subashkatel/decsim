@@ -509,16 +509,16 @@ class BacklogTrajectory:
     name = "backlog_trajectory"
     result_schema_version = 1
 
-    def __init__(self, chip):
-        self.chip = chip
+    def __init__(self, execution_runtime):
+        self.execution_runtime = execution_runtime
 
     def observe(self, engine: "Engine") -> None:
-        """Nothing to sample (event-driven; the chip stamps the timestamps)."""
+        """Nothing to sample (event-driven; the execution runtime stamps the timestamps)."""
         return None
 
     def rows(self) -> list:
         """One record per released feedback-blocked gate."""
-        view = reaction_view(self.chip)
+        view = reaction_view(self.execution_runtime)
         body_done = dict(view.body_done_time)
         info = {op.op: op for op in view.ops}
         rows = []
@@ -556,23 +556,21 @@ class BacklogTrajectory:
 class ConditionalReactionTime:
     """Reaction-time wait for feedback-blocked operations."""
 
-    # ref: SWIPER; average divides by every conditional op, not only finished ones.
-
     name = "conditional_reaction_time"
     result_schema_version = 1
 
-    def __init__(self, chip, divergence_threshold_rounds: float | None = None,
+    def __init__(self, execution_runtime, divergence_threshold_rounds: float | None = None,
                  require_all_released: bool = True):
-        self.chip = chip
+        self.execution_runtime = execution_runtime
         self.divergence_threshold_rounds = divergence_threshold_rounds
         self.require_all_released = require_all_released
 
     def observe(self, engine: "Engine") -> None:
-        """Nothing to sample. The chip stamps body-done and release times."""
+        """Nothing to sample. The controller records body-done and release times."""
         return None
 
     def _view(self):
-        return reaction_view(self.chip)
+        return reaction_view(self.execution_runtime)
 
     def conditional_operation_ids(self) -> list[int]:
         """Operation ids that wait for an earlier decode result."""

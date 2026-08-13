@@ -1,17 +1,7 @@
-"""Rounds policies and deterministic static-window materialization.
+"""Resolve round counts and build the immutable plan for one run.
 
-Part module: planner.py port with the §5.21 generalizations —
-  - every policy result is validated >= 1 (configured values < 1 raise);
-  - GateRounds consults Operation.kind first (MEASURE/INJECT -> 1 round,
-    MERGE -> merge_steps*d, IDLE/MEMORY -> d) and falls back to the
-    len(op.qubits) >= 2 rule for GENERIC ops — the frozen
-    behavior since all existing frontends emit GENERIC;
-  - TemporalRounds decouples the temporal distance d_m from the spatial d
-    (Chamberland–Campbell 2109.02746); constant-round architectures are
-    op-kind -> 1 (Zhou/AFT 2406.17653);
-  - PerOpRounds is the QLX pass-through adapter (schedule durations ->
-    per-op counts).
-RunSpec owns resolution and calls the private materializer below.
+Round policies answer how many rounds an operation needs. The private planner
+then creates windows, dependencies, and the minimum upstream retention witness.
 """
 
 from __future__ import annotations
@@ -21,7 +11,6 @@ import math
 
 from .config import us
 from .message import (
-    EndpointRole,
     Operation,
     OperationPlanningView,
     OperationWindowPlan,
@@ -51,13 +40,23 @@ class _RunPlan:
 
 @dataclass(frozen=True)
 class _SyndromeBufferingPlan:
-    sb0_owners: tuple
-    potential_owners: tuple
-    capacity_rows: tuple
+    """Future consumer holds and one physical upstream-capacity witness."""
+
+    weak_holds: tuple
+    potential_holds: tuple
+    minimum_live_rounds: tuple
+    sufficient_live_rounds: tuple | None
 
 
 def _plan_syndrome_buffering(execution, *, retain_strong_context, double_window,
-                             has_open_ended_dynamic_streams=False):
+                              has_open_ended_dynamic_streams=False):
+    """Plan logical holds over one upstream round allocation.
+
+    Weak and possible-strong consumers may overlap, but overlapping holds do
+    not create another physical packet allocation. The sufficient witness is
+    therefore the union of round identities, not a sum of endpoint ledgers.
+
+    """
     def read_keys(operation_id, lower, upper):
         round_count = execution.rounds_by_operation[operation_id]
         keys = [(operation_id, index)
@@ -68,19 +67,19 @@ def _plan_syndrome_buffering(execution, *, retain_strong_context, double_window,
             keys += [(successor_id, index) for index in range(1, overflow + 1)]
         return tuple(keys)
 
-    weak_owners, potential_owners = [], []
-    lower_witnesses = {role: () for role in EndpointRole}
-    sufficient = {role: set() for role in EndpointRole}
+    weak_holds, potential_holds = [], []
+    minimum = ()
+    sufficient = set()
     for operation_id, indices in execution.op_windows.items():
         windows = [execution.windows[(operation_id, index)] for index in indices]
         round_count = execution.rounds_by_operation[operation_id]
         for window in windows:
             key = (operation_id, window.k)
             weak = read_keys(operation_id, window.start_round, window.buffer_hi)
-            weak_owners.append((key, weak))
-            sufficient[EndpointRole.SB0].update(weak)
-            if len(weak) > len(lower_witnesses[EndpointRole.SB0]):
-                lower_witnesses[EndpointRole.SB0] = weak
+            weak_holds.append((key, weak))
+            sufficient.update(weak)
+            if len(weak) > len(minimum):
+                minimum = weak
             if not retain_strong_context:
                 continue
             buffer_rounds = max(0, window.buffer_hi - window.commit_hi)
@@ -92,19 +91,18 @@ def _plan_syndrome_buffering(execution, *, retain_strong_context, double_window,
                 operation_id, max(1, window.commit_lo - buffer_rounds),
                 commit_hi + buffer_rounds)
             owner = PotentialStrong(key)
-            potential_owners.append((owner, potential))
-            sufficient[EndpointRole.SB1].update(potential)
+            potential_holds.append((owner, potential))
+            sufficient.update(potential)
             arrived = tuple(identity for identity in potential
                             if identity[0] != operation_id
                             or identity[1] <= window.buffer_hi)
-            if len(arrived) > len(lower_witnesses[EndpointRole.SB1]):
-                lower_witnesses[EndpointRole.SB1] = arrived
-    rows = tuple((role, lower_witnesses[role], None if
-                  has_open_ended_dynamic_streams else tuple(sorted(
-                      sufficient[role], key=stable_identity_bytes)))
-                 for role in EndpointRole)
+            if len(arrived) > len(minimum):
+                minimum = arrived
     return _SyndromeBufferingPlan(
-        tuple(weak_owners), tuple(potential_owners), rows)
+        tuple(weak_holds), tuple(potential_holds), minimum,
+        None if has_open_ended_dynamic_streams else tuple(sorted(
+            sufficient, key=stable_identity_bytes)),
+    )
 
 
 def _validated(value: int, source: str) -> int:

@@ -50,7 +50,7 @@ class ExecutionOrchestrator:
             self.engine.log(
                 "Orchestrator",
                 f"DISPATCH {instruction} for "
-                f"op#{decision.target_operation_id} -> controller -> chip",
+                f"op#{decision.target_operation_id} -> controller -> controller sequencer",
             )
             self.controller.relay_instruction(decision, self.decision_sink)
 
@@ -68,7 +68,7 @@ class ExecutionOrchestrator:
             ]
             self._record(operation, "decision", result.logical_observables)
             return decisions
-        if operation.requires_result_return_to_chip:
+        if operation.requires_result_return_to_qpu:
             self._record(operation, "result_return", result.logical_observables)
             return [Decision(operation.id, releases_operation=False)]
         self._record(operation, "outcome", result.logical_observables)

@@ -15,7 +15,7 @@
 """Vendored Stim-style surface-code circuit generator."""
 
 import stim
-from typing import Callable, Set, List, Dict, Tuple, Optional
+from typing import Callable, Set, List, Dict, Optional
 from dataclasses import dataclass
 import math
 

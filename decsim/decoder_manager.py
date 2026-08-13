@@ -10,7 +10,7 @@ from .message import (DecodeJob, DecodeOutcome, DecodeResult,
                       DecoderRequestKey, DecoderServiceKey,
                       SoftOutput, StrongDecodeCompletion,
                       stable_identity_order_key)
-from .protocols import Directive
+from .protocols import DecoderInputTransfer, Directive
 from .config import fmt
 
 
@@ -76,9 +76,26 @@ class DecoderManager:
                  unit_pools: Optional[dict] = None, num_units: int = 1,
                  bulk_strong: bool = False,
                  lane_policy=None, log_name: str = "DecoderCluster",
-                 capture_enabled: bool = False):
+                 capture_enabled: bool = False,
+                 decoder_input_transfer=None):
+        from .decoder_input import FixedLatencyDecoderInputTransfer
+
         self.engine = engine
         self.router = router
+        self.decoder_input_transfer = (
+            FixedLatencyDecoderInputTransfer(engine)
+            if decoder_input_transfer is None else decoder_input_transfer
+        )
+        if (
+            not isinstance(self.decoder_input_transfer, DecoderInputTransfer)
+            or not callable(getattr(self.decoder_input_transfer, "deliver", None))
+        ):
+            raise TypeError(
+                "decoder_input_transfer must implement DecoderInputTransfer"
+            )
+        transport_engine = getattr(self.decoder_input_transfer, "engine", engine)
+        if transport_engine is not engine:
+            raise ValueError("decoder_input_transfer uses a different engine")
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
@@ -145,23 +162,47 @@ class DecoderManager:
         return self.router.route(job)
 
     def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None:
-        """Entry point for the window_manager's strategy Submissions."""
+        """Admit once, then hand input delivery to the configured transport."""
+        if type(delay_ticks) is not int:
+            raise TypeError("delay_ticks must be an exact int")
+        if delay_ticks < 0:
+            raise ValueError("delay_ticks must be nonnegative")
         self._reject_spent_job(job)
         if job.strong_decode_for is not None:
             self._admit_strong_request(job)
         elif job.on_done is None:
             self._admit_weak_decode(job)
         job.submitted = True
-        if delay_ticks <= 0:
+        delivered = False
+        expected_delivery_tick = self.engine.now + delay_ticks
+
+        def receive_once(delivered_job: DecodeJob) -> None:
+            nonlocal delivered
+            if delivered:
+                raise RuntimeError(
+                    f"decoder input transport delivered {job.label!r} twice"
+                )
+            if delivered_job is not job:
+                raise RuntimeError(
+                    "decoder input transport delivered a different job"
+                )
+            if self.engine.now != expected_delivery_tick:
+                raise RuntimeError(
+                    "decoder input transport delivered at the wrong tick"
+                )
+            delivered = True
             self._enqueue_now(job)
-            return
-        self.engine.log(self.log_name,
-                        f"weak decoder unsure about window "
-                        f"({job.op_id},{job.window_id}) -> hand {job.n_rounds} "
-                        f"rounds to the strong decoder (after the weak->strong "
-                        f"link)")
-        self.engine.schedule(delay_ticks, lambda: self._enqueue_now(job),
-                             label=f"weak->strong handoff {job.label}")
+
+        def release_upstream_hold(delivered_job: DecodeJob) -> None:
+            hold = delivered_job.input_hold
+            if hold is not None:
+                hold()
+                delivered_job.input_hold = None
+
+        self.decoder_input_transfer.deliver(
+            job, delay_ticks, receive_once,
+            on_materialized=release_upstream_hold,
+        )
 
     @staticmethod
     def _reject_spent_job(job: DecodeJob) -> None:
@@ -185,19 +226,20 @@ class DecoderManager:
                 f"duplicate strong decode for window {key}: a destination "
                 f"window has at most one unconsumed strong result")
         self._running_strong_decodes[key] = _LiveStrongRequest(job, job)
+        job.request_admitted_ticks = self.engine.now
 
     def _admit_weak_decode(self, job: DecodeJob) -> None:
         """Open one destination window's decode attempt."""
         key = (job.op_id, job.window_id)
         if job.request_key is None:
             raise RuntimeError("built-in weak decode requires a request key")
-        job.request_admitted_ticks = self.engine.now
         if key in self._unresolved_weak_decodes:
             raise RuntimeError(
                 f"second weak decode for window {key} while the first is "
                 f"unresolved: a destination window decodes once at a time, so "
                 f"that its strong result reaches the attempt that asked")
         self._unresolved_weak_decodes.add(key)
+        job.request_admitted_ticks = self.engine.now
 
     def _destination_may_consume_strong(self, key: tuple) -> bool:
         """Whether a strong result for this destination still has a consumer:
@@ -211,9 +253,15 @@ class DecoderManager:
         if job.strong_decode_for is not None:
             live = self._running_strong_decodes.get(job.strong_decode_for)
             if live is None or live.request_job is not job:
+                self._release_decoder_input(job)
                 return                             # cancelled across the link
-            job.ready_time = self.engine.now
-            job.request_admitted_ticks = self.engine.now
+        if job.decoder_input is not None:
+            job.payloads = [
+                fragment
+                for round_input in job.decoder_input.rounds
+                for fragment in round_input.fragments
+            ]
+        job.ready_time = self.engine.now
         pool = self.pool_for(job)
         queue = self.queue_for(pool)
         queue.append(job)
@@ -263,14 +311,19 @@ class DecoderManager:
                 held.decode_output_ticks)
         live = self._running_strong_decodes.pop(key, None)
         if live is None:
+            if held is not None:
+                self.strong_cancelled += 1
             return
         job = live.service_job
         if job.pool is None:
+            self._cancel_decoder_input(job)
+            self._release_decoder_input(job)
             for pool in self.unit_totals:
                 queue = self.queue_for(pool)
                 if job in queue:
                     queue.remove(job)
                     break
+            self._release_decoder_input(job)
             self._record_request(
                 live.request_job, None,
                 RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
@@ -285,6 +338,8 @@ class DecoderManager:
             else:
                 outcome = RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE
                 job.cancelled = True
+                self._cancel_decoder_input(job)
+                self._release_decoder_input(job)
                 self.pool_free[job.pool] += 1
                 self._record_service(job)
                 self.try_dispatch()
@@ -370,12 +425,28 @@ class DecoderManager:
             latency_ticks, lambda j=job: self._on_decode_done(j),
             label=f"decode_done({job.label})")
 
+    def _cancel_decoder_input(self, job: DecodeJob) -> None:
+        cancel = getattr(self.decoder_input_transfer, "cancel", None)
+        if callable(cancel):
+            cancel(job)
+        hold = job.input_hold
+        if hold is not None:
+            hold()
+            job.input_hold = None
+
+    def _release_decoder_input(self, job: DecodeJob) -> None:
+        release = getattr(self.decoder_input_transfer, "release", None)
+        if callable(release) and job.decoder_input is not None:
+            release(job)
+
     def _on_decode_done(self, job: DecodeJob) -> None:
         """Contract 2b pipeline with the strategy seam in the switching slots."""
         if job.cancelled:
+            self._release_decoder_input(job)
             return
         if job.strong_decode_for is not None:
             result = self._decode_and_validate_result(job)
+            self._release_decoder_input(job)
             strong_result_deliveries = self._prepare_strong_result_deliveries(
                 job, result)
             job.completed = True
@@ -456,6 +527,7 @@ class DecoderManager:
              RequestProcessingOutcome.WEAK_FORWARDED_FOR_DELIVERY),
             self.engine.now)
         self._record_service(job)
+        self._release_decoder_input(job)
         self.try_dispatch()
 
     def _select_strong_result(self, key: tuple,
@@ -666,11 +738,17 @@ class DecoderManager:
         window = job.window
         if window is None:
             raise RuntimeError("terminal built-in request has no window")
-        bits_known = bool(job.payloads) and all(
-            payload.bits is not None for payload in job.payloads)
-        bit_count = (sum(len(payload.bits) for payload in job.payloads)
+        local_fragments = tuple(
+            fragment
+            for round_input in (() if job.decoder_input is None
+                                 else job.decoder_input.rounds)
+            for fragment in round_input.fragments
+        )
+        bits_known = bool(local_fragments) and all(
+            payload.bits is not None for payload in local_fragments)
+        bit_count = (sum(len(payload.bits) for payload in local_fragments)
                      if bits_known else None)
-        weight = (sum(sum(payload.bits) for payload in job.payloads)
+        weight = (sum(sum(payload.bits) for payload in local_fragments)
                   if bits_known else None)
         self._terminal_request_records.append(TerminalRequestRecord(
             job.request_key, window.start_round, window.buffer_hi, job.n_rounds,
@@ -745,8 +823,7 @@ class StrategyServicesImpl:
         return strong
 
     def defer_strong_escalation(self, weak_job: DecodeJob) -> DecoderRequestKey:
-        """Faithful double window: the runtime submits the strong job once
-        the far-side weak boundary is determined (arXiv:2510.25222 III C)."""
+        """Reserve a strong request that waits for its far-side boundary."""
         return self._runtime.defer_strong_escalation(weak_job)
 
     def check_strong_route(self, weak_job: DecodeJob,

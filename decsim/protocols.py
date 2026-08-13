@@ -1,13 +1,7 @@
-"""One Protocol per pluggable piece of the simulator.
+"""Interfaces for the simulator parts that users may replace.
 
-Every swappable part — decoder, scheduler, windowing scheme, controller,
-and so on — plugs into the pipeline through exactly one interface below.
-RunSpec.build() picks one implementation per port; the port numbers are
-the stable names tests and docstrings use to refer to these seams.
-
-This module declares interfaces only (plus the small strategy seam types
-Submission / Directive / OutcomeDirective that DecodingStrategy hooks use
-to answer the core). It imports nothing from decsim except message types.
+Each protocol describes one construction seam used by ``RunSpec``. Runtime
+state and implementation logic belong in the implementing modules.
 """
 
 from __future__ import annotations
@@ -21,7 +15,8 @@ from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
                       DecoderRequestKey,
                       DecodeOutcome, DecodeResult, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
-                      StrongRegionPlan, SyndromePacketRoute, SyndromePayload,
+                      QPUReadout, StrongRegionPlan, SyndromePacketRoute,
+                      SyndromePayload,
                       Window, WindowInfo, WindowReadiness)
 
 
@@ -274,14 +269,6 @@ class Decoder(Protocol):
 
 
 @runtime_checkable
-class DecoderRouter(Protocol):
-    """Port 9. Selects a decoder for each job."""
-
-    def route(self, job: DecodeJob) -> Decoder: ...
-
-    def fault_model_requirement_for(self, code: Optional[str]): ...
-
-
 @runtime_checkable
 class Scheduler(Protocol):
     """Port 11. Select the next ready job from one decoder-pool queue."""
@@ -290,65 +277,27 @@ class Scheduler(Protocol):
 
 
 @runtime_checkable
+class DecoderInputTransfer(Protocol):
+    """Port 22. Make one admitted job's decoder-local input ready.
+
+    Implementations call ``receiver(job)`` once after ``delay_ticks``. An
+    implementation that owns decoder-local allocations may also provide
+    ``release(job)``; the manager calls it after service or cancellation. Link
+    reservation, admission, service, and result handling belong elsewhere.
+    """
+
+    def deliver(
+        self, job: DecodeJob, delay_ticks: int,
+        receiver: Callable[[DecodeJob], None], *, on_materialized=None,
+    ) -> None: ...
+
+@runtime_checkable
 class ResourcePool(Protocol):
-    """Port 12. The decode units and their ready queues (implemented by
-    DecoderManager).
+    """Port 12. Admit decoder jobs and own decoder queues and service units.
 
-    A DecodeJob is submitted once. enqueue raises, before touching any state,
-    on a job it has already admitted, completed or cancelled; admitted spans
-    the whole time the job holds a queue slot or a unit, from the moment
-    enqueue accepts it through crossing the weak->strong link, queueing and
-    execution. A refused submission leaves the job and the pool untouched, so
-    a strong request refused as a duplicate may be built again and submitted
-    once the destination's result is consumed.
-
-    A destination window owns at most one unconsumed strong result, either a
-    live request or a completion held for a demand that has not registered
-    yet. enqueue raises on a second strong request while the first is
-    unconsumed, and checks nothing else about the destination: whether a
-    result will be consumed is decided when it completes, so a strategy may
-    return its Submissions in any order and may cancel and replace a request
-    from any hook position.
-
-    A completing strong result is delivered to its destination if the
-    destination registered a strong demand (AWAIT_STRONG); held if that
-    destination's weak decode is still open and may raise one; and otherwise
-    raises, because nothing would consume it.
-
-    That ownership is per destination window, not per decode attempt, so it
-    needs at most one of a destination's weak decodes open at a time: with two,
-    either decode's directive consumes whichever result the destination owns
-    and the other attempt is left waiting for one that never comes. enqueue
-    therefore refuses a second weak decode for a destination whose first has
-    not yet produced a directive. A decode produces its directive by returning
-    from on_decode_outcome, so the refusal covers that whole call: a strategy
-    calling enqueue from inside its own outcome hook is refused a second weak
-    decode of the destination it is deciding, and the destination reopens
-    before the returned directive is applied. Per-attempt ownership, which
-    would let a destination decode twice at once, needs the attempt carried
-    through the request, the hold and the demand, and this port does not carry
-    it.
-
-    Two shipped components keep clear of that refusal, and both are
-    load-bearing: the window manager queues a window once and re-queues it only
-    after its decode has produced a directive, and the Switching strategy lists
-    one weak Submission per window. A new strategy is as able to break the rule
-    as a change to the window manager.
-
-    check_decode_work_settled raises when the run has gone quiescent with any
-    destination still recorded as decoding, waiting for a strong result,
-    holding an unclaimed one, or holding a strong request. Each of those is a
-    window that never became final, which no metric or view would otherwise
-    report.
-
-    cancel_strong is atomic at the event-queue pop: a queued job, or one still
-    crossing the weak->strong link, is removed outright and never dispatched;
-    an executing job is marked cancelled, releases its modeled unit at the
-    cancel, and delivers nothing on completion; a held completion is
-    discarded. A batched strong decode with siblings that are still wanted
-    keeps running and drops only the cancelled key from delivery. A cancel
-    ends one request and passes no verdict on the destination, which may be
-    given a replacement."""
+    A job may be submitted once. The pool also owns strong-request cancellation
+    and the final check that no decoder work is stranded.
+    """
 
     def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None: ...
 
@@ -364,55 +313,42 @@ class ResourcePool(Protocol):
 
 # ------------------------------------------------------------------ dataflow
 
-@runtime_checkable
-class SyndromeSource(Protocol):
-    """Port 2. Clocked source of syndrome rounds: start() begins emitting
-    an op's rounds on the round clock. Idle rounds are the Chip's job —
-    it only asks the source for their payloads (idle_round_payloads)."""
-
-    def start(self, op, round_ticks: int,
-              on_body_done: Callable[[Any], None]) -> None: ...
-
-    def idle_round_payloads(self, op, stream_id, global_round: int,
-                            patch) -> list: ...
-
 
 @runtime_checkable
 class SyndromeDevice(Protocol):
-    """The unclocked syndrome and error-model source supplied to RunSpec."""
+    """Unclocked physical source used only by ``QPUDevice``."""
 
     operation_circuit_scope: str
-
     def begin_operation(
         self, op, segment_round_count: int, source_round_count: int,
     ) -> None: ...
-
-    def round_payloads(self, op, round_index: int) -> list: ...
-
-    def finalize_stream_round(self, op, source_round_count: int) -> list: ...
-
+    def round_payloads(self, op, round_index: int) -> list[QPUReadout]: ...
+    def finalize_stream_round(
+        self, op, source_round_count: int,
+    ) -> list[QPUReadout]: ...
     def idle_round_payloads(
         self, op, stream_id, global_round: int, patch,
-    ) -> list: ...
+    ) -> list[QPUReadout]: ...
+
+
+@runtime_checkable
+class ErrorModelProvider(Protocol):
+    """Build decoder-facing models without owning physical QPU cadence."""
 
     def register_dynamic_stream(
         self, stream_op, round_count: int, *, fault_model_requirement,
     ): ...
-
     def validate_stream_length(
         self, stream_op, stream_round_count: int,
     ) -> None: ...
-
     def window_models_for_operation(
         self, op, windows: list, round_count: int, *,
         fault_model_requirement, fault_exclusion_ranges: tuple,
         window_protocol,
     ) -> list: ...
-
     def window_model_for_stream(
         self, stream_id, window, *, is_last: bool,
     ): ...
-
     def strong_window_model_for_operation(
         self, op, window, round_count: int, *,
         fault_model_requirement, exclude_faults_touching=None,
@@ -430,18 +366,16 @@ class MultiFaultExclusionSyndromeDevice(Protocol):
 
 
 @runtime_checkable
-class Controller(Protocol):
-    """Port 14. Owns controller staging and reaction-path link relays."""
+class SyndromeTransport(Protocol):
+    """Port 14. Reassembles and forwards transient syndrome packets."""
     links: Any
+    def relay_qpu_readout(
+        self, payload: SyndromePayload, route: SyndromePacketRoute, *,
+        processing_ticks: int,
+    ) -> None: ...
     def relay_syndrome(self, payload: SyndromePayload,
                        route: SyndromePacketRoute) -> None: ...
 
-    def relay_instruction(self, decision, deliver: Callable) -> None: ...
-
-
-@runtime_checkable
-class EndpointCapacityChangeReceiver(Protocol):
-    def on_endpoint_capacity_changed(self) -> None: ...
 
 @runtime_checkable
 class Orchestrator(Protocol):
@@ -547,13 +481,6 @@ class DecodingScheme(Protocol):
     def validate_buffer(self, geometry: ResolvedCodeGeometry) -> None: ...
 
 
-@runtime_checkable
-class CrossPartValidator(Protocol):
-    """Optional exact capability for parts that reject whole-run combinations."""
-
-    def validate(self, spec, planning) -> None: ...
-
-
 # ----------------------------------------------------------------- resources
 
 @runtime_checkable
@@ -583,7 +510,7 @@ class Metric(Protocol):
 
 @runtime_checkable
 class MemoryModel(Protocol):
-    """Port 18. Observes physical payload storage inside the PayloadStore:
+    """Port 18. Observes retained payload storage inside SyndromeBuffer:
     store()/evict() fire on exactly the fragments held. Optional — when
     absent, storage is unbounded."""
 

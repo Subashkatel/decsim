@@ -5,7 +5,7 @@ Both are tiny pluggable seams the window pipeline consumes:
     handoff to dependents; consumed by WindowManager.
   - IdlePolicy (Ignore/ExtendStream/SeparateDecodeJobs) — what happens to the
     idle rounds an op emits while waiting for feedback; the reaction gate
-    (chip.py) branches on .mode. MODES is the one registry of mode strings.
+    (controller.py) branches on .mode. MODES is the one registry of mode strings.
 """
 
 from __future__ import annotations

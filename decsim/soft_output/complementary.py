@@ -12,8 +12,6 @@ if TYPE_CHECKING:
     import stim
     from ..detector_error_model import WindowErrorModel
 
-_CITATION = "Toshio et al. 2510.25222 Sec. II.C"
-
 COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
     method="complementary_gap",
     cluster_origin="mwpm_opposite_logical",
@@ -21,7 +19,7 @@ COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
     gap_units="log_likelihood_weight",
     correction="opposite_logical_constraint",
     weight_step_natural_log=None,
-    references=("arXiv:2510.25222v1 Section II.C",),
+    references=("complementary-gap method",),
 )
 
 
@@ -91,7 +89,7 @@ class ComplementaryGapMetric:
             raise ValueError(
                 "the complementary gap is defined for one observable; got "
                 f"{self.obs.shape[0]}. Decode each logical operator with its own "
-                "metric (paper Sec. II.C notes the multi-observable subtlety).")
+                "metric.")
         self._base = pymatching.Matching.from_check_matrix(self.check, weights=self.weights)
         check_aug = np.vstack([self.check, self.obs[0:1, :]])
         self._aug = pymatching.Matching.from_check_matrix(check_aug, weights=self.weights)

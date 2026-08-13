@@ -491,12 +491,16 @@ class LinkModelConfig:
     oc: LinkEdgeConfig
     cq: LinkEdgeConfig
     profile_name: str
+    qc_excludes_controller_processing: bool = False
 
     def __post_init__(self) -> None:
         for path in LinkPath:
             if type(getattr(self, path.value)) is not LinkEdgeConfig:
                 raise TypeError(f"{path.value} must be an exact LinkEdgeConfig")
         _require_nonempty_stable_string(self.profile_name, "profile_name")
+        if type(self.qc_excludes_controller_processing) is not bool:
+            raise TypeError(
+                "qc_excludes_controller_processing must be an exact bool")
 
     def resolve(self) -> "LinkModel":
         physical_by_config_id = {}
@@ -512,7 +516,7 @@ class LinkModelConfig:
         return LinkModel(self, bindings)
 
     @classmethod
-    def reference_fixed_latency_profile(cls) -> "LinkModelConfig":
+    def logical_reference_profile(cls) -> "LinkModelConfig":
         def channel(latency_us: float, source: str) -> LinkConfig:
             return LinkConfig(us(latency_us), None, source)
 
@@ -552,7 +556,7 @@ class LinkModelConfig:
             qc=actual_edge(0.15, "Khalid qc effective time", "SyndromePayload.size_bits"),
             cwd=actual_edge(
                 2.0,
-                "Khalid cd mapped to controller-to-weak",
+                "Khalid cd latency; logical_reference integrated weak-input transfer",
                 "SyndromeRoundPacket.fragment_size_sum",
             ),
             wsd=actual_edge(
@@ -579,7 +583,7 @@ class LinkModelConfig:
             do=per_channel_default(1.0, 50_000, 100, "Khalid do"),
             oc=per_channel_default(4.0, 20_000, 1000, "Khalid oc"),
             cq=per_channel_default(0.15, 1, 5_000_000, "Khalid cq"),
-            profile_name="reference_fixed_latency",
+            profile_name="logical_reference",
         )
 
 
@@ -662,9 +666,12 @@ class LinkModel:
     ) -> None:
         has_window = attribution.window_id is not None
         has_rounds = attribution.round_lo is not None
-        if path in (LinkPath.QC, LinkPath.CWD):
+        if path is LinkPath.QC:
             valid = not has_window and has_rounds
             expected = "syndrome-round attribution without a window"
+        elif path is LinkPath.CWD:
+            valid = has_rounds
+            expected = "syndrome-round or window-region attribution"
         elif path in (
             LinkPath.WSD,
             LinkPath.CSD,
@@ -681,15 +688,17 @@ class LinkModel:
             raise ValueError(f"{path.value} requires {expected}")
         relation = attribution.relation
         request_paths = (LinkPath.WSD, LinkPath.CSD, LinkPath.WDO, LinkPath.DO)
-        if path in request_paths and type(relation) is not RequestTransferRelation:
+        if (path in request_paths or (path is LinkPath.CWD and has_window)) \
+                and type(relation) is not RequestTransferRelation:
             raise ValueError(f"{path.value} requires a request relation")
-        expected_tier = DecoderTier.WEAK if path is LinkPath.WDO else DecoderTier.STRONG
+        expected_tier = (DecoderTier.WEAK if path in (LinkPath.CWD, LinkPath.WDO)
+                         else DecoderTier.STRONG)
         if (type(relation) is RequestTransferRelation
                 and relation.request_key.tier is not expected_tier):
             raise ValueError(f"{path.value} requires the {expected_tier.value} tier")
         if path is LinkPath.DD and type(relation) is not BoundaryTransferRelation:
             raise ValueError("dd requires a boundary relation")
-        if path not in request_paths + (LinkPath.DD,) and relation is not None:
+        if path not in request_paths + (LinkPath.CWD, LinkPath.DD,) and relation is not None:
             raise ValueError(f"{path.value} does not accept a relation")
         request_key = (relation.request_key if type(relation) is RequestTransferRelation
                        else relation.source_request_key

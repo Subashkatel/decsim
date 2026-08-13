@@ -6,7 +6,7 @@ import hashlib
 from numbers import Integral
 from typing import Optional
 
-from ..message import Operation, SyndromePayload
+from ..message import Operation, QPUReadout
 from ..seeding import _AtomicRunSeedConsumer
 
 
@@ -174,7 +174,7 @@ class StimDevice(_AtomicRunSeedConsumer):
         self._dets[op.id] = self._dets[key]
         self._truth[op.id] = self._truth[key]
 
-    def round_payloads(self, op: Operation, round_index: int) -> list[SyndromePayload]:
+    def round_payloads(self, op: Operation, round_index: int) -> list[QPUReadout]:
         """Emit this operation round as one Stim-backed payload."""
         key = self._key(op)
         global_round = round_index + (op.stream_offset or 0)
@@ -182,12 +182,12 @@ class StimDevice(_AtomicRunSeedConsumer):
         bits = self._dets[key][detector_indices]
         patch = op.patches[0] if op.patches else (op.qubits[0] if op.qubits else 0)
         target = op.stream_id if op.stream_id is not None else op.id
-        return [SyndromePayload(target, patch, global_round, bits=bits,
+        return [QPUReadout(target, patch, global_round, bits=bits,
                                 size_bits=len(bits))]
 
     def finalize_stream_round(
         self, op: Operation, source_round_count: int,
-    ) -> list[SyndromePayload]:
+    ) -> list[QPUReadout]:
         """Emit terminal detector events from the already sampled stream."""
         key = self._key(op)
         if key not in self._dets:
@@ -212,7 +212,7 @@ class StimDevice(_AtomicRunSeedConsumer):
         if key not in self._terminal_data_bits:
             raise ValueError("terminal finalizer has no raw data-bit size")
         patch = op.patches[0] if op.patches else op.qubits[0]
-        return [SyndromePayload(
+        return [QPUReadout(
             key,
             patch,
             op.stream_offset + 1,
@@ -221,7 +221,7 @@ class StimDevice(_AtomicRunSeedConsumer):
         )]
 
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
-                            patch) -> list[SyndromePayload]:
+                            patch) -> list[QPUReadout]:
         """Emit this feedback-idle stream round as one Stim-backed payload."""
         binding = self._source_bindings.get(stream_id)
         if stream_id not in self._dets or binding is None:
@@ -230,7 +230,7 @@ class StimDevice(_AtomicRunSeedConsumer):
             raise ValueError("idle round is outside the finite source")
         detector_indices = self._by_round.get(stream_id, {}).get(global_round, [])
         bits = self._dets[stream_id][detector_indices]
-        return [SyndromePayload(stream_id, patch, global_round, bits=bits,
+        return [QPUReadout(stream_id, patch, global_round, bits=bits,
                                 size_bits=len(bits))]
 
     def _source_rounds(self, key, circuit, source_round_count: int) -> dict:

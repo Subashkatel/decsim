@@ -8,8 +8,8 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Callable, Optional
 
-from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob,
-                      DecodeResult, DecoderRequestKey, DecoderTier, EndpointRole,
+from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob, DecoderInputHold,
+                      DecodeResult, DecoderRequestKey, DecoderTier,
                       Operation, PendingStrong, PotentialStrong, RephaseGuard,
                       SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
                       SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
@@ -18,7 +18,7 @@ from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob,
                       stable_identity_order_key)
 from .links import (BoundaryTransferRelation, LinkPath,
                     RequestTransferRelation, TrafficAttribution)
-from .payload_store import PayloadStore
+from .syndrome_buffer import SyndromeBuffer
 from .dynamic_windows import DynamicWindows
 from .protocols import MultiFaultExclusionSyndromeDevice
 from .speculative_recovery import SpeculativeRecovery
@@ -240,9 +240,9 @@ class WindowManager:
                  planning_view_by_operation_id,
                  fault_model_requirement_for,
                  feedback_boundary_mode: str = "trailing_buffer",
-                 syndrome_source=None, retain_strong_context: bool,
+                 error_model_provider=None, retain_strong_context: bool,
                  double_window: bool,
-                 store: Optional[PayloadStore] = None,
+                 syndrome_buffer: Optional[SyndromeBuffer] = None,
                  capture_enabled: bool = False):
         self.engine = engine
         self.scheme = scheme
@@ -266,7 +266,7 @@ class WindowManager:
             raise TypeError("fault_model_requirement_for must be callable")
         self._fault_model_requirement_for_code = fault_model_requirement_for
         self.feedback_boundary_mode = feedback_boundary_mode
-        self.syndrome_source = syndrome_source
+        self.error_model_provider = error_model_provider
         self.retain_strong_context = retain_strong_context
         self.double_window = double_window
         self._next_decoder_request_sequence = 0
@@ -277,7 +277,7 @@ class WindowManager:
         self.submit_fn: Optional[Callable] = None    # (job, delay_ticks) -> None
         self.on_workload_complete: Optional[Callable[[], None]] = None
 
-        self.store = store if store is not None else PayloadStore()
+        self.syndrome_buffer = syndrome_buffer if syndrome_buffer is not None else SyndromeBuffer()
         self.lifecycle = DynamicWindows(self)
 
         self._ops: dict[int, Operation] = {}
@@ -294,6 +294,7 @@ class WindowManager:
         self.blocking_ops: set[int] = set()
         self.op_results: dict[int, tuple[int, ...]] = {}
         self._required_stream_end_by_operation_id: dict[int, int] = {}
+        self._stream_binding_by_operation_id: dict[int, tuple[object, int]] = {}
         self.logical_contributions: dict[tuple, LogicalContribution] = {}
         self._observable_arity_by_stream: dict[object, int] = {}
         self._committed_boundaries: dict[tuple, object] = {}
@@ -327,7 +328,7 @@ class WindowManager:
         if op.id not in self._ops:
             self.rounds_arrived[op.id] = 0
             self.memory_rounds[op.id] = 0
-            self.store.register_op(op.id)
+            self.syndrome_buffer.open_operation(op.id)
         self._ops[op.id] = op
         if op.blocked_by is not None:
             self.blocking_ops.add(op.blocked_by)
@@ -351,15 +352,15 @@ class WindowManager:
         self._ops[stream_id] = stream_op
         self.rounds_arrived.setdefault(stream_id, 0)
         self.memory_rounds.setdefault(stream_id, 0)
-        self.store.register_op(stream_id)
+        self.syndrome_buffer.open_operation(stream_id)
         self.window_count[stream_id] = 0
         self.op_windows[stream_id] = []
         self.successors.setdefault(stream_id, [])
         self._windowed_by_operation[stream_id] = True
         self._batch_preceding_idle_rounds_by_operation[stream_id] = False
         source_round_limit = None
-        if self.syndrome_source is not None:
-            source_round_limit = self.syndrome_source.register_dynamic_stream(
+        if self.error_model_provider is not None:
+            source_round_limit = self.error_model_provider.register_dynamic_stream(
                 stream_op, self.rounds_for(stream_op),
                 fault_model_requirement=self._fault_model_requirement(stream_op))
         finite_geometries = None
@@ -426,70 +427,59 @@ class WindowManager:
         self.total_windows = plan.total_windows
         self._build_window_error_models()
         self.buffering_capacity_rows = {
-            role: (minimum, sufficient)
-            for role, minimum, sufficient in buffering_plan.capacity_rows
+            "upstream": (
+                buffering_plan.minimum_live_rounds,
+                buffering_plan.sufficient_live_rounds,
+            )
         }
-        for role, minimum, _ in buffering_plan.capacity_rows:
-            capacity = self.store.endpoint_capacity(role)
-            if capacity is not None and capacity < len(minimum):
-                raise ValueError(
-                    f"{role.name} needs {len(minimum)} packet slots, got {capacity}")
-        self._register_planned_endpoint_owners(buffering_plan)
+        capacity = self.syndrome_buffer.capacity
+        minimum = buffering_plan.minimum_live_rounds
+        if capacity is not None and capacity < len(minimum):
+            raise ValueError(
+                f"upstream syndrome buffer needs {len(minimum)} packet slots, "
+                f"got {capacity}"
+            )
+        self._register_planned_holds(buffering_plan)
 
-    def _register_planned_endpoint_owners(self, plan) -> None:
-        for owner, identities in plan.sb0_owners:
-            self.store.register_owner(EndpointRole.SB0, owner, identities)
-        for owner, identities in plan.potential_owners:
-            self.store.register_owner(EndpointRole.SB1, owner, identities)
+    def _register_planned_holds(self, plan) -> None:
+        for owner, identities in plan.weak_holds:
+            self.syndrome_buffer.register_hold(owner, identities)
+        for owner, identities in plan.potential_holds:
+            self.syndrome_buffer.register_hold(owner, identities)
 
-    def _transfer_sb1_owner(self, previous, replacement) -> tuple:
-        keys = self.store.owner_packet_identities(EndpointRole.SB1, previous)
-        self.store.register_owner(EndpointRole.SB1, replacement, keys)
-        self.store.release_owner(EndpointRole.SB1, previous)
+    def _transfer_retention_hold(self, previous, replacement) -> tuple:
+        keys = self.syndrome_buffer.hold_round_identities(previous)
+        self.syndrome_buffer.transfer_hold(previous, replacement)
         return keys
 
-    def _release_owner_if_live(self, role, owner) -> None:
-        if self.store.has_owner(role, owner):
-            self.store.release_owner(role, owner)
+    def _release_hold_if_live(self, owner) -> None:
+        if self.syndrome_buffer.has_hold(owner):
+            self.syndrome_buffer.release_hold(owner)
 
     def _transfer_potential_to_pending(
         self, window_key, request_key,
     ) -> tuple:
-        return self._transfer_sb1_owner(
+        return self._transfer_retention_hold(
             PotentialStrong(window_key), PendingStrong(request_key))
 
     def _transfer_pending_to_csd(self, request_key) -> tuple:
-        return self._transfer_sb1_owner(
+        return self._transfer_retention_hold(
             PendingStrong(request_key), CsdInput(request_key))
 
     def _transfer_potential_to_csd(self, window_key, request_key) -> tuple:
-        return self._transfer_sb1_owner(
+        return self._transfer_retention_hold(
             PotentialStrong(window_key), CsdInput(request_key))
-
-    def _release_csd_at_delivery(self, request_key, arrival_tick) -> None:
-        def release_input():
-            self._release_owner_if_live(
-                EndpointRole.SB1, CsdInput(request_key))
-            operation = self._ops.get(request_key.operation_id)
-            if operation is not None:
-                self._finish_operation_if_ready(operation)
-                self.finish_workload_if_ready()
-
-        self.engine.schedule(
-            arrival_tick - self.engine.now,
-            release_input,
-            label="release delivered CSD input")
 
     def _build_window_error_models(self) -> None:
         """Ask the syndrome source for per-window detector error models."""
-        if self.syndrome_source is None:
+        if self.error_model_provider is None:
             return
         for op_id, op in self._ops.items():
             keys = [(op_id, k) for k in self.op_windows.get(op_id, [])]
             wins = [self.windows[key] for key in keys]
             if not wins:
                 continue
-            models = self.syndrome_source.window_models_for_operation(
+            models = self.error_model_provider.window_models_for_operation(
                 op, wins, self.rounds_for(op),
                 fault_model_requirement=self._fault_model_requirement(op),
                 fault_exclusion_ranges=(),
@@ -505,10 +495,9 @@ class WindowManager:
         weak = self._read_keys_for_bounds(
             window.op_id, window.start_round, window.buffer_hi, window)
         strong = self._strong_context_read_keys(window, weak)
-        self.store.register_owner(EndpointRole.SB0, key, weak)
+        self.syndrome_buffer.register_hold(key, weak)
         if self.retain_strong_context:
-            self.store.register_owner(
-                EndpointRole.SB1, PotentialStrong(key), weak + strong)
+            self.syndrome_buffer.register_hold(PotentialStrong(key), weak + strong)
 
     def _read_keys_for_bounds(self, op_id, start_round: int, buffer_hi: int,
                               window: Optional[Window] = None) -> list:
@@ -539,10 +528,10 @@ class WindowManager:
             window.op_id, window.start_round, window.buffer_hi, window)
         strong = self._strong_context_read_keys(window, weak)
         potential = PotentialStrong(key)
-        if self.store.has_owner(EndpointRole.SB1, potential):
-            self.store.replace_owner_membership(
-                EndpointRole.SB1, potential, weak + strong)
-        self.store.replace_owner_membership(EndpointRole.SB0, key, weak)
+        if self.syndrome_buffer.has_hold(potential):
+            self.syndrome_buffer.replace_hold(
+                potential, weak + strong)
+        self.syndrome_buffer.replace_hold(key, weak)
 
     def _require_retained_payloads(
         self, round_keys: list, purpose: str,
@@ -550,9 +539,9 @@ class WindowManager:
         """Reject a new consumer if any already-arrived input was released."""
         missing = [
             round_key for round_key in round_keys
-            if (not self.store.has_op(round_key[0])
+            if (not self.syndrome_buffer.has_operation(round_key[0])
                 or (round_key[1] <= self.rounds_arrived.get(round_key[0], 0)
-                    and self.store.fragments(*round_key) is None))
+                    and self.syndrome_buffer.retained_fragments(round_key) is None))
         ]
         if missing:
             raise RuntimeError(
@@ -570,20 +559,20 @@ class WindowManager:
 
     def reset_dynamic_window_reads(self, stream_id, window_index: int,
                                    window: Window) -> None:
-        """Refresh read references after a live stream tail is clipped:
-        weak reads only, over the window's commit range."""
+        """After clipping a live tail, retain only the weak commit range."""
         key = (stream_id, window_index)
         new_reads = sorted(
             (stream_id, r)
             for r in range(window.start_round, window.commit_hi + 1))
-        self.store.replace_owner_membership(
-            EndpointRole.SB0, key, new_reads)
+        self.syndrome_buffer.replace_hold(
+            key, new_reads)
 
     def create_dynamic_window(self, stream_id, window_index, commit_lo,
                               commit_hi, buffer_hi, *, is_last) -> None:
-        """Create one dynamic-stream window and wire it into the live plan.
-        If the previous window already committed and shipped its boundary,
-        the defects fold in right here — no dependency wait, no delay event."""
+        """Create one window and connect it to the live stream plan.
+
+        If the previous boundary already arrived, apply it immediately.
+        """
         buffer_lo = commit_lo
         window = Window(op_id=stream_id, k=window_index, commit_lo=commit_lo,
                         commit_hi=commit_hi, buffer_hi=buffer_hi,
@@ -609,17 +598,17 @@ class WindowManager:
         self.op_windows[stream_id].append(window_index)
         self.window_count[stream_id] += 1
         self.total_windows += 1
-        if self.syndrome_source is not None:
-            model = self.syndrome_source.window_model_for_stream(
+        if self.error_model_provider is not None:
+            model = self.error_model_provider.window_model_for_stream(
                 stream_id, window, is_last=is_last)
             if model is not None:
                 self.window_models[(stream_id, window_index)] = model
         self._add_window_read_refs((stream_id, window_index), window)
 
     def validate_stream_length(self, stream_id, stream_round_count: int) -> None:
-        if self.syndrome_source is None:
+        if self.error_model_provider is None:
             return
-        self.syndrome_source.validate_stream_length(
+        self.error_model_provider.validate_stream_length(
             self._ops[stream_id], stream_round_count)
 
     def on_syndrome_arrival(self, packet: SyndromeRoundPacket) -> None:
@@ -640,39 +629,15 @@ class WindowManager:
             self.check_windows_for_operation(predecessor_id)
 
     def accept_window_input(self, packet: SyndromeRoundPacket) -> bool:
-        """Accept one controller-head packet through the typed window route."""
-        pair = self.store.prepare_pair(packet, self.engine.now)
-        if pair is None:
-            return False
-        fragment_bits = tuple(fragment.size_bits for fragment in packet.fragments)
-        packet_bits = (sum(fragment_bits)
-                       if all(bits is not None for bits in fragment_bits)
-                       else None)
-        # Canonicalize metadata only; packet fragment order remains unchanged.
-        reservation = self.links.reserve(
-            LinkPath.CWD, payload_bits=packet_bits, now_ticks=self.engine.now,
-            attribution=TrafficAttribution(
-                operation_id=packet.operation_id,
-                patch_ids=tuple(sorted(
-                    (fragment.patch_id for fragment in packet.fragments),
-                    key=stable_identity_order_key,
-                )),
-                window_id=None, round_lo=packet.round_index,
-                round_hi=packet.round_index))
-        arrival_tick = self.engine.now + reservation.total_delay_ticks
-        pair.set_completion_tick(arrival_tick)
-        pair.commit_unpublished()
-        pair.publish()
-        identity = (packet.operation_id, packet.round_index)
-        self.engine.schedule(
-            reservation.total_delay_ticks,
-            lambda: self._complete_window_input(identity, packet),
-            label="complete CRYO packet transfer")
-        return True
+        """Publish one already-retained upstream round to window readiness.
 
-    def _complete_window_input(self, identity, packet) -> None:
+        Assembly-to-retention is a state transition on the same allocation;
+        this method performs no decoder-input transfer. Window input transfer
+        begins only when a decode request is admitted.
+
+        """
         self.on_syndrome_arrival(packet)
-        self.store.complete_cryo(identity)
+        return True
 
     def accept_feedback_memory_round(self, source_operation_id) -> None:
         """Accept one standalone feedback-memory notification after CWD."""
@@ -683,7 +648,7 @@ class WindowManager:
         packet: SyndromeRoundPacket,
         op: Operation,
     ) -> None:
-        if not self.store.has_op(op.id):
+        if not self.syndrome_buffer.has_operation(op.id):
             raise RuntimeError(
                 f"round {packet.round_index} of {op.name} arrived after the op's "
                 f"last window committed and its syndrome RAM was freed. The device "
@@ -698,11 +663,13 @@ class WindowManager:
                 f"round limit {round_limit}"
             )
         if (
-            self.store.fragments(op.id, packet.round_index) != packet.fragments
-            or self.store.round_complete_tick(op.id, packet.round_index)
+            self.syndrome_buffer.retained_fragments((op.id, packet.round_index)) != packet.fragments
+            or self.syndrome_buffer.publication_tick((op.id, packet.round_index))
             != self.engine.now
         ):
-            raise RuntimeError("syndrome packet did not arrive through its pair")
+            raise RuntimeError(
+                "syndrome packet was not published from the retained "
+                "syndrome buffer round")
         self.rounds_arrived[op.id] = max(
             self.rounds_arrived[op.id],
             packet.round_index,
@@ -745,9 +712,8 @@ class WindowManager:
             return
         if (window.t_first_round is None
                 and self.rounds_arrived[window.op_id] >= window.start_round):
-            window.t_first_round = self.store.round_complete_tick(
-                window.op_id,
-                window.start_round,
+            window.t_first_round = self.syndrome_buffer.publication_tick(
+                (window.op_id, window.start_round)
             )
         if not self._window_data_complete(window):
             return
@@ -834,9 +800,7 @@ class WindowManager:
     def _stamp_first_round_tick(self, window: Window) -> None:
         """Retain arrival provenance for latency accounting."""
         if window.t_first_round is None:
-            window.t_first_round = self.store.round_complete_tick(
-                window.op_id, window.start_round
-            )
+            window.t_first_round = self.syndrome_buffer.publication_tick((window.op_id, window.start_round))
 
     def _new_request_key(
         self, operation_id, window_id: int, tier: DecoderTier,
@@ -845,6 +809,27 @@ class WindowManager:
             operation_id, window_id, tier, self._next_decoder_request_sequence)
         self._next_decoder_request_sequence += 1
         return request_key
+
+    def _bind_decoder_input_hold(self, job: DecodeJob, previous_owner) -> None:
+        """Atomically transfer upstream retention to an admitted input request.
+
+        The callback is invoked only after decoder-local materialization, so
+        overlapping rounds remain upstream until their last consumer transfer.
+
+        """
+        if job.request_key is None:
+            raise RuntimeError("decoder input hold requires a request key")
+        owner = DecoderInputHold(job.request_key)
+        if previous_owner != owner:
+            if self.syndrome_buffer.has_hold(previous_owner):
+                self.syndrome_buffer.transfer_hold(previous_owner, owner)
+            else:
+                identities = tuple(dict.fromkeys(
+                    (fragment.operation_id, fragment.round_index)
+                    for fragment in job.payloads
+                ))
+                self.syndrome_buffer.register_hold(owner, identities)
+        job.input_hold = lambda token=owner: self.syndrome_buffer.release_hold(token)
 
     def _submit_window_decode(self, key: tuple, window: Window,
                               op: Operation) -> None:
@@ -876,14 +861,27 @@ class WindowManager:
         for submission in self.strategy.on_window_ready(window, job,
                                                         self.services):
             if submission.job.strong_decode_for is None:
-                self.submit_fn(submission.job, submission.delay_ticks)
+                if submission.job.submitted or (
+                        submission.job.request_key is not None
+                        and self.syndrome_buffer.has_hold(
+                            DecoderInputHold(submission.job.request_key))):
+                    self.submit_fn(submission.job, submission.delay_ticks)
+                    continue
+                self._bind_decoder_input_hold(submission.job, key)
+                input_arrival = self._link_arrival(
+                    LinkPath.CWD, submission.job,
+                    payload_bits=self._job_payload_bits(submission.job),
+                )
+                self.submit_fn(
+                    submission.job,
+                    input_arrival - self.engine.now + submission.delay_ticks,
+                )
             else:
                 if submission.delay_ticks != 0:
                     raise ValueError(
                         "strong transport delay is owned by the link fabric"
                     )
                 self._submit_strong_with_csd(submission.job)
-        self._release_owner_if_live(EndpointRole.SB0, key)
 
     def _assemble_payloads(self, w: Window) -> list:
         """Collect this window's payloads, including successor overflow rounds."""
@@ -892,7 +890,7 @@ class WindowManager:
         payloads = []
         window_info = WindowInfo.from_window(w)
         for round_index in range(w.start_round, end_round + 1):
-            frags = self.store.fragments(w.op_id, round_index)
+            frags = self.syndrome_buffer.retained_fragments((w.op_id, round_index))
             if frags is not None:
                 payloads += [
                     self.window_interaction.apply_boundary(
@@ -909,7 +907,7 @@ class WindowManager:
         if overflow > 0:
             for successor_id in self.successors.get(w.op_id, []):
                 for round_index in range(1, overflow + 1):
-                    frags = self.store.fragments(successor_id, round_index)
+                    frags = self.syndrome_buffer.retained_fragments((successor_id, round_index))
                     if frags is not None:
                         payloads += [
                             self.window_interaction.apply_boundary(
@@ -1031,19 +1029,16 @@ class WindowManager:
         )
         request_key = strong_job.request_key
         window_key = strong_job.strong_decode_for
-        if self.store.has_owner(
-                EndpointRole.SB1, PotentialStrong(window_key)):
+        if self.syndrome_buffer.has_hold(PotentialStrong(window_key)):
             self._transfer_potential_to_csd(window_key, request_key)
-        elif self.store.has_owner(
-                EndpointRole.SB1, PendingStrong(request_key)):
+        elif self.syndrome_buffer.has_hold(PendingStrong(request_key)):
             self._transfer_pending_to_csd(request_key)
         else:
             packet_ids = tuple(dict.fromkeys(
                 (fragment.operation_id, fragment.round_index)
                 for fragment in strong_job.payloads))
-            self.store.register_owner(
-                EndpointRole.SB1, CsdInput(request_key), packet_ids)
-        self._release_csd_at_delivery(request_key, csd_arrival_ticks)
+            self.syndrome_buffer.register_hold(CsdInput(request_key), packet_ids)
+        self._bind_decoder_input_hold(strong_job, CsdInput(request_key))
         ready_ticks = (
             csd_arrival_ticks
             if wsd_arrival_ticks is None
@@ -1244,18 +1239,15 @@ class WindowManager:
         guard = None
         if restart_key is not None:
             guard = RephaseGuard(strong_request_key)
-            sb0_guard = list(self.store.owner_packet_identities(
-                EndpointRole.SB0, restart_key))
-            sb0_guard += list(resolved_region.restart_read_keys)
-            sb1_guard = list(self.store.owner_packet_identities(
-                EndpointRole.SB1, PotentialStrong(key)))
-            sb1_guard += list(self.store.owner_packet_identities(
-                EndpointRole.SB1, PotentialStrong(restart_key)))
-            sb1_guard += [(op_id, round_index) for round_index in
-                          range(plan.context_lo, plan.context_hi + 1)]
-            sb1_guard += self._strong_context_read_keys(
+            guarded = list(self.syndrome_buffer.hold_round_identities(restart_key))
+            guarded += list(resolved_region.restart_read_keys)
+            guarded += list(self.syndrome_buffer.hold_round_identities(PotentialStrong(key)))
+            guarded += list(self.syndrome_buffer.hold_round_identities(PotentialStrong(restart_key)))
+            guarded += [(op_id, round_index) for round_index in
+                        range(plan.context_lo, plan.context_hi + 1)]
+            guarded += self._strong_context_read_keys(
                 proposed_restart, list(resolved_region.restart_read_keys))
-            self.store.register_rephase_guard(guard, sb0_guard, sb1_guard)
+            self.syndrome_buffer.register_hold(guard, guarded)
         try:
             self.logical_contributions = logical_candidate
             phase = (
@@ -1280,8 +1272,8 @@ class WindowManager:
             else:
                 self._escalations.register_far(pending, restart_key)
             self._transfer_potential_to_pending(key, strong_request_key)
-            self.store.replace_owner_membership(
-                EndpointRole.SB1, PendingStrong(strong_request_key),
+            self.syndrome_buffer.replace_hold(
+                PendingStrong(strong_request_key),
                 [(op_id, round_index) for round_index in
                  range(plan.context_lo, plan.context_hi + 1)])
             for absorbed_key in resolved_region.absorbed_window_keys:
@@ -1312,8 +1304,7 @@ class WindowManager:
             return strong_request_key
         finally:
             if guard is not None:
-                for role in EndpointRole:
-                    self._release_owner_if_live(role, guard)
+                self._release_hold_if_live(guard)
 
     def _defer_crossing_strong_escalation(
         self, weak_job: DecodeJob, weak_window: Window, later_windows: list,
@@ -1499,8 +1490,8 @@ class WindowManager:
 
         operation = self._ops[op_id]
         suffix_models = []
-        if self.syndrome_source is not None:
-            suffix_models = self.syndrome_source.window_models_for_operation(
+        if self.error_model_provider is not None:
+            suffix_models = self.error_model_provider.window_models_for_operation(
                 operation,
                 replacement_windows,
                 round_count,
@@ -1555,16 +1546,14 @@ class WindowManager:
 
         absent = object()
         owner_tokens = list(dict.fromkeys(
-            token for window_key in affected_keys for token in (
-                (EndpointRole.SB0, window_key),
-                (EndpointRole.SB1, PotentialStrong(window_key)),
-            )
+            token for window_key in affected_keys
+            for token in (window_key, PotentialStrong(window_key))
         ))
-        strong_token = (EndpointRole.SB1, PotentialStrong(key))
+        strong_token = PotentialStrong(key)
         owner_tokens.append(strong_token)
         owner_snapshot = {
-            token: self.store.owner_packet_identities(*token)
-            if self.store.has_owner(*token) else absent
+            token: self.syndrome_buffer.hold_round_identities(token)
+            if self.syndrome_buffer.has_hold(token) else absent
             for token in owner_tokens
         }
         if owner_snapshot[strong_token] is absent:
@@ -1573,25 +1562,22 @@ class WindowManager:
         for window in replacement_windows:
             weak_reads = self._read_keys_for_bounds(
                 op_id, window.start_round, window.buffer_hi, window)
-            replacement_memberships[(EndpointRole.SB0, window.key)] = weak_reads
-            replacement_memberships[
-                (EndpointRole.SB1, PotentialStrong(window.key))
-            ] = weak_reads + self._strong_context_read_keys(window, weak_reads)
+            replacement_memberships[window.key] = weak_reads
+            replacement_memberships[PotentialStrong(window.key)] = (
+                weak_reads + self._strong_context_read_keys(window, weak_reads)
+            )
         pending_reads = [
             (op_id, round_index)
             for round_index in range(plan.context_lo, plan.context_hi + 1)
         ]
         replacement_memberships[strong_token] = pending_reads
-        guarded_by_role = {role: [] for role in EndpointRole}
-        for (role, _), reads in owner_snapshot.items():
-            if reads is not absent:
-                guarded_by_role[role].extend(reads)
-        for (role, _), reads in replacement_memberships.items():
-            guarded_by_role[role].extend(reads)
-        guarded_by_role[EndpointRole.SB1].extend(pending_reads)
         guarded_reads = list(dict.fromkeys(
-            guarded_by_role[EndpointRole.SB0]
-            + guarded_by_role[EndpointRole.SB1]))
+            identity
+            for memberships in (owner_snapshot, replacement_memberships)
+            for reads in memberships.values()
+            if reads is not absent
+            for identity in reads
+        ))
         self._require_retained_payloads(
             guarded_reads, f"suffix rephase guard for {key}")
 
@@ -1606,11 +1592,7 @@ class WindowManager:
         logical_snapshot = self.logical_contributions
         escalated_dependents = list(weak_window.dependents)
 
-        self.store.register_rephase_guard(
-            guard,
-            guarded_by_role[EndpointRole.SB0],
-            guarded_by_role[EndpointRole.SB1],
-        )
+        self.syndrome_buffer.register_hold(guard, guarded_reads)
         registered = False
         try:
             weak_window.dependents[:] = [restart_window.key]
@@ -1649,12 +1631,12 @@ class WindowManager:
             for token, old_reads in owner_snapshot.items():
                 if old_reads is absent:
                     continue
-                self.store.replace_owner_membership(
-                    *token, replacement_memberships.get(token, ()))
+                self.syndrome_buffer.replace_hold(
+                    token, replacement_memberships.get(token, ()))
         except Exception:
             for token, old_reads in owner_snapshot.items():
                 if old_reads is not absent:
-                    self.store.replace_owner_membership(*token, old_reads)
+                    self.syndrome_buffer.replace_hold(token, old_reads)
             weak_window.dependents[:] = escalated_dependents
             self.windows.clear()
             self.windows.update(windows_snapshot)
@@ -1672,8 +1654,7 @@ class WindowManager:
             self.logical_contributions = logical_snapshot
             if registered:
                 self._escalations.take_far(restart_window.key, pending)
-            for role in EndpointRole:
-                self._release_owner_if_live(role, guard)
+            self._release_hold_if_live(guard)
             raise
 
         self._transfer_potential_to_pending(key, strong_request_key)
@@ -1681,11 +1662,10 @@ class WindowManager:
             if (
                 old_reads is not absent
                 and token not in replacement_memberships
-                and self.store.has_owner(*token)
+                and self.syndrome_buffer.has_hold(token)
             ):
-                self.store.release_owner(*token)
-        for role in EndpointRole:
-            self._release_owner_if_live(role, guard)
+                self.syndrome_buffer.release_hold(token)
+        self._release_hold_if_live(guard)
 
         self.engine.log(
             "DecoderCluster",
@@ -1840,26 +1820,26 @@ class WindowManager:
         fault_exclusions: tuple,
     ):
         """Build through the historical or explicit multi-range device port."""
-        if self.syndrome_source is None:
+        if self.error_model_provider is None:
             return None
         if len(fault_exclusions) <= 1:
             exclusion = fault_exclusions[0] if fault_exclusions else None
-            return self.syndrome_source.strong_window_model_for_operation(
+            return self.error_model_provider.strong_window_model_for_operation(
                 operation, window, round_count,
                 fault_model_requirement=self._fault_model_requirement(operation),
                 exclude_faults_touching=exclusion,
             )
         if not isinstance(
-            self.syndrome_source, MultiFaultExclusionSyndromeDevice,
+            self.error_model_provider, MultiFaultExclusionSyndromeDevice,
         ):
             raise TypeError(
-                f"device {type(self.syndrome_source).__name__} cannot build "
+                f"device {type(self.error_model_provider).__name__} cannot build "
                 "a strong window with multiple fault-exclusion ranges; "
                 "implement "
                 "strong_window_model_for_operation_with_exclusions"
             )
         builder = (
-            self.syndrome_source
+            self.error_model_provider
             .strong_window_model_for_operation_with_exclusions
         )
         return builder(
@@ -1906,18 +1886,16 @@ class WindowManager:
                 restart.deps_remaining -= 1
             if restart_key in window.dependents:
                 window.dependents.remove(restart_key)
-        self._release_owner_if_live(EndpointRole.SB0, key)
+        self._release_hold_if_live(key)
         absorbed = PotentialStrong(key)
-        needed = set(self.store.owner_packet_identities(
-            EndpointRole.SB1, absorbed))
-        replacements = set(self.store.owner_packet_identities(
-            EndpointRole.SB1, replacement))
+        needed = set(self.syndrome_buffer.hold_round_identities(absorbed))
+        replacements = set(self.syndrome_buffer.hold_round_identities(replacement))
         if restart_key is not None:
-            replacements.update(self.store.owner_packet_identities(
-                EndpointRole.SB1, PotentialStrong(restart_key)))
+            replacements.update(self.syndrome_buffer.hold_round_identities(
+                PotentialStrong(restart_key)))
         if not needed <= replacements:
             raise RuntimeError("absorption replacement does not cover packets")
-        self.store.release_owner(EndpointRole.SB1, absorbed)
+        self.syndrome_buffer.release_hold(absorbed)
         self.engine.log("DecoderCluster",
                         f"window {key} absorbed into the strong slab "
                         f"(weak chain skips it)")
@@ -1935,7 +1913,6 @@ class WindowManager:
         key = pending.key
         weak_job = pending.weak_job
         slab = pending.strong_window
-        op = self._ops[key[0]]
         dem = pending.strong_model
         payloads = self._assemble_payloads(slab)
         covered = {payload.round_index for payload in payloads}
@@ -1946,7 +1923,7 @@ class WindowManager:
                 f"{pending.label}: slab submitted with rounds "
                 f"{sorted(covered)} but it needs "
                 f"{plan.context_lo}-{plan.context_hi}; a slab may "
-                f"only start once every stored block exists (Fig. 12)")
+                "only start once every required round is retained")
         self._stamp_first_round_tick(slab)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
@@ -2063,8 +2040,8 @@ class WindowManager:
             self._held_boundary[key] = _HeldBoundary(
                 job.request_key, op.id, boundary)
         if not job.awaiting_strong_result:
-            self._release_owner_if_live(
-                EndpointRole.SB1, PotentialStrong(key))
+            self._release_hold_if_live(
+                PotentialStrong(key))
         self._check_deferred_strong_after_commit(key)
         self.speculative_recovery.after_commit()
         self._finish_operation_if_ready(op)
@@ -2553,13 +2530,13 @@ class WindowManager:
             return
         if self.speculative_recovery.blocks_finality(op.id):
             return
-        if self.store.has_live_operation_reference(op.id):
+        if self.syndrome_buffer.has_live_operation_reference(op.id):
             return
         if (self._committed_per_op.get(op.id, 0) == self.window_count[op.id]
                 and self.lifecycle.sealed(op.id)):
             self._finished_ops.add(op.id)
             self._deliver_result(op)
-            self.store.close_operation(op.id)
+            self.syndrome_buffer.close_operation(op.id)
 
     def finish_workload_if_ready(self) -> None:
         if self._workload_complete_sent:
@@ -2607,7 +2584,9 @@ class WindowManager:
         """Deliver segment results whose full round range has committed
         (gated the same way as ops: no pending strong may still change it)."""
         for operation in list(self._ops.values()):
-            if operation.stream_id != stream_id:
+            binding = self._stream_binding_by_operation_id.get(operation.id)
+            operation_stream_id = operation.stream_id if binding is None else binding[0]
+            if operation_stream_id != stream_id:
                 continue
             if operation.id not in self.blocking_ops:
                 continue
@@ -2622,7 +2601,8 @@ class WindowManager:
                 continue
             if self._segment_waits_for_strong(stream_id, segment_end):
                 continue
-            segment_start = operation.stream_offset + 1
+            operation_stream_offset = operation.stream_offset if binding is None else binding[1]
+            segment_start = operation_stream_offset + 1
             logical_observables = self._logical_observables_for_interval(
                 stream_id,
                 segment_start,
@@ -2651,6 +2631,27 @@ class WindowManager:
                 return True
         return False
 
+    def connect_idle_decode_demand_receiver(self, receiver) -> None:
+        """Connect the optional synthetic idle-load model to decode service."""
+        self._idle_decode_demand_receiver = receiver
+
+    def accept_idle_decode_demand(self, *, rounds, code, spatial_nodes,
+                                  label) -> None:
+        """Submit modeled idle-memory work without exposing a decoder to control."""
+        receiver = getattr(self, "_idle_decode_demand_receiver", None)
+        if receiver is None:
+            raise RuntimeError("idle decode demand receiver is not connected")
+        receiver(rounds, on_done=lambda: None, code=code,
+                 spatial_nodes=spatial_nodes, label=label)
+
+    def bind_stream_operation(self, operation_id: int, stream_id,
+                              stream_offset: int) -> None:
+        binding = (stream_id, stream_offset)
+        previous = self._stream_binding_by_operation_id.get(operation_id)
+        if previous is not None and previous != binding:
+            raise RuntimeError("operation stream binding is already fixed")
+        self._stream_binding_by_operation_id[operation_id] = binding
+
     def bind_required_stream_end(self, operation_id: int,
                                  required_stream_end: int) -> None:
         if operation_id in self._required_stream_end_by_operation_id:
@@ -2661,9 +2662,11 @@ class WindowManager:
         required_end = self._required_stream_end_by_operation_id.get(operation.id)
         if required_end is not None:
             return required_end
-        if operation.stream_offset is None:
+        binding = self._stream_binding_by_operation_id.get(operation.id)
+        stream_offset = operation.stream_offset if binding is None else binding[1]
+        if stream_offset is None:
             return None
-        return operation.stream_offset + self.rounds_for(operation)
+        return stream_offset + self.rounds_for(operation)
 
     def close_stream_boundary(self, stream_id, stream_round_count: int) -> None:
         self.lifecycle.close_boundary(stream_id, stream_round_count)
@@ -2683,8 +2686,8 @@ class WindowManager:
 
     @property
     def peak_payloads(self) -> int:
-        return self.store.peak_payloads
+        return self.syndrome_buffer.peak_payloads
 
     @property
     def payloads_held(self) -> int:
-        return self.store.payloads_held
+        return self.syndrome_buffer.payloads_held

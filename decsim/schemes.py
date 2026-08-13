@@ -19,8 +19,7 @@ from .message import (
 )
 
 if TYPE_CHECKING:
-    from .message import Operation, Window
-    from .protocols import CodeModel, LayoutModel
+    from .message import Window
 
 
 class SlidingTerminalPolicy(Enum):
@@ -89,7 +88,7 @@ class SlidingWindowScheme:
         ``W=commit_round_count+buffer_round_count``. Regular windows commit
         their first ``F`` rounds. As soon as one window reaches the physical
         end, it becomes the closed final window and commits every remaining
-        round. This is Huang--Puri Sec. III, Tan Supp. S2.C, and QUITS Sec. 5.2.
+        round.
         """
         if self.terminal_policy is SlidingTerminalPolicy.QUITS_TAN_FLUSH:
             windows = _finite_forward_window_geometries(
@@ -324,7 +323,7 @@ class TanSandwichScheme(SlidingWindowScheme):
     ``buffer_round_count`` is the two-sided buffer ``b``. Thus the type-1
     width is ``w=s+2b``. The typed detector intervals below are the vertex
     sets whose incident correction edges form each core; the one-layer gaps
-    are the type-2 seams. This is Fig. 2(c)/Supp. S2.D, seam offset ``t=0``.
+    are the type-2 seams, using seam offset ``t=0``.
     """
 
     scheme_label = (

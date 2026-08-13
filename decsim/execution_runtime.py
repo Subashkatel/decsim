@@ -1,0 +1,197 @@
+"""Track operation readiness, resource ownership, and execution timestamps."""
+from __future__ import annotations
+from dataclasses import dataclass
+from types import MappingProxyType
+
+from .message import Decision, ExecutionProgram
+
+
+@dataclass(frozen=True)
+class ExecutionSnapshot:
+    workload_complete: bool
+    done_tick: int
+    operation_start_times: tuple
+    body_done_times: tuple
+    decode_release_times: tuple
+    result_return_times: tuple
+
+
+class ExecutionRuntime:
+    """Own the program DAG, resource claims, readiness, and timestamps."""
+
+    def __init__(self, engine, *, controller, factory,
+                 resource_claims_by_operation_id):
+        self.engine = engine
+        self.controller = controller
+        self.factory = factory
+        self._claims = MappingProxyType(dict(resource_claims_by_operation_id))
+        self.program = None
+        self.operations = {}
+        self.dependencies_remaining = {}
+        self.successors = {}
+        self.schedule_released = set()
+        self.busy_claims = {}
+        self.requested = set()
+        self.state_ready = set()
+        self.started = set()
+        self.done_bodies = set()
+        self.decode_released = set()
+        self.op_start_time = {}
+        self.body_done_time = {}
+        self.decode_release_time = {}
+        self.result_return_time_by_operation = {}
+        self.idle_rounds_by_patch = {}
+        self.last_finish_time = 0
+
+    @property
+    def workload_complete(self):
+        return self.program is not None and set(self.operations) == self.done_bodies
+
+    @property
+    def snapshot(self):
+        return ExecutionSnapshot(
+            self.workload_complete, self.last_finish_time,
+            tuple(sorted(self.op_start_time.items())),
+            tuple(sorted(self.body_done_time.items())),
+            tuple(sorted(self.decode_release_time.items())),
+            tuple(sorted(self.result_return_time_by_operation.items())))
+
+    def load_program(self, program: ExecutionProgram) -> None:
+        if self.program is not None:
+            raise RuntimeError("execution program is already loaded")
+        self.program = program
+        for operation in program.operations:
+            self.operations[operation.id] = operation
+            self.dependencies_remaining[operation.id] = len(operation.predecessors)
+            self.successors[operation.id] = []
+        for operation in program.operations:
+            for predecessor_id in operation.predecessors:
+                self.successors[predecessor_id].append(operation.id)
+        for operation in program.operations:
+            release_tick = (operation.scheduled_start_round *
+                            self.controller.round_ticks_for(operation))
+            if release_tick == 0:
+                self.schedule_released.add(operation.id)
+            else:
+                self.engine.schedule(
+                    release_tick,
+                    lambda ready=operation: self._release_scheduled(ready),
+                    label=f"scheduled-start({operation.name})")
+        for operation in program.operations:
+            self._attempt_start(operation)
+
+    def _release_scheduled(self, operation):
+        self.schedule_released.add(operation.id)
+        self._attempt_start(operation)
+
+    def _attempt_start(self, operation):
+        if (self.dependencies_remaining[operation.id] != 0 or
+                operation.id not in self.schedule_released or
+                operation.id in self.requested):
+            return
+        self._claim_resources(operation)
+        self.requested.add(operation.id)
+        if operation.needs_magic_state:
+            self.engine.log("ExecutionRuntime",
+                            f"{operation.name} needs a magic state; asking the factory")
+            self.factory.request(operation.id,
+                lambda ready=operation: self._state_became_ready(ready))
+        else:
+            self._state_became_ready(operation)
+
+    def _claim_resources(self, operation):
+        if len(set(operation.qubits)) != len(operation.qubits):
+            raise RuntimeError(
+                f"{operation.name} lists a qubit more than once: {operation.qubits}")
+        for claim in self._claims[operation.id]:
+            for resource_id in sorted(claim.ids, key=repr):
+                key = (claim.kind, resource_id)
+                if key in self.busy_claims:
+                    holder = self.operations[self.busy_claims[key]].name
+                    raise RuntimeError(
+                        f"{operation.name} and {holder} share {claim.kind} "
+                        f"resource {resource_id!r} but have no dependency edge. "
+                        "The operation list is missing "
+                        "program-order wiring (run it through _wire_circuit / a frontend)")
+                self.busy_claims[key] = operation.id
+
+    def _free_resources(self, operation):
+        for claim in self._claims[operation.id]:
+            for resource_id in claim.ids:
+                self.busy_claims.pop((claim.kind, resource_id), None)
+
+    def _state_became_ready(self, operation):
+        self.state_ready.add(operation.id)
+        self._maybe_begin(operation)
+
+    def _maybe_begin(self, operation):
+        if operation.id in self.started or operation.id not in self.state_ready:
+            return
+        if operation.blocked_by is not None and operation.id not in self.decode_released:
+            return
+        if not self.controller.can_start(operation):
+            return
+        self.started.add(operation.id)
+        self.op_start_time[operation.id] = self.engine.now
+        idle_rounds = self.consume_idle_rounds(operation)
+        self.controller.issue_operation(operation, idle_rounds)
+
+    def body_done(self, operation):
+        self.done_bodies.add(operation.id)
+        self.body_done_time[operation.id] = self.engine.now
+        self.last_finish_time = max(self.last_finish_time, self.engine.now)
+        self.engine.log("ExecutionRuntime", f"{operation.name} body done")
+        self._free_resources(operation)
+        self.controller.before_successor_release(operation)
+        for successor_id in self.successors[operation.id]:
+            self.dependencies_remaining[successor_id] -= 1
+            if self.dependencies_remaining[successor_id] == 0:
+                self._attempt_start(self.operations[successor_id])
+        if self.workload_complete:
+            self.engine.log("ExecutionRuntime",
+                            f"QPU finished. All {len(self.operations)} operations are "
+                            "physically complete; decoder may still be draining.")
+        self.controller.after_successor_release(operation)
+
+    def waiting_blocked_successor(self, operation_id):
+        for successor_id in self.successors[operation_id]:
+            successor = self.operations[successor_id]
+            if successor.blocked_by is None or successor.id in self.started:
+                continue
+            if successor.id not in self.decode_released:
+                return True
+            if self.controller.gates_start_on_round_boundaries:
+                return True
+        return False
+
+    def start_released_successors_on_boundary(self, operation_id, patch=None):
+        if not self.controller.gates_start_on_round_boundaries:
+            return
+        for successor_id in self.successors[operation_id]:
+            successor = self.operations[successor_id]
+            if (successor.blocked_by is not None and
+                    successor.id not in self.started and
+                    successor.id in self.decode_released and
+                    successor.id in self.state_ready and
+                    successor.id in self.schedule_released):
+                if patch is not None:
+                    self.controller.note_round_boundary(patch)
+                self._maybe_begin(successor)
+
+    def consume_idle_rounds(self, operation):
+        patches = operation.patches if operation.patches else operation.qubits
+        return sum(self.idle_rounds_by_patch.pop(patch, 0) for patch in patches)
+
+    def on_decision(self, decision: Decision):
+        operation_id = decision.target_operation_id
+        operation = self.operations[operation_id]
+        if not decision.releases_operation:
+            self.result_return_time_by_operation[operation_id] = self.engine.now
+            self.engine.log("ExecutionRuntime",
+                            f"received result return for {operation.name}")
+            return
+        self.decode_released.add(operation_id)
+        self.decode_release_time[operation_id] = self.engine.now
+        self.engine.log("ExecutionRuntime",
+                        f"CONSUMED release for {operation.name}; now trying to start")
+        self._maybe_begin(operation)

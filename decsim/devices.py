@@ -1,22 +1,22 @@
-"""Clocked syndrome source: emit each operation on the round clock.
+"""Clocked readout source: emit each operation on the round clock.
 
 The final round and ``on_body_done`` occur in the same event.
 """
 
 from __future__ import annotations
 
-from dataclasses import replace
-from types import MappingProxyType
-from typing import Callable, Optional
+from typing import Optional, TYPE_CHECKING
 
 from .seeding import _RandomSeedConsumer
 from .message import (
     Operation,
     RunSeedChild,
     RunSeedPathSegment,
-    SyndromePayload,
-    WINDOW_INPUT_ROUTE,
+    QPUReadout,
 )
+
+if TYPE_CHECKING:
+    from .protocols import CodeModel
 
 
 def _stream_payload_target(op: Operation, round_index: int) -> tuple:
@@ -37,13 +37,13 @@ class TimingOnlyDevice:
 
     def round_payloads(self, op: Operation, round_index: int) -> list:
         target, global_round = _stream_payload_target(op, round_index)
-        return [SyndromePayload(target,
+        return [QPUReadout(target,
                               op.patches[0] if op.patches else op.qubits[0],
                               global_round)]
 
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
                             patch) -> list:
-        return [SyndromePayload(stream_id, patch, global_round)]
+        return [QPUReadout(stream_id, patch, global_round)]
 
     def finalize_stream_round(self, op: Operation,
                               source_round_count: int) -> list:
@@ -79,139 +79,6 @@ class TimingOnlyDevice:
         return None
 
 
-class ClockedDevice:
-    """Emit one syndrome round per round-tick per running operation."""
-
-    def __init__(
-        self,
-        engine,
-        device,
-        controller,
-        round_count_by_operation_id,
-    ):
-        self.engine = engine
-        self.device = device            # round_payloads / begin_operation / ...
-        self.controller = controller    # relay path (t_qc + t_cd)
-        self._round_count_by_operation_id = MappingProxyType(
-            dict(round_count_by_operation_id)
-        )
-
-    def start(self, operation, round_ticks: int,
-              on_body_done: Callable) -> None:
-        """Begin an operation's stream: round 1 fires one round-tick from now."""
-        try:
-            total_rounds = self._round_count_by_operation_id[operation.id]
-        except KeyError as error:
-            raise ValueError(
-                f"operation {operation.id} has no resolved round count"
-            ) from error
-        source_operation_id = (
-            operation.stream_id
-            if operation.stream_id is not None
-            else operation.id
-        )
-        try:
-            source_round_count = self._round_count_by_operation_id[
-                source_operation_id
-            ]
-        except KeyError as error:
-            raise ValueError(
-                f"source operation {source_operation_id} has no resolved round count"
-            ) from error
-        if not operation.emits_detector_data:
-            self.engine.schedule(
-                total_rounds * round_ticks,
-                lambda: on_body_done(operation),
-                label=f"body-done({operation.name})",
-            )
-            return
-        if total_rounds == 0:
-            if not operation.finalizes_stream_round:
-                raise ValueError(
-                    "zero-duration detector emitters must finalize a stream round"
-                )
-            self.relay_payloads(
-                self.device.finalize_stream_round(
-                    operation, source_round_count
-                ),
-                operation,
-            )
-            on_body_done(operation)
-            return
-        self.device.begin_operation(
-            operation, total_rounds, source_round_count
-        )
-        self.engine.schedule(
-            round_ticks,
-            lambda: self._round(
-                operation,
-                1,
-                total_rounds,
-                round_ticks,
-                on_body_done,
-            ),
-            label=f"round1({operation.name})")
-
-    def _round(
-        self,
-        operation,
-        round_index: int,
-        total_rounds: int,
-        round_ticks: int,
-        on_body_done: Callable,
-    ) -> None:
-        """Emit one round; the final round triggers body-done in this event."""
-        payloads = self.device.round_payloads(operation, round_index)
-        self.engine.log("Chip", f"{operation.name} fires round "
-                                f"{round_index}/{total_rounds}")
-        self.relay_payloads(payloads, operation)
-        if round_index < total_rounds:
-            self.engine.schedule(
-                round_ticks,
-                lambda: self._round(
-                    operation,
-                    round_index + 1,
-                    total_rounds,
-                    round_ticks,
-                    on_body_done,
-                ),
-                label=f"round{round_index + 1}({operation.name})")
-        else:
-            on_body_done(operation)
-
-    def relay_payloads(self, payloads, operation: Operation) -> None:
-        """Send all fragments from one syndrome round through the controller."""
-        if (
-            operation.syndrome_fragment_index is not None
-            and len(payloads) != 1
-        ):
-            raise ValueError(
-                "an explicit syndrome fragment slot must emit one payload"
-            )
-        fragment_count = (
-            operation.syndrome_fragment_count
-            if operation.syndrome_fragment_count is not None
-            else len(payloads)
-        )
-        for local_index, payload in enumerate(payloads):
-            fragment_index = (
-                operation.syndrome_fragment_index
-                if operation.syndrome_fragment_index is not None
-                else local_index
-            )
-            relayed_payload = replace(
-                payload,
-                n_fragments=fragment_count,
-                fragment_index=fragment_index,
-            )
-            self.controller.relay_syndrome(relayed_payload, WINDOW_INPUT_ROUTE)
-
-    def idle_round_payloads(self, operation, stream_id, global_round, patch):
-        """Idle-round payloads for extend_stream mode (delegates to the device)."""
-        return self.device.idle_round_payloads(operation, stream_id,
-                                               global_round, patch)
-
-
 class SyndromeBitDevice(_RandomSeedConsumer):
     """Emit deterministic fake bits to exercise the payload path."""
 
@@ -244,13 +111,13 @@ class SyndromeBitDevice(_RandomSeedConsumer):
         self._mark_stochastic_use()
         return [self._rng.randint(0, 1) for _ in range(bit_count)]
 
-    def round_payloads(self, op: Operation, round_index: int) -> list[SyndromePayload]:
+    def round_payloads(self, op: Operation, round_index: int) -> list[QPUReadout]:
         """One payload per patch when per_patch=True; else the single aggregated payload."""
         target, global_round = _stream_payload_target(op, round_index)
         if not self.per_patch:
             num_patches = len(op.patches) if op.patches else len(op.qubits)
             bits = self._bits(num_patches)
-            return [SyndromePayload(
+            return [QPUReadout(
                 target,
                 op.patches[0] if op.patches else op.qubits[0],
                 global_round,
@@ -261,20 +128,20 @@ class SyndromeBitDevice(_RandomSeedConsumer):
         payloads = []
         for patch in patches:
             bits = self._bits(1)
-            payloads.append(SyndromePayload(
+            payloads.append(QPUReadout(
                 target, patch, global_round, bits=bits, code=self.code.name,
                 size_bits=len(bits)))
         return payloads
 
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
-                            patch) -> list[SyndromePayload]:
+                            patch) -> list[QPUReadout]:
         """Emit one fake-bit payload for a feedback-idle stream round."""
         bits = self._bits(1)
-        return [SyndromePayload(stream_id, patch, global_round, bits=bits,
+        return [QPUReadout(stream_id, patch, global_round, bits=bits,
                                 code=self.code.name, size_bits=len(bits))]
 
     def finalize_stream_round(self, op: Operation,
-                              source_round_count: int) -> list[SyndromePayload]:
+                              source_round_count: int) -> list[QPUReadout]:
         raise ValueError("SyndromeBitDevice cannot finalize a physical stream")
 
     def register_dynamic_stream(self, stream_op: Operation, round_count: int,

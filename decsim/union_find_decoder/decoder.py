@@ -47,9 +47,6 @@ class UnionFindDecoder:
     - Every logical-observable row is retained in the hard result.
     - Host runtime is not simulated decoder service latency.
     - This Python implementation does not claim the paper's complexity bound.
-
-    Growth and peeling follow Huang--Newman--Brown arXiv:2004.04693 and
-    Delfosse--Nickerson arXiv:1709.06218v3, Algorithms 1--2.
     """
 
     fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED

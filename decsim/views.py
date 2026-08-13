@@ -77,7 +77,7 @@ class OpReactionInfo:
 class ReactionView:
     """The reaction-path timeline of one run."""
 
-    chip_done: object               # last physical-work tick (None if unfinished)
+    execution_done: object               # last physical-work tick (None if unfinished)
     fully_done: int                 # engine.now at snapshot
     body_done_time: tuple           # ((op_id, tick), ...)
     decode_release_time: tuple      # ((op_id, tick), ...)
@@ -230,30 +230,28 @@ def window_latency_view(window_manager) -> WindowLatencyView:
     return WindowLatencyView(rows=tuple(rows))
 
 
-def reaction_view(gate) -> ReactionView:
-    """Snapshot the reaction timeline from the gate (chip control half)."""
+def reaction_view(execution_runtime) -> ReactionView:
+    """Snapshot execution admission and controller cadence state."""
+    controller = execution_runtime.controller
     ops = tuple(
         OpReactionInfo(op=op_id, name=op.name, blocked_by=op.blocked_by,
-                       round_ticks=gate._round_ticks_for(op),
-                       rounds=gate._round_count_for(op))
+                       round_ticks=controller.round_ticks_for(op),
+                       rounds=controller._round_count_for(op))
         for op_id, op in sorted(
-            gate._ops.items(), key=lambda item: stable_identity_order_key(item[0])
-        ))
+            execution_runtime.operations.items(),
+            key=lambda item: stable_identity_order_key(item[0])))
     return ReactionView(
-        chip_done=gate.last_finish_time,
-        fully_done=gate.engine.now,
+        execution_done=execution_runtime.last_finish_time,
+        fully_done=execution_runtime.engine.now,
         body_done_time=tuple(sorted(
-            gate.body_done_time.items(),
-            key=lambda item: stable_identity_order_key(item[0]),
-        )),
+            execution_runtime.body_done_time.items(),
+            key=lambda item: stable_identity_order_key(item[0]))),
         decode_release_time=tuple(sorted(
-            gate.decode_release_time.items(),
-            key=lambda item: stable_identity_order_key(item[0]),
-        )),
+            execution_runtime.decode_release_time.items(),
+            key=lambda item: stable_identity_order_key(item[0]))),
         idle_cap_hits=tuple(tuple(sorted(hit.items()))
-                            for hit in gate.idle_cap_hits),
+                            for hit in controller.idle_cap_hits),
         ops=ops)
-
 
 def truth_view(window_manager, device) -> TruthView:
     """Snapshot sampled truth (device) next to published predictions."""
@@ -341,7 +339,7 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
         decoder_manager.terminal_service_records_snapshot())
 
 
-def capture_primary_result(engine, chip, window_manager, operations,
+def capture_primary_result(engine, execution_runtime, window_manager, operations,
                            metric_bindings, links, syndrome_source):
     """Project terminal runtime owners into the immutable run result."""
     from .run_spec import LogicalOperationResult, MetricResultRecord, PrimaryRunResult
@@ -367,17 +365,19 @@ def capture_primary_result(engine, chip, window_manager, operations,
                     f"operation {operation_id} predicted {len(bits)} logical "
                     f"observables but the syndrome source sampled {len(actual)}")
             failure = bits != actual
+        binding = execution_runtime.controller.stream_binding_for(operation_id)
+        stream_offset = (operation_by_id[operation_id].stream_offset
+                         if binding is None else binding.stream_offset)
         rows.append(LogicalOperationResult(
-            operation_id, status, bits,
-            operation_by_id[operation_id].stream_offset, actual, failure))
+            operation_id, status, bits, stream_offset, actual, failure))
     metric_rows = tuple(MetricResultRecord(
         name, copy.deepcopy(engine._invoke_metric_callback(
             metric.result, callback_kind="result")))
         for name, metric in metric_bindings)
-    if engine._event_queue or not chip.workload_complete:
+    if engine._event_queue or not execution_runtime.workload_complete:
         raise RuntimeError("primary run ended before workload completed")
     return PrimaryRunResult(
-        "complete", True, True, True, chip.last_finish_time, engine.now,
+        "complete", True, True, True, execution_runtime.last_finish_time, engine.now,
         tuple(rows), copy.deepcopy(links.traffic_json_value()), metric_rows)
 
 

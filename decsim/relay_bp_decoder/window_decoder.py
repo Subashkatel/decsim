@@ -77,8 +77,7 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
     The paper assumes ``0 < p < 1/2``. This adapter also accepts exactly
     ``p=1/2`` as a tested software-profile extension with a zero prior log
     ratio. Decided, majority-one, and non-finite priors are rejected instead
-    of being silently transformed. The algorithm follows Relay-BP-S from
-    Müller et al., arXiv:2506.01779v2, Algorithm 1.
+    of being silently transformed.
     """
 
     _explicit_seed_label = "gamma-table seed"

@@ -13,7 +13,7 @@ from numbers import Integral
 from typing import Any, Callable, Optional
 
 from .config import TimingConfig
-from .message import OperationPlanningView, RunSeedPathSegment, is_stable_string
+from .message import ExecutionProgram, OperationPlanningView, RunSeedPathSegment, is_stable_string
 from .seeding import bind_run_seed
 
 
@@ -21,8 +21,7 @@ from .seeding import bind_run_seed
 class LogicalOperationResult:
     """One prediction and its optional sampled logical-observable truth.
 
-    ``logical_failure`` follows arXiv:2303.15933v2 Sec. 2.1 and Stim/Sinter
-    v1.16.0: it is true when any predicted bit differs from the sampled vector.
+    ``logical_failure`` is true when any predicted bit differs from truth.
     """
 
     operation_id: int
@@ -46,8 +45,8 @@ class PrimaryRunResult:
     terminal_status: str
     event_queue_empty: bool
     decode_work_settled: bool
-    chip_workload_complete: bool
-    chip_done_ticks: int
+    execution_workload_complete: bool
+    execution_done_ticks: int
     fully_done_ticks: int
     operation_results: tuple[LogicalOperationResult, ...]
     link_traffic: dict
@@ -75,10 +74,13 @@ class CompletedRun:
     engine: Any
     window_manager: Any
     decoder_manager: Any
-    chip: Any
+    execution_runtime: Any
+    controller: Any
+    qpu: Any
     orchestrator: Any
     factory: Any
-    controller: Any
+    syndrome_buffer: Any
+    syndrome_ingress: Any
 
 
 @dataclass
@@ -113,9 +115,12 @@ class RunSpec:
     round_us: Optional[float] = None
     links: Optional[Any] = None
     device: Optional[Any] = None
+    error_model_provider: Optional[Any] = None
     memory_model: Optional[Any] = None
     syndrome_buffering: Optional[Any] = None
-    make_controller: Optional[Callable] = None
+    syndrome_ingress_policy: Optional[Any] = None
+    make_syndrome_ingress: Optional[Callable] = None
+    make_decoder_input_transfer: Optional[Callable] = None
     make_factory: Optional[Callable] = None
     make_metrics: Optional[Callable] = None
     record_switching_windows: bool = False
@@ -140,14 +145,16 @@ class RunSpec:
         return completed
 
     def _build_once(self, engine, root_seed) -> CompletedRun:
-        from .chip import Chip
-        from .controllers import ModularController
+        from .controller import Controller
+        from .syndrome_ingress import SyndromeIngress, SyndromeIngressPolicy
         from .decoder_manager import DecoderManager, StrategyServicesImpl
+        from .decoder_local import DecoderLocalMemory
         from .decoders import CodeRouter
-        from .devices import ClockedDevice, SyndromeBitDevice, TimingOnlyDevice
+        from .devices import SyndromeBitDevice, TimingOnlyDevice
+        from .qpu import QPUDevice
         from .links import LinkModelConfig
         from .orchestrators import ExecutionOrchestrator
-        from .payload_store import PayloadStore, SyndromeBufferingConfig
+        from .syndrome_buffer import SyndromeBuffer, SyndromeBufferingConfig
         from .planner import (
             GateRounds,
             _plan_execution,
@@ -227,6 +234,12 @@ class RunSpec:
 
         device = self.device or TimingOnlyDevice()
         _install_device_circuits(device, all_operations)
+        error_model_provider = (
+            device if self.error_model_provider is None
+            else self.error_model_provider)
+        if (error_model_provider is not device and
+                hasattr(error_model_provider, "operation_circuit_scope")):
+            _install_device_circuits(error_model_provider, all_operations)
         if type(device) is SyndromeBitDevice and device.code is not code:
             raise ValueError(
                 "SyndromeBitDevice.code must be the exact resolved run code")
@@ -244,12 +257,26 @@ class RunSpec:
                         if self.make_orchestrator
                         else ExecutionOrchestrator(engine))
         link_config = (self.links if self.links is not None else
-                       LinkModelConfig.reference_fixed_latency_profile())
+                       LinkModelConfig.logical_reference_profile())
+        if (
+            self.timing.ticks("t_binary_availability") > 0
+            and not link_config.qc_excludes_controller_processing
+        ):
+            raise ValueError(
+                "a separate controller readout cost requires a link "
+                "profile whose QC latency excludes that cost"
+            )
         links = link_config.resolve()
         buffering = self.syndrome_buffering or SyndromeBufferingConfig()
         if type(buffering) is not SyndromeBufferingConfig:
             raise TypeError("syndrome_buffering must be SyndromeBufferingConfig")
-        payload_store = PayloadStore(memory_model=self.memory_model, sb0_capacity=buffering.sb0_packet_slots, sb1_capacity=buffering.sb1_packet_slots)
+        syndrome_buffer = SyndromeBuffer(
+            capacity=buffering.upstream_packet_slots,
+            memory_model=self.memory_model,
+        )
+        decoder_local_memory = DecoderLocalMemory(
+            capacity=buffering.decoder_local_input_slots,
+        )
         window_manager = WindowManager(
             engine, scheme=scheme, code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
@@ -260,28 +287,56 @@ class RunSpec:
             planning_view_by_operation_id=view_by_id,
             fault_model_requirement_for=router.fault_model_requirement_for,
             feedback_boundary_mode=self.feedback_boundary_mode,
-            syndrome_source=device,
-            store=payload_store,
+            error_model_provider=error_model_provider,
+            syndrome_buffer=syndrome_buffer,
             retain_strong_context=requires_strong_context,
             double_window=double_window,
             capture_enabled=self.record_switching_windows)
-        controller = (
-            self.make_controller(engine, links, buffering, window_manager)
-            if self.make_controller else ModularController(
+        if self.make_syndrome_ingress is not None and self.syndrome_ingress_policy is not None:
+            raise ValueError("syndrome_ingress_policy cannot be combined with make_syndrome_ingress")
+        syndrome_ingress = (
+            self.make_syndrome_ingress(
+                engine, links, buffering, window_manager
+            )
+            if self.make_syndrome_ingress else SyndromeIngress(
                 engine, links=links, t_pack=self.timing.ticks("t_pack"),
-                controller_capacity=buffering.controller_ingress_packet_slots,
+                ingress_context_capacity=buffering.upstream_packet_slots,
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager,
+                syndrome_buffer=syndrome_buffer,
+                policy=(self.syndrome_ingress_policy
+                        if self.syndrome_ingress_policy is not None
+                        else SyndromeIngressPolicy()),
             )
         )
-        payload_store.connect_capacity_change_receiver(controller)
+        if self.make_syndrome_ingress is not None:
+            syndrome_ingress.syndrome_buffer = syndrome_buffer
+        if self.make_decoder_input_transfer is None:
+            from .decoder_input import FixedLatencyDecoderInputTransfer
+            decoder_input_transfer = FixedLatencyDecoderInputTransfer(
+                engine, local_memory=decoder_local_memory,
+            )
+        else:
+            decoder_input_transfer = self.make_decoder_input_transfer(
+                engine, links, buffering
+            )
+        if (
+            self.make_decoder_input_transfer is not None
+            and decoder_input_transfer is None
+        ):
+            raise TypeError(
+                "make_decoder_input_transfer must return a "
+                "DecoderInputTransfer"
+            )
         decoder_manager = DecoderManager(
             engine, router=router, scheduler=scheduler,
             unit_pools=self.unit_pools,
             num_units=self.num_units if self.num_units is not None else 1,
             bulk_strong=bulk_strong,
             lane_policy=self.lane_policy,
-            capture_enabled=self.record_switching_windows)
+            capture_enabled=self.record_switching_windows,
+            decoder_input_transfer=decoder_input_transfer)
+        decoder_input_transfer = decoder_manager.decoder_input_transfer
         services = StrategyServicesImpl(engine, window_manager, decoder_manager)
         window_manager.strategy = strategy
         window_manager.services = services
@@ -297,23 +352,29 @@ class RunSpec:
             raise ValueError(
                 f"{type(factory).__name__} uses a different engine")
         _check_factory_decode_service(factory, decoder_manager)
-        source = ClockedDevice(
-            engine, device, controller,
-            {op.operation_id: op.round_count for op in plan.resolved_operations})
-        chip = Chip(
-            engine, source=source, controller=controller,
-            window_manager=window_manager, decode_service=decoder_manager,
-            factory=factory, round_ticks=plan.round_ticks,
+        qpu = QPUDevice(engine, device)
+        window_manager.connect_idle_decode_demand_receiver(
+            decoder_manager.submit_decode)
+        controller = Controller(
+            engine, qpu=qpu, window_manager=window_manager,
+            syndrome_ingress=syndrome_ingress,
+            binary_availability_ticks=self.timing.ticks("t_binary_availability"),
+            links=links, round_ticks=plan.round_ticks,
             code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
-            resolved_patches=plan.resolved_patches,
-            idle_policy=idle_policy,
-            resource_claims_by_operation_id=resource_claims,
+            resolved_patches=plan.resolved_patches, idle_policy=idle_policy,
             max_idle_rounds=self.max_idle_rounds,
             gates_start_on_round_boundaries=self.gates_start_on_round_boundaries,
             protected_regions=protected_regions)
+        from .execution_runtime import ExecutionRuntime
+        execution_runtime = ExecutionRuntime(
+            engine, controller=controller, factory=factory,
+            resource_claims_by_operation_id=resource_claims)
+        controller.connect_runtime(execution_runtime)
+        qpu.connect_readout_receiver(controller)
+        qpu.connect_completion_receiver(controller._body_done)
         metrics = (self.make_metrics(
-            engine, window_manager, decoder_manager, chip, factory)
+            engine, window_manager, decoder_manager, execution_runtime, factory)
             if self.make_metrics else [])
         if self.record_switching_windows:
             from .metrics import WindowSwitchingRecords
@@ -321,15 +382,19 @@ class RunSpec:
         metric_bindings = _metric_bindings(metrics)
         bind_run_seed(root_seed, _seed_roots(
             code=code, scheme=scheme,
-            device=device, decoder_router=router,
+            device=device, error_model_provider=error_model_provider,
+            decoder_router=router,
             factory=factory, strategy=strategy, scheduler=scheduler,
+            decoder_input_transfer=decoder_input_transfer,
             lane_policy=self.lane_policy,
             boundary_policy=boundary_policy,
             window_interaction=window_interaction, idle_policy=idle_policy,
-            orchestrator=orchestrator, controller=controller,
+            orchestrator=orchestrator, syndrome_ingress=syndrome_ingress,
+            controller=controller, qpu=qpu,
+            execution_runtime=execution_runtime,
             memory_model=self.memory_model, metrics=metric_bindings))
 
-        orchestrator.connect(controller, chip.on_decision)
+        orchestrator.connect(controller, execution_runtime.on_decision)
         window_manager.on_workload_complete = factory.shutdown
         for op in ops:
             if op.blocked_by is not None:
@@ -342,7 +407,7 @@ class RunSpec:
             window_manager._register_dynamic_stream(stream, resolved_by_id[stream.id])
         for _, metric in metric_bindings:
             engine.add_metric(metric)
-        chip._load(list(ops), decode_ops=decode_ops, dynamic_streams=dynamic_streams)
+        controller.load_program(ExecutionProgram(tuple(ops), tuple(decode_ops), tuple(dynamic_streams), tuple(protected_regions)))
         engine._start_running()
         engine.run()
         if window_manager.pending_escalations:
@@ -350,15 +415,20 @@ class RunSpec:
                 f"the run ended with pending strong escalations: "
                 f"{window_manager.pending_escalations}")
         decoder_manager.check_decode_work_settled()
+        check_ingress_settled = getattr(
+            syndrome_ingress, "check_work_settled", None)
+        if callable(check_ingress_settled):
+            check_ingress_settled()
         engine._begin_finalization()
         from .views import capture_primary_result
         result = capture_primary_result(
-            engine, chip, window_manager, all_operations,
+            engine, execution_runtime, window_manager, all_operations,
             metric_bindings, links, device)
         engine._complete()
         return CompletedRun(
-            result, engine, window_manager, decoder_manager, chip,
-            orchestrator, factory, controller)
+            result, engine, window_manager, decoder_manager, execution_runtime,
+            controller, qpu, orchestrator, factory,
+            syndrome_buffer, syndrome_ingress)
 
 
 def _select_code(distance, code, layout):

@@ -27,14 +27,14 @@ def test_simulate_two_clifford_ops_end_to_end():
                            decoder=PerRoundDecoder(0.5),
                            rounds_policy=FixedRounds(11), num_units=2))
     assert isinstance(res, CompletedRun)
-    assert res.result.chip_done_ticks == 22 * 1_100_000            # 2 ops x 11 rounds, serial
-    assert res.result.fully_done_ticks > res.result.chip_done_ticks          # decode + delivery tail
+    assert res.result.execution_done_ticks == 22 * 1_100_000            # 2 ops x 11 rounds, serial
+    assert res.result.fully_done_ticks > res.result.execution_done_ticks          # decode + delivery tail
     assert set(res.window_manager.op_results) <= {0, 1}
-    assert res.chip.body_done_time[1] == res.result.chip_done_ticks
+    assert res.execution_runtime.body_done_time[1] == res.result.execution_done_ticks
     assert res.result.terminal_status == "complete"
     assert res.result.event_queue_empty
     assert res.result.decode_work_settled
-    assert res.result.chip_workload_complete
+    assert res.result.execution_workload_complete
     with pytest.raises(RuntimeError, match="completed"):
         res.engine.run()
     with pytest.raises(RuntimeError, match="completed"):
@@ -70,7 +70,7 @@ def test_simulate_blocked_t_reaction_path():
                      decoder_boundary_predecessors=(0,))]
     res = simulate(RunSpec(ops=ops, decoder=PerRoundDecoder(0.5),
                            rounds_policy=FixedRounds(11)))
-    gate = res.chip
+    gate = res.execution_runtime
     assert 1 in gate.decode_released                     # Decision released B
     assert gate.decode_release_time[1] > gate.body_done_time[0]
     assert res.window_manager.memory_rounds_total > 0        # idle rounds while blocked
@@ -95,7 +95,7 @@ def test_build_rejects_invalid_feedback_boundary_mode():
 
 def test_build_rejects_ambiguous_stream_configs():
     """Codex API review: an op in decode_ops AND dynamic_streams raised a
-    duplicate-lease crash deep in PayloadStore; now a clear validate error."""
+    duplicate-hold crash deep in syndrome retention; now a clear validate error."""
     import pytest as _pytest
     from decsim.planner import FixedRounds
     from decsim.run_spec import RunSpec

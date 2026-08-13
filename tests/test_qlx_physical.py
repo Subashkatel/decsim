@@ -655,7 +655,7 @@ def test_terminal_stream_matches_global_sample_and_decode():
     assert result.window_manager.op_results[99] == expected
     assert len(device._dets[99]) == 8
     assert result.window_manager.rounds_arrived[99] == 3
-    assert result.chip.stream_next_round[99] == 3
+    assert result.controller.stream_next_round[99] == 3
     transfers = result.result.link_traffic["transfers"]
     final_qc = [
         row for row in transfers
@@ -663,7 +663,9 @@ def test_terminal_stream_matches_global_sample_and_decode():
     ]
     final_cwd = [
         row for row in transfers
-        if row["path"] == "cwd" and row["attribution"]["round_lo"] == 3
+        if row["path"] == "cwd" and row["attribution"]["window_id"] is not None
     ]
     assert [row["payload_bits"] for row in final_qc] == [2, 3]
-    assert [row["payload_bits"] for row in final_cwd] == [5]
+    # One window-level transfer carries all three detector rounds plus the
+    # three terminal data bits retained with round 3: 2 + 2 + (2 + 3) = 9.
+    assert [row["payload_bits"] for row in final_cwd] == [9]

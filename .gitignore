@@ -40,8 +40,15 @@ docs/*
 !docs/reviews/
 !docs/pitch/
 !docs/papers/
+!docs/architecture/
+!docs/architecture/*.md
 tools/
-/tmp/
+/tmp/*
+!/tmp/validation/
+/tmp/validation/*
+!/tmp/validation/core_evidence/
+!/tmp/validation/core_evidence/*.md
+!/tmp/validation/core_evidence/*.html
 
 # Experiments: artifact dirs are small text/json — tracked for audit
 # (same review finding); anything bulky must go under a raw_big/ dir

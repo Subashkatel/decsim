@@ -162,10 +162,10 @@ def test_backlog_trajectory_measures_the_blocked_t_gate():
             make_metrics=lambda e, wm, dm, ch, f: [BacklogTrajectory(ch)],
         ), verbose=False)
     res = r.result.metric_values()["backlog_trajectory"]
-    rows = BacklogTrajectory(r.chip).rows()
+    rows = BacklogTrajectory(r.execution_runtime).rows()
     assert res["n"] == 1 and len(rows) == 1
     assert rows[0]["wait"] > 0                              # reaction is never free
-    assert rows[0]["backlog_rounds"] == rows[0]["wait"] / r.chip.round_ticks + 11
+    assert rows[0]["backlog_rounds"] == rows[0]["wait"] / r.controller.round_ticks + 11
 
 
 def test_backlog_trajectory_registration_changes_nothing():
@@ -218,7 +218,7 @@ def test_backlog_rows_cover_fan_out_gating():
             decoder=PresetLatencyDecoder(1.0),
             make_metrics=lambda e, wm, dm, ch, f: [BacklogTrajectory(ch)],
         ), verbose=False)
-    rows = BacklogTrajectory(r.chip).rows()
+    rows = BacklogTrajectory(r.execution_runtime).rows()
     assert len(rows) == 2
     assert rows[0]["wait"] == rows[1]["wait"] > 0
 
@@ -240,5 +240,5 @@ def test_backlog_rounds_use_the_ops_own_cadence():
             decoder=PresetLatencyDecoder(1.0),
             make_metrics=lambda e, wm, dm, ch, f: [BacklogTrajectory(ch)],
         ), verbose=False)
-    row = BacklogTrajectory(r.chip).rows()[0]
+    row = BacklogTrajectory(r.execution_runtime).rows()[0]
     assert row["backlog_rounds"] == row["wait"] / us(0.5) + 11

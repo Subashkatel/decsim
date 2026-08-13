@@ -14,7 +14,7 @@ Invariants checked at every event:
 And at the end of every scenario:
   - all units returned (pool_free == unit_totals),
   - every window committed exactly once,
-  - syndrome RAM fully freed (payloads_held == 0, payload_store empty).
+  - upstream syndrome RAM fully freed (no live buffer allocations).
 """
 import sys
 import pathlib
@@ -89,7 +89,7 @@ def _assert_clean(result, guard):
     assert len(window_manager.committed_windows) == window_manager.total_windows, "not every window committed"
     assert sum(window_manager._committed_per_op.values()) == window_manager.total_windows, "double commit"
     assert window_manager.payloads_held == 0, "syndrome RAM not fully freed"
-    assert not window_manager.store.backing_identities, "syndrome RAM leaked"
+    assert window_manager.syndrome_buffer.metrics().live_allocations == 0, "syndrome RAM leaked"
 
 
 def _independent_patches(n):

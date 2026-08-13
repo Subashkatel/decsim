@@ -12,7 +12,7 @@ from decsim.policies import Eager, Held
 from decsim.codes import SurfaceCodeModel
 from decsim.decoders import (PerRoundDecoder, PresetLatencyDecoder,
                              SAMPLED_CONFIDENCE_SOURCE,
-                             SampledConfidenceDecoder, SwitchingRouter)
+                             SampledConfidenceDecoder)
 from decsim.engine import Engine
 from decsim.factories import (DistillationFactory, DistillLevel,
                               InfiniteFactory, MultiLevelDistillationFactory)
@@ -32,10 +32,6 @@ from decsim.schemes import (NaiveOnlineScheme, ParallelWindowScheme,
 from decsim.switching import Baseline, Switching
 from decsim.union_find_decoder import UnionFindDecoder
 from decsim.window_interactions import DefaultWindowInteraction
-
-
-class AlternateWindowInteraction(DefaultWindowInteraction):
-    pass
 
 
 def _ops():
@@ -71,9 +67,8 @@ def test_wired_completed_run_parts_satisfy_their_ports(completed_run):
          protocols.WindowInteraction),                         # port 21
         (completed_run.decoder_manager, protocols.ResourcePool),                    # port 12
         (completed_run.decoder_manager.scheduler, protocols.Scheduler),             # port 11
-        (completed_run.chip.idle_policy, protocols.IdlePolicy),          # port 17
-        (completed_run.chip.source, protocols.SyndromeSource),                   # port 2
-        (completed_run.controller, protocols.Controller),                 # port 14
+        (completed_run.controller.idle_policy, protocols.IdlePolicy),          # port 17
+        (completed_run.syndrome_ingress, protocols.SyndromeTransport),                 # port 14
         (completed_run.orchestrator, protocols.Orchestrator),          # port 15
         (completed_run.factory, protocols.MagicStateFactory),                      # port 19
         (completed_run.window_manager.strategy,
@@ -172,4 +167,5 @@ def test_memory_model_port_observes_a_real_run():
     assert isinstance(model, protocols.MemoryModel)
     simulate(RunSpec(**_base_kwargs(), memory_model=model))
     assert model.stored                                  # observed retention
-    assert sorted(model.evicted) == sorted(model.stored)  # no leaks at end
+    from collections import Counter
+    assert Counter(model.evicted) == Counter(model.stored)  # no leaks at end

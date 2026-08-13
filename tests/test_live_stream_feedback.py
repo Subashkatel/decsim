@@ -114,13 +114,13 @@ def test_feedback_idle_rounds_extend_the_live_stream():
              ), verbose=False)
 
     cluster = result.window_manager
-    chip = result.chip
+    execution_runtime = result.execution_runtime
     caller_first, caller_second = operations
     offsets = result.result.stream_offsets()
     first_offset = offsets[caller_first.id]
     second_offset = offsets[caller_second.id]
 
-    assert chip.done_bodies == {caller_first.id, caller_second.id}
+    assert execution_runtime.done_bodies == {caller_first.id, caller_second.id}
     assert caller_first.stream_offset is None
     assert caller_second.stream_offset is None
     assert first_offset == 0
@@ -170,7 +170,7 @@ def test_feedback_idle_rounds_use_frozen_patch_cadence():
         num_units=1,
     ))
 
-    assert result.chip.idle_rounds_emitted > 0
+    assert result.controller.idle_rounds_emitted > 0
     assert layout.patch_selection_calls == 1
 
 
@@ -193,12 +193,12 @@ def test_committed_stream_round_count_releases_blocked_operation_before_stream_r
                  round_us=1.0,
              ), verbose=False)
 
-    chip = result.chip
+    execution_runtime = result.execution_runtime
     first, second = operations
 
-    assert second.id in chip.decode_release_time
-    assert chip.decode_release_time[second.id] >= chip.body_done_time[first.id]
-    assert chip.decode_release_time[second.id] < chip.body_done_time[second.id]
+    assert second.id in execution_runtime.decode_release_time
+    assert execution_runtime.decode_release_time[second.id] >= execution_runtime.body_done_time[first.id]
+    assert execution_runtime.decode_release_time[second.id] < execution_runtime.body_done_time[second.id]
 
 
 def test_exact_live_segment_publishes_complete_vector_and_releases_successor():
@@ -234,7 +234,7 @@ def test_exact_live_segment_publishes_complete_vector_and_releases_successor():
         if record["op_id"] == first.id
     )
     assert first_record["logical_observables"] == (1,)
-    assert second.id in result.chip.decode_release_time
+    assert second.id in result.execution_runtime.decode_release_time
 
 
 def test_functional_live_segment_rejects_contribution_boundary_crossing():
@@ -320,11 +320,11 @@ def test_real_syndrome_feedback_idle_rounds_extend_the_live_stream():
              ), verbose=False)
 
     cluster = result.window_manager
-    chip = result.chip
+    execution_runtime = result.execution_runtime
     caller_first, caller_second = operations
     second_offset = result.result.stream_offsets()[caller_second.id]
 
-    assert chip.done_bodies == {caller_first.id, caller_second.id}
+    assert execution_runtime.done_bodies == {caller_first.id, caller_second.id}
     assert caller_first.stream_offset is None
     assert caller_second.stream_offset is None
     assert second_offset is not None
@@ -403,16 +403,16 @@ def test_protected_region_emits_each_patch_round_until_exact_end_boundary():
     result, stream, start, source, end = _run_protected_chain(feedback=False)
     assert result.window_manager.rounds_arrived[stream.id] == 4
     assert all(result.window_manager.lifecycle.sealed(i) for i in (stream.id, 101))
-    assert result.chip.op_start_time[4] == result.chip.body_done_time[end.id]
-    cadence_ticks = result.chip.round_ticks
-    assert result.chip.op_start_time == {
+    assert result.execution_runtime.op_start_time[4] == result.execution_runtime.body_done_time[end.id]
+    cadence_ticks = result.controller.round_ticks
+    assert result.execution_runtime.op_start_time == {
         start.id: 0, source.id: cadence_ticks, end.id: 3 * cadence_ticks,
         4: 4 * cadence_ticks, 5: 5 * cadence_ticks,
     }
 
 def test_protected_region_keeps_emitting_while_feedback_is_pending():
     result, stream, _, source, end = _run_protected_chain(feedback=True)
-    cadence_ticks = result.chip.round_ticks
+    cadence_ticks = result.controller.round_ticks
     emitted_round_count = result.window_manager.rounds_arrived[stream.id]
     assert result.result.stream_offsets()[source.id] == 0
     assert result.window_manager._required_stream_end_by_operation_id == {
@@ -420,8 +420,8 @@ def test_protected_region_keeps_emitting_while_feedback_is_pending():
     }
     assert emitted_round_count > 3
     assert emitted_round_count == (
-        result.chip.body_done_time[end.id] // cadence_ticks
+        result.execution_runtime.body_done_time[end.id] // cadence_ticks
     )
-    assert result.chip.op_start_time[end.id] > (
-        result.chip.body_done_time[source.id]
+    assert result.execution_runtime.op_start_time[end.id] > (
+        result.execution_runtime.body_done_time[source.id]
     )

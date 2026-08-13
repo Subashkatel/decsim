@@ -14,6 +14,7 @@ The companion accuracy anchor (windowed LER == global LER on frozen shots)
 lives in test_golden_decoding.py on the frozen decode corpus.
 """
 import pytest
+from conftest import fixed_latency_link_config
 
 from decsim.decoders import PresetLatencyDecoder
 from decsim.frontends.circuit import CircuitFrontend
@@ -22,6 +23,7 @@ from decsim.message import Operation
 from decsim.metrics import DecodeBacklog
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec
+from decsim.config import us
 
 ROUND_US = 1.1          # today's TimingConfig round clock
 COMMIT = 3              # d=3 surface code: commit_rounds == d
@@ -40,7 +42,7 @@ def _run(rho, rounds):
     inter-arrival), backlog sampled every event by DecodeBacklog."""
     backlog = {}
 
-    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+    def make_metrics(engine, window_manager, decoder_manager, execution_runtime, factory):
         backlog["m"] = DecodeBacklog(window_manager, decoder_manager)
         return [backlog["m"]]
 
@@ -49,13 +51,16 @@ def _run(rho, rounds):
                            decoder=PresetLatencyDecoder(
                                rho * WINDOW_US - RESULT_AND_BOUNDARY_US
                            ),
-                           num_units=1, make_metrics=make_metrics))
+                           num_units=1,
+                           links=fixed_latency_link_config(
+                               cwd=0, wdo=us(1.0), dd=us(0.5)),
+                           make_metrics=make_metrics))
     return res, backlog["m"]
 
 
 def _peak_during_emission(res, metric):
-    """Peak backlog while the source is still emitting (up to chip_done)."""
-    return max((b for t, b in metric.trace if t <= res.result.chip_done_ticks), default=0)
+    """Peak backlog while the source is still emitting (up to execution_done)."""
+    return max((b for t, b in metric.trace if t <= res.result.execution_done_ticks), default=0)
 
 
 @pytest.mark.parametrize("rho", [0.8])
@@ -69,7 +74,7 @@ def test_subcritical_backlog_bounded(rho):
     assert peak_long < 10 * COMMIT
     # stable second half: the late-run peak does not exceed the mid-run peak
     # by more than one window (p99-stability proxy on the full event trace)
-    half = res_long.result.chip_done_ticks / 2
+    half = res_long.result.execution_done_ticks / 2
     mid = max(b for t, b in m_long.trace if half <= t <= 1.5 * half)
     late = max(b for t, b in m_long.trace if 1.5 * half <= t <= 2 * half)
     assert late <= mid + COMMIT
@@ -85,7 +90,7 @@ def test_supercritical_backlog_grows(rho):
     assert peak_long >= 1.6 * peak_short
     assert peak_long - peak_short >= 20            # theory: ~(1-1/rho)·rounds/2
     # monotone growth through the emission phase
-    end = res_long.result.chip_done_ticks
+    end = res_long.result.execution_done_ticks
     samples = [max((b for t, b in m_long.trace if t <= frac * end), default=0)
                for frac in (0.25, 0.5, 0.75, 1.0)]
     assert samples == sorted(samples)
@@ -96,4 +101,4 @@ def test_backlog_drains_after_emission_when_subcritical():
     res, metric = _run(0.8, rounds=200)
     # the queue empties: every arrived round is eventually decoded
     assert metric.trace[-1][1] == 0
-    assert res.result.fully_done_ticks > res.result.chip_done_ticks    # tail exists but finite
+    assert res.result.fully_done_ticks > res.result.execution_done_ticks    # tail exists but finite

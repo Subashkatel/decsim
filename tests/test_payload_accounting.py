@@ -1,10 +1,9 @@
-"""Syndrome-RAM accounting (cluster.payloads_held / peak_payloads).
+"""Upstream syndrome-buffer accounting and high-water marks.
 
-The high-water mark is a running counter on the PayloadStore: +1 when a
-payload is stored, -N when rounds/ops free. These tests check the counter
-against a ground-truth live set maintained OUTSIDE the store through the
-MemoryModel seam (port 18: store()/evict() fire on exactly the fragments the
-store retains/frees), and that the store drains to zero at completion."""
+These tests compare ``SyndromeBuffer`` counters with a ground-truth live set
+maintained through the ``MemoryModel`` seam: ``store``/``evict`` fire exactly
+for fragments that become retained or are freed, and the buffer drains at run
+completion."""
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
@@ -61,7 +60,7 @@ def test_per_window_release_holds_only_the_live_set():
     from decsim.config import us
     from decsim.codes import SurfaceCodeModel
     from conftest import fixed_latency_link_config
-    from decsim.controllers import ModularController
+    from decsim.syndrome_ingress import SyndromeIngress
     from decsim.message import DecodeResult, Operation
     from decsim.schemes import SlidingWindowScheme
 
@@ -75,9 +74,9 @@ def test_per_window_release_holds_only_the_live_set():
                                 logical_observables=(0,))
 
     def _links(engine, links, buffering, window_manager):
-        return ModularController(
+        return SyndromeIngress(
             engine, links=links, log_syndromes=False,
-            controller_capacity=buffering.controller_ingress_packet_slots,
+            ingress_context_capacity=buffering.upstream_packet_slots,
             window_input_receiver=window_manager,
             feedback_memory_receiver=window_manager)
 
@@ -92,7 +91,7 @@ def test_per_window_release_holds_only_the_live_set():
                   scheme=SlidingWindowScheme(),
                   code=SurfaceCodeModel(d=3),
                   links=fixed_latency_link_config(),
-                  make_controller=_links,
+                  make_syndrome_ingress=_links,
               ), verbose=False)
         c = res.window_manager
         assert c.payloads_held == 0            # drains fully

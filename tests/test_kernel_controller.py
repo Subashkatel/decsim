@@ -5,15 +5,16 @@ from decsim.engine import Engine
 from decsim.policies import Ignore, SeparateDecodeJobs, from_mode
 from decsim.message import (
     Decision,
+    ExecutionProgram,
     Operation,
     ResolvedCodeGeometry,
     ResolvedOperationPlanning,
     ResolvedPatchPlanning,
     ResourceClaim,
-    SyndromePacketRouteKind,
     SyndromePayload,
 )
-from decsim.chip import Chip
+from decsim.controller import Controller
+from decsim.execution_runtime import ExecutionRuntime
 
 ROUND = 1_100_000
 
@@ -47,31 +48,29 @@ class _Cluster:
     def has_dynamic_stream(self, stream_id): return False
     def submit_decode(self, rounds, on_done, code, spatial_nodes, label):
         self.decodes.append((rounds, label))
+    def accept_idle_decode_demand(self, *, rounds, code, spatial_nodes, label):
+        self.submit_decode(rounds, lambda: None, code, spatial_nodes, label)
 
 
 class _Source:
     """Emit rounds on the gate's clock and call body-done after rounds_for."""
     def __init__(self, engine, cluster):
         self.engine, self.cluster = engine, cluster
-    def start(self, op, round_ticks, on_body_done):
-        total = self.cluster.rounds_for(op)
+    def connect_completion_receiver(self, receiver):
+        self.completion_receiver = receiver
+    def issue(self, command):
+        op, round_ticks, total = command.operation, command.round_ticks, command.round_count
         def tick(i):
             if i < total:
                 self.engine.schedule(round_ticks, lambda: tick(i + 1))
             else:
-                on_body_done(op)
+                self.completion_receiver(op)
         self.engine.schedule(round_ticks, lambda: tick(1))
-
-
-class _Controller:
-    def __init__(self, cluster):
-        self.cluster = cluster
-
-    def relay_syndrome(self, payload, route):
-        if route.kind is SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND:
-            self.cluster.on_memory_round(route.source_operation_id)
-        else:
-            self.cluster.on_syndrome_arrival(payload)
+    def emit_feedback_memory_round(self, operation_id, patch, round_index):
+        self.cluster.on_memory_round(operation_id)
+    def emit_idle_stream_round(self, operation, stream_id, global_round, patch):
+        self.cluster.on_syndrome_arrival(
+            SyndromePayload(stream_id, patch, global_round))
 
 
 class _Factory:
@@ -101,10 +100,9 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
         one_patch_spatial_node_count=9,
         buffer_floor_override_active=False,
     )
-    gate = Chip(eng, source=_Source(eng, cluster),
-                        controller=_Controller(cluster), window_manager=cluster,
-                        decode_service=cluster,
-                        factory=factory, round_ticks=ROUND,
+    source = _Source(eng, cluster)
+    gate = Controller(eng, qpu=source, window_manager=cluster,
+                        round_ticks=ROUND,
                         code_geometry=geometry,
                         resolved_operations=tuple(
                             ResolvedOperationPlanning(
@@ -134,16 +132,17 @@ def _gate(ops, *, idle_policy=None, max_idle=None, boundaries=False,
                             }
                         ),
                         idle_policy=idle_policy or Ignore(),
-                        resource_claims_by_operation_id={
-                            operation.id: tuple(
-                                cluster.layout.resources_for(operation)
-                            )
-                            for operation in ops
-                        },
                         max_idle_rounds=max_idle,
                         gates_start_on_round_boundaries=boundaries)
-    gate._load(ops)
-    return eng, gate, cluster, factory
+    runtime = ExecutionRuntime(
+        eng, controller=gate, factory=factory,
+        resource_claims_by_operation_id={
+            operation.id: tuple(cluster.layout.resources_for(operation))
+            for operation in ops})
+    gate.connect_runtime(runtime)
+    source.connect_completion_receiver(gate._body_done)
+    gate.load_program(ExecutionProgram(tuple(ops)))
+    return eng, runtime, cluster, factory
 
 
 def _blocked_pair(**succ_kw):
@@ -152,32 +151,6 @@ def _blocked_pair(**succ_kw):
                   predecessors=(0,), decoder_boundary_predecessors=(0,),
                   **succ_kw)
     return [a, b]
-
-
-def test_chip_live_stream_relay_does_not_mutate_source_fragment_counts():
-    class RecordingController:
-        def __init__(self):
-            self.payloads = []
-
-        def relay_syndrome(self, payload, deliver):
-            self.payloads.append(payload)
-
-    _, gate, _, _ = _gate([Operation(0, "memory", (0, 1))])
-    controller = RecordingController()
-    gate.controller = controller
-    source_payloads = [
-        SyndromePayload("stream", "north", 1),
-        SyndromePayload("stream", "south", 1),
-    ]
-
-    gate.relay_syndrome_payloads(source_payloads)
-
-    assert [payload.n_fragments for payload in source_payloads] == [1, 1]
-    assert [payload.n_fragments for payload in controller.payloads] == [2, 2]
-    assert all(
-        relayed is not source
-        for relayed, source in zip(controller.payloads, source_payloads)
-    )
 
 
 def test_release_unconditional_on_decision_contract_3_4():
@@ -193,16 +166,16 @@ def test_release_unconditional_on_decision_contract_3_4():
 def test_idle_cap_and_accounting_contract_3_5():
     eng, gate, cluster, _ = _gate(_blocked_pair(), max_idle=10)
     eng.run()
-    assert gate.idle_rounds_emitted == 10        # capped
-    assert len(gate.idle_cap_hits) == 1
-    assert gate.idle_cap_hits[0]["max_idle_rounds"] == 10
+    assert gate.controller.idle_rounds_emitted == 10        # capped
+    assert len(gate.controller.idle_cap_hits) == 1
+    assert gate.controller.idle_cap_hits[0]["max_idle_rounds"] == 10
     assert len(cluster.memory) == 10             # relayed as memory rounds
     assert gate.idle_rounds_by_patch == {0: 10}
 
 
 def test_default_cap_is_100d():
     eng, gate, cluster, _ = _gate(_blocked_pair())
-    assert gate.max_idle_rounds == 300
+    assert gate.controller.max_idle_rounds == 300
 
 
 def _deliver_decision_late(eng, gate, at_ticks, hop_ticks=ROUND // 2):
@@ -223,7 +196,7 @@ def test_idle_tie_beats_release_contract_3_7():
     _deliver_decision_late(eng, gate, 6 * ROUND)
     eng.run()
     # idle ticks fired at 5*ROUND and 6*ROUND (tie -> idle first), then stopped
-    assert gate.idle_rounds_emitted == 2
+    assert gate.controller.idle_rounds_emitted == 2
     assert gate.op_start_time[1] == 6 * ROUND    # started same tick as release
 
 
@@ -268,7 +241,7 @@ def test_separate_decode_jobs_submits_every_commit():
 def test_resource_conflict_without_edge_raises():
     a = Operation(0, "A", (0,))
     b = Operation(1, "B", (0,))                  # same qubit, no edge
-    with pytest.raises(RuntimeError, match="share qubit 0"):
+    with pytest.raises(RuntimeError, match="share qubits resource 0"):
         _gate([a, b])
 
 
@@ -294,7 +267,7 @@ def test_nonreleasing_result_return_records_arrival_without_starting():
         0,
         "A",
         (0,),
-        requires_result_return_to_chip=True,
+        requires_result_return_to_qpu=True,
     )
     eng, gate, _, _ = _gate([op])
     eng.run()

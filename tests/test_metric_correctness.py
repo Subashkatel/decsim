@@ -5,7 +5,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from decsim.codes import SurfaceCodeModel
 from conftest import fixed_latency_link_config
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.decoder_manager import DecoderManager
 from decsim.decoders import CodeRouter, PresetLatencyDecoder
 from decsim.engine import Engine
@@ -105,7 +105,7 @@ def test_decode_backlog_summary_is_consistent_with_its_own_trace():
     Overloaded regime (f = 2) so the backlog is genuinely nonzero."""
     captured = []
 
-    def make_metrics(engine, window_manager, decoder_manager, chip, factory):
+    def make_metrics(engine, window_manager, decoder_manager, execution_runtime, factory):
         metric = DecodeBacklog(window_manager, decoder_manager)
         captured.append(metric)
         return [metric]
@@ -120,9 +120,9 @@ def test_decode_backlog_summary_is_consistent_with_its_own_trace():
         scheme=SlidingWindowScheme(),
         code=SurfaceCodeModel(d=3),
         links=fixed_latency_link_config(),
-        make_controller=lambda e, links, buffering, window_manager: ModularController(
+        make_syndrome_ingress=lambda e, links, buffering, window_manager: SyndromeIngress(
             e, links=links, log_syndromes=False,
-            controller_capacity=buffering.controller_ingress_packet_slots,
+            ingress_context_capacity=buffering.upstream_packet_slots,
             window_input_receiver=window_manager,
             feedback_memory_receiver=window_manager),
         make_metrics=make_metrics,

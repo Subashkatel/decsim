@@ -181,7 +181,7 @@ def test_multi_pool_conservation_and_work_conservation():
 
 
 def test_delayed_enqueue_conservation():
-    """enqueue(job, delay) holds the job in the weak->strong handoff link:
+    """enqueue(job, delay) holds the job in the fixed-delay decoder input link:
     neither queued nor running until the delay elapses."""
     eng = Engine(verbose=False)
     manager = DecoderManager(

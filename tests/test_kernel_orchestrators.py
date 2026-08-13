@@ -25,7 +25,7 @@ def test_timing_only_result_return_preserves_route_without_effect_state():
         "T",
         (0,),
         clifford=False,
-        requires_result_return_to_chip=True,
+        requires_result_return_to_qpu=True,
     )
 
     decisions = orchestrator.on_result(
@@ -44,7 +44,7 @@ def test_complete_functional_vector_returns_without_scalar_interpretation():
         0,
         "measurement",
         (0,),
-        requires_result_return_to_chip=True,
+        requires_result_return_to_qpu=True,
     )
 
     decisions = orchestrator.on_result(

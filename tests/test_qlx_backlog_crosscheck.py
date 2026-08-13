@@ -9,7 +9,7 @@ backlog analytically: with per-round decode latency `lat` and cycle time
 and the program's wall clock extends by stall_rounds * cycle. In decsim
 terms, a serial sliding-window chain with per-window service tau_W over
 commit regions of n_com rounds has per-round latency lat = tau_W / n_com,
-and the same quantity is the DRAIN TIME: fully_done - chip_done (decoder
+and the same quantity is the DRAIN TIME: fully_done - execution_done (decoder
 finishing after the last syndrome round was generated). The two models
 agree analytically; this test pins that the SIMULATED drain matches the
 QLX formula, and that the peak backlog matches the matching closed form
@@ -26,7 +26,7 @@ import pytest
 from decsim.codes import SurfaceCodeModel
 from conftest import fixed_latency_link_config
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.message import DecodeResult, Operation
 from decsim.metrics import DecodeBacklog
@@ -55,9 +55,9 @@ class _FixedLatencyDecoder:
 
 
 def _zero_link_controller(engine, links, buffering, window_manager):
-    return ModularController(
+    return SyndromeIngress(
         engine, links=links, log_syndromes=False,
-        controller_capacity=buffering.controller_ingress_packet_slots,
+        ingress_context_capacity=buffering.upstream_packet_slots,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager)
 
@@ -73,10 +73,10 @@ def _run(latency_us, rounds):
               scheme=SlidingWindowScheme(),
               code=SurfaceCodeModel(d=D),
               links=fixed_latency_link_config(),
-              make_controller=_zero_link_controller,
+              make_syndrome_ingress=_zero_link_controller,
               make_metrics=lambda e, wm, dm, ch, f: [DecodeBacklog(wm, dm)],
           ), verbose=False)
-    drain_rounds = (res.result.fully_done_ticks - res.result.chip_done_ticks) / us(ROUND_US)
+    drain_rounds = (res.result.fully_done_ticks - res.result.execution_done_ticks) / us(ROUND_US)
     peak = res.result.metric_values()["decode_backlog"]["peak_rounds"]
     return drain_rounds, peak
 

@@ -49,7 +49,7 @@ def _run_chain(p_escalate, seed, **overrides):
 
 def _stalls(res):
     """Inter-barrier stalls: layer i's release wait after layer i-1's body."""
-    gate = res.chip
+    gate = res.execution_runtime
     return [gate.decode_release_time[i] - gate.body_done_time[i - 1]
             for i in range(1, K) if i in gate.decode_release_time]
 
@@ -78,7 +78,7 @@ def test_escalated_chains_stall_longer_on_lambda_eff():
         stalls = _stalls(res)
         # total idle rounds EMITTED; the per-patch counter is consumed by the
         # released successor at start (Contract 3.6), so read the run total
-        idle = res.chip.idle_rounds_emitted
+        idle = res.controller.idle_rounds_emitted
         if res.window_manager.op_strong_commit_time:
             hot_stalls += stalls
             hot_idle.append(idle)
@@ -98,7 +98,7 @@ def test_idle_emission_terminates_at_max_idle_rounds():
     res = simulate(RunSpec(ops=_chain(), d=3, rounds_policy=FixedRounds(11),
                            decoder=PresetLatencyDecoder(1e5), num_units=1,
                            max_idle_rounds=cap))
-    gate = res.chip
-    assert len(gate.idle_cap_hits) == K - 1            # every blocked layer capped
-    assert gate.idle_rounds_emitted == (K - 1) * cap   # emission stopped exactly there
+    gate = res.execution_runtime
+    assert len(res.controller.idle_cap_hits) == K - 1            # every blocked layer capped
+    assert res.controller.idle_rounds_emitted == (K - 1) * cap   # emission stopped exactly there
     assert len(_stalls(res)) == K - 1                  # decode returns still release

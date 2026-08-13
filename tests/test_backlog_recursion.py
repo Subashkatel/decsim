@@ -9,7 +9,7 @@ Sec III.B): the data a patch generates WHILE WAITING for a decode must itself be
 processed before the next feedback -- so waiting creates work, which creates waiting.
 
 In decsim this emerges from one rule: a patch's idle stretch joins the next op's
-batch window (chip.idle_rounds_by_patch -> cluster.prepend_idle_rounds, honored by
+batch window (execution_runtime.idle_rounds_by_patch -> cluster.prepend_idle_rounds, honored by
 the naive operation plan's idle-batching policy). These tests pin the simulated
 r_i (BacklogTrajectory) to the closed form.
 
@@ -59,7 +59,7 @@ def _simulate(f, scheme):
             max_idle_rounds=100_000,
             make_metrics=lambda e, wm, dm, ch, fa: [BacklogTrajectory(ch)],
         ), verbose=False)
-    return BacklogTrajectory(r.chip).rows()
+    return BacklogTrajectory(r.execution_runtime).rows()
 
 
 def _formula(i, f):
@@ -135,7 +135,7 @@ def test_round_grid_mode_matches_the_strict_recursion_exactly():
     with NO tolerance at every gate:
         seg_{i+1} = (wait_i // tau_gen + 1) + rop,  wait_i = T_comm + tau_dec * seg_i
     where `// + 1` is the next-boundary rule (a release exactly ON a boundary starts
-    at the following one -- the chip's documented convention; identical to the paper's
+    at the following one -- the execution runtime's documented convention; identical to the paper's
     ceiling everywhere except exact ties). The reference uses the simulator's own tick
     arithmetic (us()), so the comparison is integers against integers."""
     g = us(TAU_GEN_US)

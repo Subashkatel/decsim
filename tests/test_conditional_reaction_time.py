@@ -46,15 +46,15 @@ def test_reaction_time_is_pure_wait_in_rounds():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
-            ConditionalReactionTime(chip),
-            BacklogTrajectory(chip),
+                 make_metrics=lambda _engine, _wm, _dm, execution_runtime, _factory: [
+            ConditionalReactionTime(execution_runtime),
+            BacklogTrajectory(execution_runtime),
         ],
              ), verbose=False)
 
     reaction = result.result.metric_values()["conditional_reaction_time"]
-    backlog_row = BacklogTrajectory(result.chip).rows()[0]
-    wait_rounds = backlog_row["wait"] / result.chip.round_ticks
+    backlog_row = BacklogTrajectory(result.execution_runtime).rows()[0]
+    wait_rounds = backlog_row["wait"] / result.controller.round_ticks
 
     assert reaction["total_conditionals"] == 1
     assert reaction["released_conditionals"] == 1
@@ -70,8 +70,8 @@ def test_reaction_time_uses_all_conditionals_as_denominator():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
-            ConditionalReactionTime(chip)
+                 make_metrics=lambda _engine, _wm, _dm, execution_runtime, _factory: [
+            ConditionalReactionTime(execution_runtime)
         ],
              ), verbose=False)
 
@@ -92,8 +92,8 @@ def test_reaction_time_marks_threshold_divergence():
                  d=3,
                  rounds_policy=FixedRounds(11),
                  decoder=PresetLatencyDecoder(1.0),
-                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
-            ConditionalReactionTime(chip, divergence_threshold_rounds=0.5)
+                 make_metrics=lambda _engine, _wm, _dm, execution_runtime, _factory: [
+            ConditionalReactionTime(execution_runtime, divergence_threshold_rounds=0.5)
         ],
              ), verbose=False)
 
@@ -106,7 +106,7 @@ def test_reaction_time_marks_threshold_divergence():
 
 
 def test_reaction_time_marks_idle_cap_failure():
-    """If the chip safety cap fires, the reaction-time run is not trustworthy."""
+    """If the execution runtime safety cap fires, the reaction-time run is not trustworthy."""
     ops = CircuitFrontend([
         Operation(0, "A:T(q0)", (0,), clifford=False, consumes_magic_state=False),
         Operation(1, "B:T(q0)", (0,), clifford=False, blocked_by=0,
@@ -121,20 +121,20 @@ def test_reaction_time_marks_idle_cap_failure():
                  scheme=NaiveOnlineScheme(),
                  decoder=_FixedLatency(50.0),
                  max_idle_rounds=1,
-                 make_metrics=lambda _engine, _wm, _dm, chip, _factory: [
-            ConditionalReactionTime(chip)
+                 make_metrics=lambda _engine, _wm, _dm, execution_runtime, _factory: [
+            ConditionalReactionTime(execution_runtime)
         ],
              ), verbose=False)
 
     reaction = result.result.metric_values()["conditional_reaction_time"]
 
-    assert result.chip.idle_cap_hits
+    assert result.controller.idle_cap_hits
     assert reaction["success"] is False
     assert reaction["failed"] is True
     assert reaction["failure_reason"] == "idle-round cap reached"
 
 
-def test_final_non_clifford_decode_does_not_return_to_chip_by_default():
+def test_final_non_clifford_decode_does_not_return_to_qpu_by_default():
     """A final T result can stay in the orchestrator unless the caller asks otherwise."""
     ops = CircuitFrontend([
         Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
@@ -149,13 +149,13 @@ def test_final_non_clifford_decode_does_not_return_to_chip_by_default():
              ), verbose=False)
 
     assert result.window_manager.windows[(0, 0)].t_done is not None
-    assert result.chip.result_return_time_by_operation == {}
+    assert result.execution_runtime.result_return_time_by_operation == {}
     assert not any("DISPATCH result return" in line
                    for line in result.engine.log_lines)
 
 
-def test_explicit_result_return_to_chip_uses_feedback_links():
-    """A marked final result returns through decoder->orchestrator->controller->chip."""
+def test_explicit_result_return_to_qpu_uses_feedback_links():
+    """A marked final result returns through decoder -> orchestrator -> controller -> QPU."""
     ops = CircuitFrontend([
         Operation(
             0,
@@ -163,7 +163,7 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
             (0,),
             clifford=False,
             consumes_magic_state=False,
-            requires_result_return_to_chip=True,
+            requires_result_return_to_qpu=True,
         ),
     ]).build()
     result = simulate(RunSpec(
@@ -175,7 +175,7 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
                  decoder=PresetLatencyDecoder(2.0),
              ), verbose=False)
 
-    controller = result.controller
+    controller = result.syndrome_ingress
     window_done = max(
         window.t_done
         for key, window in result.window_manager.windows.items()
@@ -188,8 +188,8 @@ def test_explicit_result_return_to_chip_uses_feedback_links():
         + us(0.15)  # CQ: controller-to-QPU instruction
     )
 
-    assert result.chip.decode_release_time == {}
-    assert result.chip.result_return_time_by_operation[0] == expected_return
+    assert result.execution_runtime.decode_release_time == {}
+    assert result.execution_runtime.result_return_time_by_operation[0] == expected_return
     assert result.result.fully_done_ticks == expected_return
     assert any("DISPATCH result return for op#0" in line
                for line in result.engine.log_lines)

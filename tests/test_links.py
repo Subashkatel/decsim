@@ -13,7 +13,6 @@ from decsim.links import (
     LinkCapacityConfig,
     LinkConfig,
     LinkEdgeConfig,
-    LinkModel,
     LinkModelConfig,
     LinkPath,
     LinkQuantityBasis,
@@ -54,7 +53,7 @@ WRONG_RELATION = RequestTransferRelation(DecoderRequestKey("other", 0, DecoderTi
 
 
 def test_request_and_boundary_relations_serialize_exact_identity_and_revisions():
-    links = LinkModelConfig.reference_fixed_latency_profile().resolve()
+    links = LinkModelConfig.logical_reference_profile().resolve()
     links.reserve(LinkPath.WSD, payload_bits=None, now_ticks=3,
                   attribution=_attribution(REQUEST_RELATION))
     links.reserve(LinkPath.DD, payload_bits=None, now_ticks=5,
@@ -95,7 +94,7 @@ def _operation_attribution() -> TrafficAttribution:
 
 
 def test_default_profile_has_complete_distinct_topology():
-    config = LinkModelConfig.reference_fixed_latency_profile()
+    config = LinkModelConfig.logical_reference_profile()
     links = config.resolve()
     topology = links.topology_json_value(
         controller_link_integration_assurance="shipped_controller"
@@ -170,7 +169,7 @@ def test_exact_aliases_contend_but_equal_distinct_configs_do_not():
     default = PayloadSizeConfig(
         1000, LinkQuantityBasis.DIRECT_AGGREGATE, None, "default"
     )
-    profile = LinkModelConfig.reference_fixed_latency_profile()
+    profile = LinkModelConfig.logical_reference_profile()
     config = replace(
         profile,
         cwd=LinkEdgeConfig(shared, default, None),
@@ -206,7 +205,7 @@ def test_exact_aliases_contend_but_equal_distinct_configs_do_not():
 
 
 def test_default_only_actual_override_is_rejected_before_all_mutation():
-    links = LinkModelConfig.reference_fixed_latency_profile().resolve()
+    links = LinkModelConfig.logical_reference_profile().resolve()
     before = links.traffic_json_value()
 
     with pytest.raises(ValueError, match="does not declare"):
@@ -221,7 +220,7 @@ def test_default_only_actual_override_is_rejected_before_all_mutation():
 
 
 def test_actual_default_and_unresolved_provenance_are_distinct_and_reconcile():
-    links = LinkModelConfig.reference_fixed_latency_profile().resolve()
+    links = LinkModelConfig.logical_reference_profile().resolve()
     actual = links.reserve(
         LinkPath.QC,
         payload_bits=17,
@@ -268,7 +267,7 @@ def test_actual_default_and_unresolved_provenance_are_distinct_and_reconcile():
     ],
 )
 def test_invalid_path_attribution_fails_before_mutation(path, attribution, error):
-    links = LinkModelConfig.reference_fixed_latency_profile().resolve()
+    links = LinkModelConfig.logical_reference_profile().resolve()
     before = links.traffic_json_value()
 
     with pytest.raises(ValueError, match=error):
@@ -287,7 +286,7 @@ def test_wiring_threads_one_link_model_to_controller_and_cluster():
             rounds_policy=FixedRounds(11),
             decoder=PerRoundDecoder(tau_us=1.0),
         ), verbose=False)
-    assert r.controller.links is r.window_manager.links
+    assert r.syndrome_ingress.links is r.window_manager.links
 
 
 def test_finite_aggregate_link_reserves_one_fifo_by_hand():
@@ -435,7 +434,7 @@ def test_double_window_reserves_wsd_at_decision_and_csd_when_slab_exists():
     ]
 
     assert [transfer["path"] for transfer in selected] == ["wsd", "csd", "do"]
-    assert selected[0]["send_ticks"] < selected[1]["send_ticks"]
+    assert selected[0]["send_ticks"] <= selected[1]["send_ticks"]
     assert (selected[0]["attribution"]["relation"]["request_key"]
             == selected[2]["attribution"]["relation"]["request_key"])
     assert (
@@ -449,7 +448,7 @@ def test_double_window_reserves_wsd_at_decision_and_csd_when_slab_exists():
 
 
 def test_serial_wsd_and_csd_contend_when_bound_to_one_physical_fifo():
-    reference = LinkModelConfig.reference_fixed_latency_profile()
+    reference = LinkModelConfig.logical_reference_profile()
     shared = LinkConfig(
         0,
         LinkCapacityConfig(

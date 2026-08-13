@@ -15,7 +15,7 @@ def test_tick_conversion():
 
 
 def test_link_defaults_match_today():
-    links = LinkModelConfig.reference_fixed_latency_profile()
+    links = LinkModelConfig.logical_reference_profile()
     assert links.qc.channel.propagation_latency_ticks == 150_000
     assert links.cwd.channel.propagation_latency_ticks == 2_000_000
     assert links.dd.channel.propagation_latency_ticks == 500_000

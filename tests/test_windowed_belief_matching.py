@@ -142,7 +142,7 @@ def test_engine_belief_matching_matches_offline():
     end to end -- the cluster builds both fault domains and their link explicitly."""
     from decsim.message import Operation
     from conftest import fixed_latency_link_config
-    from decsim.controllers import ModularController
+    from decsim.syndrome_ingress import SyndromeIngress
     from decsim.adapters.stim_device import StimDevice
     from decsim.detector_error_model import build_window_error_models
     from decsim.belief_matching_decoder import (BeliefMatchingDecoder,
@@ -159,9 +159,9 @@ def test_engine_belief_matching_matches_offline():
             return 1
 
     def _zero_links(engine, links, buffering, window_manager):
-        return ModularController(
+        return SyndromeIngress(
             engine, links=links, log_syndromes=False,
-            controller_capacity=buffering.controller_ingress_packet_slots,
+            ingress_context_capacity=buffering.upstream_packet_slots,
             window_input_receiver=window_manager,
             feedback_memory_receiver=window_manager)
 
@@ -198,7 +198,7 @@ def test_engine_belief_matching_matches_offline():
                   device=device,
                   decoder=BeliefMatchingDecoder(_ZeroLat()),
                   links=fixed_latency_link_config(),
-                  make_controller=_zero_links,
+                  make_syndrome_ingress=_zero_links,
                   seed=17 + s,
               ), verbose=False)
         pred_engine = res.window_manager.op_results[1]

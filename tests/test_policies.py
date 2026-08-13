@@ -338,14 +338,14 @@ def test_code_round_time_overrides_global_cadence():
     r = simulate(RunSpec(ops=_memory_op(), num_units=1, code=slow,
                          rounds_policy=FixedRounds(5), round_us=1.1,
                          decoder=PresetLatencyDecoder(0.5)), verbose=False)
-    assert r.result.chip_done_ticks == 5 * us(2.0)       # the CODE's cadence, not the global
+    assert r.result.execution_done_ticks == 5 * us(2.0)       # the CODE's cadence, not the global
 
 
 def test_global_cadence_is_default():
     r = simulate(RunSpec(ops=_memory_op(), num_units=1, d=3,
                          rounds_policy=FixedRounds(5), round_us=1.1,
                          decoder=PresetLatencyDecoder(0.5)), verbose=False)
-    assert r.result.chip_done_ticks == 5 * us(1.1)
+    assert r.result.execution_done_ticks == 5 * us(1.1)
 
 
 # ---- idle-round decoding mode (arXiv:2511.10633: memory rounds need decoding) -----------

@@ -2,7 +2,7 @@
 
 Stable metadata ordering is a decsim repository invariant implemented by
 ``stable_identity_order_key`` and already used by
-``ModularController._round_attribution``. It is not a paper-derived decoding
+``SyndromeIngress._round_attribution``. It is not a paper-derived decoding
 rule. Packet fragment order remains device/payload order.
 """
 
@@ -12,7 +12,7 @@ from decsim.codes import SurfaceCodeModel
 from decsim.decoders import PerRoundDecoder
 from decsim.devices import SyndromeBitDevice, TimingOnlyDevice
 from decsim.links import LinkPath
-from decsim.message import Operation, SyndromePayload, stable_identity_json
+from decsim.message import Operation, QPUReadout, SyndromePayload, stable_identity_json
 from decsim.planner import FixedRounds
 from decsim.run_spec import RunSpec
 from decsim.window_manager import WindowManager
@@ -24,7 +24,7 @@ class _NoSyndromePerPatchDevice(TimingOnlyDevice):
     def round_payloads(self, op, round_index):
         """Preserve operation patch order while leaving bits/size unresolved."""
         return [
-            SyndromePayload(op.id, patch, round_index)
+            QPUReadout(op.id, patch, round_index)
             for patch in op.patches
         ]
 
@@ -92,11 +92,14 @@ def test_unsorted_fragment_order_is_canonicalized_only_for_cwd_attribution(
         ]
         if transfer["path"] == LinkPath.CWD.value
     ]
-    assert len(cwd_transfers) == len(observed_packets)
+    assert len(cwd_transfers) == completed.window_manager.total_windows
     expected_patch_ids = [stable_identity_json(0), stable_identity_json(1)]
     for transfer in cwd_transfers:
         attribution = transfer["attribution"]
         assert attribution["patch_ids"] == expected_patch_ids
-        assert transfer["payload_bits"] == expected_payload_bits[
-            attribution["round_lo"]
-        ]
+        assert attribution["window_id"] is not None
+        selected = range(attribution["round_lo"], attribution["round_hi"] + 1)
+        sizes = [expected_payload_bits[index] for index in selected]
+        assert transfer["payload_bits"] == (
+            sum(sizes) if all(size is not None for size in sizes) else None
+        )

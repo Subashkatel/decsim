@@ -11,7 +11,7 @@ def fixed_latency_link_config(**path_latency_ticks):
     unknown = set(path_latency_ticks) - {path.value for path in LinkPath}
     if unknown:
         raise ValueError(f"unknown link paths: {sorted(unknown)}")
-    reference = LinkModelConfig.reference_fixed_latency_profile()
+    reference = LinkModelConfig.logical_reference_profile()
     edges = {}
     for path in LinkPath:
         edge = getattr(reference, path.value)
@@ -50,7 +50,7 @@ def _stream_operation(circuit, *, stream_id: int, patch: int, name: str) -> Oper
 
 
 def _segment_operation(circuit, *, segment_id: int, stream_id: int,
-                       segment_index: int, segment_count: int, offset: int,
+                       segment_index: int, offset: int,
                        patch: int, name: str) -> Operation:
     """Create one scheduled segment of a continuous stream."""
     predecessor = (segment_id - 1,) if segment_index > 0 else ()
@@ -79,8 +79,7 @@ def _segments_and_rounds(circuit, segment_rounds, *, stream_id: int,
         segment_id = base_id + 1 + segment_index
         segment = _segment_operation(
             circuit, segment_id=segment_id, stream_id=stream_id,
-            segment_index=segment_index, segment_count=len(segment_rounds),
-            offset=offset, patch=patch, name=name)
+            segment_index=segment_index, offset=offset, patch=patch, name=name)
         segments.append(segment)
         rounds_by_operation[segment_id] = int(rounds)
         offset += int(rounds)

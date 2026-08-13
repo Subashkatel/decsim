@@ -1,6 +1,6 @@
-"""Program-order execution (the chip's dependency-DAG release).
+"""Program-order execution (the execution runtime's dependency-DAG release).
 
-Regression for a real bug: the chip used to start an operation whenever its qubits
+Regression for a real bug: the execution runtime used to start an operation whenever its qubits
 were momentarily free (greedy busy_qubits reservation), which reordered non-commuting
 gates -- a T(q0) ran before an earlier CNOT(q0,q1) that was still waiting on q1,
 executing a physically different circuit. The fix: an op starts only when every
@@ -31,7 +31,7 @@ def _run(ops, **kw):
 def test_t_gate_waits_for_earlier_cnot_on_same_qubit():
     """The minimal reproduction of the bug. Program order on q0 is A-then-C via B's
     qubit chain: A=CNOT(1,2) holds q1; B=CNOT(0,1) must wait for A; C=T(0) comes
-    after B on q0. The greedy chip started C at t=0 (q0 momentarily free) --
+    after B on q0. The greedy execution runtime started C at t=0 (q0 momentarily free) --
     reordering non-commuting gates. C must start only after B's body is done."""
     ops = CircuitFrontend([
         Operation(0, "A:CNOT(q1,q2)", (1, 2), clifford=True),
@@ -60,7 +60,7 @@ def test_order_holds_under_heterogeneous_durations():
 def test_brickwork_with_t_keeps_program_order():
     """The shape that exposed the bug at scale: brickwork layers + a T on q0. The
     universal invariant: EVERY op starts at-or-after EVERY one of its predecessors'
-    bodies finished. (On the greedy chip, L2:CNOT(q0,q1) jumped ahead of
+    bodies finished. (On the greedy execution runtime, L2:CNOT(q0,q1) jumped ahead of
     L1:CNOT(q1,q2) -- same-qubit ops reordered -- which this catches.)"""
     ops, oid = [], 0
     for layer in range(4):
@@ -82,7 +82,7 @@ def test_brickwork_with_t_keeps_program_order():
 def test_unwired_conflicting_ops_fail_loudly():
     """The busy_qubits invariant: ops sharing a qubit WITHOUT a dependency edge
     (someone skipped _wire_circuit) must raise, not silently serialize or overlap.
-    Enforced by the chip's live resource owner before either operation starts."""
+    Enforced by the execution runtime's live resource owner before either operation starts."""
     ops = [Operation(0, "A:X(q0)", (0,), clifford=True),
            Operation(1, "B:X(q0)", (0,), clifford=True)]   # deliberately NOT wired
     with pytest.raises(RuntimeError, match="share"):
@@ -91,7 +91,7 @@ def test_unwired_conflicting_ops_fail_loudly():
 
 
 def test_raw_op_listing_same_qubit_twice_names_the_real_problem():
-    """An unwired op like X(q0,q0) reaching the chip directly must be diagnosed as a
+    """An unwired op like X(q0,q0) reaching the execution runtime directly must be diagnosed as a
     malformed op, not blamed on missing wiring."""
     ops = [Operation(0, "X(q0,q0)", (0, 0), clifford=True)]   # bypasses the frontends
     with pytest.raises(RuntimeError, match="more than once"):

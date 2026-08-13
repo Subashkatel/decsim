@@ -1,6 +1,6 @@
 """Topology is the link matrix, not the component graph.
 
-The same engine models a distributed data center (DecLat: chip -> controller ->
+The same engine models a distributed data center (DecLat: QPU -> controller ->
 decoder cluster -> a SEPARATE orchestrator/HPC node -> back) and a single fused
 control system (Rigetti arXiv:2410.05202: the FPGA decoder lives inside the
 control box; there is no separate orchestrator). The difference is ONLY the seven
@@ -18,10 +18,10 @@ These tests assert the two consequences that make the fused model honest:
     feedback" number is a labelling choice, not a timing change);
   - zero hops add exactly nothing (fused == the bare decode/round timeline).
 """
-from conftest import fixed_latency_link_config, trace_time  # noqa: F401
+from conftest import fixed_latency_link_config
 
 from decsim.config import us
-from decsim.controllers import ModularController
+from decsim.syndrome_ingress import SyndromeIngress
 from decsim.detector_error_model import NO_FAULT_MODEL_REQUIRED
 from decsim.frontends.circuit import CircuitFrontend
 from decsim.message import DecodeResult, Operation
@@ -46,9 +46,9 @@ class _FixedLatency:
 
 
 def _controller(engine, links, buffering, window_manager):
-    return ModularController(
+    return SyndromeIngress(
         engine, links=links, log_syndromes=False,
-        controller_capacity=buffering.controller_ingress_packet_slots,
+        ingress_context_capacity=buffering.upstream_packet_slots,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager)
 
@@ -77,21 +77,20 @@ def _first_round_arrival(t_qc, t_cwd):
               round_us=1.0,
               decoder=_FixedLatency(1.0),
               links=_links(t_qc=t_qc, t_cwd=t_cwd),
-              make_controller=_controller,
+              make_syndrome_ingress=_controller,
           ), verbose=False)
     return res.window_manager.windows[(0, 0)].t_first_round
 
 
-def test_forward_latency_is_additive_and_split_invariant():
-    """Forward path (qpu -> decoder): the round arrives at production + (t_qc+t_cd),
-    independent of how the 1.4 us is split between the two hops; zero adds nothing."""
-    split_all_qc = _first_round_arrival(1.4, 0.0)
-    split_all_cd = _first_round_arrival(0.0, 1.4)
-    split_even = _first_round_arrival(0.7, 0.7)
-    assert split_all_qc == split_all_cd == split_even        # split-invariant
-
-    fused = _first_round_arrival(0.0, 0.0)                    # no transmission at all
-    assert split_all_qc == fused + us(1.4)                    # exactly additive
+def test_upstream_retained_arrival_owns_only_qc_latency():
+    """CWD is now window input materialization, not per-round retention."""
+    all_qc = _first_round_arrival(1.4, 0.0)
+    all_cwd = _first_round_arrival(0.0, 1.4)
+    even = _first_round_arrival(0.7, 0.7)
+    fused = _first_round_arrival(0.0, 0.0)
+    assert all_qc == fused + us(1.4)
+    assert even == fused + us(0.7)
+    assert all_cwd == fused
 
 
 def _decode_release(t_wdo, t_oc, t_cq):
@@ -111,9 +110,9 @@ def _decode_release(t_wdo, t_oc, t_cq):
               decoder=_FixedLatency(1.0),
               scheme=NaiveOnlineScheme(),
               links=_links(t_wdo=t_wdo, t_oc=t_oc, t_cq=t_cq),
-              make_controller=_controller,
+              make_syndrome_ingress=_controller,
           ), verbose=False)
-    return res.chip.decode_release_time[1], res.window_manager.windows[(0, 0)].t_done
+    return res.execution_runtime.decode_release_time[1], res.window_manager.windows[(0, 0)].t_done
 
 
 def test_feedback_latency_is_additive_and_split_invariant():

@@ -128,6 +128,8 @@ class Engine:
             raise TypeError("metric name must be a nonempty Unicode scalar string")
         if type(version) is not int or version < 1:
             raise TypeError("metric result_schema_version must be a positive built-in int")
+        if any(existing.name == name for existing in self.metrics):
+            raise ValueError(f"metric name {name!r} is already registered")
         self._invoke_metric_callback(
             lambda: metric.observe(self), callback_kind="initial observation"
         )
@@ -170,13 +172,8 @@ class Engine:
             for metric in self.metrics
         }
 
-    def run(self, until: Optional[int] = None) -> None:
-        """Run until the event queue is empty or the optional time limit is reached.
-
-        Events at exactly ``until`` still fire; if later events remain, the
-        clock is left at ``until`` so a follow-up run() resumes from there.
-        A limit before the current clock raises ``ValueError`` without
-        changing simulation state."""
+    def run(self) -> None:
+        """Run until the event queue is empty."""
         self._raise_if_failed("run")
         if self._phase == "construction":
             raise RuntimeError(
@@ -187,18 +184,8 @@ class Engine:
             raise RuntimeError(
                 f"engine cannot run while {self._phase}"
             )
-        if until is not None and until < self.now:
-            raise ValueError(
-                f"run limit {until} is before current simulation time {self.now}"
-            )
         self._observe_metrics()
         while self._event_queue:
-            next_event_time = self._event_queue[0].time
-            if until is not None and next_event_time > until:
-                self.now = until
-                self._observe_metrics()
-                break
-
             event = heapq.heappop(self._event_queue)
             if event.time < self.now:
                 raise ValueError(f"Event scheduled in the past: {event} "

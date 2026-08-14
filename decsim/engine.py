@@ -27,12 +27,7 @@ class Event:
 class Engine:
     """A minimal discrete event simulator: a clock plus a priority queue of events."""
 
-    def __init__(
-        self,
-        verbose: bool = True,
-        *,
-        construction_guarded: bool = False,
-    ):
+    def __init__(self, verbose: bool = True):
         """Create an empty simulator with the clock at zero."""
         self.now: int = 0
         self._event_queue: list[Event] = []
@@ -40,8 +35,7 @@ class Engine:
         self.verbose = verbose
         self.log_lines: list[str] = []
         self.metrics: list = []
-        self.log_sink = None
-        self._phase = "construction" if construction_guarded else "open"
+        self._phase = "construction"
         self._failure_cause: Optional[BaseException] = None
         self._event_action_in_progress = False
         self._metric_callback_in_progress = False
@@ -97,6 +91,8 @@ class Engine:
             raise RuntimeError(
                 f"engine cannot schedule events while {self._phase}"
             )
+        if type(delay) is not int:
+            raise TypeError("event delay must be a built-in int")
         if delay < 0:
             raise ValueError(
                 f"Cannot schedule an event in the past delay={delay} "
@@ -108,8 +104,6 @@ class Engine:
         """Store one timestamped log line and print it when verbose."""
         line = f"[{fmt(self.now)}] {who}: {msg}"
         self.log_lines.append(line)
-        if self.log_sink is not None:
-            self.log_sink(line)
         if self.verbose:
             print(line)
 
@@ -176,14 +170,13 @@ class Engine:
         """Run until the event queue is empty."""
         self._raise_if_failed("run")
         if self._phase == "construction":
-            raise RuntimeError(
-                "engine construction is guarded until run-seed binding "
-                "finishes"
-            )
+            raise RuntimeError("engine cannot run during construction")
         if self._phase in ("finalizing", "completed"):
             raise RuntimeError(
                 f"engine cannot run while {self._phase}"
             )
+        if self._event_action_in_progress or self._metric_callback_in_progress:
+            raise RuntimeError("engine may run only at a stable boundary")
         self._observe_metrics()
         while self._event_queue:
             event = heapq.heappop(self._event_queue)

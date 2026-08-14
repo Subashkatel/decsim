@@ -133,7 +133,7 @@ class RunSpec:
             raise RuntimeError(f"RunSpec build is already {self._build_state}")
         self._build_state = "committing"
         from .engine import Engine
-        engine = Engine(verbose=verbose, construction_guarded=True)
+        engine = Engine(verbose=verbose)
         try:
             root_seed = _root_seed(self.seed)
             completed = self._build_once(engine, root_seed)

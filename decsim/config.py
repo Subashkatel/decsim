@@ -31,14 +31,10 @@ class TimingConfig:
             ("t_binary_availability_us", self.t_binary_availability_us),
             ("t_pack_us", self.t_pack_us),
         ):
-            if type(value) not in (int, float):
-                raise TypeError(f"{name} must be a built-in int or float")
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be a finite nonnegative number")
             if value > 0 and us(value) == 0:
                 raise ValueError(f"{name} is positive but rounds to zero ticks")
-        if us(self.round_us) < 1:
-            raise ValueError("round_us must be at least one tick")
 
     def ticks(self, name: str) -> int:
         """Return one named non-link timing quantity in integer ticks."""
@@ -46,11 +42,4 @@ class TimingConfig:
             "t_binary_availability": self.t_binary_availability_us,
             "t_pack": self.t_pack_us,
         }
-        try:
-            return us(values[name])
-        except KeyError:
-            raise ValueError(f"unknown non-link timing quantity {name!r}") from None
-
-    @property
-    def round_ticks(self) -> int:
-        return us(self.round_us)
+        return us(values[name])

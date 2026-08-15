@@ -21,6 +21,7 @@ from .detector_chronology import (
     resolve_detector_rounds,
 )
 from .window_placement import (
+    WindowPlacementContext,
     _detectors_in_window,
     _local_physical_to_graphlike_detector_projection,
     _placed_faults_for_window,
@@ -96,14 +97,20 @@ class WindowSlicer:
             for detector_id in rows
             if self.round_of[detector_id] < commit_lo
         }
+        context = WindowPlacementContext(
+            rows=rows,
+            row_index=row_index,
+            lead_rows=lead_rows,
+            round_of=self.round_of,
+            n_obs=self.n_obs,
+            commit_lo=commit_lo,
+            commit_hi=commit_hi,
+            is_last=is_last,
+        )
         placed = {
             representation: _placed_faults_for_window(
                 catalog=catalog,
-                rows=rows,
-                row_index=row_index,
-                lead_rows=lead_rows,
-                n_obs=self.n_obs,
-                round_of=self.round_of,
+                context=context,
                 committed_elsewhere=self.committed_elsewhere[representation],
                 explicitly_owned_faults=(
                     None
@@ -116,9 +123,6 @@ class WindowSlicer:
                     else explicitly_prior_faults[representation]
                 ),
                 fault_exclusion_ranges=fault_exclusion_ranges,
-                commit_lo=commit_lo,
-                commit_hi=commit_hi,
-                is_last=is_last,
             )
             for representation, catalog in self.catalogs.items()
         }

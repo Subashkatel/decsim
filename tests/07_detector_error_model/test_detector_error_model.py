@@ -1201,14 +1201,25 @@ def test_detector_position_in_round_uses_ascending_detector_id():
 
 def test_coordinates_for_rows_are_all_or_nothing():
     """Window coordinates are returned only when every row has coordinates, otherwise nothing."""
-    complete = coordinate_circuit({0: [0.0, 0.0], 1: [1.0, 2.0]})
+    complete = {0: [0.0, 0.0], 1: [1.0, 2.0]}
     assert detector_chronology._coordinates_for_rows(complete, [0, 1]) == (
         (0.0, 0.0),
         (1.0, 2.0),
     )
-    partial = coordinate_circuit({0: [0.0, 0.0], 1: []})
+    partial = {0: [0.0, 0.0], 1: []}
     assert detector_chronology._coordinates_for_rows(partial, [0, 1]) is None
     assert detector_chronology._coordinates_for_rows(partial, [0]) == ((0.0, 0.0),)
+    assert detector_chronology._coordinates_for_rows(partial, [0, 7]) is None
+
+
+def test_coordinates_for_rows_are_normalized_to_float_tuples():
+    """Row coordinates are copied out of the mapping as nested tuples of built-in floats."""
+    integer_valued = {0: [1, 2, 3], 1: (4, 5, 6)}
+    normalized = detector_chronology._coordinates_for_rows(integer_valued, [1, 0])
+    assert normalized == ((4.0, 5.0, 6.0), (1.0, 2.0, 3.0))
+    assert type(normalized) is tuple
+    assert all(type(row) is tuple for row in normalized)
+    assert all(type(value) is float for row in normalized for value in row)
 
 
 # --------------------------------------------------------------------------
@@ -1646,6 +1657,42 @@ def test_empty_column_selection_is_not_rejected():
 # --------------------------------------------------------------------------
 
 
+def test_detector_coordinates_are_queried_once_at_construction_and_never_requeried():
+    """The slicer takes the coordinate map once when it is built, keeps that object, and slices without touching the circuit again."""
+    returned_maps = []
+
+    class RecordingCircuit(FakeCircuit):
+        def get_detector_coordinates(self):
+            coordinates = super().get_detector_coordinates()
+            returned_maps.append(coordinates)
+            return coordinates
+
+    circuit = RecordingCircuit(
+        detector_count=4,
+        observable_count=1,
+        detector_coordinates={
+            detector_id: [0.0, float(detector_id)] for detector_id in range(4)
+        },
+        decomposed_model=make_model(CHAIN_ERROR_ROWS),
+    )
+    slicer = window_slicer.WindowSlicer(
+        circuit,
+        round_count=CHAIN_ROUND_COUNT,
+        detector_rounds=dict(CHAIN_DETECTOR_ROUNDS),
+        fault_model_requirement=GRAPHLIKE_REQUIREMENT,
+    )
+    assert circuit.accessed_names.count("get_detector_coordinates") == 1
+    assert len(returned_maps) == 1
+    assert slicer.detector_coordinates is returned_maps[0]
+
+    first = slicer.slice_window(1, 1, 2, 2, is_last=False)
+    second = slicer.slice_window(3, 3, 4, 4, is_last=True)
+    assert circuit.accessed_names.count("get_detector_coordinates") == 1
+    assert slicer.detector_coordinates is returned_maps[0]
+    assert first.detector_coordinates == ((0.0, 0.0), (0.0, 1.0))
+    assert second.detector_coordinates == ((0.0, 2.0), (0.0, 3.0))
+
+
 def test_slicer_holds_one_operation_state():
     """The slicer holds one operation's catalogs, chronology, positions and per-domain commitment state."""
     circuit = chain_circuit()
@@ -1655,7 +1702,10 @@ def test_slicer_holds_one_operation_state():
         detector_rounds=dict(CHAIN_DETECTOR_ROUNDS),
         fault_model_requirement=GRAPHLIKE_REQUIREMENT,
     )
-    assert slicer.circuit is circuit
+    assert not hasattr(slicer, "circuit")
+    assert slicer.detector_coordinates == {
+        detector_id: [0.0, float(detector_id)] for detector_id in range(4)
+    }
     assert set(slicer.catalogs) == {GRAPHLIKE}
     assert slicer.catalog_link is None
     assert slicer.n_obs == 1

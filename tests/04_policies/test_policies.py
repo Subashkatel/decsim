@@ -1,0 +1,445 @@
+from types import SimpleNamespace
+
+import pytest
+
+from decsim import policies
+from decsim.controller import Controller
+from decsim.message import RunSeedReservation, SoftOutputSource
+from decsim.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
+from decsim.protocols import BoundaryPolicy, IdlePolicy
+from decsim.run_spec import RunSpec
+from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
+from decsim.speculative_recovery import SpeculativeRecovery
+from decsim.switching import Baseline, Switching
+
+
+class ExternalBoundaryPolicy:
+    def on_commit(self, window, *, final):
+        return final
+
+
+class ExternalIdlePolicy:
+    def __init__(self, mode="external"):
+        self.mode = mode
+        self.calls = []
+
+    def account(self, idle_rounds, op):
+        self.calls.append((idle_rounds, op))
+        return object()
+
+
+class EngineProbe:
+    def __init__(self):
+        self.now = 0
+        self.scheduled = []
+        self.logs = []
+
+    def schedule(self, delay, action, **metadata):
+        self.scheduled.append((delay, action, metadata))
+
+    def log(self, owner, text):
+        self.logs.append((owner, text))
+
+
+class QPUProbe:
+    def __init__(self):
+        self.feedback_rounds = []
+        self.stream_rounds = []
+
+    def emit_feedback_memory_round(self, operation_id, patch, round_index):
+        self.feedback_rounds.append((operation_id, patch, round_index))
+
+    def emit_idle_stream_round(self, operation, stream_id, round_index, patch):
+        self.stream_rounds.append((operation, stream_id, round_index, patch))
+
+
+class WindowManagerProbe:
+    def __init__(self, live_streams=()):
+        self.live_streams = set(live_streams)
+        self.idle_demands = []
+
+    def has_dynamic_stream(self, stream_id):
+        return stream_id in self.live_streams
+
+    def accept_idle_decode_demand(self, **demand):
+        self.idle_demands.append(demand)
+
+
+class RuntimeProbe:
+    def __init__(self):
+        self.operations = {7: SimpleNamespace(id=7, name="logical-cnot")}
+        self.idle_rounds_by_patch = {}
+        self.waiting = True
+        self.boundary_starts = []
+
+    def waiting_blocked_successor(self, operation_id):
+        return self.waiting
+
+    def start_released_successors_on_boundary(self, operation_id, patch):
+        self.boundary_starts.append((operation_id, patch))
+
+
+def make_controller(idle_policy, *, live_streams=(), max_idle_rounds=5):
+    geometry = SimpleNamespace(
+        distance=3,
+        commit_round_count=2,
+        buffer_round_count=1,
+        code_name="surface-code",
+    )
+    patch = SimpleNamespace(
+        patch_identity="patch-a",
+        round_ticks=11,
+        code_geometry=geometry,
+        spatial_node_count=17,
+    )
+    engine = EngineProbe()
+    qpu = QPUProbe()
+    window_manager = WindowManagerProbe(live_streams)
+    controller = Controller(
+        engine,
+        qpu=qpu,
+        window_manager=window_manager,
+        round_ticks=11,
+        code_geometry=geometry,
+        resolved_operations=(),
+        resolved_patches=(patch,),
+        idle_policy=idle_policy,
+        max_idle_rounds=max_idle_rounds,
+    )
+    controller.runtime = RuntimeProbe()
+    return controller, engine, qpu, window_manager
+
+
+def switching_source():
+    return SoftOutputSource(
+        method="matching-gap",
+        cluster_origin="decoder",
+        growth_schedule="uniform",
+        gap_units="natural-log",
+        correction="minimum-weight",
+        weight_step_natural_log=1.0,
+        references=(),
+    )
+
+
+def test_boundary_policies_decide_without_argument_validation():
+    """Boundary policies accept unchecked inputs and make their documented commit decisions."""
+    falsey_final = []
+    truthy_final = object()
+    unchecked_window = object()
+
+    assert Eager().on_commit(unchecked_window, final=False) is True
+    assert Eager().on_commit(unchecked_window, final=True) is True
+    assert Eager().on_commit(unchecked_window, final=falsey_final) is True
+    assert Eager().on_commit(unchecked_window, final=truthy_final) is True
+    assert Held().on_commit(unchecked_window, final=False) is False
+    assert Held().on_commit(unchecked_window, final=True) is True
+    assert Held().on_commit(unchecked_window, final=falsey_final) is falsey_final
+    assert Held().on_commit(unchecked_window, final=truthy_final) is truthy_final
+
+
+def test_recovery_uses_optional_speculation_and_skips_inert_cases():
+    """Recovery honors an eager request while treating an absent request and inert cones as false."""
+    job = SimpleNamespace(op_id=4, window_id=2)
+
+    class InteractionProbe:
+        def __init__(self, fail_on_call=False):
+            self.fail_on_call = fail_on_call
+            self.invalidated_keys = []
+
+        def invalidated_windows(self, key, windows):
+            if self.fail_on_call:
+                raise AssertionError("inert recovery inspected the interaction")
+            self.invalidated_keys.append(key)
+            return ()
+
+    held_runtime = SimpleNamespace(
+        boundary_policy=Held(),
+        window_interaction=InteractionProbe(fail_on_call=True),
+    )
+    held_runtime._window_infos = lambda: {}
+    SpeculativeRecovery(held_runtime, double_window=False).begin(job, object())
+
+    eager_interaction = InteractionProbe()
+    eager_runtime = SimpleNamespace(
+        boundary_policy=Eager(),
+        window_interaction=eager_interaction,
+        windows={(4, 2): SimpleNamespace(dependents=[])},
+    )
+    eager_runtime._window_infos = lambda: {}
+    recovery = SpeculativeRecovery(eager_runtime, double_window=False)
+    recovery.begin(job, object())
+
+    double_runtime = SimpleNamespace(
+        boundary_policy=Eager(),
+        window_interaction=InteractionProbe(fail_on_call=True),
+    )
+    double_runtime._window_infos = lambda: {}
+    SpeculativeRecovery(double_runtime, double_window=True).begin(job, object())
+
+    assert Eager.speculative is True
+    assert eager_interaction.invalidated_keys == [(4, 2)]
+    assert not recovery.has_finality_blockers
+
+
+def test_idle_policy_modes_and_accounts_are_stateless_no_ops():
+    """Built-in idle accounts accept arbitrary values, return nothing, and mutate no state."""
+    policy_modes = (
+        (Ignore(), "ignore"),
+        (ExtendStream(), "extend_stream"),
+        (SeparateDecodeJobs(), "separate_decode_jobs"),
+    )
+    operation = {"history": []}
+
+    for policy, expected_mode in policy_modes:
+        assert policy.mode == expected_mode
+        assert policy.account(object(), operation) is None
+        assert vars(policy) == {}
+    assert operation == {"history": []}
+    assert vars(Eager()) == {}
+    assert vars(Held()) == {}
+
+
+def test_builtin_and_external_policies_satisfy_runtime_protocols():
+    """Built-in and structurally compatible external objects satisfy the runtime policy protocols."""
+    for boundary_policy in (Eager(), Held(), ExternalBoundaryPolicy()):
+        assert isinstance(boundary_policy, BoundaryPolicy)
+    for idle_policy in (
+        Ignore(),
+        ExtendStream(),
+        SeparateDecodeJobs(),
+        ExternalIdlePolicy(),
+    ):
+        assert isinstance(idle_policy, IdlePolicy)
+
+
+def test_runspec_builds_fresh_policy_defaults():
+    """Each run with omitted policies receives fresh eager and ignore defaults."""
+    first = RunSpec(ops=[]).build()
+    second = RunSpec(ops=[]).build()
+
+    assert isinstance(first.window_manager.boundary_policy, Eager)
+    assert isinstance(first.controller.idle_policy, Ignore)
+    assert isinstance(second.window_manager.boundary_policy, Eager)
+    assert isinstance(second.controller.idle_policy, Ignore)
+    assert first.window_manager.boundary_policy is not second.window_manager.boundary_policy
+    assert first.controller.idle_policy is not second.controller.idle_policy
+
+
+def test_runspec_preserves_truthy_custom_policies_on_independent_axes():
+    """RunSpec preserves truthy custom policies and wires the two axes independently."""
+    boundary_policy = ExternalBoundaryPolicy()
+    boundary_run = RunSpec(ops=[], boundary_policy=boundary_policy).build()
+    idle_policy = ExternalIdlePolicy()
+    idle_run = RunSpec(ops=[], idle_policy=idle_policy).build()
+
+    assert boundary_run.window_manager.boundary_policy is boundary_policy
+    assert isinstance(boundary_run.controller.idle_policy, Ignore)
+    assert idle_run.controller.idle_policy is idle_policy
+    assert isinstance(idle_run.window_manager.boundary_policy, Eager)
+
+
+def test_policy_module_has_no_registry_or_string_selector():
+    """The policy module exposes neither a built-in registry nor a string selector."""
+    assert not hasattr(policies, "MODES")
+    assert not hasattr(policies, "from_mode")
+
+
+def test_switching_validates_builtin_boundary_contexts():
+    """Switching rejects shipped boundary choices that conflict with dynamic or double windows."""
+    scheme = SlidingWindowScheme(
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    )
+    common = {
+        "scheme": scheme,
+        "static_decode_plan_selected": False,
+        "has_frontend": False,
+    }
+    switching = Switching(1.0, switching_source())
+
+    with pytest.raises(ValueError, match="static.*replay cone"):
+        switching.validate_declared_run(
+            boundary_policy=Eager(), has_dynamic_streams=True, **common
+        )
+    switching.validate_declared_run(
+        boundary_policy=Held(), has_dynamic_streams=True, **common
+    )
+
+    double_window_switching = Switching(
+        1.0, switching_source(), double_window=True
+    )
+    with pytest.raises(ValueError, match="Held boundary policy"):
+        double_window_switching.validate_declared_run(
+            boundary_policy=Held(), has_dynamic_streams=False, **common
+        )
+
+    Baseline().validate_declared_run(
+        boundary_policy=Eager(), has_dynamic_streams=True, **common
+    )
+    Baseline().validate_declared_run(
+        boundary_policy=Held(), has_dynamic_streams=True, **common
+    )
+
+
+def test_controller_routes_extend_stream_by_exact_mode_string():
+    """An exact extend-stream mode routes idle data into an existing live stream."""
+    idle_policy = ExternalIdlePolicy(mode="extend_stream")
+    controller, _, qpu, _ = make_controller(
+        idle_policy, live_streams=("stream-a",)
+    )
+    operation = controller.runtime.operations[7]
+    controller._stream_binding_by_operation_id[7] = SimpleNamespace(
+        stream_id="stream-a"
+    )
+
+    controller._relay_idle_round(7, "patch-a", 9)
+
+    assert qpu.feedback_rounds == []
+    assert qpu.stream_rounds == [(operation, "stream-a", 1, "patch-a")]
+    assert controller.stream_next_round == {"stream-a": 1}
+
+
+def test_controller_falls_back_without_a_live_stream():
+    """Extend-stream mode falls back to memory rounds without creating or reopening a stream."""
+    unbound, _, unbound_qpu, _ = make_controller(
+        ExternalIdlePolicy(mode="extend_stream"), live_streams=("stream-a",)
+    )
+    unbound._relay_idle_round(7, "patch-a", 3)
+
+    closed, _, closed_qpu, window_manager = make_controller(
+        ExternalIdlePolicy(mode="extend_stream")
+    )
+    closed._stream_binding_by_operation_id[7] = SimpleNamespace(
+        stream_id="stream-a"
+    )
+    closed._relay_idle_round(7, "patch-a", 4)
+
+    assert unbound_qpu.feedback_rounds == [(7, "patch-a", 3)]
+    assert closed_qpu.feedback_rounds == [(7, "patch-a", 4)]
+    assert unbound.stream_next_round == {}
+    assert closed.stream_next_round == {}
+    assert window_manager.live_streams == set()
+
+
+def test_controller_submits_only_complete_separate_idle_jobs():
+    """Separate mode emits memory rounds and submits load-only jobs only at complete increments."""
+    controller, _, qpu, window_manager = make_controller(
+        ExternalIdlePolicy(mode="separate_decode_jobs")
+    )
+
+    controller._relay_idle_round(7, "patch-a", 2)
+    for round_index in (1, 2, 3, 4, 5):
+        controller._submit_idle_decode_if_due(7, "patch-a", round_index)
+
+    assert qpu.feedback_rounds == [(7, "patch-a", 2)]
+    assert window_manager.idle_demands == [
+        {
+            "rounds": 3,
+            "code": "surface-code",
+            "spatial_nodes": 17,
+            "label": "mem(logical-cnot,r2)",
+        },
+        {
+            "rounds": 3,
+            "code": "surface-code",
+            "spatial_nodes": 17,
+            "label": "mem(logical-cnot,r4)",
+        },
+    ]
+
+
+def test_controller_treats_other_modes_as_ordinary_memory_rounds():
+    """Every other mode uses ordinary memory routing without synthetic decode demand."""
+    controller, _, qpu, window_manager = make_controller(
+        ExternalIdlePolicy(mode="future-mode"), live_streams=("stream-a",)
+    )
+    controller._stream_binding_by_operation_id[7] = SimpleNamespace(
+        stream_id="stream-a"
+    )
+
+    controller._relay_idle_round(7, "patch-a", 2)
+    controller._submit_idle_decode_if_due(7, "patch-a", 2)
+
+    assert qpu.feedback_rounds == [(7, "patch-a", 2)]
+    assert qpu.stream_rounds == []
+    assert window_manager.idle_demands == []
+
+
+def test_controller_accounts_only_successfully_emitted_idle_rounds():
+    """Controller accounts once after emission and skips accounting after feedback clears or the cap hits."""
+    idle_policy = ExternalIdlePolicy(mode="ignore")
+    controller, engine, qpu, _ = make_controller(
+        idle_policy, max_idle_rounds=1
+    )
+    controller._patches_emitting.add("patch-a")
+
+    controller._emit_idle_round(7, "patch-a", 1)
+    controller.runtime.waiting = False
+    controller._patches_emitting.add("patch-a")
+    controller._emit_idle_round(7, "patch-a", 2)
+    controller.runtime.waiting = True
+    controller._patches_emitting.add("patch-a")
+    controller._emit_idle_round(7, "patch-a", 2)
+
+    operation = controller.runtime.operations[7]
+    assert qpu.feedback_rounds == [(7, "patch-a", 1)]
+    assert idle_policy.calls == [(1, operation)]
+    assert controller.runtime.idle_rounds_by_patch == {"patch-a": 1}
+    assert controller.idle_rounds_emitted == 1
+    assert controller.runtime.boundary_starts == [(7, "patch-a")]
+    assert len(engine.scheduled) == 1
+    assert controller.idle_cap_hits == [
+        {
+            "time": 0,
+            "op_id": 7,
+            "patch": "patch-a",
+            "round_index": 2,
+            "max_idle_rounds": 1,
+        }
+    ]
+    assert "patch-a" not in controller._patches_emitting
+
+
+def test_run_seed_binding_uses_distinct_policy_paths():
+    """Boundary and idle consumers reserve distinct derived seeds before either commits."""
+    events = []
+
+    class SeededBoundary(ExternalBoundaryPolicy):
+        def reserve_run_seed(self, seed):
+            events.append(("reserve", "boundary", seed))
+            return RunSeedReservation("derived", seed, None)
+
+        def commit_run_seed(self, reservation):
+            events.append(("commit", "boundary", reservation.proposed_seed))
+
+        def cancel_run_seed(self, reservation):
+            events.append(("cancel", "boundary", reservation.proposed_seed))
+
+    class SeededIdle(ExternalIdlePolicy):
+        def reserve_run_seed(self, seed):
+            events.append(("reserve", "idle", seed))
+            return RunSeedReservation("derived", seed, None)
+
+        def commit_run_seed(self, reservation):
+            events.append(("commit", "idle", reservation.proposed_seed))
+
+        def cancel_run_seed(self, reservation):
+            events.append(("cancel", "idle", reservation.proposed_seed))
+
+    boundary_policy = SeededBoundary()
+    idle_policy = SeededIdle()
+    completed = RunSpec(
+        ops=[],
+        boundary_policy=boundary_policy,
+        idle_policy=idle_policy,
+        seed=23,
+    ).build()
+
+    assert completed.window_manager.boundary_policy is boundary_policy
+    assert completed.controller.idle_policy is idle_policy
+    assert [event[0] for event in events] == [
+        "reserve", "reserve", "commit", "commit"
+    ]
+    reserved = {owner: seed for action, owner, seed in events if action == "reserve"}
+    assert set(reserved) == {"boundary", "idle"}
+    assert reserved["boundary"] != reserved["idle"]

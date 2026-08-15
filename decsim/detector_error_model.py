@@ -31,21 +31,6 @@ class DecoderFaultModelRequirement:
     require_physical_to_graphlike_link: bool = False
 
     def __post_init__(self) -> None:
-        if type(self.representations) is not frozenset:
-            raise TypeError("representations must be an exact frozenset")
-        invalid = [
-            representation
-            for representation in self.representations
-            if not isinstance(representation, FaultRepresentation)
-        ]
-        if invalid:
-            raise TypeError(
-                "representations must contain only FaultRepresentation values"
-            )
-        if type(self.require_physical_to_graphlike_link) is not bool:
-            raise TypeError(
-                "require_physical_to_graphlike_link must be an exact bool"
-            )
         if self.require_physical_to_graphlike_link and self.representations != frozenset(
             {FaultRepresentation.GRAPHLIKE, FaultRepresentation.PHYSICAL}
         ):
@@ -58,8 +43,6 @@ class DecoderFaultModelRequirement:
         other: "DecoderFaultModelRequirement",
     ) -> "DecoderFaultModelRequirement":
         """Return the smallest requirement satisfying both consumers."""
-        if not isinstance(other, DecoderFaultModelRequirement):
-            raise TypeError("can join only DecoderFaultModelRequirement values")
         return DecoderFaultModelRequirement(
             self.representations | other.representations,
             self.require_physical_to_graphlike_link
@@ -104,7 +87,7 @@ class PlacedFaultModel:
         import numpy as np
 
         for field_name in ("check", "priors", "observables", "owned"):
-            source = np.ascontiguousarray(getattr(self, field_name))
+            source = np.asarray(getattr(self, field_name))
             frozen = np.frombuffer(
                 source.tobytes(order="C"),
                 dtype=source.dtype,
@@ -135,13 +118,10 @@ class WindowErrorModel:
 
     detector_ids: tuple
     detector_coordinates: Optional[tuple[tuple[float, ...], ...]]
-    commit_hi: int
     defect_positions: dict
     graphlike_faults: Optional[PlacedFaultModel]
     physical_faults: Optional[PlacedFaultModel]
     physical_to_graphlike_detector_projection: "object" = None
-    commit_lo: int = 0
-    buffer_lo: int = 0
 
     def require_faults(
         self,
@@ -161,11 +141,6 @@ class WindowErrorModel:
                 f"window model does not contain {representation.value} faults"
             )
         return faults
-
-    @property
-    def has_leading_buffer(self) -> bool:
-        """True when ``buffer_lo < commit_lo`` (a two-sided buffered window)."""
-        return self.buffer_lo < self.commit_lo
 
 
 @dataclass(frozen=True)
@@ -460,11 +435,6 @@ def validate_belief_matching_matrices(
         location=location,
         name="physical-to-component map",
     )
-    if check_matrix.shape[1] != observable_matrix.shape[1]:
-        raise ValueError(
-            f"{location} component check and observable matrices have "
-            "different fault counts"
-        )
     if check_matrix.shape[0] != hyperedge_check_matrix.shape[0]:
         raise ValueError(
             f"{location} component and physical checks have different "
@@ -480,12 +450,7 @@ def validate_belief_matching_matrices(
             f"{hyperedge_to_edge_matrix.shape}; expected {expected_map_shape}"
         )
 
-    try:
-        priors = np.asarray(hyperedge_priors, dtype=float)
-    except (TypeError, ValueError) as error:
-        raise ValueError(
-            f"{location} physical priors must be real probabilities"
-        ) from error
+    priors = np.asarray(hyperedge_priors, dtype=float)
     if priors.ndim != 1:
         raise ValueError(f"{location} physical priors must be rank 1")
     if priors.shape[0] != hyperedge_check_matrix.shape[1]:
@@ -509,11 +474,6 @@ def validate_belief_matching_matrices(
         component_indices = np.nonzero(
             hyperedge_to_edge_matrix[:, physical_index]
         )[0]
-        if not component_indices.size:
-            raise ValueError(
-                f"{location} physical column {physical_index} has no "
-                "suggested graph components"
-            )
         derived_detector_bits = (
             check_matrix[:, component_indices].sum(axis=1) % 2
         )
@@ -555,7 +515,6 @@ def _odd_component_keys(record, validator) -> tuple:
                 f"{component.component_ordinal}"
             ),
         )
-        assert key is not None
         if key in odd:
             del odd[key]
         else:
@@ -586,13 +545,9 @@ def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
 
     Without a map, accept Stim repetition or decsim surface/toric coordinates.
     """
-    if type(round_count) is not int:
-        raise TypeError("round_count must be a built-in int")
     if round_count < 1:
         raise ValueError("round_count must be positive")
     detector_count = circuit.num_detectors
-    if detector_count < 1:
-        raise ValueError("a finite decoding source must contain detectors")
 
     if detector_rounds is None:
         coordinates = circuit.get_detector_coordinates()
@@ -601,7 +556,9 @@ def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
         if len(arities) != 1:
             raise ValueError("finite-memory detector coordinates need one arity")
         coordinate_arity = next(iter(arities))
-        if coordinate_arity != 2 and coordinate_arity < 3:
+        # Stim repetition coordinates have arity 2; surface/toric
+        # coordinates have arity >= 3.
+        if coordinate_arity < 2:
             raise ValueError(
                 "finite-memory chronology requires supported coordinates or "
                 "explicit detector_rounds"
@@ -612,8 +569,6 @@ def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
             if not math.isfinite(raw_value) or raw_value != int(raw_value):
                 raise ValueError("finite-memory detector layers must be finite integers")
             raw_layer = int(raw_value)
-            if raw_layer < 0:
-                raise ValueError("finite-memory detector layers must be nonnegative")
             raw_layers[detector_id] = raw_layer
         expected_layers = set(range(round_count + 1))
         if set(raw_layers.values()) != expected_layers:
@@ -629,13 +584,8 @@ def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
     else:
         resolved = dict(detector_rounds)
 
-    for detector_id, emitted_round in resolved.items():
-        if type(detector_id) is not int or type(emitted_round) is not int:
-            raise TypeError("detector ids and emitted rounds must be built-in ints")
     if set(resolved) != set(range(detector_count)):
         raise ValueError("detector-round map must cover every detector exactly")
-    if any(not 1 <= value <= round_count for value in resolved.values()):
-        raise ValueError("detector-round map contains an out-of-range round")
     if set(resolved.values()) != set(range(1, round_count + 1)):
         raise ValueError("detector-round map must fill every emitted round")
     return resolved
@@ -654,8 +604,6 @@ def _detector_position_in_round(round_of: dict) -> dict:
 
 def _parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
     """Normalize and validate a 3-value or 4-value window plan entry."""
-    if type(window_entry) is not tuple or len(window_entry) not in (3, 4):
-        raise TypeError("window entry must be an exact 3- or 4-int tuple")
     if any(type(bound) is not int for bound in window_entry):
         raise TypeError("window bounds must be built-in ints")
     if any(bound < 1 for bound in window_entry):
@@ -684,12 +632,12 @@ def _detectors_in_window(round_of: dict, buffer_lo: int, buffer_hi: int,
 
 
 def _fault_columns_for_window(
-    det_sets: list,
+    det_sets: tuple,
     row_index: dict,
     lead_rows: set,
     committed_elsewhere: set,
     *,
-    include_committed_leading: bool = True,
+    include_committed_leading: bool,
 ) -> list:
     """Choose candidate columns, excluding causally prior committed faults."""
     columns: list = []
@@ -787,12 +735,7 @@ def _prepare_linked_fault_catalogs(decomposed_dem, physical_dem):
         physical_observable_sets.append(physical_key[1])
         physical_priors.append(prior)
         for component_key in component_keys:
-            try:
-                graphlike_column = graphlike_index[component_key]
-            except KeyError as error:
-                raise ValueError(
-                    "decomposed Stim component is absent from the graphlike catalog"
-                ) from error
+            graphlike_column = graphlike_index[component_key]
             link[graphlike_column, physical_column] = 1
 
     physical_catalog = _FaultCatalog(
@@ -868,10 +811,6 @@ def _prepare_fault_catalogs(
     requirement: DecoderFaultModelRequirement,
 ) -> tuple[dict[FaultRepresentation, _FaultCatalog], "object"]:
     """Build only the fault domains requested for this operation's code."""
-    if not isinstance(requirement, DecoderFaultModelRequirement):
-        raise TypeError(
-            "fault_model_requirement must be a DecoderFaultModelRequirement"
-        )
     catalogs: dict[FaultRepresentation, _FaultCatalog] = {}
     if requirement.require_physical_to_graphlike_link:
         graphlike, physical, link = _prepare_linked_fault_catalogs(
@@ -897,7 +836,7 @@ def _prepare_fault_catalogs(
 
 def _fault_owned_by_window(
     fault_index: int,
-    fault_rounds: list,
+    fault_rounds: tuple,
     committed_elsewhere: set,
     unowned_faults: set,
     explicitly_owned_faults: Optional[set],
@@ -920,8 +859,8 @@ def _fault_owned_by_window(
 
 
 def _fill_detector_and_observable_columns(check, obs, *, column_index: int,
-                                          fault_index: int, det_sets: list,
-                                          obs_sets: list, row_index: dict) -> None:
+                                          fault_index: int, det_sets: tuple,
+                                          obs_sets: tuple, row_index: dict) -> None:
     """Fill the detector and observable entries for one fault column."""
     for detector_id in det_sets[fault_index]:
         if detector_id in row_index:
@@ -931,7 +870,7 @@ def _fill_detector_and_observable_columns(check, obs, *, column_index: int,
         obs[observable_id, column_index] = 1
 
 
-def _future_flips_after_commit(det_sets: list, round_of: dict,
+def _future_flips_after_commit(det_sets: tuple, round_of: dict,
                                fault_index: int, commit_hi: int,
                                *, is_last: bool) -> tuple:
     """Return detector flips that must be handed to a later window."""
@@ -943,8 +882,8 @@ def _future_flips_after_commit(det_sets: list, round_of: dict,
 
 
 def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
-                         det_sets: list, obs_sets: list, n_obs: int,
-                         round_of: dict, fault_rounds: list,
+                         det_sets: tuple, obs_sets: tuple, n_obs: int,
+                         round_of: dict, fault_rounds: tuple,
                          committed_elsewhere: set, unowned_faults: set,
                          explicitly_owned_faults: Optional[set],
                          commit_lo: int,
@@ -988,12 +927,7 @@ def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
 def _validate_fault_exclusion_ranges(fault_exclusion_ranges: tuple) -> None:
     """Validate explicit inclusive round ranges without changing ownership."""
     for exclusion in fault_exclusion_ranges:
-        try:
-            exclude_lo, exclude_hi = exclusion
-        except (TypeError, ValueError) as error:
-            raise TypeError(
-                "each fault-exclusion range must be an integer "
-                f"(lo, hi) pair, got {exclusion!r}") from error
+        exclude_lo, exclude_hi = exclusion
         if not all(type(endpoint) is int
                    for endpoint in (exclude_lo, exclude_hi)):
             raise TypeError(
@@ -1040,8 +974,8 @@ def _placed_faults_for_window(
     """Build one window's local matrix from one global fault catalog."""
     import numpy as np
 
-    detector_sets = list(catalog.detector_sets)
-    observable_sets = list(catalog.observable_sets)
+    detector_sets = catalog.detector_sets
+    observable_sets = catalog.observable_sets
     fault_rounds = tuple(
         tuple(round_of[detector_id] for detector_id in detectors)
         for detectors in catalog.detector_sets
@@ -1066,7 +1000,7 @@ def _placed_faults_for_window(
             obs_sets=observable_sets,
             n_obs=n_obs,
             round_of=round_of,
-            fault_rounds=list(fault_rounds),
+            fault_rounds=fault_rounds,
             committed_elsewhere=committed_elsewhere,
             unowned_faults=_unowned_faults(
                 fault_rounds,
@@ -1158,7 +1092,6 @@ class WindowSlicer:
     def __init__(
         self,
         circuit,
-        num_observables: Optional[int] = None,
         *,
         round_count: int,
         detector_rounds: Optional[dict] = None,
@@ -1169,13 +1102,6 @@ class WindowSlicer:
             circuit,
             fault_model_requirement,
         )
-        if num_observables is not None:
-            if type(num_observables) is not int:
-                raise TypeError("num_observables must be a built-in int")
-            if num_observables != circuit.num_observables:
-                raise ValueError(
-                    "num_observables must equal the circuit observable count"
-                )
         self.n_obs = circuit.num_observables
         self.round_of = resolve_detector_rounds(
             circuit, detector_rounds, round_count
@@ -1207,15 +1133,6 @@ class WindowSlicer:
             raise ValueError(
                 "explicit owner and predecessor fault maps must be supplied together"
             )
-        if explicit_values[0] is not None:
-            expected_representations = set(self.catalogs)
-            if (
-                set(explicitly_owned_faults) != expected_representations
-                or set(explicitly_prior_faults) != expected_representations
-            ):
-                raise ValueError(
-                    "explicit fault maps must exactly match the requested representations"
-                )
         _validate_fault_exclusion_ranges(fault_exclusion_ranges)
         rows = _detectors_in_window(
             self.round_of,
@@ -1262,7 +1179,6 @@ class WindowSlicer:
         physical = placed.get(FaultRepresentation.PHYSICAL)
         local_link = None
         if self.catalog_link is not None:
-            assert graphlike is not None and physical is not None
             local_link = _local_physical_to_graphlike_detector_projection(
                 graphlike,
                 physical,
@@ -1277,7 +1193,6 @@ class WindowSlicer:
         return WindowErrorModel(
             detector_ids=tuple(rows),
             detector_coordinates=_coordinates_for_rows(self.circuit, rows),
-            commit_hi=commit_hi,
             defect_positions={
                 detector_id: (
                     self.round_of[detector_id],
@@ -1288,34 +1203,15 @@ class WindowSlicer:
             graphlike_faults=graphlike,
             physical_faults=physical,
             physical_to_graphlike_detector_projection=local_link,
-            commit_lo=commit_lo,
-            buffer_lo=buffer_lo,
         )
 
 
 def _dependency_depths(window_count: int, dependency_edges: tuple) -> tuple[int, ...]:
     """Validate the dependency DAG and return each window's depth."""
     predecessors = [set() for _ in range(window_count)]
-    seen = set()
-    for edge in dependency_edges:
-        if (
-            type(edge) is not tuple
-            or len(edge) != 2
-            or any(type(index) is not int for index in edge)
-        ):
-            raise TypeError("window dependencies must be exact (int, int) pairs")
-        source, destination = edge
-        if (
-            source < 0
-            or destination < 0
-            or source >= window_count
-            or destination >= window_count
-            or source == destination
-        ):
-            raise ValueError("window dependency is out of range or self-directed")
-        if edge in seen:
-            raise ValueError("window dependencies must be unique")
-        seen.add(edge)
+    for source, destination in dependency_edges:
+        if source < 0 or destination < 0:
+            raise ValueError("window dependency indices must be nonnegative")
         predecessors[destination].add(source)
 
     depths: list[Optional[int]] = [None] * window_count
@@ -1334,7 +1230,7 @@ def _dependency_depths(window_count: int, dependency_edges: tuple) -> tuple[int,
             progressed = True
         if not progressed:
             raise ValueError("window dependencies must form an acyclic graph")
-    return tuple(depth for depth in depths if depth is not None)
+    return tuple(depths)
 
 
 def _dependency_ancestors(
@@ -1429,27 +1325,10 @@ def _validate_closed_temporal_boundary_windows(
     closed_windows: tuple[int, ...],
 ) -> None:
     """Reject a declared closed time boundary if it cuts a global fault."""
-    if type(closed_windows) is not tuple:
-        raise TypeError(
-            "closed_temporal_boundary_windows must be an exact tuple"
-        )
-    if (
-        any(type(window_index) is not int for window_index in closed_windows)
-        or len(set(closed_windows)) != len(closed_windows)
-    ):
-        raise TypeError(
-            "closed temporal boundary window indices must be unique exact ints"
-        )
     if not closed_windows:
         return
-    if dependency_edges is None:
-        raise ValueError(
-            "closed temporal boundaries require explicit dependency edges"
-        )
     destinations = {destination for _, destination in dependency_edges}
     for window_index in closed_windows:
-        if window_index < 0 or window_index >= len(models):
-            raise ValueError("closed temporal boundary window is out of range")
         if window_index not in destinations:
             raise ValueError(
                 "closed temporal boundary window must be a dependency destination"
@@ -1480,8 +1359,6 @@ def _validate_window_protocol(
     fault_model_requirement: DecoderFaultModelRequirement,
 ) -> None:
     """Fail closed unless a Tan plan has the exact zero-seam contract."""
-    if type(window_protocol) is not WindowProtocol:
-        raise TypeError("window_protocol must be an exact WindowProtocol")
     if window_protocol is WindowProtocol.GENERIC:
         return
     if window_protocol is not WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE:
@@ -1495,7 +1372,7 @@ def _validate_window_protocol(
             "Tan's validated zero-seam memory construction requires exactly the "
             "graphlike correction-edge representation"
         )
-    if tuple(sorted(closed_windows)) != seam_indices:
+    if set(closed_windows) != set(seam_indices):
         raise ValueError(
             "every Tan type-2 seam, and only a seam, must be temporally closed"
         )
@@ -1509,14 +1386,7 @@ def _validate_window_protocol(
         for edge in ((seam_index - 1, seam_index),
                      (seam_index + 1, seam_index))
     )
-    if (
-        dependency_edges is None and expected_edges
-        or dependency_edges is not None
-        and (
-            set(dependency_edges) != set(expected_edges)
-            or len(dependency_edges) != len(expected_edges)
-        )
-    ):
+    if set(dependency_edges or ()) != set(expected_edges):
         raise ValueError(
             "each Tan type-2 seam must depend on its two adjacent type-1 tasks"
         )
@@ -1525,7 +1395,6 @@ def _validate_window_protocol(
 def build_window_error_models(
     circuit,
     plan: list,
-    num_observables: Optional[int] = None,
     *,
     round_count: int,
     detector_rounds: Optional[dict] = None,
@@ -1543,13 +1412,11 @@ def build_window_error_models(
     by forward-only and dynamic Sliding construction. Indices listed in
     ``closed_temporal_boundary_windows`` are checked after slicing and rejected
     if any local column cuts a global fault into an artificial boundary edge.
-    A contiguous partial plan is allowed for runtime suffix re-slicing. Its last
-    window is terminal only when its commit region reaches ``round_count``;
-    faults wholly outside the segment remain unowned.
+    Any contiguous partial segment is allowed; production uses suffix
+    re-slicing. The last window is terminal only when its commit region
+    reaches ``round_count``; faults wholly outside the segment remain unowned.
     """
     entries = tuple(_parse_window_entry(window_entry) for window_entry in plan)
-    if not entries:
-        raise ValueError("window plan must contain at least one entry")
     _validate_window_protocol(
         entries,
         window_protocol,
@@ -1570,7 +1437,6 @@ def build_window_error_models(
 
     slicer = WindowSlicer(
         circuit,
-        num_observables,
         round_count=round_count,
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
@@ -1640,7 +1506,6 @@ def build_window_error_models(
 def _build_single_window_error_model(
     circuit,
     window_entry: tuple,
-    num_observables: Optional[int],
     *,
     round_count: int,
     detector_rounds: Optional[dict],
@@ -1650,7 +1515,6 @@ def _build_single_window_error_model(
     """Build an independent typed model with explicit non-owned ranges."""
     slicer = WindowSlicer(
         circuit,
-        num_observables,
         round_count=round_count,
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
@@ -1663,7 +1527,6 @@ def _build_single_window_error_model(
 
 
 def build_single_window_error_model(circuit, window_entry: tuple,
-                                    num_observables: Optional[int] = None,
                                     *, round_count: int,
                                     detector_rounds: Optional[dict] = None,
                                     fault_model_requirement:
@@ -1681,7 +1544,7 @@ def build_single_window_error_model(circuit, window_entry: tuple,
         else (exclude_faults_touching,)
     )
     return _build_single_window_error_model(
-        circuit, window_entry, num_observables,
+        circuit, window_entry,
         round_count=round_count,
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
@@ -1690,7 +1553,7 @@ def build_single_window_error_model(circuit, window_entry: tuple,
 
 
 def build_single_window_error_model_with_exclusions(
-    circuit, window_entry: tuple, num_observables: Optional[int] = None, *,
+    circuit, window_entry: tuple, *,
     round_count: int,
     detector_rounds: Optional[dict] = None,
     fault_model_requirement: DecoderFaultModelRequirement,
@@ -1698,132 +1561,9 @@ def build_single_window_error_model_with_exclusions(
 ) -> WindowErrorModel:
     """Build one independent model with multiple non-owned inclusive ranges."""
     return _build_single_window_error_model(
-        circuit, window_entry, num_observables,
+        circuit, window_entry,
         round_count=round_count,
         detector_rounds=detector_rounds,
         fault_model_requirement=fault_model_requirement,
         fault_exclusion_ranges=fault_exclusion_ranges,
     )
-
-
-def decode_windowed(
-    window_models: list,
-    detection_events,
-    decode_window,
-    *,
-    selected_fault_representation: FaultRepresentation,
-) -> "object":
-    """Decode one shot through a forward-only sliding-window chain.
-
-    Parallel block A/B decoding needs a dependency-aware seam stage and
-    residual-syndrome handoff. This list-ordered helper intentionally rejects
-    leading-buffer models instead of approximating that different algorithm.
-    """
-    logical_prediction, _ = _walk_windowed(
-        window_models,
-        detection_events,
-        decode_window,
-        selected_fault_representation,
-        typed_backend_outcomes=False,
-    )
-    return logical_prediction
-
-
-@dataclass(frozen=True)
-class WindowedBackendDecode:
-    """Same-shot backend outcomes and a prediction only after full success."""
-
-    window_outcomes: tuple
-    logical_prediction: Optional[tuple[int, ...]]
-
-
-def decode_windowed_backend_outcomes(
-    window_models: list,
-    detection_events,
-    decode_window,
-) -> WindowedBackendDecode:
-    """Walk physical windows once and preserve each exact backend outcome."""
-    logical_prediction, outcomes = _walk_windowed(
-        window_models,
-        detection_events,
-        decode_window,
-        FaultRepresentation.PHYSICAL,
-        typed_backend_outcomes=True,
-    )
-    return WindowedBackendDecode(
-        window_outcomes=outcomes,
-        logical_prediction=(
-            None
-            if logical_prediction is None
-            else tuple(int(bit) for bit in logical_prediction)
-        ),
-    )
-
-
-def _walk_windowed(
-    window_models: list,
-    detection_events,
-    decode_window,
-    selected_fault_representation: FaultRepresentation,
-    *,
-    typed_backend_outcomes: bool,
-) -> tuple["object", tuple]:
-    """Single owner of detector selection, commitment, and boundary forwarding."""
-    import numpy as np
-
-    if not window_models:
-        raise ValueError("windowed decode requires at least one window model")
-    if any(model.has_leading_buffer for model in window_models):
-        raise ValueError(
-            "list-ordered decode_windowed supports only forward sliding windows; "
-            "parallel A/B windows require dependency-aware seam reconciliation"
-        )
-    pending: set = set()
-    last_window_for_detector = {
-        detector_id: window_index
-        for window_index, model in enumerate(window_models)
-        for detector_id in model.detector_ids
-    }
-    first_faults = window_models[0].require_faults(
-        selected_fault_representation
-    )
-    total = np.zeros(first_faults.observables.shape[0], dtype=np.uint8)
-    outcomes = []
-    for window_index, model in enumerate(window_models):
-        faults = model.require_faults(selected_fault_representation)
-        syndrome = detection_events[list(model.detector_ids)].astype(np.uint8).copy()
-        for detector_index, detector_id in enumerate(model.detector_ids):
-            if detector_id in pending:
-                syndrome[detector_index] ^= 1
-                if last_window_for_detector[detector_id] == window_index:
-                    pending.discard(detector_id)
-
-        decoded = decode_window(model, syndrome)
-        if typed_backend_outcomes:
-            from .adapters.window_decode_results import (
-                validate_backend_outcome,
-            )
-
-            validate_backend_outcome(decoded, model, faults, syndrome)
-            outcomes.append(decoded)
-            if not decoded.succeeded:
-                return None, tuple(outcomes)
-            selected = np.asarray(
-                decoded.physical_correction,
-                dtype=np.uint8,
-            )
-        else:
-            selected = np.asarray(decoded, dtype=np.uint8)
-        if selected.shape != (faults.check.shape[1],):
-            raise ValueError(
-                "selected correction arity does not match the placed fault model"
-            )
-        committed = selected.astype(bool) & faults.owned
-        total ^= (faults.observables @ committed.astype(np.uint8)) % 2
-        for column_index in np.nonzero(committed)[0]:
-            for detector_id in faults.future_flips.get(int(column_index), ()):
-                pending.symmetric_difference_update({detector_id})
-    if pending:
-        raise RuntimeError(f"artificial defects were never consumed: {sorted(pending)}"
-                           ". The plan does not cover the full detector stream.")
-    return total, tuple(outcomes)

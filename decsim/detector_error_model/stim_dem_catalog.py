@@ -305,7 +305,7 @@ def _prepare_linked_fault_catalogs(decomposed_dem, physical_dem):
         )
 
     derived_check = np.zeros(
-        (max((detector_id for detectors in physical_catalog.detector_sets
+        (max((detector_id for detectors in graphlike_catalog.detector_sets
               for detector_id in detectors), default=-1) + 1,
          len(physical_catalog.detector_sets)),
         dtype=np.uint8,

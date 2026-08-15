@@ -10,30 +10,20 @@ or requires such tools and runs standalone."""
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 from typing import Optional
 
-from .config import us
 
-
-def _require_positive_int(value, field_name: str) -> int:
+def _require_positive_int(value, field_name: str) -> None:
     if type(value) is not int:
         raise TypeError(f"{field_name} must be a built-in int; got {value!r}")
     if value <= 0:
         raise ValueError(f"{field_name} must be positive; got {value!r}")
-    return value
 
 
 def _check_round_us(value) -> Optional[float]:
     if value is None:
         return None
-    normalized = float(value)
-    if not math.isfinite(normalized):
-        raise ValueError("round_us must be finite and at least one tick")
-    ticks = us(normalized)
-    if ticks < 1:
-        raise ValueError("round_us must be finite and at least one tick")
-    return normalized
+    return float(value)
 
 
 @dataclass(frozen=True)
@@ -46,20 +36,12 @@ class SurfaceCodeModel:
     buffer_rounds_override: Optional[int] = None  # window look-ahead size; None = d
 
     def __post_init__(self) -> None:
-        """Validate the built-in Surface timing and sizing card."""
-        _require_positive_int(self.d, "d")
-        for field_name in (
-            "commit_rounds_override",
-            "buffer_rounds_override",
-        ):
-            value = getattr(self, field_name)
-            if value is not None:
-                _require_positive_int(value, field_name)
+        """Normalize the optional per-code cadence."""
         object.__setattr__(self, "round_us", _check_round_us(self.round_us))
 
     @property
     def name(self) -> str:
-        """The code's human-readable name."""
+        """Stable routing and readout identity for this code card."""
         return f"rotated surface code (d={self.d})"
 
     @property
@@ -90,24 +72,24 @@ class SurfaceCodeModel:
         return self.buffer_rounds_override is not None
 
     def spatial_nodes(self, num_patches: int) -> int:
-        """Decoding-graph node count per round for this many patches (drives
-        decode latency). Multi-patch ops add one d-node strip for the seam
-        where patches merge."""
-        patch_count = max(1, num_patches)
-        return patch_count * self.d * self.d + (self.d if patch_count > 1 else 0)
+        """Bulk timing proxy with a heuristic d-node multi-patch seam strip."""
+        return num_patches * self.d * self.d + (
+            self.d if num_patches > 1 else 0
+        )
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Syndrome bits measured per round: the d^2 - 1 stabilizers of a
         rotated surface-code patch."""
-        return max(1, num_patches) * (self.d * self.d - 1)
+        return num_patches * (self.d * self.d - 1)
 
 
 @dataclass(frozen=True)
 class BBCodeModel:
     """Timing model for a bivariate-bicycle CSS code.
 
-    One extraction cycle measures ``n/2`` X checks and ``n/2`` Z checks.
-    Exact window-local detector rows remain owned by the detector error model.
+    One modeled syndrome round is one complete extraction cycle measuring
+    ``n/2`` X checks and ``n/2`` Z checks. Exact window-local detector rows
+    remain owned by the detector error model.
     """
 
     n: int = 144                     # physical qubits
@@ -141,16 +123,16 @@ class BBCodeModel:
 
     @property
     def name(self) -> str:
-        """The code's human-readable name."""
-        return f"bivariate-bicycle / gross code [[{self.n},{self.k},{self.d}]]"
+        """Stable routing and readout identity for this code card."""
+        return f"bivariate-bicycle code [[{self.n},{self.k},{self.d}]]"
 
     @property
     def distance(self) -> int:
-        """Code distance d (errors up to ~d/2 are corrected)."""
+        """Configured code distance."""
         return self.d
 
     def rounds_per_logical_cycle(self) -> int:
-        """Syndrome rounds per logical cycle."""
+        """Logical cycle modeled as d syndrome rounds."""
         return self.d
 
     def round_period_us(self) -> Optional[float]:
@@ -160,7 +142,7 @@ class BBCodeModel:
         return (0, 0)
 
     def buffer_floor_override_active(self) -> bool:
-        return True
+        return self.buffer_rounds_override is not None
 
     def commit_rounds(self) -> int:
         """Rounds committed per decode window."""
@@ -179,9 +161,9 @@ class BBCodeModel:
         )
 
     def spatial_nodes(self, num_patches: int) -> int:
-        """Combined per-cycle check count used as a bulk timing proxy."""
-        return max(1, num_patches) * self.n
+        """Combined check count used as a bulk timing proxy."""
+        return num_patches * self.n
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
-        """Raw X-plus-Z check bits measured in one complete BB cycle."""
-        return max(1, num_patches) * self.n
+        """Raw X-plus-Z check bits measured per modeled round."""
+        return num_patches * self.n

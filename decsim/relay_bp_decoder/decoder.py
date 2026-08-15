@@ -11,7 +11,7 @@ from ..adapters.window_decode_results import (
     result_from_selected_faults,
     validate_backend_outcome,
 )
-from ..detector_error_model import (
+from ..detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     PHYSICAL_FAULT_MODEL_REQUIRED,
 )

@@ -22,7 +22,7 @@ from .message import (
 )
 from .config import us
 from .seeding import _RandomSeedConsumer
-from .detector_error_model import (
+from .detector_error_model.fault_model_contracts import (
     DecoderFaultModelRequirement,
     NO_FAULT_MODEL_REQUIRED,
 )

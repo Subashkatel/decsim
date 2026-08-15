@@ -5,12 +5,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..message import SoftOutput, SoftOutputSource
-from ..detector_error_model import GRAPHLIKE_FAULT_MODEL_REQUIRED
+from ..detector_error_model.fault_model_contracts import GRAPHLIKE_FAULT_MODEL_REQUIRED
 from ..mwpm_decoder.weights import matching_weights
 
 if TYPE_CHECKING:
     import stim
-    from ..detector_error_model import WindowErrorModel
+    from ..detector_error_model.fault_model_contracts import WindowErrorModel
 
 COMPLEMENTARY_GAP_SOURCE = SoftOutputSource(
     method="complementary_gap",
@@ -27,10 +27,10 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
     """Flatten a decomposed DEM into ``(H[det x err], O[obs x err], weights=ln((1-p)/p))``."""
     import numpy as np
 
-    from ..detector_error_model import (
-        detector_error_model_to_faults,
+    from ..detector_error_model.fault_identity_validation import (
         validate_graphlike_fault,
     )
+    from ..detector_error_model.stim_dem_catalog import detector_error_model_to_faults
     num_det = dem.num_detectors
     num_obs = dem.num_observables
     h_cols: list = []
@@ -75,7 +75,9 @@ class ComplementaryGapMetric:
         import numpy as np
         import pymatching
 
-        from ..detector_error_model import validate_graphlike_matrices
+        from ..detector_error_model.fault_identity_validation import (
+            validate_graphlike_matrices,
+        )
 
         self.check = np.asarray(check, dtype=np.uint8)
         self.obs = np.asarray(obs, dtype=np.uint8)
@@ -103,7 +105,7 @@ class ComplementaryGapMetric:
     @classmethod
     def from_window_model(cls, model: "WindowErrorModel") -> "ComplementaryGapMetric":
         """Build the metric from a decsim WindowErrorModel (check/obs/priors)."""
-        from ..detector_error_model import FaultRepresentation
+        from ..detector_error_model.fault_model_contracts import FaultRepresentation
 
         faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
         return cls(

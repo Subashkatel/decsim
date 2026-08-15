@@ -4,7 +4,7 @@ import hashlib
 import random
 import threading
 
-from .message import RunSeedChild, RunSeedPathSegment, RunSeedReservation
+from .message import RunSeedPathSegment, RunSeedReservation
 from .protocols import RunSeedComposite, RunSeedConsumer
 
 _NAMESPACE = b"decsim.run-seed.v1"
@@ -143,10 +143,6 @@ def derive_component_seed(root_seed: int, path) -> int:
 
 def bind_run_seed(root_seed, roots) -> None:
     """Bind each stochastic leaf once, cancelling every claim on failure."""
-    if root_seed is not None and (
-        type(root_seed) is not int or not 0 <= root_seed < 2**64
-    ):
-        raise ValueError("root seed must be an unsigned 64-bit integer or None")
     paths_by_identity = {}
     active = set()
     paths = set()
@@ -182,8 +178,6 @@ def bind_run_seed(root_seed, roots) -> None:
                 return
             children = []
             for child in component.run_seed_children():
-                if type(child) is not RunSeedChild:
-                    raise TypeError("run_seed_children() must yield RunSeedChild")
                 children.append((encoded(child.relative_path), child))
             for _, child in sorted(children, key=lambda item: item[0]):
                 walk(path + child.relative_path, child.child)
@@ -200,8 +194,6 @@ def bind_run_seed(root_seed, roots) -> None:
     try:
         for path, component, seed in plan:
             reservation = component.reserve_run_seed(seed)
-            if type(reservation) is not RunSeedReservation:
-                raise TypeError("reserve_run_seed() must return RunSeedReservation")
             if seed is not None and (
                 reservation.proposed_seed_source != "derived"
                 or reservation.proposed_seed != seed

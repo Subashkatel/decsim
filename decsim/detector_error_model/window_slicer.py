@@ -45,11 +45,11 @@ class WindowSlicer:
         detector_rounds: Optional[dict] = None,
         fault_model_requirement: DecoderFaultModelRequirement,
     ):
-        self.circuit = circuit
         self.catalogs, self.catalog_link = _prepare_fault_catalogs(
             circuit,
             fault_model_requirement,
         )
+        self.detector_coordinates = circuit.get_detector_coordinates()
         self.n_obs = circuit.num_observables
         self.round_of = resolve_detector_rounds(
             circuit, detector_rounds, round_count
@@ -143,7 +143,9 @@ class WindowSlicer:
         }
         return WindowErrorModel(
             detector_ids=tuple(rows),
-            detector_coordinates=_coordinates_for_rows(self.circuit, rows),
+            detector_coordinates=_coordinates_for_rows(
+                self.detector_coordinates, rows
+            ),
             defect_positions={
                 detector_id: (
                     self.round_of[detector_id],

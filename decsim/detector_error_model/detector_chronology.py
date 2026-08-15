@@ -78,12 +78,11 @@ def _detector_position_in_round(round_of: dict) -> dict:
             for index, detector_id in enumerate(detectors)}
 
 
-def _coordinates_for_rows(circuit, rows: list[int]):
+def _coordinates_for_rows(detector_coordinates: dict, rows: list[int]):
     """Return real circuit coordinates only when every local row has them."""
-    coordinates = circuit.get_detector_coordinates()
-    if any(not coordinates.get(detector_id) for detector_id in rows):
+    if any(not detector_coordinates.get(detector_id) for detector_id in rows):
         return None
     return tuple(
-        tuple(float(value) for value in coordinates[detector_id])
+        tuple(float(value) for value in detector_coordinates[detector_id])
         for detector_id in rows
     )

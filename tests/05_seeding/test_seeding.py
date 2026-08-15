@@ -652,8 +652,8 @@ def test_binder_rolls_back_prior_acquisitions_in_reverse_on_reserve_failure(
     assert [event[:2] for event in events] == expected
 
 
-def test_binder_cancels_prior_acquisitions_after_validation_failure():
-    """Reservation validation failure still cancels every earlier valid acquisition."""
+def test_binder_cancels_every_acquisition_after_validation_failure():
+    """Validation failure cancels the rejected reservation and every earlier acquisition."""
     events = []
     first = RecordingConsumer("a", events)
 
@@ -674,8 +674,12 @@ def test_binder_cancels_prior_acquisitions_after_validation_failure():
             [((field("a"),), first), ((field("b"),), invalid)],
         )
 
-    first_events = [event[0] for event in events if event[1] == "a"]
-    assert first_events == ["reserve", "cancel"]
+    assert [event[:2] for event in events] == [
+        ("reserve", "a"),
+        ("reserve", "b"),
+        ("cancel", "b"),
+        ("cancel", "a"),
+    ]
 
 
 @pytest.mark.parametrize(

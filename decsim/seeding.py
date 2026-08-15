@@ -194,6 +194,7 @@ def bind_run_seed(root_seed, roots) -> None:
     try:
         for path, component, seed in plan:
             reservation = component.reserve_run_seed(seed)
+            acquired.append((component, reservation))
             if seed is not None and (
                 reservation.proposed_seed_source != "derived"
                 or reservation.proposed_seed != seed
@@ -206,7 +207,6 @@ def bind_run_seed(root_seed, roots) -> None:
                 "explicit_local", "entropy"
             ):
                 raise ValueError("unseeded components must report their seed source")
-            acquired.append((component, reservation))
     except BaseException:
         for component, reservation in reversed(acquired):
             component.cancel_run_seed(reservation)

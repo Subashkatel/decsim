@@ -114,9 +114,6 @@ class Baseline:
             return OutcomeDirective(Directive.FINALIZE_STRONG)
         return OutcomeDirective(Directive.FINALIZE)
 
-    def metrics(self) -> dict:
-        return {}
-
 
 class Switching:
     """Weak decoder first; escalate to a strong decoder on low confidence.
@@ -240,11 +237,6 @@ class Switching:
             extra=extra,
             strong_request_key=strong_request_key,
         )
-
-    def metrics(self) -> dict:
-        return {"confidence_threshold": self.confidence_threshold,
-                "run_both_at_once": self.run_both_at_once,
-                "double_window": self.double_window}
 
     # ------------------------------------------------------------ validation
 

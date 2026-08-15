@@ -1395,9 +1395,7 @@ def test_fault_owned_by_window_precedence(
             committed,
             unowned,
             explicit,
-            1,
-            3,
-            is_last=is_last,
+            placement_context(commit_lo=1, commit_hi=3, is_last=is_last),
         )
         is expected
     )
@@ -1414,7 +1412,7 @@ def test_detector_bits_are_local_but_observable_bits_are_unconditional():
         fault_index=0,
         det_sets=((0, 5),),
         obs_sets=((2,),),
-        row_index={0: 1},
+        context=placement_context(row_index={0: 1}),
     )
     assert check.tolist() == [[0], [1]]
     assert observables.tolist() == [[0], [0], [1]]
@@ -1425,32 +1423,42 @@ def test_future_flips_are_strictly_after_the_commit_region():
     det_sets = ((0, 1, 2),)
     round_of = {0: 1, 1: 2, 2: 3}
     assert window_placement._future_flips_after_commit(
-        det_sets, round_of, 0, 2, is_last=False
+        det_sets, 0, placement_context(round_of=round_of, commit_hi=2, is_last=False)
     ) == (2,)
     assert window_placement._future_flips_after_commit(
-        det_sets, round_of, 0, 2, is_last=True
+        det_sets, 0, placement_context(round_of=round_of, commit_hi=2, is_last=True)
     ) == ()
     assert window_placement._future_flips_after_commit(
-        det_sets, round_of, 0, 3, is_last=False
+        det_sets, 0, placement_context(round_of=round_of, commit_hi=3, is_last=False)
     ) == ()
 
 
-def build_window_arrays_case(**overrides):
-    arguments = dict(
+def placement_context(**overrides):
+    """Build one window placement context for direct calls into the placement helpers."""
+    fields = dict(
         rows=[0, 1],
-        columns=[0, 1],
         row_index={0: 0, 1: 1},
+        lead_rows=set(),
+        round_of={0: 1, 1: 2, 2: 3},
+        n_obs=1,
+        commit_lo=1,
+        commit_hi=2,
+        is_last=False,
+    )
+    fields.update(overrides)
+    return window_placement.WindowPlacementContext(**fields)
+
+
+def build_window_arrays_case(context_overrides=None, **overrides):
+    arguments = dict(
+        context=placement_context(**(context_overrides or {})),
+        columns=[0, 1],
         det_sets=((0,), (1, 2)),
         obs_sets=((0,), ()),
-        n_obs=1,
-        round_of={0: 1, 1: 2, 2: 3},
         fault_rounds=((1,), (2, 3)),
         committed_elsewhere=set(),
         unowned_faults=set(),
         explicitly_owned_faults=None,
-        commit_lo=1,
-        commit_hi=2,
-        is_last=False,
     )
     arguments.update(overrides)
     return arguments
@@ -1485,11 +1493,11 @@ def test_owned_columns_are_not_recorded_on_the_explicit_path():
 def test_detectorless_owned_column_records_no_boundary_flip():
     """An owned column with no detectors contributes no boundary flip entry."""
     arguments = build_window_arrays_case(
+        context_overrides={"is_last": True},
         columns=[0],
         det_sets=((),),
         obs_sets=((),),
         fault_rounds=((),),
-        is_last=True,
     )
     _, _, owned, future_flips, boundary_flips = window_placement._build_window_arrays(
         **arguments
@@ -1676,6 +1684,99 @@ def test_ownership_state_is_kept_per_representation():
     assert physical_committed == {0, 1}
     assert len(slicer.catalogs[GRAPHLIKE].detector_sets) == 3
     assert len(slicer.catalogs[PHYSICAL].detector_sets) == 2
+
+
+def test_placement_context_is_a_frozen_eight_field_bundle_without_copies():
+    """The window placement context is a frozen eight-field bundle that normalises, copies and freezes nothing."""
+    rows = [1, 2]
+    row_index = {1: 0, 2: 1}
+    lead_rows = {1}
+    round_of = {1: 1, 2: 2}
+    context = window_placement.WindowPlacementContext(
+        rows=rows,
+        row_index=row_index,
+        lead_rows=lead_rows,
+        round_of=round_of,
+        n_obs=1,
+        commit_lo=1,
+        commit_hi=2,
+        is_last=False,
+    )
+    fields = dataclasses.fields(context)
+    assert [field.name for field in fields] == [
+        "rows",
+        "row_index",
+        "lead_rows",
+        "round_of",
+        "n_obs",
+        "commit_lo",
+        "commit_hi",
+        "is_last",
+    ]
+    assert all(field.default is dataclasses.MISSING for field in fields)
+    assert all(field.default_factory is dataclasses.MISSING for field in fields)
+    assert context.rows is rows
+    assert context.row_index is row_index
+    assert context.lead_rows is lead_rows
+    assert context.round_of is round_of
+    rows.append(3)
+    lead_rows.add(2)
+    assert context.rows == [1, 2, 3]
+    assert context.lead_rows == {1, 2}
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        context.is_last = True
+    assert "__post_init__" not in vars(window_placement.WindowPlacementContext)
+    own_methods = [
+        name
+        for name, value in vars(window_placement.WindowPlacementContext).items()
+        if callable(value) and not name.startswith("__")
+    ]
+    assert own_methods == []
+    with pytest.raises(TypeError):
+        window_placement.WindowPlacementContext(rows=rows, row_index=row_index)
+
+
+def test_slice_window_builds_one_shared_placement_context(monkeypatch):
+    """One placement context is built per slice, before any domain is placed, and the same object is reused for every domain."""
+    events = []
+    real_context_type = window_placement.WindowPlacementContext
+    real_placement = window_placement._placed_faults_for_window
+
+    def recording_context(**fields):
+        context = real_context_type(**fields)
+        events.append(("built", context))
+        return context
+
+    def recording_placement(*, context, **rest):
+        events.append(("placed", context))
+        return real_placement(context=context, **rest)
+
+    monkeypatch.setattr(window_slicer, "WindowPlacementContext", recording_context)
+    monkeypatch.setattr(window_slicer, "_placed_faults_for_window", recording_placement)
+    both_domains = fault_model_contracts.DecoderFaultModelRequirement(
+        frozenset({GRAPHLIKE, PHYSICAL})
+    )
+    slicer = window_slicer.WindowSlicer(
+        linked_circuit(),
+        round_count=4,
+        detector_rounds={0: 1, 1: 2, 2: 3, 3: 4},
+        fault_model_requirement=both_domains,
+    )
+    model = slicer.slice_window(1, 1, 2, 3, is_last=False)
+    kinds = [kind for kind, _ in events]
+    assert kinds == ["built", "placed", "placed"]
+    contexts = [context for _, context in events]
+    assert contexts[1] is contexts[0]
+    assert contexts[2] is contexts[0]
+    shared = contexts[0]
+    assert shared.rows == list(model.detector_ids)
+    assert shared.row_index == {
+        detector_id: row for row, detector_id in enumerate(model.detector_ids)
+    }
+    assert shared.lead_rows == set()
+    assert shared.round_of is slicer.round_of
+    assert shared.n_obs == slicer.n_obs
+    assert (shared.commit_lo, shared.commit_hi, shared.is_last) == (1, 2, False)
 
 
 def test_explicit_owner_and_predecessor_maps_come_together():

@@ -1,4 +1,4 @@
-"""Inner PyMatching decoder used by decode_windowed tests and references."""
+"""Inner PyMatching decoder over one WindowErrorModel."""
 
 from __future__ import annotations
 

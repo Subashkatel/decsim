@@ -1,20 +1,17 @@
-"""Small window/op policy parts: boundary handoff (port 16) and idle rounds (port 17).
+"""Policies supplied through ``RunSpec`` at the two runtime seams.
 
-Both are tiny pluggable seams the window pipeline consumes:
-  - BoundaryPolicy (Eager/Held) — when a committed window ships its boundary
-    handoff to dependents; consumed by WindowManager.
-  - IdlePolicy (Ignore/ExtendStream/SeparateDecodeJobs) — what happens to the
-    idle rounds an op emits while waiting for feedback; the reaction gate
-    (controller.py) branches on .mode. MODES is the one registry of mode strings.
+``RunSpec.boundary_policy`` reaches ``WindowManager`` for ``on_commit`` and
+optional speculative recovery. ``RunSpec.idle_policy`` reaches ``Controller``
+for mode routing and account callbacks. Compatible external objects enter
+through ``RunSpec`` without registration.
 """
 
-from __future__ import annotations
 
-
-# ---- boundary handoff (port 16) --------------------------------------------
+# BoundaryPolicy, protocol port 16
 
 class Eager:
-    """Speculative default: ship at weak commit and replay if strong disagrees."""
+    """Ships every committed boundary and requests replay when a later strong
+    result revises it."""
 
     speculative = True
 
@@ -25,16 +22,14 @@ class Eager:
 class Held:
     """Opt-in: ship only when the committing result is final."""
 
-    speculative = False
-
     def on_commit(self, window, final: bool) -> bool:
         return final
 
 
-# ---- idle rounds (port 17) -------------------------------------------------
+# IdlePolicy, protocol port 17
 
 class Ignore:
-    """Timing-only memory rounds (mode 'ignore', the default)."""
+    """Uses ordinary feedback-memory rounds without extra idle decode demand."""
 
     mode = "ignore"
 
@@ -53,21 +48,10 @@ class ExtendStream:
 
 
 class SeparateDecodeJobs:
-    """Additionally submit an external commit+buffer decode every commit
-    region of idle rounds (mode 'separate_decode_jobs')."""
+    """Requests one synthetic load-only demand per completed commit region,
+    sized to commit plus buffer rounds and carrying no real syndrome contents."""
 
     mode = "separate_decode_jobs"
 
     def account(self, idle_rounds: int, op) -> None:
         pass
-
-
-MODES = {p.mode: p for p in (Ignore, ExtendStream, SeparateDecodeJobs)}
-
-
-def from_mode(mode: str):
-    """Instantiate the idle policy for a mode string."""
-    if mode not in MODES:
-        raise ValueError(
-            f"idle_round_mode must be one of {tuple(MODES)} (got {mode!r})")
-    return MODES[mode]()

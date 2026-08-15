@@ -6,13 +6,14 @@ forward, builds the aligned decoder arrays, and projects the window-local link
 between the two fault domains.
 
 Package-internal seams: _parse_window_entry is imported by
-window_model_builders; _detectors_in_window, _validate_fault_exclusion_ranges,
-_placed_faults_for_window and _local_physical_to_graphlike_detector_projection
-are imported by window_slicer.
+window_model_builders; WindowPlacementContext, _detectors_in_window,
+_validate_fault_exclusion_ranges, _placed_faults_for_window and
+_local_physical_to_graphlike_detector_projection are imported by window_slicer.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Optional
 
 from .fault_model_contracts import (
@@ -24,6 +25,25 @@ from .fault_identity_validation import (
     validate_graphlike_matrices,
     validate_placed_fault_matrices,
 )
+
+
+@dataclass(frozen=True)
+class WindowPlacementContext:
+    """The one window that a fault model is being placed into.
+
+    A parameter bundle, not an immutability boundary: frozen=True only prevents
+    rebinding the eight fields, and the list, dict and set members stay exactly
+    as mutable as the objects the caller already owns.
+    """
+
+    rows: list[int]
+    row_index: dict[int, int]
+    lead_rows: set[int]
+    round_of: dict[int, int]
+    n_obs: int
+    commit_lo: int
+    commit_hi: int
+    is_last: bool
 
 
 def _parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
@@ -87,10 +107,7 @@ def _fault_owned_by_window(
     committed_elsewhere: set,
     unowned_faults: set,
     explicitly_owned_faults: Optional[set],
-    commit_lo: int,
-    commit_hi: int,
-    *,
-    is_last: bool,
+    context: WindowPlacementContext,
 ) -> bool:
     """True when this window is responsible for committing the fault."""
     if fault_index in unowned_faults:
@@ -99,47 +116,45 @@ def _fault_owned_by_window(
         return fault_index in explicitly_owned_faults
     if fault_index in committed_elsewhere:
         return False
-    if is_last:
+    if context.is_last:
         return True
-    return any(commit_lo <= round_index <= commit_hi
+    return any(context.commit_lo <= round_index <= context.commit_hi
                for round_index in fault_rounds[fault_index])
 
 
-def _fill_detector_and_observable_columns(check, obs, *, column_index: int,
-                                          fault_index: int, det_sets: tuple,
-                                          obs_sets: tuple, row_index: dict) -> None:
+def _fill_detector_and_observable_columns(
+    check, obs, *, column_index: int, fault_index: int, det_sets: tuple,
+    obs_sets: tuple, context: WindowPlacementContext,
+) -> None:
     """Fill the detector and observable entries for one fault column."""
     for detector_id in det_sets[fault_index]:
-        if detector_id in row_index:
-            check[row_index[detector_id], column_index] = 1
+        if detector_id in context.row_index:
+            check[context.row_index[detector_id], column_index] = 1
 
     for observable_id in obs_sets[fault_index]:
         obs[observable_id, column_index] = 1
 
 
-def _future_flips_after_commit(det_sets: tuple, round_of: dict,
-                               fault_index: int, commit_hi: int,
-                               *, is_last: bool) -> tuple:
+def _future_flips_after_commit(det_sets: tuple, fault_index: int,
+                               context: WindowPlacementContext) -> tuple:
     """Return detector flips that must be handed to a later window."""
-    if is_last:
+    if context.is_last:
         return ()
     return tuple(detector_id
                  for detector_id in det_sets[fault_index]
-                 if round_of[detector_id] > commit_hi)
+                 if context.round_of[detector_id] > context.commit_hi)
 
 
-def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
-                         det_sets: tuple, obs_sets: tuple, n_obs: int,
-                         round_of: dict, fault_rounds: tuple,
+def _build_window_arrays(*, context: WindowPlacementContext, columns: list,
+                         det_sets: tuple, obs_sets: tuple,
+                         fault_rounds: tuple,
                          committed_elsewhere: set, unowned_faults: set,
-                         explicitly_owned_faults: Optional[set],
-                         commit_lo: int,
-                         commit_hi: int, is_last: bool) -> tuple:
+                         explicitly_owned_faults: Optional[set]) -> tuple:
     """Build check, observable, ownership, and residual-defect arrays."""
     import numpy as np
 
-    check = np.zeros((len(rows), len(columns)), dtype=np.uint8)
-    obs = np.zeros((n_obs, len(columns)), dtype=np.uint8)
+    check = np.zeros((len(context.rows), len(columns)), dtype=np.uint8)
+    obs = np.zeros((context.n_obs, len(columns)), dtype=np.uint8)
     owned = np.zeros(len(columns), dtype=bool)
     future_flips: dict = {}
     boundary_flips: dict = {}
@@ -147,11 +162,11 @@ def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
     for column_index, fault_index in enumerate(columns):
         _fill_detector_and_observable_columns(
             check, obs, column_index=column_index, fault_index=fault_index,
-            det_sets=det_sets, obs_sets=obs_sets, row_index=row_index)
+            det_sets=det_sets, obs_sets=obs_sets, context=context)
 
         owns_fault = _fault_owned_by_window(
             fault_index, fault_rounds, committed_elsewhere, unowned_faults,
-            explicitly_owned_faults, commit_lo, commit_hi, is_last=is_last)
+            explicitly_owned_faults, context)
         if not owns_fault:
             continue
 
@@ -159,7 +174,7 @@ def _build_window_arrays(*, rows: list, columns: list, row_index: dict,
         if explicitly_owned_faults is None:
             committed_elsewhere.add(fault_index)
         beyond_commit = _future_flips_after_commit(
-            det_sets, round_of, fault_index, commit_hi, is_last=is_last)
+            det_sets, fault_index, context)
         if beyond_commit:
             future_flips[column_index] = beyond_commit
         # Keep the complete global detector effect. The destination intersects
@@ -205,18 +220,11 @@ def _unowned_faults(
 def _placed_faults_for_window(
     *,
     catalog: _FaultCatalog,
-    rows: list[int],
-    row_index: dict[int, int],
-    lead_rows: set[int],
-    n_obs: int,
-    round_of: dict[int, int],
+    context: WindowPlacementContext,
     committed_elsewhere: set[int],
     explicitly_owned_faults: Optional[set[int]],
     explicitly_prior_faults: Optional[set[int]],
     fault_exclusion_ranges: tuple,
-    commit_lo: int,
-    commit_hi: int,
-    is_last: bool,
 ) -> PlacedFaultModel:
     """Build one window's local matrix from one global fault catalog."""
     import numpy as np
@@ -224,13 +232,13 @@ def _placed_faults_for_window(
     detector_sets = catalog.detector_sets
     observable_sets = catalog.observable_sets
     fault_rounds = tuple(
-        tuple(round_of[detector_id] for detector_id in detectors)
+        tuple(context.round_of[detector_id] for detector_id in detectors)
         for detectors in catalog.detector_sets
     )
     columns = _fault_columns_for_window(
         detector_sets,
-        row_index,
-        lead_rows,
+        context.row_index,
+        context.lead_rows,
         (
             committed_elsewhere
             if explicitly_prior_faults is None
@@ -240,13 +248,10 @@ def _placed_faults_for_window(
     )
     check, observables, owned, future_flips, boundary_flips = (
         _build_window_arrays(
-            rows=rows,
+            context=context,
             columns=columns,
-            row_index=row_index,
             det_sets=detector_sets,
             obs_sets=observable_sets,
-            n_obs=n_obs,
-            round_of=round_of,
             fault_rounds=fault_rounds,
             committed_elsewhere=committed_elsewhere,
             unowned_faults=_unowned_faults(
@@ -254,9 +259,6 @@ def _placed_faults_for_window(
                 fault_exclusion_ranges,
             ),
             explicitly_owned_faults=explicitly_owned_faults,
-            commit_lo=commit_lo,
-            commit_hi=commit_hi,
-            is_last=is_last,
         )
     )
     placed = PlacedFaultModel(

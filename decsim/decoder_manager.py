@@ -812,10 +812,6 @@ class StrategyServicesImpl:
         self._runtime = window_manager
         self._pool = pool
 
-    @property
-    def now(self) -> int:
-        return self._engine.now
-
     def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
                         label: str) -> DecodeJob:
         strong = self._runtime.make_strong_decode_job(weak_job, n_rounds, label)
@@ -829,9 +825,6 @@ class StrategyServicesImpl:
     def check_strong_route(self, weak_job: DecodeJob,
                            strong_job: DecodeJob) -> None:
         self._pool.check_strong_route(weak_job, strong_job)
-
-    def cancel_strong(self, key: tuple) -> None:
-        self._pool.cancel_strong(key)
 
     def prepare_strong_selection(self, weak_job: DecodeJob,
                                  strong_request_key: DecoderRequestKey,

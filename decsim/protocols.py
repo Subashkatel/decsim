@@ -107,11 +107,7 @@ class OutcomeDirective:
 
 @runtime_checkable
 class StrategyServices(Protocol):
-    """What the core offers a strategy inside its hooks: the clock, strong-job
-    construction/cancellation, and strong-result selection transport."""
-
-    @property
-    def now(self) -> int: ...
+    """Strong-job construction and strong-result selection offered to a strategy."""
 
     def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
                         label: str) -> DecodeJob: ...
@@ -123,8 +119,6 @@ class StrategyServices(Protocol):
     def check_strong_route(
         self, weak_job: DecodeJob, strong_job: DecodeJob,
     ) -> None: ...
-
-    def cancel_strong(self, key: tuple) -> None: ...
 
     def prepare_strong_selection(
         self, weak_job: DecodeJob, strong_request_key: DecoderRequestKey,
@@ -169,8 +163,6 @@ class DecodingStrategy(Protocol):
 
     def on_decode_outcome(self, outcome: DecodeOutcome,
                           services: StrategyServices) -> OutcomeDirective: ...
-
-    def metrics(self) -> dict: ...
 
 
 # ----------------------------------------------------------- runtime policies
@@ -269,7 +261,6 @@ class Decoder(Protocol):
 
 
 @runtime_checkable
-@runtime_checkable
 class Scheduler(Protocol):
     """Port 11. Select the next ready job from one decoder-pool queue."""
 
@@ -291,6 +282,7 @@ class DecoderInputTransfer(Protocol):
         receiver: Callable[[DecodeJob], None], *, on_materialized=None,
     ) -> None: ...
 
+
 @runtime_checkable
 class ResourcePool(Protocol):
     """Port 12. Admit decoder jobs and own decoder queues and service units.
@@ -305,8 +297,6 @@ class ResourcePool(Protocol):
                       label: str = "") -> None: ...
 
     def cancel_strong(self, key: tuple) -> None: ...
-
-    def try_dispatch(self) -> None: ...
 
     def check_decode_work_settled(self) -> None: ...
 
@@ -368,19 +358,15 @@ class MultiFaultExclusionSyndromeDevice(Protocol):
 @runtime_checkable
 class SyndromeTransport(Protocol):
     """Port 14. Reassembles and forwards transient syndrome packets."""
-    links: Any
     def relay_qpu_readout(
         self, payload: SyndromePayload, route: SyndromePacketRoute, *,
         processing_ticks: int,
     ) -> None: ...
-    def relay_syndrome(self, payload: SyndromePayload,
-                       route: SyndromePacketRoute) -> None: ...
 
 
 @runtime_checkable
 class Orchestrator(Protocol):
     """Port 15. Records final predictions and releases blocked operations."""
-    engine: Any
     def connect(self, controller, decision_sink: Callable) -> None: ...
 
     def register_blocked_operation(self, blocked_op_id: int,

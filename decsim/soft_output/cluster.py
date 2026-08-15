@@ -7,7 +7,7 @@ import itertools
 import math
 from fractions import Fraction
 
-from ..detector_error_model import (
+from ..detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )

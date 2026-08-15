@@ -20,7 +20,7 @@ from ..adapters.window_decode_results import (
     empty_fault_model_outcome,
     fault_model_fingerprint,
 )
-from ..detector_error_model import FaultRepresentation
+from ..detector_error_model.fault_model_contracts import FaultRepresentation
 from ..seeding import _AtomicRunSeedConsumer
 
 

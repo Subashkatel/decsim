@@ -15,7 +15,7 @@ from ..message import (
     RunSeedChild,
     RunSeedPathSegment,
 )
-from ..detector_error_model import (
+from ..detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
@@ -66,7 +66,9 @@ class PyMatchingDecoder:
         entry = self._matchings.get(id(faults))
         matching = entry[1] if entry is not None and entry[0]() is faults else None
         if matching is None:
-            from ..detector_error_model import validate_graphlike_matrices
+            from ..detector_error_model.fault_identity_validation import (
+                validate_graphlike_matrices,
+            )
 
             validate_graphlike_matrices(
                 faults.check,

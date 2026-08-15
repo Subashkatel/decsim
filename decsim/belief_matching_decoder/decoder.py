@@ -10,7 +10,7 @@ from ..adapters.window_decode_results import (
     result_from_selected_faults,
 )
 from ..message import DecodeResult, RunSeedChild, RunSeedPathSegment
-from ..detector_error_model import (
+from ..detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     LINKED_FAULT_MODELS_REQUIRED,
 )

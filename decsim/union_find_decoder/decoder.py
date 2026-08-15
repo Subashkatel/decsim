@@ -9,7 +9,7 @@ from ..adapters.window_decode_results import (
     payload_syndrome,
     result_from_selected_faults,
 )
-from ..detector_error_model import (
+from ..detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )

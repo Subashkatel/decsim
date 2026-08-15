@@ -235,7 +235,7 @@ class StimDevice(_AtomicRunSeedConsumer):
 
     def _source_rounds(self, key, circuit, source_round_count: int) -> dict:
         """Bind one finite circuit, duration, and detector chronology per key."""
-        from ..detector_error_model import resolve_detector_rounds
+        from ..detector_error_model.detector_chronology import resolve_detector_rounds
 
         resolved = resolve_detector_rounds(
             circuit,
@@ -262,7 +262,7 @@ class StimDevice(_AtomicRunSeedConsumer):
         if stream_op.circuit is None:
             return None
 
-        from ..detector_error_model import WindowSlicer
+        from ..detector_error_model.window_slicer import WindowSlicer
 
         detector_rounds = self._source_rounds(
             stream_op.id, stream_op.circuit, round_count)
@@ -302,7 +302,9 @@ class StimDevice(_AtomicRunSeedConsumer):
         if op.circuit is None or not windows:
             return []
 
-        from ..detector_error_model import build_window_error_models
+        from ..detector_error_model.window_model_builders import (
+            build_window_error_models,
+        )
 
         detector_rounds = self._source_rounds(
             self._key(op), op.circuit, round_count)
@@ -356,7 +358,9 @@ class StimDevice(_AtomicRunSeedConsumer):
         if op.circuit is None:
             return None
 
-        from ..detector_error_model import build_single_window_error_model
+        from ..detector_error_model.window_model_builders import (
+            build_single_window_error_model,
+        )
 
         detector_rounds = self._source_rounds(
             self._key(op), op.circuit, round_count)
@@ -377,7 +381,7 @@ class StimDevice(_AtomicRunSeedConsumer):
         if op.circuit is None:
             return None
 
-        from ..detector_error_model import (
+        from ..detector_error_model.window_model_builders import (
             build_single_window_error_model_with_exclusions,
         )
 

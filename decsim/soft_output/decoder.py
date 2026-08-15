@@ -11,7 +11,7 @@ from ..message import (
     RunSeedPathSegment,
     SoftOutputSource,
 )
-from ..detector_error_model import DecoderFaultModelRequirement
+from ..detector_error_model.fault_model_contracts import DecoderFaultModelRequirement
 
 if TYPE_CHECKING:
     from ..protocols import Decoder
@@ -93,7 +93,7 @@ class SoftOutputDecoder:
     def _metric_for(self, model):
         """Build this decode's metric, or return None without an observable."""
         import numpy as np
-        from ..detector_error_model import FaultRepresentation
+        from ..detector_error_model.fault_model_contracts import FaultRepresentation
 
         if model is None:
             return None

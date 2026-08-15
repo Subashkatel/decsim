@@ -989,6 +989,30 @@ def test_linked_catalogs_build_a_verified_link():
     assert link.tolist() == [[1, 0], [0, 1], [0, 1]]
 
 
+def test_linked_catalogs_retain_a_maximum_detector_canceled_from_the_aggregate():
+    """Linked catalogs retain a maximum component detector even when it cancels out of the physical aggregate."""
+    graphlike, physical, link = stim_dem_catalog._prepare_linked_fault_catalogs(
+        make_model([(0.25, "D1 D4 ^ D3 D4")]),
+        make_model([(0.25, "D1 D3")]),
+    )
+    assert graphlike == fault_model_contracts._FaultCatalog(
+        representation=GRAPHLIKE,
+        detector_sets=((1, 4), (3, 4)),
+        observable_sets=((), ()),
+        priors=(0.25, 0.25),
+    )
+    assert physical == fault_model_contracts._FaultCatalog(
+        representation=PHYSICAL,
+        detector_sets=((1, 3),),
+        observable_sets=((),),
+        priors=(0.25,),
+    )
+    assert link.dtype == numpy.uint8
+    assert link.tolist() == [[1], [1]]
+    assert max(detector for detectors in graphlike.detector_sets for detector in detectors) == 4
+    assert all(4 not in detectors for detectors in physical.detector_sets)
+
+
 def test_linked_catalogs_keep_distinct_decompositions_of_one_aggregate():
     """Two mechanisms with the same overall identity but different decompositions stay separate physical columns."""
     merged = stim_dem_catalog._merge_probability(0.2, 0.3)

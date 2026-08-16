@@ -421,7 +421,7 @@ class Controller:
         )
 
     def _seal_finished_streams_if_needed(self) -> None:
-        if len(self.runtime.done_bodies) != len(self.runtime.operations):
+        if len(self.runtime.body_done_time) != len(self.runtime.operations):
             return
         protected_stream_ids = self._stream_owner_by_id
         for stream_id, total_rounds in list(self.stream_next_round.items()):

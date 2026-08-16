@@ -1,19 +1,8 @@
 """Track operation readiness, resource ownership, and execution timestamps."""
 from __future__ import annotations
-from dataclasses import dataclass
 from types import MappingProxyType
 
 from .message import Decision, ExecutionProgram
-
-
-@dataclass(frozen=True)
-class ExecutionSnapshot:
-    workload_complete: bool
-    done_tick: int
-    operation_start_times: tuple
-    body_done_times: tuple
-    decode_release_times: tuple
-    result_return_times: tuple
 
 
 class ExecutionRuntime:
@@ -46,15 +35,6 @@ class ExecutionRuntime:
     @property
     def workload_complete(self):
         return self.program is not None and set(self.operations) == self.done_bodies
-
-    @property
-    def snapshot(self):
-        return ExecutionSnapshot(
-            self.workload_complete, self.last_finish_time,
-            tuple(sorted(self.op_start_time.items())),
-            tuple(sorted(self.body_done_time.items())),
-            tuple(sorted(self.decode_release_time.items())),
-            tuple(sorted(self.result_return_time_by_operation.items())))
 
     def load_program(self, program: ExecutionProgram) -> None:
         if self.program is not None:
@@ -103,22 +83,51 @@ class ExecutionRuntime:
         if len(set(operation.qubits)) != len(operation.qubits):
             raise RuntimeError(
                 f"{operation.name} lists a qubit more than once: {operation.qubits}")
+        keys_to_claim = []
+        prospective_keys = set()
         for claim in self._claims[operation.id]:
             for resource_id in sorted(claim.ids, key=repr):
                 key = (claim.kind, resource_id)
                 if key in self.busy_claims:
-                    holder = self.operations[self.busy_claims[key]].name
-                    raise RuntimeError(
-                        f"{operation.name} and {holder} share {claim.kind} "
-                        f"resource {resource_id!r} but have no dependency edge. "
-                        "The operation list is missing "
-                        "program-order wiring (run it through _wire_circuit / a frontend)")
-                self.busy_claims[key] = operation.id
+                    holder_id = self.busy_claims[key]
+                elif key in prospective_keys:
+                    holder_id = operation.id
+                else:
+                    keys_to_claim.append(key)
+                    prospective_keys.add(key)
+                    continue
+                holder = self.operations[holder_id].name
+                raise RuntimeError(
+                    f"{operation.name} and {holder} share {claim.kind} "
+                    f"resource {resource_id!r} but have no dependency edge. "
+                    "The operation list is missing "
+                    "program-order wiring (run it through _wire_circuit / a frontend)")
+        for key in keys_to_claim:
+            self.busy_claims[key] = operation.id
 
     def _free_resources(self, operation):
+        release_keys = []
+        unique_release_keys = set()
         for claim in self._claims[operation.id]:
             for resource_id in claim.ids:
-                self.busy_claims.pop((claim.kind, resource_id), None)
+                key = (claim.kind, resource_id)
+                if key not in unique_release_keys:
+                    release_keys.append(key)
+                    unique_release_keys.add(key)
+
+        missing_holder = object()
+        for kind, resource_id in release_keys:
+            holder_id = self.busy_claims.get((kind, resource_id), missing_holder)
+            if holder_id is missing_holder:
+                raise RuntimeError(
+                    f"{operation.name} cannot release unclaimed {kind} "
+                    f"resource {resource_id!r}")
+            if holder_id != operation.id:
+                raise RuntimeError(
+                    f"{operation.name} cannot release {kind} resource "
+                    f"{resource_id!r} held by operation {holder_id!r}")
+        for key in release_keys:
+            del self.busy_claims[key]
 
     def _state_became_ready(self, operation):
         self.state_ready.add(operation.id)
@@ -137,6 +146,15 @@ class ExecutionRuntime:
         self.controller.issue_operation(operation, idle_rounds)
 
     def body_done(self, operation):
+        if operation.id not in self.operations:
+            raise RuntimeError(
+                f"cannot complete unindexed operation id {operation.id!r}")
+        if operation.id not in self.started:
+            raise RuntimeError(
+                f"cannot complete operation {operation.name} before it starts")
+        if operation.id in self.done_bodies:
+            raise RuntimeError(
+                f"operation {operation.name} body is already complete")
         self.done_bodies.add(operation.id)
         self.body_done_time[operation.id] = self.engine.now
         self.last_finish_time = max(self.last_finish_time, self.engine.now)

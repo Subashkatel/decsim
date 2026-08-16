@@ -592,6 +592,40 @@ def test_committed_prefix_stops_at_gaps_and_absorbs_adjacent_overlaps():
         lifecycle._committed_prefix_round_count("stream")
 
 
+def test_committed_round_count_reads_the_exact_cache_without_manager_events():
+    """The committed-prefix query exposes exact cache state without manager side effects."""
+    manager = RecordingWindowManager()
+    manager.windows = {
+        ("stream", 0): SimpleNamespace(commit_lo=1, commit_hi=3),
+        ("stream", 1): SimpleNamespace(commit_lo=4, commit_hi=6),
+    }
+    manager.committed_windows = {("stream", 0)}
+    lifecycle = DynamicWindows(manager)
+    register(lifecycle)
+
+    assert lifecycle.committed_round_count("missing") == 0
+    assert lifecycle.committed_round_count("stream") == 0
+    lifecycle.update_committed_round_count("stream")
+    assert lifecycle.committed_round_count("stream") == 3
+    manager.committed_windows.add(("stream", 1))
+    lifecycle.update_committed_round_count("stream")
+    manager.committed_windows.remove(("stream", 1))
+    assert lifecycle.committed_round_count("stream") == 6
+    assert lifecycle.recompute_committed_round_count("stream") == 3
+    assert lifecycle.committed_round_count("stream") == 3
+    manager.committed_windows.clear()
+    assert lifecycle.recompute_committed_round_count("stream") == 0
+    assert lifecycle.committed_round_count("stream") == 0
+    expected_events = [
+        ("release", "stream", 3),
+        ("release", "stream", 6),
+    ]
+    assert manager.events == expected_events
+    with pytest.raises(TypeError):
+        lifecycle.committed_round_count([])
+    assert manager.events == expected_events
+
+
 def test_committed_prefix_updates_monotonically_and_recompute_can_regress():
     """Ordinary commits advance once while recovery recomputation may lower or clear the cache."""
     manager = RecordingWindowManager()

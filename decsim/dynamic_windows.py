@@ -80,7 +80,12 @@ class DynamicWindows:
 
     # ---------------------------------------------------------------- grow
 
-    def grow(self, stream_id, rounds_to_plan: Optional[int] = None) -> None:
+    def grow(
+        self,
+        stream_id,
+        rounds_to_plan: Optional[int] = None,
+        sealed_round_cap: Optional[int] = None,
+    ) -> None:
         """Create every window whose commit region has begun."""
         wm = self.window_manager
         stream_state = self._streams[stream_id]
@@ -111,18 +116,25 @@ class DynamicWindows:
         while stream_state["next_window"] * commit_rounds + 1 <= highest_known_round:
             window_index = stream_state["next_window"]
             commit_lo = window_index * commit_rounds + 1
-            commit_hi = self._commit_hi(stream_state, window_index)
+            commit_hi = self._commit_hi(
+                stream_state, window_index, sealed_round_cap)
             buffer_hi = commit_hi + buffer_rounds
             wm.create_dynamic_window(stream_id, window_index, commit_lo,
                                      commit_hi, buffer_hi, is_last=False)
             stream_state["next_window"] += 1
 
     @staticmethod
-    def _commit_hi(stream_state: dict, window_index: int) -> int:
+    def _commit_hi(
+        stream_state: dict,
+        window_index: int,
+        sealed_round_cap: Optional[int] = None,
+    ) -> int:
         """Commit end for one dynamic window, clipped when a cap is known."""
         commit_rounds = stream_state["commit_rounds"]
         commit_hi = (window_index + 1) * commit_rounds
-        known_round_count = stream_state["sealed_round_count"]
+        known_round_count = sealed_round_cap
+        if known_round_count is None:
+            known_round_count = stream_state["sealed_round_count"]
         if known_round_count is None:
             known_round_count = stream_state["source_round_limit"]
         if known_round_count is None:
@@ -150,13 +162,53 @@ class DynamicWindows:
         if stream_state["sealed"]:
             return
         wm.validate_stream_length(stream_id, stream_round_count)
+
+        local_state_snapshot = (
+            stream_state["next_window"],
+            stream_state["sealed_round_count"],
+            stream_state["sealed"],
+        )
+        seal_phase = "window growth"
+        try:
+            self.grow(
+                stream_id,
+                rounds_to_plan=stream_round_count,
+                sealed_round_cap=stream_round_count,
+            )
+            if stream_state["finite_geometries"] is None:
+                seal_phase = "tail trimming"
+                self._trim_tail(stream_id, stream_round_count)
+        except Exception as error:
+            (
+                stream_state["next_window"],
+                stream_state["sealed_round_count"],
+                stream_state["sealed"],
+            ) = local_state_snapshot
+            raise RuntimeError(
+                f"FAIL_STOP: sealing stream {stream_id!r} at "
+                f"{stream_round_count} rounds failed during {seal_phase}; local "
+                "seal state was restored, but delegated WindowManager side "
+                "effects may not be rollbackable, so execution cannot continue"
+            ) from error
+
         stream_state["sealed_round_count"] = stream_round_count
-        self.grow(stream_id, rounds_to_plan=stream_round_count)
-        if stream_state["finite_geometries"] is None:
-            self._trim_tail(stream_id, stream_round_count)
         stream_state["sealed"] = True
-        wm.check_windows_for_operation(stream_id)
-        wm.finish_workload_if_ready()
+        try:
+            wm.check_windows_for_operation(stream_id)
+        except Exception as error:
+            raise RuntimeError(
+                f"FAIL_STOP: stream {stream_id!r} sealed at "
+                f"{stream_round_count} rounds, but its postcommit window check "
+                "failed; execution cannot continue"
+            ) from error
+        try:
+            wm.finish_workload_if_ready()
+        except Exception as error:
+            raise RuntimeError(
+                f"FAIL_STOP: stream {stream_id!r} sealed at "
+                f"{stream_round_count} rounds, but its postcommit workload "
+                "completion failed; execution cannot continue"
+            ) from error
 
     def _trim_tail(self, stream_id, stream_round_count: int) -> None:
         """Clip the final open-stream commit region to the sealed length."""
@@ -175,7 +227,12 @@ class DynamicWindows:
             raise ValueError(
                 f"stream_round_count must be >= 1 (got {stream_round_count})")
         self._reject_unsupported_boundary(stream_id, stream_round_count)
-        self.closed_boundaries[stream_id].add(stream_round_count)
+        closed_rounds = self.closed_boundaries[stream_id]
+        if stream_round_count in closed_rounds:
+            raise RuntimeError(
+                f"stream {stream_id!r} already closed a feedback boundary at "
+                f"round {stream_round_count}")
+        closed_rounds.add(stream_round_count)
         self.grow(stream_id, rounds_to_plan=stream_round_count)
         wm.refresh_unqueued_stream_windows(stream_id)
         wm.check_windows_for_operation(stream_id)

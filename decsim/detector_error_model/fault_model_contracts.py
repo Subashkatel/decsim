@@ -135,6 +135,11 @@ class WindowErrorModel:
     physical_faults: Optional[PlacedFaultModel]
     physical_to_graphlike_detector_projection: "object" = None
 
+    def __post_init__(self) -> None:
+        projection = self.physical_to_graphlike_detector_projection
+        if projection is not None:
+            projection.flags.writeable = False
+
     def require_faults(
         self,
         representation: FaultRepresentation,

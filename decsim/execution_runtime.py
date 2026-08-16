@@ -22,9 +22,6 @@ class ExecutionRuntime:
         self.busy_claims = {}
         self.requested = set()
         self.state_ready = set()
-        self.started = set()
-        self.done_bodies = set()
-        self.decode_released = set()
         self.op_start_time = {}
         self.body_done_time = {}
         self.decode_release_time = {}
@@ -34,7 +31,8 @@ class ExecutionRuntime:
 
     @property
     def workload_complete(self):
-        return self.program is not None and set(self.operations) == self.done_bodies
+        return (self.program is not None and
+                self.operations.keys() == self.body_done_time.keys())
 
     def load_program(self, program: ExecutionProgram) -> None:
         if self.program is not None:
@@ -134,13 +132,13 @@ class ExecutionRuntime:
         self._maybe_begin(operation)
 
     def _maybe_begin(self, operation):
-        if operation.id in self.started or operation.id not in self.state_ready:
+        if operation.id in self.op_start_time or operation.id not in self.state_ready:
             return
-        if operation.blocked_by is not None and operation.id not in self.decode_released:
+        if (operation.blocked_by is not None and
+                operation.id not in self.decode_release_time):
             return
         if not self.controller.can_start(operation):
             return
-        self.started.add(operation.id)
         self.op_start_time[operation.id] = self.engine.now
         idle_rounds = self.consume_idle_rounds(operation)
         self.controller.issue_operation(operation, idle_rounds)
@@ -149,13 +147,12 @@ class ExecutionRuntime:
         if operation.id not in self.operations:
             raise RuntimeError(
                 f"cannot complete unindexed operation id {operation.id!r}")
-        if operation.id not in self.started:
+        if operation.id not in self.op_start_time:
             raise RuntimeError(
                 f"cannot complete operation {operation.name} before it starts")
-        if operation.id in self.done_bodies:
+        if operation.id in self.body_done_time:
             raise RuntimeError(
                 f"operation {operation.name} body is already complete")
-        self.done_bodies.add(operation.id)
         self.body_done_time[operation.id] = self.engine.now
         self.last_finish_time = max(self.last_finish_time, self.engine.now)
         self.engine.log("ExecutionRuntime", f"{operation.name} body done")
@@ -174,9 +171,9 @@ class ExecutionRuntime:
     def waiting_blocked_successor(self, operation_id):
         for successor_id in self.successors[operation_id]:
             successor = self.operations[successor_id]
-            if successor.blocked_by is None or successor.id in self.started:
+            if successor.blocked_by is None or successor.id in self.op_start_time:
                 continue
-            if successor.id not in self.decode_released:
+            if successor.id not in self.decode_release_time:
                 return True
             if self.controller.gates_start_on_round_boundaries:
                 return True
@@ -188,8 +185,8 @@ class ExecutionRuntime:
         for successor_id in self.successors[operation_id]:
             successor = self.operations[successor_id]
             if (successor.blocked_by is not None and
-                    successor.id not in self.started and
-                    successor.id in self.decode_released and
+                    successor.id not in self.op_start_time and
+                    successor.id in self.decode_release_time and
                     successor.id in self.state_ready and
                     successor.id in self.schedule_released):
                 if patch is not None:
@@ -208,7 +205,13 @@ class ExecutionRuntime:
             self.engine.log("ExecutionRuntime",
                             f"received result return for {operation.name}")
             return
-        self.decode_released.add(operation_id)
+        if operation.blocked_by is None:
+            raise RuntimeError(
+                f"release decision targets {operation.name}, "
+                "which is not feedback-blocked")
+        if operation_id in self.decode_release_time:
+            raise RuntimeError(
+                f"{operation.name} was already released by an earlier decision")
         self.decode_release_time[operation_id] = self.engine.now
         self.engine.log("ExecutionRuntime",
                         f"CONSUMED release for {operation.name}; now trying to start")

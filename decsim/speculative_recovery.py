@@ -203,7 +203,7 @@ class SpeculativeRecovery:
             source_request_key=completion.request_key)
         runtime.release_stream_segments_at_commit(
             source_op.id,
-            runtime.lifecycle.committed_round_counts.get(source_op.id, 0),
+            runtime.lifecycle.committed_round_count(source_op.id),
         )
         runtime._finish_operation_if_ready(source_op)
         runtime.finish_workload_if_ready()
@@ -261,7 +261,7 @@ class SpeculativeRecovery:
                 continue
             self.runtime.release_stream_segments_at_commit(
                 op_id,
-                self.runtime.lifecycle.committed_round_counts.get(op_id, 0),
+                self.runtime.lifecycle.committed_round_count(op_id),
             )
             self.runtime._finish_operation_if_ready(op)
         self.runtime.finish_workload_if_ready()

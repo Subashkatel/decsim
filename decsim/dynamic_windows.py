@@ -278,10 +278,14 @@ class DynamicWindows:
             return window.buffer_hi
         return self.window_manager.rounds_arrived.get(op_id, 0)
 
+    def committed_round_count(self, stream_id) -> int:
+        """Committed-prefix round count cached for a stream, or 0."""
+        return self.committed_round_counts.get(stream_id, 0)
+
     def update_committed_round_count(self, stream_id) -> None:
         """Advance the committed prefix and release the segments it covers."""
         committed = self._committed_prefix_round_count(stream_id)
-        if committed <= self.committed_round_counts.get(stream_id, 0):
+        if committed <= self.committed_round_count(stream_id):
             return
         self.committed_round_counts[stream_id] = committed
         self.window_manager.release_stream_segments_at_commit(stream_id, committed)

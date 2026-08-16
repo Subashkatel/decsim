@@ -6,11 +6,11 @@ from dataclasses import FrozenInstanceError, dataclass, fields
 
 import pytest
 
-import decsim.decoder_local as decoder_local
-from decsim.decoder_local import (
+import decsim.decoder_input_store as decoder_input_store
+from decsim.decoder_input_store import (
     DecoderInput,
-    DecoderLocalCapacityExhaustion,
-    DecoderLocalMemory,
+    DecoderInputStoreCapacityExhaustion,
+    DecoderInputStore,
     MaterializedSyndromeRound,
     materialize_decoder_input,
 )
@@ -85,7 +85,7 @@ def make_job(
 
 def test_module_imports_only_kept_dependencies_and_has_no_stale_helper() -> None:
     """The module keeps only its narrow dependency set and no retired helper."""
-    tree = ast.parse(inspect.getsource(decoder_local))
+    tree = ast.parse(inspect.getsource(decoder_input_store))
     imports = []
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
@@ -109,7 +109,7 @@ def test_module_imports_only_kept_dependencies_and_has_no_stale_helper() -> None
             ),
         ),
     ]
-    assert not hasattr(decoder_local, "_rematerialized_fragment")
+    assert not hasattr(decoder_input_store, "_rematerialized_fragment")
 
 
 def test_materialization_orders_rounds_and_preserves_within_round_order() -> None:
@@ -304,153 +304,153 @@ def test_materialization_rejects_identity_outside_stable_domain() -> None:
 
 @pytest.mark.parametrize("capacity", [0, -1, True, 1.0])
 def test_memory_capacity_requires_none_or_positive_exact_integer(capacity: object) -> None:
-    """Decoder-local capacity accepts only unbounded or positive exact integers."""
+    """Decoder-input store capacity accepts only unbounded or positive exact integers."""
     with pytest.raises(TypeError, match="positive built-in int"):
-        DecoderLocalMemory(capacity)
+        DecoderInputStore(capacity)
 
 
 def test_unbounded_memory_tracks_reserved_and_deposited_slots() -> None:
-    """Unbounded memory counts both reserved and deposited live slots."""
-    memory = DecoderLocalMemory()
-    memory.reserve("reserved")
-    memory.reserve("deposited")
-    memory.deposit("deposited", make_job())
+    """An unbounded input store counts both reserved and deposited live slots."""
+    input_store = DecoderInputStore()
+    input_store.reserve("reserved")
+    input_store.reserve("deposited")
+    input_store.deposit("deposited", make_job())
 
-    assert memory.capacity is None
-    assert memory.slots_in_use == 2
+    assert input_store.capacity is None
+    assert input_store.slots_in_use == 2
 
 
 @pytest.mark.parametrize("deposited", [False, True])
 def test_duplicate_reserve_reports_current_state_without_mutation(deposited: bool) -> None:
     """Duplicate reservation reports the current slot state without changing occupancy."""
-    memory = DecoderLocalMemory(2)
-    memory.reserve("request")
+    input_store = DecoderInputStore(2)
+    input_store.reserve("request")
     if deposited:
-        memory.deposit("request", make_job())
+        input_store.deposit("request", make_job())
     expected_state = "deposited" if deposited else "reserved"
 
     with pytest.raises(RuntimeError, match=rf"request.*{expected_state}"):
-        memory.reserve("request")
+        input_store.reserve("request")
 
-    assert memory.slots_in_use == 1
+    assert input_store.slots_in_use == 1
 
 
 def test_equal_slot_keys_collide_loudly_without_mutation() -> None:
     """Python-equal slot keys collide loudly rather than sharing a live slot."""
-    memory = DecoderLocalMemory(2)
-    memory.reserve(1)
+    input_store = DecoderInputStore(2)
+    input_store.reserve(1)
 
     with pytest.raises(RuntimeError, match="already reserved"):
-        memory.reserve(True)
+        input_store.reserve(True)
 
-    assert memory.slots_in_use == 1
+    assert input_store.slots_in_use == 1
 
 
 def test_capacity_exhaustion_is_typed_and_releases_after_take() -> None:
     """A full store raises its typed error and accepts work after a successful release."""
-    memory = DecoderLocalMemory(1)
-    memory.reserve("first")
-    stored = memory.deposit("first", make_job([make_fragment()]))
+    input_store = DecoderInputStore(1)
+    input_store.reserve("first")
+    stored = input_store.deposit("first", make_job([make_fragment()]))
 
     with pytest.raises(
-        DecoderLocalCapacityExhaustion,
-        match="all 1 decoder-local slots",
+        DecoderInputStoreCapacityExhaustion,
+        match="all 1 decoder-input store slots",
     ) as error:
-        memory.reserve("second")
+        input_store.reserve("second")
     assert isinstance(error.value, RuntimeError)
-    assert memory.slots_in_use == 1
+    assert input_store.slots_in_use == 1
 
-    assert memory.take("first") is stored
-    memory.reserve("second")
-    assert memory.slots_in_use == 1
+    assert input_store.take("first") is stored
+    input_store.reserve("second")
+    assert input_store.slots_in_use == 1
 
 
 def test_deposit_rejects_overwrite_without_mutation() -> None:
     """A second deposit raises a state error and preserves the original input."""
-    memory = DecoderLocalMemory()
-    memory.reserve("request")
-    original = memory.deposit("request", make_job([make_fragment(1, 0)]))
+    input_store = DecoderInputStore()
+    input_store.reserve("request")
+    original = input_store.deposit("request", make_job([make_fragment(1, 0)]))
 
     with pytest.raises(RuntimeError, match="already holds a deposit"):
-        memory.deposit("request", make_job([make_fragment(1, 1)]))
+        input_store.deposit("request", make_job([make_fragment(1, 1)]))
 
-    assert memory.slots_in_use == 1
-    assert memory.take("request") is original
+    assert input_store.slots_in_use == 1
+    assert input_store.take("request") is original
 
 
 def test_take_rejects_reserved_slot_without_mutation() -> None:
     """Taking before deposit raises a state error and leaves the reservation live."""
-    memory = DecoderLocalMemory()
-    memory.reserve("request")
+    input_store = DecoderInputStore()
+    input_store.reserve("request")
 
     with pytest.raises(RuntimeError, match="before any deposit"):
-        memory.take("request")
+        input_store.take("request")
 
-    assert memory.slots_in_use == 1
-    memory.discard("request")
-    assert memory.slots_in_use == 0
+    assert input_store.slots_in_use == 1
+    input_store.discard("request")
+    assert input_store.slots_in_use == 0
 
 
 @pytest.mark.parametrize("action", ["deposit", "take"])
 def test_unknown_deposit_and_take_raise_natural_key_error(action: str) -> None:
     """Unknown deposit and take operations expose the mapping's natural key error."""
-    memory = DecoderLocalMemory()
+    input_store = DecoderInputStore()
 
     with pytest.raises(KeyError) as error:
         if action == "deposit":
-            memory.deposit("missing", make_job())
+            input_store.deposit("missing", make_job())
         else:
-            memory.take("missing")
+            input_store.take("missing")
 
     assert error.value.args == ("missing",)
-    assert memory.slots_in_use == 0
+    assert input_store.slots_in_use == 0
 
 
 def test_discard_rejects_unknown_key_and_preserves_live_slot() -> None:
     """Discarding an unknown key raises a state error without touching live slots."""
-    memory = DecoderLocalMemory()
-    memory.reserve("live")
+    input_store = DecoderInputStore()
+    input_store.reserve("live")
 
     with pytest.raises(RuntimeError, match="discard of unknown"):
-        memory.discard("missing")
+        input_store.discard("missing")
 
-    assert memory.slots_in_use == 1
-    memory.discard("live")
+    assert input_store.slots_in_use == 1
+    input_store.discard("live")
 
 
 @pytest.mark.parametrize("deposited", [False, True])
 def test_discard_releases_reserved_and_deposited_slots(deposited: bool) -> None:
     """Discard frees either live slot state without returning its contents."""
-    memory = DecoderLocalMemory(1)
-    memory.reserve("request")
+    input_store = DecoderInputStore(1)
+    input_store.reserve("request")
     if deposited:
-        memory.deposit("request", make_job())
+        input_store.deposit("request", make_job())
 
-    assert memory.discard("request") is None
-    assert memory.slots_in_use == 0
-    memory.reserve("replacement")
-    assert memory.slots_in_use == 1
+    assert input_store.discard("request") is None
+    assert input_store.slots_in_use == 0
+    input_store.reserve("replacement")
+    assert input_store.slots_in_use == 1
 
 
 def test_successful_deposit_and_take_return_one_identical_input() -> None:
     """A successful reserve-deposit-take lifecycle returns one identical frozen input."""
-    memory = DecoderLocalMemory(1)
-    memory.reserve("request")
-    deposited = memory.deposit("request", make_job([make_fragment()]))
+    input_store = DecoderInputStore(1)
+    input_store.reserve("request")
+    deposited = input_store.deposit("request", make_job([make_fragment()]))
 
-    taken = memory.take("request")
+    taken = input_store.take("request")
 
     assert taken is deposited
-    assert memory.slots_in_use == 0
+    assert input_store.slots_in_use == 0
 
 
 def test_failed_materialization_leaves_slot_reserved() -> None:
     """A failed materialization leaves its reserved slot unchanged and recoverable."""
-    memory = DecoderLocalMemory(1)
-    memory.reserve("request")
+    input_store = DecoderInputStore(1)
+    input_store.reserve("request")
 
     with pytest.raises(TypeError):
-        memory.deposit(
+        input_store.deposit(
             "request",
             make_job(
                 [
@@ -467,21 +467,21 @@ def test_failed_materialization_leaves_slot_reserved() -> None:
             ),
         )
 
-    assert memory.slots_in_use == 1
+    assert input_store.slots_in_use == 1
     with pytest.raises(RuntimeError, match="before any deposit"):
-        memory.take("request")
-    memory.discard("request")
+        input_store.take("request")
+    input_store.discard("request")
 
 
 def test_capacity_attribute_can_change_without_revalidating_live_slots() -> None:
     """Changing the public capacity does not retroactively validate existing occupancy."""
-    memory = DecoderLocalMemory(2)
-    memory.reserve("first")
-    memory.reserve("second")
+    input_store = DecoderInputStore(2)
+    input_store.reserve("first")
+    input_store.reserve("second")
 
-    memory.capacity = 1
+    input_store.capacity = 1
 
-    assert memory.capacity == 1
-    assert memory.slots_in_use == 2
-    with pytest.raises(DecoderLocalCapacityExhaustion):
-        memory.reserve("third")
+    assert input_store.capacity == 1
+    assert input_store.slots_in_use == 2
+    with pytest.raises(DecoderInputStoreCapacityExhaustion):
+        input_store.reserve("third")

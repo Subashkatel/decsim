@@ -270,14 +270,15 @@ def test_arrival_update_grows_then_auto_seals_at_a_finite_source_limit():
     assert lifecycle.sealed("stream") is True
 
 
-def test_seal_orders_delegation_is_idempotent_and_preserves_partial_failure():
-    """Sealing delegates in order, repeats nothing, and retains pre-failure length mutation."""
+def test_successful_seal_preserves_geometry_and_repeated_calls_are_noops():
+    """A successful seal preserves event geometry and every later seal is a no-op."""
     manager = RecordingWindowManager()
     lifecycle = DynamicWindows(manager)
     manager.lifecycle = lifecycle
     register(lifecycle)
 
     lifecycle.seal("stream", 5)
+
     expected = [
         ("validate", "stream", 5),
         ("create", "stream", 0, 1, 3, 5, False),
@@ -287,25 +288,160 @@ def test_seal_orders_delegation_is_idempotent_and_preserves_partial_failure():
         ("finish",),
     ]
     assert manager.events == expected
+    assert lifecycle._streams["stream"]["next_window"] == 2
+    assert lifecycle._streams["stream"]["sealed_round_count"] == 5
+    assert lifecycle.sealed("stream") is True
+
     lifecycle.grow("stream")
     lifecycle.seal("stream", 99)
+    lifecycle.seal("stream", 5)
     assert manager.events == expected
     with pytest.raises(KeyError):
         lifecycle.grow("missing")
     with pytest.raises(KeyError):
         lifecycle.seal("missing", 1)
 
-    failing_manager = RecordingWindowManager()
-    failing_manager.fail_creation = True
-    failing_lifecycle = DynamicWindows(failing_manager)
-    register(failing_lifecycle)
-    with pytest.raises(RuntimeError, match="creation failed"):
-        failing_lifecycle.seal("stream", 2)
-    assert failing_lifecycle.sealed("stream") is False
-    failing_manager.fail_creation = False
-    failing_lifecycle.grow("stream", rounds_to_plan=2)
-    assert failing_manager.events[-1] == (
-        "create", "stream", 0, 1, 2, 4, False)
+
+def test_preflight_failure_leaves_local_and_delegated_state_unchanged():
+    """A pure length-validation failure leaves local and delegated state unchanged."""
+    manager = RecordingWindowManager()
+    lifecycle = DynamicWindows(manager)
+    manager.lifecycle = lifecycle
+    register(lifecycle)
+    manager.rounds_arrived["stream"] = 4
+    initial_stream_state = lifecycle._streams["stream"].copy()
+
+    def reject_length(_stream_id, _stream_round_count):
+        raise ValueError("invalid stream length")
+
+    manager.validate_stream_length = reject_length
+    with pytest.raises(ValueError, match="invalid stream length"):
+        lifecycle.seal("stream", 5)
+
+    assert lifecycle._streams["stream"] == initial_stream_state
+    assert lifecycle.sealed("stream") is False
+    assert lifecycle.arrival_round_limit("stream", 99) is None
+    assert lifecycle.round_count_for_window("stream", None, 99) == 4
+    assert manager.events == []
+    assert manager.windows == {}
+
+
+@pytest.mark.parametrize("failed_window_index", [0, 1])
+def test_grow_failure_restores_local_seal_state_and_requires_fail_stop(
+        failed_window_index):
+    """First and later grow failures restore local seal state without retrying delegated effects."""
+    manager = RecordingWindowManager()
+    lifecycle = DynamicWindows(manager)
+    manager.lifecycle = lifecycle
+    register(lifecycle)
+    initial_stream_state = lifecycle._streams["stream"].copy()
+    create_window = manager.create_dynamic_window
+
+    def fail_during_growth(stream_id, window_index, commit_lo, commit_hi,
+                           buffer_hi, *, is_last):
+        create_window(stream_id, window_index, commit_lo, commit_hi,
+                      buffer_hi, is_last=is_last)
+        if window_index == failed_window_index:
+            raise RuntimeError("growth failed")
+
+    manager.create_dynamic_window = fail_during_growth
+    with pytest.raises(RuntimeError, match="FAIL_STOP") as raised:
+        lifecycle.seal("stream", 5)
+
+    assert "window growth" in str(raised.value)
+    assert "execution cannot continue" in str(raised.value)
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert lifecycle._streams["stream"] == initial_stream_state
+    assert lifecycle.sealed("stream") is False
+    assert lifecycle.arrival_round_limit("stream", 99) is None
+    expected_creates = [
+        ("create", "stream", 0, 1, 3, 5, False),
+        ("create", "stream", 1, 4, 5, 7, False),
+    ][:failed_window_index + 1]
+    assert manager.events == [
+        ("validate", "stream", 5),
+        *expected_creates,
+    ]
+    # Delegated effects remain visible, so FAIL_STOP is terminal rather than retryable.
+    assert manager.events[-1] == expected_creates[-1]
+
+
+def test_trim_failure_restores_local_seal_state_and_requires_fail_stop():
+    """A trim failure restores local seal state while its delegated effects remain terminal."""
+    manager = RecordingWindowManager()
+    lifecycle = DynamicWindows(manager)
+    manager.lifecycle = lifecycle
+    register(lifecycle)
+    initial_stream_state = lifecycle._streams["stream"].copy()
+    trim_tail = manager.trim_dynamic_window_tail
+
+    def fail_during_trim(stream_id, stream_round_count, buffer_rounds):
+        trim_tail(stream_id, stream_round_count, buffer_rounds)
+        raise RuntimeError("trim failed")
+
+    manager.trim_dynamic_window_tail = fail_during_trim
+    with pytest.raises(RuntimeError, match="FAIL_STOP") as raised:
+        lifecycle.seal("stream", 5)
+
+    assert "tail trimming" in str(raised.value)
+    assert "execution cannot continue" in str(raised.value)
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert lifecycle._streams["stream"] == initial_stream_state
+    assert lifecycle.sealed("stream") is False
+    assert manager.events == [
+        ("validate", "stream", 5),
+        ("create", "stream", 0, 1, 3, 5, False),
+        ("create", "stream", 1, 4, 5, 7, False),
+        ("trim", "stream", 5, 2),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("failed_phase", "message_fragment"),
+    [
+        ("check", "postcommit window check"),
+        ("finish", "postcommit workload completion"),
+    ],
+)
+def test_postcommit_failure_is_contextual_and_keeps_the_seal_published(
+        failed_phase, message_fragment):
+    """Postcommit check and finish failures name their phase and preserve the seal."""
+    manager = RecordingWindowManager()
+    lifecycle = DynamicWindows(manager)
+    manager.lifecycle = lifecycle
+    register(lifecycle)
+
+    if failed_phase == "check":
+        check_windows = manager.check_windows_for_operation
+
+        def fail_postcommit_check(stream_id):
+            check_windows(stream_id)
+            raise RuntimeError("check failed")
+
+        manager.check_windows_for_operation = fail_postcommit_check
+    else:
+        finish_workload = manager.finish_workload_if_ready
+
+        def fail_postcommit_finish():
+            finish_workload()
+            raise RuntimeError("finish failed")
+
+        manager.finish_workload_if_ready = fail_postcommit_finish
+
+    with pytest.raises(RuntimeError, match="FAIL_STOP") as raised:
+        lifecycle.seal("stream", 5)
+
+    assert message_fragment in str(raised.value)
+    assert "'stream'" in str(raised.value)
+    assert "5 rounds" in str(raised.value)
+    assert "execution cannot continue" in str(raised.value)
+    assert isinstance(raised.value.__cause__, RuntimeError)
+    assert lifecycle._streams["stream"]["next_window"] == 2
+    assert lifecycle._streams["stream"]["sealed_round_count"] == 5
+    assert lifecycle.sealed("stream") is True
+    assert lifecycle.arrival_round_limit("stream", 99) == 5
+    assert manager.events[-1] == (("check", "stream", True)
+                                  if failed_phase == "check" else ("finish",))
 
 
 def test_real_manager_clips_only_the_first_containing_tail_window():
@@ -330,8 +466,8 @@ def test_real_manager_clips_only_the_first_containing_tail_window():
     assert len(manager.syndrome_buffer.replacements) == 1
 
 
-def test_boundary_closure_guards_finite_sources_and_repeats_readiness_effects():
-    """Boundary closure rejects only invalid lower and finite internal bounds while repeating effects."""
+def test_boundary_closure_guards_finite_sources_and_rejects_duplicates():
+    """Boundary closure rejects invalid bounds and duplicates before any mutation."""
     manager = RecordingWindowManager()
     lifecycle = DynamicWindows(manager)
     manager.lifecycle = lifecycle
@@ -342,12 +478,17 @@ def test_boundary_closure_guards_finite_sources_and_repeats_readiness_effects():
         lifecycle.close_boundary("stream", "four")
 
     lifecycle.close_boundary("stream", 4)
-    lifecycle.close_boundary("stream", 4)
-    assert lifecycle.closed_boundaries["stream"] == {4}
-    assert manager.events == [
-        ("refresh", "stream"), ("check", "stream", False),
+    initial_stream_state = lifecycle._streams["stream"].copy()
+    initial_boundaries = lifecycle.closed_boundaries["stream"].copy()
+    initial_events = list(manager.events)
+    with pytest.raises(RuntimeError, match="already closed.*round 4"):
+        lifecycle.close_boundary("stream", 4)
+    assert lifecycle._streams["stream"] == initial_stream_state
+    assert lifecycle.closed_boundaries["stream"] == initial_boundaries
+    assert manager.events == initial_events == [
         ("refresh", "stream"), ("check", "stream", False),
     ]
+
     lifecycle.seal("stream", 0)
     manager.events.clear()
     lifecycle.close_boundary("stream", 5)
@@ -360,8 +501,34 @@ def test_boundary_closure_guards_finite_sources_and_repeats_readiness_effects():
     register(finite_lifecycle, source_limit=5, finite_geometries=[])
     with pytest.raises(RuntimeError, match="destructive boundary"):
         finite_lifecycle.close_boundary("stream", 4)
+    assert finite_lifecycle.closed_boundaries["stream"] == set()
     finite_lifecycle.close_boundary("stream", 6)
     assert finite_lifecycle.closed_boundaries["stream"] == {6}
+
+
+def test_duplicate_boundaries_are_scoped_per_stream_and_round():
+    """A duplicate blocks only the same stream and round while other keys remain valid."""
+    manager = RecordingWindowManager()
+    lifecycle = DynamicWindows(manager)
+    manager.lifecycle = lifecycle
+    register(lifecycle, stream_id="first", finite_geometries=[])
+    register(lifecycle, stream_id="second", finite_geometries=[])
+
+    lifecycle.close_boundary("first", 4)
+    with pytest.raises(RuntimeError, match="already closed.*round 4"):
+        lifecycle.close_boundary("first", 4)
+    lifecycle.close_boundary("first", 5)
+    lifecycle.close_boundary("second", 4)
+
+    assert lifecycle.closed_boundaries == {
+        "first": {4, 5},
+        "second": {4},
+    }
+    assert manager.events == [
+        ("refresh", "first"), ("check", "first", False),
+        ("refresh", "first"), ("check", "first", False),
+        ("refresh", "second"), ("check", "second", False),
+    ]
 
 
 def test_closed_boundary_selection_uses_the_right_buffer_half_open_interval():

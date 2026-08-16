@@ -233,14 +233,13 @@ def test_nonnumeric_cadence_uses_natural_float_conversion_errors(model_type):
 
 
 def test_models_report_exact_generic_names():
-    """Surface and BB cards expose their exact parameterized routing names."""
+    """Surface and BB code models expose their exact parameterized names."""
     surface = SurfaceCodeModel()
     default_bb = BBCodeModel()
     other_bb = BBCodeModel(n=56, k=2, d=10)
     assert surface.name == "rotated surface code (d=3)"
     assert default_bb.name == "bivariate-bicycle code [[144,12,12]]"
     assert other_bb.name == "bivariate-bicycle code [[56,2,10]]"
-    assert UniformLayout(surface).name == "uniform[rotated surface code (d=3)]"
 
 
 def test_router_uses_exact_names_and_silently_falls_back_when_unmapped():

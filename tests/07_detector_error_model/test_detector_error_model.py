@@ -1315,6 +1315,39 @@ def test_window_error_model_fields_and_deliberate_non_freezing():
     assert window.defect_positions[99] == (9, 9)
 
 
+def test_window_error_model_freezes_projection_without_copying():
+    """A window model retains its projection array and prevents external item assignment."""
+    projection = numpy.array([[True, False], [False, True]])
+
+    window = fault_model_contracts.WindowErrorModel(
+        detector_ids=(),
+        detector_coordinates=None,
+        defect_positions={},
+        graphlike_faults=None,
+        physical_faults=None,
+        physical_to_graphlike_detector_projection=projection,
+    )
+
+    assert window.physical_to_graphlike_detector_projection is projection
+    assert projection.flags.writeable is False
+    with pytest.raises(ValueError):
+        projection[0, 0] = False
+
+
+def test_window_error_model_accepts_no_projection():
+    """A window model continues to accept no physical-to-graphlike projection."""
+    window = fault_model_contracts.WindowErrorModel(
+        detector_ids=(),
+        detector_coordinates=None,
+        defect_positions={},
+        graphlike_faults=None,
+        physical_faults=None,
+        physical_to_graphlike_detector_projection=None,
+    )
+
+    assert window.physical_to_graphlike_detector_projection is None
+
+
 def test_require_faults_returns_or_fails_at_the_consuming_boundary():
     """Requesting a fault view returns it, or fails clearly when the view is missing or the argument is not a representation."""
     window = chain_models([(1, 2, 2), (3, 4, 4)])[0]

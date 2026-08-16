@@ -730,7 +730,7 @@ class DecodeJob:
     """One unit of decoder work in the ``logical_reference`` profile.
 
     During the Phase-A migration, ``payloads`` is an upstream source view used
-    to construct the decoder-local input. Decoders must not observe it before
+    to construct the decoder-input store value. Decoders must not observe it before
     input-transfer completion. Boundary processing may replace an entry with a
     new immutable transformed fragment. The field is removed in Phase B.
     """
@@ -740,7 +740,7 @@ class DecodeJob:
     n_rounds: int                            # syndrome rounds in the window
     dem: Optional[Any] = None                # window detector error model (data-path decoders)
     payloads: list = field(default_factory=list)   # transfer-source view; cleared after materialization
-    decoder_input: Optional[Any] = None             # decoder-local materialized input
+    decoder_input: Optional[Any] = None             # materialized decoder-input store value
     input_hold: Optional[Any] = None                # upstream hold released at transfer completion
     ready_time: int = 0                      # tick the job was enqueued (queue-wait accounting)
     on_done: Optional[Callable[[], None]] = None   # completion callback

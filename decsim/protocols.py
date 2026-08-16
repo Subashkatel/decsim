@@ -269,10 +269,10 @@ class Scheduler(Protocol):
 
 @runtime_checkable
 class DecoderInputTransfer(Protocol):
-    """Port 22. Make one admitted job's decoder-local input ready.
+    """Port 22. Make one admitted job's decoder-input store value ready.
 
     Implementations call ``receiver(job)`` once after ``delay_ticks``. An
-    implementation that owns decoder-local allocations may also provide
+    implementation that owns decoder-input store allocations may also provide
     ``release(job)``; the manager calls it after service or cancellation. Link
     reservation, admission, service, and result handling belong elsewhere.
     """

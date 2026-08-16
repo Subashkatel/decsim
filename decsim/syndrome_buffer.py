@@ -27,18 +27,18 @@ from .message import (
 
 @dataclass(frozen=True)
 class SyndromeBufferingConfig:
-    """Optional capacities for the upstream and decoder-local buffers.
+    """Optional capacities for the upstream and decoder-input store buffers.
 
     ``None`` means unbounded. The two limits are independent.
     """
 
     upstream_packet_slots: Optional[int] = None
-    decoder_local_input_slots: Optional[int] = None
+    decoder_input_slots: Optional[int] = None
 
     def __post_init__(self) -> None:
         for name, value in (
             ("upstream_packet_slots", self.upstream_packet_slots),
-            ("decoder_local_input_slots", self.decoder_local_input_slots),
+            ("decoder_input_slots", self.decoder_input_slots),
         ):
             if value is not None and (type(value) is not int or value < 1):
                 raise TypeError(f"{name} must be a positive int or None")

@@ -20,8 +20,8 @@ from .message import (
 )
 
 
-class DecoderLocalCapacityExhaustion(RuntimeError):
-    """A reserve was refused because every decoder-local slot is in use."""
+class DecoderInputStoreCapacityExhaustion(RuntimeError):
+    """A reserve was refused because every decoder-input store slot is in use."""
 
 
 @dataclass(frozen=True)
@@ -56,7 +56,7 @@ class DecoderInput:
 
 
 def materialize_decoder_input(job: DecodeJob) -> DecoderInput:
-    """Build one immutable decoder-local input from a job's fragments."""
+    """Build one immutable decoder-input store input from a job's fragments."""
     fragments_by_round: dict[tuple, list[RetainedSyndromeFragment]] = {}
     for payload in job.payloads:
         if type(payload) is not RetainedSyndromeFragment:
@@ -91,7 +91,7 @@ class _SlotState(Enum):
     DEPOSITED = "deposited"
 
 
-class DecoderLocalMemory:
+class DecoderInputStore:
     """Manage local input slots through reserve, deposit, and release.
 
     One key owns one slot. ``capacity=None`` means unbounded. Invalid state
@@ -110,14 +110,14 @@ class DecoderLocalMemory:
         return len(self._slots)
 
     def reserve(self, key: Any) -> None:
-        """Claim one empty decoder-local slot for a future deposit."""
+        """Claim one empty decoder-input store slot for a future deposit."""
         if key in self._slots:
             raise RuntimeError(
-                f"decoder-local slot {key!r} is already "
+                f"decoder-input store slot {key!r} is already "
                 f"{self._slots[key][0].value}")
         if self.capacity is not None and len(self._slots) >= self.capacity:
-            raise DecoderLocalCapacityExhaustion(
-                f"all {self.capacity} decoder-local slots are in use")
+            raise DecoderInputStoreCapacityExhaustion(
+                f"all {self.capacity} decoder-input store slots are in use")
         self._slots[key] = (_SlotState.RESERVED, None)
 
     def deposit(self, key: Any, job: DecodeJob) -> DecoderInput:
@@ -125,7 +125,7 @@ class DecoderLocalMemory:
         state = self._slots[key]
         if state[0] is not _SlotState.RESERVED:
             raise RuntimeError(
-                f"decoder-local slot {key!r} already holds a deposit")
+                f"decoder-input store slot {key!r} already holds a deposit")
         decoder_input = materialize_decoder_input(job)
         self._slots[key] = (_SlotState.DEPOSITED, decoder_input)
         return decoder_input
@@ -135,7 +135,7 @@ class DecoderLocalMemory:
         state = self._slots[key]
         if state[0] is not _SlotState.DEPOSITED:
             raise RuntimeError(
-                f"take from decoder-local slot {key!r} before any deposit")
+                f"take from decoder-input store slot {key!r} before any deposit")
         del self._slots[key]
         return state[1]
 
@@ -143,5 +143,5 @@ class DecoderLocalMemory:
         """Free one live slot (reserved or deposited) without reading it."""
         if key not in self._slots:
             raise RuntimeError(
-                f"discard of unknown decoder-local slot {key!r}")
+                f"discard of unknown decoder-input store slot {key!r}")
         del self._slots[key]

@@ -1,4 +1,4 @@
-"""Move one decoder request from upstream data to decoder-local input.
+"""Move one decoder request from upstream data to decoder-input store input.
 
 The default transfer waits for a requested delay, materializes the input, then
 hands the ready job to the decoder manager.
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .decoder_local import DecoderLocalMemory
+from .decoder_input_store import DecoderInputStore
 from .message import DecodeJob
 
 
@@ -16,14 +16,14 @@ class FixedLatencyDecoderInputTransfer:
     """Materialize one admitted job after a fixed delay.
 
     The decoder cannot read the input before completion. On completion, this
-    object deposits local input, releases the upstream hold through the callback,
+    object deposits stored input, releases the upstream hold through the callback,
     and delivers the ready job.
     """
 
-    def __init__(self, engine, *, local_memory=None) -> None:
+    def __init__(self, engine, *, input_store=None) -> None:
         self.engine = engine
-        self.local_memory = (
-            DecoderLocalMemory() if local_memory is None else local_memory
+        self.input_store = (
+            DecoderInputStore() if input_store is None else input_store
         )
         self._cancelled_pending_keys = set()
 
@@ -44,14 +44,14 @@ class FixedLatencyDecoderInputTransfer:
         if on_materialized is not None and not callable(on_materialized):
             raise TypeError("materialization callback must be callable")
         key = self._key(job)
-        self.local_memory.reserve(key)
+        self.input_store.reserve(key)
 
         def complete() -> None:
             if key in self._cancelled_pending_keys:
                 self._cancelled_pending_keys.remove(key)
                 return
             try:
-                decoder_input = self.local_memory.deposit(key, job)
+                decoder_input = self.input_store.deposit(key, job)
                 job.decoder_input = decoder_input
                 job.payloads = []
                 if on_materialized is not None:
@@ -59,7 +59,7 @@ class FixedLatencyDecoderInputTransfer:
                 receiver(job)
             except BaseException:
                 try:
-                    self.local_memory.discard(key)
+                    self.input_store.discard(key)
                 except RuntimeError:
                     pass
                 raise
@@ -79,16 +79,16 @@ class FixedLatencyDecoderInputTransfer:
             self.release(job)
             return
         try:
-            self.local_memory.discard(key)
+            self.input_store.discard(key)
         except RuntimeError:
             return
         self._cancelled_pending_keys.add(key)
 
     def release(self, job: DecodeJob) -> None:
-        """Release the local allocation after decoder service/cancellation."""
+        """Release the input-store allocation after decoder service/cancellation."""
         key = self._key(job)
         if job.decoder_input is not None:
-            taken = self.local_memory.take(key)
+            taken = self.input_store.take(key)
             if taken is not job.decoder_input:
-                raise RuntimeError("decoder-local input identity changed")
+                raise RuntimeError("decoder-input store input identity changed")
             job.decoder_input = None

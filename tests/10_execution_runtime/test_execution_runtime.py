@@ -38,32 +38,48 @@ class RecordingController:
         self.boundaries = []
         self.runtime = None
         self.observed_at_issue = []
+        self.lifecycle_observations = []
+
+    def observe_lifecycle(self, boundary, operation_id):
+        if self.runtime is not None:
+            self.lifecycle_observations.append((
+                boundary,
+                operation_id,
+                frozenset(self.runtime.op_start_time),
+                frozenset(self.runtime.body_done_time),
+                frozenset(self.runtime.decode_release_time),
+            ))
 
     def round_ticks_for(self, operation):
         return self.round_ticks
 
     def can_start(self, operation):
+        self.observe_lifecycle("can_start", operation.id)
         self.engine.events.append(("can_start", operation.id))
         return self.allowed.get(operation.id, True)
 
     def issue_operation(self, operation, idle_rounds):
+        self.observe_lifecycle("issue_operation", operation.id)
         self.issued.append((operation, idle_rounds))
         if self.runtime is not None:
             self.observed_at_issue.append((
                 operation.id,
-                operation.id in self.runtime.started,
+                operation.id in self.runtime.op_start_time,
                 self.runtime.op_start_time.get(operation.id),
                 dict(self.runtime.idle_rounds_by_patch),
             ))
         self.engine.events.append(("issue", operation.id, idle_rounds))
 
     def before_successor_release(self, operation):
+        self.observe_lifecycle("before_successor_release", operation.id)
         self.engine.events.append(("before", operation.id))
 
     def after_successor_release(self, operation):
+        self.observe_lifecycle("after_successor_release", operation.id)
         self.engine.events.append(("after", operation.id))
 
     def note_round_boundary(self, patch):
+        self.observe_lifecycle("note_round_boundary", patch)
         self.boundaries.append(patch)
         self.engine.events.append(("boundary", patch))
 
@@ -106,8 +122,8 @@ def make_runtime(*operations, round_ticks=1, gates=False, claims=None):
 def mutable_runtime_state(runtime, engine, controller, factory):
     names = (
         "operations", "dependencies_remaining", "successors", "schedule_released",
-        "busy_claims", "requested", "state_ready", "started", "done_bodies",
-        "decode_released", "op_start_time", "body_done_time", "decode_release_time",
+        "busy_claims", "requested", "state_ready", "op_start_time", "body_done_time",
+        "decode_release_time",
         "result_return_time_by_operation", "idle_rounds_by_patch",
     )
     copied = {}
@@ -119,6 +135,9 @@ def mutable_runtime_state(runtime, engine, controller, factory):
     copied["engine_events"] = list(engine.events)
     copied["scheduled"] = list(engine.scheduled)
     copied["issued"] = list(controller.issued)
+    copied["observed_at_issue"] = list(controller.observed_at_issue)
+    copied["boundaries"] = list(controller.boundaries)
+    copied["lifecycle_observations"] = list(controller.lifecycle_observations)
     copied["factory_requests"] = list(factory.requests)
     return copied
 
@@ -167,10 +186,7 @@ def test_construction_starts_with_the_documented_empty_lifecycle():
         "result_return_time_by_operation", "idle_rounds_by_patch",
     ):
         assert getattr(runtime, name) == {}
-    for name in (
-        "schedule_released", "requested", "state_ready", "started",
-        "done_bodies", "decode_released",
-    ):
+    for name in ("schedule_released", "requested", "state_ready"):
         assert getattr(runtime, name) == set()
     assert runtime.last_finish_time == 0
 
@@ -181,6 +197,53 @@ def test_deleted_snapshot_projection_is_not_part_of_the_runtime_surface():
 
     assert not hasattr(execution_runtime, "ExecutionSnapshot")
     assert not hasattr(runtime, "snapshot")
+
+
+def test_deleted_lifecycle_latches_are_not_part_of_the_runtime_surface():
+    """Deleted lifecycle latch sets stay absent before and after a complete operation."""
+    operation = make_operation(1)
+    runtime, _, _, _ = make_runtime(operation)
+
+    for name in ("started", "done_bodies", "decode_released"):
+        assert not hasattr(runtime, name)
+    runtime.load_program(ExecutionProgram((operation,)))
+    runtime.body_done(operation)
+    for name in ("started", "done_bodies", "decode_released"):
+        assert not hasattr(runtime, name)
+
+
+def test_timestamp_map_keys_are_the_only_lifecycle_membership_record():
+    """Timestamp-map keys match lifecycle membership at every controller observation boundary."""
+    root = make_operation(1)
+    blocked_successor = make_operation(2, predecessors=(1,), blocked_by=1)
+    runtime, engine, controller, _ = make_runtime(root, blocked_successor, gates=True)
+    controller.allowed[2] = False
+
+    runtime.load_program(ExecutionProgram((root, blocked_successor)))
+    engine.now = 1
+    runtime.body_done(root)
+    engine.now = 2
+    runtime.on_decision(Decision(2, releases_operation=True))
+    controller.allowed[2] = True
+    runtime.start_released_successors_on_boundary(1, patch="patch-a")
+    engine.now = 3
+    runtime.body_done(blocked_successor)
+
+    assert controller.lifecycle_observations == [
+        ("can_start", 1, frozenset(), frozenset(), frozenset()),
+        ("issue_operation", 1, frozenset({1}), frozenset(), frozenset()),
+        ("before_successor_release", 1, frozenset({1}), frozenset({1}), frozenset()),
+        ("after_successor_release", 1, frozenset({1}), frozenset({1}), frozenset()),
+        ("can_start", 2, frozenset({1}), frozenset({1}), frozenset({2})),
+        ("note_round_boundary", "patch-a", frozenset({1}), frozenset({1}), frozenset({2})),
+        ("can_start", 2, frozenset({1}), frozenset({1}), frozenset({2})),
+        ("issue_operation", 2, frozenset({1, 2}), frozenset({1}), frozenset({2})),
+        ("before_successor_release", 2, frozenset({1, 2}), frozenset({1, 2}), frozenset({2})),
+        ("after_successor_release", 2, frozenset({1, 2}), frozenset({1, 2}), frozenset({2})),
+    ]
+    assert set(runtime.op_start_time) == {1, 2}
+    assert set(runtime.body_done_time) == {1, 2}
+    assert set(runtime.decode_release_time) == {2}
 
 
 def test_empty_program_completes_physically_and_second_load_is_atomic():
@@ -309,17 +372,15 @@ def test_feedback_and_controller_cadence_are_independent_start_gates():
     runtime.load_program(ExecutionProgram((operation,)))
 
     assert runtime.state_ready == {1}
-    assert runtime.started == set()
+    assert runtime.op_start_time == {}
     engine.now = 3
     runtime.on_decision(Decision(1, releases_operation=True))
-    assert runtime.decode_released == {1}
     assert runtime.decode_release_time == {1: 3}
-    assert runtime.started == set()
+    assert runtime.op_start_time == {}
 
     controller.allowed[1] = True
     engine.now = 5
     runtime._maybe_begin(operation)
-    assert runtime.started == {1}
     assert runtime.op_start_time == {1: 5}
 
 
@@ -333,7 +394,6 @@ def test_readiness_callback_deliberately_does_not_recheck_schedule_or_claim_admi
     engine.now = 2
     runtime._state_became_ready(operation)
 
-    assert runtime.started == {1}
     assert runtime.op_start_time == {1: 2}
     assert [issued.id for issued, _ in controller.issued] == [1]
 
@@ -521,11 +581,11 @@ def test_waiting_blocked_successor_checks_only_direct_feedback_and_boundary_stat
     runtime.load_program(ExecutionProgram((predecessor, blocked, unblocked)))
 
     assert runtime.waiting_blocked_successor(1) is True
-    runtime.decode_released.add(2)
+    runtime.decode_release_time[2] = 0
     assert runtime.waiting_blocked_successor(1) is False
     controller.gates_start_on_round_boundaries = True
     assert runtime.waiting_blocked_successor(1) is True
-    runtime.started.add(2)
+    runtime.op_start_time[2] = 0
     assert runtime.waiting_blocked_successor(1) is False
 
 
@@ -535,7 +595,7 @@ def test_round_boundary_retry_is_inert_off_and_notes_each_eligible_retry_before_
     blocked = make_operation(2, predecessors=(1,), blocked_by=1)
     runtime, engine, controller, _ = make_runtime(predecessor, blocked, gates=False)
     runtime.load_program(ExecutionProgram((predecessor, blocked)))
-    runtime.decode_released.add(2)
+    runtime.decode_release_time[2] = 0
     runtime.state_ready.add(2)
     runtime.schedule_released.add(2)
     runtime.dependencies_remaining[2] = 0
@@ -543,7 +603,7 @@ def test_round_boundary_retry_is_inert_off_and_notes_each_eligible_retry_before_
 
     runtime.start_released_successors_on_boundary(1, patch="patch-a")
     assert engine.events == []
-    assert runtime.started == {1}
+    assert set(runtime.op_start_time) == {1}
 
     controller.gates_start_on_round_boundaries = True
     runtime.start_released_successors_on_boundary(1, patch="patch-a")
@@ -579,6 +639,41 @@ def test_idle_round_consumption_deliberately_does_not_roll_back_earlier_pops():
     assert runtime.idle_rounds_by_patch == {"other": 1}
 
 
+def test_duplicate_release_decision_raises_before_any_timestamp_mutation():
+    """A duplicate blocked release raises before changing timestamps or collaborator records."""
+    operation = make_operation(1, blocked_by=0)
+    runtime, engine, controller, factory = make_runtime(operation)
+    controller.allowed[1] = False
+    runtime.load_program(ExecutionProgram((operation,)))
+    engine.now = 2
+    runtime.on_decision(Decision(1, releases_operation=True))
+    before = mutable_runtime_state(runtime, engine, controller, factory)
+
+    engine.now = 9
+    with pytest.raises(RuntimeError, match="already released"):
+        runtime.on_decision(Decision(1, releases_operation=True))
+
+    assert mutable_runtime_state(runtime, engine, controller, factory) == before
+    assert runtime.decode_release_time == {1: 2}
+
+
+def test_release_decision_for_an_unblocked_operation_raises_before_any_timestamp_mutation():
+    """An unblocked release raises before mutation while a result return remains accepted."""
+    operation = make_operation(1)
+    runtime, engine, controller, factory = make_runtime(operation)
+    runtime.load_program(ExecutionProgram((operation,)))
+    engine.now = 7
+    before = mutable_runtime_state(runtime, engine, controller, factory)
+
+    with pytest.raises(RuntimeError, match="not feedback-blocked"):
+        runtime.on_decision(Decision(1, releases_operation=True))
+
+    assert mutable_runtime_state(runtime, engine, controller, factory) == before
+    assert runtime.decode_release_time == {}
+    runtime.on_decision(Decision(1, releases_operation=False))
+    assert runtime.result_return_time_by_operation == {1: 7}
+
+
 def test_decisions_keep_release_and_result_timestamps_distinct_and_latched():
     """Timing-only decisions latch feedback separately from result return and preserve early release."""
     operation = make_operation(1, blocked_by=0, clifford=False)
@@ -587,10 +682,9 @@ def test_decisions_keep_release_and_result_timestamps_distinct_and_latched():
 
     engine.now = 2
     runtime.on_decision(Decision(1, releases_operation=1))
-    assert runtime.decode_released == {1}
     assert runtime.decode_release_time == {1: 2}
     assert runtime.result_return_time_by_operation == {}
-    assert runtime.started == set()
+    assert runtime.op_start_time == {}
 
     engine.now = 4
     factory.release()
@@ -604,14 +698,13 @@ def test_decisions_keep_release_and_result_timestamps_distinct_and_latched():
 
     engine.now = 8
     runtime.on_decision(Decision(1, releases_operation=False))
-    runtime.on_decision(Decision(1, releases_operation=True))
     assert runtime.result_return_time_by_operation == {1: 8}
-    assert runtime.decode_release_time == {1: 8}
+    assert runtime.decode_release_time == {1: 2}
 
 
-def test_unknown_decision_target_fails_before_mutation_and_unblocked_release_is_recorded():
-    """Unknown decisions fail naturally, while an unblocked release still records its timing state."""
-    operation = make_operation(1)
+def test_unknown_decision_target_fails_before_mutation_and_blocked_release_is_recorded():
+    """Unknown decisions fail naturally, while a valid blocked release records its timing state."""
+    operation = make_operation(1, blocked_by=0)
     runtime, engine, controller, factory = make_runtime(operation)
     runtime.load_program(ExecutionProgram((operation,)))
     before = mutable_runtime_state(runtime, engine, controller, factory)
@@ -622,8 +715,8 @@ def test_unknown_decision_target_fails_before_mutation_and_unblocked_release_is_
 
     engine.now = 9
     runtime.on_decision(Decision(1))
-    assert runtime.decode_released == {1}
     assert runtime.decode_release_time == {1: 9}
+    assert runtime.op_start_time == {1: 9}
 
 
 

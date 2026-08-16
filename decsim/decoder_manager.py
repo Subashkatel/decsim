@@ -11,6 +11,8 @@ from .message import (DecodeJob, DecodeOutcome, DecodeResult,
                       SoftOutput, StrongDecodeCompletion,
                       stable_identity_order_key)
 from .protocols import DecoderInputTransfer, Directive
+from .decoder_input_store import (DecoderInputStoreConfig,
+                                  DecoderInputStoreStager)
 from .config import fmt
 
 
@@ -77,7 +79,8 @@ class DecoderManager:
                  bulk_strong: bool = False,
                  lane_policy=None, log_name: str = "DecoderCluster",
                  capture_enabled: bool = False,
-                 decoder_input_transfer=None):
+                 decoder_input_transfer=None,
+                 decoder_input_store: Optional[DecoderInputStoreConfig] = None):
         from .decoder_input_transfer import FixedLatencyDecoderInputTransfer
 
         self.engine = engine
@@ -89,9 +92,11 @@ class DecoderManager:
         if (
             not isinstance(self.decoder_input_transfer, DecoderInputTransfer)
             or not callable(getattr(self.decoder_input_transfer, "deliver", None))
+            or not callable(getattr(self.decoder_input_transfer, "cancel", None))
         ):
             raise TypeError(
-                "decoder_input_transfer must implement DecoderInputTransfer"
+                "decoder_input_transfer must implement DecoderInputTransfer "
+                "(deliver and cancel)"
             )
         transport_engine = getattr(self.decoder_input_transfer, "engine", engine)
         if transport_engine is not engine:
@@ -120,6 +125,13 @@ class DecoderManager:
 
         self.unit_totals = dict(unit_pools)
         self.pool_free = dict(unit_pools)
+        # One stager owns decoder-input storage behind every transport. A
+        # configured store needs one exact round budget per normalized unit
+        # pool; with none the stager keeps a single unbounded store.
+        self.decoder_input_stager = DecoderInputStoreStager(
+            engine, config=decoder_input_store,
+            pool_names=tuple(self.unit_totals))
+        self._dispatching = False
         self.num_units = self.unit_totals["default"]
         self.ready: list[DecodeJob] = []
         self.pool_ready: dict[str, list] = {
@@ -162,7 +174,16 @@ class DecoderManager:
         return self.router.route(job)
 
     def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None:
-        """Admit once, then hand input delivery to the configured transport."""
+        """Admit once, then transport the input and stage it into storage.
+
+        The transport only carries the request; the manager-owned stager is
+        always the receiver, so no transport can bypass configured decoder-input
+        storage. With a configured store the input pool is resolved here, before
+        transport, and stays a closure-local: ``job.pool`` remains dispatch
+        state, so a lane-policy change during transport is deliberately ignored
+        on that path. With no configured store pool selection stays late, at
+        enqueue.
+        """
         if type(delay_ticks) is not int:
             raise TypeError("delay_ticks must be an exact int")
         if delay_ticks < 0:
@@ -175,6 +196,8 @@ class DecoderManager:
         job.submitted = True
         delivered = False
         expected_delivery_tick = self.engine.now + delay_ticks
+        input_pool = (self.pool_for(job)
+                      if self.decoder_input_stager.enabled else None)
 
         def receive_once(delivered_job: DecodeJob) -> None:
             nonlocal delivered
@@ -190,19 +213,28 @@ class DecoderManager:
                 raise RuntimeError(
                     "decoder input transport delivered at the wrong tick"
                 )
+            if job.decoder_input is not None:
+                raise RuntimeError(
+                    "decoder input transport materialized an input before "
+                    "storage admission"
+                )
             delivered = True
-            self._enqueue_now(job)
+            self.decoder_input_stager.admit(
+                job, pool=input_pool,
+                on_admitted=enqueue_admitted_job,
+                on_materialized=release_upstream_hold,
+            )
 
-        def release_upstream_hold(delivered_job: DecodeJob) -> None:
-            hold = delivered_job.input_hold
+        def enqueue_admitted_job(admitted_job: DecodeJob) -> None:
+            self._enqueue_now(admitted_job, input_pool)
+
+        def release_upstream_hold(admitted_job: DecodeJob) -> None:
+            hold = admitted_job.input_hold
             if hold is not None:
                 hold()
-                delivered_job.input_hold = None
+                admitted_job.input_hold = None
 
-        self.decoder_input_transfer.deliver(
-            job, delay_ticks, receive_once,
-            on_materialized=release_upstream_hold,
-        )
+        self.decoder_input_transfer.deliver(job, delay_ticks, receive_once)
 
     @staticmethod
     def _reject_spent_job(job: DecodeJob) -> None:
@@ -249,11 +281,19 @@ class DecoderManager:
                 or key in self._windows_waiting_for_strong_selection
                 or key in self._unresolved_weak_decodes)
 
-    def _enqueue_now(self, job: DecodeJob) -> None:
+    def _enqueue_now(self, job: DecodeJob,
+                     input_pool: Optional[str] = None) -> None:
+        """Put one storage-admitted job in its ready queue.
+
+        ``input_pool`` is the pool whose round credits this request holds, so a
+        configured store queues the job where it was charged. It is ``None``
+        when no store is configured, where the pool is selected here.
+        """
         if job.strong_decode_for is not None:
             live = self._running_strong_decodes.get(job.strong_decode_for)
             if live is None or live.request_job is not job:
                 self._release_decoder_input(job)
+                self.try_dispatch()                # returned credits may admit
                 return                             # cancelled across the link
         if job.decoder_input is not None:
             job.payloads = [
@@ -262,7 +302,7 @@ class DecoderManager:
                 for fragment in round_input.fragments
             ]
         job.ready_time = self.engine.now
-        pool = self.pool_for(job)
+        pool = self.pool_for(job) if input_pool is None else input_pool
         queue = self.queue_for(pool)
         queue.append(job)
         self.engine.log(self.log_name,
@@ -276,7 +316,12 @@ class DecoderManager:
                       spatial_nodes: Optional[int] = None,
                       hint: Optional[str] = None) -> None:
         """Submit a self-contained external decode job (factory corrections,
-        separate idle decodes)."""
+        separate idle decodes).
+
+        The job carries no syndrome data, so it skips input transport and
+        storage entirely: its decoder-input round demand is zero and it charges
+        no round credits.
+        """
         job = DecodeJob(op_id=-1, window_id=0, n_rounds=round_count,
                         ready_time=self.engine.now,
                         on_done=on_done, label=label, code=code,
@@ -317,13 +362,14 @@ class DecoderManager:
         job = live.service_job
         if job.pool is None:
             self._cancel_decoder_input(job)
-            self._release_decoder_input(job)
             for pool in self.unit_totals:
                 queue = self.queue_for(pool)
                 if job in queue:
                     queue.remove(job)
                     break
-            self._release_decoder_input(job)
+            # Credits belong to the original request, never to a batch service
+            # job, and the request is its own service job before dispatch.
+            self._release_decoder_input(live.request_job)
             self._record_request(
                 live.request_job, None,
                 RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
@@ -335,20 +381,40 @@ class DecoderManager:
                 for survivor in self._running_strong_decodes.values())
             if survivors:
                 outcome = RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED
+                self._release_decoder_input(live.request_job)
             else:
                 outcome = RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE
                 job.cancelled = True
                 self._cancel_decoder_input(job)
-                self._release_decoder_input(job)
+                self._release_decoder_input(live.request_job)
                 self.pool_free[job.pool] += 1
                 self._record_service(job)
                 self.try_dispatch()
             self._record_request(live.request_job, None, outcome, None)
         self.strong_cancelled += 1
+        self.try_dispatch()           # returned credits may admit a waiting head
 
     def try_dispatch(self) -> None:
-        for pool in self.unit_totals:
-            self._dispatch_pool(pool)
+        """Drain admissible decoder inputs, then dispatch every pool.
+
+        The loop is not reentrant: an admission continuation or a credit return
+        that happens inside it returns immediately and the outer loop keeps
+        running while the stager reports drainable work. So no event boundary
+        leaves a pool holding both free round credits and a waiting request
+        that fits, and no drain needs its own engine event.
+        """
+        if self._dispatching:
+            return
+        self._dispatching = True
+        try:
+            while True:
+                self.decoder_input_stager.drain_admissible_requests()
+                for pool in self.unit_totals:
+                    self._dispatch_pool(pool)
+                if not self.decoder_input_stager.has_drainable_work():
+                    return
+        finally:
+            self._dispatching = False
 
     def _dispatch_pool(self, pool: str) -> None:
         queue = self.queue_for(pool)
@@ -426,23 +492,46 @@ class DecoderManager:
             label=f"decode_done({job.label})")
 
     def _cancel_decoder_input(self, job: DecodeJob) -> None:
-        cancel = getattr(self.decoder_input_transfer, "cancel", None)
-        if callable(cancel):
-            cancel(job)
+        """Drop one job from transport and storage, then free its upstream hold.
+
+        Both calls are idempotent, so cancelling a request that is in transport,
+        waiting for round credits, already stored, or already cleared is safe.
+        """
+        self.decoder_input_transfer.cancel(job)
+        self.decoder_input_stager.cancel(job)
         hold = job.input_hold
         if hold is not None:
             hold()
             job.input_hold = None
 
     def _release_decoder_input(self, job: DecodeJob) -> None:
-        release = getattr(self.decoder_input_transfer, "release", None)
-        if callable(release) and job.decoder_input is not None:
-            release(job)
+        """Return one job's round credits; a job holding none is untouched."""
+        self.decoder_input_stager.release(job)
+
+    def _release_service_decoder_inputs(self, service_job: DecodeJob) -> None:
+        """Return the credits of every request still served by one decode.
+
+        A batch service job holds no credits of its own: they belong to the
+        original request jobs staged before dispatch, and every remaining member
+        must give them back before the live bookkeeping that names them is
+        dropped. Release is idempotent, so a single request whose service job is
+        itself is safe to release twice.
+        """
+        released_request_jobs = []
+        for live in self._running_strong_decodes.values():
+            if live.service_job is not service_job:
+                continue
+            if any(released is live.request_job
+                   for released in released_request_jobs):
+                continue
+            released_request_jobs.append(live.request_job)
+            self._release_decoder_input(live.request_job)
 
     def _on_decode_done(self, job: DecodeJob) -> None:
         """Contract 2b pipeline with the strategy seam in the switching slots."""
         if job.cancelled:
             self._release_decoder_input(job)
+            self.try_dispatch()
             return
         if job.strong_decode_for is not None:
             result = self._decode_and_validate_result(job)
@@ -451,6 +540,7 @@ class DecoderManager:
                 job, result)
             job.completed = True
             self.pool_free[job.pool] += 1
+            self._release_service_decoder_inputs(job)
             self._finish_strong_bookkeeping(job)
             self.strategy.on_decode_outcome(DecodeOutcome(job, result),
                                             self.services)   # FINALIZE_STRONG
@@ -462,6 +552,12 @@ class DecoderManager:
         if job.on_done is not None:                            # external job
             job.completed = True
             self.pool_free[job.pool] += 1
+            # An external job that carried syndrome payloads through the
+            # transport holds stored input like any other request, so its
+            # credits come back before its callback runs and before the
+            # same-tick drain; a self-contained submit_decode job holds none
+            # and this is a no-op.
+            self._release_decoder_input(job)
             self.engine.log(self.log_name,
                             f"DECODE DONE {job.label} "
                             f"({self.pool_tag(job.pool)}units free now "
@@ -596,7 +692,12 @@ class DecoderManager:
                     self._running_strong_decodes.pop(key)
 
     def admitted_strong_work_snapshot(self) -> tuple:
-        """Snapshot each physical strong job once in its authoritative phase."""
+        """Snapshot each physical strong job once in its authoritative phase.
+
+        The ``in_transit`` phase means admitted but not yet queued: still in
+        input transport, or, with a configured decoder-input store, waiting for
+        round credits.
+        """
         queue_memberships = {}
         for pool in self.unit_totals:
             for queued_job in self.queue_for(pool):
@@ -783,7 +884,13 @@ class DecoderManager:
         return tuple(self._terminal_service_records)
 
     def check_decode_work_settled(self) -> None:
-        """Require every admitted decode to reach a final result."""
+        """Require every admitted decode to reach a final result.
+
+        Decoder-input storage settles with it, configured or not: nothing may
+        still hold rounds, wait for round credits, or hold returned credits
+        nobody drained. Every stored input is released unconditionally, so a
+        leak on either path is a real defect rather than a tolerated one.
+        """
         unsettled = {
             state: sorted(keys) for state, keys in (
                 ("waiting for a strong result",
@@ -796,6 +903,9 @@ class DecoderManager:
                 ("decoding with no outcome", self._unresolved_weak_decodes),
             ) if keys
         }
+        storage_states = self.decoder_input_stager.unsettled_storage()
+        for storage_state, pools in storage_states:
+            unsettled[storage_state] = pools
         if unsettled:
             detail = "; ".join(f"{state}: {keys}"
                                for state, keys in unsettled.items())

@@ -11,19 +11,21 @@ SyndromeIngress --assembled retained round--> SyndromeBuffer
 SyndromeBuffer --retained-round availability--> WindowManager
 WindowManager --window input requirement--> DecoderManager
 DecoderManager --transfer request--> DecoderInputTransfer
-DecoderInputTransfer --materialized input--> DecoderInputStore
+DecoderInputTransfer --delivered request--> DecoderInputStoreStager
+DecoderInputStoreStager --materialized input--> DecoderInputStore
 DecoderManager --ready DecodeJob--> Scheduler/Decoder
 ```
 
 - `SyndromeBuffer` owns exactly one modeled upstream allocation per live round, fragment assembly, packing state, upstream capacity, immutable retained packets, typed consumer holds, and last-consumer release.
 - `WindowManager` owns window bounds, readiness, dependencies, boundary transformations, and finality. It does not own payload storage, transfer scheduling, or decoder-input store allocations.
 - `DecoderManager` owns request admission, transfer coordination, post-transfer ready queues, service, cancellation, and completion.
-- `DecoderInputTransfer` owns mechanism-specific delay/backpressure and completion. The generic contract is not named DMA.
-- `DecoderInputStore` owns decoder-input store allocations and materialized immutable inputs. It is not a second scheduler.
+- `DecoderInputTransfer` owns mechanism-specific delay and cancellation only. The generic contract is not named DMA.
+- `DecoderInputStoreStager`, owned by `DecoderManager`, is the storage-admission boundary after every transfer: round demand, admission, materialization, upstream-hold release, waiting, and credit return.
+- `DecoderInputStore` owns one pool's round credits and its materialized immutable inputs. It is not a second scheduler.
 
 ## Baseline
 
-The default is weak-only, one weak decoder, FIFO, unbounded upstream capacity, unbounded decoder-input store capacity, and explicit fixed-latency materialization. Strong/replay tokens are absent unless the selected strategy needs them.
+The default is weak-only, one weak decoder, FIFO, unbounded upstream capacity, one shared unbounded decoder-input store, and explicit fixed-latency delivery with materialization on arrival. Strong/replay tokens are absent unless the selected strategy needs them.
 
 ## Core invariants
 

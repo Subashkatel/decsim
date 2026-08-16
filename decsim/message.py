@@ -750,7 +750,7 @@ class DecodeJob:
     code: Optional[str] = None               # code name, drives CodeRouter routing
     attempt: int = 0                         # 0 = first (weak) decode, 1 = strong redo
     hint: Optional[str] = None               # routing override, e.g. "strong"
-    pool: Optional[str] = None               # unit pool assigned at enqueue
+    pool: Optional[str] = None               # unit pool assigned at dispatch
     window: Optional[Window] = None          # back-reference to the source window
     strong_decode_for: Optional[tuple] = None      # (op_id, window_id) this strong job re-decodes
     awaiting_strong_result: bool = False     # weak result held non-final until the strong sibling lands

@@ -1,0 +1,65 @@
+schema_version: 2
+directive: Q-028
+suite:
+  path: tests/09_qlx_workloads/test_qlx_workloads.py
+  sha256: 7c73555a16826710b2325dcc5d7acb6566e38befdafcf99597b490a6409be2e6
+module_documentation:
+  path: decsim/frontends/qlx.py
+  sha256: fed95cb158d034eb18f656528a326b081250c20f676d641adc93799b4ccdf307
+  locator: line 19
+  contract: mapping rules are partially asserted by this suite
+fixtures:
+  - path: tests/data/qlx/README.md
+    sha256: c350360491b53d55c7819f20d3f90799dc44c1ffcae605615976949ce67ce47e
+    role: frozen-provenance contract
+  - path: tests/data/qlx/schedule_mem_surface.json
+    sha256: 0703daca41bb6b9b7e5b956b11ceca4a7e93148aaebc025e185df8dbdf7d3b31
+    role: structural and physical schedule
+  - path: tests/data/qlx/mem_surface.stim
+    sha256: 98a0c58a4e551f7496dab3fd5f4c9bfcd83b5200a3ba9ae64747d7618f5935cf
+    role: physical detector source
+  - path: tests/data/qlx/mem_surface_decoder_params.json
+    sha256: 491d5e384f46a5e460cae45b21cc9fdfac8e69bfe2715a8b1313986bbbe9c673
+    role: detector-routing metadata
+contracts:
+  - test: test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds
+    locator: tests/09_qlx_workloads/test_qlx_workloads.py:80
+    pins:
+      - exact operation count
+      - exact predecessor-edge shape
+      - exact occupied-patch cardinality
+      - monotone scheduled start rounds
+      - exact feedback candidates
+      - explicit GateRounds(merge_steps=2) controls RunSpec durations
+      - QLX raw 0/1 durations do not price surgery
+  - test: test_frozen_mem_surface_physical_routing_completes_without_quality_claim
+    locator: tests/09_qlx_workloads/test_qlx_workloads.py:115
+    pins:
+      - qlx_frontend validates all 56 detector routes from frozen artifacts
+      - detector-free baseline is non-emitting and GateRounds prices it as one measurement round
+      - detector_rounds is an order-preserving derivative with detector IDs unchanged and each emitted round r mapped to r-1
+      - terminal_detector_ids and terminal_data_bits are passed verbatim from qlx_frontend
+      - explicit GateRounds(merge_steps=2) controls physical RunSpec durations
+      - d=7 prices only the seven-round detector-bearing stream owner and is not a circuit-distance claim
+      - deterministic execution drains and completes
+      - timing-only decoder produces no logical output
+    excludes:
+      - decode quality
+      - logical accuracy
+      - logical failure rate
+verification:
+  focused:
+    command: .venv/bin/python -m pytest -q tests/09_qlx_workloads
+    result: PASS, 2 passed
+  full_tests:
+    command: .venv/bin/python -m pytest -q tests
+    result: PASS, 600 passed
+  compileall:
+    command: .venv/bin/python -m compileall -q decsim tests/09_qlx_workloads
+    result: PASS
+  smoke:
+    command: .venv/bin/python tmp/validation/smoke_run.py
+    result: PASS
+  diff_check:
+    command: git diff --check plus explicit untracked trailing-whitespace check
+    result: PASS

@@ -1,0 +1,195 @@
+schema_version: 1
+directive: Q-028
+scope: fixture and documentation preparation only
+provenance:
+  authorized_revision: 43f4ffa^
+  resolved_commit: 811d3e1c0e6a072230ea095c7d87440e4bf44fb7
+  source_subtree: tests/data/qlx
+  source_tree_object: ffd5fc23c4b9129d440e870ecd8ebe82ed45eca4
+restoration:
+  expected_file_count: 25
+  restored_file_count: 25
+  hash_algorithm: sha256
+  all_source_hashes_match_restored_files: true
+  readme_excluded_from_restored_count: true
+  manifest:
+  - path: tests/data/qlx/dump_decoder_params.py
+    bytes: 1545
+    sha256: b522a954d04122775af9e41f59a22850be78756fa86e5b587ae219b30409cc51
+    source_git_blob: a123722641d1ec00ba4f157d061f2cb338e19815
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/dump_mem_surface_t_schedule.py
+    bytes: 3624
+    sha256: 18e3296425bf1ea824217ec905cd17acfe42b23671616c8f91a27973f8b9d707
+    source_git_blob: 33f5db2e43b9668851b52fb6ad4181be602717fe
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/dump_realtime_artifacts.py
+    bytes: 2784
+    sha256: e9f9c32c6a6c0ad84e7ade709c58cfa39e1a1401f62695f1a56c5f4fde6fc9bd
+    source_git_blob: 408d36591d1374f06d6c4c90d91db2765e81028a
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/generate_qlx_fixtures.py
+    bytes: 11614
+    sha256: a4a0f87580c34ecd61160c6e6adc221f381f16747b3c160fb77a811abef6b8cd
+    source_git_blob: 1ad9536c61ad9f8a66e364c4547dd0aa9eff2f12
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/h_then_t_local.tsim
+    bytes: 3340
+    sha256: c4ec346ed10688d5099cdf7d64e970011c102c3edf4dd9146e947e4386b22d50
+    source_git_blob: fa15f09d9b3faba8dc25d7da4cd85109df85a59b
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/ls_cx_tqec.stim
+    bytes: 17859
+    sha256: 6cae752810d7bf4caf543010c721a09611be594e834ee3fd3882933db282fab3
+    source_git_blob: 33d7ab5bd853a67b78d5acc4ffcdcc1c53fcdff9
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/ls_cx_tqec_meta.json
+    bytes: 715
+    sha256: 473d5b58058efdf68e6c9f33489db2337a7218b9e4524df228883caec43e5e70
+    source_git_blob: 890c4a5272fbca2fd98bb19aa25c2563e94d70b9
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/ls_cx_tqec_p001.stim
+    bytes: 39679
+    sha256: fc33d3bc9d44f765ab6e3af1df1f3cf7629d312adb27b09529a4b2db2af9c241
+    source_git_blob: 51805327fad4279bafd3651709e52509cebd1f49
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/mem_surface.stim
+    bytes: 2187
+    sha256: 98a0c58a4e551f7496dab3fd5f4c9bfcd83b5200a3ba9ae64747d7618f5935cf
+    source_git_blob: a3c667e6015e22045cb51bf027d58f3fce53b7ea
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/mem_surface_decoder_params.json
+    bytes: 12206
+    sha256: 491d5e384f46a5e460cae45b21cc9fdfac8e69bfe2715a8b1313986bbbe9c673
+    source_git_blob: 461ea11b65f246fd3f997272ba0c04a0dbd93b0d
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/mem_surface_t.tsim
+    bytes: 61884
+    sha256: f6b45b3040cc56d093774b74a56fd55139a4ca7a85d4352504c9981127174613
+    source_git_blob: 43343a640bee2da67c8321673c1b85808ecdf4c5
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/mem_surface_twin.json
+    bytes: 138
+    sha256: 046e4178020ed36433de10082593226142a233078ac7bba20cc8d32ce3d52c76
+    source_git_blob: 02ad6f426204f459a36fae017aaa6be96a9afa3f
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/mem_surface_walker_dem.txt
+    bytes: 5226
+    sha256: d82213f74fec425e28698865416cf78199b4758d54ba4187201819738d853501
+    source_git_blob: 60aa2dfccd7bd4f667bc6a95304e30978ffd34a2
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/probe_decoder_params.py
+    bytes: 1864
+    sha256: a22c79500eaa4e063cfe544c1200aa9d3f66197f8c8c89ea6af5117a10637854
+    source_git_blob: 82c763a13ac12c9de7c75c761a7a14f592a7868f
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/probe_t_stim_emit.py
+    bytes: 6903
+    sha256: 33ab6cf797fa92f41751ced0bf41e4ed495b7e6d642ef0954ad082a2810d1fe3
+    source_git_blob: e7f2b84ec4cfdc743c8ea166c053ea78a1bb8f65
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/probe_t_stim_emit_report.json
+    bytes: 13811
+    sha256: caff8bb3335ab14c59bec8685c18c97616e8ec8d339cab7ded5ae8a0e52544ca
+    source_git_blob: 61d10445b5418473efd8a0f593889e58ff3d4c57
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/realtime_byproduct_ff.json
+    bytes: 3975
+    sha256: 3e44a6874fb79e1931643d56204057d181da8ba3be3758c4c6c07afc49451a41
+    source_git_blob: 5ec88cd569af1e55e8c283f7b94b156db6f18b46
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/realtime_mem_surface.json
+    bytes: 6379
+    sha256: 2341e4305457f089de03c3b2840266a8034c3ecbda5e39badaed08ad47d6a76c
+    source_git_blob: 8309c98f5faec7cf69ccba29c0a99a1916c31a74
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/realtime_mem_surface_t.json
+    bytes: 10304
+    sha256: ebc283b332401af9ee4d9308d0df5bfe2416070e45be58a4551b366fed88bca5
+    source_git_blob: 9d887fc4c6c0ff23ff8f7712cb62f00fcffd3a61
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/run_summary.json
+    bytes: 102
+    sha256: 8076d63c424e4274f310401d9c0b2e9bcb8850f72c1f874b25e166fff86d9be2
+    source_git_blob: 76a91ba1cf81d90b8d9dffe49923273551aba08b
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/schedule_h_then_2t.json
+    bytes: 3901
+    sha256: 7ea325180cacb234f0c8a4072cde2af6d3a70e59173e4fc1104815e28815a51b
+    source_git_blob: 25b29ade814575af6821061045b164fcb62a0042
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/schedule_h_then_t.json
+    bytes: 2887
+    sha256: ee83b671dfce8774329fc1bb0c99b4e811d6ad215a2d3b626ed38209874dbf42
+    source_git_blob: 15f43852e658737d42a4f2d3a67fc6c01cad61df
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/schedule_ls_cx.json
+    bytes: 2131
+    sha256: bcdcda464cd7fb5fa93f8ea57e71e288dc4cfd67200a7c4f63d42848c8e26c78
+    source_git_blob: d4a5a581370aa9a50504f83fc5e3910ed58449d7
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/schedule_mem_surface.json
+    bytes: 3983
+    sha256: 0703daca41bb6b9b7e5b956b11ceca4a7e93148aaebc025e185df8dbdf7d3b31
+    source_git_blob: e665ac94f0632daa84a5f4fd3e82c3c151a95e7e
+    source_git_mode: '100644'
+    source_equals_restored: true
+  - path: tests/data/qlx/schedule_mem_surface_t.json
+    bytes: 4715
+    sha256: 6577f88e45f7e77631481edb1e1d318581000e7901e4154aef20d73af36637a9
+    source_git_blob: 244efa2b1fd3729eb58d24a9d2c2ac21c88db756
+    source_git_mode: '100644'
+    source_equals_restored: true
+readme:
+  path: tests/data/qlx/README.md
+  bytes: 386
+  sha256: c350360491b53d55c7819f20d3f90799dc44c1ffcae605615976949ce67ce47e
+  checks:
+    records_literal_revision_43f4ffa_parent: true
+    records_frozen_test_only_status: true
+    forbids_ci_regeneration: true
+    marks_scripts_as_provenance_only: true
+    forbids_test_execution_of_scripts: true
+qlx_module_docstring:
+  path: decsim/frontends/qlx.py
+  before_sha256: b8ca088f80c2f11a01ac72ddfd2639b56d1c07ce67dfa5dfae3b3a103a7b0a2b
+  after_sha256: fed95cb158d034eb18f656528a326b081250c20f676d641adc93799b4ccdf307
+  normalized_non_docstring_ast_equal: true
+  fixture_reference: tests/data/qlx/schedule_h_then_t.json
+  suite_reference: tests/09_qlx_workloads
+verification:
+  compileall:
+    command: python -m compileall -q decsim
+    returncode: 0
+    result: PASS
+  diff_check:
+    command: git diff --check -- decsim/frontends/qlx.py tests/data/qlx tmp/validation/Q028_RESTORE_REPORT.yaml
+    returncode: 0
+    result: PASS
+  tests_run: false
+  smoke_run: false
+  probes_run: false
+  generator_scripts_run: false

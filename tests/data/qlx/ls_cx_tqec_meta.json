@@ -1,0 +1,15 @@
+{
+ "program": "ls_cx (qlx dialect): pz q0; pz q1; cx q0,q1; mz q0",
+ "emission": "StimViaTQEC(k=1)",
+ "noise": "tqec.NoiseModel.uniform_depolarizing(1e-3)",
+ "qlx_entry": ".version 1.0\n.target qlx-c\n.region %Cs0, code=\"surface_demo\", role=compute;\n.entry surface_demo_entry() {\n    lqbit %q0 : %Cs0;\n    lqbit %q1 : %Cs0;\n    lbit %m;\n    pz %q0;\n    pz %q1;\n    cx %q0, %q1;\n    mz %m, %q0;\n    ret;\n}",
+ "sha256_noiseless": "6cae752810d7bf4caf543010c721a09611be594e834ee3fd3882933db282fab3",
+ "sha256_noisy": "fc33d3bc9d44f765ab6e3af1df1f3cf7629d312adb27b09529a4b2db2af9c241",
+ "num_qubits": 81,
+ "num_detectors": 232,
+ "num_observables": 2,
+ "versions": {
+  "stim": "1.16.0",
+  "tqec": "0.2.0"
+ }
+}

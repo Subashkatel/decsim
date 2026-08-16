@@ -55,6 +55,62 @@ class DecoderInput:
     rounds: tuple[MaterializedSyndromeRound, ...]
 
 
+def _check_detector_row_layout(
+    job: DecodeJob,
+    rounds: tuple[MaterializedSyndromeRound, ...],
+) -> None:
+    """Check model-backed operation/round order and dense row positions."""
+    model = getattr(job, "dem", None)
+    if model is None:
+        return
+    missing_layout_member = object()
+    detector_ids = getattr(model, "detector_ids", missing_layout_member)
+    defect_positions = getattr(
+        model, "defect_positions", missing_layout_member
+    )
+    if (
+        detector_ids is missing_layout_member
+        or defect_positions is missing_layout_member
+    ):
+        return
+
+    input_row_identities = []
+    for round_input in rounds:
+        if not same_stable_identity(round_input.operation_id, job.op_id):
+            raise ValueError(
+                f"{getattr(job, 'label', '')}: model-backed decoder-input "
+                f"round operation {round_input.operation_id!r} does not match "
+                f"job operation {job.op_id!r}"
+            )
+        position_in_round = 0
+        for fragment in round_input.fragments:
+            if fragment.bits is None:
+                continue
+            input_row_identities.extend(
+                (
+                    round_input.operation_id,
+                    round_input.round_index,
+                    position_in_round + bit_offset,
+                )
+                for bit_offset in range(len(fragment.bits))
+            )
+            position_in_round += len(fragment.bits)
+    input_row_identities = tuple(input_row_identities)
+
+    model_row_identities = []
+    for detector_id in detector_ids:
+        round_index, position_in_round = defect_positions[detector_id]
+        model_row_identities.append(
+            (job.op_id, round_index, position_in_round)
+        )
+    model_row_identities = tuple(model_row_identities)
+    if input_row_identities != model_row_identities:
+        raise ValueError(
+            f"{getattr(job, 'label', '')}: canonical decoder-input row layout "
+            f"{input_row_identities!r} does not match the window error model's "
+            f"row layout {model_row_identities!r}"
+        )
+
 def materialize_decoder_input(job: DecodeJob) -> DecoderInput:
     """Build one immutable decoder-input store input from a job's fragments."""
     fragments_by_round: dict[tuple, list[RetainedSyndromeFragment]] = {}
@@ -78,6 +134,7 @@ def materialize_decoder_input(job: DecodeJob) -> DecoderInput:
         )
         for identity, fragments in ordered
     )
+    _check_detector_row_layout(job, rounds)
     return DecoderInput(
         op_id=job.op_id,
         window_id=job.window_id,

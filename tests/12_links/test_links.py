@@ -916,3 +916,240 @@ def test_links_expose_timing_only_without_scheduler_or_reclamation_ownership():
         "set_priority",
     ):
         assert not hasattr(link, name)
+
+
+
+def test_bandwidth_profile_declares_finite_calibrated_capacities():
+    """The bandwidth profile exposes all calibrated capacities and fallback payloads."""
+    config = LinkModelConfig.bandwidth_limited_profile()
+    topology = config.resolve().topology_json_value(
+        controller_link_integration_assurance="shipped_controller"
+    )
+    expected_capacities = {
+        "qc": (24.0, "direct_aggregate", None, 24.0),
+        "cwd": (48.0, "direct_aggregate", None, 48.0),
+        "wsd": (24.0, "direct_aggregate", None, 24.0),
+        "csd": (72.0, "direct_aggregate", None, 72.0),
+        "wdo": (10_000.0, "per_channel", 100, 1_000_000.0),
+        "dd": (24.0, "direct_aggregate", None, 24.0),
+        "do": (10_000.0, "per_channel", 100, 1_000_000.0),
+        "oc": (4_000.0, "per_channel", 1_000, 4_000_000.0),
+        "cq": (0.2, "per_channel", 5_000_000, 1_000_000.0),
+    }
+    expected_fallbacks = {
+        "qc": (24, "direct_aggregate", None, 24),
+        "cwd": (240, "direct_aggregate", None, 240),
+        "wsd": (1, "direct_aggregate", None, 1),
+        "csd": (360, "direct_aggregate", None, 360),
+        "wdo": (50_000, "per_channel", 100, 5_000_000),
+        "dd": (100, "direct_aggregate", None, 100),
+        "do": (50_000, "per_channel", 100, 5_000_000),
+        "oc": (20_000, "per_channel", 1_000, 20_000_000),
+        "cq": (1, "per_channel", 5_000_000, 5_000_000),
+    }
+    capacities = {
+        channel["member_paths"][0]: (
+            channel["capacity"]["input_bits_per_us"],
+            channel["capacity"]["basis"],
+            channel["capacity"]["channel_count"],
+            channel["capacity"]["aggregate_bits_per_us"],
+        )
+        for channel in topology["physical_channels"]
+    }
+    fallbacks = {
+        edge["path"]: (
+            edge["default_payload"]["input_bits"],
+            edge["default_payload"]["basis"],
+            edge["default_payload"]["channel_count"],
+            edge["default_payload"]["aggregate_bits"],
+        )
+        for edge in topology["edges"]
+    }
+
+    assert config.profile_name == "bandwidth_limited"
+    assert config.qc_excludes_controller_processing is False
+    assert topology["path_order"] == PATH_ORDER
+    assert len(topology["physical_channels"]) == 9
+    assert capacities == expected_capacities
+    assert fallbacks == expected_fallbacks
+    assert all(math.isfinite(values[0]) for values in capacities.values())
+    assert json.loads(json.dumps(topology)) == topology
+
+
+def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters():
+    """The reference profile stays pure latency while shared semantic parameters match."""
+    reference = LinkModelConfig.logical_reference_profile()
+    bandwidth = LinkModelConfig.bandwidth_limited_profile()
+    reference_topology = reference.resolve().topology_json_value(
+        controller_link_integration_assurance="shipped_controller"
+    )
+    bandwidth_topology = bandwidth.resolve().topology_json_value(
+        controller_link_integration_assurance="shipped_controller"
+    )
+
+    def propagation_by_path(topology):
+        return {
+            channel["member_paths"][0]: channel["propagation_latency_ticks"]
+            for channel in topology["physical_channels"]
+        }
+
+    reference_edges = {edge["path"]: edge for edge in reference_topology["edges"]}
+    bandwidth_edges = {edge["path"]: edge for edge in bandwidth_topology["edges"]}
+    configured_default_paths = ("wdo", "dd", "do", "oc", "cq")
+    actual_payload_paths = ("qc", "cwd", "wsd", "csd")
+
+    assert reference.profile_name == "logical_reference"
+    assert reference.qc_excludes_controller_processing is False
+    assert len(reference_topology["physical_channels"]) == 9
+    assert all(
+        channel["capacity"] is None
+        for channel in reference_topology["physical_channels"]
+    )
+    assert propagation_by_path(reference_topology) == propagation_by_path(
+        bandwidth_topology
+    )
+    payload_parameters = ("input_bits", "basis", "channel_count", "aggregate_bits")
+    assert {
+        path: tuple(
+            reference_edges[path]["default_payload"][parameter]
+            for parameter in payload_parameters
+        )
+        for path in configured_default_paths
+    } == {
+        path: tuple(
+            bandwidth_edges[path]["default_payload"][parameter]
+            for parameter in payload_parameters
+        )
+        for path in configured_default_paths
+    }
+    assert {
+        path: reference_edges[path]["actual_payload_source"]
+        for path in actual_payload_paths
+    } == {
+        path: bandwidth_edges[path]["actual_payload_source"]
+        for path in actual_payload_paths
+    }
+
+
+def test_bandwidth_profile_serializes_and_queues_in_physical_fifo_order():
+    """Finite QC transfers serialize FIFO and WSD uses its configured fallback."""
+    model = LinkModelConfig.bandwidth_limited_profile().resolve()
+    first = model.reserve(
+        LinkPath.QC,
+        payload_bits=24,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+    second = model.reserve(
+        LinkPath.QC,
+        payload_bits=24,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+    wsd = model.reserve(
+        LinkPath.WSD,
+        payload_bits=None,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.WSD),
+    )
+    traffic = model.traffic_json_value()
+    qc_transfers = [
+        transfer for transfer in traffic["transfers"]
+        if transfer["path"] == "qc"
+    ]
+    wsd_transfer = next(
+        transfer for transfer in traffic["transfers"]
+        if transfer["path"] == "wsd"
+    )
+    qc_channel = next(
+        channel for channel in traffic["physical_channels"]
+        if channel["member_paths"] == ["qc"]
+    )
+
+    assert first.serialization_ticks == us(1.0)
+    assert first.queue_wait_ticks == 0
+    assert first.serializer_start_ticks == 0
+    assert first.propagation_ticks == us(0.15)
+    assert first.total_delay_ticks == us(1.15)
+    assert second.serializer_start_ticks == first.serializer_end_ticks
+    assert second.queue_wait_ticks == us(1.0)
+    assert second.serialization_ticks == us(1.0)
+    assert second.total_delay_ticks == us(2.15)
+    assert second.physical_sequence == 1
+    assert wsd.payload_bits == 1
+    assert wsd.serialization_ticks == us(1 / 24.0)
+    assert wsd_transfer["payload_selection"] == "configured_default"
+    assert qc_transfers[1]["serializer_start_ticks"] >= qc_transfers[0][
+        "serializer_end_ticks"
+    ]
+    assert qc_channel["counters"]["transfer_count"] == 2
+    assert qc_channel["counters"]["known_payload_bits"] == 48
+    assert qc_channel["counters"]["serialization_ticks"] == sum(
+        transfer["serialization_ticks"] for transfer in qc_transfers
+    )
+    assert qc_channel["counters"]["queue_wait_ticks"] == sum(
+        transfer["queue_wait_ticks"] for transfer in qc_transfers
+    )
+    assert all(row["reconciles"] is True for row in traffic["reconciliation"])
+    assert json.loads(json.dumps(traffic)) == traffic
+
+
+def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
+    """Capacity scaling changes service time and rejects invalid scale values."""
+    base_capacities = {
+        "qc": 24.0,
+        "cwd": 48.0,
+        "wsd": 24.0,
+        "csd": 72.0,
+        "wdo": 1_000_000.0,
+        "dd": 24.0,
+        "do": 1_000_000.0,
+        "oc": 4_000_000.0,
+        "cq": 1_000_000.0,
+    }
+
+    def aggregate_capacities(scale):
+        topology = LinkModelConfig.bandwidth_limited_profile(
+            capacity_scale=scale
+        ).resolve().topology_json_value(
+            controller_link_integration_assurance="shipped_controller"
+        )
+        return {
+            channel["member_paths"][0]: channel["capacity"][
+                "aggregate_bits_per_us"
+            ]
+            for channel in topology["physical_channels"]
+        }
+
+    slow_model = LinkModelConfig.bandwidth_limited_profile(
+        capacity_scale=0.5
+    ).resolve()
+    fast_model = LinkModelConfig.bandwidth_limited_profile(
+        capacity_scale=2.0
+    ).resolve()
+    slow = slow_model.reserve(
+        LinkPath.QC,
+        payload_bits=24,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+    fast = fast_model.reserve(
+        LinkPath.QC,
+        payload_bits=24,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+
+    assert aggregate_capacities(0.5) == {
+        path: capacity * 0.5 for path, capacity in base_capacities.items()
+    }
+    assert aggregate_capacities(2.0) == {
+        path: capacity * 2.0 for path, capacity in base_capacities.items()
+    }
+    assert slow.serialization_ticks == us(2.0)
+    assert fast.serialization_ticks == us(0.5)
+    for invalid_scale in (0.0, -1.0, math.inf, -math.inf, math.nan):
+        with pytest.raises(ValueError):
+            LinkModelConfig.bandwidth_limited_profile(
+                capacity_scale=invalid_scale
+            )

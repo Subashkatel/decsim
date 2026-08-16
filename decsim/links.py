@@ -16,7 +16,6 @@ from .config import us
 from .message import (
     DecoderRequestKey, DecoderTier,
     is_stable_identity,
-    is_stable_string,
     stable_identity_json,
     stable_identity_order_key,
 )
@@ -53,13 +52,6 @@ class BoundaryTransferRelation:
             raise TypeError("boundary revisions must be exact ints")
         if min(revisions) < 1:
             raise ValueError("boundary revisions must be positive")
-
-
-def _require_nonempty_stable_string(value, field_name: str) -> None:
-    if not is_stable_string(value):
-        raise TypeError(f"{field_name} must be an exact Unicode-scalar string")
-    if not value:
-        raise ValueError(f"{field_name} must be nonempty")
 
 
 class LinkQuantityBasis(str, Enum):
@@ -101,8 +93,6 @@ class LinkCapacityConfig:
     source: str
 
     def __post_init__(self) -> None:
-        if type(self.input_bits_per_us) is not float:
-            raise TypeError("input_bits_per_us must be an exact built-in float")
         if not math.isfinite(self.input_bits_per_us):
             raise ValueError("input_bits_per_us must be finite")
         if self.input_bits_per_us <= 0:
@@ -110,7 +100,6 @@ class LinkCapacityConfig:
         if type(self.basis) is not LinkQuantityBasis:
             raise TypeError("basis must be an exact LinkQuantityBasis")
         self._validate_channel_count()
-        _require_nonempty_stable_string(self.source, "capacity source")
         if not math.isfinite(self.aggregate_bits_per_us):
             raise ValueError("aggregate_bits_per_us must be finite")
 
@@ -152,14 +141,11 @@ class PayloadSizeConfig:
     source: str
 
     def __post_init__(self) -> None:
-        if type(self.input_bits) is not int:
-            raise TypeError("input_bits must be an exact built-in int")
         if self.input_bits < 0:
             raise ValueError("input_bits must be nonnegative")
         if type(self.basis) is not LinkQuantityBasis:
             raise TypeError("basis must be an exact LinkQuantityBasis")
         self._validate_channel_count()
-        _require_nonempty_stable_string(self.source, "payload source")
 
     def _validate_channel_count(self) -> None:
         if self.basis is LinkQuantityBasis.DIRECT_AGGREGATE:
@@ -202,12 +188,6 @@ class LinkConfig:
             raise TypeError("propagation_latency_ticks must be an exact int")
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
-        if self.capacity is not None and type(self.capacity) is not LinkCapacityConfig:
-            raise TypeError("capacity must be an exact LinkCapacityConfig or None")
-        _require_nonempty_stable_string(
-            self.configuration_source,
-            "configuration_source",
-        )
 
 
 @dataclass(frozen=True, eq=False)
@@ -219,20 +199,6 @@ class LinkEdgeConfig:
     actual_payload_source: Optional[str]
 
     def __post_init__(self) -> None:
-        if type(self.channel) is not LinkConfig:
-            raise TypeError("channel must be an exact LinkConfig")
-        if (
-            self.default_payload is not None
-            and type(self.default_payload) is not PayloadSizeConfig
-        ):
-            raise TypeError(
-                "default_payload must be an exact PayloadSizeConfig or None"
-            )
-        if self.actual_payload_source is not None:
-            _require_nonempty_stable_string(
-                self.actual_payload_source,
-                "actual_payload_source",
-            )
         if self.default_payload is None and self.actual_payload_source is None:
             raise ValueError(
                 "an edge requires a configured default or actual payload source"
@@ -244,41 +210,6 @@ class LinkEdgeConfig:
                 raise ValueError("capacity and payload bases must match")
             if capacity.channel_count != default.channel_count:
                 raise ValueError("capacity and payload channel counts must match")
-
-    @classmethod
-    def from_per_channel_transaction(
-        cls,
-        *,
-        propagation_latency_ticks: int,
-        per_channel_capacity_bits_per_us: float,
-        per_channel_payload_bits: int,
-        channel_count: int,
-        capacity_source: str,
-        payload_source: str,
-        configuration_source: str,
-        actual_payload_source: Optional[str] = None,
-    ) -> "LinkEdgeConfig":
-        capacity = LinkCapacityConfig(
-            input_bits_per_us=per_channel_capacity_bits_per_us,
-            basis=LinkQuantityBasis.PER_CHANNEL,
-            channel_count=channel_count,
-            source=capacity_source,
-        )
-        payload = PayloadSizeConfig(
-            input_bits=per_channel_payload_bits,
-            basis=LinkQuantityBasis.PER_CHANNEL,
-            channel_count=channel_count,
-            source=payload_source,
-        )
-        return cls(
-            channel=LinkConfig(
-                propagation_latency_ticks=propagation_latency_ticks,
-                capacity=capacity,
-                configuration_source=configuration_source,
-            ),
-            default_payload=payload,
-            actual_payload_source=actual_payload_source,
-        )
 
 
 @dataclass(frozen=True)
@@ -397,10 +328,9 @@ class Link:
     """One resolved aggregate FIFO physical channel."""
 
     def __init__(self, config: LinkConfig):
-        if type(config) is not LinkConfig:
-            raise TypeError("Link requires an exact LinkConfig")
         self._config = config
         self._next_free_tick = 0
+        self._last_send_tick = None
         self._physical_sequence = 0
         self._counters = TrafficCounters()
 
@@ -427,6 +357,8 @@ class Link:
             raise TypeError("now_ticks must be an exact int")
         if now_ticks < 0:
             raise ValueError("now_ticks must be nonnegative")
+        if self._last_send_tick is not None and now_ticks < self._last_send_tick:
+            raise ValueError("now_ticks must not precede the prior reservation")
         capacity = self._config.capacity
         if capacity is not None and payload_bits is None:
             raise ValueError("finite bandwidth requires a resolved payload size")
@@ -461,6 +393,7 @@ class Link:
         )
         if capacity is not None:
             self._next_free_tick = serializer_end_ticks
+        self._last_send_tick = now_ticks
         self._physical_sequence += 1
         self._counters = self._counters.plus_reservation(reservation)
         return reservation
@@ -471,7 +404,6 @@ class SemanticTransferRecord:
     path: LinkPath
     physical_alias: str
     attribution: TrafficAttribution
-    payload_bits: Optional[int]
     payload_selection: PayloadSelectionSource
     payload_source: str
     reservation: LinkReservation
@@ -494,10 +426,6 @@ class LinkModelConfig:
     qc_excludes_controller_processing: bool = False
 
     def __post_init__(self) -> None:
-        for path in LinkPath:
-            if type(getattr(self, path.value)) is not LinkEdgeConfig:
-                raise TypeError(f"{path.value} must be an exact LinkEdgeConfig")
-        _require_nonempty_stable_string(self.profile_name, "profile_name")
         if type(self.qc_excludes_controller_processing) is not bool:
             raise TypeError(
                 "qc_excludes_controller_processing must be an exact bool")
@@ -606,10 +534,6 @@ class LinkModel:
                     f"channel-{len(self._alias_by_link)}"
                 )
 
-    @property
-    def config(self) -> LinkModelConfig:
-        return self._config
-
     def reserve(
         self,
         path: LinkPath,
@@ -618,8 +542,6 @@ class LinkModel:
         now_ticks: int,
         attribution: TrafficAttribution,
     ) -> LinkReservation:
-        if type(path) is not LinkPath:
-            raise TypeError("path must be an exact LinkPath")
         if type(attribution) is not TrafficAttribution:
             raise TypeError("attribution must be an exact TrafficAttribution")
         self._validate_attribution_shape(path, attribution)
@@ -652,7 +574,6 @@ class LinkModel:
             path=path,
             physical_alias=self._alias_by_link[physical],
             attribution=attribution,
-            payload_bits=selected_bits,
             payload_selection=selection,
             payload_source=payload_source,
             reservation=reservation,
@@ -691,11 +612,6 @@ class LinkModel:
         if (path in request_paths or (path is LinkPath.CWD and has_window)) \
                 and type(relation) is not RequestTransferRelation:
             raise ValueError(f"{path.value} requires a request relation")
-        expected_tier = (DecoderTier.WEAK if path in (LinkPath.CWD, LinkPath.WDO)
-                         else DecoderTier.STRONG)
-        if (type(relation) is RequestTransferRelation
-                and relation.request_key.tier is not expected_tier):
-            raise ValueError(f"{path.value} requires the {expected_tier.value} tier")
         if path is LinkPath.DD and type(relation) is not BoundaryTransferRelation:
             raise ValueError("dd requires a boundary relation")
         if path not in request_paths + (LinkPath.CWD, LinkPath.DD,) and relation is not None:
@@ -703,6 +619,28 @@ class LinkModel:
         request_key = (relation.request_key if type(relation) is RequestTransferRelation
                        else relation.source_request_key
                        if type(relation) is BoundaryTransferRelation else None)
+        if request_key is not None:
+            if not is_stable_identity(request_key.operation_id):
+                raise TypeError("request operation_id must be a stable identity")
+            if type(request_key.window_id) is not int or request_key.window_id < 0:
+                raise ValueError("request window_id must be a nonnegative exact int")
+            if type(request_key.tier) is not DecoderTier:
+                raise TypeError("request tier must be an exact DecoderTier")
+            if (type(request_key.run_sequence) is not int
+                    or request_key.run_sequence < 0):
+                raise ValueError(
+                    "request run_sequence must be a nonnegative exact int"
+                )
+        if type(relation) is BoundaryTransferRelation:
+            if not is_stable_identity(relation.source_window_key):
+                raise TypeError("boundary source_window_key must be stable")
+            if not is_stable_identity(relation.destination_window_key):
+                raise TypeError("boundary destination_window_key must be stable")
+        expected_tier = (DecoderTier.WEAK if path in (LinkPath.CWD, LinkPath.WDO)
+                         else DecoderTier.STRONG)
+        if (type(relation) is RequestTransferRelation
+                and request_key.tier is not expected_tier):
+            raise ValueError(f"{path.value} requires the {expected_tier.value} tier")
         if request_key is not None and (
                 request_key.operation_id != attribution.operation_id
                 or request_key.window_id != attribution.window_id):
@@ -823,8 +761,12 @@ class LinkModel:
             }
             if type(relation) is BoundaryTransferRelation:
                 relation_json.update({
-                    "source_window_key": relation.source_window_key,
-                    "destination_window_key": relation.destination_window_key,
+                    "source_window_key": stable_identity_json(
+                        relation.source_window_key
+                    ),
+                    "destination_window_key": stable_identity_json(
+                        relation.destination_window_key
+                    ),
                     "source_revision": relation.source_revision,
                     "delivery_revision": relation.delivery_revision})
         return {
@@ -841,7 +783,7 @@ class LinkModel:
                 "round_hi": attribution.round_hi,
                 "relation": relation_json,
             },
-            "payload_bits": record.payload_bits,
+            "payload_bits": reservation.payload_bits,
             "payload_selection": record.payload_selection.value,
             "payload_source": record.payload_source,
             "send_ticks": reservation.send_ticks,

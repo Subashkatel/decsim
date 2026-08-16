@@ -312,7 +312,7 @@ class RunSpec:
         if self.make_syndrome_ingress is not None:
             syndrome_ingress.syndrome_buffer = syndrome_buffer
         if self.make_decoder_input_transfer is None:
-            from .decoder_input import FixedLatencyDecoderInputTransfer
+            from .decoder_input_transfer import FixedLatencyDecoderInputTransfer
             decoder_input_transfer = FixedLatencyDecoderInputTransfer(
                 engine, input_store=decoder_input_store,
             )

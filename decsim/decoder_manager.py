@@ -78,7 +78,7 @@ class DecoderManager:
                  lane_policy=None, log_name: str = "DecoderCluster",
                  capture_enabled: bool = False,
                  decoder_input_transfer=None):
-        from .decoder_input import FixedLatencyDecoderInputTransfer
+        from .decoder_input_transfer import FixedLatencyDecoderInputTransfer
 
         self.engine = engine
         self.router = router

@@ -75,7 +75,7 @@ validation rules, and a custom window-interaction example.
 - `controller.py` — command/feedback sequencing, QPU readout conversion, and its optional fixed cost.
 - `qpu.py` — physical round cadence and typed QPU readout production.
 - `syndrome_ingress.py` — controller-side QC receipt, fragment reassembly, and route arbitration.
-- `decoder_input.py` / `decoder_input_store.py` — decoder-input transfer and stored-input lifetime.
+- `decoder_input_transfer.py` / `decoder_input_store.py` — decoder-input transfer and stored-input lifetime.
 - `planner.py` — compile-time window layout and rounds policies.
 - Directly replaceable parts include decoders, schedulers, schemes, policies,
   switching strategies, factories, syndrome ingress, and decoder-input transfer.

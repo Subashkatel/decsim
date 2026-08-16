@@ -514,6 +514,146 @@ class LinkModelConfig:
             profile_name="logical_reference",
         )
 
+    @classmethod
+    def bandwidth_limited_profile(
+        cls,
+        *,
+        capacity_scale: float = 1.0,
+    ) -> "LinkModelConfig":
+        """Return the reference fabric with finite, calibrated channel rates.
+
+        Propagation latencies, path mapping and the configured default payloads
+        match logical_reference_profile, so switching profiles changes bandwidth
+        and nothing else. Capacity is bits per microsecond, which equals Mbps.
+        The calibration point is one distance-5 surface-code logical qubit whose
+        24 measure qubits produce a 24-bit syndrome round every 1.0 us, that is
+        24 Mbps, inside the few tens of Mbps per logical qubit reported in
+        2303.00054.txt:141-144. Each channel carries its nominal transfer at the
+        cadence that transfer occurs and no channel is provisioned below that
+        24 Mbps anchor. capacity_scale multiplies every channel, so sweeping it
+        moves the whole fabric through its contention regimes.
+        """
+        syndrome_bits_per_round = 24
+        round_us = 1.0
+        commit_rounds = 5
+        buffer_rounds = 5
+        commit_region_us = commit_rounds * round_us
+        weak_window_bits = (
+            (commit_rounds + buffer_rounds) * syndrome_bits_per_round
+        )
+        strong_window_bits = (
+            (commit_rounds + 2 * buffer_rounds) * syndrome_bits_per_round
+        )
+        anchor_bits_per_us = syndrome_bits_per_round / round_us
+
+        def aggregate_edge(
+            latency_us: float,
+            bits: int,
+            nominal_bits_per_us: float,
+            source: str,
+            actual_payload_source,
+        ):
+            capacity = LinkCapacityConfig(
+                max(anchor_bits_per_us, nominal_bits_per_us) * capacity_scale,
+                LinkQuantityBasis.DIRECT_AGGREGATE,
+                None,
+                source,
+            )
+            return LinkEdgeConfig(
+                LinkConfig(us(latency_us), capacity, source),
+                PayloadSizeConfig(
+                    bits,
+                    LinkQuantityBasis.DIRECT_AGGREGATE,
+                    None,
+                    source,
+                ),
+                actual_payload_source,
+            )
+
+        def per_channel_edge(
+            latency_us: float,
+            bits: int,
+            count: int,
+            source: str,
+        ):
+            capacity = LinkCapacityConfig(
+                max(anchor_bits_per_us / count, bits / commit_region_us)
+                * capacity_scale,
+                LinkQuantityBasis.PER_CHANNEL,
+                count,
+                source,
+            )
+            return LinkEdgeConfig(
+                LinkConfig(us(latency_us), capacity, source),
+                PayloadSizeConfig(
+                    bits,
+                    LinkQuantityBasis.PER_CHANNEL,
+                    count,
+                    source,
+                ),
+                None,
+            )
+
+        return cls(
+            qc=aggregate_edge(
+                0.15,
+                syndrome_bits_per_round,
+                syndrome_bits_per_round / round_us,
+                "one distance-5 syndrome round per 1.0 us round period "
+                "(2408.13687v1.txt:127-129, 2303.00054.txt:141-144)",
+                "SyndromePayload.size_bits",
+            ),
+            cwd=aggregate_edge(
+                2.0,
+                weak_window_bits,
+                weak_window_bits / commit_region_us,
+                "one weak window of rcom+rbuf rounds per commit region "
+                "(2510.25222v1.txt:1147-1155)",
+                "SyndromeRoundPacket.fragment_size_sum",
+            ),
+            wsd=aggregate_edge(
+                0.5,
+                1,
+                1 / commit_region_us,
+                "one escalation decision per commit region, floored at the "
+                "24 Mbps syndrome anchor",
+                "switching decision payload_bits",
+            ),
+            csd=aggregate_edge(
+                2.0,
+                strong_window_bits,
+                strong_window_bits / commit_region_us,
+                "one strong window of rcom+2rbuf rounds per commit region "
+                "(2510.25222v1.txt:1147-1155)",
+                "DecodeJob.retained_payload_size_bits",
+            ),
+            wdo=per_channel_edge(
+                1.0, 50_000, 100,
+                "one weak decoder output payload per commit region",
+            ),
+            dd=aggregate_edge(
+                0.5,
+                100,
+                100 / commit_region_us,
+                "one boundary transaction per commit region, floored at the "
+                "24 Mbps syndrome anchor",
+                None,
+            ),
+            do=per_channel_edge(
+                1.0, 50_000, 100,
+                "one decoder output payload per commit region",
+            ),
+            oc=per_channel_edge(
+                4.0, 20_000, 1000,
+                "one output-to-controller payload per commit region",
+            ),
+            cq=per_channel_edge(
+                0.15, 1, 5_000_000,
+                "one controller-to-QPU payload per commit region",
+            ),
+            profile_name="bandwidth_limited",
+        )
+
 
 class LinkModel:
     """One run-owned semantic fabric and its immutable traffic ledger."""

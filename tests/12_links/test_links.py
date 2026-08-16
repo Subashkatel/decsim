@@ -1,0 +1,918 @@
+"""Behavior tests for typed timing-only reaction-path links."""
+
+from dataclasses import fields
+import json
+import math
+from types import SimpleNamespace
+
+import pytest
+
+import decsim.links as links_module
+from decsim.config import us
+from decsim.links import (
+    BoundaryTransferRelation,
+    Link,
+    LinkCapacityConfig,
+    LinkConfig,
+    LinkEdgeConfig,
+    LinkModelConfig,
+    LinkPath,
+    LinkQuantityBasis,
+    LinkReservation,
+    PayloadSelectionSource,
+    PayloadSizeConfig,
+    RequestTransferRelation,
+    SemanticTransferRecord,
+    TrafficAttribution,
+    TrafficCounters,
+)
+from decsim.message import (
+    DecoderRequestKey,
+    DecoderTier,
+    stable_identity_json,
+)
+
+
+OPERATION_ID = ("experiment", 7)
+PATCH_IDS = (1, 2)
+PATH_ORDER = ["qc", "cwd", "wsd", "csd", "wdo", "dd", "do", "oc", "cq"]
+
+
+def make_channel(*, capacity=None, propagation_ticks=7, source="test channel"):
+    return LinkConfig(propagation_ticks, capacity, source)
+
+
+def make_actual_edge(*, channel=None, source="measured payload"):
+    return LinkEdgeConfig(channel or make_channel(), None, source)
+
+
+def make_default_edge(*, channel=None, bits=12, source="configured payload"):
+    payload = PayloadSizeConfig(
+        bits,
+        LinkQuantityBasis.DIRECT_AGGREGATE,
+        None,
+        source,
+    )
+    return LinkEdgeConfig(channel or make_channel(), payload, None)
+
+
+def make_model_config(overrides=None):
+    overrides = overrides or {}
+    edges = {
+        path.value: overrides.get(path, make_actual_edge())
+        for path in LinkPath
+    }
+    return LinkModelConfig(
+        **edges,
+        profile_name="test fabric",
+        qc_excludes_controller_processing=False,
+    )
+
+
+def request_relation(*, tier, operation_id=OPERATION_ID, window_id=3, sequence=0):
+    key = DecoderRequestKey(operation_id, window_id, tier, sequence)
+    return RequestTransferRelation(key)
+
+
+def valid_attribution(path):
+    if path is LinkPath.QC:
+        return TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, 2)
+    if path is LinkPath.CWD:
+        relation = request_relation(tier=DecoderTier.WEAK)
+        return TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2, relation)
+    if path in (LinkPath.WSD, LinkPath.CSD, LinkPath.DO):
+        relation = request_relation(tier=DecoderTier.STRONG)
+        return TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2, relation)
+    if path is LinkPath.WDO:
+        relation = request_relation(tier=DecoderTier.WEAK)
+        return TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2, relation)
+    if path is LinkPath.DD:
+        key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, 0)
+        relation = BoundaryTransferRelation(
+            key,
+            (OPERATION_ID, 3),
+            (OPERATION_ID, 4),
+            2,
+            5,
+        )
+        return TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2, relation)
+    return TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)
+
+
+def counters_from(report, path):
+    return next(
+        edge["counters"]
+        for edge in report["semantic_edges"]
+        if edge["path"] == path.value
+    )
+
+
+def test_quantity_basis_derives_aggregate_capacity_and_payload():
+    """Direct quantities stay raw while per-channel quantities multiply by count."""
+    direct_capacity = LinkCapacityConfig(
+        8.0, LinkQuantityBasis.DIRECT_AGGREGATE, None, "direct"
+    )
+    parallel_capacity = LinkCapacityConfig(
+        8.0, LinkQuantityBasis.PER_CHANNEL, 4, "parallel"
+    )
+    direct_payload = PayloadSizeConfig(
+        9, LinkQuantityBasis.DIRECT_AGGREGATE, None, "direct"
+    )
+    parallel_payload = PayloadSizeConfig(
+        9, LinkQuantityBasis.PER_CHANNEL, 4, "parallel"
+    )
+
+    assert direct_capacity.aggregate_bits_per_us == 8.0
+    assert parallel_capacity.aggregate_bits_per_us == 32.0
+    assert direct_payload.aggregate_bits == 9
+    assert parallel_payload.aggregate_bits == 36
+    assert parallel_capacity.to_json_value() == {
+        "basis": "per_channel",
+        "input_bits_per_us": 8.0,
+        "channel_count": 4,
+        "source": "parallel",
+        "aggregate_bits_per_us": 32.0,
+    }
+    assert parallel_payload.to_json_value()["aggregate_bits"] == 36
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, math.inf, -math.inf, math.nan])
+def test_capacity_rejects_nonpositive_or_nonfinite_values(value):
+    """Capacity rejects values that cannot define finite positive service."""
+    with pytest.raises(ValueError):
+        LinkCapacityConfig(
+            value, LinkQuantityBasis.DIRECT_AGGREGATE, None, "capacity"
+        )
+
+
+def test_capacity_guards_basis_count_and_aggregate_overflow():
+    """Capacity guards basis-count coherence and finite derived aggregate service."""
+    with pytest.raises(TypeError):
+        LinkCapacityConfig(1.0, "per_channel", 2, "capacity")
+    with pytest.raises(ValueError):
+        LinkCapacityConfig(
+            1.0, LinkQuantityBasis.DIRECT_AGGREGATE, 1, "capacity"
+        )
+    for count in (None, True):
+        with pytest.raises(TypeError):
+            LinkCapacityConfig(1.0, LinkQuantityBasis.PER_CHANNEL, count, "capacity")
+    with pytest.raises(ValueError):
+        LinkCapacityConfig(1.0, LinkQuantityBasis.PER_CHANNEL, 0, "capacity")
+    with pytest.raises(ValueError):
+        LinkCapacityConfig(1e308, LinkQuantityBasis.PER_CHANNEL, 2, "capacity")
+
+
+def test_payload_guards_nonnegative_basis_and_count():
+    """Payload configuration keeps nonnegative and basis-count coherence guards."""
+    zero = PayloadSizeConfig(
+        0, LinkQuantityBasis.DIRECT_AGGREGATE, None, "zero"
+    )
+    assert zero.aggregate_bits == 0
+    with pytest.raises(ValueError):
+        PayloadSizeConfig(-1, LinkQuantityBasis.DIRECT_AGGREGATE, None, "payload")
+    with pytest.raises(TypeError):
+        PayloadSizeConfig(1, "direct_aggregate", None, "payload")
+    with pytest.raises(ValueError):
+        PayloadSizeConfig(1, LinkQuantityBasis.DIRECT_AGGREGATE, 1, "payload")
+    with pytest.raises(TypeError):
+        PayloadSizeConfig(1, LinkQuantityBasis.PER_CHANNEL, None, "payload")
+    with pytest.raises(ValueError):
+        PayloadSizeConfig(1, LinkQuantityBasis.PER_CHANNEL, 0, "payload")
+
+
+def test_removed_provenance_and_early_numeric_checks_stay_absent():
+    """Configuration provenance and early exact-number admission remain unchecked."""
+    capacity = LinkCapacityConfig(
+        2, LinkQuantityBasis.DIRECT_AGGREGATE, None, None
+    )
+    payload = PayloadSizeConfig(
+        1.5, LinkQuantityBasis.DIRECT_AGGREGATE, None, object()
+    )
+    channel = LinkConfig(0, capacity, None)
+    edge = LinkEdgeConfig(channel, payload, "")
+
+    assert capacity.aggregate_bits_per_us == 2
+    assert payload.aggregate_bits == 1.5
+    assert edge.actual_payload_source == ""
+    with pytest.raises(TypeError):
+        Link(channel).reserve(payload_bits=payload.aggregate_bits, now_ticks=0)
+
+
+def test_physical_and_edge_configuration_keep_only_corruption_guards():
+    """Physical and edge configuration retain timing, source, and basis guards."""
+    with pytest.raises(TypeError):
+        LinkConfig(True, None, "channel")
+    with pytest.raises(ValueError):
+        LinkConfig(-1, None, "channel")
+    with pytest.raises(ValueError):
+        LinkEdgeConfig(make_channel(), None, None)
+
+    capacity = LinkCapacityConfig(
+        2.0, LinkQuantityBasis.PER_CHANNEL, 2, "capacity"
+    )
+    channel = make_channel(capacity=capacity)
+    direct_payload = PayloadSizeConfig(
+        4, LinkQuantityBasis.DIRECT_AGGREGATE, None, "payload"
+    )
+    wrong_count = PayloadSizeConfig(
+        4, LinkQuantityBasis.PER_CHANNEL, 3, "payload"
+    )
+    with pytest.raises(ValueError):
+        LinkEdgeConfig(channel, direct_payload, None)
+    with pytest.raises(ValueError):
+        LinkEdgeConfig(channel, wrong_count, None)
+
+    unchecked_nested = LinkEdgeConfig(
+        SimpleNamespace(capacity=None), SimpleNamespace(), "actual"
+    )
+    assert unchecked_nested.actual_payload_source == "actual"
+
+
+def test_attribution_guards_stable_ordered_geometry():
+    """Attribution admits only stable ordered identities and coherent geometry."""
+    valid = TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 4)
+    assert valid.round_hi == 4
+    with pytest.raises(TypeError):
+        TrafficAttribution([], PATCH_IDS, None, None, None)
+    with pytest.raises(TypeError):
+        TrafficAttribution(OPERATION_ID, [1, 2], None, None, None)
+    with pytest.raises(TypeError):
+        TrafficAttribution(OPERATION_ID, (object(),), None, None, None)
+    with pytest.raises(ValueError):
+        TrafficAttribution(OPERATION_ID, (2, 1), None, None, None)
+    with pytest.raises(ValueError):
+        TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, None)
+    with pytest.raises(ValueError):
+        TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, None, None)
+    with pytest.raises(ValueError):
+        TrafficAttribution(OPERATION_ID, PATCH_IDS, -1, 1, 2)
+    with pytest.raises(ValueError):
+        TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 0, 2)
+    with pytest.raises(ValueError):
+        TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 2, 1)
+
+
+def test_attribution_deliberately_does_not_prove_uniqueness_or_provenance():
+    """Attribution leaves patch uniqueness and operation provenance unproved."""
+    unrelated = RequestTransferRelation(
+        DecoderRequestKey("different operation", 9, DecoderTier.WEAK, 0)
+    )
+    attribution = TrafficAttribution(
+        OPERATION_ID, (1, 1), 3, 1, 2, unrelated
+    )
+    assert attribution.patch_ids == (1, 1)
+    assert attribution.relation is unrelated
+
+
+def test_request_relation_requires_a_real_message_request_key():
+    """Request relations require the exact real decoder request record."""
+    key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.WEAK, 0)
+    assert RequestTransferRelation(key).request_key is key
+    with pytest.raises(TypeError):
+        RequestTransferRelation(SimpleNamespace())
+
+
+def test_boundary_relation_guards_source_destination_and_revisions():
+    """Boundary relations bind a real request to exact keys and positive revisions."""
+    key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, 0)
+    relation = BoundaryTransferRelation(
+        key, (OPERATION_ID, 3), (OPERATION_ID, 4), 1, 2
+    )
+    assert relation.source_request_key is key
+    with pytest.raises(TypeError):
+        BoundaryTransferRelation(
+            SimpleNamespace(), (OPERATION_ID, 3), (OPERATION_ID, 4), 1, 2
+        )
+    with pytest.raises(ValueError):
+        BoundaryTransferRelation(
+            key, (OPERATION_ID, 2), (OPERATION_ID, 4), 1, 2
+        )
+    with pytest.raises(TypeError):
+        BoundaryTransferRelation(
+            key, (OPERATION_ID, 3), [OPERATION_ID, 4], 1, 2
+        )
+    for revisions in ((True, 2), (1, 0)):
+        with pytest.raises((TypeError, ValueError)):
+            BoundaryTransferRelation(
+                key,
+                (OPERATION_ID, 3),
+                (OPERATION_ID, 4),
+                *revisions,
+            )
+
+
+def test_finite_fifo_reservations_obey_exact_timing_equations():
+    """Finite service serializes in call order without occupying propagation time."""
+    capacity = LinkCapacityConfig(
+        1_000_000.0,
+        LinkQuantityBasis.DIRECT_AGGREGATE,
+        None,
+        "one bit per tick",
+    )
+    link = Link(make_channel(capacity=capacity, propagation_ticks=7))
+
+    first = link.reserve(payload_bits=10, now_ticks=100)
+    second = link.reserve(payload_bits=10, now_ticks=105)
+    third = link.reserve(payload_bits=10, now_ticks=117)
+
+    assert first == LinkReservation(10, 100, 0, 10, 7, 100, 110, 17, 0)
+    assert second == LinkReservation(10, 105, 5, 10, 7, 110, 120, 22, 1)
+    assert third == LinkReservation(10, 117, 3, 10, 7, 120, 130, 20, 2)
+    assert first.send_ticks + first.total_delay_ticks == 117
+    assert second.serializer_start_ticks == first.serializer_end_ticks
+    assert third.serializer_start_ticks < second.send_ticks + second.total_delay_ticks
+
+
+def test_unlimited_reservations_charge_only_propagation_and_still_account():
+    """Unlimited links skip serialization while retaining sequence and accounting."""
+    link = Link(make_channel(capacity=None, propagation_ticks=9))
+    first = link.reserve(payload_bits=None, now_ticks=4)
+    second = link.reserve(payload_bits=5, now_ticks=4)
+
+    assert first == LinkReservation(None, 4, 0, 0, 9, 4, 4, 9, 0)
+    assert second == LinkReservation(5, 4, 0, 0, 9, 4, 4, 9, 1)
+    assert link.counters_snapshot() == TrafficCounters(
+        transfer_count=2,
+        known_payload_bits=5,
+        unknown_payload_transfer_count=1,
+        propagation_ticks=18,
+    )
+
+
+def test_failed_reservations_do_not_advance_time_sequence_or_counters():
+    """Only successful reservations advance monotonic time and physical state."""
+    capacity = LinkCapacityConfig(
+        1_000_000.0,
+        LinkQuantityBasis.DIRECT_AGGREGATE,
+        None,
+        "finite",
+    )
+    link = Link(make_channel(capacity=capacity))
+    first = link.reserve(payload_bits=2, now_ticks=10)
+
+    with pytest.raises(TypeError):
+        link.reserve(payload_bits=1.5, now_ticks=20)
+    with pytest.raises(ValueError):
+        link.reserve(payload_bits=None, now_ticks=18)
+    second = link.reserve(payload_bits=2, now_ticks=15)
+    with pytest.raises(ValueError):
+        link.reserve(payload_bits=2, now_ticks=14)
+    third = link.reserve(payload_bits=2, now_ticks=15)
+
+    assert [first.physical_sequence, second.physical_sequence, third.physical_sequence] == [0, 1, 2]
+    assert link.counters_snapshot().transfer_count == 3
+    assert link.counters_snapshot().known_payload_bits == 6
+
+
+def test_counter_operations_are_exact_immutable_fieldwise_sums():
+    """Counter updates return exact additive snapshots without mutating inputs."""
+    original = TrafficCounters(1, 3, 0, 2, 5, 7)
+    reservation = LinkReservation(None, 0, 4, 6, 8, 4, 10, 18, 1)
+    updated = original.plus_reservation(reservation)
+    combined = updated.plus(TrafficCounters(2, 11, 1, 13, 17, 19))
+
+    assert original == TrafficCounters(1, 3, 0, 2, 5, 7)
+    assert updated == TrafficCounters(2, 3, 1, 8, 13, 11)
+    assert combined == TrafficCounters(4, 14, 2, 21, 30, 30)
+    assert combined.to_json_value() == {
+        "transfer_count": 4,
+        "known_payload_bits": 14,
+        "unknown_payload_transfer_count": 2,
+        "serialization_ticks": 21,
+        "propagation_ticks": 30,
+        "queue_wait_ticks": 30,
+    }
+
+
+@pytest.mark.parametrize("path", list(LinkPath))
+def test_every_semantic_path_accepts_its_real_attribution_shape(path):
+    """Every semantic path accepts its documented real-record attribution shape."""
+    model = make_model_config().resolve()
+    reservation = model.reserve(
+        path,
+        payload_bits=4,
+        now_ticks=10,
+        attribution=valid_attribution(path),
+    )
+    assert reservation.physical_sequence == 0
+    assert counters_from(model.traffic_json_value(), path)["transfer_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("path", "attribution"),
+    [
+        (LinkPath.QC, TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2)),
+        (LinkPath.CWD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.WSD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.CSD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.WDO, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.DD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.DO, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.OC, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, 2)),
+        (LinkPath.CQ, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, 2)),
+    ],
+)
+def test_semantic_paths_reject_wrong_geometry(path, attribution):
+    """Each semantic path rejects attribution with the wrong window-round geometry."""
+    model = make_model_config().resolve()
+    with pytest.raises(ValueError):
+        model.reserve(path, payload_bits=1, now_ticks=0, attribution=attribution)
+    assert counters_from(model.traffic_json_value(), path)["transfer_count"] == 0
+
+
+def test_request_paths_enforce_relation_kind_tier_and_identity():
+    """Request routes bind real keys to the expected tier and attribution identity."""
+    model = make_model_config().resolve()
+    missing = TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2)
+    wrong_tier = TrafficAttribution(
+        OPERATION_ID,
+        PATCH_IDS,
+        3,
+        1,
+        2,
+        request_relation(tier=DecoderTier.WEAK),
+    )
+    wrong_identity = TrafficAttribution(
+        OPERATION_ID,
+        PATCH_IDS,
+        3,
+        1,
+        2,
+        request_relation(
+            tier=DecoderTier.STRONG,
+            operation_id="another operation",
+        ),
+    )
+    for attribution in (missing, wrong_tier, wrong_identity):
+        with pytest.raises(ValueError):
+            model.reserve(
+                LinkPath.WSD,
+                payload_bits=1,
+                now_ticks=0,
+                attribution=attribution,
+            )
+    assert counters_from(model.traffic_json_value(), LinkPath.WSD)["transfer_count"] == 0
+
+
+@pytest.mark.parametrize(
+    ("key", "exception"),
+    [
+        (DecoderRequestKey([], 3, DecoderTier.STRONG, 0), TypeError),
+        (DecoderRequestKey(OPERATION_ID, -1, DecoderTier.STRONG, 0), ValueError),
+        (DecoderRequestKey(OPERATION_ID, True, DecoderTier.STRONG, 0), ValueError),
+        (DecoderRequestKey(OPERATION_ID, 3, "strong", 0), TypeError),
+        (DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, -1), ValueError),
+        (DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, True), ValueError),
+    ],
+)
+def test_model_admission_guards_inner_request_identity_before_mutation(key, exception):
+    """Model admission validates every inner request identity field before mutation."""
+    model = make_model_config().resolve()
+    attribution = TrafficAttribution(
+        OPERATION_ID,
+        PATCH_IDS,
+        3,
+        1,
+        2,
+        RequestTransferRelation(key),
+    )
+    with pytest.raises(exception):
+        model.reserve(
+            LinkPath.WSD,
+            payload_bits=1,
+            now_ticks=0,
+            attribution=attribution,
+        )
+    assert counters_from(model.traffic_json_value(), LinkPath.WSD)["transfer_count"] == 0
+
+
+def test_boundary_admission_guards_stable_keys_before_mutation():
+    """Boundary delivery rejects unstable durable source or destination keys before mutation."""
+    class UnstableTuple(tuple):
+        pass
+
+    key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, 0)
+    relations = (
+        BoundaryTransferRelation(
+            key,
+            UnstableTuple((OPERATION_ID, 3)),
+            (OPERATION_ID, 4),
+            1,
+            2,
+        ),
+        BoundaryTransferRelation(
+            key,
+            (OPERATION_ID, 3),
+            (object(), 4),
+            1,
+            2,
+        ),
+    )
+    model = make_model_config().resolve()
+
+    for relation in relations:
+        attribution = TrafficAttribution(
+            OPERATION_ID, PATCH_IDS, 3, 1, 2, relation
+        )
+        with pytest.raises(TypeError):
+            model.reserve(
+                LinkPath.DD,
+                payload_bits=1,
+                now_ticks=0,
+                attribution=attribution,
+            )
+    assert counters_from(model.traffic_json_value(), LinkPath.DD)["transfer_count"] == 0
+
+
+def test_payload_selection_records_actual_default_and_unresolved_sources():
+    """Routing records actual precedence, configured defaults, and unresolved payloads."""
+    actual_channel = make_channel()
+    actual_default = PayloadSizeConfig(
+        99, LinkQuantityBasis.DIRECT_AGGREGATE, None, "fallback"
+    )
+    edges = {
+        LinkPath.QC: LinkEdgeConfig(actual_channel, actual_default, "measured"),
+        LinkPath.CWD: make_default_edge(bits=12, source="default"),
+        LinkPath.OC: make_actual_edge(source="optional measurement"),
+    }
+    model = make_model_config(edges).resolve()
+    model.reserve(
+        LinkPath.QC,
+        payload_bits=7,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+    model.reserve(
+        LinkPath.CWD,
+        payload_bits=None,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.CWD),
+    )
+    model.reserve(
+        LinkPath.OC,
+        payload_bits=None,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.OC),
+    )
+
+    transfers = model.traffic_json_value()["transfers"]
+    assert [row["payload_bits"] for row in transfers] == [7, 12, None]
+    assert [row["payload_selection"] for row in transfers] == [
+        PayloadSelectionSource.ACTUAL.value,
+        PayloadSelectionSource.CONFIGURED_DEFAULT.value,
+        PayloadSelectionSource.UNRESOLVED.value,
+    ]
+    assert [row["payload_source"] for row in transfers] == [
+        "measured",
+        "default",
+        "optional measurement",
+    ]
+
+
+def test_payload_admission_failures_leave_semantic_and_physical_state_untouched():
+    """Payload policy failures do not create reservations or semantic ledger rows."""
+    capacity = LinkCapacityConfig(
+        1_000_000.0,
+        LinkQuantityBasis.DIRECT_AGGREGATE,
+        None,
+        "finite",
+    )
+    default_only = make_default_edge(bits=4)
+    unresolved_finite = LinkEdgeConfig(
+        make_channel(capacity=capacity), None, "optional actual"
+    )
+    model = make_model_config(
+        {LinkPath.QC: default_only, LinkPath.OC: unresolved_finite}
+    ).resolve()
+
+    with pytest.raises(ValueError):
+        model.reserve(
+            LinkPath.QC,
+            payload_bits=3,
+            now_ticks=20,
+            attribution=valid_attribution(LinkPath.QC),
+        )
+    with pytest.raises(ValueError):
+        model.reserve(
+            LinkPath.OC,
+            payload_bits=None,
+            now_ticks=20,
+            attribution=valid_attribution(LinkPath.OC),
+        )
+    accepted = model.reserve(
+        LinkPath.QC,
+        payload_bits=None,
+        now_ticks=10,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+
+    report = model.traffic_json_value()
+    assert accepted.physical_sequence == 0
+    assert len(report["transfers"]) == 1
+    assert counters_from(report, LinkPath.OC)["transfer_count"] == 0
+
+
+def test_config_identity_controls_sharing_and_each_resolve_is_run_owned():
+    """Only identical channel objects share FIFO state and resolves stay independent."""
+    capacity = LinkCapacityConfig(
+        1_000_000.0,
+        LinkQuantityBasis.DIRECT_AGGREGATE,
+        None,
+        "finite",
+    )
+    shared = make_channel(capacity=capacity)
+    equal_but_distinct = make_channel(capacity=capacity)
+    config = make_model_config(
+        {
+            LinkPath.QC: make_actual_edge(channel=shared),
+            LinkPath.CWD: make_actual_edge(channel=shared),
+            LinkPath.OC: make_actual_edge(channel=equal_but_distinct),
+        }
+    )
+    first_run = config.resolve()
+    second_run = config.resolve()
+
+    qc = first_run.reserve(
+        LinkPath.QC,
+        payload_bits=10,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+    cwd = first_run.reserve(
+        LinkPath.CWD,
+        payload_bits=10,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.CWD),
+    )
+    oc = first_run.reserve(
+        LinkPath.OC,
+        payload_bits=10,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.OC),
+    )
+    fresh = second_run.reserve(
+        LinkPath.QC,
+        payload_bits=10,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+
+    assert qc.physical_sequence == 0
+    assert cwd.physical_sequence == 1
+    assert cwd.queue_wait_ticks == qc.serialization_ticks
+    assert oc.physical_sequence == 0
+    assert fresh.physical_sequence == 0
+    topology = first_run.topology_json_value(
+        controller_link_integration_assurance="shipped_controller"
+    )
+    aliases = {edge["path"]: edge["physical_alias"] for edge in topology["edges"]}
+    assert aliases["qc"] == aliases["cwd"]
+    assert aliases["qc"] != aliases["oc"]
+
+
+def test_shared_fifo_counters_reconcile_across_member_paths():
+    """Shared physical counters equal the fieldwise sum of their semantic paths."""
+    shared = make_channel()
+    model = make_model_config(
+        {
+            LinkPath.QC: make_actual_edge(channel=shared),
+            LinkPath.CWD: make_actual_edge(channel=shared),
+        }
+    ).resolve()
+    model.reserve(
+        LinkPath.QC,
+        payload_bits=3,
+        now_ticks=1,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+    model.reserve(
+        LinkPath.CWD,
+        payload_bits=5,
+        now_ticks=1,
+        attribution=valid_attribution(LinkPath.CWD),
+    )
+
+    report = model.traffic_json_value()
+    shared_row = next(
+        row for row in report["reconciliation"]
+        if row["member_paths"] == ["qc", "cwd"]
+    )
+    assert shared_row["reconciles"] is True
+    assert shared_row["semantic_counter_sum"] == shared_row["physical_counters"]
+    assert shared_row["physical_counters"]["transfer_count"] == 2
+    assert shared_row["physical_counters"]["known_payload_bits"] == 8
+
+
+def test_reconciliation_guard_rejects_silent_counter_divergence():
+    """Traffic reporting rejects divergence between semantic and physical totals."""
+    model = make_model_config().resolve()
+    model.reserve(
+        LinkPath.QC,
+        payload_bits=3,
+        now_ticks=0,
+        attribution=valid_attribution(LinkPath.QC),
+    )
+    model._semantic_counters[LinkPath.QC] = TrafficCounters()
+    with pytest.raises(RuntimeError, match="do not reconcile"):
+        model.traffic_json_value()
+
+
+def test_topology_json_reports_stable_fabric_and_integration_contract():
+    """Topology evidence reports ordered routing, channel policy, and provenance."""
+    capacity = LinkCapacityConfig(
+        4.0, LinkQuantityBasis.PER_CHANNEL, 2, "capacity source"
+    )
+    payload = PayloadSizeConfig(
+        6, LinkQuantityBasis.PER_CHANNEL, 2, "payload source"
+    )
+    shared = make_channel(capacity=capacity, propagation_ticks=11, source="wire")
+    edge = LinkEdgeConfig(shared, payload, "actual source")
+    model = make_model_config({LinkPath.QC: edge, LinkPath.CWD: edge}).resolve()
+
+    topology = model.topology_json_value(
+        controller_link_integration_assurance="custom_controller_unverified"
+    )
+    assert topology["schema_version"] == 1
+    assert topology["profile_name"] == "test fabric"
+    assert topology["path_order"] == PATH_ORDER
+    assert topology["cancellation_semantics"] == "non_preemptive_irrevocable"
+    assert topology["controller_link_integration_assurance"] == "custom_controller_unverified"
+    qc_edge = topology["edges"][0]
+    assert qc_edge["actual_payload_source"] == "actual source"
+    assert qc_edge["default_payload"]["aggregate_bits"] == 12
+    channel = topology["physical_channels"][0]
+    assert channel["member_paths"] == ["qc", "cwd"]
+    assert channel["propagation_latency_ticks"] == 11
+    assert channel["capacity"]["aggregate_bits_per_us"] == 8.0
+    assert channel["configuration_source"] == "wire"
+    assert channel["service_scope"] == "aggregate_fifo"
+
+    for bad_assurance in ("", "third_party"):
+        with pytest.raises(ValueError):
+            model.topology_json_value(
+                controller_link_integration_assurance=bad_assurance
+            )
+
+
+def test_traffic_json_preserves_typed_identity_and_timing_boundaries():
+    """Traffic evidence serializes typed request and boundary identities with timing."""
+    model = make_model_config().resolve()
+    request = valid_attribution(LinkPath.WSD)
+    boundary = valid_attribution(LinkPath.DD)
+    first = model.reserve(
+        LinkPath.WSD,
+        payload_bits=8,
+        now_ticks=20,
+        attribution=request,
+    )
+    second = model.reserve(
+        LinkPath.DD,
+        payload_bits=9,
+        now_ticks=30,
+        attribution=boundary,
+    )
+
+    report = model.traffic_json_value()
+    assert report["schema_version"] == 1
+    assert report["path_order"] == PATH_ORDER
+    assert [row["path"] for row in report["transfers"]] == ["wsd", "dd"]
+    request_json, boundary_json = report["transfers"]
+    assert request_json["attribution"]["operation_id"] == stable_identity_json(OPERATION_ID)
+    assert request_json["attribution"]["patch_ids"] == [
+        stable_identity_json(1), stable_identity_json(2)
+    ]
+    assert request_json["attribution"]["relation"]["request_key"] == {
+        "operation_id": stable_identity_json(OPERATION_ID),
+        "window_id": 3,
+        "tier": "strong",
+        "run_sequence": 0,
+    }
+    relation_json = boundary_json["attribution"]["relation"]
+    assert relation_json["source_window_key"] == stable_identity_json((OPERATION_ID, 3))
+    assert relation_json["destination_window_key"] == stable_identity_json((OPERATION_ID, 4))
+    assert relation_json["source_revision"] == 2
+    assert relation_json["delivery_revision"] == 5
+    assert request_json["payload_bits"] == first.payload_bits
+    assert boundary_json["payload_bits"] == second.payload_bits
+    assert request_json["delivery_ticks"] == first.send_ticks + first.total_delay_ticks
+    assert json.loads(json.dumps(report)) == report
+
+
+def test_reference_profile_has_the_exact_timing_only_project_metadata():
+    """The reference profile preserves its nine timing and payload configuration choices."""
+    config = LinkModelConfig.logical_reference_profile()
+    model = config.resolve()
+    topology = model.topology_json_value(
+        controller_link_integration_assurance="shipped_controller"
+    )
+    expected_propagation = {
+        "qc": us(0.15),
+        "cwd": us(2.0),
+        "wsd": us(0.5),
+        "csd": us(2.0),
+        "wdo": us(1.0),
+        "dd": us(0.5),
+        "do": us(1.0),
+        "oc": us(4.0),
+        "cq": us(0.15),
+    }
+    expected_defaults = {
+        "wdo": 5_000_000,
+        "dd": 100,
+        "do": 5_000_000,
+        "oc": 20_000_000,
+        "cq": 5_000_000,
+    }
+    actual_sources = {
+        "qc": "SyndromePayload.size_bits",
+        "cwd": "SyndromeRoundPacket.fragment_size_sum",
+        "wsd": "switching decision payload_bits",
+        "csd": "DecodeJob.retained_payload_size_bits",
+    }
+
+    assert config.profile_name == "logical_reference"
+    assert config.qc_excludes_controller_processing is False
+    assert topology["path_order"] == PATH_ORDER
+    assert len(topology["physical_channels"]) == 9
+    assert all(channel["capacity"] is None for channel in topology["physical_channels"])
+    propagation = {
+        channel["member_paths"][0]: channel["propagation_latency_ticks"]
+        for channel in topology["physical_channels"]
+    }
+    defaults = {
+        edge["path"]: edge["default_payload"]["aggregate_bits"]
+        for edge in topology["edges"]
+        if edge["default_payload"] is not None
+    }
+    sources = {
+        edge["path"]: edge["actual_payload_source"]
+        for edge in topology["edges"]
+        if edge["actual_payload_source"] is not None
+    }
+    assert propagation == expected_propagation
+    assert defaults == expected_defaults
+    assert sources == actual_sources
+
+
+def test_config_and_record_validation_nonchecks_remain_at_their_boundaries():
+    """Fabric and ledger records retain deliberate constructor nonchecks."""
+    loose_config = LinkModelConfig(
+        qc=None,
+        cwd=None,
+        wsd=None,
+        csd=None,
+        wdo=None,
+        dd=None,
+        do=None,
+        oc=None,
+        cq=None,
+        profile_name=None,
+        qc_excludes_controller_processing=False,
+    )
+    reservation = LinkReservation(None, -1, -2, -3, -4, -5, -6, -7, -8)
+    counters = TrafficCounters(-1, -2, -3, -4, -5, -6)
+    record = SemanticTransferRecord(
+        path="not a path",
+        physical_alias=None,
+        attribution=None,
+        payload_selection="not a selection",
+        payload_source=None,
+        reservation=reservation,
+    )
+
+    assert loose_config.profile_name is None
+    assert counters.transfer_count == -1
+    assert record.reservation is reservation
+    with pytest.raises(TypeError):
+        LinkModelConfig(
+            **{path.value: make_actual_edge() for path in LinkPath},
+            profile_name="profile",
+            qc_excludes_controller_processing=1,
+        )
+
+
+def test_deleted_helpers_factories_fields_and_shims_are_absent():
+    """Removed construction conveniences, fields, and accessors have no shims."""
+    assert not hasattr(links_module, "_require_nonempty_stable_string")
+    assert not hasattr(LinkEdgeConfig, "from_per_channel_transaction")
+    assert not hasattr(make_model_config().resolve(), "config")
+    assert "payload_bits" not in {field.name for field in fields(SemanticTransferRecord)}
+    assert hasattr(Link, "config")
+
+
+def test_links_expose_timing_only_without_scheduler_or_reclamation_ownership():
+    """Links return timing records and expose no scheduling or reclamation operations."""
+    link = Link(make_channel())
+    reservation = link.reserve(payload_bits=1, now_ticks=0)
+    assert type(reservation) is LinkReservation
+    for name in (
+        "schedule",
+        "send",
+        "deliver",
+        "acknowledge",
+        "cancel",
+        "release",
+        "preempt",
+        "set_priority",
+    ):
+        assert not hasattr(link, name)

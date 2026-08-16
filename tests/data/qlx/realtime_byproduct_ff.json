@@ -1,0 +1,196 @@
+{
+  "backend": "event",
+  "decoder_config": {
+    "decoder": "mwpm",
+    "weights": "uniform"
+  },
+  "dispatch": {
+    "nvqlink": "artifact-only",
+    "opx_rdma": "artifact-only"
+  },
+  "execution_model": {
+    "conditional_feedback": true,
+    "corrections": "frame-aware",
+    "decoder": "async-ticket",
+    "streams": "patch-local"
+  },
+  "idle_policy": {
+    "idle_rounds_for_decoder_wait": 1,
+    "mode": "patch-local-before-feedback"
+  },
+  "kind": "qlx.realtime_artifact",
+  "lowering_targets": {
+    "hardware": [
+      "cudaq-realtime:nvqlink",
+      "opx:rdma"
+    ],
+    "simulation": [
+      "xstab",
+      "cusv"
+    ]
+  },
+  "runtime_ops": [
+    {
+      "op_name": "fabric.if"
+    },
+    {
+      "decoder": "@decoder",
+      "op_name": "fabric.decode_bit"
+    }
+  ],
+  "schedule": {
+    "active_volume": 3.0,
+    "bottleneck_per_round": [
+      "compute_limited"
+    ],
+    "entries": [
+      {
+        "consumes": null,
+        "dependencies": [],
+        "duration": 0,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "alloc_0",
+        "op_name": "fabric.alloc",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 0
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "alloc_0"
+        ],
+        "duration": 0,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "reset_0",
+        "op_name": "fabric.reset",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 0
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "reset_0"
+        ],
+        "duration": 1,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "measure_product_0",
+        "op_name": "fabric.measure_product",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 0
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "measure_product_0"
+        ],
+        "duration": 0,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "x_0",
+        "op_name": "fabric.x",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 1
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "x_0",
+          "measure_product_0"
+        ],
+        "duration": 0,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "if_0",
+        "op_name": "fabric.if",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 1
+      },
+      {
+        "consumes": null,
+        "dependencies": [
+          "if_0"
+        ],
+        "duration": 0,
+        "occupied_slots": [
+          [
+            "C0",
+            0
+          ]
+        ],
+        "op_id": "mz_0",
+        "op_name": "fabric.mz",
+        "produces": null,
+        "protocol": null,
+        "region": "C0",
+        "slot": 0,
+        "start_round": 1
+      }
+    ],
+    "minimize": "active_volume",
+    "solver": "list",
+    "total_rounds": 1
+  },
+  "streams": [
+    {
+      "entries": [
+        "alloc_0",
+        "reset_0",
+        "measure_product_0",
+        "x_0",
+        "if_0",
+        "mz_0"
+      ],
+      "id": "C0:0",
+      "region": "C0",
+      "slot": 0
+    }
+  ],
+  "timing": {
+    "cycle_time_ns": 1000.0,
+    "decoder_latency_ns": 1000.0,
+    "decoder_latency_rounds": 1
+  },
+  "validation": {
+    "notes": "fabric.if branches are both represented in the static schedule artifact; live runtime dispatch executes the branch selected by the decoded bit.",
+    "static_upper_bound": true
+  },
+  "version": 1
+}

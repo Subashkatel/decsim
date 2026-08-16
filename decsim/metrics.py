@@ -16,8 +16,8 @@ from typing import TYPE_CHECKING, Optional
 
 from .message import (DecoderRequestKey, stable_identity_json,
                       stable_identity_order_key)
-from .views import (WINDOW_STAGES, backlog_view, reaction_view,
-                    strong_work_view, utilization_view,
+from .views import (WINDOW_STAGES, backlog_view, decoder_input_store_view,
+                    reaction_view, strong_work_view, utilization_view,
                     switching_records_view, window_latency_view)
 
 if TYPE_CHECKING:
@@ -151,6 +151,174 @@ class ReadyQueueStats:
         return {"observation_span_ticks": self._integral.span_ticks,
                 "peak_jobs": self.peak,
                 "time_avg_jobs": self._integral.time_average()}
+
+
+def _time_average(integrals_by_pool: dict, pool: str) -> float:
+    """One pool's time average, zero before it was ever observed."""
+    integral = integrals_by_pool.get(pool)
+    return 0.0 if integral is None else integral.time_average()
+
+
+def _request_key_json(request_key: Optional[DecoderRequestKey]):
+    """One decoder request key as plain JSON-ready values."""
+    if request_key is None:
+        return None
+    return {"operation_id": stable_identity_json(request_key.operation_id),
+            "window_id": request_key.window_id,
+            "tier": request_key.tier.value,
+            "run_sequence": request_key.run_sequence}
+
+
+class DecoderInputStoreOccupancy:
+    """Decoder-input storage occupancy, waiting, and stalls, in rounds.
+
+    Opt-in observer for runs that configure a finite decoder-input store. It
+    reports per-pool and aggregate current, peak and time-average occupied
+    rounds and their utilization, current, peak and time-average work waiting
+    for round credits, stall counts and ticks, and one record per request that
+    had to wait, from transport arrival to storage admission.
+    That record is the storage stage of a window's composite queue wait. Round
+    occupancy is staged request volume: overlapping requests each charge shared
+    syndrome rounds. ``stall_events`` counts all FIFO entries, including later
+    cancellations; ticks and records describe only waits that reach admission.
+    Finite storage retains one record per admitted waiter even without this
+    metric. A run without a configured store reports ``enabled`` false.
+
+    Occupied-round peaks are exact: each per-pool value is the store's own
+    high-water mark, and the aggregate is their conservative sum because pools
+    need not peak together. Waiting peaks and every time average are sampled at
+    event boundaries.
+    """
+
+    name = "decoder_input_store_occupancy"
+    result_schema_version = 1
+
+    def __init__(self, decoder_manager):
+        self.decoder_manager = decoder_manager
+        self._pool_names = None
+        self._occupied_rounds = {}
+        self._waiting_jobs = {}
+        self._waiting_rounds = {}
+        self._peak_occupied_rounds = {}
+        self._peak_waiting_jobs = {}
+        self._peak_waiting_rounds = {}
+        self._aggregate_occupied_rounds = _StepIntegral()
+        self._peak_aggregate_occupied_rounds = 0
+
+    def observe(self, engine: "Engine") -> None:
+        """Add the storage levels held since the last event, then re-sample."""
+        view = decoder_input_store_view(self.decoder_manager)
+        if not view.enabled:
+            return
+        pool_names = tuple(row.pool for row in view.per_pool)
+        if self._pool_names is None:
+            self._pool_names = pool_names
+            self._occupied_rounds = {
+                name: _StepIntegral() for name in pool_names}
+            self._waiting_jobs = {
+                name: _StepIntegral() for name in pool_names}
+            self._waiting_rounds = {
+                name: _StepIntegral() for name in pool_names}
+            self._peak_occupied_rounds = {name: 0 for name in pool_names}
+            self._peak_waiting_jobs = {name: 0 for name in pool_names}
+            self._peak_waiting_rounds = {name: 0 for name in pool_names}
+        elif pool_names != self._pool_names:
+            raise RuntimeError(
+                "decoder-input store pools changed during measurement")
+        aggregate_occupied_rounds = 0
+        for row in view.per_pool:
+            self._occupied_rounds[row.pool].observe(
+                engine.now, row.occupied_rounds)
+            self._waiting_jobs[row.pool].observe(
+                engine.now, row.waiting_jobs)
+            self._waiting_rounds[row.pool].observe(
+                engine.now, row.waiting_rounds)
+            self._peak_occupied_rounds[row.pool] = max(
+                self._peak_occupied_rounds[row.pool],
+                row.peak_occupied_rounds)
+            self._peak_waiting_jobs[row.pool] = max(
+                self._peak_waiting_jobs[row.pool], row.waiting_jobs)
+            self._peak_waiting_rounds[row.pool] = max(
+                self._peak_waiting_rounds[row.pool], row.waiting_rounds)
+            aggregate_occupied_rounds += row.occupied_rounds
+        self._aggregate_occupied_rounds.observe(
+            engine.now, aggregate_occupied_rounds)
+        # Conservative aggregate high-water: the sum of exact per-pool marks,
+        # with no tracker for simultaneous totals to claim more than that.
+        self._peak_aggregate_occupied_rounds = sum(
+            self._peak_occupied_rounds.values())
+
+    def rows(self) -> list:
+        """One record per request that waited for decoder-input round credits."""
+        view = decoder_input_store_view(self.decoder_manager)
+        return [{
+            "request_key": _request_key_json(record.request_key),
+            "pool": record.pool,
+            "arrival_ticks": record.arrival_tick,
+            "admitted_ticks": record.admitted_tick,
+            "stall_ticks": record.admitted_tick - record.arrival_tick,
+            "round_demand": record.round_demand,
+        } for record in view.stall_records]
+
+    def result(self) -> dict:
+        """Per-pool and aggregate storage occupancy, waiting, and stalls."""
+        view = decoder_input_store_view(self.decoder_manager)
+        if not view.enabled:
+            return {"enabled": False, "observation_span_ticks": 0,
+                    "per_pool": {}, "aggregate": {}, "stall_records": []}
+        total_capacity_rounds = sum(
+            row.capacity_rounds for row in view.per_pool)
+        per_pool = {}
+        for row in view.per_pool:
+            time_avg_occupied_rounds = _time_average(
+                self._occupied_rounds, row.pool)
+            per_pool[row.pool] = {
+                "capacity_rounds": row.capacity_rounds,
+                "occupied_rounds": row.occupied_rounds,
+                "slots_in_use": row.slots_in_use,
+                "peak_occupied_rounds": self._peak_occupied_rounds.get(
+                    row.pool, 0),
+                "time_avg_occupied_rounds": time_avg_occupied_rounds,
+                "time_avg_occupied_fraction": (
+                    time_avg_occupied_rounds / row.capacity_rounds),
+                "waiting_jobs": row.waiting_jobs,
+                "peak_waiting_jobs": self._peak_waiting_jobs.get(row.pool, 0),
+                "time_avg_waiting_jobs": _time_average(
+                    self._waiting_jobs, row.pool),
+                "waiting_rounds": row.waiting_rounds,
+                "peak_waiting_rounds": self._peak_waiting_rounds.get(
+                    row.pool, 0),
+                "time_avg_waiting_rounds": _time_average(
+                    self._waiting_rounds, row.pool),
+                "stall_events": row.stall_events,
+                "stall_ticks": row.stall_ticks,
+            }
+        time_avg_aggregate_rounds = (
+            self._aggregate_occupied_rounds.time_average())
+        return {
+            "enabled": True,
+            "observation_span_ticks": (
+                self._aggregate_occupied_rounds.span_ticks),
+            "per_pool": per_pool,
+            "aggregate": {
+                "capacity_rounds": total_capacity_rounds,
+                "occupied_rounds": sum(
+                    row.occupied_rounds for row in view.per_pool),
+                "slots_in_use": sum(
+                    row.slots_in_use for row in view.per_pool),
+                "peak_occupied_rounds": self._peak_aggregate_occupied_rounds,
+                "time_avg_occupied_rounds": time_avg_aggregate_rounds,
+                "time_avg_occupied_fraction": (
+                    time_avg_aggregate_rounds / total_capacity_rounds
+                    if total_capacity_rounds else 0.0),
+                "waiting_jobs": sum(row.waiting_jobs for row in view.per_pool),
+                "waiting_rounds": sum(
+                    row.waiting_rounds for row in view.per_pool),
+                "stall_events": sum(row.stall_events for row in view.per_pool),
+                "stall_ticks": sum(row.stall_ticks for row in view.per_pool),
+            },
+            "stall_records": self.rows(),
+        }
 
 
 class WindowLatencyBreakdown:

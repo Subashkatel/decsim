@@ -75,7 +75,7 @@ validation rules, and a custom window-interaction example.
 - `controller.py` — command/feedback sequencing, QPU readout conversion, and its optional fixed cost.
 - `qpu.py` — physical round cadence and typed QPU readout production.
 - `syndrome_ingress.py` — controller-side QC receipt, fragment reassembly, and route arbitration.
-- `decoder_input_transfer.py` / `decoder_input_store.py` — decoder-input transfer and stored-input lifetime.
+- `decoder_input_transfer.py` / `decoder_input_store.py` — decoder-input transport delay, and decoder-side storage admission, round budgets, and stored-input lifetime.
 - `planner.py` — compile-time window layout and rounds policies.
 - Directly replaceable parts include decoders, schedulers, schemes, policies,
   switching strategies, factories, syndrome ingress, and decoder-input transfer.
@@ -106,10 +106,15 @@ The default decoder-I/O composition is the placement-neutral
 per live round as it moves from assembly through immutable retained readiness;
 that state transition does not fabricate a staging-to-retention byte copy.
 ``WindowManager`` submits only ready window requirements. One CWD transfer per
-weak window materializes a distinct immutable ``DecoderInput`` in
-``DecoderInputStore`` before the job enters ``DecoderManager``'s FIFO ready
-queue. The upstream hold is released at transfer completion, and overlapping
-windows retain shared rounds until their last required transfer completes.
+weak window carries the request, and the manager-owned
+``DecoderInputStoreStager`` materializes a distinct immutable ``DecoderInput``
+in a ``DecoderInputStore`` on arrival, before the job enters
+``DecoderManager``'s FIFO ready queue. The upstream hold is released when
+storage admits the request, and overlapping windows retain shared rounds until
+their last required transfer completes. Decoder-side storage is optionally
+finite in syndrome rounds per decoder unit pool
+(``RunSpec.decoder_input_store``); unset, one shared unbounded store keeps the
+path unchanged.
 Strong input uses CSD once. The generic seam makes no claim about cryogenic or
 room-temperature placement, DMA, MMIO, rings, pointers, or streaming; these are
 named replaceable research profiles. SB0/SB1 and ``PayloadStore`` are removed

@@ -269,18 +269,22 @@ class Scheduler(Protocol):
 
 @runtime_checkable
 class DecoderInputTransfer(Protocol):
-    """Port 22. Make one admitted job's decoder-input store value ready.
+    """Port 22. Carry one admitted job to the decoder side after a delay.
 
-    Implementations call ``receiver(job)`` once after ``delay_ticks``. An
-    implementation that owns decoder-input store allocations may also provide
-    ``release(job)``; the manager calls it after service or cancellation. Link
-    reservation, admission, service, and result handling belong elsewhere.
+    Implementations call ``receiver(job)`` exactly once after ``delay_ticks``,
+    unless the request is cancelled first. ``cancel(job)`` is idempotent: the
+    receiver is never invoked for a request cancelled before its delivery, and
+    cancelling an unknown or already delivered request does nothing. Storage
+    admission, materialization, stored-input lifetime, link reservation,
+    admission, service, and result handling belong elsewhere.
     """
 
     def deliver(
         self, job: DecodeJob, delay_ticks: int,
-        receiver: Callable[[DecodeJob], None], *, on_materialized=None,
+        receiver: Callable[[DecodeJob], None],
     ) -> None: ...
+
+    def cancel(self, job: DecodeJob) -> None: ...
 
 
 @runtime_checkable

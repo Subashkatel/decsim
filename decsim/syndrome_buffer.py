@@ -27,21 +27,20 @@ from .message import (
 
 @dataclass(frozen=True)
 class SyndromeBufferingConfig:
-    """Optional capacities for the upstream and decoder-input store buffers.
+    """Optional capacity of the upstream syndrome buffer, in rounds.
 
-    ``None`` means unbounded. The two limits are independent.
+    ``None`` means unbounded. Decoder-side storage is configured separately and
+    in different units by ``RunSpec.decoder_input_store``.
     """
 
     upstream_packet_slots: Optional[int] = None
-    decoder_input_slots: Optional[int] = None
 
     def __post_init__(self) -> None:
-        for name, value in (
-            ("upstream_packet_slots", self.upstream_packet_slots),
-            ("decoder_input_slots", self.decoder_input_slots),
-        ):
-            if value is not None and (type(value) is not int or value < 1):
-                raise TypeError(f"{name} must be a positive int or None")
+        if self.upstream_packet_slots is not None and (
+                type(self.upstream_packet_slots) is not int
+                or self.upstream_packet_slots < 1):
+            raise TypeError(
+                "upstream_packet_slots must be a positive int or None")
 
 
 class SyndromeBufferRoundState(Enum):

@@ -27,10 +27,8 @@ class DynamicWindows:
     def __init__(self, window_manager) -> None:
         self.window_manager = window_manager
         self._streams: dict = {}
-        self.unsealed: set = set()
         self.closed_boundaries: dict = {}
         self.committed_round_counts: dict = {}
-        self.segment_results_sent: set = set()
 
     # ------------------------------------------------------------ register
 
@@ -53,14 +51,14 @@ class DynamicWindows:
             "sealed_round_count": None,
             "finite_geometries": finite_geometries,
         }
-        self.unsealed.add(stream_op.id)
         self.closed_boundaries.setdefault(stream_op.id, set())
 
     def has(self, stream_id) -> bool:
         return stream_id in self._streams
 
-    def state(self, stream_id) -> Optional[dict]:
-        return self._streams.get(stream_id)
+    def has_unsealed_streams(self) -> bool:
+        return any(not stream_state["sealed"]
+                   for stream_state in self._streams.values())
 
     def sealed(self, op_id) -> bool:
         """True for non-streams and sealed streams."""
@@ -157,22 +155,14 @@ class DynamicWindows:
         if stream_state["finite_geometries"] is None:
             self._trim_tail(stream_id, stream_round_count)
         stream_state["sealed"] = True
-        self.unsealed.discard(stream_id)
         wm.check_windows_for_operation(stream_id)
         wm.finish_workload_if_ready()
 
     def _trim_tail(self, stream_id, stream_round_count: int) -> None:
         """Clip the final open-stream commit region to the sealed length."""
-        wm = self.window_manager
         stream_state = self._streams[stream_id]
-        for window_index in wm.op_windows.get(stream_id, []):
-            window = wm.windows[(stream_id, window_index)]
-            if window.commit_lo <= stream_round_count <= window.commit_hi:
-                window.commit_hi = stream_round_count
-                window.buffer_hi = stream_round_count + stream_state["buffer_rounds"]
-                window.n_rounds = window.buffer_hi - window.start_round + 1
-                wm.reset_dynamic_window_reads(stream_id, window_index, window)
-                return
+        self.window_manager.trim_dynamic_window_tail(
+            stream_id, stream_round_count, stream_state["buffer_rounds"])
 
     # ---------------------------------------------------- feedback boundary
 
@@ -185,7 +175,7 @@ class DynamicWindows:
             raise ValueError(
                 f"stream_round_count must be >= 1 (got {stream_round_count})")
         self._reject_unsupported_boundary(stream_id, stream_round_count)
-        self.closed_boundaries.setdefault(stream_id, set()).add(stream_round_count)
+        self.closed_boundaries[stream_id].add(stream_round_count)
         self.grow(stream_id, rounds_to_plan=stream_round_count)
         wm.refresh_unqueued_stream_windows(stream_id)
         wm.check_windows_for_operation(stream_id)

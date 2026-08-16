@@ -12,11 +12,11 @@ they do not claim byte-identical QLX decoder ABI encoding.
 Input formats accepted:
   * a live ``SpaceTimeDiagram`` (objects with ``.entries`` attributes),
   * ``as_dict()``-style dicts, or
-  * the reflection capture format used by
-    ``docs/audits/qlx-output-sample/schedule_output.json``, where every
-    value is a Python repr string ("'alloc_0'", "(('C0', 0),)", ...).
+  * the frozen reflection capture
+    ``tests/data/qlx/schedule_h_then_t.json``, where every value is a Python
+    repr string ("'alloc_0'", "(('C0', 0),)", ...).
 
-Mapping rules (each asserted by tests/test_qlx_frontend.py):
+Mapping rules (partially asserted by the ``tests/09_qlx_workloads`` suite):
   * entry order is preserved; ``Operation.id`` = position; the original
     ``op_id`` string is kept in ``QLXProgram.op_ids``.
   * ``dependencies`` -> workload-only ``Operation.predecessors``.

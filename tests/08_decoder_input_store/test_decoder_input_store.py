@@ -14,7 +14,19 @@ from decsim.decoder_input_store import (
     MaterializedSyndromeRound,
     materialize_decoder_input,
 )
-from decsim.message import DecodeJob, RetainedSyndromeFragment
+from decsim.detector_error_model.fault_model_contracts import (
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    WindowErrorModel,
+)
+from decsim.detector_error_model.window_model_builders import (
+    build_window_error_models,
+)
+from decsim.adapters.stim_device import StimDevice
+from decsim.decoders import PerRoundDecoder
+from decsim.message import DecodeJob, Operation, RetainedSyndromeFragment
+from decsim.mwpm_decoder.decoder import PyMatchingDecoder
+from decsim.planner import FixedRounds
+from decsim.run_spec import RunSpec
 
 
 @dataclass(frozen=True)
@@ -54,7 +66,7 @@ def make_fragment(
     fragment_index: int = 0,
     *,
     patch_id: object | None = None,
-    bits: tuple[int, ...] = (0, 1),
+    bits: tuple[int, ...] | None = (0, 1),
 ) -> RetainedSyndromeFragment:
     return RetainedSyndromeFragment(
         operation_id=operation_id,
@@ -62,7 +74,7 @@ def make_fragment(
         round_index=round_index,
         bits=bits,
         code="surface",
-        size_bits=len(bits),
+        size_bits=None if bits is None else len(bits),
         fragment_index=fragment_index,
     )
 
@@ -73,11 +85,13 @@ def make_job(
     op_id: object = 41,
     window_id: object = 7,
     request_key: object | None = None,
+    dem: object = None,
 ) -> DecodeJob:
     return DecodeJob(
         op_id=op_id,
         window_id=window_id,
         n_rounds=len(payloads or []),
+        dem=dem,
         payloads=list(payloads or []),
         request_key=request_key,
     )
@@ -136,6 +150,220 @@ def test_materialization_orders_rounds_and_preserves_within_round_order() -> Non
     )
 
 
+def test_real_window_model_accepts_matching_operation_round_layout() -> None:
+    """A real model accepts matching operation, round order, and dense counts."""
+    stim = pytest.importorskip("stim")
+    circuit = stim.Circuit.generated(
+        "repetition_code:memory",
+        rounds=3,
+        distance=3,
+        after_clifford_depolarization=0.01,
+    )
+    window_model = build_window_error_models(
+        circuit,
+        [(1, 3, 3)],
+        round_count=3,
+        fault_model_requirement=GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=(),
+    )[0]
+    detector_count_by_round: dict[int, int] = {}
+    for detector_id in window_model.detector_ids:
+        round_index, position_in_round = window_model.defect_positions[detector_id]
+        assert position_in_round == detector_count_by_round.get(round_index, 0)
+        detector_count_by_round[round_index] = position_in_round + 1
+    fragments = tuple(
+        make_fragment(
+            operation_id=9,
+            round_index=round_index,
+            bits=tuple(index % 2 for index in range(detector_count)),
+        )
+        for round_index, detector_count in detector_count_by_round.items()
+    )
+
+    decoder_input = materialize_decoder_input(
+        make_job(list(reversed(fragments)), op_id=9, dem=window_model)
+    )
+
+    assert tuple(
+        (round_input.operation_id, round_input.round_index)
+        for round_input in decoder_input.rounds
+    ) == tuple((9, round_index) for round_index in detector_count_by_round)
+    assert sum(
+        len(fragment.bits)
+        for round_input in decoder_input.rounds
+        for fragment in round_input.fragments
+    ) == len(window_model.detector_ids)
+
+
+def test_real_stim_run_reaches_model_backed_materialization_and_completes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real StimDevice run materializes a window model and completes."""
+    stim = pytest.importorskip("stim")
+    circuit = stim.Circuit.generated(
+        "repetition_code:memory",
+        rounds=3,
+        distance=3,
+        after_clifford_depolarization=0.01,
+        before_measure_flip_probability=0.01,
+        after_reset_flip_probability=0.01,
+        before_round_data_depolarization=0.01,
+    )
+    operation = Operation(
+        id=1,
+        name="repetition memory",
+        qubits=(0,),
+        patches=(0,),
+        circuit=circuit,
+    )
+    model_backed_jobs = []
+    original_materialize = decoder_input_store.materialize_decoder_input
+
+    def record_model_backed_materialization(job):
+        model = getattr(job, "dem", None)
+        if model is not None:
+            model_backed_jobs.append(job)
+        return original_materialize(job)
+
+    monkeypatch.setattr(
+        decoder_input_store,
+        "materialize_decoder_input",
+        record_model_backed_materialization,
+    )
+
+    completed = RunSpec(
+        ops=[operation],
+        d=3,
+        rounds_policy=FixedRounds(3),
+        device=StimDevice(),
+        decoder=PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)),
+        seed=7,
+    ).build()
+
+    assert completed.result.terminal_status == "complete"
+    assert completed.result.event_queue_empty
+    assert completed.result.execution_workload_complete
+    assert model_backed_jobs
+    assert all(isinstance(job.dem, WindowErrorModel) for job in model_backed_jobs)
+    logical_result = completed.result.operation_results[0]
+    assert logical_result.logical_observables == logical_result.observable_truth
+
+
+def test_same_size_divergent_model_row_layout_order_raises() -> None:
+    """A same-size round-layout permutation fails instead of moving syndrome bits."""
+    window_model = WindowErrorModel(
+        detector_ids=(20, 10),
+        detector_coordinates=None,
+        defect_positions={10: (1, 0), 20: (2, 0)},
+        graphlike_faults=None,
+        physical_faults=None,
+    )
+    payloads = [
+        make_fragment(round_index=2, bits=(0,)),
+        make_fragment(round_index=1, bits=(1,)),
+    ]
+
+    with pytest.raises(ValueError, match="row layout"):
+        materialize_decoder_input(make_job(payloads, op_id=1, dem=window_model))
+
+
+def test_successor_identity_cannot_replace_predecessor_model_rows() -> None:
+    """A sorting-first successor cannot silently occupy predecessor model rows."""
+    window_model = WindowErrorModel(
+        detector_ids=(10, 20),
+        detector_coordinates=None,
+        defect_positions={10: (1, 0), 20: (2, 0)},
+        graphlike_faults=None,
+        physical_faults=None,
+    )
+    predecessor_fragment = make_fragment(
+        operation_id=2,
+        round_index=2,
+        bits=(0,),
+    )
+    successor_fragment = make_fragment(
+        operation_id=1,
+        round_index=1,
+        bits=(1,),
+    )
+
+    with pytest.raises(ValueError, match="round operation 1.*job operation 2"):
+        materialize_decoder_input(
+            make_job(
+                [predecessor_fragment, successor_fragment],
+                op_id=2,
+                dem=window_model,
+            )
+        )
+
+
+def test_unknown_model_detector_identity_raises() -> None:
+    """A detector identity absent from defect positions raises loudly."""
+    window_model = WindowErrorModel(
+        detector_ids=(10, 99),
+        detector_coordinates=None,
+        defect_positions={10: (1, 0)},
+        graphlike_faults=None,
+        physical_faults=None,
+    )
+
+    with pytest.raises(KeyError) as error:
+        materialize_decoder_input(
+            make_job(
+                [make_fragment(round_index=1, bits=(1, 0))],
+                op_id=1,
+                dem=window_model,
+            )
+        )
+
+    assert error.value.args == (99,)
+
+
+def test_detector_row_length_divergence_raises() -> None:
+    """A model and materialized bit vector with different lengths fail loudly."""
+    window_model = WindowErrorModel(
+        detector_ids=(10,),
+        detector_coordinates=None,
+        defect_positions={10: (1, 0)},
+        graphlike_faults=None,
+        physical_faults=None,
+    )
+
+    with pytest.raises(ValueError, match="row layout"):
+        materialize_decoder_input(
+            make_job(
+                [make_fragment(round_index=1, bits=(1, 0))],
+                op_id=1,
+                dem=window_model,
+            )
+        )
+
+
+def test_custom_model_without_row_layout_materializes_unchanged() -> None:
+    """A non-None custom model without row-layout attributes remains accepted."""
+    class CustomModelWithoutRowLayout:
+        """Represent a decoder model whose contract has no row-layout view."""
+
+    custom_model = CustomModelWithoutRowLayout()
+    fragment = make_fragment(operation_id=3, round_index=2, bits=(1, 0))
+
+    decoder_input = materialize_decoder_input(
+        make_job([fragment], op_id=3, dem=custom_model)
+    )
+
+    assert decoder_input.rounds[0].fragments == (fragment,)
+
+
+def test_timing_only_fragments_need_no_detector_model_or_bits() -> None:
+    """Timing-only fragments with no model and no bits still materialize."""
+    fragment = make_fragment(round_index=3, bits=None)
+
+    decoder_input = materialize_decoder_input(make_job([fragment], dem=None))
+
+    assert decoder_input.rounds[0].fragments == (fragment,)
+    assert decoder_input.rounds[0].fragments[0].bits is None
+
+
 def test_empty_job_materializes_to_self_identifying_input() -> None:
     """A timing-only job produces an empty frozen input with only request identity fields."""
     request_marker = object()
@@ -186,6 +414,7 @@ def test_compatible_job_consumes_one_shot_payloads_once() -> None:
         payloads=accepted_payloads,
     )
 
+    assert not hasattr(accepted_job, "dem")
     decoder_input = materialize_decoder_input(accepted_job)
 
     assert accepted_payloads.iterations == 1

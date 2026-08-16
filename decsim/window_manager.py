@@ -293,6 +293,7 @@ class WindowManager:
         self._committed_per_op: dict[int, int] = {}
         self.blocking_ops: set[int] = set()
         self.op_results: dict[int, tuple[int, ...]] = {}
+        self.segment_results_sent: set = set()
         self._required_stream_end_by_operation_id: dict[int, int] = {}
         self._stream_binding_by_operation_id: dict[int, tuple[object, int]] = {}
         self.logical_contributions: dict[tuple, LogicalContribution] = {}
@@ -566,6 +567,17 @@ class WindowManager:
             for r in range(window.start_round, window.commit_hi + 1))
         self.syndrome_buffer.replace_hold(
             key, new_reads)
+
+    def trim_dynamic_window_tail(self, stream_id, stream_round_count: int,
+                                 buffer_rounds) -> None:
+        for window_index in self.op_windows.get(stream_id, []):
+            window = self.windows[(stream_id, window_index)]
+            if window.commit_lo <= stream_round_count <= window.commit_hi:
+                window.commit_hi = stream_round_count
+                window.buffer_hi = stream_round_count + buffer_rounds
+                window.n_rounds = window.buffer_hi - window.start_round + 1
+                self.reset_dynamic_window_reads(stream_id, window_index, window)
+                return
 
     def create_dynamic_window(self, stream_id, window_index, commit_lo,
                               commit_hi, buffer_hi, *, is_last) -> None:
@@ -2544,7 +2556,7 @@ class WindowManager:
         if (len(self.committed_windows) == self.total_windows
                 and not self._pending_strong_windows
                 and not self.speculative_recovery.has_finality_blockers
-                and not self.lifecycle.unsealed
+                and not self.lifecycle.has_unsealed_streams()
                 and self.on_workload_complete is not None):
             self._workload_complete_sent = True
             self.on_workload_complete()
@@ -2590,7 +2602,7 @@ class WindowManager:
                 continue
             if operation.id not in self.blocking_ops:
                 continue
-            if operation.id in self.lifecycle.segment_results_sent:
+            if operation.id in self.segment_results_sent:
                 continue
             segment_end = self._stream_segment_end(operation)
             if segment_end is None or segment_end > committed_round_count:
@@ -2613,7 +2625,7 @@ class WindowManager:
                 self.op_results.pop(operation.id, None)
             else:
                 self.op_results[operation.id] = logical_observables
-            self.lifecycle.segment_results_sent.add(operation.id)
+            self.segment_results_sent.add(operation.id)
             self.orchestrator.integrate(
                 operation,
                 DecodeResult(

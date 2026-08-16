@@ -2338,7 +2338,7 @@ class WindowManager:
                 source_request_key=completion.request_key)
         self.speculative_recovery.after_commit()
         self.release_stream_segments_at_commit(
-            op.id, self.lifecycle.committed_round_counts.get(op.id, 0))
+            op.id, self.lifecycle.committed_round_count(op.id))
         self._finish_operation_if_ready(op)
         self.finish_workload_if_ready()
 
@@ -2690,7 +2690,7 @@ class WindowManager:
         return self.lifecycle.has(stream_id)
 
     def committed_stream_round_count(self, stream_id) -> int:
-        return self.lifecycle.committed_round_counts.get(stream_id, 0)
+        return self.lifecycle.committed_round_count(stream_id)
 
     def pending_strong_work_snapshot(self) -> tuple:
         """Snapshot strong slabs assigned but not yet admitted for service."""

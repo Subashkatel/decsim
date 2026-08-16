@@ -12,7 +12,7 @@ only in the explicitly historical column; they are not compatibility APIs.
 ```
 Controller --command--> QPUDevice --QPUReadout--> Controller
            --binary detector data--> SyndromeIngress -> SyndromeBuffer
-           -> WindowManager -> DecoderInputTransfer -> DecoderLocalMemory
+           -> WindowManager -> DecoderInputTransfer -> DecoderInputStore
            -> DecoderManager ready queue -> decoder
 ```
 
@@ -34,11 +34,11 @@ EV-POLICY-DIRECT-VALUE-BASELINE]
 | `SyndromeStagingPolicy` | `SyndromeIngressPolicy`, `ReassemblyQueueAdmission`, `IngressOverflowPolicy` | EV-QEC-HELIOS-INPUT-READY-BACKPRESSURE, EV-QEC-MICROBLOSSOM-BUS-BACKPRESSURE | Overflow and admission remain explicit policies; they are not universal hardware claims. |
 | `PayloadStore`, `_EndpointLedger`, `EndpointRole.SB0/SB1` | `SyndromeBuffer` bounded slot and typed-hold ledger | EV-POLICY-ONE-ALLOCATION-OWNERSHIP-TRANSITION, EV-QEC-HELIOS-UPSTREAM-FIFO | The SB0/SB1 split was a decsim ledger, not a physical claim. |
 | `PayloadStore.register_owner` / `release_owner` | `SyndromeBuffer.register_hold`, `replace_hold`, `transfer_hold`, `release_hold` | EV-CLS-DPDK-MBUF-OWNERSHIP, EV-POLICY-LAST-TRANSFER-RELEASE | Weak, strong, replay, and rephase lifetimes use typed holds on the same backing. |
-| `complete_input_transfer` and `_TransportOwner` | `DecoderInputHold` released by `FixedLatencyDecoderInputTransfer` after materialization | EV-POLICY-LAST-TRANSFER-RELEASE, EV-QEC-CUDAQ-RING-SLOT-LIFECYCLE | Upstream lifetime ends only after decoder-local input exists or the request is cancelled. |
+| `complete_input_transfer` and `_TransportOwner` | `DecoderInputHold` released by `FixedLatencyDecoderInputTransfer` after materialization | EV-POLICY-LAST-TRANSFER-RELEASE, EV-QEC-CUDAQ-RING-SLOT-LIFECYCLE | Upstream lifetime ends only after decoder-input store input exists or the request is cancelled. |
 | `FixedDelayDirectValueTransport` | `DecoderInputTransfer` protocol and `FixedLatencyDecoderInputTransfer` baseline | EV-POLICY-DIRECT-VALUE-BASELINE, EV-POLICY-NAMED-TRANSFER-PROFILES | The baseline is mechanism-neutral; DMA, rings, MMIO, and streaming require named profiles. |
-| Shared pre-transfer `DecodeJob.payloads` as decoder input | Immutable `DecoderInput` in `DecoderLocalMemory` | EV-QEC-CUDAQ-HOST-STAGING-RETAINED-SPLIT, EV-QEC-HELIOS-PE-M-STATE, EV-QEC-XQSIM-ESM-LOCAL-HISTORY | The transfer materializes decoder-local rounds before ready-queue admission. A temporary payload view remains only for existing decoder adapters after materialization. |
+| Shared pre-transfer `DecodeJob.payloads` as decoder input | Immutable `DecoderInput` in `DecoderInputStore` | EV-QEC-CUDAQ-HOST-STAGING-RETAINED-SPLIT, EV-QEC-HELIOS-PE-M-STATE, EV-QEC-XQSIM-ESM-LOCAL-HISTORY | The transfer materializes decoder-input store rounds before ready-queue admission. A temporary payload view remains only for existing decoder adapters after materialization. |
 | Admission conflated with input readiness | `request_admitted_ticks`, transfer completion/`ready_time`, dispatch, and completion | EV-POLICY-REQUEST-ADMISSION-DATA-READINESS-SPLIT, EV-QEC-CUDAQ-DECODE-TRIGGER-RESET | These are distinct lifecycle events. |
-| Per-endpoint capacity/exhaustion | Independent `SyndromeBufferingConfig.upstream_packet_slots` and `decoder_local_input_slots` | EV-QEC-MICROBLOSSOM-BUS-BACKPRESSURE, EV-QEC-HELIOS-INPUT-READY-BACKPRESSURE | Both capacities default to the unbounded baseline and are independently configurable. |
+| Per-endpoint capacity/exhaustion | Independent `SyndromeBufferingConfig.upstream_packet_slots` and `decoder_input_slots` | EV-QEC-MICROBLOSSOM-BUS-BACKPRESSURE, EV-QEC-HELIOS-INPUT-READY-BACKPRESSURE | Both capacities default to the unbounded baseline and are independently configurable. |
 | `SyndromeRoundPacket`, `RetainedSyndromeFragment` | Same immutable, identity-preserving packet/fragment types | EV-POLICY-ONE-ALLOCATION-OWNERSHIP-TRANSITION, EV-CLS-DPDK-MBUF-OWNERSHIP | Patch, operation, round, fragment, bit, code, and size identity remain available across the boundary. |
 
 ## Corrections and quarantine

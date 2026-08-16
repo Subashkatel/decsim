@@ -75,7 +75,7 @@ validation rules, and a custom window-interaction example.
 - `controller.py` — command/feedback sequencing, QPU readout conversion, and its optional fixed cost.
 - `qpu.py` — physical round cadence and typed QPU readout production.
 - `syndrome_ingress.py` — controller-side QC receipt, fragment reassembly, and route arbitration.
-- `decoder_input.py` / `decoder_local.py` — decoder-input transfer and local input lifetime.
+- `decoder_input.py` / `decoder_input_store.py` — decoder-input transfer and stored-input lifetime.
 - `planner.py` — compile-time window layout and rounds policies.
 - Directly replaceable parts include decoders, schedulers, schemes, policies,
   switching strategies, factories, syndrome ingress, and decoder-input transfer.
@@ -107,7 +107,7 @@ per live round as it moves from assembly through immutable retained readiness;
 that state transition does not fabricate a staging-to-retention byte copy.
 ``WindowManager`` submits only ready window requirements. One CWD transfer per
 weak window materializes a distinct immutable ``DecoderInput`` in
-``DecoderLocalMemory`` before the job enters ``DecoderManager``'s FIFO ready
+``DecoderInputStore`` before the job enters ``DecoderManager``'s FIFO ready
 queue. The upstream hold is released at transfer completion, and overlapping
 windows retain shared rounds until their last required transfer completes.
 Strong input uses CSD once. The generic seam makes no claim about cryogenic or

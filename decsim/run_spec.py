@@ -148,7 +148,7 @@ class RunSpec:
         from .controller import Controller
         from .syndrome_ingress import SyndromeIngress, SyndromeIngressPolicy
         from .decoder_manager import DecoderManager, StrategyServicesImpl
-        from .decoder_local import DecoderLocalMemory
+        from .decoder_input_store import DecoderInputStore
         from .decoders import CodeRouter
         from .devices import SyndromeBitDevice, TimingOnlyDevice
         from .qpu import QPUDevice
@@ -274,8 +274,8 @@ class RunSpec:
             capacity=buffering.upstream_packet_slots,
             memory_model=self.memory_model,
         )
-        decoder_local_memory = DecoderLocalMemory(
-            capacity=buffering.decoder_local_input_slots,
+        decoder_input_store = DecoderInputStore(
+            capacity=buffering.decoder_input_slots,
         )
         window_manager = WindowManager(
             engine, scheme=scheme, code_geometry=plan.code_geometry,
@@ -314,7 +314,7 @@ class RunSpec:
         if self.make_decoder_input_transfer is None:
             from .decoder_input import FixedLatencyDecoderInputTransfer
             decoder_input_transfer = FixedLatencyDecoderInputTransfer(
-                engine, local_memory=decoder_local_memory,
+                engine, input_store=decoder_input_store,
             )
         else:
             decoder_input_transfer = self.make_decoder_input_transfer(

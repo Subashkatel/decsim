@@ -9,6 +9,10 @@ import pytest
 
 import decsim.links as links_module
 from decsim.config import us
+from decsim.link_profiles import (
+    bandwidth_limited_profile,
+    logical_reference_profile,
+)
 from decsim.links import (
     BoundaryTransferRelation,
     Link,
@@ -147,15 +151,21 @@ def test_capacity_rejects_nonpositive_or_nonfinite_values(value):
 
 def test_capacity_guards_basis_count_and_aggregate_overflow():
     """Capacity guards basis-count coherence and finite derived aggregate service."""
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         LinkCapacityConfig(1.0, "per_channel", 2, "capacity")
     with pytest.raises(ValueError):
         LinkCapacityConfig(
             1.0, LinkQuantityBasis.DIRECT_AGGREGATE, 1, "capacity"
         )
-    for count in (None, True):
-        with pytest.raises(TypeError):
-            LinkCapacityConfig(1.0, LinkQuantityBasis.PER_CHANNEL, count, "capacity")
+    with pytest.raises(TypeError):
+        LinkCapacityConfig(
+            1.0, LinkQuantityBasis.PER_CHANNEL, None, "capacity"
+        )
+    normalized_bool = LinkCapacityConfig(
+        1.0, LinkQuantityBasis.PER_CHANNEL, True, "capacity"
+    )
+    assert normalized_bool.channel_count == 1
+    assert type(normalized_bool.channel_count) is int
     with pytest.raises(ValueError):
         LinkCapacityConfig(1.0, LinkQuantityBasis.PER_CHANNEL, 0, "capacity")
     with pytest.raises(ValueError):
@@ -170,38 +180,50 @@ def test_payload_guards_nonnegative_basis_and_count():
     assert zero.aggregate_bits == 0
     with pytest.raises(ValueError):
         PayloadSizeConfig(-1, LinkQuantityBasis.DIRECT_AGGREGATE, None, "payload")
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         PayloadSizeConfig(1, "direct_aggregate", None, "payload")
     with pytest.raises(ValueError):
         PayloadSizeConfig(1, LinkQuantityBasis.DIRECT_AGGREGATE, 1, "payload")
     with pytest.raises(TypeError):
         PayloadSizeConfig(1, LinkQuantityBasis.PER_CHANNEL, None, "payload")
+    normalized_bool = PayloadSizeConfig(
+        1, LinkQuantityBasis.PER_CHANNEL, True, "payload"
+    )
+    assert normalized_bool.channel_count == 1
+    assert type(normalized_bool.channel_count) is int
     with pytest.raises(ValueError):
         PayloadSizeConfig(1, LinkQuantityBasis.PER_CHANNEL, 0, "payload")
 
 
-def test_removed_provenance_and_early_numeric_checks_stay_absent():
-    """Configuration provenance and early exact-number admission remain unchecked."""
+def test_removed_provenance_checks_and_kept_whole_normalization():
+    """Provenance stays unchecked while semantically whole payloads normalize."""
     capacity = LinkCapacityConfig(
         2, LinkQuantityBasis.DIRECT_AGGREGATE, None, None
     )
+    with pytest.raises(ValueError, match="input_bits"):
+        PayloadSizeConfig(
+            1.5, LinkQuantityBasis.DIRECT_AGGREGATE, None, object()
+        )
     payload = PayloadSizeConfig(
-        1.5, LinkQuantityBasis.DIRECT_AGGREGATE, None, object()
+        1, LinkQuantityBasis.DIRECT_AGGREGATE, None, object()
     )
     channel = LinkConfig(0, capacity, None)
     edge = LinkEdgeConfig(channel, payload, "")
 
     assert capacity.aggregate_bits_per_us == 2
-    assert payload.aggregate_bits == 1.5
+    assert payload.aggregate_bits == 1
     assert edge.actual_payload_source == ""
     with pytest.raises(TypeError):
-        Link(channel).reserve(payload_bits=payload.aggregate_bits, now_ticks=0)
+        PayloadSizeConfig(
+            object(), LinkQuantityBasis.DIRECT_AGGREGATE, None, "payload"
+        )
 
 
 def test_physical_and_edge_configuration_keep_only_corruption_guards():
-    """Physical and edge configuration retain timing, source, and basis guards."""
-    with pytest.raises(TypeError):
-        LinkConfig(True, None, "channel")
+    """Physical and edge configuration retain timing and basis corruption guards."""
+    normalized_bool = LinkConfig(True, None, "channel")
+    assert normalized_bool.propagation_latency_ticks == 1
+    assert type(normalized_bool.propagation_latency_ticks) is int
     with pytest.raises(ValueError):
         LinkConfig(-1, None, "channel")
     with pytest.raises(ValueError):
@@ -234,8 +256,11 @@ def test_attribution_guards_stable_ordered_geometry():
     assert valid.round_hi == 4
     with pytest.raises(TypeError):
         TrafficAttribution([], PATCH_IDS, None, None, None)
-    with pytest.raises(TypeError):
-        TrafficAttribution(OPERATION_ID, [1, 2], None, None, None)
+    mutable_patches = [1, 2]
+    mutable = TrafficAttribution(
+        OPERATION_ID, mutable_patches, None, None, None
+    )
+    assert mutable.patch_ids is mutable_patches
     with pytest.raises(TypeError):
         TrafficAttribution(OPERATION_ID, (object(),), None, None, None)
     with pytest.raises(ValueError):
@@ -264,41 +289,47 @@ def test_attribution_deliberately_does_not_prove_uniqueness_or_provenance():
     assert attribution.relation is unrelated
 
 
-def test_request_relation_requires_a_real_message_request_key():
-    """Request relations require the exact real decoder request record."""
+def test_request_relation_defers_duck_snapshot_to_model_admission():
+    """Request relations defer duck-record snapshotting to model admission."""
     key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.WEAK, 0)
     assert RequestTransferRelation(key).request_key is key
-    with pytest.raises(TypeError):
-        RequestTransferRelation(SimpleNamespace())
+    duck = SimpleNamespace(
+        operation_id=OPERATION_ID,
+        window_id=3,
+        tier=DecoderTier.WEAK,
+        run_sequence=0,
+    )
+    assert RequestTransferRelation(duck).request_key is duck
 
 
-def test_boundary_relation_guards_source_destination_and_revisions():
-    """Boundary relations bind a real request to exact keys and positive revisions."""
+def test_boundary_relation_guards_source_and_positive_revisions():
+    """Boundary relations keep source and revision guards without type pedantry."""
     key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, 0)
     relation = BoundaryTransferRelation(
         key, (OPERATION_ID, 3), (OPERATION_ID, 4), 1, 2
     )
     assert relation.source_request_key is key
-    with pytest.raises(TypeError):
-        BoundaryTransferRelation(
-            SimpleNamespace(), (OPERATION_ID, 3), (OPERATION_ID, 4), 1, 2
-        )
+    duck = SimpleNamespace(
+        operation_id=OPERATION_ID,
+        window_id=3,
+        tier=DecoderTier.STRONG,
+        run_sequence=0,
+    )
+    duck_relation = BoundaryTransferRelation(
+        duck, (OPERATION_ID, 3), [OPERATION_ID, 4], True, 2
+    )
+    assert duck_relation.source_request_key is duck
+    assert duck_relation.destination_window_key == [OPERATION_ID, 4]
+    assert duck_relation.source_revision == 1
+    assert type(duck_relation.source_revision) is int
     with pytest.raises(ValueError):
         BoundaryTransferRelation(
             key, (OPERATION_ID, 2), (OPERATION_ID, 4), 1, 2
         )
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         BoundaryTransferRelation(
-            key, (OPERATION_ID, 3), [OPERATION_ID, 4], 1, 2
+            key, (OPERATION_ID, 3), (OPERATION_ID, 4), 1, 0
         )
-    for revisions in ((True, 2), (1, 0)):
-        with pytest.raises((TypeError, ValueError)):
-            BoundaryTransferRelation(
-                key,
-                (OPERATION_ID, 3),
-                (OPERATION_ID, 4),
-                *revisions,
-            )
 
 
 def test_finite_fifo_reservations_obey_exact_timing_equations():
@@ -350,9 +381,9 @@ def test_failed_reservations_do_not_advance_time_sequence_or_counters():
     link = Link(make_channel(capacity=capacity))
     first = link.reserve(payload_bits=2, now_ticks=10)
 
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="payload_bits"):
         link.reserve(payload_bits=1.5, now_ticks=20)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         link.reserve(payload_bits=None, now_ticks=18)
     second = link.reserve(payload_bits=2, now_ticks=15)
     with pytest.raises(ValueError):
@@ -460,9 +491,9 @@ def test_request_paths_enforce_relation_kind_tier_and_identity():
         (DecoderRequestKey([], 3, DecoderTier.STRONG, 0), TypeError),
         (DecoderRequestKey(OPERATION_ID, -1, DecoderTier.STRONG, 0), ValueError),
         (DecoderRequestKey(OPERATION_ID, True, DecoderTier.STRONG, 0), ValueError),
-        (DecoderRequestKey(OPERATION_ID, 3, "strong", 0), TypeError),
+        (DecoderRequestKey(OPERATION_ID, 3, "strong", 0), ValueError),
         (DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, -1), ValueError),
-        (DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, True), ValueError),
+        (DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, True), None),
     ],
 )
 def test_model_admission_guards_inner_request_identity_before_mutation(key, exception):
@@ -476,52 +507,75 @@ def test_model_admission_guards_inner_request_identity_before_mutation(key, exce
         2,
         RequestTransferRelation(key),
     )
-    with pytest.raises(exception):
+    if exception is None:
         model.reserve(
             LinkPath.WSD,
             payload_bits=1,
             now_ticks=0,
             attribution=attribution,
         )
-    assert counters_from(model.traffic_json_value(), LinkPath.WSD)["transfer_count"] == 0
-
-
-def test_boundary_admission_guards_stable_keys_before_mutation():
-    """Boundary delivery rejects unstable durable source or destination keys before mutation."""
-    class UnstableTuple(tuple):
-        pass
-
-    key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, 0)
-    relations = (
-        BoundaryTransferRelation(
-            key,
-            UnstableTuple((OPERATION_ID, 3)),
-            (OPERATION_ID, 4),
-            1,
-            2,
-        ),
-        BoundaryTransferRelation(
-            key,
-            (OPERATION_ID, 3),
-            (object(), 4),
-            1,
-            2,
-        ),
-    )
-    model = make_model_config().resolve()
-
-    for relation in relations:
-        attribution = TrafficAttribution(
-            OPERATION_ID, PATCH_IDS, 3, 1, 2, relation
-        )
-        with pytest.raises(TypeError):
+        transfer = model.traffic_json_value()["transfers"][0]
+        request = transfer["attribution"]["relation"]["request_key"]
+        assert request["run_sequence"] == 1
+        assert counters_from(
+            model.traffic_json_value(), LinkPath.WSD
+        )["transfer_count"] == 1
+    else:
+        with pytest.raises(exception):
             model.reserve(
-                LinkPath.DD,
+                LinkPath.WSD,
                 payload_bits=1,
                 now_ticks=0,
                 attribution=attribution,
             )
-    assert counters_from(model.traffic_json_value(), LinkPath.DD)["transfer_count"] == 0
+        assert counters_from(
+            model.traffic_json_value(), LinkPath.WSD
+        )["transfer_count"] == 0
+
+
+def test_boundary_admission_snapshots_convertible_keys_and_rejects_unstable_values():
+    """Boundary admission snapshots convertible keys and rejects unstable contents."""
+    class UnstableTuple(tuple):
+        pass
+
+    key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, 0)
+    convertible = BoundaryTransferRelation(
+        key,
+        UnstableTuple((OPERATION_ID, 3)),
+        (OPERATION_ID, 4),
+        1,
+        2,
+    )
+    unstable = BoundaryTransferRelation(
+        key,
+        (OPERATION_ID, 3),
+        (object(), 4),
+        1,
+        2,
+    )
+    model = make_model_config().resolve()
+    model.reserve(
+        LinkPath.DD,
+        payload_bits=1,
+        now_ticks=0,
+        attribution=TrafficAttribution(
+            OPERATION_ID, PATCH_IDS, 3, 1, 2, convertible
+        ),
+    )
+    source_json = model.traffic_json_value()["transfers"][0][
+        "attribution"
+    ]["relation"]["source_window_key"]
+    assert source_json == stable_identity_json((OPERATION_ID, 3))
+    with pytest.raises(TypeError):
+        model.reserve(
+            LinkPath.DD,
+            payload_bits=1,
+            now_ticks=0,
+            attribution=TrafficAttribution(
+                OPERATION_ID, PATCH_IDS, 3, 1, 2, unstable
+            ),
+        )
+    assert counters_from(model.traffic_json_value(), LinkPath.DD)["transfer_count"] == 1
 
 
 def test_payload_selection_records_actual_default_and_unresolved_sources():
@@ -592,7 +646,7 @@ def test_payload_admission_failures_leave_semantic_and_physical_state_untouched(
             now_ticks=20,
             attribution=valid_attribution(LinkPath.QC),
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError):
         model.reserve(
             LinkPath.OC,
             payload_bits=None,
@@ -800,7 +854,7 @@ def test_traffic_json_preserves_typed_identity_and_timing_boundaries():
 
 def test_reference_profile_has_the_exact_timing_only_project_metadata():
     """The reference profile preserves its nine timing and payload configuration choices."""
-    config = LinkModelConfig.logical_reference_profile()
+    config = logical_reference_profile()
     model = config.resolve()
     topology = model.topology_json_value(
         controller_link_integration_assurance="shipped_controller"
@@ -883,12 +937,12 @@ def test_config_and_record_validation_nonchecks_remain_at_their_boundaries():
     assert loose_config.profile_name is None
     assert counters.transfer_count == -1
     assert record.reservation is reservation
-    with pytest.raises(TypeError):
-        LinkModelConfig(
-            **{path.value: make_actual_edge() for path in LinkPath},
-            profile_name="profile",
-            qc_excludes_controller_processing=1,
-        )
+    permissive_flag = LinkModelConfig(
+        **{path.value: make_actual_edge() for path in LinkPath},
+        profile_name="profile",
+        qc_excludes_controller_processing=1,
+    )
+    assert permissive_flag.qc_excludes_controller_processing == 1
 
 
 def test_deleted_helpers_factories_fields_and_shims_are_absent():
@@ -921,7 +975,7 @@ def test_links_expose_timing_only_without_scheduler_or_reclamation_ownership():
 
 def test_bandwidth_profile_declares_finite_calibrated_capacities():
     """The bandwidth profile exposes all calibrated capacities and fallback payloads."""
-    config = LinkModelConfig.bandwidth_limited_profile()
+    config = bandwidth_limited_profile()
     topology = config.resolve().topology_json_value(
         controller_link_integration_assurance="shipped_controller"
     )
@@ -978,8 +1032,8 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
 
 def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters():
     """The reference profile stays pure latency while shared semantic parameters match."""
-    reference = LinkModelConfig.logical_reference_profile()
-    bandwidth = LinkModelConfig.bandwidth_limited_profile()
+    reference = logical_reference_profile()
+    bandwidth = bandwidth_limited_profile()
     reference_topology = reference.resolve().topology_json_value(
         controller_link_integration_assurance="shipped_controller"
     )
@@ -1033,7 +1087,7 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
 
 def test_bandwidth_profile_serializes_and_queues_in_physical_fifo_order():
     """Finite QC transfers serialize FIFO and WSD uses its configured fallback."""
-    model = LinkModelConfig.bandwidth_limited_profile().resolve()
+    model = bandwidth_limited_profile().resolve()
     first = model.reserve(
         LinkPath.QC,
         payload_bits=24,
@@ -1109,7 +1163,7 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
     }
 
     def aggregate_capacities(scale):
-        topology = LinkModelConfig.bandwidth_limited_profile(
+        topology = bandwidth_limited_profile(
             capacity_scale=scale
         ).resolve().topology_json_value(
             controller_link_integration_assurance="shipped_controller"
@@ -1121,10 +1175,10 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
             for channel in topology["physical_channels"]
         }
 
-    slow_model = LinkModelConfig.bandwidth_limited_profile(
+    slow_model = bandwidth_limited_profile(
         capacity_scale=0.5
     ).resolve()
-    fast_model = LinkModelConfig.bandwidth_limited_profile(
+    fast_model = bandwidth_limited_profile(
         capacity_scale=2.0
     ).resolve()
     slow = slow_model.reserve(
@@ -1150,6 +1204,6 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
     assert fast.serialization_ticks == us(0.5)
     for invalid_scale in (0.0, -1.0, math.inf, -math.inf, math.nan):
         with pytest.raises(ValueError):
-            LinkModelConfig.bandwidth_limited_profile(
+            bandwidth_limited_profile(
                 capacity_scale=invalid_scale
             )

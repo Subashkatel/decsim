@@ -210,8 +210,8 @@ def test_card_cadence_precedes_run_and_timing_fallbacks(model_type):
 @pytest.mark.parametrize(
     ("value", "message"),
     (
-        (float("nan"), "finite built-in number"),
-        (float("inf"), "finite built-in number"),
+        (float("nan"), "finite real number"),
+        (float("inf"), "finite real number"),
         (0.0, "at least one tick"),
         (-1.0, "at least one tick"),
         (4e-7, "at least one tick"),

@@ -16,7 +16,7 @@ from decsim.decoders import PerRoundDecoder
 from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
 from decsim.frontends.qlx import qlx_frontend
 from decsim.message import OpKind
-from decsim.planner import GateRounds
+from decsim.rounds import GateRounds
 from decsim.run_spec import RunSpec
 
 

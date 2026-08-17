@@ -29,7 +29,7 @@ from decsim.adapters.stim_device import StimDevice
 from decsim.decoders import PerRoundDecoder
 from decsim.message import DecodeJob, Operation, RetainedSyndromeFragment
 from decsim.mwpm_decoder.decoder import PyMatchingDecoder
-from decsim.planner import FixedRounds
+from decsim.rounds import FixedRounds
 from decsim.run_spec import RunSpec
 
 

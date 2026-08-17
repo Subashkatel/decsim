@@ -33,7 +33,7 @@ from decsim.message import (
     RetainedSyndromeFragment,
 )
 from decsim.metrics import DecoderInputStoreOccupancy, DecoderUtilization
-from decsim.planner import FixedRounds
+from decsim.rounds import FixedRounds
 from decsim.run_spec import RunSpec
 from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.syndrome_buffer import SyndromeBufferingConfig

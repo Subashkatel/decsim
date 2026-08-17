@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import numbers
 
 from .config import us
 from .message import (
@@ -266,8 +267,17 @@ class CodeRounds:
 
 
 class GateRounds:
-    """Lattice-surgery round counts: op-kind aware, GENERIC falls back to
-    the qubit-count rule (Horsman 1111.4022 / Litinski 1808.02892)."""
+    """Lattice-surgery round counts: op-kind aware, distance-proportional.
+
+    The cited sections establish the unit only, one lattice-surgery step
+    costing d rounds: Horsman arXiv:1111.4022v3 (Sec. 3.1, 3.2 and 6, d rounds
+    of error correction per merge, per split, and per operation) and Litinski
+    arXiv:1808.02892v3 ("Translation to surface codes", a two-patch or
+    multi-patch measurement is one time step of d code cycles). The default
+    merge_steps=2, the qubit-count convention for GENERIC, and the one-round
+    MEASURE and INJECT cost are project coefficients that those sections do
+    not establish.
+    """
 
     def __init__(self, merge_steps: int = 2):
         self.merge_steps = _validated(int(merge_steps), "GateRounds.merge_steps")
@@ -317,8 +327,12 @@ def _plan_execution(
     round_us = code.round_period_us()
     if round_us is None:
         round_us = fallback_round_us
-    if type(round_us) not in (int, float) or not math.isfinite(round_us):
-        raise ValueError("resolved round_us must be a finite built-in number")
+    if type(round_us) not in (int, float):
+        if isinstance(round_us, bool) or not isinstance(round_us, numbers.Real):
+            raise ValueError("resolved round_us must be a finite real number")
+        round_us = float(round_us)
+    if not math.isfinite(round_us):
+        raise ValueError("resolved round_us must be a finite real number")
     round_ticks = us(round_us)
     if round_ticks < 1:
         raise ValueError("resolved round cadence must be at least one tick")

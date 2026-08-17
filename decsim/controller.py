@@ -280,8 +280,7 @@ class Controller:
             raise RuntimeError(
                 f"protected stream {stream_id} boundary already open")
         self._boundary_open_patches.add(region.patch_id)
-        for operation_id in sorted(self.runtime.state_ready):
-            self.runtime._maybe_begin(self.runtime.operations[operation_id])
+        self.runtime.retry_ready_operations()
         next_round = self.stream_next_round.get(stream_id, 0) + 1
         self.engine.schedule(
             0,
@@ -340,8 +339,7 @@ class Controller:
         self._active_stream_id_by_patch.pop(region.patch_id)
         self._close_requested_stream_ids.remove(stream_id)
         self._last_emission_tick_by_stream_id.pop(stream_id, None)
-        for operation_id in sorted(self.runtime.state_ready):
-            self.runtime._maybe_begin(self.runtime.operations[operation_id])
+        self.runtime.retry_ready_operations()
 
 
     def _reserve_stream_rounds(self, operation: Operation) -> None:
@@ -421,7 +419,7 @@ class Controller:
         )
 
     def _seal_finished_streams_if_needed(self) -> None:
-        if len(self.runtime.body_done_time) != len(self.runtime.operations):
+        if not self.runtime.workload_complete:
             return
         protected_stream_ids = self._stream_owner_by_id
         for stream_id, total_rounds in list(self.stream_next_round.items()):
@@ -457,8 +455,7 @@ class Controller:
         if self._idle_round_cap_reached(op_id, patch, round_index):
             return
         self._relay_idle_round(op_id, patch, round_index)
-        self.runtime.idle_rounds_by_patch[patch] = \
-            self.runtime.idle_rounds_by_patch.get(patch, 0) + 1
+        self.runtime.record_idle_round(patch)
         self.idle_rounds_emitted += 1
         self.idle_policy.account(1, self.runtime.operations[op_id])
         self.runtime.start_released_successors_on_boundary(op_id, patch)

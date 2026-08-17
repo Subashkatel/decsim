@@ -8,10 +8,12 @@ from dataclasses import replace
 import json
 from pathlib import Path
 
+import pytest
 import stim
 
 from decsim.adapters.stim_device import StimDevice
 from decsim.decoders import PerRoundDecoder
+from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
 from decsim.frontends.qlx import qlx_frontend
 from decsim.message import OpKind
 from decsim.planner import GateRounds
@@ -26,55 +28,50 @@ def _load_json(name):
         return json.load(fixture_file)
 
 
-def _detector_bearing_runtime(program):
-    """Represent only detector-bearing submissions in Stim's finite source.
-
-    The frozen memory circuit uses its first syndrome submission solely as a
-    detector baseline. Its 56 detectors belong to the following seven
-    submissions, numbered 2 through 8 by qlx_frontend. StimDevice finite
-    sources require every represented round to contain a detector, so this
-    test-side physical view omits the detector-free baseline from the stream
-    and renumbers the seven detector-bearing submissions to 1 through 7.
-
-    QLX's raw durations remain unused. GateRounds prices all runtime work: the
-    baseline and seven physical submissions are measurements. ``d=7`` prices
-    only the seven-round detector-bearing stream owner; it is a runtime source
-    length here, not a claim that the frozen circuit has code distance seven.
-    """
-    runtime_operations = []
-    for operation in program.operations:
-        if not operation.name.startswith("measure_syndrome["):
-            runtime_operations.append(operation)
-            continue
-        if operation.stream_offset == 0:
-            runtime_operations.append(replace(
-                operation,
-                circuit=None,
-                stream_id=None,
-                stream_offset=None,
-                emits_detector_data=False,
-                kind=OpKind.MEASURE,
-            ))
-            continue
-        runtime_operations.append(replace(
-            operation,
-            kind=OpKind.MEASURE,
-            stream_offset=operation.stream_offset - 1,
-        ))
-
-    program.operations = runtime_operations
+def _native_physical_program():
+    """Load and price the frozen physical workload without changing its chronology."""
+    circuit = stim.Circuit.from_file(QLX_DATA / "mem_surface.stim")
+    decode_operation_id = 100
+    program = qlx_frontend(
+        _load_json("schedule_mem_surface.json"),
+        physical_circuit=circuit,
+        detector_metadata=_load_json("mem_surface_decoder_params.json"),
+        decode_operation_id=decode_operation_id,
+    )
+    program.operations = [
+        replace(operation, kind=OpKind.MEASURE)
+        if operation.name.startswith("measure_syndrome[")
+        else operation
+        for operation in program.operations
+    ]
     program.decoder_operations = (
         replace(program.decoder_operations[0], kind=OpKind.MEMORY),
     )
-    program.detector_rounds_by_stream = {
-        stream_id: {
-            detector_id: emitted_round - 1
-            for detector_id, emitted_round in detector_rounds.items()
-        }
-        for stream_id, detector_rounds
-        in program.detector_rounds_by_stream.items()
-    }
-    return program
+    return circuit, program, decode_operation_id
+
+
+def _physical_device(program):
+    """Build a Stim device from a physical program's native routing metadata."""
+    # Authorized StimDevice wiring: these maps are routing metadata, not accuracy evidence.
+    return StimDevice(
+        detector_rounds=program.detector_rounds_by_stream,
+        terminal_detector_ids=program.terminal_detector_ids_by_stream,
+        terminal_data_bits=program.terminal_data_bits_by_stream,
+    )
+
+
+def _run_native_physical_program(program, device):
+    """Run the native eight-round physical source with timing-only decoding."""
+    return RunSpec(
+        frontend=program,
+        decode_ops=program.decoder_operations,
+        device=device,
+        decoder=PerRoundDecoder(tau_us=0.0),
+        rounds_policy=GateRounds(merge_steps=2),
+        # Native runtime source length, not a code-distance claim.
+        d=8,
+        seed=28,
+    ).build()
 
 
 def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
@@ -112,22 +109,33 @@ def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
     assert completed.result.terminal_status == "complete"
 
 
-def test_frozen_mem_surface_physical_routing_completes_without_quality_claim():
-    """Prove detector routing completes without claiming decode quality."""
-    circuit = stim.Circuit.from_file(QLX_DATA / "mem_surface.stim")
-    decode_operation_id = 100
-    program = qlx_frontend(
-        _load_json("schedule_mem_surface.json"),
-        physical_circuit=circuit,
-        detector_metadata=_load_json("mem_surface_decoder_params.json"),
-        decode_operation_id=decode_operation_id,
-    )
+def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim():
+    """Route the frozen circuit on its own eight rounds, baseline round included."""
+    circuit, program, decode_operation_id = _native_physical_program()
+    detector_rounds = program.detector_rounds_by_stream[decode_operation_id]
 
-    original_detector_rounds = program.detector_rounds_by_stream[
-        decode_operation_id
-    ]
-    assert len(original_detector_rounds) == circuit.num_detectors == 56
-    assert set(original_detector_rounds.values()) == set(range(2, 9))
+    assert len(detector_rounds) == circuit.num_detectors == 56
+    assert detector_rounds == {
+        detector_id: 2 + detector_id // 8
+        for detector_id in range(circuit.num_detectors)
+    }
+    assert tuple(
+        tuple(
+            detector_id
+            for detector_id in range(circuit.num_detectors)
+            if detector_rounds[detector_id] == round_index
+        )
+        for round_index in range(1, 9)
+    ) == ((),) + tuple(
+        tuple(range(8 * offset, 8 * (offset + 1)))
+        for offset in range(7)
+    )
+    assert resolve_detector_rounds(circuit, detector_rounds, 8) == detector_rounds
+    with pytest.raises(ValueError) as coordinate_failure:
+        resolve_detector_rounds(circuit, None, 8)
+    assert "requires supported coordinates or explicit detector_rounds" in str(
+        coordinate_failure.value
+    )
     assert program.terminal_detector_ids_by_stream == {
         decode_operation_id: (),
     }
@@ -135,35 +143,34 @@ def test_frozen_mem_surface_physical_routing_completes_without_quality_claim():
         decode_operation_id: 9,
     }
 
-    program = _detector_bearing_runtime(program)
-    assert set(
-        program.detector_rounds_by_stream[decode_operation_id].values()
-    ) == set(range(1, 8))
-
-    # Authorized StimDevice wiring from 43f4ffa^:tests/test_qlx_physical.py
-    # lines 610-614. These maps are routing metadata, not accuracy evidence.
-    device = StimDevice(
-        detector_rounds=program.detector_rounds_by_stream,
-        terminal_detector_ids=program.terminal_detector_ids_by_stream,
-        terminal_data_bits=program.terminal_data_bits_by_stream,
-    )
-    completed = RunSpec(
-        frontend=program,
-        decode_ops=program.decoder_operations,
-        device=device,
-        decoder=PerRoundDecoder(tau_us=0.0),
-        rounds_policy=GateRounds(merge_steps=2),
-        d=7,
-        seed=28,
-    ).build()
+    device = _physical_device(program)
+    completed = _run_native_physical_program(program, device)
 
     assert completed.window_manager.rounds_for(
         program.decoder_operations[0]
-    ) == 7
+    ) == 8
     assert tuple(
         completed.window_manager.rounds_for(operation)
-        for operation in program.operations[1:9]
-    ) == (1, 1, 1, 1, 1, 1, 1, 1)
+        for operation in program.operations
+    ) == (8, 1, 1, 1, 1, 1, 1, 1, 1, 1, 8)
+    submissions = [
+        operation
+        for operation in program.operations
+        if operation.name.startswith("measure_syndrome[")
+    ]
+    round_payloads = tuple(
+        device.round_payloads(operation, 1)[0]
+        for operation in submissions
+    )
+    assert tuple(payload.round_index for payload in round_payloads) == tuple(
+        range(1, 9)
+    )
+    assert tuple(payload.size_bits for payload in round_payloads) == (
+        0, 8, 8, 8, 8, 8, 8, 8,
+    )
+    assert tuple(len(payload.bits) for payload in round_payloads) == (
+        0, 8, 8, 8, 8, 8, 8, 8,
+    )
     assert completed.result.terminal_status == "complete"
     assert completed.result.event_queue_empty
     assert completed.result.decode_work_settled
@@ -172,3 +179,54 @@ def test_frozen_mem_surface_physical_routing_completes_without_quality_claim():
         result.result_status == "no_logical_output"
         for result in completed.result.operation_results
     )
+
+
+@pytest.mark.parametrize("invalid_round", [0, 9])
+def test_frozen_mem_surface_rejects_native_rounds_outside_eight_round_source(
+    invalid_round,
+):
+    """The real native map rejects detector rounds below one or above eight."""
+    _, program, decode_operation_id = _native_physical_program()
+    detector_rounds = dict(
+        program.detector_rounds_by_stream[decode_operation_id]
+    )
+    detector_rounds[0] = invalid_round
+    program.detector_rounds_by_stream[decode_operation_id] = detector_rounds
+
+    with pytest.raises(ValueError) as failure:
+        _run_native_physical_program(program, _physical_device(program))
+    assert "detector-round map must lie inside the emitted rounds" in str(
+        failure.value
+    )
+
+
+def test_frozen_mem_surface_rejects_a_missing_native_detector_identity():
+    """The real native map must retain every frozen circuit detector identity."""
+    _, program, decode_operation_id = _native_physical_program()
+    detector_rounds = dict(
+        program.detector_rounds_by_stream[decode_operation_id]
+    )
+    detector_rounds.pop(55)
+    program.detector_rounds_by_stream[decode_operation_id] = detector_rounds
+
+    with pytest.raises(ValueError) as failure:
+        _run_native_physical_program(program, _physical_device(program))
+    assert "detector-round map must cover every detector exactly" in str(
+        failure.value
+    )
+
+
+def test_frozen_mem_surface_rejects_a_native_round_order_swap():
+    """Swapping two real detector rounds still breaks canonical decoder row order."""
+    _, program, decode_operation_id = _native_physical_program()
+    detector_rounds = dict(
+        program.detector_rounds_by_stream[decode_operation_id]
+    )
+    detector_rounds[0], detector_rounds[8] = (
+        detector_rounds[8], detector_rounds[0]
+    )
+    program.detector_rounds_by_stream[decode_operation_id] = detector_rounds
+
+    with pytest.raises(ValueError) as failure:
+        _run_native_physical_program(program, _physical_device(program))
+    assert "canonical decoder-input row layout" in str(failure.value)

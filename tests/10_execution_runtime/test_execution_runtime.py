@@ -615,6 +615,66 @@ def test_round_boundary_retry_is_inert_off_and_notes_each_eligible_retry_before_
     assert controller.boundaries == ["patch-a"]
 
 
+def test_ready_retry_offers_state_ready_operations_in_identity_order():
+    """A ready retry re-offers state-ready operations in identity order and starts only those the gates admit."""
+    unloaded, _, _, _ = make_runtime()
+    unloaded.retry_ready_operations()
+
+    root = make_operation(1)
+    never_released = make_operation(2, blocked_by=1)
+    released_first = make_operation(9, blocked_by=1)
+    released_second = make_operation(24, blocked_by=1)
+    operations = (root, never_released, released_first, released_second)
+    runtime, engine, controller, _ = make_runtime(*operations)
+    runtime.load_program(ExecutionProgram(operations))
+    assert runtime.state_ready == {1, 2, 9, 24}
+    assert set(runtime.op_start_time) == {1}
+
+    engine.events.clear()
+    runtime.retry_ready_operations()
+    assert engine.events == []
+    assert runtime.state_ready == {1, 2, 9, 24}
+    assert set(runtime.op_start_time) == {1}
+
+    runtime.decode_release_time.update({9: 0, 24: 0})
+    controller.allowed[24] = False
+    engine.now = 6
+    engine.events.clear()
+    runtime.retry_ready_operations()
+    assert engine.events == [
+        ("can_start", 9),
+        ("issue", 9, 0),
+        ("can_start", 24),
+    ]
+    assert set(runtime.op_start_time) == {1, 9}
+    assert runtime.op_start_time[9] == 6
+
+    controller.allowed[24] = True
+    engine.now = 8
+    engine.events.clear()
+    runtime.retry_ready_operations()
+    assert engine.events == [("can_start", 24), ("issue", 24, 0)]
+    assert [operation.id for operation, _ in controller.issued] == [1, 9, 24]
+    assert runtime.op_start_time[24] == 8
+
+
+def test_idle_round_accounting_accumulates_per_patch_until_consumed():
+    """Recorded idle rounds accumulate per patch identity and survive only until an operation consumes them."""
+    operation = make_operation(1, patches=("patch-a",))
+    runtime, _, _, _ = make_runtime(operation)
+
+    runtime.record_idle_round("patch-a")
+    runtime.record_idle_round("patch-b")
+    runtime.record_idle_round("patch-a")
+    assert runtime.idle_rounds_by_patch == {"patch-a": 2, "patch-b": 1}
+
+    assert runtime.consume_idle_rounds(operation) == 2
+    assert runtime.idle_rounds_by_patch == {"patch-b": 1}
+
+    runtime.record_idle_round("patch-a")
+    assert runtime.idle_rounds_by_patch == {"patch-a": 1, "patch-b": 1}
+
+
 def test_idle_round_consumption_prefers_patches_and_is_destructive():
     """Idle-round consumption prefers truthy patches, counts duplicates once, and removes used entries."""
     patched = make_operation(1, qubits=("q",), patches=("p", "p", "missing"))

@@ -69,11 +69,16 @@ class RuntimeProbe:
     def __init__(self):
         self.operations = {7: SimpleNamespace(id=7, name="logical-cnot")}
         self.idle_rounds_by_patch = {}
+        self.idle_round_records = []
         self.waiting = True
         self.boundary_starts = []
 
     def waiting_blocked_successor(self, operation_id):
         return self.waiting
+
+    def record_idle_round(self, patch):
+        self.idle_round_records.append(patch)
+        self.idle_rounds_by_patch[patch] = self.idle_rounds_by_patch.get(patch, 0) + 1
 
     def start_released_successors_on_boundary(self, operation_id, patch):
         self.boundary_starts.append((operation_id, patch))
@@ -384,6 +389,7 @@ def test_controller_accounts_only_successfully_emitted_idle_rounds():
     operation = controller.runtime.operations[7]
     assert qpu.feedback_rounds == [(7, "patch-a", 1)]
     assert idle_policy.calls == [(1, operation)]
+    assert controller.runtime.idle_round_records == ["patch-a"]
     assert controller.runtime.idle_rounds_by_patch == {"patch-a": 1}
     assert controller.idle_rounds_emitted == 1
     assert controller.runtime.boundary_starts == [(7, "patch-a")]

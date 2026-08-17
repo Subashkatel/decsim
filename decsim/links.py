@@ -1,8 +1,92 @@
-"""Typed reaction-path link configuration, reservation, and traffic evidence.
+"""The nine reaction-path link segments, their channels, and the traffic ledger.
 
-Immutable configuration is reusable across runs. ``Link`` owns the mutable
-FIFO state of one resolved physical channel, and ``LinkModel`` is the only
-semantic routing/accounting boundary used by production sends.
+decsim prices TIME on the path from syndrome generation to corrected feedback.
+This module owns the transport part of that price: how long each hop takes and
+what evidence each hop leaves behind. It holds mechanism only. The number cards
+that fill it in live in ``decsim/link_profiles.py``.
+
+THE NINE PATHS. ``LinkPath`` is the closed reaction-path vocabulary. Each member
+is one measured segment, named for the pair of runtime components it connects:
+
+- ``QC``  QPU -> controller: syndrome readout leaving the QPU (t_qc).
+- ``CWD`` controller -> weak decoder: syndrome data reaching the weak tier,
+  either as one round (``syndrome_ingress``) or as one weak window
+  (``window_manager``) (t_cwd).
+- ``WSD`` weak decoder -> strong decoder: the escalation selection that hands a
+  window to the strong tier (t_wsd).
+- ``CSD`` controller -> strong decoder: the strong window's syndrome input
+  (t_csd).
+- ``WDO`` weak decoder -> orchestrator: the weak correction leaving the weak
+  tier. This is the weak-tier counterpart of ``DO``; the research program in
+  ORIENTATION.md names eight t segments and does not name this one separately.
+- ``DD``  decoder -> decoder: a committed window boundary handed to a dependent
+  window (t_dd).
+- ``DO``  strong decoder -> orchestrator: the strong correction leaving the
+  strong tier (t_do).
+- ``OC``  orchestrator -> controller: the resolved decision returning to the
+  controller (t_oc).
+- ``CQ``  controller -> QPU: the instruction delivered back to the QPU (t_cq).
+
+The vocabulary is CLOSED and each member's semantics are declared once, in
+``_PATH_RULES``: the attribution scope its transfers must use, the provenance
+relation they must carry, and the decoder tier they belong to. It is the
+measurement decomposition, not a free-form axis, so a run cannot invent a
+segment and change what a latency report means.
+
+Closed does not mean frozen. Every one of the nine segments above is REQUIRED:
+its rule says so and a card that omits one is refused, so no fabric can quietly
+stop pricing part of the reaction path. A segment added later may be declared
+OPTIONAL in the same rule table, and a card then chooses whether to price it.
+The wired set of a card is therefore always a declared subset of the closed
+vocabulary, never an arbitrary set of names a run made up.
+
+Adding a new measured segment is a three-line extension and no surgery:
+
+1. add the member to ``LinkPath``;
+2. add its row to ``_PATH_RULES``, marked optional while it is being adopted;
+3. add an ``Optional[LinkEdgeConfig]`` field for it to ``LinkModelConfig``,
+   defaulting to ``None`` so every existing fabric card keeps working.
+
+Then any card that wants to price it supplies an edge. Nothing in ``resolve``,
+``reserve``, the counters or the reports changes, because they all iterate the
+card's wired paths rather than the enum. Reserving on a segment this fabric did
+not wire is refused at the top of ``reserve``, before any attribution work.
+
+THE CONFIGURATION. Each path carries a ``LinkEdgeConfig``: the physical
+``LinkConfig`` channel it rides (propagation latency and an optional finite
+``LinkCapacityConfig`` bandwidth), an optional ``PayloadSizeConfig`` default
+payload, and the name of the runtime quantity that supplies an actual payload
+size. ``LinkModelConfig`` is the whole fabric card: one edge per path plus a
+profile name. Two paths that are given the SAME ``LinkConfig`` object share one
+physical FIFO, so the number of physical channels behind the nine paths is
+itself a configuration choice.
+
+QUANTITY RULES. Bandwidth is a real rate in bits per microsecond and only has to
+be finite and positive. Everything that counts something - bits, channels,
+ticks, window and round indices, request ordinals, boundary revisions - is
+integral by meaning: a value is accepted when it is finite and equal to its own
+integer conversion, is refused otherwise, and is normalised to an exact ``int``
+at the boundary where it becomes trusted. No quantity check asserts a Python
+type. Two type-discriminating predicates DO remain, both semantic rather than
+pedantic: the stable-identity rule imported from ``message``, which defines what
+may serve as an identity in the ledger, and the closed two-kind relation
+dispatch, which after the snapshot ranges only over values this module built.
+
+THE RUNTIME. ``LinkModelConfig.resolve()`` builds a run-owned ``LinkModel``:
+one ``Link`` per distinct channel object, each owning that channel's mutable
+FIFO state. ``LinkModel.reserve`` is the only semantic boundary production sends
+use. It snapshots the caller's attribution into links-owned immutable values,
+checks the attribution against the path's meaning, selects the payload size,
+reserves the physical interval, and appends one immutable transfer record.
+
+THE EVIDENCE. Every reservation is counted twice, once per semantic path and
+once per physical channel, and ``traffic_json_value`` refuses to emit a report
+whose two counts disagree.
+
+CUSTOMISING. An outside scientist builds their own ``LinkModelConfig`` (or
+starts from a card in ``decsim/link_profiles.py``) and passes it as
+``RunSpec.links``. No core module is edited to change any latency, bandwidth,
+payload, channel sharing, or profile name.
 """
 
 from __future__ import annotations
@@ -21,13 +105,37 @@ from .message import (
 )
 
 
+def _whole(value, name: str) -> int:
+    """Return one semantically integral quantity as an exact int."""
+    try:
+        normalized = int(value)
+    except (OverflowError, ValueError) as error:
+        raise ValueError(f"{name} must be a finite whole number") from error
+    if normalized != value:
+        raise ValueError(f"{name} must be a finite whole number")
+    return normalized
+
+def _finite(value, name: str):
+    """Return one real quantity after refusing NaN and infinity.
+
+    A Python integer is finite at any magnitude; ``math.isfinite`` only raises
+    ``OverflowError`` because it converts to float first, so that outcome is
+    read as finite rather than as a failure.
+    """
+    try:
+        finite = math.isfinite(value)
+    except OverflowError:
+        finite = True
+    if not finite:
+        raise ValueError(f"{name} must be a finite number")
+    return value
+
+
 @dataclass(frozen=True)
 class RequestTransferRelation:
-    request_key: DecoderRequestKey
+    """Provenance tying one transfer to the decoder request it serves."""
 
-    def __post_init__(self) -> None:
-        if type(self.request_key) is not DecoderRequestKey:
-            raise TypeError("request relation requires an exact request key")
+    request_key: DecoderRequestKey
 
 
 @dataclass(frozen=True)
@@ -39,18 +147,17 @@ class BoundaryTransferRelation:
     delivery_revision: int
 
     def __post_init__(self) -> None:
-        if type(self.source_request_key) is not DecoderRequestKey:
-            raise TypeError("boundary relation requires an exact request key")
         expected_source = (self.source_request_key.operation_id,
                            self.source_request_key.window_id)
         if self.source_window_key != expected_source:
             raise ValueError("boundary source does not match its request key")
-        if type(self.destination_window_key) is not tuple:
-            raise TypeError("boundary destination must be an exact tuple")
-        revisions = (self.source_revision, self.delivery_revision)
-        if any(type(revision) is not int for revision in revisions):
-            raise TypeError("boundary revisions must be exact ints")
-        if min(revisions) < 1:
+        object.__setattr__(
+            self, "source_revision",
+            _whole(self.source_revision, "source_revision"))
+        object.__setattr__(
+            self, "delivery_revision",
+            _whole(self.delivery_revision, "delivery_revision"))
+        if min(self.source_revision, self.delivery_revision) < 1:
             raise ValueError("boundary revisions must be positive")
 
 
@@ -61,8 +168,15 @@ class LinkQuantityBasis(str, Enum):
     PER_CHANNEL = "per_channel"
 
 
+def _require_known_basis(basis) -> None:
+    """Reject a basis outside the closed pair that decides the aggregate rule."""
+    if (basis is not LinkQuantityBasis.DIRECT_AGGREGATE
+            and basis is not LinkQuantityBasis.PER_CHANNEL):
+        raise ValueError(f"unknown link quantity basis {basis!r}")
+
+
 class LinkPath(str, Enum):
-    """Closed semantic reaction-path vocabulary."""
+    """The nine measured reaction-path segments; see the module docstring."""
 
     QC = "qc"
     CWD = "cwd"
@@ -82,6 +196,74 @@ class PayloadSelectionSource(str, Enum):
     CONFIGURED_DEFAULT = "configured_default"
     UNRESOLVED = "unresolved"
 
+class LinkAttributionScope(str, Enum):
+    """What one path's transfers are attributed to."""
+
+    OPERATION_ONLY = "operation_only"
+    ROUND = "round"
+    ROUND_OR_WINDOW = "round_or_window"
+    WINDOW = "window"
+
+
+class LinkRelationRule(str, Enum):
+    """Which provenance record one path's transfers must carry."""
+
+    NONE = "none"
+    REQUEST = "request"
+    REQUEST_WHEN_WINDOWED = "request_when_windowed"
+    BOUNDARY = "boundary"
+
+
+@dataclass(frozen=True)
+class LinkPathRule:
+    """The fixed semantics of one reaction-path segment.
+
+    ``required`` says whether every fabric card must wire this segment. All nine
+    segments of the original reaction path are required, so no card can quietly
+    stop pricing one. A segment added later may be declared optional, which is
+    what makes adding one a config-or-small-extension step; optionality is a
+    property of the declared vocabulary, never of the caller's configuration.
+    """
+
+    scope: LinkAttributionScope
+    scope_description: str
+    relation: LinkRelationRule
+    tier: Optional[DecoderTier]
+    required: bool
+
+
+_PATH_RULES = {
+    LinkPath.QC: LinkPathRule(
+        LinkAttributionScope.ROUND,
+        "syndrome-round attribution without a window",
+        LinkRelationRule.NONE, None, True),
+    LinkPath.CWD: LinkPathRule(
+        LinkAttributionScope.ROUND_OR_WINDOW,
+        "syndrome-round or window-region attribution",
+        LinkRelationRule.REQUEST_WHEN_WINDOWED, DecoderTier.WEAK, True),
+    LinkPath.WSD: LinkPathRule(
+        LinkAttributionScope.WINDOW, "window-region attribution",
+        LinkRelationRule.REQUEST, DecoderTier.STRONG, True),
+    LinkPath.CSD: LinkPathRule(
+        LinkAttributionScope.WINDOW, "window-region attribution",
+        LinkRelationRule.REQUEST, DecoderTier.STRONG, True),
+    LinkPath.WDO: LinkPathRule(
+        LinkAttributionScope.WINDOW, "window-region attribution",
+        LinkRelationRule.REQUEST, DecoderTier.WEAK, True),
+    LinkPath.DD: LinkPathRule(
+        LinkAttributionScope.WINDOW, "window-region attribution",
+        LinkRelationRule.BOUNDARY, None, True),
+    LinkPath.DO: LinkPathRule(
+        LinkAttributionScope.WINDOW, "window-region attribution",
+        LinkRelationRule.REQUEST, DecoderTier.STRONG, True),
+    LinkPath.OC: LinkPathRule(
+        LinkAttributionScope.OPERATION_ONLY, "operation-only attribution",
+        LinkRelationRule.NONE, None, True),
+    LinkPath.CQ: LinkPathRule(
+        LinkAttributionScope.OPERATION_ONLY, "operation-only attribution",
+        LinkRelationRule.NONE, None, True),
+}
+
 
 @dataclass(frozen=True, eq=False)
 class LinkCapacityConfig:
@@ -93,15 +275,12 @@ class LinkCapacityConfig:
     source: str
 
     def __post_init__(self) -> None:
-        if not math.isfinite(self.input_bits_per_us):
-            raise ValueError("input_bits_per_us must be finite")
+        _finite(self.input_bits_per_us, "input_bits_per_us")
         if self.input_bits_per_us <= 0:
             raise ValueError("input_bits_per_us must be positive")
-        if type(self.basis) is not LinkQuantityBasis:
-            raise TypeError("basis must be an exact LinkQuantityBasis")
+        _require_known_basis(self.basis)
         self._validate_channel_count()
-        if not math.isfinite(self.aggregate_bits_per_us):
-            raise ValueError("aggregate_bits_per_us must be finite")
+        _finite(self.aggregate_bits_per_us, "aggregate_bits_per_us")
 
     def _validate_channel_count(self) -> None:
         if self.basis is LinkQuantityBasis.DIRECT_AGGREGATE:
@@ -110,8 +289,9 @@ class LinkCapacityConfig:
                     "direct aggregate capacity requires channel_count=None"
                 )
             return
-        if type(self.channel_count) is not int:
-            raise TypeError("per-channel capacity count must be an exact int")
+        object.__setattr__(
+            self, "channel_count",
+            _whole(self.channel_count, "per-channel capacity count"))
         if self.channel_count <= 0:
             raise ValueError("per-channel capacity count must be positive")
 
@@ -141,10 +321,11 @@ class PayloadSizeConfig:
     source: str
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "input_bits", _whole(self.input_bits, "input_bits"))
         if self.input_bits < 0:
             raise ValueError("input_bits must be nonnegative")
-        if type(self.basis) is not LinkQuantityBasis:
-            raise TypeError("basis must be an exact LinkQuantityBasis")
+        _require_known_basis(self.basis)
         self._validate_channel_count()
 
     def _validate_channel_count(self) -> None:
@@ -154,8 +335,9 @@ class PayloadSizeConfig:
                     "direct aggregate payload requires channel_count=None"
                 )
             return
-        if type(self.channel_count) is not int:
-            raise TypeError("per-channel payload count must be an exact int")
+        object.__setattr__(
+            self, "channel_count",
+            _whole(self.channel_count, "per-channel payload count"))
         if self.channel_count <= 0:
             raise ValueError("per-channel payload count must be positive")
 
@@ -184,8 +366,10 @@ class LinkConfig:
     configuration_source: str
 
     def __post_init__(self) -> None:
-        if type(self.propagation_latency_ticks) is not int:
-            raise TypeError("propagation_latency_ticks must be an exact int")
+        object.__setattr__(
+            self, "propagation_latency_ticks",
+            _whole(self.propagation_latency_ticks,
+                   "propagation_latency_ticks"))
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
 
@@ -228,8 +412,6 @@ class TrafficAttribution:
     def __post_init__(self) -> None:
         if not is_stable_identity(self.operation_id):
             raise TypeError("operation_id must be a stable identity")
-        if type(self.patch_ids) is not tuple:
-            raise TypeError("patch_ids must be a tuple")
         if not all(is_stable_identity(patch_id) for patch_id in self.patch_ids):
             raise TypeError("patch_ids must contain stable identities")
         ordered = tuple(sorted(self.patch_ids, key=stable_identity_order_key))
@@ -240,16 +422,65 @@ class TrafficAttribution:
         if (self.round_lo is None) != (self.round_hi is None):
             raise ValueError("round endpoints are present together")
         if self.window_id is not None:
-            if type(self.window_id) is not int or self.window_id < 0:
-                raise ValueError("window_id must be a nonnegative exact int")
+            object.__setattr__(
+                self, "window_id", _whole(self.window_id, "window_id"))
+            if self.window_id < 0:
+                raise ValueError("window_id must be a nonnegative window index")
             if self.round_lo is None:
                 raise ValueError("window attribution requires a round range")
         if self.round_lo is None:
             return
-        if type(self.round_lo) is not int or self.round_lo < 1:
-            raise ValueError("round_lo must be a positive exact int")
-        if type(self.round_hi) is not int or self.round_hi < self.round_lo:
-            raise ValueError("round_hi must be an exact int at least round_lo")
+        object.__setattr__(
+            self, "round_lo", _whole(self.round_lo, "round_lo"))
+        object.__setattr__(
+            self, "round_hi", _whole(self.round_hi, "round_hi"))
+        if self.round_lo < 1:
+            raise ValueError("round_lo must be a positive round index")
+        if self.round_hi < self.round_lo:
+            raise ValueError("round_hi must be at least round_lo")
+
+
+def _request_key_snapshot(request_key) -> DecoderRequestKey:
+    """Return a fresh links-owned copy of one decoder request key."""
+    return DecoderRequestKey(
+        operation_id=request_key.operation_id,
+        window_id=_whole(request_key.window_id, "request window_id"),
+        tier=request_key.tier,
+        run_sequence=_whole(request_key.run_sequence, "request run_sequence"),
+    )
+
+
+def _relation_snapshot(relation):
+    """Return a fresh links-owned copy of one transfer relation."""
+    if relation is None:
+        return None
+    if isinstance(relation, RequestTransferRelation):
+        return RequestTransferRelation(
+            _request_key_snapshot(relation.request_key)
+        )
+    if isinstance(relation, BoundaryTransferRelation):
+        return BoundaryTransferRelation(
+            _request_key_snapshot(relation.source_request_key),
+            tuple(relation.source_window_key),
+            tuple(relation.destination_window_key),
+            relation.source_revision,
+            relation.delivery_revision,
+        )
+    raise TypeError(
+        "a transfer relation is a request relation or a boundary relation"
+    )
+
+
+def _attribution_snapshot(attribution) -> TrafficAttribution:
+    """Return the fresh links-owned attribution the ledger actually stores."""
+    return TrafficAttribution(
+        operation_id=attribution.operation_id,
+        patch_ids=tuple(attribution.patch_ids),
+        window_id=attribution.window_id,
+        round_lo=attribution.round_lo,
+        round_hi=attribution.round_hi,
+        relation=_relation_snapshot(attribution.relation),
+    )
 
 
 @dataclass(frozen=True)
@@ -347,21 +578,17 @@ class Link:
         payload_bits: Optional[int],
         now_ticks: int,
     ) -> LinkReservation:
-        """Validate, reserve one FIFO interval, and return its exact timing."""
+        """Reserve one FIFO interval and return its exact timing."""
         if payload_bits is not None:
-            if type(payload_bits) is not int:
-                raise TypeError("payload_bits must be an exact int or None")
+            payload_bits = _whole(payload_bits, "payload_bits")
             if payload_bits < 0:
                 raise ValueError("payload_bits must be nonnegative")
-        if type(now_ticks) is not int:
-            raise TypeError("now_ticks must be an exact int")
+        now_ticks = _whole(now_ticks, "now_ticks")
         if now_ticks < 0:
             raise ValueError("now_ticks must be nonnegative")
         if self._last_send_tick is not None and now_ticks < self._last_send_tick:
             raise ValueError("now_ticks must not precede the prior reservation")
         capacity = self._config.capacity
-        if capacity is not None and payload_bits is None:
-            raise ValueError("finite bandwidth requires a resolved payload size")
 
         serialization_ticks = (
             0
@@ -425,15 +652,25 @@ class LinkModelConfig:
     profile_name: str
     qc_excludes_controller_processing: bool = False
 
-    def __post_init__(self) -> None:
-        if type(self.qc_excludes_controller_processing) is not bool:
-            raise TypeError(
-                "qc_excludes_controller_processing must be an exact bool")
+    def wired_paths(self) -> tuple:
+        """Return the paths this fabric card wires, in vocabulary order.
+
+        A required path must be wired. Only a path the vocabulary declares
+        optional may be left out, so the wired set is always a declared subset,
+        never an arbitrary one.
+        """
+        wired = []
+        for path in LinkPath:
+            if getattr(self, path.value, None) is not None:
+                wired.append(path)
+            elif _PATH_RULES[path].required:
+                raise ValueError(f"{path.value} is a required link path")
+        return tuple(wired)
 
     def resolve(self) -> "LinkModel":
         physical_by_config_id = {}
         bindings = {}
-        for path in LinkPath:
+        for path in self.wired_paths():
             edge = getattr(self, path.value)
             config_id = id(edge.channel)
             physical = physical_by_config_id.get(config_id)
@@ -443,217 +680,6 @@ class LinkModelConfig:
             bindings[path] = (edge, physical)
         return LinkModel(self, bindings)
 
-    @classmethod
-    def logical_reference_profile(cls) -> "LinkModelConfig":
-        def channel(latency_us: float, source: str) -> LinkConfig:
-            return LinkConfig(us(latency_us), None, source)
-
-        def actual_edge(latency_us: float, source: str, actual: str):
-            return LinkEdgeConfig(channel(latency_us, source), None, actual)
-
-        def direct_default(latency_us: float, bits: int, source: str):
-            return LinkEdgeConfig(
-                channel(latency_us, source),
-                PayloadSizeConfig(
-                    bits,
-                    LinkQuantityBasis.DIRECT_AGGREGATE,
-                    None,
-                    source,
-                ),
-                None,
-            )
-
-        def per_channel_default(
-            latency_us: float,
-            bits: int,
-            count: int,
-            source: str,
-        ):
-            return LinkEdgeConfig(
-                channel(latency_us, source),
-                PayloadSizeConfig(
-                    bits,
-                    LinkQuantityBasis.PER_CHANNEL,
-                    count,
-                    source,
-                ),
-                None,
-            )
-
-        return cls(
-            qc=actual_edge(0.15, "Khalid qc effective time", "SyndromePayload.size_bits"),
-            cwd=actual_edge(
-                2.0,
-                "Khalid cd latency; logical_reference integrated weak-input transfer",
-                "SyndromeRoundPacket.fragment_size_sum",
-            ),
-            wsd=actual_edge(
-                0.5,
-                "repository weak-to-strong model choice",
-                "switching decision payload_bits",
-            ),
-            csd=actual_edge(
-                2.0,
-                "Khalid cd mapped to controller-to-strong",
-                "DecodeJob.retained_payload_size_bits",
-            ),
-            wdo=per_channel_default(
-                1.0,
-                50_000,
-                100,
-                "Khalid do mapped to weak output",
-            ),
-            dd=direct_default(
-                0.5,
-                100,
-                "Khalid dd representative aggregate transaction",
-            ),
-            do=per_channel_default(1.0, 50_000, 100, "Khalid do"),
-            oc=per_channel_default(4.0, 20_000, 1000, "Khalid oc"),
-            cq=per_channel_default(0.15, 1, 5_000_000, "Khalid cq"),
-            profile_name="logical_reference",
-        )
-
-    @classmethod
-    def bandwidth_limited_profile(
-        cls,
-        *,
-        capacity_scale: float = 1.0,
-    ) -> "LinkModelConfig":
-        """Return the reference fabric with finite, calibrated channel rates.
-
-        Propagation latencies, path mapping and the configured default payloads
-        match logical_reference_profile, so switching profiles changes bandwidth
-        and nothing else. Capacity is bits per microsecond, which equals Mbps.
-        The calibration point is one distance-5 surface-code logical qubit whose
-        24 measure qubits produce a 24-bit syndrome round every 1.0 us, that is
-        24 Mbps, inside the few tens of Mbps per logical qubit reported in
-        2303.00054.txt:141-144. Each channel carries its nominal transfer at the
-        cadence that transfer occurs and no channel is provisioned below that
-        24 Mbps anchor. capacity_scale multiplies every channel, so sweeping it
-        moves the whole fabric through its contention regimes.
-        """
-        syndrome_bits_per_round = 24
-        round_us = 1.0
-        commit_rounds = 5
-        buffer_rounds = 5
-        commit_region_us = commit_rounds * round_us
-        weak_window_bits = (
-            (commit_rounds + buffer_rounds) * syndrome_bits_per_round
-        )
-        strong_window_bits = (
-            (commit_rounds + 2 * buffer_rounds) * syndrome_bits_per_round
-        )
-        anchor_bits_per_us = syndrome_bits_per_round / round_us
-
-        def aggregate_edge(
-            latency_us: float,
-            bits: int,
-            nominal_bits_per_us: float,
-            source: str,
-            actual_payload_source,
-        ):
-            capacity = LinkCapacityConfig(
-                max(anchor_bits_per_us, nominal_bits_per_us) * capacity_scale,
-                LinkQuantityBasis.DIRECT_AGGREGATE,
-                None,
-                source,
-            )
-            return LinkEdgeConfig(
-                LinkConfig(us(latency_us), capacity, source),
-                PayloadSizeConfig(
-                    bits,
-                    LinkQuantityBasis.DIRECT_AGGREGATE,
-                    None,
-                    source,
-                ),
-                actual_payload_source,
-            )
-
-        def per_channel_edge(
-            latency_us: float,
-            bits: int,
-            count: int,
-            source: str,
-        ):
-            capacity = LinkCapacityConfig(
-                max(anchor_bits_per_us / count, bits / commit_region_us)
-                * capacity_scale,
-                LinkQuantityBasis.PER_CHANNEL,
-                count,
-                source,
-            )
-            return LinkEdgeConfig(
-                LinkConfig(us(latency_us), capacity, source),
-                PayloadSizeConfig(
-                    bits,
-                    LinkQuantityBasis.PER_CHANNEL,
-                    count,
-                    source,
-                ),
-                None,
-            )
-
-        return cls(
-            qc=aggregate_edge(
-                0.15,
-                syndrome_bits_per_round,
-                syndrome_bits_per_round / round_us,
-                "one distance-5 syndrome round per 1.0 us round period "
-                "(2408.13687v1.txt:127-129, 2303.00054.txt:141-144)",
-                "SyndromePayload.size_bits",
-            ),
-            cwd=aggregate_edge(
-                2.0,
-                weak_window_bits,
-                weak_window_bits / commit_region_us,
-                "one weak window of rcom+rbuf rounds per commit region "
-                "(2510.25222v1.txt:1147-1155)",
-                "SyndromeRoundPacket.fragment_size_sum",
-            ),
-            wsd=aggregate_edge(
-                0.5,
-                1,
-                1 / commit_region_us,
-                "one escalation decision per commit region, floored at the "
-                "24 Mbps syndrome anchor",
-                "switching decision payload_bits",
-            ),
-            csd=aggregate_edge(
-                2.0,
-                strong_window_bits,
-                strong_window_bits / commit_region_us,
-                "one strong window of rcom+2rbuf rounds per commit region "
-                "(2510.25222v1.txt:1147-1155)",
-                "DecodeJob.retained_payload_size_bits",
-            ),
-            wdo=per_channel_edge(
-                1.0, 50_000, 100,
-                "one weak decoder output payload per commit region",
-            ),
-            dd=aggregate_edge(
-                0.5,
-                100,
-                100 / commit_region_us,
-                "one boundary transaction per commit region, floored at the "
-                "24 Mbps syndrome anchor",
-                None,
-            ),
-            do=per_channel_edge(
-                1.0, 50_000, 100,
-                "one decoder output payload per commit region",
-            ),
-            oc=per_channel_edge(
-                4.0, 20_000, 1000,
-                "one output-to-controller payload per commit region",
-            ),
-            cq=per_channel_edge(
-                0.15, 1, 5_000_000,
-                "one controller-to-QPU payload per commit region",
-            ),
-            profile_name="bandwidth_limited",
-        )
-
 
 class LinkModel:
     """One run-owned semantic fabric and its immutable traffic ledger."""
@@ -661,18 +687,24 @@ class LinkModel:
     def __init__(self, config: LinkModelConfig, bindings: dict):
         self._config = config
         self._bindings = dict(bindings)
+        self._paths = tuple(self._bindings)
         self._semantic_counters = {
             path: TrafficCounters()
-            for path in LinkPath
+            for path in self._paths
         }
         self._transfers = []
         self._alias_by_link = {}
-        for path in LinkPath:
+        for path in self._paths:
             _edge, physical = self._bindings[path]
             if physical not in self._alias_by_link:
                 self._alias_by_link[physical] = (
                     f"channel-{len(self._alias_by_link)}"
                 )
+
+    @property
+    def paths(self) -> tuple:
+        """Return the semantic paths this fabric wires, in vocabulary order."""
+        return self._paths
 
     def reserve(
         self,
@@ -682,8 +714,9 @@ class LinkModel:
         now_ticks: int,
         attribution: TrafficAttribution,
     ) -> LinkReservation:
-        if type(attribution) is not TrafficAttribution:
-            raise TypeError("attribution must be an exact TrafficAttribution")
+        if path not in self._bindings:
+            raise ValueError(f"{path.value} is not wired in this link fabric")
+        attribution = _attribution_snapshot(attribution)
         self._validate_attribution_shape(path, attribution)
         edge, physical = self._bindings[path]
         if payload_bits is not None and edge.actual_payload_source is None:
@@ -725,36 +758,31 @@ class LinkModel:
         path: LinkPath,
         attribution: TrafficAttribution,
     ) -> None:
+        rule = _PATH_RULES[path]
         has_window = attribution.window_id is not None
         has_rounds = attribution.round_lo is not None
-        if path is LinkPath.QC:
+        if rule.scope is LinkAttributionScope.ROUND:
             valid = not has_window and has_rounds
-            expected = "syndrome-round attribution without a window"
-        elif path is LinkPath.CWD:
+        elif rule.scope is LinkAttributionScope.ROUND_OR_WINDOW:
             valid = has_rounds
-            expected = "syndrome-round or window-region attribution"
-        elif path in (
-            LinkPath.WSD,
-            LinkPath.CSD,
-            LinkPath.WDO,
-            LinkPath.DD,
-            LinkPath.DO,
-        ):
+        elif rule.scope is LinkAttributionScope.WINDOW:
             valid = has_window and has_rounds
-            expected = "window-region attribution"
         else:
             valid = not has_window and not has_rounds
-            expected = "operation-only attribution"
         if not valid:
-            raise ValueError(f"{path.value} requires {expected}")
+            raise ValueError(f"{path.value} requires {rule.scope_description}")
         relation = attribution.relation
-        request_paths = (LinkPath.WSD, LinkPath.CSD, LinkPath.WDO, LinkPath.DO)
-        if (path in request_paths or (path is LinkPath.CWD and has_window)) \
-                and type(relation) is not RequestTransferRelation:
+        needs_request = (
+            rule.relation is LinkRelationRule.REQUEST
+            or (rule.relation is LinkRelationRule.REQUEST_WHEN_WINDOWED
+                and has_window)
+        )
+        needs_boundary = rule.relation is LinkRelationRule.BOUNDARY
+        if needs_request and type(relation) is not RequestTransferRelation:
             raise ValueError(f"{path.value} requires a request relation")
-        if path is LinkPath.DD and type(relation) is not BoundaryTransferRelation:
-            raise ValueError("dd requires a boundary relation")
-        if path not in request_paths + (LinkPath.CWD, LinkPath.DD,) and relation is not None:
+        if needs_boundary and type(relation) is not BoundaryTransferRelation:
+            raise ValueError(f"{path.value} requires a boundary relation")
+        if not needs_request and not needs_boundary and relation is not None:
             raise ValueError(f"{path.value} does not accept a relation")
         request_key = (relation.request_key if type(relation) is RequestTransferRelation
                        else relation.source_request_key
@@ -762,25 +790,21 @@ class LinkModel:
         if request_key is not None:
             if not is_stable_identity(request_key.operation_id):
                 raise TypeError("request operation_id must be a stable identity")
-            if type(request_key.window_id) is not int or request_key.window_id < 0:
-                raise ValueError("request window_id must be a nonnegative exact int")
-            if type(request_key.tier) is not DecoderTier:
-                raise TypeError("request tier must be an exact DecoderTier")
-            if (type(request_key.run_sequence) is not int
-                    or request_key.run_sequence < 0):
+            if request_key.window_id < 0:
                 raise ValueError(
-                    "request run_sequence must be a nonnegative exact int"
+                    "request window_id must be a nonnegative window index"
+                )
+            if request_key.run_sequence < 0:
+                raise ValueError(
+                    "request run_sequence must be a nonnegative request ordinal"
                 )
         if type(relation) is BoundaryTransferRelation:
             if not is_stable_identity(relation.source_window_key):
                 raise TypeError("boundary source_window_key must be stable")
             if not is_stable_identity(relation.destination_window_key):
                 raise TypeError("boundary destination_window_key must be stable")
-        expected_tier = (DecoderTier.WEAK if path in (LinkPath.CWD, LinkPath.WDO)
-                         else DecoderTier.STRONG)
-        if (type(relation) is RequestTransferRelation
-                and request_key.tier is not expected_tier):
-            raise ValueError(f"{path.value} requires the {expected_tier.value} tier")
+        if needs_request and request_key.tier is not rule.tier:
+            raise ValueError(f"{path.value} requires the {rule.tier.value} tier")
         if request_key is not None and (
                 request_key.operation_id != attribution.operation_id
                 or request_key.window_id != attribution.window_id):
@@ -789,7 +813,7 @@ class LinkModel:
     def _member_paths(self, physical: Link) -> tuple:
         return tuple(
             path
-            for path in LinkPath
+            for path in self._paths
             if self._bindings[path][1] is physical
         )
 
@@ -804,7 +828,7 @@ class LinkModel:
         ):
             raise ValueError("unknown controller link integration assurance")
         edges = []
-        for path in LinkPath:
+        for path in self._paths:
             edge, physical = self._bindings[path]
             edges.append({
                 "path": path.value,
@@ -834,7 +858,7 @@ class LinkModel:
         return {
             "schema_version": 1,
             "profile_name": self._config.profile_name,
-            "path_order": [path.value for path in LinkPath],
+            "path_order": [path.value for path in self._paths],
             "edges": edges,
             "physical_channels": physical_channels,
             "cancellation_semantics": "non_preemptive_irrevocable",
@@ -845,7 +869,7 @@ class LinkModel:
 
     def traffic_json_value(self) -> dict:
         semantic_edges = []
-        for path in LinkPath:
+        for path in self._paths:
             _edge, physical = self._bindings[path]
             semantic_edges.append({
                 "path": path.value,
@@ -877,7 +901,7 @@ class LinkModel:
             })
         return {
             "schema_version": 1,
-            "path_order": [path.value for path in LinkPath],
+            "path_order": [path.value for path in self._paths],
             "semantic_edges": semantic_edges,
             "physical_channels": physical_channels,
             "transfers": [self._transfer_json(record) for record in self._transfers],

@@ -40,8 +40,6 @@ class ExecutionOrchestrator:
     def integrate(self, operation: Operation, result: DecodeResult) -> None:
         """Record a final result and dispatch its timing decisions."""
         for decision in self.on_result(operation, result):
-            if self.controller is None or self.decision_sink is None:
-                continue
             instruction = (
                 "conditional release"
                 if decision.releases_operation

@@ -193,6 +193,15 @@ class ExecutionRuntime:
                     self.controller.note_round_boundary(patch)
                 self._maybe_begin(successor)
 
+    def retry_ready_operations(self):
+        """Retry every state-ready operation after a controller cadence change."""
+        for operation_id in sorted(self.state_ready):
+            self._maybe_begin(self.operations[operation_id])
+
+    def record_idle_round(self, patch):
+        """Account one emitted idle round against the patch that idled."""
+        self.idle_rounds_by_patch[patch] = self.idle_rounds_by_patch.get(patch, 0) + 1
+
     def consume_idle_rounds(self, operation):
         patches = operation.patches if operation.patches else operation.qubits
         return sum(self.idle_rounds_by_patch.pop(patch, 0) for patch in patches)

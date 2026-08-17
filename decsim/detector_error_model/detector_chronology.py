@@ -24,6 +24,8 @@ def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
     if round_count < 1:
         raise ValueError("round_count must be positive")
     detector_count = circuit.num_detectors
+    if detector_count < 1:
+        raise ValueError("finite-memory chronology requires at least one detector")
 
     if detector_rounds is None:
         coordinates = circuit.get_detector_coordinates()
@@ -46,10 +48,10 @@ def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
                 raise ValueError("finite-memory detector layers must be finite integers")
             raw_layer = int(raw_value)
             raw_layers[detector_id] = raw_layer
-        expected_layers = set(range(round_count + 1))
-        if set(raw_layers.values()) != expected_layers:
+        allowed_layers = set(range(round_count + 1))
+        if not set(raw_layers.values()) <= allowed_layers:
             raise ValueError(
-                "raw detector layers must equal the declared source duration"
+                "raw detector layers must lie inside the declared source duration"
             )
         resolved = {
             detector_id: (
@@ -62,8 +64,8 @@ def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
 
     if set(resolved) != set(range(detector_count)):
         raise ValueError("detector-round map must cover every detector exactly")
-    if set(resolved.values()) != set(range(1, round_count + 1)):
-        raise ValueError("detector-round map must fill every emitted round")
+    if not set(resolved.values()) <= set(range(1, round_count + 1)):
+        raise ValueError("detector-round map must lie inside the emitted rounds")
     return resolved
 
 

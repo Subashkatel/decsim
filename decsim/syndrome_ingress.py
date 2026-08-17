@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
-from .links import LinkModel, LinkModelConfig, LinkPath, TrafficAttribution
+from .link_profiles import logical_reference_profile
+from .links import LinkModel, LinkPath, TrafficAttribution
 from .syndrome_buffer import SyndromeBuffer, SyndromeBufferCapacityExhaustion
 from .message import (
     RetainedSyndromeFragment,
@@ -141,7 +142,7 @@ class SyndromeIngress:
             raise TypeError("policy must be an exact SyndromeIngressPolicy")
         self.policy = policy
         self.engine = engine
-        default_links = LinkModelConfig.logical_reference_profile().resolve()
+        default_links = logical_reference_profile().resolve()
         self.links = links if links is not None else default_links
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes

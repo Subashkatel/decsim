@@ -155,7 +155,7 @@ class RunSpec:
         from .decoders import CodeRouter
         from .devices import SyndromeBitDevice, TimingOnlyDevice
         from .qpu import QPUDevice
-        from .links import LinkModelConfig
+        from .link_profiles import logical_reference_profile
         from .orchestrators import ExecutionOrchestrator
         from .syndrome_buffer import SyndromeBuffer, SyndromeBufferingConfig
         from .planner import (
@@ -260,7 +260,7 @@ class RunSpec:
                         if self.make_orchestrator
                         else ExecutionOrchestrator(engine))
         link_config = (self.links if self.links is not None else
-                       LinkModelConfig.logical_reference_profile())
+                       logical_reference_profile())
         if (
             self.timing.ticks("t_binary_availability") > 0
             and not link_config.qc_excludes_controller_processing

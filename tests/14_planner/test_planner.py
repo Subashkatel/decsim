@@ -21,11 +21,6 @@ from decsim.message import (
     WindowProtocol,
 )
 from decsim.planner import (
-    CodeRounds,
-    FixedRounds,
-    GateRounds,
-    PerOpRounds,
-    TemporalRounds,
     _RunPlan,
     _SyndromeBufferingPlan,
     _materialize_execution_plan,
@@ -33,6 +28,13 @@ from decsim.planner import (
     _plan_syndrome_buffering,
     _validate_operation_graph,
     _validate_workload_identity,
+)
+from decsim.rounds import (
+    CodeRounds,
+    FixedRounds,
+    GateRounds,
+    PerOpRounds,
+    TemporalRounds,
 )
 
 

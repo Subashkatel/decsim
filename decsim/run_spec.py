@@ -159,11 +159,11 @@ class RunSpec:
         from .orchestrators import ExecutionOrchestrator
         from .syndrome_buffer import SyndromeBuffer, SyndromeBufferingConfig
         from .planner import (
-            GateRounds,
             _plan_execution,
             _validate_operation_graph,
             _validate_workload_identity,
         )
+        from .rounds import GateRounds
         from .policies import Eager, Ignore
         from .schedulers import FifoScheduler
         from .schemes import SlidingWindowScheme

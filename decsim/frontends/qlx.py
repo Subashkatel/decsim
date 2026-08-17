@@ -40,7 +40,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from ..message import Operation, OpKind, ProtectedRegion
-from ..planner import PerOpRounds
+from ..rounds import PerOpRounds
 
 _KIND_BY_NAME = {"mz": OpKind.MEASURE, "mx": OpKind.MEASURE,
                  "measure": OpKind.MEASURE, "inject": OpKind.INJECT,

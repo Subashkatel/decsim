@@ -1137,6 +1137,15 @@ def test_round_count_must_be_positive():
     assert "round_count must be positive" in str(failure.value)
 
 
+def test_a_detector_free_source_is_still_refused():
+    """Empty detector sources remain invalid even though individual rounds may be empty."""
+    circuit = coordinate_circuit({}, detector_count=0)
+    for detector_rounds in ({}, None):
+        with pytest.raises(ValueError) as failure:
+            detector_chronology.resolve_detector_rounds(circuit, detector_rounds, 1)
+        assert "requires at least one detector" in str(failure.value)
+
+
 def test_explicit_map_is_shallow_copied_and_not_transformed():
     """An explicit detector-round map is copied and used verbatim, with no coordinate transformation."""
     supplied = dict(CHAIN_DETECTOR_ROUNDS)
@@ -1149,18 +1158,27 @@ def test_explicit_map_is_shallow_copied_and_not_transformed():
     assert resolved[0] == 1
 
 
-def test_explicit_map_must_cover_detectors_and_fill_rounds():
-    """A detector-round map must cover every detector and fill every emitted round."""
+def test_explicit_map_must_cover_detectors_and_stay_inside_the_rounds():
+    """An explicit map may skip a round but must cover every detector within bounds."""
     with pytest.raises(ValueError) as coverage_failure:
         detector_chronology.resolve_detector_rounds(
             chain_circuit(), {0: 1, 1: 2, 2: 3}, CHAIN_ROUND_COUNT
         )
     assert "must cover every detector exactly" in str(coverage_failure.value)
-    with pytest.raises(ValueError) as fill_failure:
-        detector_chronology.resolve_detector_rounds(
-            chain_circuit(), {0: 1, 1: 1, 2: 2, 3: 2}, CHAIN_ROUND_COUNT
-        )
-    assert "must fill every emitted round" in str(fill_failure.value)
+
+    map_with_middle_gap = {0: 1, 1: 1, 2: 3, 3: 4}
+    assert detector_chronology.resolve_detector_rounds(
+        chain_circuit(), map_with_middle_gap, CHAIN_ROUND_COUNT
+    ) == map_with_middle_gap
+
+    for out_of_bounds_round in (0, CHAIN_ROUND_COUNT + 1):
+        invalid_map = dict(CHAIN_DETECTOR_ROUNDS)
+        invalid_map[0] = out_of_bounds_round
+        with pytest.raises(ValueError) as bounds_failure:
+            detector_chronology.resolve_detector_rounds(
+                chain_circuit(), invalid_map, CHAIN_ROUND_COUNT
+            )
+        assert "must lie inside the emitted rounds" in str(bounds_failure.value)
 
 
 def test_coordinate_layers_are_folded_into_one_based_rounds():
@@ -1209,18 +1227,74 @@ def test_raw_layers_must_be_finite_integers(layer):
     assert math.isfinite(0.0)
 
 
-def test_raw_layer_set_must_equal_the_declared_duration():
-    """The set of raw coordinate layers must match the declared number of rounds."""
-    circuit = coordinate_circuit({0: [0.0, 0.0], 1: [0.0, 1.0], 2: [0.0, 2.0]})
-    with pytest.raises(ValueError) as failure:
-        detector_chronology.resolve_detector_rounds(circuit, None, 3)
-    assert "must equal the declared source duration" in str(failure.value)
+def test_raw_layers_may_skip_a_round_but_must_stay_inside_the_duration():
+    """Coordinate layers may leave a middle round empty but must remain bounded."""
+    circuit_with_middle_gap = coordinate_circuit(
+        {0: [0.0, 0.0], 1: [0.0, 2.0]}
+    )
+    assert detector_chronology.resolve_detector_rounds(
+        circuit_with_middle_gap, None, 3
+    ) == {0: 1, 1: 3}
+
+    for out_of_bounds_layer in (-1.0, 4.0):
+        invalid_circuit = coordinate_circuit(
+            {0: [0.0, 0.0], 1: [0.0, out_of_bounds_layer]}
+        )
+        with pytest.raises(ValueError) as failure:
+            detector_chronology.resolve_detector_rounds(invalid_circuit, None, 3)
+        assert "must lie inside the declared source duration" in str(failure.value)
 
 
 def test_detector_position_in_round_uses_ascending_detector_id():
     """A detector's position inside its round follows ascending detector id."""
     positions = detector_chronology._detector_position_in_round({2: 1, 0: 1, 1: 2, 3: 2})
     assert positions == {0: 0, 2: 1, 1: 0, 3: 1}
+
+
+def test_a_detector_free_round_keeps_addresses_and_committed_coverage():
+    """A gapped chronology emits an empty model without losing or inventing detectors."""
+    detector_rounds = {0: 1, 1: 1, 2: 3, 3: 4}
+    slicer = window_slicer.WindowSlicer(
+        chain_circuit(),
+        round_count=CHAIN_ROUND_COUNT,
+        detector_rounds=detector_rounds,
+        fault_model_requirement=GRAPHLIKE_REQUIREMENT,
+    )
+    windows = (
+        slicer.slice_window(1, 1, 1, 1, is_last=False),
+        slicer.slice_window(2, 2, 2, 2, is_last=False),
+        slicer.slice_window(3, 3, 4, 4, is_last=True),
+    )
+
+    expected_addresses = {
+        0: (1, 0),
+        1: (1, 1),
+        2: (3, 0),
+        3: (4, 0),
+    }
+    assert slicer.round_of == detector_rounds
+    assert {
+        detector_id: (slicer.round_of[detector_id], slicer.pos_of[detector_id])
+        for detector_id in detector_rounds
+    } == expected_addresses
+    assert windows[1].detector_ids == ()
+    assert windows[1].detector_coordinates == ()
+    empty_faults = windows[1].require_faults(GRAPHLIKE)
+    assert empty_faults.check.shape == (0, 0)
+    assert empty_faults.observables.shape == (1, 0)
+    assert empty_faults.priors.shape == (0,)
+    assert empty_faults.owned.shape == (0,)
+
+    committed_detector_ids = tuple(
+        detector_id
+        for window in windows
+        for detector_id in window.detector_ids
+    )
+    assert committed_detector_ids == (0, 1, 2, 3)
+    assert len(committed_detector_ids) == len(set(committed_detector_ids))
+    for window in windows:
+        for detector_id in window.detector_ids:
+            assert window.defect_positions[detector_id] == expected_addresses[detector_id]
 
 
 def test_coordinates_for_rows_are_all_or_nothing():

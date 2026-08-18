@@ -175,8 +175,6 @@ def _validate_workload_identity(ops, decode_ops, dynamic_streams) -> None:
     for role, operations in groups:
         seen_ids = set()
         for operation in operations:
-            if type(operation) is not Operation:
-                raise TypeError(f"{role} entries must be exact Operation values")
             if operation.id in seen_ids:
                 raise ValueError(
                     f"operation id {operation.id} appears more than once in {role}")
@@ -379,8 +377,6 @@ def _materialize_execution_plan(
         resolved_operations,
         operation_window_plans,
     ):
-        if operation.id != operation_plan.operation_id:
-            raise ValueError("operation planning inputs must match by position")
         operation_id = operation.id
         plan_by_operation_id[operation_id] = operation_plan
         window_count[operation_id] = len(operation_plan.windows)

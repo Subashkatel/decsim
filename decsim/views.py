@@ -367,14 +367,14 @@ def capture_primary_result(engine, execution_runtime, window_manager, operations
     for operation_id in sorted(operation_by_id):
         logical = window_manager.op_results.get(operation_id)
         if logical is not None:
-            bits = tuple(_logical_bit(bit) for bit in logical)
+            bits = tuple(logical)
             status = "logical_observables"
         else:
             bits = None
             status = "no_logical_output"
         actual = None if truth_for is None else truth_for(operation_id)
         if actual is not None:
-            actual = tuple(_logical_bit(bit) for bit in actual)
+            actual = tuple(actual)
         failure = None
         if bits is not None and actual is not None:
             if len(bits) != len(actual):
@@ -396,7 +396,3 @@ def capture_primary_result(engine, execution_runtime, window_manager, operations
         tuple(rows), copy.deepcopy(links.traffic_json_value()), metric_rows)
 
 
-def _logical_bit(value):
-    if type(value) is not int or value not in (0, 1):
-        raise TypeError(f"logical observables must contain bits; got {value!r}")
-    return value

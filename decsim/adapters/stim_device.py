@@ -125,20 +125,12 @@ class StimDevice(_AtomicRunSeedConsumer):
         source_round_count: int,
     ) -> None:
         """Sample one fresh shot, or reuse the stream shot for later segments."""
-        for name, value in (
-            ("segment_round_count", segment_round_count),
-            ("source_round_count", source_round_count),
-        ):
-            if type(value) is not int or value < 1:
-                raise ValueError(f"{name} must be a positive built-in int")
         if op.circuit is None:
             raise ValueError("StimDevice operations require a circuit")
         if op.stream_id is None:
             if op.stream_offset is not None or segment_round_count != source_round_count:
                 raise ValueError("standalone duration must equal its source duration")
         else:
-            if type(op.stream_offset) is not int or op.stream_offset < 0:
-                raise ValueError("stream_offset must be a nonnegative built-in int")
             if op.stream_offset + segment_round_count > source_round_count:
                 raise ValueError("stream segment extends beyond its finite source")
         key = self._key(op)
@@ -196,14 +188,10 @@ class StimDevice(_AtomicRunSeedConsumer):
         if binding is None:
             raise RuntimeError("sampled stream has no source binding")
         circuit_text, bound_round_count, _ = binding
-        if type(source_round_count) is not int or source_round_count < 1:
-            raise ValueError("source_round_count must be a positive built-in int")
         if source_round_count != bound_round_count:
             raise ValueError("finalizer source duration differs from its binding")
         if op.circuit is None or str(op.circuit) != circuit_text:
             raise ValueError("finalizer circuit differs from its source binding")
-        if type(op.stream_offset) is not int or op.stream_offset < 0:
-            raise ValueError("finalizer offset must be a nonnegative built-in int")
         if op.stream_offset + 1 != source_round_count:
             raise ValueError("finalizer is not at the final source round")
         detector_ids = self._terminal_detector_ids.get(key)

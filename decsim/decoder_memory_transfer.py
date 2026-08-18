@@ -33,12 +33,8 @@ class FixedLatencyDecoderMemoryTransfer:
         self, job: DecodeJob, delay_ticks: int,
         receiver: Callable[[DecodeJob], None],
     ) -> None:
-        if type(delay_ticks) is not int:
-            raise TypeError("delay_ticks must be an exact int")
         if delay_ticks < 0:
             raise ValueError("delay_ticks must be nonnegative")
-        if not callable(receiver):
-            raise TypeError("decoder input receiver must be callable")
         key = self._key(job)
         if key in self._in_flight_keys:
             raise RuntimeError(

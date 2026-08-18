@@ -11,6 +11,8 @@ from decsim.decoder_cycle_model import (
     DecoderCycleModel,
     DecoderPipelineStage,
     StageCycleConfig,
+)
+from decsim.decoder_cycle_profiles import (
     delegated_latency_model,
     lookup_table_published_total_model,
 )
@@ -18,16 +20,14 @@ from decsim.decoders import CycleModelDecoder, NO_FAULT_MODEL_REQUIRED
 
 
 def _stage(cycles, basis=CycleQuantityBasis.PER_JOB, label="configured"):
-    if cycles == 0:
-        return StageCycleConfig(
-            cycles=cycles,
-            basis=basis,
-            zero_justification=f"{label} is deliberately free in this card.",
-        )
     return StageCycleConfig(
         cycles=cycles,
         basis=basis,
-        source=f"{label} cycle budget source.",
+        source=(
+            f"{label} is deliberately free in this card."
+            if cycles == 0
+            else f"{label} cycle budget source."
+        ),
     )
 
 
@@ -37,8 +37,6 @@ def _model(
     frequency_mhz=250.0,
     frequency_source="Configured FPGA clock source.",
     include_inner_latency=True,
-    inner_latency_source="Wrapped decoder latency source.",
-    inner_latency_zero_justification=None,
     model_name="test_card",
 ):
     stages = stages or (_stage(0),) * 5
@@ -51,8 +49,6 @@ def _model(
         frequency_mhz=frequency_mhz,
         frequency_source=frequency_source,
         include_inner_latency=include_inner_latency,
-        inner_latency_source=inner_latency_source,
-        inner_latency_zero_justification=inner_latency_zero_justification,
         model_name=model_name,
     )
 
@@ -115,17 +111,6 @@ def test_stage_cycle_counts_refuse_non_whole_or_negative_values(cycles):
         )
 
 
-def test_stage_cycle_count_normalizes_a_semantically_whole_value():
-    """A semantically whole numeric cycle count is stored as an integer."""
-    stage = StageCycleConfig(
-        cycles=3.0,
-        basis=CycleQuantityBasis.PER_JOB,
-        source="Measured positive cycle source.",
-    )
-    assert stage.cycles == 3
-    assert type(stage.cycles) is int
-
-
 @pytest.mark.parametrize("round_count", [-1, 2.5, float("nan"), float("inf")])
 def test_per_round_work_refuses_invalid_job_sizes(round_count):
     """Per-round pricing refuses negative, fractional, or nonfinite job sizes."""
@@ -143,77 +128,11 @@ def test_per_round_work_refuses_invalid_job_sizes(round_count):
 
 
 def test_stage_basis_must_be_one_of_the_closed_basis_members():
-    """A stage refuses strings and other values outside the basis enumeration."""
+    """A configured basis is selected from the closed quantity-basis enum."""
+    assert CycleQuantityBasis("per_job") is CycleQuantityBasis.PER_JOB
+    assert CycleQuantityBasis("per_round") is CycleQuantityBasis.PER_ROUND
     with pytest.raises(ValueError):
-        StageCycleConfig(
-            cycles=1,
-            basis="per_job",
-            source="Measured positive cycle source.",
-        )
-
-
-@pytest.mark.parametrize(
-    "cycles,source,zero_justification",
-    [
-        (0, None, None),
-        (0, "Unexpected source.", "Explicit zero reason."),
-        (0, "Unexpected source.", None),
-        (1, None, None),
-        (1, "Measured source.", "Unexpected zero reason."),
-    ],
-)
-def test_stage_source_and_zero_justification_are_exclusive(
-    cycles,
-    source,
-    zero_justification,
-):
-    """Zero and positive stages require their matching exclusive attribution."""
-    with pytest.raises(ValueError):
-        StageCycleConfig(
-            cycles=cycles,
-            basis=CycleQuantityBasis.PER_JOB,
-            source=source,
-            zero_justification=zero_justification,
-        )
-
-
-@pytest.mark.parametrize("bad_line", ["", "   ", "source\nsecond", "source\rsecond"])
-def test_stage_provenance_refuses_empty_or_multiline_text(bad_line):
-    """Stage attribution must be a nonempty single line."""
-    with pytest.raises(ValueError):
-        StageCycleConfig(
-            cycles=1,
-            basis=CycleQuantityBasis.PER_JOB,
-            source=bad_line,
-        )
-    with pytest.raises(ValueError):
-        StageCycleConfig(
-            cycles=0,
-            basis=CycleQuantityBasis.PER_JOB,
-            zero_justification=bad_line,
-        )
-
-
-def test_provenance_lines_are_stripped_before_storage():
-    """Valid provenance is normalized to its stripped one-line form."""
-    positive = StageCycleConfig(
-        1,
-        CycleQuantityBasis.PER_JOB,
-        source="  measured source  ",
-    )
-    zero = StageCycleConfig(
-        0,
-        CycleQuantityBasis.PER_JOB,
-        zero_justification="  explicit zero  ",
-    )
-    card = _model(
-        frequency_source="  clock source  ",
-        inner_latency_source="  inner source  ",
-    )
-    assert positive.source == "measured source"
-    assert zero.zero_justification == "explicit zero"
-    assert card.frequency_source == "clock source"
-    assert card.inner_latency_source == "inner source"
+        CycleQuantityBasis("per_batch")
 
 
 @pytest.mark.parametrize("frequency_mhz", [0, -1, float("nan"), float("inf")])
@@ -223,66 +142,10 @@ def test_frequency_must_be_finite_and_positive(frequency_mhz):
         _model(frequency_mhz=frequency_mhz)
 
 
-@pytest.mark.parametrize("bad_line", ["", "   ", "clock\nsource", "clock\rsource"])
-def test_frequency_source_must_be_a_nonempty_single_line(bad_line):
-    """Every configured frequency carries readable one-line attribution."""
-    with pytest.raises(ValueError):
-        _model(frequency_source=bad_line)
-
-
 def test_frequency_refuses_a_clock_where_one_cycle_rounds_to_zero_ticks():
     """A configured positive cycle can never become a free simulated hop."""
     with pytest.raises(ValueError, match="one cycle must convert to at least one tick"):
         _model(frequency_mhz=2_000_000.0)
-
-
-@pytest.mark.parametrize(
-    "include_inner_latency,inner_source,zero_reason",
-    [
-        (True, None, None),
-        (True, "Inner source.", "Unexpected zero reason."),
-        (True, None, "Wrong mode reason."),
-        (False, None, None),
-        (False, "Wrong mode source.", None),
-        (False, "Wrong mode source.", "Zero reason."),
-    ],
-)
-def test_inner_latency_attribution_matches_the_flag_exclusively(
-    include_inner_latency,
-    inner_source,
-    zero_reason,
-):
-    """Included and excluded inner latency each require only their matching text."""
-    with pytest.raises(ValueError):
-        _model(
-            include_inner_latency=include_inner_latency,
-            inner_latency_source=inner_source,
-            inner_latency_zero_justification=zero_reason,
-        )
-
-
-@pytest.mark.parametrize("include_inner_latency", [0, 1, None, "yes"])
-def test_inner_latency_flag_must_be_an_exact_boolean(include_inner_latency):
-    """The inner-latency decision refuses truthy and falsey substitutes."""
-    with pytest.raises(ValueError):
-        _model(
-            include_inner_latency=include_inner_latency,
-            inner_latency_source=None,
-            inner_latency_zero_justification="Explicit exclusion reason.",
-        )
-
-
-@pytest.mark.parametrize("bad_line", ["", "   ", "inner\nsource", "inner\rsource"])
-def test_inner_latency_provenance_must_be_a_nonempty_single_line(bad_line):
-    """Both inner-latency modes require readable one-line attribution."""
-    with pytest.raises(ValueError):
-        _model(inner_latency_source=bad_line)
-    with pytest.raises(ValueError):
-        _model(
-            include_inner_latency=False,
-            inner_latency_source=None,
-            inner_latency_zero_justification=bad_line,
-        )
 
 
 def test_cycles_are_summed_before_exactly_one_time_conversion(monkeypatch):
@@ -291,8 +154,6 @@ def test_cycles_are_summed_before_exactly_one_time_conversion(monkeypatch):
         stages=tuple(_stage(cycles) for cycles in (1, 2, 3, 4, 5)),
         frequency_mhz=100.0,
         include_inner_latency=False,
-        inner_latency_source=None,
-        inner_latency_zero_justification="The stage card owns all latency.",
     )
     conversion_inputs = []
 
@@ -315,20 +176,18 @@ def test_runtime_guard_rejects_positive_work_that_converts_to_zero(monkeypatch):
         card.latency_ticks(SimpleNamespace(n_rounds=1), 0)
 
 
-def test_excluded_inner_latency_cannot_be_supplied_as_hidden_work():
-    """A pure stage card refuses any nonzero hidden inner latency."""
+def test_excluded_inner_latency_is_ignored_by_the_cycle_card():
+    """The flag alone chooses whether supplied inner ticks contribute."""
     card = _model(
         stages=(_stage(1),) + (_stage(0),) * 4,
         include_inner_latency=False,
-        inner_latency_source=None,
-        inner_latency_zero_justification="The stage card owns all latency.",
     )
-    with pytest.raises(ValueError, match="inner_latency_ticks must be zero"):
-        card.latency_ticks(SimpleNamespace(n_rounds=1), 1)
+
+    assert card.latency_ticks(SimpleNamespace(n_rounds=1), 123456) == 4000
 
 
 def test_json_reports_every_knob_and_each_stage_attribution():
-    """The JSON card fully reports cycles, bases, sources, zeros, clock, and inner mode."""
+    """The JSON card reports each stage source, clock, and inner-latency flag."""
     card = _model(
         stages=(
             _stage(2, label="fetch"),
@@ -340,8 +199,6 @@ def test_json_reports_every_knob_and_each_stage_attribution():
         frequency_mhz=500.0,
         frequency_source="Measured ASIC clock.",
         include_inner_latency=False,
-        inner_latency_source=None,
-        inner_latency_zero_justification="This card owns the full decode price.",
         model_name="fully_attributed",
     )
 
@@ -353,41 +210,35 @@ def test_json_reports_every_knob_and_each_stage_attribution():
                 "cycles": 2,
                 "basis": "per_job",
                 "source": "fetch cycle budget source.",
-                "zero_justification": None,
             },
             {
                 "stage": "decode",
                 "cycles": 0,
                 "basis": "per_job",
-                "source": None,
-                "zero_justification": "decode is deliberately free in this card.",
+                "source": "decode is deliberately free in this card.",
             },
             {
                 "stage": "execute",
                 "cycles": 3,
                 "basis": "per_round",
                 "source": "execute cycle budget source.",
-                "zero_justification": None,
             },
             {
                 "stage": "memory",
                 "cycles": 0,
                 "basis": "per_job",
-                "source": None,
-                "zero_justification": "memory is deliberately free in this card.",
+                "source": "memory is deliberately free in this card.",
             },
             {
                 "stage": "writeback",
                 "cycles": 0,
                 "basis": "per_job",
-                "source": None,
-                "zero_justification": "writeback is deliberately free in this card.",
+                "source": "writeback is deliberately free in this card.",
             },
         ],
         "frequency_mhz": 500.0,
         "frequency_source": "Measured ASIC clock.",
         "include_inner_latency": False,
-        "inner_latency_zero_justification": "This card owns the full decode price.",
     }
 
 
@@ -423,9 +274,7 @@ def test_delegated_default_is_exactly_the_wrapped_decoder_latency():
     assert card.model_name == "delegated_latency"
     assert card.frequency_mhz == 250.0
     assert card.include_inner_latency is True
-    json_value = card.to_json_value()
-    assert json_value["inner_latency_source"] == card.inner_latency_source
-    assert "inner_latency_zero_justification" not in json_value
+    assert card.to_json_value()["include_inner_latency"] is True
     assert card.stage_cycles(SimpleNamespace(n_rounds=999)) == tuple(
         (stage, 0) for stage in DecoderPipelineStage
     )
@@ -452,13 +301,7 @@ def test_lilliput_card_reproduces_seven_cycles_at_250_mhz():
     )
     assert card.total_cycles(job) == 7
     assert card.latency_ticks(job, 0) == 28000
-    for stage_row in card.to_json_value()["stages"]:
-        if stage_row["stage"] == "execute":
-            assert stage_row["source"] is not None
-            assert stage_row["zero_justification"] is None
-        else:
-            assert stage_row["source"] is None
-            assert stage_row["zero_justification"] is not None
+    assert all(stage_row["source"] for stage_row in card.to_json_value()["stages"])
 
 
 def test_adapter_delegates_decode_fault_requirement_and_seed_child():

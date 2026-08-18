@@ -41,7 +41,7 @@ import stim
 
 from decsim.adapters.stim_device import RecordedStimDevice
 from decsim.config import TICKS_PER_US, TimingConfig
-from decsim.decoder_engine import DecoderEngine, DecoderStage, DecoderTiming
+from decsim.decoder_engine import ALGORITHM_STAGE, DecoderEngine, DecoderStage, DecoderTiming
 from decsim.decoders import PresetLatencyDecoder
 from decsim.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
 from decsim.message import Operation
@@ -171,7 +171,7 @@ def realtime(shots: int, algorithm_us: float) -> dict:
         circuit.detector_error_model(decompose_errors=True))
     whole_pred = matching.decode_batch(dets[:shots])
     whole_fails = int(np.sum(np.any(whole_pred != obs[:shots], axis=1)))
-    last_round_to_frame, reaction, fails, spans = [], [], 0, []
+    last_round_to_frame, reaction, fails, spans, measured_ns = [], [], 0, [], []
     for shot in range(shots):
         engine = DecoderEngine(
             PyMatchingDecoder(latency_model=None),          # measured wall clock per call
@@ -183,6 +183,8 @@ def realtime(shots: int, algorithm_us: float) -> dict:
         result = done.result.operation_results[0]
         fails += result.logical_observables != result.observable_truth
         frames = {r.window_key[1]: r for r in done.pauli_frame.snapshot().records}
+        measured_ns.extend(r.measured_ns for r in engine.stage_records
+                           if r.stage == ALGORITHM_STAGE and r.measured_ns is not None)
         for (op_id, window_id), window in done.window_manager.windows.items():
             frame = frames.get(window_id)
             if frame is None or window.t_data_complete is None:
@@ -192,6 +194,8 @@ def realtime(shots: int, algorithm_us: float) -> dict:
         first = min(w.t_first_round for w in done.window_manager.windows.values())
         spans.append((max(f.committed_ticks for f in frames.values()) - first) / TICKS_PER_US)
     return dict(shots=shots, rounds=rounds, algorithm_us=algorithm_us,
+                measured_decode_median_us=statistics.median(measured_ns) / 1000,
+                measured_decode_max_us=max(measured_ns) / 1000,
                 loop_fails=fails, whole_fails=whole_fails, samples=last_round_to_frame,
                 last_round_to_frame_mean_us=statistics.fmean(last_round_to_frame),
                 last_round_to_frame_sd_us=statistics.pstdev(last_round_to_frame),
@@ -416,9 +420,11 @@ def write_report(acc_rows: list, eps: dict, rt: dict, software_us: float,
               "ensembling. The paper's error bars come from all cycle counts up to 250; ours from four.",
               "", "## 2. Real-time configuration (paper Sec. V: d = 5, 1.1 us cycle)", "",
               "Software algorithm cost: the wall clock of each real PyMatching call on this host, "
-              f"measured per window inside the loop (median over synthetic d=5 windows for reference: "
-              f"{software_us:.1f} us; graph prebuilt, one thread); reference link cards (CWD 2 us, WDO 1 us, "
-              "DD 0.5 us), C2B 0.1 us at 1 Gbit/s, frame commit 4 ns.", "",
+              f"measured per window inside the loop: median {rt['measured_decode_median_us']:.1f} us, "
+              f"max {rt['measured_decode_max_us']:.1f} us on these d=5 SI1000 windows (10 rounds, 240 "
+              f"detectors; the sparser synthetic p=0.001 window reference is {software_us:.1f} us); graph "
+              "prebuilt, one thread; reference link cards (CWD 2 us, WDO 1 us, DD 0.5 us), C2B 0.1 us at "
+              "1 Gbit/s, frame commit 4 ns.", "",
               "| quantity | this loop | paper |", "|---|---|---|",
               f"| last cycle received -> correction committed, mean (sd, max) us | {rt['last_round_to_frame_mean_us']:.1f} "
               f"({rt['last_round_to_frame_sd_us']:.1f}, {rt['last_round_to_frame_max_us']:.1f}) | {PAPER['realtime_latency_us']} +- {PAPER['realtime_latency_sd_us']} |",
@@ -428,7 +434,9 @@ def write_report(acc_rows: list, eps: dict, rt: dict, software_us: float,
               "multi-threaded streaming decoder on a workstation, none of which are our numbers; ours are the "
               "reference link cards plus one measured software decode per window. Windows here are sliding "
               "(commit 5, buffer 5) and serial; the paper's decoder streams and kept latency constant for a "
-              "million cycles, ours grows over 250 cycles because 0.65 < 0.91 rounds/us. Their real-time "
+              "million cycles, ours grows over 250 cycles because a single-threaded PyMatching call per "
+              "5-round window (about 22 us here) cannot keep pace with 1.1 us cycles; the paper's decoder "
+              "is a multi-worker streaming design. Their real-time "
               "run used the 72-qubit processor data (not in this archive); ours replays the 105-qubit d=5 patch."]
     lines += ["", "## 3. What keeps the loop up with the QPU (d = 5, 1.1 us cycles, 250 recorded cycles)", "",
               "| scheme | units | algorithm | sustained rounds/us (need 0.91) | latency first 10 windows us | last 10 windows us | max us | keeps up |",

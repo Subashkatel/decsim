@@ -198,6 +198,14 @@ Phase 0, zero-risk deletions and inlines (one commit)
   window_manager.lifecycle; decoder_manager decoder_for, free_units,
   queue_for, _handle_strong_decode_result; StrategyServicesImpl into
   window_manager.
+- validation ceremony: delete the __post_init__ blocks and type guards that
+  re-prove values another decsim module just built (message.py 45 raises /
+  23 type checks, links.py 44, ingress 12, buffer 8, engine 18, seeding 14,
+  qlx 46; roughly 300 lines). Keep only the six real invariants: qpu.issue
+  cadence equals the cycle; ExecutionRuntime._claim_resources no double
+  allocation; SyndromeBuffer duplicate and late-fragment checks; decoder
+  memory capacity exhaustion (fail-stop); RunSpec compatibility rules on
+  user config (moved to defaults.py); link card completeness.
 - comments: convert the 10 history comments to present-tense invariants;
   add one-line invariants to the 14 undocumented message.py classes and the
   public methods listed in the audits.

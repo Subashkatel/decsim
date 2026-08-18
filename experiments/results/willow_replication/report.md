@@ -2,7 +2,7 @@
 
 Data: Zenodo 13273331 (arXiv:2408.13687), patches d=3: d3_at_q4_5, d=5: d5_at_q6_5, d=7: d7_at_q6_7.
 Plots: logical_error_vs_cycles.png, eps_per_cycle_vs_distance.png, realtime_latency.png, latency_vs_window.png.
-Host: AMD EPYC 9454 48-Core Processor; load average at run start 15.5, 13.9, 12.1 (measured decode times are only meaningful on an otherwise idle core).
+Host: AMD EPYC 9454 48-Core Processor; load average at run start 8.9, 9.2, 9.1 (measured decode times are only meaningful on an otherwise idle core).
 
 ## 0. Correctness freeze: loop vs whole-shot PyMatching, shot for shot
 
@@ -55,11 +55,11 @@ Read across a row: the loop and whole-shot PyMatching share decoder and prior an
 
 ## 2. Real-time configuration (paper Sec. V: d = 5, 1.1 us cycle)
 
-Software algorithm cost: the wall clock of each real PyMatching call on this host, measured per window inside the loop: median 22.0 us, max 52.4 us on these d=5 SI1000 windows (10 rounds, 240 detectors; the sparser synthetic p=0.001 window reference is 4.1 us); graph prebuilt, one thread; reference link cards (CWD 2 us, WDO 1 us, DD 0.5 us), C2B 0.1 us at 1 Gbit/s, frame commit 4 ns.
+Software algorithm cost: the wall clock of each real PyMatching call on this host, measured per window inside the loop: median 21.3 us, max 46.7 us on these d=5 SI1000 windows (10 rounds, 240 detectors; the sparser synthetic p=0.001 window reference is 4.1 us); graph prebuilt, one thread; reference link cards (CWD 2 us, WDO 1 us, DD 0.5 us), C2B 0.1 us at 1 Gbit/s, frame commit 4 ns.
 
 | quantity | this loop | paper |
 |---|---|---|
-| last cycle received -> correction committed, mean (sd, max) us | 524.5 (289.1, 1106.4) | 63.0 +- 17.0 |
+| last cycle received -> correction committed, mean (sd, max) us | 505.1 (277.6, 1064.2) | 63.0 +- 17.0 |
 | sustained input, rounds/us | 0.20 | 1/1.1 = 0.91 |
 | logical failures over 250 cycles, d=5 | loop 5/10, whole-shot PyMatching on the same shots 5/10 | eps_5 = 0.35 % per cycle real-time (0.269 offline NN); at 250 cycles that is P ~ 0.4 |
 
@@ -69,13 +69,13 @@ Deviations to state: the paper's latency includes Ethernet, shared-memory buffer
 
 | scheme | units | algorithm | sustained rounds/us (need 0.91) | latency first 10 windows us | last 10 windows us | max us | keeps up |
 |---|---|---|---|---|---|---|---|
-| serial sliding | 1 | software PyMatching, measured per call | 0.19 | 126.6 | 926.1 | 1121.1 | NO |
+| serial sliding | 1 | software PyMatching, measured per call | 0.20 | 124.6 | 884.9 | 1062.6 | NO |
 | serial sliding | 1 | LILLIPUT-class ASIC 42 ns | 0.90 | 3.1 | 3.1 | 3.1 | yes |
-| serial sliding | 2 | software PyMatching, measured per call | 0.19 | 133.0 | 938.9 | 1121.9 | NO |
+| serial sliding | 2 | software PyMatching, measured per call | 0.20 | 129.0 | 901.2 | 1075.6 | NO |
 | serial sliding | 2 | LILLIPUT-class ASIC 42 ns | 0.90 | 3.1 | 3.1 | 3.1 | yes |
-| parallel A/B (Skoric) | 1 | software PyMatching, measured per call | 0.29 | 218.7 | 442.9 | 696.9 | NO |
-| parallel A/B (Skoric) | 1 | LILLIPUT-class ASIC 42 ns | 0.89 | 10.4 | 9.9 | 17.7 | yes |
-| parallel A/B (Skoric) | 2 | software PyMatching, measured per call | 0.56 | 84.8 | 141.5 | 240.5 | NO |
-| parallel A/B (Skoric) | 2 | LILLIPUT-class ASIC 42 ns | 0.89 | 10.4 | 9.9 | 17.7 | yes |
+| parallel A/B (Skoric) | 1 | software PyMatching, measured per call | 0.29 | 220.6 | 437.4 | 643.4 | NO |
+| parallel A/B (Skoric) | 1 | LILLIPUT-class ASIC 42 ns | 0.89 | 9.9 | 9.4 | 16.7 | yes |
+| parallel A/B (Skoric) | 2 | software PyMatching, measured per call | 0.55 | 87.5 | 147.1 | 256.6 | NO |
+| parallel A/B (Skoric) | 2 | LILLIPUT-class ASIC 42 ns | 0.89 | 9.9 | 9.4 | 16.7 | yes |
 
-Serial sliding windows are bound by the per-window chain (unit assigned, CWD transfer, decode, WDO, boundary handoff), so more units change nothing and latency grows with time; parallel A/B windows remove the chain and hold latency flat. Plot: latency_vs_window.png.
+Serial sliding windows are bound by the per-window chain (unit assigned, CWD transfer, decode, boundary handoff over DD at decode done), so more units change nothing and latency grows with time; parallel A/B windows remove the chain and hold latency flat. Plot: latency_vs_window.png.

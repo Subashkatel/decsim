@@ -257,19 +257,25 @@ def write_report(config: dict, rows: list, report_dir: Path) -> None:
     lines += ["", f"algorithm = 'measured' rows charge the wall clock of each real PyMatching call "
               f"(software decoder on this host: {cpu}, one thread, graph cached); numeric rows charge "
               "the stated modeled latency (an ASIC card)."]
-    fastest = min(rows, key=lambda r: r["round_period_us"])
-    chain_us = 1 / fastest["throughput_windows_per_us"]
     commit_rounds = config["distance"]
+    fastest_period = min(r["round_period_us"] for r in rows)
+    chains = []
+    for r in rows:
+        if r["round_period_us"] == fastest_period:
+            chain_us = 1 / r["throughput_windows_per_us"]
+            algo = r["algorithm_latency_us"]
+            chains.append(f"{algo if isinstance(algo, str) else f'{algo:g} us'}: {chain_us:.2f} us per window, "
+                          f"{commit_rounds / chain_us:.2f} rounds/us, knee near a {chain_us / commit_rounds:.2f} us round period")
     lines += ["", "Reading the table. Windows are sliding (commit d, buffer d) and serial: window k+1 "
               "starts only after window k's boundary arrives, so the loop's capacity is one window "
-              f"per serial chain. Measured chain at the fastest input: {chain_us:.2f} us per window "
-              f"= unit assigned, CWD transfer into its memory, decoder service, WDO delivery, boundary handoff, i.e. "
-              f"{commit_rounds / chain_us:.2f} rounds/us sustainable, a knee at a round period of "
-              f"about {chain_us / commit_rounds:.2f} us. Faster input only grows dep_block (the wait "
-              "for the previous window). A unit is held from assignment through its input transfer to "
-              "the end of its decode, so utilization counts the CWD transfer; the decode itself is "
-              "the fetch+algorithm+release columns. With these link cards the baseline is link-bound, "
-              "not decoder-bound.",
+              "per serial chain = unit assigned, CWD transfer into its memory, decoder service, boundary "
+              "handoff over DD at decode done (the WDO delivery and frame commit run downstream, off the "
+              "chain). Measured chain at the fastest input, per algorithm: " + "; ".join(chains) + ". "
+              "Faster input only grows dep_block (the wait for the previous window). A unit is held from "
+              "assignment through its input transfer to the end of its decode, so utilization counts the "
+              "CWD transfer; the decode itself is the fetch+algorithm+release columns. With these link "
+              "cards the ASIC rows are link-bound (CWD 2 us + DD 0.5 us per window), not decoder-bound; "
+              "the measured software row is decoder-bound.",
               "", "Simulator wall clock per shot (host CPU, not a modeled latency): "
               + ", ".join(f"{r['sim_wall_seconds_per_shot']:.2f}s" for r in rows[:6]) + " ...",
               "", "Anchor comparison against published numbers: anchor.md (experiments/baseline_anchor.py)."]

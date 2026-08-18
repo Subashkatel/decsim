@@ -445,7 +445,7 @@ def write_report(acc_rows: list, eps: dict, rt: dict, software_us: float,
         lines.append(f"| {r['scheme']} | {r['units']} | {r['algorithm']} | {r['rounds_per_us']:.2f} | "
                      f"{r['first10_us']:.1f} | {r['last10_us']:.1f} | {r['max_us']:.1f} | {'yes' if r['keeps_up'] else 'NO'} |")
     lines += ["", "Serial sliding windows are bound by the per-window chain (unit assigned, CWD transfer, decode, "
-              "WDO, boundary handoff), so more units change nothing and latency grows with time; parallel A/B "
+              "boundary handoff over DD at decode done), so more units change nothing and latency grows with time; parallel A/B "
               "windows remove the chain and hold latency flat. Plot: latency_vs_window.png."]
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text("\n".join(lines) + "\n")

@@ -26,29 +26,35 @@ class Held:
 
 
 class Ignore:
-    """Uses ordinary feedback-memory rounds without extra idle decode demand."""
+    """Idle rounds travel as ordinary feedback-memory rounds and cost no extra decode work."""
 
-    mode = "ignore"
+    def relay(self, controller, operation, patch, round_index: int) -> None:
+        controller.emit_memory_round(operation, patch, round_index)
 
     def account(self, idle_rounds: int, op) -> None:
         pass
 
 
 class ExtendStream:
-    """Inject idle rounds into the op's live dynamic stream when one exists;
-    falls back to memory rounds otherwise (mode 'extend_stream')."""
+    """Idle rounds extend the op's live dynamic stream when it has one, and
+    travel as memory rounds otherwise."""
 
-    mode = "extend_stream"
+    def relay(self, controller, operation, patch, round_index: int) -> None:
+        if not controller.extend_live_stream(operation, patch):
+            controller.emit_memory_round(operation, patch, round_index)
 
     def account(self, idle_rounds: int, op) -> None:
         pass
 
 
 class SeparateDecodeJobs:
-    """Requests one synthetic load-only demand per completed commit region,
-    sized to commit plus buffer rounds and carrying no real syndrome contents."""
+    """Idle rounds travel as memory rounds and every completed commit region
+    of them costs one synthetic load-only decode job, sized to commit plus
+    buffer rounds and carrying no real syndrome contents."""
 
-    mode = "separate_decode_jobs"
+    def relay(self, controller, operation, patch, round_index: int) -> None:
+        controller.emit_memory_round(operation, patch, round_index)
+        controller.submit_idle_decode_if_due(operation, patch, round_index)
 
     def account(self, idle_rounds: int, op) -> None:
         pass

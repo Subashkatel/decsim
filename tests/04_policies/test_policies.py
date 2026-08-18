@@ -19,9 +19,13 @@ class ExternalBoundaryPolicy:
 
 
 class ExternalIdlePolicy:
-    def __init__(self, mode="external"):
-        self.mode = mode
+    def __init__(self):
         self.calls = []
+        self.relayed = []
+
+    def relay(self, controller, operation, patch, round_index):
+        self.relayed.append((operation, patch, round_index))
+        controller.emit_memory_round(operation, patch, round_index)
 
     def account(self, idle_rounds, op):
         self.calls.append((idle_rounds, op))
@@ -76,6 +80,34 @@ class RuntimeProbe:
         self.idle_rounds_by_patch[patch] = self.idle_rounds_by_patch.get(patch, 0) + 1
 
 
+class StreamsProbe:
+    """Stream bookkeeping stand-in: a binding per operation, a set of live
+    protected patches, and the streams the window manager knows."""
+
+    def __init__(self, qpu, window_manager):
+        self.qpu = qpu
+        self.window_manager = window_manager
+        self.bindings = {}
+        self.live_protected_patches = set()
+        self.stream_next_round = {}
+
+    def binding_for(self, operation_id):
+        return self.bindings.get(operation_id)
+
+    def is_live_protected_patch(self, patch):
+        return patch in self.live_protected_patches
+
+    def extend_live_stream(self, operation, patch):
+        binding = self.bindings.get(operation.id)
+        stream_id = None if binding is None else binding.stream_id
+        if stream_id is None or not self.window_manager.has_dynamic_stream(stream_id):
+            return False
+        global_round = self.stream_next_round.get(stream_id, 0) + 1
+        self.stream_next_round[stream_id] = global_round
+        self.qpu.emit_idle_stream_round(operation, stream_id, global_round, patch)
+        return True
+
+
 def make_controller(idle_policy, *, live_streams=()):
     geometry = SimpleNamespace(
         distance=3,
@@ -101,6 +133,7 @@ def make_controller(idle_policy, *, live_streams=()):
         resolved_operations=(),
         resolved_patches=(patch,),
         idle_policy=idle_policy,
+        feedback_streams=StreamsProbe(qpu, window_manager),
     )
     controller.runtime = RuntimeProbe()
     return controller, engine, qpu, window_manager
@@ -178,17 +211,11 @@ def test_recovery_uses_optional_speculation_and_skips_inert_cases():
     assert not recovery.has_finality_blockers
 
 
-def test_idle_policy_modes_and_accounts_are_stateless_no_ops():
+def test_idle_policy_accounts_are_stateless_no_ops():
     """Built-in idle accounts accept arbitrary values, return nothing, and mutate no state."""
-    policy_modes = (
-        (Ignore(), "ignore"),
-        (ExtendStream(), "extend_stream"),
-        (SeparateDecodeJobs(), "separate_decode_jobs"),
-    )
     operation = {"history": []}
 
-    for policy, expected_mode in policy_modes:
-        assert policy.mode == expected_mode
+    for policy in (Ignore(), ExtendStream(), SeparateDecodeJobs()):
         assert policy.account(object(), operation) is None
         assert vars(policy) == {}
     assert operation == {"history": []}
@@ -277,57 +304,43 @@ def test_switching_validates_builtin_boundary_contexts():
     )
 
 
-def test_controller_routes_extend_stream_by_exact_mode_string():
-    """An exact extend-stream mode routes idle data into an existing live stream."""
-    idle_policy = ExternalIdlePolicy(mode="extend_stream")
-    controller, _, qpu, _ = make_controller(
-        idle_policy, live_streams=("stream-a",)
-    )
+def test_extend_stream_relays_idle_rounds_into_a_live_stream():
+    """ExtendStream routes idle data into an existing live stream."""
+    controller, _, qpu, _ = make_controller(ExtendStream(), live_streams=("stream-a",))
     operation = controller.runtime.operations[7]
-    controller._stream_binding_by_operation_id[7] = SimpleNamespace(
-        stream_id="stream-a"
-    )
+    controller.streams.bindings[7] = SimpleNamespace(stream_id="stream-a")
 
-    controller._relay_idle_round(7, "patch-a", 9)
+    controller.emit_idle_round(7, "patch-a", 9)
 
     assert qpu.feedback_rounds == []
     assert qpu.stream_rounds == [(operation, "stream-a", 1, "patch-a")]
-    assert controller.stream_next_round == {"stream-a": 1}
+    assert controller.streams.stream_next_round == {"stream-a": 1}
 
 
-def test_controller_falls_back_without_a_live_stream():
-    """Extend-stream mode falls back to memory rounds without creating or reopening a stream."""
-    unbound, _, unbound_qpu, _ = make_controller(
-        ExternalIdlePolicy(mode="extend_stream"), live_streams=("stream-a",)
-    )
-    unbound._relay_idle_round(7, "patch-a", 3)
+def test_extend_stream_falls_back_without_a_live_stream():
+    """ExtendStream falls back to memory rounds without creating or reopening a stream."""
+    unbound, _, unbound_qpu, _ = make_controller(ExtendStream(), live_streams=("stream-a",))
+    unbound.emit_idle_round(7, "patch-a", 3)
 
-    closed, _, closed_qpu, window_manager = make_controller(
-        ExternalIdlePolicy(mode="extend_stream")
-    )
-    closed._stream_binding_by_operation_id[7] = SimpleNamespace(
-        stream_id="stream-a"
-    )
-    closed._relay_idle_round(7, "patch-a", 4)
+    closed, _, closed_qpu, window_manager = make_controller(ExtendStream())
+    closed.streams.bindings[7] = SimpleNamespace(stream_id="stream-a")
+    closed.emit_idle_round(7, "patch-a", 4)
 
     assert unbound_qpu.feedback_rounds == [(7, "patch-a", 3)]
     assert closed_qpu.feedback_rounds == [(7, "patch-a", 4)]
-    assert unbound.stream_next_round == {}
-    assert closed.stream_next_round == {}
+    assert unbound.streams.stream_next_round == {}
+    assert closed.streams.stream_next_round == {}
     assert window_manager.live_streams == set()
 
 
-def test_controller_submits_only_complete_separate_idle_jobs():
-    """Separate mode emits memory rounds and submits load-only jobs only at complete increments."""
-    controller, _, qpu, window_manager = make_controller(
-        ExternalIdlePolicy(mode="separate_decode_jobs")
-    )
+def test_separate_decode_jobs_submits_only_complete_idle_regions():
+    """SeparateDecodeJobs emits memory rounds and submits load-only jobs only at complete increments."""
+    controller, _, qpu, window_manager = make_controller(SeparateDecodeJobs())
 
-    controller._relay_idle_round(7, "patch-a", 2)
     for round_index in (1, 2, 3, 4, 5):
-        controller._submit_idle_decode_if_due(7, "patch-a", round_index)
+        controller.emit_idle_round(7, "patch-a", round_index)
 
-    assert qpu.feedback_rounds == [(7, "patch-a", 2)]
+    assert qpu.feedback_rounds == [(7, "patch-a", r) for r in (1, 2, 3, 4, 5)]
     assert window_manager.idle_demands == [
         {
             "rounds": 3,
@@ -344,32 +357,30 @@ def test_controller_submits_only_complete_separate_idle_jobs():
     ]
 
 
-def test_controller_treats_other_modes_as_ordinary_memory_rounds():
-    """Every other mode uses ordinary memory routing without synthetic decode demand."""
-    controller, _, qpu, window_manager = make_controller(
-        ExternalIdlePolicy(mode="future-mode"), live_streams=("stream-a",)
-    )
-    controller._stream_binding_by_operation_id[7] = SimpleNamespace(
-        stream_id="stream-a"
-    )
+def test_an_external_idle_policy_relays_through_the_controller():
+    """An external policy owns its relay; the controller offers memory rounds,
+    live-stream extension and idle decode demand."""
+    policy = ExternalIdlePolicy()
+    controller, _, qpu, window_manager = make_controller(policy, live_streams=("stream-a",))
+    controller.streams.bindings[7] = SimpleNamespace(stream_id="stream-a")
 
-    controller._relay_idle_round(7, "patch-a", 2)
-    controller._submit_idle_decode_if_due(7, "patch-a", 2)
+    controller.emit_idle_round(7, "patch-a", 2)
 
     assert qpu.feedback_rounds == [(7, "patch-a", 2)]
     assert qpu.stream_rounds == []
     assert window_manager.idle_demands == []
+    assert policy.relayed == [(controller.runtime.operations[7], "patch-a", 2)]
 
 
 def test_controller_accounts_every_idle_round_except_on_a_live_protected_stream():
     """Every idle cycle the QPU reports is emitted and accounted once; a patch on a
     live protected stream emits through that stream instead."""
-    idle_policy = ExternalIdlePolicy(mode="ignore")
+    idle_policy = ExternalIdlePolicy()
     controller, engine, qpu, _ = make_controller(idle_policy)
 
     controller.emit_idle_round(7, "patch-a", 1)
     controller.emit_idle_round(7, "patch-a", 2)
-    controller._active_stream_id_by_patch["patch-a"] = "stream-a"
+    controller.streams.live_protected_patches.add("patch-a")
     controller.emit_idle_round(7, "patch-a", 3)
 
     operation = controller.runtime.operations[7]

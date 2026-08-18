@@ -143,6 +143,7 @@ class RunSpec:
         """Wire the run from its resolved configuration, in dependency order,
         run the engine to quiescence, and capture the result."""
         from .controller.controller import Controller
+        from .controller.feedback_streams import FeedbackStreams, NoFeedbackStreams
         from .decoder_manager import DecoderManager
         from .program.execution_runtime import ExecutionRuntime
         from .program.orchestrators import ExecutionOrchestrator
@@ -219,6 +220,15 @@ class RunSpec:
         check_factory_decode_service(factory, decoder_manager)
 
         qpu = QPUDevice(engine, config.device, plan.round_ticks)
+        uses_streams = config.protected_regions or any(
+            op.stream_id is not None for op in config.all_operations)
+        feedback_streams = FeedbackStreams(
+            engine, qpu=qpu, window_manager=window_manager,
+            regions=config.protected_regions,
+            resolved_operations=plan.resolved_operations,
+            resolved_patches=plan.resolved_patches,
+            retry_ready_operations=lambda: execution_runtime.retry_ready_operations(),
+        ) if uses_streams else NoFeedbackStreams()
         controller = Controller(
             engine, qpu=qpu, window_manager=window_manager,
             syndrome_ingress=syndrome_ingress,
@@ -227,7 +237,7 @@ class RunSpec:
             code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches, idle_policy=config.idle_policy,
-            protected_regions=config.protected_regions)
+            feedback_streams=feedback_streams)
         execution_runtime = ExecutionRuntime(
             engine, controller=controller, factory=factory,
             resource_claims_by_operation_id=config.resource_claims)

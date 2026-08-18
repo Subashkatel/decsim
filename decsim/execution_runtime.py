@@ -31,10 +31,12 @@ class ExecutionRuntime:
 
     @property
     def workload_complete(self):
+        """Every operation of the loaded program has finished its body."""
         return (self.program is not None and
                 self.operations.keys() == self.body_done_time.keys())
 
     def load_program(self, program: ExecutionProgram) -> None:
+        """Index the operations, build the dependency graph, start the roots."""
         self.program = program
         for operation in program.operations:
             self.operations[operation.id] = operation
@@ -142,6 +144,7 @@ class ExecutionRuntime:
         self.op_start_time[operation.id] = self.controller.issue_operation(operation, idle_rounds)
 
     def body_done(self, operation):
+        """The QPU finished a body: record it, release successors, free resources."""
         if operation.id not in self.operations:
             raise RuntimeError(
                 f"cannot complete unindexed operation id {operation.id!r}")
@@ -167,6 +170,7 @@ class ExecutionRuntime:
         self.controller.after_successor_release(operation)
 
     def waiting_blocked_successor(self, operation_id):
+        """True while a feedback-blocked successor of this operation awaits its decode release."""
         for successor_id in self.successors[operation_id]:
             successor = self.operations[successor_id]
             if successor.blocked_by is None or successor.id in self.op_start_time:
@@ -185,10 +189,12 @@ class ExecutionRuntime:
         self.idle_rounds_by_patch[patch] = self.idle_rounds_by_patch.get(patch, 0) + 1
 
     def consume_idle_rounds(self, operation):
+        """Take the idle rounds emitted on this operation's patches since the last consumer."""
         patches = operation.patches if operation.patches else operation.qubits
         return sum(self.idle_rounds_by_patch.pop(patch, 0) for patch in patches)
 
     def on_decision(self, decision: Decision):
+        """A decode result arrived at the controller: record it, and release the blocked operation if it says so."""
         operation_id = decision.target_operation_id
         operation = self.operations[operation_id]
         if not decision.releases_operation:

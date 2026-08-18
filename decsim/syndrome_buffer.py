@@ -180,14 +180,17 @@ class SyndromeBuffer:
     # ------------------------------------------------------ operation scope
 
     def open_operation(self, operation_id) -> None:
+        """Admit rounds of this operation; a closed identity never reopens."""
         if operation_id in self._closed_operations:
             raise RuntimeError("closed operation identities cannot be reused")
         self._open_operations.add(operation_id)
 
     def has_operation(self, operation_id) -> bool:
+        """True while the operation may still receive rounds."""
         return operation_id in self._open_operations
 
     def close_operation(self, operation_id) -> None:
+        """Retire an operation once none of its rounds or holds are live."""
         live_rounds = [
             identity
             for identity in self._rounds
@@ -337,6 +340,7 @@ class SyndromeBuffer:
         return packet
 
     def read_retained_round(self, round_identity) -> SyndromeRoundPacket:
+        """The packed packet of a retained round."""
         slot = self._rounds.get(round_identity)
         if slot is None or slot.state is not (
             SyndromeBufferRoundState.PACKED_RETAINED
@@ -364,9 +368,11 @@ class SyndromeBuffer:
         self._publication_ticks[identity] = publication_tick
 
     def publication_tick(self, round_identity) -> Optional[int]:
+        """Tick a retained round was published to the window manager, or None."""
         return self._publication_ticks.get(round_identity)
 
     def round_state(self, round_identity) -> Optional[SyndromeBufferRoundState]:
+        """Slot state of a round, or None when it holds no live allocation."""
         slot = self._rounds.get(round_identity)
         return None if slot is None else slot.state
 
@@ -397,6 +403,7 @@ class SyndromeBuffer:
         return _HoldRecord(identities, frozenset(references))
 
     def has_live_operation_reference(self, operation_id) -> bool:
+        """True while any live hold refers to this operation."""
         return any(
             operation_id in record.referenced_operation_ids
             for record in self._live_holds.values()
@@ -417,6 +424,7 @@ class SyndromeBuffer:
             self._holders_by_round.setdefault(identity, set()).add(holder)
 
     def replace_hold(self, holder, round_identities) -> None:
+        """Re-point a live hold at a new set of rounds."""
         try:
             old = self._live_holds[holder]
         except KeyError as error:
@@ -447,6 +455,7 @@ class SyndromeBuffer:
         self._released_holds[old_holder] = record.referenced_operation_ids
 
     def release_hold(self, holder) -> None:
+        """Drop a hold; rounds with no remaining holder become releasable."""
         if holder in self._released_holds:
             return
         try:
@@ -476,9 +485,11 @@ class SyndromeBuffer:
             self._orphan_on_publish.add(identity)
 
     def has_hold(self, holder) -> bool:
+        """True while this holder token is live."""
         return holder in self._live_holds
 
     def hold_round_identities(self, holder) -> tuple:
+        """The rounds a live holder keeps."""
         return self._live_holds[holder].round_identities
 
     # ------------------------------------------------- release/cancellation
@@ -526,6 +537,7 @@ class SyndromeBuffer:
     # -------------------------------------------------------- observability
 
     def snapshot(self) -> SyndromeBufferSnapshot:
+        """Frozen view of every slot, hold and tombstone."""
         ordered = sorted(
             self._rounds.values(), key=lambda slot: slot.slot_index
         )
@@ -568,6 +580,7 @@ class SyndromeBuffer:
         )
 
     def metrics(self) -> SyndromeBufferMetrics:
+        """Allocation and occupancy counters."""
         return SyndromeBufferMetrics(
             allocations_total=self._allocations_total,
             live_allocations=len(self._rounds),

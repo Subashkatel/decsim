@@ -19,7 +19,7 @@ from decsim.detector_error_model import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
-from decsim.mwpm_decoder import matching_window_decoder
+from decsim.decoders.mwpm import matching_window_decoder
 from decsim.schemes import SlidingWindowScheme
 
 from .decoding import OfflineBatchDecoder, read_stored_batch_result, run_offline_parallel

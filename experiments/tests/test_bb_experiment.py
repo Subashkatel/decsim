@@ -11,12 +11,12 @@ import pytest
 import stim
 
 from experiments.bb import build_quits11_bb_memory
-from decsim.adapters.window_decode_results import (
+from decsim.decoders.window_decode_results import (
     BackendDecodeOutcome,
     BackendDecodeStatus,
     BackendFailureReason,
 )
-from decsim.bposd_decoder import bposd_window_decoder
+from decsim.decoders.bposd import bposd_window_decoder
 from decsim.detector_error_model import (
     FaultRepresentation,
     PHYSICAL_FAULT_MODEL_REQUIRED,

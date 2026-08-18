@@ -16,7 +16,7 @@ from .message import ExecutionProgram, RunSeedPathSegment
 from .seeding import bind_run_seed
 
 if TYPE_CHECKING:
-    from .decoder_memory import DecoderMemoryConfig
+    from .decoders.decoder_memory import DecoderMemoryConfig
 
 
 @dataclass(frozen=True)
@@ -144,7 +144,7 @@ class RunSpec:
         run the engine to quiescence, and capture the result."""
         from .controller.controller import Controller
         from .controller.feedback_streams import FeedbackStreams, NoFeedbackStreams
-        from .decoder_manager import DecoderManager
+        from .decoders.decoder_manager import DecoderManager
         from .program.execution_runtime import ExecutionRuntime
         from .program.orchestrators import ExecutionOrchestrator
         from .qpu.cycle_clock import QPUDevice

@@ -392,7 +392,7 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
         GRAPHLIKE_FAULT_MODEL_REQUIRED,
         decode_windowed,
     )
-    from decsim.mwpm_decoder import matching_window_decoder
+    from decsim.decoders.mwpm import matching_window_decoder
     from decsim.schemes import SlidingWindowScheme
 
     circuit = stim.Circuit.generated(

@@ -22,8 +22,8 @@ from dataclasses import dataclass
 import math
 from typing import Callable, Optional
 
-from .config import us
-from .message import DecodeJob, DecodeResult, RunSeedChild, RunSeedPathSegment
+from ..config import us
+from ..message import DecodeJob, DecodeResult, RunSeedChild, RunSeedPathSegment
 
 ALGORITHM_STAGE = "algorithm"
 

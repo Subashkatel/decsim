@@ -61,16 +61,16 @@ class ResolvedRunConfiguration:
 
 
 def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
-    from .decoders import CodeRouter
+    from .decoders.decoders import CodeRouter
     from .qpu.syndrome_devices import SyndromeBitDevice, TimingOnlyDevice
     from .link_profiles import logical_reference_profile
     from .program.planner import (_plan_execution, _validate_operation_graph,
                           _validate_workload_identity)
     from .controller.policies import Eager, Ignore
     from .program.round_policies import GateRounds
-    from .schedulers import FifoScheduler
+    from .decoders.schedulers import FifoScheduler
     from .schemes import SlidingWindowScheme
-    from .switching import Baseline
+    from .decoders.weak_strong_switching import Baseline
     from .syndrome_buffer.syndrome_buffer import SyndromeBufferingConfig
     from .controller.syndrome_ingress import SyndromeIngressPolicy
     from .window_interactions import DefaultWindowInteraction

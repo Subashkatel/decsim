@@ -10,12 +10,12 @@ from __future__ import annotations
 import math
 from typing import Optional
 
-from .message import (
+from ..message import (
     RunSeedChild,
     RunSeedPathSegment,
     SoftOutputSource,
 )
-from .protocols import Directive, OutcomeDirective, Submission
+from ..protocols import Directive, OutcomeDirective, Submission
 
 
 class ThresholdRegister:
@@ -232,8 +232,8 @@ class Switching:
         static_decode_plan_selected,
         has_frontend,
     ) -> None:
-        from .controller.policies import Eager, Held
-        from .schemes import SlidingTerminalPolicy, SlidingWindowScheme
+        from ..controller.policies import Eager, Held
+        from ..schemes import SlidingTerminalPolicy, SlidingWindowScheme
 
         if (
             type(scheme) is SlidingWindowScheme

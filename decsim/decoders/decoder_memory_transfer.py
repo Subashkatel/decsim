@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from .message import DecodeJob
+from ..message import DecodeJob
 
 
 class FixedLatencyDecoderMemoryTransfer:

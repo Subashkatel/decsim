@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..detector_error_model.fault_model_contracts import WindowErrorModel
+    from ...detector_error_model.fault_model_contracts import WindowErrorModel
 
 
 def matching_window_decoder():
@@ -23,12 +23,12 @@ def matching_window_decoder():
     cache: dict = {}
 
     def decode(model: "WindowErrorModel", syndrome):
-        from ..detector_error_model.fault_model_contracts import FaultRepresentation
+        from ...detector_error_model.fault_model_contracts import FaultRepresentation
 
         faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
         matching = cache.get(id(faults))
         if matching is None:
-            from ..detector_error_model.fault_identity_validation import (
+            from ...detector_error_model.fault_identity_validation import (
                 validate_graphlike_matrices,
             )
             from .weights import matching_weights

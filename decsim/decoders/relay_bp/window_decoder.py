@@ -12,7 +12,7 @@ import threading
 from typing import Optional
 import weakref
 
-from ..adapters.window_decode_results import (
+from ..window_decode_results import (
     BackendDecodeOutcome,
     BackendDecodeStatus,
     BackendFailureReason,
@@ -20,8 +20,8 @@ from ..adapters.window_decode_results import (
     empty_fault_model_outcome,
     fault_model_fingerprint,
 )
-from ..detector_error_model.fault_model_contracts import FaultRepresentation
-from ..seeding import _AtomicRunSeedConsumer
+from ...detector_error_model.fault_model_contracts import FaultRepresentation
+from ...seeding import _AtomicRunSeedConsumer
 
 
 def _finite_real(value, name: str, *, allow_none: bool = False):

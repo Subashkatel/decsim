@@ -5,12 +5,12 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..detector_error_model.fault_model_contracts import WindowErrorModel
+    from ...detector_error_model.fault_model_contracts import WindowErrorModel
 
 
 def _require_belief_matching_model(model: "WindowErrorModel") -> None:
     """Fail if the window model lacks hyperedge data for belief matching."""
-    from ..detector_error_model.fault_model_contracts import FaultRepresentation
+    from ...detector_error_model.fault_model_contracts import FaultRepresentation
 
     model.require_faults(FaultRepresentation.GRAPHLIKE)
     model.require_faults(FaultRepresentation.PHYSICAL)
@@ -33,11 +33,11 @@ def _cache_entry(model: "WindowErrorModel", cache: dict,
     if entry is not None:
         return entry
 
-    from ..detector_error_model.fault_identity_validation import (
+    from ...detector_error_model.fault_identity_validation import (
         validate_belief_matching_matrices,
     )
 
-    from ..detector_error_model.fault_model_contracts import FaultRepresentation
+    from ...detector_error_model.fault_model_contracts import FaultRepresentation
     graphlike = model.require_faults(FaultRepresentation.GRAPHLIKE)
     physical = model.require_faults(FaultRepresentation.PHYSICAL)
 
@@ -88,7 +88,7 @@ def belief_matching_window_decoder(max_iter: int = 30, bp_method: str = "product
         import pymatching
 
         _require_belief_matching_model(model)
-        from ..detector_error_model.fault_model_contracts import FaultRepresentation
+        from ...detector_error_model.fault_model_contracts import FaultRepresentation
         graphlike = model.require_faults(FaultRepresentation.GRAPHLIKE)
         physical = model.require_faults(FaultRepresentation.PHYSICAL)
         syndrome = np.asarray(syndrome, dtype=np.uint8)

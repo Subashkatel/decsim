@@ -9,7 +9,7 @@ import decsim
 import decsim.qpu.code_geometry as codes_module
 from decsim.qpu.code_geometry import BBCodeModel, SurfaceCodeModel
 from decsim.config import TimingConfig, us
-from decsim.decoders import CodeRouter, PresetLatencyDecoder
+from decsim.decoders.decoders import CodeRouter, PresetLatencyDecoder
 from decsim.qpu.syndrome_devices import SyndromeBitDevice
 from decsim.qpu.layouts import UniformLayout
 from decsim.message import DecodeJob, Operation

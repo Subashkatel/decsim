@@ -10,7 +10,7 @@ from decsim.protocols import BoundaryPolicy, IdlePolicy
 from decsim.run_spec import RunSpec
 from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.speculative_recovery import SpeculativeRecovery
-from decsim.switching import Baseline, Switching
+from decsim.decoders.weak_strong_switching import Baseline, Switching
 
 
 class ExternalBoundaryPolicy:

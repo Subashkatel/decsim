@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping, Optional
 
-from .message import (
+from ..message import (
     DecodeJob,
     DecoderRequestKey,
     RetainedSyndromeFragment,

@@ -3,7 +3,7 @@
 Compose a RunSpec (decsim.run_spec) and drive it with simulate().
 """
 
-from .decoders import (PresetLatencyDecoder, PerRoundDecoder,
+from .decoders.decoders import (PresetLatencyDecoder, PerRoundDecoder,
                        FunctionLatencyDecoder,
                        SwitchingRouter, SampledConfidenceDecoder,
                        switch_probability_per_round)
@@ -19,7 +19,7 @@ from .metrics import (DecoderMemoryOccupancy, DecoderUtilization,
                       StrongDecoderBacklog, ConditionalReactionTime)
 from .schemes import ParallelWindowScheme
 from .run_spec import RunSpec, simulate
-from .switching import Switching
+from .decoders.weak_strong_switching import Switching
 from .config import TimingConfig, fmt, us
 
 __all__ = [

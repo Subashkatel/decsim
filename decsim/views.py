@@ -12,8 +12,8 @@ import copy
 from dataclasses import dataclass
 from typing import Optional
 
-from .decoder_memory import DecoderMemorySnapshot
-from .decoder_manager import TerminalRequestRecord, TerminalServiceRecord
+from .decoders.decoder_memory import DecoderMemorySnapshot
+from .decoders.decoder_manager import TerminalRequestRecord, TerminalServiceRecord
 from .message import DecoderRequestKey, stable_identity_order_key
 
 

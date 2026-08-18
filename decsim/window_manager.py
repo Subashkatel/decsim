@@ -14,13 +14,11 @@ from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob, Dec
                       SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
                       SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
                       WindowPlan, WindowProtocol, WindowReadiness,
-                      is_stable_identity,
                       stable_identity_order_key)
 from .links import (BoundaryTransferRelation, LinkPath,
                     RequestTransferRelation, TrafficAttribution)
 from .syndrome_buffer import SyndromeBuffer
 from .dynamic_windows import DynamicWindows
-from .protocols import MultiFaultExclusionSyndromeDevice
 from .speculative_recovery import SpeculativeRecovery
 
 
@@ -117,12 +115,6 @@ class _EscalationRegistry:
         readiness_index: dict,
         readiness_key,
     ) -> None:
-        if type(pending) is not _PendingEscalation:
-            raise TypeError("pending escalation must use the exact record type")
-        if not is_stable_identity(pending.key):
-            raise TypeError("pending escalation key must be a stable identity")
-        if not is_stable_identity(readiness_key):
-            raise TypeError("readiness key must be a stable identity")
         if pending.phase is not expected_phase:
             raise RuntimeError(
                 f"pending escalation {pending.key} has phase "
@@ -195,8 +187,6 @@ class _EscalationRegistry:
         readiness_index: dict,
         readiness_key,
     ) -> _PendingEscalation:
-        if type(expected) is not _PendingEscalation:
-            raise TypeError("expected escalation must use the exact record type")
         if expected.phase is not expected_phase:
             raise RuntimeError(
                 f"wrong-phase take for escalation {expected.key}")
@@ -264,8 +254,6 @@ class WindowManager:
         self._planning_view_by_operation_id = MappingProxyType(
             dict(planning_view_by_operation_id)
         )
-        if not callable(fault_model_requirement_for):
-            raise TypeError("fault_model_requirement_for must be callable")
         self._fault_model_requirement_for_code = fault_model_requirement_for
         self.feedback_boundary_mode = feedback_boundary_mode
         self.error_model_provider = error_model_provider
@@ -276,6 +264,7 @@ class WindowManager:
 
         self.strategy = None
         self.services = None
+        self._idle_decode_demand_receiver = None
         self.submit_fn: Optional[Callable] = None    # (job, reserve_transfer) -> None
         self.on_workload_complete: Optional[Callable[[], None]] = None
 
@@ -612,8 +601,6 @@ class WindowManager:
 
     def on_syndrome_arrival(self, packet: SyndromeRoundPacket) -> None:
         """Retain one complete syndrome round and re-check affected windows."""
-        if type(packet) is not SyndromeRoundPacket:
-            raise TypeError("window manager requires a SyndromeRoundPacket")
         try:
             op = self._ops[packet.operation_id]
         except KeyError as error:
@@ -813,8 +800,6 @@ class WindowManager:
         overlapping rounds remain upstream until their last consumer transfer.
 
         """
-        if job.request_key is None:
-            raise RuntimeError("decoder input hold requires a request key")
         owner = DecoderInputHold(job.request_key)
         if previous_owner != owner:
             if self.syndrome_buffer.has_hold(previous_owner):
@@ -1005,8 +990,6 @@ class WindowManager:
         request_key: Optional[DecoderRequestKey] = None,
     ) -> int:
         relation_key = job.request_key if request_key is None else request_key
-        if relation_key is None:
-            raise RuntimeError("window transfer requires a request key")
         reservation = self.links.reserve(
             path,
             payload_bits=payload_bits,
@@ -1062,8 +1045,6 @@ class WindowManager:
         key = (weak_job.op_id, weak_job.window_id)
         pending = self._escalations.peek_key(key)
         if deferred:
-            if pending is None or pending.strong_request_key != strong_request_key:
-                raise RuntimeError("deferred directive key has no matching pending request")
             wsd_arrival_ticks = self._link_arrival(
                 LinkPath.WSD,
                 weak_job,
@@ -1080,8 +1061,6 @@ class WindowManager:
                 self._submit_terminal_strong(pending.key[0], pending)
             return selection_delay
         if serial_strong_job is not None:
-            if serial_strong_job.request_key != strong_request_key:
-                raise RuntimeError("serial strong selection request key mismatch")
             wsd_arrival_ticks = self._link_arrival(
                 LinkPath.WSD,
                 weak_job,
@@ -1188,11 +1167,6 @@ class WindowManager:
             [WindowInfo.from_window(window) for window in later_windows],
             round_count,
         )
-        if not isinstance(plan, StrongRegionPlan):
-            raise TypeError(
-                f"window interaction must return StrongRegionPlan for "
-                f"double-window escalation {key}, got "
-                f"{type(plan).__name__}")
         crossing_windows = [
             window for window in later_windows
             if window.commit_lo <= plan.commit_hi < window.commit_hi
@@ -1781,11 +1755,6 @@ class WindowManager:
             restart_reads = self._read_keys_for_bounds(
                 restart.op_id, plan.restart_buffer_lo, restart.buffer_hi,
                 restart)
-            if not isinstance(
-                    plan.restart_seam_fault_owner, SeamFaultOwner):
-                raise RuntimeError(
-                    f"strong-region plan for {key} must select a valid "
-                    f"restart seam fault owner")
 
         left_exclusions = (
             ((1, plan.commit_lo - 1),) if plan.commit_lo > 1 else ()
@@ -1831,15 +1800,6 @@ class WindowManager:
                 operation, window, round_count,
                 fault_model_requirement=self._fault_model_requirement(operation),
                 exclude_faults_touching=exclusion,
-            )
-        if not isinstance(
-            self.error_model_provider, MultiFaultExclusionSyndromeDevice,
-        ):
-            raise TypeError(
-                f"device {type(self.error_model_provider).__name__} cannot build "
-                "a strong window with multiple fault-exclusion ranges; "
-                "implement "
-                "strong_window_model_for_operation_with_exclusions"
             )
         builder = (
             self.error_model_provider
@@ -2104,10 +2064,6 @@ class WindowManager:
         self,
         contribution: LogicalContribution,
     ) -> None:
-        if type(contribution.owner_key) is not tuple \
-                or len(contribution.owner_key) != 2:
-            raise TypeError(
-                "logical contribution owner_key must be a two-item tuple")
         if contribution.ownership_kind not in (
             "ordinary_window",
             "strong_slab",
@@ -2115,12 +2071,6 @@ class WindowManager:
             raise ValueError(
                 "logical contribution ownership_kind must be "
                 "'ordinary_window' or 'strong_slab'")
-        if (
-            type(contribution.commit_lo) is not int
-            or type(contribution.commit_hi) is not int
-        ):
-            raise TypeError(
-                "logical contribution bounds must be exact ints")
         if (
             contribution.commit_lo < 1
             or contribution.commit_hi < contribution.commit_lo
@@ -2130,12 +2080,6 @@ class WindowManager:
                 f"extent {contribution.commit_lo}-{contribution.commit_hi}")
 
         logical_observables = contribution.logical_observables
-        if logical_observables is not None:
-            if type(logical_observables) is not tuple:
-                raise TypeError(
-                    f"logical contribution {contribution.owner_key} "
-                    "logical_observables must be an exact tuple")
-
         stream_id = contribution.owner_key[0]
         previous = self.logical_contributions.get(contribution.owner_key)
         if previous is not None and (
@@ -2527,11 +2471,6 @@ class WindowManager:
     def _validate_boundary_update(
         delivery: BoundaryDelivery, update,
     ) -> None:
-        if not isinstance(update, BoundaryUpdate):
-            raise TypeError(
-                f"window interaction merge_boundary for "
-                f"{delivery.source_key}->{delivery.destination_key} must "
-                f"return BoundaryUpdate, got {type(update).__name__}")
         if not update.accepted and update.release_dependency:
             raise RuntimeError(
                 f"rejected boundary {delivery.source_key}->"
@@ -2660,24 +2599,16 @@ class WindowManager:
     def accept_idle_decode_demand(self, *, rounds, code, spatial_nodes,
                                   label) -> None:
         """Submit modeled idle-memory work without exposing a decoder to control."""
-        receiver = getattr(self, "_idle_decode_demand_receiver", None)
-        if receiver is None:
-            raise RuntimeError("idle decode demand receiver is not connected")
-        receiver(rounds, on_done=lambda: None, code=code,
-                 spatial_nodes=spatial_nodes, label=label)
+        self._idle_decode_demand_receiver(
+            rounds, on_done=lambda: None, code=code,
+            spatial_nodes=spatial_nodes, label=label)
 
     def bind_stream_operation(self, operation_id: int, stream_id,
                               stream_offset: int) -> None:
-        binding = (stream_id, stream_offset)
-        previous = self._stream_binding_by_operation_id.get(operation_id)
-        if previous is not None and previous != binding:
-            raise RuntimeError("operation stream binding is already fixed")
-        self._stream_binding_by_operation_id[operation_id] = binding
+        self._stream_binding_by_operation_id[operation_id] = (stream_id, stream_offset)
 
     def bind_required_stream_end(self, operation_id: int,
                                  required_stream_end: int) -> None:
-        if operation_id in self._required_stream_end_by_operation_id:
-            raise RuntimeError("protected feedback stream end is already bound")
         self._required_stream_end_by_operation_id[operation_id] = required_stream_end
 
     def _stream_segment_end(self, operation: Operation) -> Optional[int]:

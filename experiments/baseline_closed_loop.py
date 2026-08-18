@@ -1,0 +1,269 @@
+"""Baseline closed loop on real Stim data, measured at every point.
+
+One shot = one rotated memory circuit run through the whole reaction path:
+QPU rounds -> controller (pulses to binary) -> packing -> link C2B -> Buffer 0
+-> window manager -> link CWD -> decoder memory -> decoder engine (fetch,
+PyMatching algorithm, release) -> link WDO -> Pauli frame commit. Nothing is
+skipped and every hop charges its configured cost; the report shows the
+simulated latency at each point and the throughput, per sweep point.
+
+Usage: python -m experiments.baseline_closed_loop [config.yaml]
+"""
+
+from __future__ import annotations
+
+import csv
+import statistics
+import sys
+import time
+from dataclasses import dataclass
+from pathlib import Path
+
+import stim
+import yaml
+
+from decsim.adapters.stim_device import StimDevice
+from decsim.config import TICKS_PER_US, TimingConfig
+from decsim.decoder_engine import DecoderEngine, DecoderStage, DecoderTiming
+from decsim.decoder_memory import DecoderMemoryConfig
+from decsim.decoders import PresetLatencyDecoder
+from decsim import link_profiles
+from decsim.link_profiles import with_controller_to_buffer_edge
+from decsim.message import Operation
+from decsim.mwpm_decoder.decoder import PyMatchingDecoder
+from decsim.pauli_frame import PauliFrameConfig
+from decsim.rounds import FixedRounds
+from decsim.run_spec import RunSpec
+
+DEFAULT_CONFIG = Path(__file__).with_suffix(".yaml")
+
+# Latency points, in path order, all in microseconds per window unless noted.
+POINTS = (
+    "c2b_per_round",        # controller -> Buffer 0, one round (link latency + serialization + queue)
+    "buffer_fill",          # first round in window arrives -> last round arrives (waiting on the QPU)
+    "dep_block",            # window complete -> job queued (window dependencies)
+    "queue_wait",           # queued -> dispatched (CWD transfer, decoder memory, ready queue)
+    "cwd_per_window",       # window manager -> decoder memory, link CWD
+    "fetch",                # decoder engine: read the window out of decoder memory
+    "algorithm",            # decoder engine: the decoding algorithm
+    "release",              # decoder engine: correction write-out
+    "service",              # dispatched -> decode done (equals fetch+algorithm+release)
+    "wdo_per_window",       # decoder -> orchestrator, link WDO
+    "frame_commit",         # Pauli frame accepted -> committed
+    "last_round_to_frame",  # last round of the window arrives -> its correction is in the frame
+    "reaction_first_round", # first round of the window arrives -> correction in the frame
+)
+
+
+@dataclass(frozen=True)
+class ShotMeasurement:
+    round_period_us: float
+    algorithm_latency_us: float
+    seed: int
+    windows: int
+    logical_failure: bool
+    means: dict            # point -> mean us over windows of this shot
+    maxes: dict            # point -> max us
+    throughput_windows_per_us: float
+    throughput_rounds_per_us: float
+    decoder_utilization: float
+    max_queued_windows: int
+    sim_wall_seconds: float
+
+
+def load_config(path: Path) -> dict:
+    with open(path) as handle:
+        return yaml.safe_load(handle)
+
+
+def build_run(config: dict, *, round_period_us: float, algorithm_latency_us: float,
+              seed: int):
+    p = config["noise_probability"]
+    circuit = stim.Circuit.generated(
+        config["code_task"], rounds=config["rounds_per_shot"],
+        distance=config["distance"], after_clifford_depolarization=p,
+        before_measure_flip_probability=p, after_reset_flip_probability=p,
+        before_round_data_depolarization=p)
+    operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
+                          circuit=circuit)
+    engine_config = config["decoder"]["engine"]
+    decoder_engine = DecoderEngine(
+        PyMatchingDecoder(PresetLatencyDecoder(algorithm_latency_us)),
+        DecoderTiming(
+            before=(DecoderStage("fetch",
+                                 cycles_per_round=engine_config["fetch_cycles_per_round"]),),
+            after=(DecoderStage("release",
+                                cycles_per_job=engine_config["release_cycles_per_job"]),),
+            frequency_mhz=engine_config["frequency_mhz"]))
+    c2b = config["controller_to_buffer"]
+    links = with_controller_to_buffer_edge(
+        getattr(link_profiles, config["links_profile"])(),
+        latency_us=c2b["latency_us"],
+        aggregate_bits_per_us=c2b["aggregate_bits_per_us"],
+        source="experiments/baseline_closed_loop.yaml controller_to_buffer")
+    memory_rounds = config["decoder_memory_rounds"]
+    spec = RunSpec(
+        ops=[operation], d=config["distance"],
+        rounds_policy=FixedRounds(config["rounds_per_shot"]),
+        device=StimDevice(), decoder=decoder_engine,
+        num_units=config["decoder"]["units"],
+        timing=TimingConfig(
+            round_us=round_period_us,
+            t_binary_availability_us=config["controller"]["t_binary_availability_us"],
+            t_pack_us=config["controller"]["t_pack_us"]),
+        links=links,
+        decoder_memory=(None if memory_rounds is None
+                        else DecoderMemoryConfig({"default": memory_rounds})),
+        pauli_frame=PauliFrameConfig(commit_us=config["pauli_frame"]["commit_us"]),
+        seed=seed)
+    return spec, decoder_engine
+
+
+def measure_shot(config: dict, *, round_period_us: float, algorithm_latency_us: float,
+                 seed: int) -> ShotMeasurement:
+    spec, decoder_engine = build_run(
+        config, round_period_us=round_period_us,
+        algorithm_latency_us=algorithm_latency_us, seed=seed)
+    wall = time.perf_counter()
+    completed = spec.build()
+    wall = time.perf_counter() - wall
+    if completed.result.terminal_status != "complete":
+        raise RuntimeError(f"run did not complete: {completed.result.terminal_status}")
+
+    us = lambda ticks: ticks / TICKS_PER_US
+    windows = completed.window_manager.windows
+    transfers = completed.result.link_traffic["transfers"]
+    per_window_link = {}
+    for row in transfers:
+        key = (row["path"], row["attribution"]["window_id"])
+        per_window_link.setdefault(key, 0)
+        per_window_link[key] += row["delivery_ticks"] - row["send_ticks"]
+    c2b_delays = [us(row["delivery_ticks"] - row["send_ticks"])
+                  for row in transfers if row["path"] == "c2b"]
+    frame_by_window = {record.window_key[1]: record
+                       for record in completed.pauli_frame.snapshot().records}
+
+    samples = {point: [] for point in POINTS}
+    samples["c2b_per_round"] = c2b_delays
+    for (op_id, window_id), window in sorted(windows.items()):
+        frame = frame_by_window.get(window_id)
+        if frame is None or window.t_done is None:
+            continue
+        stages = {r.stage: us(r.end_ticks - r.start_ticks)
+                  for r in decoder_engine.stage_records_for(op_id, window_id)}
+        samples["buffer_fill"].append(us(window.t_data_complete - window.t_first_round))
+        samples["dep_block"].append(us(window.t_queued - window.t_data_complete))
+        samples["queue_wait"].append(us(window.t_dispatch - window.t_queued))
+        samples["cwd_per_window"].append(us(per_window_link.get(("cwd", window_id), 0)))
+        samples["fetch"].append(stages["fetch"])
+        samples["algorithm"].append(stages["algorithm"])
+        samples["release"].append(stages["release"])
+        samples["service"].append(us(window.t_done - window.t_dispatch))
+        samples["wdo_per_window"].append(us(per_window_link.get(("wdo", window_id), 0)))
+        samples["frame_commit"].append(us(frame.committed_ticks - frame.accepted_ticks))
+        samples["last_round_to_frame"].append(us(frame.committed_ticks - window.t_data_complete))
+        samples["reaction_first_round"].append(us(frame.committed_ticks - window.t_first_round))
+
+    decoded = len(samples["service"])
+    first_round = min(w.t_first_round for w in windows.values() if w.t_first_round is not None)
+    last_commit = max(f.committed_ticks for f in frame_by_window.values())
+    span_us = us(last_commit - first_round)
+    result = completed.result.operation_results[0]
+    return ShotMeasurement(
+        round_period_us=round_period_us, algorithm_latency_us=algorithm_latency_us,
+        seed=seed, windows=decoded,
+        logical_failure=result.logical_observables != result.observable_truth,
+        means={p: (statistics.fmean(v) if v else 0.0) for p, v in samples.items()},
+        maxes={p: (max(v) if v else 0.0) for p, v in samples.items()},
+        throughput_windows_per_us=decoded / span_us,
+        throughput_rounds_per_us=config["rounds_per_shot"] / span_us,
+        decoder_utilization=sum(samples["service"]) / span_us,
+        max_queued_windows=max((n for _, n in completed.decoder_manager.queue_log), default=0),
+        sim_wall_seconds=wall)
+
+
+def run_sweep(config: dict) -> list:
+    measurements = []
+    for algorithm_latency_us in config["algorithm_latency_us"]:
+        for round_period_us in config["round_period_us"]:
+            for seed in config["seeds"]:
+                measurements.append(measure_shot(
+                    config, round_period_us=round_period_us,
+                    algorithm_latency_us=algorithm_latency_us, seed=seed))
+            print(f"algorithm {algorithm_latency_us} us, round period {round_period_us} us: done",
+                  file=sys.stderr)
+    return measurements
+
+
+def summarize(measurements: list) -> list:
+    """One row per sweep point: means over seeds of the per-shot means, maxes of maxes."""
+    rows = []
+    points = sorted({(m.algorithm_latency_us, m.round_period_us) for m in measurements})
+    for algorithm_latency_us, round_period_us in points:
+        group = [m for m in measurements
+                 if (m.algorithm_latency_us, m.round_period_us) == (algorithm_latency_us, round_period_us)]
+        row = {"algorithm_latency_us": algorithm_latency_us,
+               "round_period_us": round_period_us,
+               "shots": len(group),
+               "windows_per_shot": statistics.fmean(m.windows for m in group),
+               "logical_error_rate": sum(m.logical_failure for m in group) / len(group),
+               "throughput_windows_per_us": statistics.fmean(m.throughput_windows_per_us for m in group),
+               "throughput_rounds_per_us": statistics.fmean(m.throughput_rounds_per_us for m in group),
+               "decoder_utilization": statistics.fmean(m.decoder_utilization for m in group),
+               "max_queued_windows": max(m.max_queued_windows for m in group),
+               "sim_wall_seconds_per_shot": statistics.fmean(m.sim_wall_seconds for m in group)}
+        for point in POINTS:
+            row[f"{point}_mean_us"] = statistics.fmean(m.means[point] for m in group)
+            row[f"{point}_max_us"] = max(m.maxes[point] for m in group)
+        rows.append(row)
+    return rows
+
+
+def write_report(config: dict, rows: list, report_dir: Path) -> None:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    with open(report_dir / "sweep.csv", "w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    lines = ["# Baseline closed loop, per-point latency and throughput", "",
+             f"Circuit: {config['code_task']} d={config['distance']}, "
+             f"{config['rounds_per_shot']} rounds per shot, p={config['noise_probability']}, "
+             f"{len(config['seeds'])} shots per point. All latencies simulated, in microseconds, "
+             "mean over decoded windows (max in the CSV).", ""]
+    head = ["algo us", "round us", "LER", "win/us", "rounds/us", "util", "max q"] + list(POINTS)
+    lines.append("| " + " | ".join(head) + " |")
+    lines.append("|" + "---|" * len(head))
+    for row in rows:
+        cells = [f"{row['algorithm_latency_us']:g}", f"{row['round_period_us']:g}",
+                 f"{row['logical_error_rate']:.2f}",
+                 f"{row['throughput_windows_per_us']:.4f}", f"{row['throughput_rounds_per_us']:.3f}",
+                 f"{row['decoder_utilization']:.3f}", f"{row['max_queued_windows']}"]
+        cells += [f"{row[f'{p}_mean_us']:.3f}" for p in POINTS]
+        lines.append("| " + " | ".join(cells) + " |")
+    fastest = min(rows, key=lambda r: r["round_period_us"])
+    chain_us = 1 / fastest["throughput_windows_per_us"]
+    commit_rounds = config["distance"]
+    lines += ["", "Reading the table. Windows are sliding (commit d, buffer d) and serial: window k+1 "
+              "starts only after window k's boundary arrives, so the loop's capacity is one window "
+              f"per serial chain. Measured chain at the fastest input: {chain_us:.2f} us per window "
+              f"= CWD transfer + decoder service + WDO delivery + boundary handoff, i.e. "
+              f"{commit_rounds / chain_us:.2f} rounds/us sustainable, a knee at a round period of "
+              f"about {chain_us / commit_rounds:.2f} us. Faster input only grows dep_block (the wait "
+              "for the previous window). Decoder utilization at the LILLIPUT card is a few percent: "
+              "with these link cards the baseline is link-bound, not decoder-bound.",
+              "", "Simulator wall clock per shot (host CPU, not a modeled latency): "
+              + ", ".join(f"{r['sim_wall_seconds_per_shot']:.2f}s" for r in rows[:6]) + " ...",
+              "", "Anchor comparison against published numbers: anchor.md (experiments/baseline_anchor.py)."]
+    (report_dir / "sweep.md").write_text("\n".join(lines) + "\n")
+
+
+def main(argv) -> None:
+    config_path = Path(argv[1]) if len(argv) > 1 else DEFAULT_CONFIG
+    config = load_config(config_path)
+    rows = summarize(run_sweep(config))
+    write_report(config, rows, Path(config["report_dir"]))
+    print(open(Path(config["report_dir"]) / "sweep.md").read())
+
+
+if __name__ == "__main__":
+    main(sys.argv)

@@ -378,3 +378,33 @@ def switch_probability_per_round(gamma_switch: float, d: int):
             "switch probability",
         )
     return probability
+
+
+class CycleModelDecoder:
+    """Add a five-stage cycle service-time card around a real decoder."""
+
+    def __init__(self, inner: "Decoder", cycle_model):
+        self.inner = inner
+        self.cycle_model = cycle_model
+        self.fault_model_requirement = _decoder_fault_model_requirement(inner)
+
+    def run_seed_children(self):
+        """Expose the real decoder under its stable semantic child path."""
+        return (
+            RunSeedChild(
+                (RunSeedPathSegment("field", "inner"),),
+                self.inner,
+            ),
+        )
+
+    def latency(self, job: DecodeJob) -> int:
+        """Price the card, consulting inner latency only when configured."""
+        if self.cycle_model.include_inner_latency:
+            inner_latency_ticks = self.inner.latency(job)
+        else:
+            inner_latency_ticks = 0
+        return self.cycle_model.latency_ticks(job, inner_latency_ticks)
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        """Return the real decoder's result unchanged."""
+        return self.inner.decode(job)

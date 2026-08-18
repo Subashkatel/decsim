@@ -460,7 +460,8 @@ class DecoderManager:
         self.engine.log(self.log_name, f"START DECODE {job.label}")
         run = getattr(decoder, "run", None)
         if run is not None:                 # staged decoder reads memory itself
-            run(job, self.engine, lambda j=job: self._on_decode_done(j))
+            run(job, self.engine,
+                lambda result, j=job: self._on_decode_done(j, result))
             return
         if job.decoder_input is not None:   # a plain decoder reads its memory now
             job.payloads = [
@@ -468,9 +469,14 @@ class DecoderManager:
                 for round_input in job.decoder_input.rounds
                 for fragment in round_input.fragments
             ]
-        self.engine.schedule(
-            decoder.latency(job), lambda j=job: self._on_decode_done(j),
-            label=f"decode_done({job.label})")
+
+        def decode_now(j=job):              # the algorithm's result is ready when its time ends
+            result = (None if j.cancelled or j.on_done is not None
+                      else decoder.decode(j))
+            self._on_decode_done(j, result)
+
+        self.engine.schedule(decoder.latency(job), decode_now,
+                             label=f"decode_done({job.label})")
 
     def _cancel_decoder_input(self, job: DecodeJob) -> None:
         """Drop one job from transport and storage, then free its upstream hold.
@@ -512,14 +518,14 @@ class DecoderManager:
             released_request_jobs.append(live.request_job)
             self._release_decoder_input(live.request_job)
 
-    def _on_decode_done(self, job: DecodeJob) -> None:
+    def _on_decode_done(self, job: DecodeJob, result) -> None:
         """One decode finished: free the unit, ask the strategy, commit or await strong."""
         if job.cancelled:
             self._release_decoder_input(job)
             self.try_dispatch()
             return
         if job.strong_decode_for is not None:
-            result = self._decode_and_validate_result(job)
+            self._validate_logical_observables(job, result)
             self._release_decoder_input(job)
             strong_result_deliveries = self._prepare_strong_result_deliveries(
                 job, result)
@@ -552,7 +558,7 @@ class DecoderManager:
             self.try_dispatch()
             return
 
-        result = self._decode_and_validate_result(job)
+        self._validate_logical_observables(job, result)
         job.completed = True
         self._free_unit(job)
         key = (job.op_id, job.window_id)
@@ -612,12 +618,6 @@ class DecoderManager:
         before that directive is applied. Every job reaching here was admitted
         by _admit_weak_decode, so the key is present."""
         self._unresolved_weak_decodes.remove(key)
-
-    def _decode_and_validate_result(self, job: DecodeJob) -> DecodeResult:
-        """Decode one job and reject output for any other operation or window."""
-        result = self.router.route(job).decode(job)
-        self._validate_logical_observables(job, result)
-        return result
 
     @staticmethod
     def _validate_logical_observables(

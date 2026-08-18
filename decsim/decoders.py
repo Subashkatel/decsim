@@ -1,6 +1,6 @@
 """Decoder models and routing helpers.
 
-Every decoder here implements the Decoder port (protocols.py, port 8):
+Every decoder here implements the Decoder protocol (protocols.py):
 ``latency(job)`` prices one window-job's compute as a service time in ticks
 (the manager dispatches the job to a free unit and schedules completion that
 many ticks later), and ``decode(job)`` produces the DecodeResult. Timing-only

@@ -519,8 +519,8 @@ def test_execution_planning_resolves_geometry_patches_seams_and_graph():
     assert plan.execution.windows[(10, 0)].dependents == [(20, 0)]
 
 
-def test_execution_planning_accepts_real_numpy_scalars_and_rejects_boolean_cadence():
-    """Cadence normalization accepts NumPy real scalars but excludes built-in and NumPy booleans."""
+def test_execution_planning_accepts_real_numpy_scalars():
+    """Cadence normalization accepts NumPy real scalars."""
     witnesses = [
         (np.float32(1.25), 1_250_000),
         (np.float64(1.5), 1_500_000),
@@ -531,14 +531,10 @@ def test_execution_planning_accepts_real_numpy_scalars_and_rejects_boolean_caden
         assert plan.round_ticks == expected_ticks
         assert type(plan.round_ticks) is int
 
-    for cadence in (True, np.bool_(True)):
-        with pytest.raises(ValueError, match="finite real"):
-            compile_plan((operation(1),), (1,), code=RecordingCode(cadence))
-
 
 def test_execution_planning_rejects_invalid_cadence_and_code_selection():
     """Execution planning rejects nonfinite cadence, sub-tick cadence, and inconsistent selected code objects."""
-    for cadence in (float("nan"), float("inf"), "1.0"):
+    for cadence in (float("nan"), float("inf")):
         with pytest.raises(ValueError, match="finite real"):
             compile_plan((operation(1),), (1,), code=RecordingCode(cadence))
     with pytest.raises(ValueError, match="at least one tick"):

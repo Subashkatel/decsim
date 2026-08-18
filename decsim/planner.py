@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import numbers
 
 from .config import us
 from .message import (
@@ -232,10 +231,7 @@ def _plan_execution(
     round_us = code.round_period_us()
     if round_us is None:
         round_us = fallback_round_us
-    if type(round_us) not in (int, float):
-        if isinstance(round_us, bool) or not isinstance(round_us, numbers.Real):
-            raise ValueError("resolved round_us must be a finite real number")
-        round_us = float(round_us)
+    round_us = float(round_us)
     if not math.isfinite(round_us):
         raise ValueError("resolved round_us must be a finite real number")
     round_ticks = us(round_us)

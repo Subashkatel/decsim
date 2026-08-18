@@ -513,7 +513,7 @@ class DecoderManager:
             self._release_decoder_input(live.request_job)
 
     def _on_decode_done(self, job: DecodeJob) -> None:
-        """Contract 2b pipeline with the strategy seam in the switching slots."""
+        """One decode finished: free the unit, ask the strategy, commit or await strong."""
         if job.cancelled:
             self._release_decoder_input(job)
             self.try_dispatch()

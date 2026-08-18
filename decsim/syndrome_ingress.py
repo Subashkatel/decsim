@@ -35,8 +35,6 @@ class IngressOverflowPolicy(Enum):
 
     FAIL_STOP = "fail_stop"
     DROP_ROUND = "drop_round"
-    # BLOCK_UPSTREAM requires admission before the QC transfer and is not yet
-    # implemented; naming it here would falsely claim modeled credit flow.
 
 
 @dataclass(frozen=True)
@@ -368,8 +366,8 @@ class SyndromeIngress:
             )
             return True
 
-        # A legacy fabric has no C2B edge. A delivered-but-backpressured packet
-        # also returns here, without making a second reservation.
+        # No C2B edge on this fabric, or a delivered-but-backpressured packet:
+        # deliver directly, without a second reservation.
         return self._deliver_window_input_round(slot_index)
 
     def _deliver_window_input_round(self, slot_index: int) -> bool:

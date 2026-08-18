@@ -64,7 +64,7 @@ class StateTrace:
 
 @dataclass
 class Ticket:
-    """Cancellable handle for one factory request (spec §5.21 port 19)."""
+    """Cancellable handle for one factory request."""
 
     op_id: int
     entry: tuple
@@ -500,9 +500,9 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
         )
 
     def _phys_done(self, round_state: dict) -> None:
-        """Physical time elapsed; submit correction decodes NOW (one overlap
-        rule, spec §5.21: corrections start at the end of the physical
-        attempt in every factory — measurement data exists only then)."""
+        """Physical time elapsed; submit the correction decodes now. In
+        every factory the corrections start at the end of the physical
+        attempt, because measurement data exists only then."""
         round_state["phys"] = True
         if self.decode_service is not None and self.n_corr:
             round_state["decodes_left"] = self.n_corr

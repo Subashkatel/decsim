@@ -1,10 +1,9 @@
-"""Typed read-only metric views (spec §8.9).
+"""Typed read-only metric views.
 
-Frozen snapshot dataclasses + the builders that populate them. Metrics
-consume these views instead of reaching through a combined facade; the
-engine invokes Metric.observe(...) only between events, so every
-snapshot is taken at a consistent instant (principle 7: no mid-mutation
-reads). Each builder receives the state owners it actually consumes.
+Frozen snapshot dataclasses and the builders that populate them. Metrics
+consume these views instead of reaching into owners; the engine invokes
+Metric.observe(...) only between events, so every snapshot is taken at a
+consistent instant. Each builder receives the state owners it consumes.
 """
 
 from __future__ import annotations

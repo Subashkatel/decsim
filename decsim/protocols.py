@@ -253,7 +253,13 @@ class Decoder(Protocol):
     manager schedules completion that many ticks later and then calls
     ``decode(job)`` for the result. Timing evaluation must not mutate routing
     or accuracy-bearing job state; functional decisions belong to decode and
-    strategy owners."""
+    strategy owners.
+
+    A decoder that simulates its own internal stages also offers
+    ``run(job, engine, on_done)``: the manager calls it instead of scheduling
+    ``latency(job)``, the decoder walks its stages as engine events on the
+    unit the manager granted, calls ``on_done`` once when its output is
+    released, and ``decode(job)`` then returns the released result."""
 
     def decode(self, job: DecodeJob) -> DecodeResult: ...
 

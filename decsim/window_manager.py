@@ -243,6 +243,7 @@ class WindowManager:
                  error_model_provider=None, retain_strong_context: bool,
                  double_window: bool,
                  syndrome_buffer: Optional[SyndromeBuffer] = None,
+                 pauli_frame=None,
                  capture_enabled: bool = False):
         self.engine = engine
         self.scheme = scheme
@@ -257,6 +258,7 @@ class WindowManager:
         })
         self.links = links
         self.orchestrator = orchestrator
+        self.pauli_frame = pauli_frame
         self.boundary_policy = boundary_policy
         self.window_interaction = window_interaction
         self._planning_view_by_operation_id = MappingProxyType(
@@ -2028,8 +2030,20 @@ class WindowManager:
         )
         self.engine.schedule(
             delivery_ticks - self.engine.now,
-            lambda: self._commit_decode_done(job, res),
+            lambda: self._sink_weak_correction(job, res),
             label=f"weak result {op.name}W{window.k}->orchestrator",
+        )
+
+    def _sink_weak_correction(self, job: DecodeJob, res: DecodeResult) -> None:
+        """Charge and install one final weak correction before committing it."""
+        if self.pauli_frame is None:
+            self._commit_decode_done(job, res)
+            return
+        self.pauli_frame.commit_weak_correction(
+            window_key=(job.op_id, job.window_id),
+            logical_observables=res.logical_observables,
+            request_key=job.request_key,
+            on_committed=lambda: self._commit_decode_done(job, res),
         )
 
     def _commit_decode_done(self, job: DecodeJob, res: DecodeResult) -> None:

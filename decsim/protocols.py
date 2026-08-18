@@ -288,6 +288,31 @@ class DecoderInputTransfer(Protocol):
 
 
 @runtime_checkable
+class PauliFrame(Protocol):
+    """Port 23. Optional final-weak correction sink, inert when absent.
+
+    The caller supplies a stable ``(op_id, window_id)`` identity, the delivered
+    logical observables, their decoder-request provenance, and a zero-argument
+    continuation. Implementations call the continuation at most once per call
+    and exactly once per accepted write, never before the configured write cost
+    has elapsed. They never mutate caller-owned values or call the orchestrator,
+    controller, or execution runtime. ``snapshot`` is immutable and does not
+    mutate the frame.
+    """
+
+    def commit_weak_correction(
+        self,
+        *,
+        window_key,
+        logical_observables,
+        request_key,
+        on_committed: Callable[[], None],
+    ) -> None: ...
+
+    def snapshot(self): ...
+
+
+@runtime_checkable
 class ResourcePool(Protocol):
     """Port 12. Admit decoder jobs and own decoder queues and service units.
 

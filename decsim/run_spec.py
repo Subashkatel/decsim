@@ -84,6 +84,7 @@ class CompletedRun:
     factory: Any
     syndrome_buffer: Any
     syndrome_ingress: Any
+    pauli_frame: Any = None
 
 
 @dataclass
@@ -122,6 +123,7 @@ class RunSpec:
     memory_model: Optional[Any] = None
     syndrome_buffering: Optional[Any] = None
     decoder_input_store: Optional["DecoderInputStoreConfig"] = None
+    pauli_frame: Optional[Any] = None
     syndrome_ingress_policy: Optional[Any] = None
     make_syndrome_ingress: Optional[Callable] = None
     make_decoder_input_transfer: Optional[Callable] = None
@@ -277,6 +279,11 @@ class RunSpec:
             capacity=buffering.upstream_packet_slots,
             memory_model=self.memory_model,
         )
+        pauli_frame = (
+            None if self.pauli_frame is None else self.pauli_frame.resolve(engine)
+        )
+        if self.pauli_frame is not None and pauli_frame is None:
+            raise TypeError("pauli_frame.resolve must return a PauliFrame")
         window_manager = WindowManager(
             engine, scheme=scheme, code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
@@ -289,6 +296,7 @@ class RunSpec:
             feedback_boundary_mode=self.feedback_boundary_mode,
             error_model_provider=error_model_provider,
             syndrome_buffer=syndrome_buffer,
+            pauli_frame=pauli_frame,
             retain_strong_context=requires_strong_context,
             double_window=double_window,
             capture_enabled=self.record_switching_windows)
@@ -394,6 +402,7 @@ class RunSpec:
             orchestrator=orchestrator, syndrome_ingress=syndrome_ingress,
             controller=controller, qpu=qpu,
             execution_runtime=execution_runtime,
+            pauli_frame=pauli_frame,
             memory_model=self.memory_model, metrics=metric_bindings))
 
         orchestrator.connect(controller, execution_runtime.on_decision)
@@ -430,7 +439,7 @@ class RunSpec:
         return CompletedRun(
             result, engine, window_manager, decoder_manager, execution_runtime,
             controller, qpu, orchestrator, factory,
-            syndrome_buffer, syndrome_ingress)
+            syndrome_buffer, syndrome_ingress, pauli_frame=pauli_frame)
 
 
 def _select_code(distance, code, layout):

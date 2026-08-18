@@ -37,7 +37,7 @@ the existing file. New names are proposals until the owner approves them.
 | message.py | 1033 | not broken down | 6 hold tokens to syndrome_buffer | Submission, Directive, OutcomeDirective from protocols | __post_init__ ceremony (~150 lines), 2 history comments | one vocabulary module, ~850 lines, every class with a one-line invariant |
 | protocols.py | 540 | not broken down | 3 value classes to message | | | seams only |
 | metrics.py | 742 | not broken down | BurstEscalationDetector out of core | | 2 history comments | |
-| views.py | 404 | not broken down | capture_primary_result to run_spec | | private reads (replaced by accessors on owners) | |
+| views.py | 404 | not broken down | capture_primary_result to run_spec | | private reads (each owner publishes one snapshot()) | |
 | seeding.py, engine.py | 224, 192 | leave | | | guard ceremony beyond real invariants; engine gets a public run | |
 | frontends/qlx.py | 592 | not broken down | | | | _prove_detector_routing becomes a labeled section |
 | detector_error_model/* | 1827 | leave | | _check_detector_row_layout | | |
@@ -167,8 +167,8 @@ RetainedSyndromeFragment 239-245 and kin); every class gets a one-line
 invariant. protocols: seams only, each with the promise implementers make.
 
 ### views.py and metrics.py
-views: private reads replaced by public accessors on window_manager,
-controller, engine, device; capture_primary_result leaves. metrics:
+views: private reads replaced by one snapshot() per owner (window_manager,
+controller, engine, device); capture_primary_result leaves. metrics:
 BurstEscalationDetector leaves core; factory access through the protocol.
 
 ### speculative_recovery.py, dynamic_windows.py, schemes.py, decoders.py, switching.py

@@ -4,7 +4,10 @@ Proposal, 2026-08-18. Companion to guide/core-design-audit.md and
 guide/core-rewrite-plan.md. Nothing here is applied; every rename below
 needs the owner's yes.
 
-Why. A reader of the target diagram (notes24) sees boxes: QPU, controller,
+Why. Ousterhout ch. 7 (different layer, different abstraction) and tef step
+6 (isolate by likelihood of change) argue for a tree that mirrors the
+architecture, not the kind of code. A reader of the target diagram (notes24)
+sees boxes: QPU, controller,
 syndrome buffer, window manager, decoder manager and decoders, Pauli frame,
 links, program orchestration, observation. The package tree should be that
 diagram, two levels deep, so a box maps to a folder and a file name only has

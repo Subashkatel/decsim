@@ -63,7 +63,7 @@ class Controller:
         self.stream_next_round: dict = {}
         self._stream_binding_by_operation_id = {}
 
-    def _round_ticks_for(self, operation: Operation) -> int:
+    def round_ticks_for(self, operation: Operation) -> int:
         return self._resolved_operations[operation.id].round_ticks
 
     def _round_ticks_for_patch(self, patch) -> int:
@@ -138,9 +138,6 @@ class Controller:
         if self.runtime is not None:
             raise RuntimeError("controller runtime is already connected")
         self.runtime = runtime
-
-    def round_ticks_for(self, operation: Operation) -> int:
-        return self._round_ticks_for(operation)
 
     def can_start(self, operation: Operation) -> bool:
         return not self._must_wait_for_round_boundary(operation)
@@ -242,7 +239,7 @@ class Controller:
         source_operation_id = binding.stream_id if binding is not None else operation.id
         self.qpu.issue(RunOperationBody(
             operation=effective_operation,
-            round_ticks=self._round_ticks_for(operation),
+            round_ticks=self.round_ticks_for(operation),
             round_count=self._round_count_for(operation),
             source_round_count=self._resolved_operations[source_operation_id].round_count,
 

@@ -399,12 +399,6 @@ class WindowManager:
                 f"operation {op.id} has no resolved planning record"
             ) from error
 
-    def _spatial_nodes(self, op: Operation) -> int:
-        return self._resolved_operations[op.id].spatial_node_count
-
-    def _planning_view(self, op: Operation):
-        return self._planning_view_by_operation_id[op.id]
-
     def load_execution_plan(self, plan: WindowPlan, buffering_plan) -> None:
         """Install the pre-computed compile-time window plan."""
         if self._windows_built:
@@ -464,14 +458,6 @@ class WindowManager:
     ) -> tuple:
         return self._transfer_retention_hold(
             PotentialStrong(window_key), PendingStrong(request_key))
-
-    def _transfer_pending_to_csd(self, request_key) -> tuple:
-        return self._transfer_retention_hold(
-            PendingStrong(request_key), CsdInput(request_key))
-
-    def _transfer_potential_to_csd(self, window_key, request_key) -> tuple:
-        return self._transfer_retention_hold(
-            PotentialStrong(window_key), CsdInput(request_key))
 
     def _build_window_error_models(self) -> None:
         """Ask the syndrome source for per-window detector error models."""
@@ -743,7 +729,7 @@ class WindowManager:
         op = self._ops[w.op_id]
         return self.scheme.data_complete(
             w, readiness=self._window_readiness(w),
-            operation=self._planning_view(op))
+            operation=self._planning_view_by_operation_id[op.id])
 
     def _job_desc(self, w: Window, op: Operation) -> str:
         """Human decode-job label."""
@@ -772,9 +758,6 @@ class WindowManager:
         if closed is None:
             return round_count
         return min(round_count, closed)
-
-    def _window_has_closed_boundary(self, window: Window) -> bool:
-        return self._closed_boundary_round_for_window(window) is not None
 
     def _closed_boundary_round_for_window(self, window: Window) -> Optional[int]:
         stream_boundary = self.lifecycle.closed_boundary_for_window(window)
@@ -807,7 +790,7 @@ class WindowManager:
                 window.op_id, window),
             successors=successors,
             memory_rounds_arrived=self.memory_rounds[window.op_id],
-            tail_closed=self._window_has_closed_boundary(window),
+            tail_closed=self._closed_boundary_round_for_window(window) is not None,
         )
 
     def _stamp_first_round_tick(self, window: Window) -> None:
@@ -858,7 +841,7 @@ class WindowManager:
                             + window.batched_preceding_idle_round_count
                         ),
                         ready_time=self.engine.now,
-                        spatial_nodes=self._spatial_nodes(op),
+                        spatial_nodes=self._resolved_operations[op.id].spatial_node_count,
                         payloads=self._assemble_payloads(window),
                         dem=self.window_models.get(key),
                         code=(
@@ -1046,9 +1029,11 @@ class WindowManager:
         request_key = strong_job.request_key
         window_key = strong_job.strong_decode_for
         if self.syndrome_buffer.has_hold(PotentialStrong(window_key)):
-            self._transfer_potential_to_csd(window_key, request_key)
+            self._transfer_retention_hold(
+                PotentialStrong(window_key), CsdInput(request_key))
         elif self.syndrome_buffer.has_hold(PendingStrong(request_key)):
-            self._transfer_pending_to_csd(request_key)
+            self._transfer_retention_hold(
+                PendingStrong(request_key), CsdInput(request_key))
         else:
             packet_ids = tuple(dict.fromkeys(
                 (fragment.operation_id, fragment.round_index)
@@ -1993,12 +1978,6 @@ class WindowManager:
             f"{pending.label}: terminal data complete -> strong slab submitted",
         )
 
-    def _check_deferred_strong_after_commit(self, committed_key: tuple) -> None:
-        """The restart window's weak commit is the far boundary of a slab."""
-        pending = self._escalations.peek_far(committed_key)
-        if pending is not None:
-            self._submit_far_strong(committed_key, pending)
-
     def _check_deferred_strong_after_arrival(self, op_id) -> None:
         """A terminal slab waits for its clamped tail rounds to be stored."""
         pending = self._escalations.peek_terminal(op_id)
@@ -2072,7 +2051,9 @@ class WindowManager:
         if not job.awaiting_strong_result:
             self._release_hold_if_live(
                 PotentialStrong(key))
-        self._check_deferred_strong_after_commit(key)
+        far_pending = self._escalations.peek_far(key)   # this commit is a slab's far boundary
+        if far_pending is not None:
+            self._submit_far_strong(key, far_pending)
         self.speculative_recovery.after_commit()
         self._finish_operation_if_ready(op)
         self.finish_workload_if_ready()

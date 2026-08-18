@@ -22,11 +22,12 @@ Status vocabulary:
   with compileall and the default smoke run green. The direct owner addendum in
   `tmp/validation/OWNER_QUEUE.yaml` accepted the verified semantics and required
   the short PECOS provenance header before commit.
-- Q-062(c), the weak-decoder cycle model, is **DONE**: production commit
-  `ec0b17f` then lean follow-up `9d67f54`, tests `547802c` then `c507dd5`; the latest accumulated suite is **843 passed**,
-  with compileall and the default smoke run green.
+- Q-062(c) is **REOPENED** by the 22:55/22:58 owner amendment. The committed
+  card work (`ec0b17f`, `9d67f54`; tests `547802c`, `c507dd5`) passed 843 tests
+  and smoke, but is not completion: ordered FETCH, DECODE, real EXECUTE, MEMORY,
+  and WRITEBACK engine events adapted from XQsim must still land.
 - Q-062(d), the baseline experiment and report, and Q-062(f), published-number
-  validation, are **BUILD PENDING**. Evidence:
+  validation, remain **BUILD PENDING** behind the reopened Part C. Evidence:
   `tmp/validation/OWNER_QUEUE.yaml`, Q-062. The module-review pipeline remains
   paused at module 15 until the Q-062 priority sequence completes.
 
@@ -43,7 +44,7 @@ Status vocabulary:
 | 7 | Syndrome Buffer 0 | `decsim/syndrome_buffer.py` | EXISTS, REVIEW PENDING | Source exists; module 18 is pending. The standalone FIFO baseline shape and separately priced controller-to-buffer hop are binding Q-055 work. |
 | 8 | Window manager, fires decode when a window is ready | `decsim/window_manager.py` | EXISTS, REVIEW PENDING | Source exists; module 27 is pending. Q-057 binds zero weak/strong coordination in the baseline and keeps the parallel capability off, not deleted. |
 | 9 | Decoder manager and weak scheduler, unit assignment and manager-side push | `decsim/decoder_manager.py`; `decsim/schedulers.py`; `decsim/decoder_input_transfer.py` | EXISTS, REVIEW PENDING | Sources exist; schedulers module 16, transfer module 22, and manager module 26 are pending. Push DMA and its priced trigger are later Q-056 work, so the current existence claim is not a Q-056 completion claim. |
-| 10 | Weak decoder, memory plus compute engine | `decsim/decoders.py`; `decsim/decoder_cycle_model.py` | Q-062(c) DONE; module review pending | The optional five-stage cycle card and functional decoder adapter landed at production `ec0b17f` plus lean follow-up `9d67f54`, and tests `547802c` plus `c507dd5`; 843 accumulated tests, compileall, and default smoke passed. Normal decoder module review remains pending. |
+| 10 | Weak decoder, memory plus compute engine | `decsim/decoders.py`; `decsim/decoder_cycle_model.py` | Q-062(c) REOPENED | The optional cycle card commits remain as partial work, but the 22:55/22:58 owner amendment rejects lump-cost-only completion. Ordered XQsim-adapted FETCH, DECODE, real EXECUTE, MEMORY, and WRITEBACK engine events plus the authorized decoder-manager dispatch edit are pending. |
 | 11 | Pauli frame, minimal weak-correction commit sink | `decsim/pauli_frame.py` | DONE, Q-062(b) | The toggleable final-weak sink is committed at production `efe7270` and tests `bdd0b1f`; 818 accumulated tests, compileall, and the default smoke run passed. The adapted PECOS XOR core carries the owner-required short provenance header. Full Q-054 mapping, lookup/update bandwidth, storage, and capacity axes remain later work. |
 | 12 | End-to-end throughput and per-point latency measurement | `decsim/views.py`; `decsim/metrics.py` | EXISTS, REVIEW PENDING; Q-062(d) BUILD PENDING | Both sources exist, but views module 29 and metrics module 30 are pending. `tmp/validation/ORIENTATION.md` defines them as the observation surface. The actual swept loop report is not done until Q-062(d) lands. |
 

@@ -19,7 +19,6 @@ from .message import (
     Replay,
     RetainedSyndromeFragment,
     SyndromeRoundPacket,
-    is_stable_identity,
     same_stable_identity,
     stable_identity_order_key,
 )
@@ -34,13 +33,6 @@ class SyndromeBufferingConfig:
     """
 
     upstream_packet_slots: Optional[int] = None
-
-    def __post_init__(self) -> None:
-        if self.upstream_packet_slots is not None and (
-                type(self.upstream_packet_slots) is not int
-                or self.upstream_packet_slots < 1):
-            raise TypeError(
-                "upstream_packet_slots must be a positive int or None")
 
 
 class SyndromeBufferRoundState(Enum):
@@ -120,21 +112,6 @@ class _HoldRecord:
     referenced_operation_ids: frozenset
 
 
-def _validated_round_identity(identity) -> tuple:
-    if (
-        type(identity) is not tuple
-        or len(identity) != 2
-        or not is_stable_identity(identity[0])
-        or type(identity[1]) is not int
-        or identity[1] < 1
-    ):
-        raise TypeError(
-            "round identities are (stable operation_id, round_index >= 1) "
-            "tuples"
-        )
-    return identity
-
-
 def _merge_fragments_by_patch(fragments) -> tuple:
     """Order fragments by index, merging parts from the same patch.
 
@@ -176,8 +153,6 @@ class SyndromeBuffer:
     def __init__(
         self, *, capacity: Optional[int] = None, memory_model=None,
     ) -> None:
-        if capacity is not None and (type(capacity) is not int or capacity < 1):
-            raise TypeError("capacity must be a positive int or None")
         self.capacity = capacity
         self.memory_model = memory_model
         self.payloads_held = 0
@@ -205,8 +180,6 @@ class SyndromeBuffer:
     # ------------------------------------------------------ operation scope
 
     def open_operation(self, operation_id) -> None:
-        if not is_stable_identity(operation_id):
-            raise TypeError("operation_id must be a stable identity")
         if operation_id in self._closed_operations:
             raise RuntimeError("closed operation identities cannot be reused")
         self._open_operations.add(operation_id)
@@ -258,12 +231,6 @@ class SyndromeBuffer:
         expected_fragments: int,
     ) -> FragmentAdmission:
         """Add one fragment. The first fragment allocates the round slot."""
-        if type(fragment) is not RetainedSyndromeFragment:
-            raise TypeError(
-                "accept_fragment requires a RetainedSyndromeFragment"
-            )
-        if type(expected_fragments) is not int or expected_fragments < 1:
-            raise TypeError("expected_fragments must be a positive int")
         if fragment.operation_id not in self._open_operations:
             raise RuntimeError(
                 f"operation {fragment.operation_id!r} is not open"
@@ -330,7 +297,7 @@ class SyndromeBuffer:
         self, round_identity, *, publication_tick: Optional[int] = None,
     ) -> SyndromeRoundPacket:
         """Finish packing and make the retained round readable."""
-        slot = self._rounds.get(_validated_round_identity(round_identity))
+        slot = self._rounds.get(round_identity)
         if slot is None:
             raise RuntimeError(
                 f"round {round_identity!r} holds no live allocation"
@@ -370,7 +337,7 @@ class SyndromeBuffer:
         return packet
 
     def read_retained_round(self, round_identity) -> SyndromeRoundPacket:
-        slot = self._rounds.get(_validated_round_identity(round_identity))
+        slot = self._rounds.get(round_identity)
         if slot is None or slot.state is not (
             SyndromeBufferRoundState.PACKED_RETAINED
         ):
@@ -381,28 +348,26 @@ class SyndromeBuffer:
 
     def retained_fragments(self, round_identity) -> Optional[tuple]:
         """Return retained fragments, or ``None`` before/after retention."""
-        slot = self._rounds.get(_validated_round_identity(round_identity))
+        slot = self._rounds.get(round_identity)
         if slot is None or slot.state is not SyndromeBufferRoundState.PACKED_RETAINED:
             return None
         return slot.packet.fragments
 
     def mark_publication_tick(self, round_identity, publication_tick: int) -> None:
         """Stamp a retained round when its priced publication reaches Buffer 0."""
-        identity = _validated_round_identity(round_identity)
+        identity = round_identity
         slot = self._rounds.get(identity)
         if slot is None or slot.state is not SyndromeBufferRoundState.PACKED_RETAINED:
             raise RuntimeError(f"round {identity!r} is not packed and retained")
-        if type(publication_tick) is not int or publication_tick < 0:
-            raise TypeError("publication_tick must be a nonnegative exact int")
         if self._publication_ticks[identity] is not None:
             raise RuntimeError(f"round {identity!r} was already published")
         self._publication_ticks[identity] = publication_tick
 
     def publication_tick(self, round_identity) -> Optional[int]:
-        return self._publication_ticks.get(_validated_round_identity(round_identity))
+        return self._publication_ticks.get(round_identity)
 
     def round_state(self, round_identity) -> Optional[SyndromeBufferRoundState]:
-        slot = self._rounds.get(_validated_round_identity(round_identity))
+        slot = self._rounds.get(round_identity)
         return None if slot is None else slot.state
 
     # ------------------------------------------------------- consumer holds
@@ -410,7 +375,6 @@ class SyndromeBuffer:
     def _hold_record(self, holder, round_identities) -> _HoldRecord:
         identities = tuple(dict.fromkeys(round_identities))
         for identity in identities:
-            _validated_round_identity(identity)
             if identity[0] not in self._open_operations:
                 raise RuntimeError(
                     f"hold references closed operation {identity[0]!r}"
@@ -443,11 +407,6 @@ class SyndromeBuffer:
             raise TypeError("consumer hold tokens cannot be None")
         if holder in self._live_holds or holder in self._released_holds:
             raise ValueError(f"duplicate consumer hold token {holder!r}")
-        if type(holder) is Replay and (
-            type(holder.boundary_generation) is not int
-            or holder.boundary_generation < 0
-        ):
-            raise TypeError("Replay generation must be a nonnegative int")
 
     def register_hold(self, holder, round_identities) -> None:
         """Keep the listed rounds alive for one consumer token."""
@@ -526,7 +485,7 @@ class SyndromeBuffer:
 
     def release_round_if_unheld(self, round_identity) -> bool:
         """Free an existing round only when no consumer holds it."""
-        identity = _validated_round_identity(round_identity)
+        identity = round_identity
         slot = self._rounds.get(identity)
         if slot is None or self._holders_by_round.get(identity):
             return False
@@ -535,7 +494,7 @@ class SyndromeBuffer:
 
     def release_round(self, round_identity) -> None:
         """Free one unheld round, including a partially assembled round."""
-        identity = _validated_round_identity(round_identity)
+        identity = round_identity
         slot = self._rounds.get(identity)
         if slot is None:
             raise RuntimeError(

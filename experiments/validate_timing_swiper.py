@@ -153,11 +153,10 @@ def main() -> None:
         lines.append(f"| {name} | {latency[name]:g} | " + " | ".join(f"{s:g} / {e:g}" for s, e in shifts) + " |")
     lines += ["", "QC delays every round and so every window by its latency once. CWD is paid per window on the "
               "serial chain: with one unit the next window is assigned only when the unit frees, and its input "
-              "transfer then precedes its decode (assign-then-transfer). DD is paid once per boundary handoff. "
-              "WDO also accumulates on the chain: the boundary a window hands to its successor is sent from "
-              "_commit_window, after the weak result has crossed WDO and been committed to the frame, so the "
-              "successor waits for decode + WDO + frame commit + DD rather than decode + DD. DO, OC, CQ, WSD, "
-              "CSD are off the weak-only path and shift nothing."]
+              "transfer then precedes its decode (assign-then-transfer). DD is paid once per boundary handoff, "
+              "sent when the decode completes (Q-063). WDO carries the correction to the frame downstream and "
+              "does not gate the next window; DO, OC, CQ, WSD, CSD are off the weak-only path. None of these "
+              "shift a window."]
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

@@ -34,11 +34,11 @@ Verdict: PASS on every interior window and on the single-window case; the tail d
 | qc | 0.15 | 0.15 / 0.15 | 0.15 / 0.15 | 0.15 / 0.15 | 0.15 / 0.15 |
 | cwd | 2 | 2 / 2 | 4 / 4 | 6 / 6 | 8 / 8 |
 | dd | 0.5 | 0 / 0 | 0.5 / 0.5 | 1 / 1 | 1.5 / 1.5 |
-| wdo | 1 | 0 / 0 | 1 / 1 | 2 / 2 | 3 / 3 |
+| wdo | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | do | 1 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | oc | 4 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | cq | 0.15 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | wsd | 0.5 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 | csd | 2 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 
-QC delays every round and so every window by its latency once. CWD is paid per window on the serial chain: with one unit the next window is assigned only when the unit frees, and its input transfer then precedes its decode (assign-then-transfer). DD is paid once per boundary handoff. WDO also accumulates on the chain: the boundary a window hands to its successor is sent from _commit_window, after the weak result has crossed WDO and been committed to the frame, so the successor waits for decode + WDO + frame commit + DD rather than decode + DD. DO, OC, CQ, WSD, CSD are off the weak-only path and shift nothing.
+QC delays every round and so every window by its latency once. CWD is paid per window on the serial chain: with one unit the next window is assigned only when the unit frees, and its input transfer then precedes its decode (assign-then-transfer). DD is paid once per boundary handoff, sent when the decode completes (Q-063). WDO carries the correction to the frame downstream and does not gate the next window; DO, OC, CQ, WSD, CSD are off the weak-only path. None of these shift a window.

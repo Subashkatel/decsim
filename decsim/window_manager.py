@@ -234,7 +234,9 @@ class WindowManager:
                  double_window: bool,
                  syndrome_buffer: Optional[SyndromeBuffer] = None,
                  pauli_frame=None,
-                 capture_enabled: bool = False):
+                 capture_enabled: bool = False,
+                 strategy, submit_fn: Callable, check_strong_route: Callable,
+                 on_workload_complete: Callable[[], None]):
         self.engine = engine
         self.scheme = scheme
         self._code_geometry = code_geometry
@@ -262,11 +264,11 @@ class WindowManager:
         self._next_decoder_request_sequence = 0
         self._selected_request_keys = {} if capture_enabled else None
 
-        self.strategy = None
-        self.services = None
+        self.strategy = strategy
         self._idle_decode_demand_receiver = None
-        self.submit_fn: Optional[Callable] = None    # (job, reserve_transfer) -> None
-        self.on_workload_complete: Optional[Callable[[], None]] = None
+        self.submit_fn = submit_fn                   # (job, reserve_transfer) -> None
+        self._check_strong_route = check_strong_route
+        self.on_workload_complete = on_workload_complete
 
         self.syndrome_buffer = syndrome_buffer if syndrome_buffer is not None else SyndromeBuffer()
         self.lifecycle = DynamicWindows(self)
@@ -839,8 +841,7 @@ class WindowManager:
                         request_key=request_key,
                         request_created_ticks=self.engine.now)
         window.queued = True
-        for submission in self.strategy.on_window_ready(window, job,
-                                                        self.services):
+        for submission in self.strategy.on_window_ready(window, job, self):
             if submission.job.strong_decode_for is None:
                 if submission.job.submitted or (
                         submission.job.request_key is not None
@@ -1081,6 +1082,18 @@ class WindowManager:
             request_key=strong_request_key,
         )
         return wsd_arrival_ticks - self.engine.now
+
+    # ---- the StrategyServices seam: what a strategy may ask of the run
+
+    def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
+                        label: str) -> DecodeJob:
+        """Build the strong job for a weak one; a route back to the weak decoder fails now."""
+        strong = self.make_strong_decode_job(weak_job, n_rounds, label)
+        self.check_strong_route(weak_job, strong)
+        return strong
+
+    def check_strong_route(self, weak_job: DecodeJob, strong_job: DecodeJob) -> None:
+        self._check_strong_route(weak_job, strong_job)
 
     def make_strong_decode_job(self, weak_job: DecodeJob, round_count: int,
                                label: str) -> DecodeJob:
@@ -1907,7 +1920,7 @@ class WindowManager:
         if pending.wsd_arrival_ticks is None:
             raise RuntimeError("far strong submission requires WSD reservation")
         strong_job = self._build_pending_strong_job(pending)
-        self.services.check_strong_route(pending.weak_job, strong_job)
+        self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_far(far_boundary_key, pending)
         self._submit_strong_with_csd(
             strong_job,
@@ -1927,7 +1940,7 @@ class WindowManager:
         if pending.wsd_arrival_ticks is None:
             raise RuntimeError("terminal strong submission requires WSD reservation")
         strong_job = self._build_pending_strong_job(pending)
-        self.services.check_strong_route(pending.weak_job, strong_job)
+        self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_terminal(operation_id, pending)
         self._submit_strong_with_csd(
             strong_job,

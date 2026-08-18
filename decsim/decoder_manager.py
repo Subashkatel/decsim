@@ -79,7 +79,9 @@ class DecoderManager:
                  lane_policy=None, log_name: str = "DecoderCluster",
                  capture_enabled: bool = False,
                  decoder_memory_transfer=None,
-                 decoder_memory: Optional[DecoderMemoryConfig] = None):
+                 decoder_memory: Optional[DecoderMemoryConfig] = None,
+                 strategy, services, on_window_decoded: Callable,
+                 on_strong_window_decoded: Callable):
         from .decoder_memory_transfer import FixedLatencyDecoderMemoryTransfer
 
         self.engine = engine
@@ -98,10 +100,10 @@ class DecoderManager:
         self._terminal_request_records = [] if capture_enabled else None
         self._terminal_service_records = [] if capture_enabled else None
 
-        self.strategy = None
-        self.services = None
-        self.on_window_decoded: Optional[Callable] = None
-        self.on_strong_window_decoded: Optional[Callable] = None
+        self.strategy = strategy
+        self.services = services                     # the StrategyServices seam (the window manager)
+        self.on_window_decoded = on_window_decoded
+        self.on_strong_window_decoded = on_strong_window_decoded
 
         if unit_pools is None:
             unit_pools = {"default": num_units}
@@ -843,35 +845,3 @@ class DecoderManager:
             raise RuntimeError(
                 f"the run ended with decode work unsettled ({detail}): every "
                 f"window is final once the simulation is quiescent")
-
-
-class StrategyServicesImpl:
-    """The StrategyServices seam handed to DecodingStrategy hooks."""
-
-    def __init__(self, engine, window_manager, pool):
-        self._engine = engine
-        self._runtime = window_manager
-        self._pool = pool
-
-    def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
-                        label: str) -> DecodeJob:
-        strong = self._runtime.make_strong_decode_job(weak_job, n_rounds, label)
-        self._pool.check_strong_route(weak_job, strong)   # fail at build time
-        return strong
-
-    def defer_strong_escalation(self, weak_job: DecodeJob) -> DecoderRequestKey:
-        """Reserve a strong request that waits for its far-side boundary."""
-        return self._runtime.defer_strong_escalation(weak_job)
-
-    def check_strong_route(self, weak_job: DecodeJob,
-                           strong_job: DecodeJob) -> None:
-        self._pool.check_strong_route(weak_job, strong_job)
-
-    def prepare_strong_selection(self, weak_job: DecodeJob,
-                                 strong_request_key: DecoderRequestKey,
-                                 serial_strong_job: Optional[DecodeJob], *,
-                                 deferred: bool) -> int:
-        return self._runtime.prepare_strong_selection(
-            weak_job, strong_request_key, serial_strong_job,
-            deferred=deferred,
-        )

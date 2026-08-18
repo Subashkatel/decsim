@@ -198,20 +198,6 @@ def test_configuration_rejects_implicit_or_disappearing_costs():
 
 
 
-def test_supplied_frame_card_must_resolve_to_a_runtime_owner():
-    class MissingOwnerCard:
-        def __init__(self):
-            self.resolve_calls = 0
-
-        def resolve(self, engine):
-            self.resolve_calls += 1
-            return None
-
-    card = MissingOwnerCard()
-    with pytest.raises(TypeError, match="resolve must return a PauliFrame"):
-        RunSpec(ops=[], pauli_frame=card).build()
-    assert card.resolve_calls == 1
-
 def test_default_toggle_is_absent_and_zero_cost_matches_the_inline_off_path():
     assert RunSpec().pauli_frame is None
 

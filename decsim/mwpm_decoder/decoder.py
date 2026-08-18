@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import time
+
+from typing import TYPE_CHECKING, Optional
 
 from ..adapters.window_decode_results import (
     check_syndrome_size,
@@ -25,12 +27,23 @@ if TYPE_CHECKING:
 
 
 class PyMatchingDecoder:
-    """Decode one window with PyMatching and report simulated latency separately."""
+    """Decode one window with PyMatching; simulated latency comes from a
+    latency model, or, with ``latency_model=None``, from the measured wall
+    clock of the matching call itself (software decoder on this host).
+
+    Measured mode times ``matching.decode`` only, not syndrome extraction or
+    result construction, and needs the DecoderEngine, which decodes first and
+    holds the unit busy for the measured time; ``latency()`` alone cannot know
+    the time before the call. Measurements are of one call on one thread: with
+    several units they do not prove parallel hardware.
+    """
 
     fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
 
-    def __init__(self, latency_model: Decoder):
+    def __init__(self, latency_model: Optional[Decoder] = None):
         self.latency_model = latency_model
+        self.measures_wall_clock = latency_model is None
+        self.last_decode_ns: Optional[int] = None
         self._matchings: dict = {}
 
     def run_seed_children(self):
@@ -44,6 +57,9 @@ class PyMatchingDecoder:
 
     def latency(self, job: DecodeJob) -> int:
         """Timing comes from the wrapped latency model."""
+        if self.measures_wall_clock:
+            raise RuntimeError("measured wall-clock timing needs the DecoderEngine: "
+                               "it decodes first and charges the measured time")
         return self.latency_model.latency(job)
 
     def decode(self, job: DecodeJob) -> DecodeResult:
@@ -55,7 +71,9 @@ class PyMatchingDecoder:
         matching = self._matching_for_model(faults)
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
+        started_ns = time.perf_counter_ns()
         selected = matching.decode(syndrome)
+        self.last_decode_ns = time.perf_counter_ns() - started_ns
         return result_from_selected_faults(job, model, faults, selected)
 
     def _matching_for_model(self, faults):
@@ -77,6 +95,11 @@ class PyMatchingDecoder:
             )
             matching = pymatching.Matching.from_check_matrix(
                 faults.check, weights=self._weights_for(faults))
+            # PyMatching builds its internal graph lazily on the first decode;
+            # a real software decoder has the window graph prebuilt, so warm it
+            # here (the published benchmark method decodes one shot first).
+            import numpy
+            matching.decode(numpy.zeros(faults.check.shape[0], dtype=numpy.uint8))
             self._matchings[id(faults)] = (weakref.ref(faults), matching)
         return matching
 

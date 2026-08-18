@@ -70,6 +70,7 @@ class DecoderStageRecord:
     cycles: Optional[int]      # None for the algorithm, priced in time
     start_ticks: int
     end_ticks: int
+    measured_ns: Optional[int] = None   # algorithm: wall clock of the real call when measured
 
 
 @dataclass
@@ -101,6 +102,10 @@ class DecoderEngine:
         # Window jobs carry a request key; a merged strong batch only a service key.
         return job.request_key if job.request_key is not None else job.service_key
 
+    @property
+    def measures_wall_clock(self) -> bool:
+        return bool(getattr(self.decoder, "measures_wall_clock", False))
+
     def latency(self, job: DecodeJob) -> int:
         stages = self.timing.before + self.timing.after
         return (sum(self.timing.ticks_for(stage, job) for stage in stages)
@@ -111,7 +116,7 @@ class DecoderEngine:
         running = _RunningDecode(job, on_done)
         steps = ([(s.name, s.cycles_for(job), self.timing.ticks_for(s, job))
                   for s in self.timing.before]
-                 + [(ALGORITHM_STAGE, None, self.decoder.latency(job))]
+                 + [(ALGORITHM_STAGE, None, None)]
                  + [(s.name, s.cycles_for(job), self.timing.ticks_for(s, job))
                     for s in self.timing.after])
         self._enter(running, engine, steps, 0)
@@ -126,13 +131,26 @@ class DecoderEngine:
             return
         name, cycles, ticks = steps[index]
         start = engine.now
+        measured_ns = None
+        if name == ALGORITHM_STAGE:
+            if self.measures_wall_clock:
+                # Software decoder on this host: run the real call now, hold the
+                # unit for exactly as long as it took, release the result then.
+                if not job.cancelled:
+                    running.result = self.decoder.decode(job)
+                    measured_ns = self.decoder.last_decode_ns
+                ticks = us((measured_ns or 0) / 1000.0)
+            else:
+                ticks = self.decoder.latency(job)
         self.stage_records.append(DecoderStageRecord(
-            job.op_id, job.window_id, name, cycles, start, start + ticks))
+            job.op_id, job.window_id, name, cycles, start, start + ticks, measured_ns))
         engine.log(self.log_name, f"{name} {job.label}"
-                   + ("" if cycles is None else f" ({cycles} cycles)"))
+                   + ("" if cycles is None else f" ({cycles} cycles)")
+                   + ("" if measured_ns is None else f" ({measured_ns} ns measured)"))
 
         def leave():
-            if name == ALGORITHM_STAGE and not job.cancelled:
+            if (name == ALGORITHM_STAGE and not job.cancelled
+                    and not self.measures_wall_clock):
                 running.result = self.decoder.decode(job)   # ready when time ends
             self._enter(running, engine, steps, index + 1)
 

@@ -87,8 +87,10 @@ def build_run(config: dict, *, round_period_us: float, algorithm_latency_us: flo
     operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
                           circuit=circuit)
     engine_config = config["decoder"]["engine"]
+    algorithm = (PyMatchingDecoder(latency_model=None) if algorithm_latency_us == "measured"
+                 else PyMatchingDecoder(PresetLatencyDecoder(algorithm_latency_us)))
     decoder_engine = DecoderEngine(
-        PyMatchingDecoder(PresetLatencyDecoder(algorithm_latency_us)),
+        algorithm,
         DecoderTiming(
             before=(DecoderStage("fetch",
                                  cycles_per_round=engine_config["fetch_cycles_per_round"]),),
@@ -198,7 +200,7 @@ def run_sweep(config: dict) -> list:
 def summarize(measurements: list) -> list:
     """One row per sweep point: means over seeds of the per-shot means, maxes of maxes."""
     rows = []
-    points = sorted({(m.algorithm_latency_us, m.round_period_us) for m in measurements})
+    points = sorted({(m.algorithm_latency_us, m.round_period_us) for m in measurements}, key=str)
     for algorithm_latency_us, round_period_us in points:
         group = [m for m in measurements
                  if (m.algorithm_latency_us, m.round_period_us) == (algorithm_latency_us, round_period_us)]
@@ -236,12 +238,25 @@ def write_report(config: dict, rows: list, report_dir: Path) -> None:
     lines.append("| " + " | ".join(head) + " |")
     lines.append("|" + "---|" * len(head))
     for row in rows:
-        cells = [f"{row['algorithm_latency_us']:g}", f"{row['round_period_us']:g}",
+        algo = row['algorithm_latency_us']
+        cells = [algo if isinstance(algo, str) else f"{algo:g}", f"{row['round_period_us']:g}",
                  f"{row['logical_error_rate']:.2f}",
                  f"{row['throughput_windows_per_us']:.4f}", f"{row['throughput_rounds_per_us']:.3f}",
                  f"{row['decoder_utilization']:.3f}", f"{row['max_queued_windows']}"]
         cells += [f"{row[f'{p}_mean_us']:.3f}" for p in POINTS]
         lines.append("| " + " | ".join(cells) + " |")
+    import platform
+    cpu = platform.processor() or "unknown"
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith("model name"):
+                cpu = line.split(":", 1)[1].strip()
+                break
+    except OSError:
+        pass
+    lines += ["", f"algorithm = 'measured' rows charge the wall clock of each real PyMatching call "
+              f"(software decoder on this host: {cpu}, one thread, graph cached); numeric rows charge "
+              "the stated modeled latency (an ASIC card)."]
     fastest = min(rows, key=lambda r: r["round_period_us"])
     chain_us = 1 / fastest["throughput_windows_per_us"]
     commit_rounds = config["distance"]
@@ -266,7 +281,7 @@ def plots(rows: list, report_dir: Path) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    algorithms = sorted({r["algorithm_latency_us"] for r in rows})
+    algorithms = sorted({r["algorithm_latency_us"] for r in rows}, key=str)
     stack = ("buffer_fill", "dep_block", "cwd_per_window", "fetch", "algorithm", "release",
              "wdo_per_window", "frame_commit")
     fig, axes = plt.subplots(1, len(algorithms), figsize=(4.2 * len(algorithms), 3.8), sharey=True)
@@ -279,7 +294,7 @@ def plots(rows: list, report_dir: Path) -> None:
             values = [r[f"{point}_mean_us"] for r in group]
             ax.bar(x, values, bottom=bottom, label=point)
             bottom = [b + v for b, v in zip(bottom, values)]
-        ax.set_title(f"algorithm {algorithm:g} us")
+        ax.set_title(f"algorithm {algorithm if isinstance(algorithm, str) else f'{algorithm:g} us'}")
         ax.set_xlabel("input round period (us)")
         ax.grid(alpha=0.3, axis="y")
     (axes[0] if len(algorithms) > 1 else axes).set_ylabel("first round -> frame, mean us per window")
@@ -292,7 +307,8 @@ def plots(rows: list, report_dir: Path) -> None:
         group = sorted((r for r in rows if r["algorithm_latency_us"] == algorithm),
                        key=lambda r: r["round_period_us"])
         ax.plot([1 / r["round_period_us"] for r in group],
-                [r["throughput_rounds_per_us"] for r in group], "o-", label=f"algorithm {algorithm:g} us")
+                [r["throughput_rounds_per_us"] for r in group], "o-",
+                label=f"algorithm {algorithm if isinstance(algorithm, str) else f'{algorithm:g} us'}")
     limit = max(1 / r["round_period_us"] for r in rows)
     ax.plot([0, limit], [0, limit], "k--", lw=0.8, label="keeps up (out = in)")
     ax.set_xlabel("input rounds/us")

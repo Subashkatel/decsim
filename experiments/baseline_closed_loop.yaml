@@ -9,10 +9,10 @@ seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]        # one shot per seed at each sweep p
 
 # Sweep axis 1: input round period (the QEC cycle time seen by the controller).
 round_period_us: [1.0, 0.5, 0.2, 0.1, 0.05, 0.02]
-# Sweep axis 2: weak decoder algorithm latency (one window), microseconds.
-# 0.028 = LILLIPUT [d=3, m=2] 7 cycles at 250 MHz, 2108.06569 sec. 6.3 and Table 4.
-# 16.0 = PyMatching v2 software at d=17,17 rounds on an M1 Max core, 2303.15933 companion data (software row).
-algorithm_latency_us: [0.028, 0.28, 2.8]
+# Sweep axis 2: weak decoder algorithm latency (one window), microseconds, or "measured":
+# 0.028 = LILLIPUT [d=3, m=2] 7 cycles at 250 MHz, 2108.06569 sec. 6.3 and Table 4 (ASIC card).
+# measured = wall clock of each real PyMatching call on this host (software decoder row).
+algorithm_latency_us: [0.028, 0.28, measured]
 
 controller:
   t_binary_availability_us: 0.0              # pulses to binary; zero: readout classification is inside the priced round (Google 2023 Nature 614 sec. Methods)

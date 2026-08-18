@@ -87,33 +87,56 @@ def run_shot(circuit, dets, obs, shot, *, d, rounds, decoder, round_us=1.1, link
                    pauli_frame=pauli_frame, seed=shot).build()
 
 
-def accuracy(shots_per_cell: dict, rounds: int) -> list:
+def accuracy(shots_per_cell: dict, rounds_list) -> list:
     rows = []
     for d in (3, 5, 7):
         for basis in ("X", "Z"):
-            circuit, dets, obs, google, meta = load_cell(d, basis, rounds)
-            n = shots_per_cell[d]
-            matching = pymatching.Matching.from_detector_error_model(
-                circuit.detector_error_model(decompose_errors=True))
-            whole_pred = matching.decode_batch(dets)
-            whole = np.mean(np.any(whole_pred != obs, axis=1))
-            whole_subset = np.mean(np.any(whole_pred[:n] != obs[:n], axis=1))
-            google_ler = np.mean(np.any(google != obs, axis=1))
-            google_subset = np.mean(np.any(google[:n] != obs[:n], axis=1))
-            fails = 0
-            t0 = time.perf_counter()
-            for shot in range(n):
-                result = run_shot(circuit, dets, obs, shot, d=d, rounds=rounds,
-                                  decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028))
-                                  ).result.operation_results[0]
-                fails += result.logical_observables != result.observable_truth
-            rows.append(dict(d=d, basis=basis, rounds=rounds, shots=n,
-                             loop_ler=fails / n, whole_subset_ler=float(whole_subset),
-                             google_subset_ler=float(google_subset), whole_ler=float(whole),
-                             google_ler=float(google_ler), total_shots=int(len(dets)),
-                             seconds_per_shot=(time.perf_counter() - t0) / n))
-            print(rows[-1], file=sys.stderr)
+            for rounds in rounds_list:
+                rows.append(_accuracy_cell(d, basis, rounds, shots_per_cell[d]))
+                print(rows[-1], file=sys.stderr)
     return rows
+
+
+def _accuracy_cell(d, basis, rounds, n) -> dict:
+    circuit, dets, obs, google, meta = load_cell(d, basis, rounds)
+    matching = pymatching.Matching.from_detector_error_model(
+        circuit.detector_error_model(decompose_errors=True))
+    whole_pred = matching.decode_batch(dets)
+    fails = 0
+    t0 = time.perf_counter()
+    for shot in range(n):
+        result = run_shot(circuit, dets, obs, shot, d=d, rounds=rounds,
+                          decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028))
+                          ).result.operation_results[0]
+        fails += result.logical_observables != result.observable_truth
+    return dict(d=d, basis=basis, rounds=rounds, shots=n, loop_ler=fails / n,
+                whole_subset_ler=float(np.mean(np.any(whole_pred[:n] != obs[:n], axis=1))),
+                google_subset_ler=float(np.mean(np.any(google[:n] != obs[:n], axis=1))),
+                whole_ler=float(np.mean(np.any(whole_pred != obs, axis=1))),
+                google_ler=float(np.mean(np.any(google != obs, axis=1))),
+                total_shots=int(len(dets)),
+                seconds_per_shot=(time.perf_counter() - t0) / n)
+
+
+def fit_eps_per_cycle(points) -> float:
+    """Paper-style fit: logical fidelity 1 - 2P decays as (1 - 2 eps)^r.
+
+    Least squares of ln(1 - 2P) against r over the cycle counts; points at or
+    past P = 0.5 carry no information and are dropped."""
+    rs = np.array([r for r, p in points if p < 0.5], dtype=float)
+    ys = np.log(np.array([1 - 2 * p for r, p in points if p < 0.5]))
+    slope = np.polyfit(rs, ys, 1)[0]
+    return (1 - np.exp(slope)) / 2
+
+
+def eps_table(rows) -> dict:
+    """eps per cycle by (d, source) fitted across cycle counts, bases pooled."""
+    out = {}
+    for d in sorted({r["d"] for r in rows}):
+        for source in ("loop_ler", "whole_ler", "google_ler"):
+            points = [(r["rounds"], r[source]) for r in rows if r["d"] == d]
+            out[(d, source)] = fit_eps_per_cycle(points)
+    return out
 
 
 def software_window_us(d: int, rounds: int, window_rounds: int) -> float:
@@ -151,7 +174,7 @@ def realtime(shots: int, algorithm_us: float) -> dict:
     last_round_to_frame, reaction, fails, spans = [], [], 0, []
     for shot in range(shots):
         engine = DecoderEngine(
-            PyMatchingDecoder(PresetLatencyDecoder(algorithm_us)),
+            PyMatchingDecoder(latency_model=None),          # measured wall clock per call
             DecoderTiming((DecoderStage("fetch", cycles_per_round=1),),
                           (DecoderStage("release", cycles_per_job=1),), 250.0))
         done = run_shot(circuit, dets, obs, shot, d=d, rounds=rounds, decoder=engine,
@@ -169,7 +192,7 @@ def realtime(shots: int, algorithm_us: float) -> dict:
         first = min(w.t_first_round for w in done.window_manager.windows.values())
         spans.append((max(f.committed_ticks for f in frames.values()) - first) / TICKS_PER_US)
     return dict(shots=shots, rounds=rounds, algorithm_us=algorithm_us,
-                loop_fails=fails, whole_fails=whole_fails,
+                loop_fails=fails, whole_fails=whole_fails, samples=last_round_to_frame,
                 last_round_to_frame_mean_us=statistics.fmean(last_round_to_frame),
                 last_round_to_frame_sd_us=statistics.pstdev(last_round_to_frame),
                 last_round_to_frame_max_us=max(last_round_to_frame),
@@ -178,38 +201,208 @@ def realtime(shots: int, algorithm_us: float) -> dict:
                 windows=len(last_round_to_frame) // shots)
 
 
-def write_report(acc_rows: list, rt: dict, software_us: float) -> None:
+def agreement(shots_per_d: dict, rounds: int = 30) -> list:
+    """Correctness freeze: the loop's answer must equal whole-shot PyMatching on
+    every recorded shot, except where windowed and whole-shot matching may
+    legitimately differ (a boundary case); both counts are reported."""
+    rows = []
+    for d in (3, 5, 7):
+        circuit, dets, obs, google, meta = load_cell(d, "X", rounds)
+        matching = pymatching.Matching.from_detector_error_model(
+            circuit.detector_error_model(decompose_errors=True))
+        n = shots_per_d[d]
+        whole = matching.decode_batch(dets[:n])
+        agree = 0
+        for shot in range(n):
+            result = run_shot(circuit, dets, obs, shot, d=d, rounds=rounds,
+                              decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028))
+                              ).result.operation_results[0]
+            agree += result.logical_observables == tuple(int(b) for b in whole[shot])
+        rows.append(dict(d=d, rounds=rounds, shots=n, agree=agree))
+        print(rows[-1], file=sys.stderr)
+    return rows
+
+
+def resources(shots: int, software_us: float) -> list:
+    """Section 3: what keeps the loop up with the QPU. Scheme x units x algorithm at
+    d = 5, 1.1 us cycles, 250 recorded cycles; report sustained input, latency of
+    the first and last ten windows (growth means the loop is falling behind), max."""
+    from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
+    circuit, dets, obs, google, meta = load_cell(5, "X", 250)
+    links = with_controller_to_buffer_edge(logical_reference_profile(), latency_us=0.10,
+                                           aggregate_bits_per_us=1000.0,
+                                           source="experiments/baseline_closed_loop.yaml controller_to_buffer")
+    rows = []
+    for scheme_name, make_scheme in (("serial sliding", SlidingWindowScheme),
+                                     ("parallel A/B (Skoric)", ParallelWindowScheme)):
+        for units in (1, 2):
+            for algo_name, algorithm_us in (("software PyMatching, measured per call", None),
+                                            ("LILLIPUT-class ASIC 42 ns", 0.042)):
+                spans, head, tail, maxes = [], [], [], []
+                for shot in range(shots):
+                    engine = DecoderEngine(
+                        PyMatchingDecoder(None if algorithm_us is None
+                                          else PresetLatencyDecoder(algorithm_us)),
+                        DecoderTiming((DecoderStage("fetch", cycles_per_round=1),),
+                                      (DecoderStage("release", cycles_per_job=1),), 250.0))
+                    op = Operation(id=1, name="willow d5", qubits=(0,), patches=(0,), circuit=circuit)
+                    device = RecordedStimDevice(dets, obs, shot, detector_rounds={
+                        1: RecordedStimDevice.detector_rounds_from_coordinates(circuit, 250)})
+                    done = RunSpec(ops=[op], d=5, rounds_policy=FixedRounds(250), device=device,
+                                   decoder=engine, num_units=units, scheme=make_scheme(),
+                                   timing=TimingConfig(round_us=PAPER["cycle_us"]), links=links,
+                                   pauli_frame=PauliFrameConfig(commit_us=0.004), seed=shot).build()
+                    frames = {r.window_key[1]: r for r in done.pauli_frame.snapshot().records}
+                    latency = []
+                    for (op_id, window_id), window in sorted(done.window_manager.windows.items()):
+                        frame = frames.get(window_id)
+                        if frame is not None and window.t_data_complete is not None:
+                            latency.append((frame.committed_ticks - window.t_data_complete) / TICKS_PER_US)
+                    first = min(w.t_first_round for w in done.window_manager.windows.values())
+                    spans.append((max(f.committed_ticks for f in frames.values()) - first) / TICKS_PER_US)
+                    head.append(statistics.fmean(latency[:10])); tail.append(statistics.fmean(latency[-10:]))
+                    maxes.append(max(latency))
+                rows.append(dict(scheme=scheme_name, units=units, algorithm=algo_name,
+                                 algorithm_us=algorithm_us, rounds_per_us=250 / statistics.fmean(spans),
+                                 first10_us=statistics.fmean(head), last10_us=statistics.fmean(tail),
+                                 max_us=max(maxes), keeps_up=statistics.fmean(tail) < 1.5 * statistics.fmean(head)))
+                print(rows[-1], file=sys.stderr)
+    return rows
+
+
+def plots(acc_rows, eps, rt_samples, out_dir: Path) -> None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    # A. logical error vs cycles, per distance, three decoders on the same data
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3.6), sharey=True)
+    for ax, d in zip(axes, (3, 5, 7)):
+        rows = sorted((r for r in acc_rows if r["d"] == d), key=lambda r: r["rounds"])
+        by_r = {}
+        for r in rows:
+            by_r.setdefault(r["rounds"], []).append(r)
+        rs = sorted(by_r)
+        loop = [np.mean([r["loop_ler"] for r in by_r[k]]) for k in rs]
+        n = [sum(r["shots"] for r in by_r[k]) for k in rs]
+        err = [np.sqrt(p * (1 - p) / m) for p, m in zip(loop, n)]
+        whole = [np.mean([r["whole_ler"] for r in by_r[k]]) for k in rs]
+        google = [np.mean([r["google_ler"] for r in by_r[k]]) for k in rs]
+        ax.errorbar(rs, loop, yerr=err, fmt="o", color="k", label="decsim loop (PyMatching, SI1000 prior)")
+        ax.plot(rs, whole, "s--", color="tab:blue", label="whole-shot PyMatching, 50k shots")
+        ax.plot(rs, google, "^:", color="tab:red", label="Google correlated matching, 50k shots")
+        ax.set_title(f"d = {d}, {PATCHES[d]}")
+        ax.set_xlabel("QEC cycles")
+        ax.grid(alpha=0.3)
+    axes[0].set_ylabel("logical error probability")
+    axes[0].legend(fontsize=7, loc="upper left")
+    fig.tight_layout()
+    fig.savefig(out_dir / "logical_error_vs_cycles.png", dpi=150)
+
+    # B. eps per cycle vs distance, against the paper
+    fig, ax = plt.subplots(figsize=(5, 3.6))
+    ds = (3, 5, 7)
+    for source, label, marker, color in (("loop_ler", "decsim loop", "o", "k"),
+                                         ("whole_ler", "whole-shot PyMatching", "s", "tab:blue"),
+                                         ("google_ler", "Google corr. matching", "^", "tab:red")):
+        ax.semilogy(ds, [100 * eps[(d, source)] for d in ds], marker=marker, color=color, label=label)
+    paper_eps = [PAPER["eps7_percent"] * PAPER["lambda"] ** k for k in (2, 1, 0)]
+    ax.semilogy(ds, paper_eps, "x-.", color="tab:green",
+                label=f"paper: eps7 = {PAPER['eps7_percent']}%, Lambda = {PAPER['lambda']}")
+    ax.set_xlabel("code distance d")
+    ax.set_ylabel("logical error per cycle (%)")
+    ax.set_xticks(ds)
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(out_dir / "eps_per_cycle_vs_distance.png", dpi=150)
+
+    # C0. latency per window, serial vs parallel scheme, one recorded shot
+    from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
+    circuit, dets, obs, google, meta = load_cell(5, "X", 250)
+    links = with_controller_to_buffer_edge(logical_reference_profile(), latency_us=0.10,
+                                           aggregate_bits_per_us=1000.0, source="plot")
+    fig, ax = plt.subplots(figsize=(6, 3.6))
+    for label, make_scheme, color in (("serial sliding windows", SlidingWindowScheme, "tab:red"),
+                                      ("parallel A/B windows", ParallelWindowScheme, "tab:blue")):
+        engine = DecoderEngine(PyMatchingDecoder(latency_model=None),
+                               DecoderTiming((DecoderStage("fetch", cycles_per_round=1),),
+                                             (DecoderStage("release", cycles_per_job=1),), 250.0))
+        op = Operation(id=1, name="willow d5", qubits=(0,), patches=(0,), circuit=circuit)
+        device = RecordedStimDevice(dets, obs, 0, detector_rounds={
+            1: RecordedStimDevice.detector_rounds_from_coordinates(circuit, 250)})
+        done = RunSpec(ops=[op], d=5, rounds_policy=FixedRounds(250), device=device, decoder=engine,
+                       scheme=make_scheme(), timing=TimingConfig(round_us=PAPER["cycle_us"]),
+                       links=links, pauli_frame=PauliFrameConfig(commit_us=0.004), seed=0).build()
+        frames = {r.window_key[1]: r for r in done.pauli_frame.snapshot().records}
+        xs, ys = [], []
+        for (op_id, window_id), window in sorted(done.window_manager.windows.items()):
+            frame = frames.get(window_id)
+            if frame is not None and window.t_data_complete is not None:
+                xs.append(window.t_data_complete / TICKS_PER_US)
+                ys.append((frame.committed_ticks - window.t_data_complete) / TICKS_PER_US)
+        ax.plot(xs, ys, ".-", color=color, label=label)
+    ax.axhline(PAPER["realtime_latency_us"], color="k", lw=0.8, ls="--", label="paper mean 63 us")
+    ax.set_xlabel("time the window's last cycle arrived (us)")
+    ax.set_ylabel("last cycle -> correction (us)")
+    ax.legend(fontsize=7)
+    ax.grid(alpha=0.3)
+    fig.tight_layout()
+    fig.savefig(out_dir / "latency_vs_window.png", dpi=150)
+
+    # C. real-time latency distribution against the paper
+    fig, ax = plt.subplots(figsize=(5, 3.6))
+    ax.hist(rt_samples, bins=40, color="tab:gray", label="decsim: last cycle -> correction (per window)")
+    ax.axvline(PAPER["realtime_latency_us"], color="tab:red", label="paper mean 63 us")
+    ax.axvspan(PAPER["realtime_latency_us"] - PAPER["realtime_latency_sd_us"],
+               PAPER["realtime_latency_us"] + PAPER["realtime_latency_sd_us"], color="tab:red", alpha=0.15,
+               label="paper +- 17 us")
+    ax.set_xlabel("latency (us)")
+    ax.set_ylabel("windows")
+    ax.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(out_dir / "realtime_latency.png", dpi=150)
+
+
+def write_report(acc_rows: list, eps: dict, rt: dict, software_us: float,
+                 agree_rows: list = (), resource_rows: list = ()) -> None:
     lines = ["# Willow data through the baseline loop", "",
              "Data: Zenodo 13273331 (arXiv:2408.13687), patches "
-             + ", ".join(f"d={d}: {p}" for d, p in PATCHES.items()) + ".", "",
-             "## 1. Accuracy on the same recorded shots (30 cycles)", "",
-             "| d | basis | loop LER (n shots) | whole-shot PyMatching, same n | Google corr. matching, same n | whole-shot, 50k | Google, 50k | Google eps/cycle % (50k) |",
+             + ", ".join(f"d={d}: {p}" for d, p in PATCHES.items()) + ".",
+             "Plots: logical_error_vs_cycles.png, eps_per_cycle_vs_distance.png, realtime_latency.png.", "",
+             "## 0. Correctness freeze: loop vs whole-shot PyMatching, shot for shot", "",
+             "| d | cycles | shots | agree | differ (window-boundary cases) |", "|---|---|---|---|---|"]
+    for r in agree_rows:
+        lines.append(f"| {r['d']} | {r['rounds']} | {r['shots']} | {r['agree']} | {r['shots'] - r['agree']} |")
+    lines += ["", "## 1. Accuracy on the same recorded shots", "",
+             "| d | basis | cycles | loop LER (n shots) | whole-shot PyMatching, same n | Google corr. matching, same n | whole-shot, 50k | Google, 50k |",
              "|---|---|---|---|---|---|---|---|"]
-    eps = {}
     for r in acc_rows:
-        loop_eps = 100 * eps_per_cycle(r["loop_ler"], r["rounds"])
-        google_eps = 100 * eps_per_cycle(r["google_ler"], r["rounds"])
-        eps.setdefault(r["d"], []).append((loop_eps, google_eps))
-        lines.append(f"| {r['d']} | {r['basis']} | {r['loop_ler']:.3f} ({r['shots']}) | "
+        lines.append(f"| {r['d']} | {r['basis']} | {r['rounds']} | {r['loop_ler']:.3f} ({r['shots']}) | "
                      f"{r['whole_subset_ler']:.3f} | {r['google_subset_ler']:.3f} | "
-                     f"{r['whole_ler']:.4f} | {r['google_ler']:.4f} | {google_eps:.3f} |")
-    mean_eps = {d: (statistics.fmean(a for a, _ in v), statistics.fmean(b for _, b in v))
-                for d, v in eps.items()}
-    lines += ["", "Google pathway error per cycle averaged over bases (50k shots): "
-              + "; ".join(f"d={d}: {b:.3f} %" for d, (_, b) in mean_eps.items())]
-    if 5 in mean_eps and 7 in mean_eps:
-        lines.append(f"Lambda(5->7) of that pathway: {mean_eps[5][1] / mean_eps[7][1]:.2f}; paper headline: "
-                     f"eps_7 = {PAPER['eps7_percent']} %, Lambda = {PAPER['lambda']} (best decoders, all cycle "
-                     "counts fitted).")
-    lines += ["", "Read across a row: the loop and whole-shot PyMatching share decoder and prior and "
-              "decode the same n shots, so 'loop' and 'same n' must agree (they do, up to the rare window-boundary difference between windowed and whole-shot matching: one shot in 1200 here); the "
-              "50k columns show the subset's sampling noise. Google's released pathway adds "
-              "correlation reweighting, so it is lower; the paper's headline uses further-optimized "
-              "priors and ensembles. Per-cycle rates from the loop's small subsets are not quoted.",
+                     f"{r['whole_ler']:.4f} | {r['google_ler']:.4f} |")
+    lines += ["", "Logical error per cycle, fitted across cycle counts (bases pooled), percent:", "",
+              "| d | decsim loop | whole-shot PyMatching (50k) | Google corr. matching (50k) | paper (best decoders) |",
+              "|---|---|---|---|---|"]
+    paper_eps = {7: PAPER["eps7_percent"], 5: PAPER["eps7_percent"] * PAPER["lambda"],
+                 3: PAPER["eps7_percent"] * PAPER["lambda"] ** 2}
+    for d in (3, 5, 7):
+        lines.append(f"| {d} | {100 * eps[(d, 'loop_ler')]:.3f} | {100 * eps[(d, 'whole_ler')]:.3f} | "
+                     f"{100 * eps[(d, 'google_ler')]:.3f} | {paper_eps[d]:.3f} |")
+    lam = lambda s: eps[(5, s)] / eps[(7, s)]
+    lines += ["", f"Lambda(5->7): decsim loop {lam('loop_ler'):.2f}, whole-shot PyMatching {lam('whole_ler'):.2f}, "
+              f"Google pathway {lam('google_ler'):.2f}, paper {PAPER['lambda']}.",
+              "", "Read across a row: the loop and whole-shot PyMatching share decoder and prior and decode "
+              "the same n shots, so 'loop' and 'same n' agree shot for shot (up to the rare window-boundary "
+              "difference between windowed and whole-shot matching); the 50k columns show the subset's "
+              "sampling noise. The gap to Google's released pathway is decoder quality (correlated "
+              "matching reweights Y-error correlations); the paper's headline adds optimized priors and "
+              "ensembling. The paper's error bars come from all cycle counts up to 250; ours from four.",
               "", "## 2. Real-time configuration (paper Sec. V: d = 5, 1.1 us cycle)", "",
-              f"Software algorithm cost used: {software_us:.1f} us per d=5 window (median PyMatching "
-              "wall clock on this host, graph cached); reference link cards (CWD 2 us, WDO 1 us, DD 0.5 us), "
-              "C2B 0.1 us at 1 Gbit/s, frame commit 4 ns.", "",
+              "Software algorithm cost: the wall clock of each real PyMatching call on this host, "
+              f"measured per window inside the loop (median over synthetic d=5 windows for reference: "
+              f"{software_us:.1f} us; graph prebuilt, one thread); reference link cards (CWD 2 us, WDO 1 us, "
+              "DD 0.5 us), C2B 0.1 us at 1 Gbit/s, frame commit 4 ns.", "",
               "| quantity | this loop | paper |", "|---|---|---|",
               f"| last cycle received -> correction committed, mean (sd, max) us | {rt['last_round_to_frame_mean_us']:.1f} "
               f"({rt['last_round_to_frame_sd_us']:.1f}, {rt['last_round_to_frame_max_us']:.1f}) | {PAPER['realtime_latency_us']} +- {PAPER['realtime_latency_sd_us']} |",
@@ -218,8 +411,18 @@ def write_report(acc_rows: list, rt: dict, software_us: float) -> None:
               "", "Deviations to state: the paper's latency includes Ethernet, shared-memory buffering and a "
               "multi-threaded streaming decoder on a workstation, none of which are our numbers; ours are the "
               "reference link cards plus one measured software decode per window. Windows here are sliding "
-              "(commit 5, buffer 5) and serial; the paper's decoder streams. Their real-time run used the "
-              "72-qubit processor data (not in this archive); ours replays the 105-qubit d=5 patch."]
+              "(commit 5, buffer 5) and serial; the paper's decoder streams and kept latency constant for a "
+              "million cycles, ours grows over 250 cycles because 0.65 < 0.91 rounds/us. Their real-time "
+              "run used the 72-qubit processor data (not in this archive); ours replays the 105-qubit d=5 patch."]
+    lines += ["", "## 3. What keeps the loop up with the QPU (d = 5, 1.1 us cycles, 250 recorded cycles)", "",
+              "| scheme | units | algorithm | sustained rounds/us (need 0.91) | latency first 10 windows us | last 10 windows us | max us | keeps up |",
+              "|---|---|---|---|---|---|---|---|"]
+    for r in resource_rows:
+        lines.append(f"| {r['scheme']} | {r['units']} | {r['algorithm']} | {r['rounds_per_us']:.2f} | "
+                     f"{r['first10_us']:.1f} | {r['last10_us']:.1f} | {r['max_us']:.1f} | {'yes' if r['keeps_up'] else 'NO'} |")
+    lines += ["", "Serial sliding windows are bound by the per-window chain (unit assigned, CWD transfer, decode, "
+              "WDO, boundary handoff), so more units change nothing and latency grows with time; parallel A/B "
+              "windows remove the chain and hold latency flat. Plot: latency_vs_window.png."]
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text("\n".join(lines) + "\n")
     print("\n".join(lines))
@@ -227,11 +430,17 @@ def write_report(acc_rows: list, rt: dict, software_us: float) -> None:
 
 def main(argv) -> None:
     quick = "--quick" in argv
-    shots = {3: 40, 5: 20, 7: 10} if quick else {3: 300, 5: 200, 7: 100}
-    acc_rows = accuracy(shots, rounds=30)
+    shots = {3: 40, 5: 20, 7: 10} if quick else {3: 600, 5: 400, 7: 150}
+    rounds_list = (10, 30) if quick else (10, 30, 50, 90)
+    acc_rows = accuracy(shots, rounds_list)
+    eps = eps_table(acc_rows)
     software_us = software_window_us(5, 30, window_rounds=10)
     rt = realtime(shots=2 if quick else 10, algorithm_us=software_us)
-    write_report(acc_rows, rt, software_us)
+    agree_rows = agreement({3: 30, 5: 20, 7: 10} if quick else {3: 2000, 5: 1000, 7: 500})
+    resource_rows = resources(shots=1 if quick else 3, software_us=software_us)
+    REPORT.parent.mkdir(parents=True, exist_ok=True)
+    plots(acc_rows, eps, rt["samples"], REPORT.parent)
+    write_report(acc_rows, eps, rt, software_us, agree_rows, resource_rows)
 
 
 if __name__ == "__main__":

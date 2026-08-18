@@ -21,8 +21,8 @@ Rules
   (150 internal imports, 37 test and experiment files), no re-exports, no
   shims, no content edits. History follows the files; every later refactor
   diff stays readable. Then the content work of the rewrite plan.
-- detector_error_model/ and the decoder backend packages keep their internal
-  structure; they only move as a whole.
+- detector_error_model/, the six decoder backend packages and soft_output/
+  keep their internal structure; they only move as a whole.
 
 ## 1. Target tree
 
@@ -84,10 +84,16 @@ Rules
         strong_escalation.py      NEW: StrongEscalation and StrongRequestLedger
                                   (today spread over window_manager and decoder_manager)
         window_decode_results.py  was adapters/window_decode_results.py
-        mwpm/                     was mwpm_decoder/
-        union_find/               was union_find_decoder/
-        tesseract/                was tesseract_decoder/
-        relay_bp/                 was relay_bp_decoder/
+        mwpm/                     was mwpm_decoder/        (internals unchanged)
+        union_find/               was union_find_decoder/  (internals unchanged)
+        tesseract/                was tesseract_decoder/   (internals unchanged)
+        relay_bp/                 was relay_bp_decoder/    (internals unchanged)
+        belief_matching/          was belief_matching_decoder/ (internals unchanged)
+        bposd/                    was bposd_decoder/       (internals unchanged)
+
+      confidence/               the confidence estimator box of the memo
+        (was soft_output/, internals unchanged: decoder.py, cluster.py,
+         complementary.py, the SoftOutputMetric protocol)
 
       detector_error_model/     (as is)
 
@@ -119,7 +125,8 @@ Rules
 | decoders.py | decoders/decoder_routing.py | it routes jobs to decoders and prices latency; it holds no decoder |
 | switching.py | decoders/weak_strong_switching.py | it is the weak-to-strong strategy |
 | adapters/window_decode_results.py | decoders/window_decode_results.py | it belongs to the decoders |
-| mwpm_decoder/ etc. | decoders/mwpm/ etc. | the folder already says decoders |
+| mwpm_decoder/, union_find_decoder/, tesseract_decoder/, relay_bp_decoder/, belief_matching_decoder/, bposd_decoder/ | decoders/mwpm/, union_find/, tesseract/, relay_bp/, belief_matching/, bposd/ | the folder already says decoders; each package moves whole, internals unchanged |
+| soft_output/ | confidence/ | the memo names confidence estimation as its own component; it is not a decoder |
 | views.py | observe/run_views.py | it is the frozen views of one run |
 | NEW protected_streams | controller/feedback_streams.py | it is the feedback-stream state of the controller |
 | NEW boundaries | windows/window_boundaries.py | says whose boundaries |

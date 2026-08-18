@@ -11,7 +11,7 @@ import math
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
-from .message import (
+from ..message import (
     OperationWindowPlan,
     WindowReadiness,
     WindowGeometry,
@@ -19,7 +19,7 @@ from .message import (
 )
 
 if TYPE_CHECKING:
-    from .message import Window
+    from ..message import Window
 
 
 class SlidingTerminalPolicy(Enum):

@@ -8,8 +8,8 @@ from decsim.message import RunSeedReservation, SoftOutputSource
 from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
 from decsim.protocols import BoundaryPolicy, IdlePolicy
 from decsim.run_spec import RunSpec
-from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
-from decsim.speculative_recovery import SpeculativeRecovery
+from decsim.windows.windowing_schemes import SlidingTerminalPolicy, SlidingWindowScheme
+from decsim.windows.speculative_recovery import SpeculativeRecovery
 from decsim.decoders.weak_strong_switching import Baseline, Switching
 
 

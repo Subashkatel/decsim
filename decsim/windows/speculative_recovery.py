@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum, auto
 
-from .message import Replay
+from ..message import Replay
 
 
 class _RecoveryState(Enum):

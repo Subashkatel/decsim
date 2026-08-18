@@ -13,7 +13,7 @@ from decsim.pauli_frame import PauliFrameConfig
 from decsim.protocols import PauliFrame as PauliFramePort
 import decsim.run_spec as run_spec_module
 from decsim.run_spec import RunSpec
-from decsim.window_manager import WindowManager
+from decsim.windows.window_manager import WindowManager
 
 
 class ManualEngine:

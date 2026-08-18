@@ -8,16 +8,16 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Callable, Optional
 
-from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob, DecoderInputHold,
+from ..message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob, DecoderInputHold,
                       DecodeResult, DecoderRequestKey, DecoderTier,
                       Operation, PendingStrong, PotentialStrong, RephaseGuard,
                       SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
                       SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
                       WindowPlan, WindowProtocol, WindowReadiness,
                       stable_identity_order_key)
-from .links import (BoundaryTransferRelation, LinkPath,
+from ..links import (BoundaryTransferRelation, LinkPath,
                     RequestTransferRelation, TrafficAttribution)
-from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
+from ..syndrome_buffer.syndrome_buffer import SyndromeBuffer
 from .dynamic_windows import DynamicWindows
 from .speculative_recovery import SpeculativeRecovery
 

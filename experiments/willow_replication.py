@@ -231,7 +231,7 @@ def resources(shots: int, software_us: float) -> list:
     """Section 3: what keeps the loop up with the QPU. Scheme x units x algorithm at
     d = 5, 1.1 us cycles, 250 recorded cycles; report sustained input, latency of
     the first and last ten windows (growth means the loop is falling behind), max."""
-    from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
+    from decsim.windows.windowing_schemes import ParallelWindowScheme, SlidingWindowScheme
     circuit, dets, obs, google, meta = load_cell(5, "X", 250)
     links = with_controller_to_buffer_edge(logical_reference_profile(), latency_us=0.10,
                                            aggregate_bits_per_us=1000.0,
@@ -322,7 +322,7 @@ def plots(acc_rows, eps, rt_samples, out_dir: Path) -> None:
     fig.savefig(out_dir / "eps_per_cycle_vs_distance.png", dpi=150)
 
     # C0. latency per window, serial vs parallel scheme, one recorded shot
-    from decsim.schemes import ParallelWindowScheme, SlidingWindowScheme
+    from decsim.windows.windowing_schemes import ParallelWindowScheme, SlidingWindowScheme
     circuit, dets, obs, google, meta = load_cell(5, "X", 250)
     links = with_controller_to_buffer_edge(logical_reference_profile(), latency_us=0.10,
                                            aggregate_bits_per_us=1000.0, source="plot")

@@ -15,7 +15,7 @@ from decsim.qpu.layouts import UniformLayout
 from decsim.message import DecodeJob, Operation
 from decsim.protocols import CodeModel
 from decsim.run_spec import RunSpec
-from decsim.schemes import ParallelWindowScheme
+from decsim.windows.windowing_schemes import ParallelWindowScheme
 
 
 class IntSubclass(int):

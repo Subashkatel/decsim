@@ -47,16 +47,6 @@ class SyndromeIngressPolicy:
     overflow: IngressOverflowPolicy = IngressOverflowPolicy.FAIL_STOP
     reassembly_timeout_ticks: Optional[int] = None
 
-    def __post_init__(self) -> None:
-        if type(self.queue_admission) is not ReassemblyQueueAdmission:
-            raise TypeError("queue_admission must be ReassemblyQueueAdmission")
-        if type(self.overflow) is not IngressOverflowPolicy:
-            raise TypeError("overflow must be IngressOverflowPolicy")
-        if (self.reassembly_timeout_ticks is not None and
-                (type(self.reassembly_timeout_ticks) is not int or
-                 self.reassembly_timeout_ticks < 1)):
-            raise TypeError("reassembly_timeout_ticks must be positive or None")
-
 
 @dataclass(frozen=True)
 class SyndromeIngressSnapshot:
@@ -136,12 +126,6 @@ class SyndromeIngress:
         syndrome_buffer: Optional[SyndromeBuffer] = None,
         policy: SyndromeIngressPolicy = SyndromeIngressPolicy(),
     ):
-        if ingress_context_capacity is not None and (
-            type(ingress_context_capacity) is not int or ingress_context_capacity < 1
-        ):
-            raise TypeError("ingress_context_capacity must be a positive int or None")
-        if type(policy) is not SyndromeIngressPolicy:
-            raise TypeError("policy must be an exact SyndromeIngressPolicy")
         self.policy = policy
         self.engine = engine
         default_links = logical_reference_profile().resolve()
@@ -181,12 +165,6 @@ class SyndromeIngress:
         self, payload, route: SyndromePacketRoute, *, processing_ticks: int,
     ) -> None:
         """Deliver a QPU result, then expose it after controller processing."""
-        if type(processing_ticks) is not int or processing_ticks < 0:
-            raise TypeError("processing_ticks must be a nonnegative exact int")
-        if type(payload) is not SyndromePayload:
-            raise TypeError("relay_qpu_readout requires exact SyndromePayload")
-        if type(route) is not SyndromePacketRoute:
-            raise TypeError("relay_qpu_readout requires a typed packet route")
         fragment_count = payload.n_fragments
         fragment = RetainedSyndromeFragment.from_payload(payload)
         attribution = self._round_attribution(
@@ -209,12 +187,6 @@ class SyndromeIngress:
 
     def relay_syndrome(self, payload, route: SyndromePacketRoute) -> None:
         """Accept one binary fragment after QPU-to-controller delivery."""
-        if type(payload) is not SyndromePayload:
-            raise TypeError("relay_syndrome accepts only exact SyndromePayload values")
-        if type(route) is not SyndromePacketRoute:
-            raise TypeError("relay_syndrome requires a typed packet route")
-        if type(payload.n_fragments) is not int:
-            raise TypeError("n_fragments must be an exact built-in int")
         if payload.n_fragments < 1:
             raise ValueError("n_fragments must be at least one")
         fragment_count = payload.n_fragments
@@ -413,8 +385,6 @@ class SyndromeIngress:
             slot.state = _IngressSlotState.PACKED_WAIT   # a refused round is ahead; keep order
             return False
         accepted = self.window_input_receiver.accept_window_input(slot.packet)
-        if type(accepted) is not bool:
-            raise TypeError("window input receiver must return an exact bool")
         if not accepted:
             slot.state = _IngressSlotState.PACKED_WAIT
             return False

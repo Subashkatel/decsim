@@ -831,3 +831,32 @@ Keep:
 | 2688 | WindowManager.accept_idle_decode_demand | `receiver is None` -> RuntimeError("idle decode demand receiver is not connected") | delete | re-proves wiring that run_spec makes by construction (Phase 2 constructor injection) |
 | 2697 | WindowManager.bind_stream_operation | `previous is not None and previous != binding` -> RuntimeError("operation stream binding is already fixed") | delete | re-proves wiring that run_spec makes by construction (Phase 2 constructor injection) |
 | 2703 | WindowManager.bind_required_stream_end | `operation_id in self._required_stream_end_by_operation_id` -> RuntimeError("protected feedback stream end is already bound | delete | re-proves wiring that run_spec makes by construction (Phase 2 constructor injection) |
+
+## Applied (Phase 1, commits 14db92d..HEAD)
+
+Every row marked delete is gone, with these adjustments found while
+applying, each recorded here as the plan requires:
+
+- planner._plan_execution gained one user config check with its reason:
+  distance >= 1, commit_round_count >= 1, buffer_round_count >= 0 on the
+  code card. The ResolvedCodeGeometry __post_init__ that used to reject
+  d = 0 was internal ceremony by the table, but without it a zero geometry
+  never terminates (the first lock run hung).
+- links _validate_attribution_shape keeps "path requires a request / a
+  boundary relation" (rows 790, 792 moved to keep): they are the link
+  contract callers rely on; the stable-identity re-proving around them is
+  gone.
+- switching.validate_declared_run rows 260-286 moved to keep: switching
+  options versus scheme and workload are user config rules (the "exact
+  shipped serial SlidingWindowScheme" wording had matched the type-guard
+  pattern).
+- codes.py BB card value rules (n even, k <= n, d <= n, buffer override
+  nonnegative) and decoder_memory rows 57 (capacity positive) and 234 (one
+  job per unit memory) moved to keep.
+- RunSeedPathSegment.kind: no __post_init__; canonical_bytes looks the tag
+  up, so an unknown kind fails on its own.
+- Engine: the whole phase machine, the stable-boundary flags and
+  SimulationFailed are gone; delay >= 0, monotone event time and unique
+  metric names stay. RunSpec.build is one call.
+- Tests that asserted the removed guards were dropped (about 70), and
+  tests that used engine._start_running were trimmed.

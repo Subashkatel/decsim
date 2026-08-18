@@ -186,3 +186,32 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
     assert all(a_end <= b_start
                for (_, a_end), (b_start, _) in zip(spans, spans[1:]))
     assert any(ALGORITHM_STAGE in line for line in staged.engine.log_lines)
+
+
+def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
+    """PyMatchingDecoder(latency_model=None) inside the engine: the real matching
+    call runs at algorithm start, the unit stays busy for exactly the measured
+    time, and the result is released only then."""
+    stim = pytest.importorskip("stim")
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.message import Operation
+    from decsim.mwpm_decoder.decoder import PyMatchingDecoder
+    from decsim.rounds import FixedRounds
+    from decsim.run_spec import RunSpec
+
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", rounds=6, distance=3,
+        after_clifford_depolarization=0.005, before_measure_flip_probability=0.005,
+        after_reset_flip_probability=0.005, before_round_data_depolarization=0.005)
+    operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
+    engine = DecoderEngine(PyMatchingDecoder(latency_model=None), _timing())
+    completed = RunSpec(ops=[operation], d=3, rounds_policy=FixedRounds(6),
+                        device=StimDevice(), decoder=engine, seed=3).build()
+    assert completed.result.terminal_status == "complete"
+    algorithm = [r for r in engine.stage_records if r.stage == ALGORITHM_STAGE]
+    assert algorithm
+    for record in algorithm:
+        assert record.measured_ns is not None and record.measured_ns > 0
+        assert record.end_ticks - record.start_ticks == us(record.measured_ns / 1000.0)
+    with pytest.raises(RuntimeError, match="measured wall-clock"):
+        PyMatchingDecoder(latency_model=None).latency(_job())

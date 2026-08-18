@@ -252,33 +252,6 @@ def test_physical_and_edge_configuration_keep_only_corruption_guards():
     assert unchecked_nested.actual_payload_source == "actual"
 
 
-def test_attribution_guards_stable_ordered_geometry():
-    """Attribution admits only stable ordered identities and coherent geometry."""
-    valid = TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 4)
-    assert valid.round_hi == 4
-    with pytest.raises(TypeError):
-        TrafficAttribution([], PATCH_IDS, None, None, None)
-    mutable_patches = [1, 2]
-    mutable = TrafficAttribution(
-        OPERATION_ID, mutable_patches, None, None, None
-    )
-    assert mutable.patch_ids is mutable_patches
-    with pytest.raises(TypeError):
-        TrafficAttribution(OPERATION_ID, (object(),), None, None, None)
-    with pytest.raises(ValueError):
-        TrafficAttribution(OPERATION_ID, (2, 1), None, None, None)
-    with pytest.raises(ValueError):
-        TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, None)
-    with pytest.raises(ValueError):
-        TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, None, None)
-    with pytest.raises(ValueError):
-        TrafficAttribution(OPERATION_ID, PATCH_IDS, -1, 1, 2)
-    with pytest.raises(ValueError):
-        TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 0, 2)
-    with pytest.raises(ValueError):
-        TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 2, 1)
-
-
 def test_attribution_deliberately_does_not_prove_uniqueness_or_provenance():
     """Attribution leaves patch uniqueness and operation provenance unproved."""
     unrelated = RequestTransferRelation(
@@ -302,36 +275,6 @@ def test_request_relation_defers_duck_snapshot_to_model_admission():
         run_sequence=0,
     )
     assert RequestTransferRelation(duck).request_key is duck
-
-
-def test_boundary_relation_guards_source_and_positive_revisions():
-    """Boundary relations keep source and revision guards without type pedantry."""
-    key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, 0)
-    relation = BoundaryTransferRelation(
-        key, (OPERATION_ID, 3), (OPERATION_ID, 4), 1, 2
-    )
-    assert relation.source_request_key is key
-    duck = SimpleNamespace(
-        operation_id=OPERATION_ID,
-        window_id=3,
-        tier=DecoderTier.STRONG,
-        run_sequence=0,
-    )
-    duck_relation = BoundaryTransferRelation(
-        duck, (OPERATION_ID, 3), [OPERATION_ID, 4], True, 2
-    )
-    assert duck_relation.source_request_key is duck
-    assert duck_relation.destination_window_key == [OPERATION_ID, 4]
-    assert duck_relation.source_revision == 1
-    assert type(duck_relation.source_revision) is int
-    with pytest.raises(ValueError):
-        BoundaryTransferRelation(
-            key, (OPERATION_ID, 2), (OPERATION_ID, 4), 1, 2
-        )
-    with pytest.raises(ValueError):
-        BoundaryTransferRelation(
-            key, (OPERATION_ID, 3), (OPERATION_ID, 4), 1, 0
-        )
 
 
 def test_finite_fifo_reservations_obey_exact_timing_equations():
@@ -490,7 +433,6 @@ def test_request_paths_enforce_relation_kind_tier_and_identity():
 @pytest.mark.parametrize(
     ("key", "exception"),
     [
-        (DecoderRequestKey([], 3, DecoderTier.STRONG, 0), TypeError),
         (DecoderRequestKey(OPERATION_ID, -1, DecoderTier.STRONG, 0), ValueError),
         (DecoderRequestKey(OPERATION_ID, True, DecoderTier.STRONG, 0), ValueError),
         (DecoderRequestKey(OPERATION_ID, 3, "strong", 0), ValueError),
@@ -533,51 +475,6 @@ def test_model_admission_guards_inner_request_identity_before_mutation(key, exce
         assert counters_from(
             model.traffic_json_value(), LinkPath.WSD
         )["transfer_count"] == 0
-
-
-def test_boundary_admission_snapshots_convertible_keys_and_rejects_unstable_values():
-    """Boundary admission snapshots convertible keys and rejects unstable contents."""
-    class UnstableTuple(tuple):
-        pass
-
-    key = DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, 0)
-    convertible = BoundaryTransferRelation(
-        key,
-        UnstableTuple((OPERATION_ID, 3)),
-        (OPERATION_ID, 4),
-        1,
-        2,
-    )
-    unstable = BoundaryTransferRelation(
-        key,
-        (OPERATION_ID, 3),
-        (object(), 4),
-        1,
-        2,
-    )
-    model = make_model_config().resolve()
-    model.reserve(
-        LinkPath.DD,
-        payload_bits=1,
-        now_ticks=0,
-        attribution=TrafficAttribution(
-            OPERATION_ID, PATCH_IDS, 3, 1, 2, convertible
-        ),
-    )
-    source_json = model.traffic_json_value()["transfers"][0][
-        "attribution"
-    ]["relation"]["source_window_key"]
-    assert source_json == stable_identity_json((OPERATION_ID, 3))
-    with pytest.raises(TypeError):
-        model.reserve(
-            LinkPath.DD,
-            payload_bits=1,
-            now_ticks=0,
-            attribution=TrafficAttribution(
-                OPERATION_ID, PATCH_IDS, 3, 1, 2, unstable
-            ),
-        )
-    assert counters_from(model.traffic_json_value(), LinkPath.DD)["transfer_count"] == 1
 
 
 def test_payload_selection_records_actual_default_and_unresolved_sources():

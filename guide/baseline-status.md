@@ -56,9 +56,10 @@ Status vocabulary:
   500/500 at d = 3, 5, 7; the one difference is an equal-weight tie),
   epsilon per cycle 1.086 / 0.748 / 0.509 % (Lambda 1.47 vs 1.49 whole-shot;
   Google's released decoder 1.76, paper 2.14, a decoder-quality gap), and real
-  time at d = 5, 1.1 us cycle: single-thread PyMatching measures 22 us median
-  per window on this host, so serial windows sustain 0.19 rounds/us and
-  parallel A/B with two units 0.56 against the 0.91 required, while a
+  time at d = 5, 1.1 us cycle: single-thread PyMatching measures 16 us median
+  per window on this host (warm graphs, commit 2e9a669; one Python decode call
+  costs 5-7 us before any matching work), so serial windows sustain 0.26
+  rounds/us and parallel A/B with two units 0.65 against the 0.91 required, while a
   LILLIPUT-class ASIC keeps up at 0.90 with 3.1 us (serial) or 10 us
   (parallel) latency; the paper's 63 us is a multi-worker streaming decoder
   (`experiments/results/willow_replication/report.md` and four plots).

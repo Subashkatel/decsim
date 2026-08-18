@@ -40,14 +40,39 @@ Status vocabulary:
   (`anchor.md`). The controller-to-Buffer-0 hop is a priced optional link (C2B).
   Finding: with the reference link cards the serial sliding-window chain, not the
   decoder, bounds throughput (knee near a 1.2 us round period at d=3).
-- Willow replication (owner request 2026-08-18): `RecordedStimDevice` replays
-  Google's Zenodo 13273331 hardware detection events through the loop;
-  `experiments/willow_replication.py` reports the loop's logical error rate equal
-  to whole-shot PyMatching on the same recorded shots (d = 3, 5, 7) beside
-  Google's released decoder, and the real-time configuration (d = 5, 1.1 us
-  cycle) at 58.7 +- 30 us last-cycle-to-correction beside the paper's 63 +- 17 us,
-  sustaining 0.65 rounds/us against the 0.91 required
-  (`experiments/results/willow_replication/report.md`).
+- Decoder-side shape after the owner rulings of 2026-08-18 (commits `cd43fdb`,
+  `1d8b77f`, `b3c8943`, `ebae88f`): assign-then-transfer (a job is queued, a
+  numbered unit is assigned, then its input is transferred into that unit's
+  own `DecoderMemory`, then service starts); decoder memory is per unit, never
+  a pool; the software decoder row uses the measured wall clock of each real
+  PyMatching call (`PyMatchingDecoder(latency_model=None)`), the only place
+  wall clock enters as modeled time; `cancel` aborts stages. Suite 765 passed,
+  smoke rebaselined for assign-then-transfer.
+- Willow replication (owner request 2026-08-18, final at `a7336f2`):
+  `RecordedStimDevice` replays Google's Zenodo 13273331 hardware detection
+  events through the loop; `experiments/willow_replication.py` reports the loop
+  identical shot for shot to whole-shot PyMatching (1999/2000, 1000/1000,
+  500/500 at d = 3, 5, 7; the one difference is an equal-weight tie),
+  epsilon per cycle 1.086 / 0.748 / 0.509 % (Lambda 1.47 vs 1.49 whole-shot;
+  Google's released decoder 1.76, paper 2.14, a decoder-quality gap), and real
+  time at d = 5, 1.1 us cycle: single-thread PyMatching measures 22 us median
+  per window on this host, so serial windows sustain 0.19 rounds/us and
+  parallel A/B with two units 0.56 against the 0.91 required, while a
+  LILLIPUT-class ASIC keeps up at 0.90 with 3.1 us (serial) or 10 us
+  (parallel) latency; the paper's 63 us is a multi-worker streaming decoder
+  (`experiments/results/willow_replication/report.md` and four plots).
+- External validation gates (`experiments/results/validation/`): Gate 1 qLDPC
+  `SlidingWindowDecoder` (window 2d, stride d) vs decsim, same windows and commit
+  sets, 2998/3000 shots identical (`validate_windows_qldpc.py`); Gate 2
+  SWIPER-SIM sliding-window timing vs decsim with every link at zero latency,
+  every interior window identical, tail convention differs by one window
+  (`validate_timing_swiper.py`, commit `adfb522`); Gate 3 Fusion Blossom exact
+  MWPM vs decsim's PyMatching on the same window graphs, 2700/2700 same weight
+  and logical class (`validate_mwpm_fusion_blossom.py`). Gate 2 also restored
+  the reference links one at a time: CWD, DD and WDO each accumulate on the
+  serial window chain, WDO because the boundary handed to the next window is
+  sent only after the weak result crossed WDO and committed to the frame
+  (open owner question, see queue).
 
 ## Minimal baseline closed loop
 

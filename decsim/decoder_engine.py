@@ -79,10 +79,10 @@ class _RunningDecode:
     result: Optional[DecodeResult] = None
 
 
-class TimedDecoder:
+class DecoderEngine:
     """Decoder port plus ``run()``: stages before, the algorithm, stages after."""
 
-    log_name = "TimedDecoder"
+    log_name = "DecoderEngine"
 
     def __init__(self, decoder, timing: DecoderTiming):
         from .decoders import _decoder_fault_model_requirement

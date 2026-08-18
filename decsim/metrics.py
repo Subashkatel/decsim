@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Optional
 
 from .message import (DecoderRequestKey, stable_identity_json,
                       stable_identity_order_key)
-from .views import (WINDOW_STAGES, backlog_view, decoder_input_store_view,
+from .views import (WINDOW_STAGES, backlog_view, decoder_memory_view,
                     reaction_view, strong_work_view, utilization_view,
                     switching_records_view, window_latency_view)
 
@@ -169,10 +169,10 @@ def _request_key_json(request_key: Optional[DecoderRequestKey]):
             "run_sequence": request_key.run_sequence}
 
 
-class DecoderInputStoreOccupancy:
+class DecoderMemoryOccupancy:
     """Decoder-input storage occupancy, waiting, and stalls, in rounds.
 
-    Opt-in observer for runs that configure a finite decoder-input store. It
+    Opt-in observer for runs that configure a finite decoder memory. It
     reports per-pool and aggregate current, peak and time-average occupied
     rounds and their utilization, current, peak and time-average work waiting
     for round credits, stall counts and ticks, and one record per request that
@@ -190,7 +190,7 @@ class DecoderInputStoreOccupancy:
     event boundaries.
     """
 
-    name = "decoder_input_store_occupancy"
+    name = "decoder_memory_occupancy"
     result_schema_version = 1
 
     def __init__(self, decoder_manager):
@@ -207,7 +207,7 @@ class DecoderInputStoreOccupancy:
 
     def observe(self, engine: "Engine") -> None:
         """Add the storage levels held since the last event, then re-sample."""
-        view = decoder_input_store_view(self.decoder_manager)
+        view = decoder_memory_view(self.decoder_manager)
         if not view.enabled:
             return
         pool_names = tuple(row.pool for row in view.per_pool)
@@ -224,7 +224,7 @@ class DecoderInputStoreOccupancy:
             self._peak_waiting_rounds = {name: 0 for name in pool_names}
         elif pool_names != self._pool_names:
             raise RuntimeError(
-                "decoder-input store pools changed during measurement")
+                "decoder memory pools changed during measurement")
         aggregate_occupied_rounds = 0
         for row in view.per_pool:
             self._occupied_rounds[row.pool].observe(
@@ -250,7 +250,7 @@ class DecoderInputStoreOccupancy:
 
     def rows(self) -> list:
         """One record per request that waited for decoder-input round credits."""
-        view = decoder_input_store_view(self.decoder_manager)
+        view = decoder_memory_view(self.decoder_manager)
         return [{
             "request_key": _request_key_json(record.request_key),
             "pool": record.pool,
@@ -262,7 +262,7 @@ class DecoderInputStoreOccupancy:
 
     def result(self) -> dict:
         """Per-pool and aggregate storage occupancy, waiting, and stalls."""
-        view = decoder_input_store_view(self.decoder_manager)
+        view = decoder_memory_view(self.decoder_manager)
         if not view.enabled:
             return {"enabled": False, "observation_span_ticks": 0,
                     "per_pool": {}, "aggregate": {}, "stall_records": []}

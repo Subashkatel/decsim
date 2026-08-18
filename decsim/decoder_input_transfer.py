@@ -2,7 +2,7 @@
 
 The default transport owns delay and cancellation only. Storage admission,
 materialization, stored-input lifetime, and the upstream hold belong to
-``DecoderInputStoreStager`` in decoder_input_store.py, which is the receiver
+``DecoderMemoryStager`` in decoder_memory.py, which is the receiver
 every transport delivers to.
 """
 

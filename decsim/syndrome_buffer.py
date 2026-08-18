@@ -30,7 +30,7 @@ class SyndromeBufferingConfig:
     """Optional capacity of the upstream syndrome buffer, in rounds.
 
     ``None`` means unbounded. Decoder-side storage is configured separately and
-    in different units by ``RunSpec.decoder_input_store``.
+    in different units by ``RunSpec.decoder_memory``.
     """
 
     upstream_packet_slots: Optional[int] = None

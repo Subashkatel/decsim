@@ -13,7 +13,7 @@ import copy
 from dataclasses import dataclass
 from typing import Optional
 
-from .decoder_input_store import DecoderInputStoreStallRecord
+from .decoder_memory import DecoderMemoryStallRecord
 from .decoder_manager import TerminalRequestRecord, TerminalServiceRecord
 from .message import DecoderRequestKey, stable_identity_order_key
 
@@ -62,7 +62,7 @@ class WindowLatencyView:
     ``queue_wait`` stays composite: input transport, plus the wait for
     decoder-input round credits when a finite store is configured, plus the
     ready-queue wait. The storage stage is decomposed separately by
-    DecoderInputStoreView.stall_records.
+    DecoderMemoryView.stall_records.
     """
 
     stages: tuple = WINDOW_STAGES
@@ -137,7 +137,7 @@ class FinalWindowRow:
 
 
 @dataclass(frozen=True)
-class DecoderInputStorePoolView:
+class DecoderMemoryPoolView:
     """One decoder unit pool's input storage at one instant."""
 
     pool: str
@@ -152,8 +152,8 @@ class DecoderInputStorePoolView:
 
 
 @dataclass(frozen=True)
-class DecoderInputStoreView:
-    """Configured decoder-input storage at one instant.
+class DecoderMemoryView:
+    """Configured decoder memory at one instant.
 
     ``enabled`` is false when no finite store is configured; the run then keeps
     one shared unbounded store that owns no per-pool budget, so there is
@@ -161,8 +161,8 @@ class DecoderInputStoreView:
     """
 
     enabled: bool
-    per_pool: tuple[DecoderInputStorePoolView, ...]
-    stall_records: tuple[DecoderInputStoreStallRecord, ...]
+    per_pool: tuple[DecoderMemoryPoolView, ...]
+    stall_records: tuple[DecoderMemoryStallRecord, ...]
 
 
 @dataclass(frozen=True)
@@ -343,18 +343,18 @@ def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
     )
 
 
-def decoder_input_store_view(decoder_manager) -> DecoderInputStoreView:
-    """Snapshot decoder-input storage occupancy, waiting, and stalls."""
-    snapshot = decoder_manager.decoder_input_stager.snapshot()
+def decoder_memory_view(decoder_manager) -> DecoderMemoryView:
+    """Snapshot decoder memory occupancy, waiting, and stalls."""
+    snapshot = decoder_manager.decoder_memory_stager.snapshot()
     if not snapshot.enabled:
-        return DecoderInputStoreView(
+        return DecoderMemoryView(
             enabled=False, per_pool=(), stall_records=())
     waiting_jobs_by_pool = dict(snapshot.waiting_jobs_by_pool)
     waiting_rounds_by_pool = dict(snapshot.waiting_rounds_by_pool)
     stall_events_by_pool = dict(snapshot.stall_events_by_pool)
     stall_ticks_by_pool = dict(snapshot.stall_ticks_by_pool)
     per_pool = tuple(
-        DecoderInputStorePoolView(
+        DecoderMemoryPoolView(
             pool=store.pool,
             capacity_rounds=store.capacity_rounds,
             occupied_rounds=store.occupied_rounds,
@@ -367,7 +367,7 @@ def decoder_input_store_view(decoder_manager) -> DecoderInputStoreView:
         )
         for store in snapshot.per_pool_store
     )
-    return DecoderInputStoreView(
+    return DecoderMemoryView(
         enabled=True, per_pool=per_pool,
         stall_records=snapshot.stall_records)
 

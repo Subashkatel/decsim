@@ -13,7 +13,7 @@ from .frontends.circuit import (CircuitFrontend, SurgeryIRFrontend,
                                 three_cnot_circuit, cnot_plus_two_t_circuit,
                                 independent_t_circuit,
                                 three_cnot_six_qubits_circuit)
-from .metrics import (DecoderInputStoreOccupancy, DecoderUtilization,
+from .metrics import (DecoderMemoryOccupancy, DecoderUtilization,
                       ReadyQueueStats,
                       WindowLatencyBreakdown, MagicStateLatency,
                       StrongDecoderBacklog, ConditionalReactionTime)
@@ -34,7 +34,7 @@ __all__ = [
     "InfiniteFactory", "DistillationFactory", "MultiLevelDistillationFactory",
     "ParallelWindowScheme",
     "Switching",
-    "DecoderInputStoreOccupancy", "DecoderUtilization", "ReadyQueueStats",
+    "DecoderMemoryOccupancy", "DecoderUtilization", "ReadyQueueStats",
     "WindowLatencyBreakdown", "MagicStateLatency", "StrongDecoderBacklog",
     "ConditionalReactionTime",
 ]

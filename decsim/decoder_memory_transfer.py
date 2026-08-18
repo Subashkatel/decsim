@@ -1,9 +1,8 @@
-"""Move one decoder request into decoder memory after an exact delay.
+"""Move one decoder request into its assigned unit's memory after an exact delay.
 
-The default transport owns delay and cancellation only. Storage admission,
-materialization, stored-input lifetime, and the upstream hold belong to
-``DecoderMemoryStager`` in decoder_memory.py, which is the receiver
-every transport delivers to.
+The default transport owns delay and cancellation only. Materialization into
+the unit's ``DecoderMemory`` and the upstream hold release belong to the
+decoder manager's receiver.
 """
 
 from __future__ import annotations

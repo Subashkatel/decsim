@@ -6,12 +6,12 @@ Circuit: surface_code:rotated_memory_z d=3, 60 rounds per shot, p=0.001, 10 shot
 
 | algo us | round us | LER | win/us | rounds/us | util | max q | c2b_per_round | buffer_fill | dep_block | queue_wait | cwd_per_window | fetch | algorithm | release | service | wdo_per_window | frame_commit | last_round_to_frame | reaction_first_round |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| measured | 0.02 | 0.00 | 0.1167 | 0.368 | 0.938 | 1 | 0.108 | 0.100 | 78.144 | 0.000 | 2.000 | 0.024 | 6.066 | 0.004 | 8.094 | 1.000 | 0.004 | 87.242 | 87.343 |
-| measured | 0.05 | 0.00 | 0.1157 | 0.365 | 0.938 | 1 | 0.108 | 0.250 | 78.248 | 0.000 | 2.000 | 0.024 | 6.115 | 0.004 | 8.143 | 1.000 | 0.004 | 87.395 | 87.645 |
-| measured | 0.1 | 0.00 | 0.1142 | 0.361 | 0.937 | 1 | 0.108 | 0.500 | 77.032 | 0.000 | 2.000 | 0.024 | 6.231 | 0.004 | 8.259 | 1.000 | 0.004 | 86.295 | 86.795 |
-| measured | 0.2 | 0.00 | 0.1168 | 0.369 | 0.932 | 1 | 0.108 | 1.000 | 72.845 | 0.000 | 2.000 | 0.024 | 6.007 | 0.004 | 8.035 | 1.000 | 0.004 | 81.884 | 82.885 |
-| measured | 0.5 | 0.00 | 0.1137 | 0.359 | 0.925 | 1 | 0.108 | 2.500 | 66.572 | 0.000 | 2.000 | 0.024 | 6.171 | 0.004 | 8.199 | 1.000 | 0.004 | 75.775 | 78.275 |
-| measured | 1 | 0.00 | 0.1114 | 0.352 | 0.912 | 1 | 0.108 | 5.000 | 52.879 | 0.000 | 2.000 | 0.024 | 6.213 | 0.004 | 8.241 | 1.000 | 0.004 | 62.123 | 67.124 |
+| measured | 0.02 | 0.00 | 0.1187 | 0.375 | 0.937 | 1 | 0.108 | 0.100 | 76.836 | 0.000 | 2.000 | 0.024 | 5.922 | 0.004 | 7.950 | 1.000 | 0.004 | 85.790 | 85.890 |
+| measured | 0.05 | 0.00 | 0.1178 | 0.372 | 0.936 | 1 | 0.108 | 0.250 | 75.995 | 0.000 | 2.000 | 0.024 | 5.975 | 0.004 | 8.003 | 1.000 | 0.004 | 85.002 | 85.252 |
+| measured | 0.1 | 0.00 | 0.1159 | 0.366 | 0.936 | 1 | 0.108 | 0.500 | 77.011 | 0.000 | 2.000 | 0.024 | 6.111 | 0.004 | 8.139 | 1.000 | 0.004 | 86.154 | 86.654 |
+| measured | 0.2 | 0.00 | 0.1168 | 0.369 | 0.932 | 1 | 0.108 | 1.000 | 73.112 | 0.000 | 2.000 | 0.024 | 6.009 | 0.004 | 8.037 | 1.000 | 0.004 | 82.153 | 83.154 |
+| measured | 0.5 | 0.00 | 0.1163 | 0.367 | 0.923 | 1 | 0.108 | 2.500 | 64.462 | 0.000 | 2.000 | 0.024 | 5.968 | 0.004 | 7.996 | 1.000 | 0.004 | 73.462 | 75.963 |
+| measured | 1 | 0.00 | 0.1144 | 0.361 | 0.910 | 1 | 0.108 | 5.000 | 51.041 | 0.000 | 2.000 | 0.024 | 5.969 | 0.004 | 7.997 | 1.000 | 0.004 | 60.042 | 65.043 |
 | 0.028 | 0.02 | 0.00 | 0.3864 | 1.220 | 0.794 | 1 | 0.108 | 0.100 | 22.464 | 0.000 | 2.000 | 0.024 | 0.028 | 0.004 | 2.056 | 1.000 | 0.004 | 25.524 | 25.624 |
 | 0.028 | 0.05 | 0.00 | 0.3852 | 1.216 | 0.792 | 1 | 0.108 | 0.250 | 21.654 | 0.000 | 2.000 | 0.024 | 0.028 | 0.004 | 2.056 | 1.000 | 0.004 | 24.714 | 24.964 |
 | 0.028 | 0.1 | 0.00 | 0.3833 | 1.210 | 0.788 | 1 | 0.108 | 0.500 | 20.304 | 0.000 | 2.000 | 0.024 | 0.028 | 0.004 | 2.056 | 1.000 | 0.004 | 23.364 | 23.864 |
@@ -27,7 +27,7 @@ Circuit: surface_code:rotated_memory_z d=3, 60 rounds per shot, p=0.001, 10 shot
 
 algorithm = 'measured' rows charge the wall clock of each real PyMatching call (software decoder on this host: AMD EPYC 9454 48-Core Processor, one thread, graph cached); numeric rows charge the stated modeled latency (an ASIC card).
 
-Reading the table. Windows are sliding (commit d, buffer d) and serial: window k+1 starts only after window k's boundary arrives, so the loop's capacity is one window per serial chain = unit assigned, CWD transfer into its memory, decoder service, boundary handoff over DD at decode done (the WDO delivery and frame commit run downstream, off the chain). Measured chain at the fastest input, per algorithm: measured: 8.57 us per window, 0.35 rounds/us, knee near a 2.86 us round period; 0.028 us: 2.59 us per window, 1.16 rounds/us, knee near a 0.86 us round period; 0.28 us: 2.84 us per window, 1.06 rounds/us, knee near a 0.95 us round period. Faster input only grows dep_block (the wait for the previous window). A unit is held from assignment through its input transfer to the end of its decode, so utilization counts the CWD transfer; the decode itself is the fetch+algorithm+release columns. With these link cards the ASIC rows are link-bound (CWD 2 us + DD 0.5 us per window), not decoder-bound; the measured software row is decoder-bound.
+Reading the table. Windows are sliding (commit d, buffer d) and serial: window k+1 starts only after window k's boundary arrives, so the loop's capacity is one window per serial chain = unit assigned, CWD transfer into its memory, decoder service, boundary handoff over DD at decode done (the WDO delivery and frame commit run downstream, off the chain). Measured chain at the fastest input, per algorithm: measured: 8.43 us per window, 0.36 rounds/us, knee near a 2.81 us round period; 0.028 us: 2.59 us per window, 1.16 rounds/us, knee near a 0.86 us round period; 0.28 us: 2.84 us per window, 1.06 rounds/us, knee near a 0.95 us round period. Faster input only grows dep_block (the wait for the previous window). A unit is held from assignment through its input transfer to the end of its decode, so utilization counts the CWD transfer; the decode itself is the fetch+algorithm+release columns. With these link cards the ASIC rows are link-bound (CWD 2 us + DD 0.5 us per window), not decoder-bound; the measured software row is decoder-bound.
 
 Simulator wall clock per shot (host CPU, not a modeled latency): 0.25s, 0.25s, 0.25s, 0.25s, 0.25s, 0.25s ...
 

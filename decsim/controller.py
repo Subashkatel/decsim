@@ -31,8 +31,6 @@ class Controller:
         self.qpu = qpu
         self.window_manager = window_manager
         self.syndrome_ingress = syndrome_ingress
-        if type(binary_availability_ticks) is not int or binary_availability_ticks < 0:
-            raise TypeError("binary_availability_ticks must be a nonnegative exact int")
         self.binary_availability_ticks = binary_availability_ticks
         self.links = links
         self.runtime = None
@@ -96,9 +94,6 @@ class Controller:
 
     def load_program(self, program: ExecutionProgram) -> None:
         """Load one immutable program, build dependencies, and start roots."""
-        if hasattr(self, "_loaded_program"):
-            raise RuntimeError("controller sequencer program is already loaded")
-        self._loaded_program = program
         ops = program.operations
         decode_ops = program.decode_operations
         dynamic_streams = program.dynamic_streams
@@ -135,8 +130,6 @@ class Controller:
         self.runtime.load_program(program)
 
     def connect_runtime(self, runtime) -> None:
-        if self.runtime is not None:
-            raise RuntimeError("controller runtime is already connected")
         self.runtime = runtime
 
     def can_start(self, operation: Operation) -> bool:
@@ -452,13 +445,7 @@ class Controller:
     def accept_qpu_readout(
         self, readout: QPUReadout, route: SyndromePacketRoute,
     ) -> None:
-        """Validate one QPU result, then model controller-side availability."""
-        if type(readout) is not QPUReadout:
-            raise TypeError("controller accepts only exact QPUReadout values")
-        if type(route) is not SyndromePacketRoute:
-            raise TypeError("controller requires a typed packet route")
-        if self.syndrome_ingress is None:
-            raise RuntimeError("controller syndrome ingress is not connected")
+        """Turn one QPU readout into controller binary and hand it to ingress."""
         payload = SyndromePayload(
             operation_id=readout.operation_id,
             patch_id=readout.patch_id,

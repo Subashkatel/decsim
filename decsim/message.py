@@ -742,6 +742,7 @@ class DecodeJob:
     payloads: list = field(default_factory=list)   # transfer-source view; cleared after materialization
     decoder_input: Optional[Any] = None             # materialized decoder memory value
     input_hold: Optional[Any] = None                # upstream hold released at transfer completion
+    reserve_transfer: Optional[Callable[[], int]] = None   # called at dispatch: reserve the input link, return its delay in ticks
     ready_time: int = 0                      # tick the job was enqueued (queue-wait accounting)
     on_done: Optional[Callable[[], None]] = None   # completion callback
     label: str = ""                          # log label

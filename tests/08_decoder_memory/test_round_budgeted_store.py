@@ -446,19 +446,18 @@ def test_custom_pure_delay_transport_always_ends_at_the_common_stager() -> None:
         config=DecoderMemoryConfig({"default": 1}),
         transfer=transfer,
     )
-    manager.pool_free["default"] = 0
     first = make_job("first", (0,), run_sequence=1)
     second = make_job("second", (1,), run_sequence=2)
 
-    manager.enqueue(first, delay_ticks=3)
-    manager.enqueue(second, delay_ticks=3)
+    manager.enqueue(first, lambda: 3)          # unit assigned now, input in flight
+    manager.enqueue(second, lambda: 3)         # no free unit: rounds stay upstream
     assert manager.decoder_memory_stager.snapshot().per_pool_store[0].occupied_rounds == 0
     engine.advance(3)
 
     snapshot = manager.decoder_memory_stager.snapshot()
-    assert transfer.deliveries == [(3, first), (3, second)]
+    assert transfer.deliveries == [(3, first)]
     assert snapshot.per_pool_store[0].occupied_rounds == 1
-    assert snapshot.waiting_jobs_by_pool == (("default", 1),)
+    assert manager.ready == [second]
 
 
 def test_old_custom_materializing_transport_fails_loudly() -> None:
@@ -497,14 +496,18 @@ def test_unset_custom_transport_preserves_exact_arrival_and_late_pool_selection(
     )
     manager.pool_free = {"default": 0, "strong": 0}
     job = make_job("late-route", (0,), run_sequence=1)
-    manager.enqueue(job, delay_ticks=4)
-    lane.pool = "strong"
+    manager.enqueue(job, lambda: 4)            # queued in the pool chosen now
+    lane.pool = "strong"                       # too late: the queue is chosen
     engine.advance(4)
+    assert transfer.deliveries == []           # no unit yet, nothing moved
+    assert job.ready_time == 0
+    assert manager.ready == [job]
 
-    assert transfer.deliveries == [(4, job)]
-    assert job.ready_time == 4
-    assert job.pool is None
-    assert manager.pool_ready["strong"] == [job]
+    manager.pool_free["default"] = 1
+    manager.try_dispatch()                     # unit assigned, then the input moves
+    engine.advance(8)
+    assert transfer.deliveries == [(8, job)]
+    assert job.pool == "default"
     assert manager.decoder_memory_stager.snapshot().enabled is False
 
 
@@ -530,14 +533,17 @@ def test_finite_pool_choice_is_closed_before_transport_without_mutating_job_pool
     )
     manager.pool_free = {"default": 0, "strong": 0}
     job = make_job("closed-route", (0,), run_sequence=1)
-    manager.enqueue(job, delay_ticks=4)
+    manager.enqueue(job, lambda: 4)
     lane.pool = "strong"
-    assert job.pool is None
-    engine.advance(4)
-
     assert job.pool is None
     assert manager.ready == [job]
     assert manager.pool_ready["strong"] == []
+    manager.pool_free["default"] = 1
+    manager.try_dispatch()
+    engine.advance(4)
+
+    assert job.pool == "default"
+    assert transfer.deliveries == [(4, job)]
     stores = {
         row.pool: row
         for row in manager.decoder_memory_stager.snapshot().per_pool_store
@@ -864,6 +870,7 @@ def test_unbounded_upstream_isolates_local_stall_and_completes_finitely() -> Non
         d=3,
         rounds_policy=FixedRounds(3),
         decoder=PerRoundDecoder(tau_us=100),
+        num_units=2,                          # two units share a 3-round memory
         decoder_memory=DecoderMemoryConfig({"default": 3}),
         syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=None),
     ).build()
@@ -938,12 +945,15 @@ def test_default_smoke_metric_remains_exactly_the_frozen_baseline() -> None:
     assert completed.result.terminal_status == "complete"
     assert completed.result.event_queue_empty is True
     assert completed.result.execution_workload_complete is True
+    # A unit is busy from assignment, through its 2 us input transfer, to the
+    # end of its decode (assign, then DMA, then compute), so utilization counts
+    # the transfer as unit time.
     assert completed.result.metric_values() == {
         "decoder_utilization": {
-            "observation_span_ticks": 16950000,
-            "aggregate_busy_fraction": 0.10619469026548672,
+            "observation_span_ticks": 17050000,
+            "aggregate_busy_fraction": 0.4574780058651026,
             "aggregate_total_units": 1,
-            "per_pool_busy_fraction": {"default": 0.10619469026548672},
+            "per_pool_busy_fraction": {"default": 0.4574780058651026},
             "per_pool_total_units": {"default": 1},
         }
     }
@@ -986,7 +996,7 @@ def test_manager_cancel_before_transport_delivery_never_reaches_storage(
         strong_decode_for=(1, 0),
     )
 
-    manager.enqueue(job, delay_ticks=5)
+    manager.enqueue(job, lambda: 5)
     manager.cancel_strong((1, 0))
     engine.advance(5)
 
@@ -1153,6 +1163,7 @@ def test_every_finite_run_boundary_has_no_free_credit_with_a_fitting_fifo_head()
         d=3,
         rounds_policy=FixedRounds(3),
         decoder=PerRoundDecoder(tau_us=100),
+        num_units=2,                          # two units share a 3-round memory
         decoder_memory=DecoderMemoryConfig({"default": 3}),
         make_metrics=make_metrics,
     ).build()
@@ -1163,8 +1174,10 @@ def test_every_finite_run_boundary_has_no_free_credit_with_a_fitting_fifo_head()
     assert result["boundaries_with_waiters"] > 0
 
 
-def test_real_multi_patch_switching_storm_isolates_weak_and_strong_budgets() -> None:
-    """A real multi-patch switching storm stalls strong inputs while weak work progresses."""
+def test_real_multi_patch_switching_storm_keeps_only_assigned_inputs_in_memory() -> None:
+    """A real multi-patch switching storm moves each input into decoder memory only
+    after its unit is assigned, so memory holds one assigned window per unit and a
+    single strong unit never stalls on credits."""
     operations = [
         Operation(id=index, name=f"patch {index}", qubits=(index,), patches=(index,))
         for index in range(1, 4)
@@ -1196,35 +1209,16 @@ def test_real_multi_patch_switching_storm_isolates_weak_and_strong_budgets() -> 
 
     snapshot = completed.decoder_manager.decoder_memory_stager.snapshot()
     stores = {row.pool: row for row in snapshot.per_pool_store}
-    records = snapshot.stall_records
     assert completed.result.terminal_status == "complete"
     assert completed.result.execution_done_ticks == 3_300_000
-    assert completed.result.fully_done_ticks == 2_706_450_000
+    assert completed.result.fully_done_ticks == 2_710_450_000   # three serial 900 us strong decodes, each after its 2 us CSD transfer
     assert stores["default"].capacity_rounds == 9
-    assert stores["default"].peak_occupied_rounds == 9
+    assert stores["default"].peak_occupied_rounds == 3          # one assigned weak window at a time
     assert stores["default"].admissions == 3
     assert stores["strong"].capacity_rounds == 3
     assert stores["strong"].peak_occupied_rounds == 3
     assert stores["strong"].admissions == 3
-    assert dict(snapshot.stall_events_by_pool) == {"default": 0, "strong": 2}
-    assert dict(snapshot.stall_ticks_by_pool) == {
-        "default": 0,
-        "strong": 2_700_000_000,
-    }
-    assert tuple(record.request_key.operation_id for record in records) == (2, 3)
-    assert tuple(record.request_key.tier for record in records) == (
-        DecoderTier.STRONG,
-        DecoderTier.STRONG,
-    )
-    assert tuple(record.arrival_tick for record in records) == (
-        5_450_000,
-        5_450_000,
-    )
-    assert tuple(record.admitted_tick for record in records) == (
-        905_450_000,
-        1_805_450_000,
-    )
-    assert tuple(record.round_demand for record in records) == (3, 3)
-    assert all(store.occupied_rounds == 0 for store in stores.values())
-    assert dict(snapshot.waiting_jobs_by_pool) == {"default": 0, "strong": 0}
-    assert completed.decoder_manager.decoder_memory_stager.unsettled_storage() == ()
+    assert dict(snapshot.stall_events_by_pool) == {"default": 0, "strong": 0}
+    assert snapshot.stall_records == ()
+    completed.decoder_manager.check_decode_work_settled()
+

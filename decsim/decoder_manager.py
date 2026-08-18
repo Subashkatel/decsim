@@ -172,68 +172,25 @@ class DecoderManager:
     def decoder_for(self, job: DecodeJob):
         return self.router.route(job)
 
-    def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None:
-        """Admit once, then transport the input and stage it into storage.
+    def enqueue(self, job: DecodeJob, reserve_transfer=None) -> None:
+        """Admit once and queue the request; its rounds stay in Buffer 0.
 
-        The transport only carries the request; the manager-owned stager is
-        always the receiver, so no transport can bypass configured decoder-input
-        storage. With a configured store the input pool is resolved here, before
-        transport, and stays a closure-local: ``job.pool`` remains dispatch
-        state, so a lane-policy change during transport is deliberately ignored
-        on that path. With no configured store pool selection stays late, at
-        enqueue.
+        ``reserve_transfer`` is called at dispatch, after a unit is assigned,
+        to reserve the input link and return the transfer delay in ticks (the
+        accelerator pattern: invoke the unit, then DMA its input into that
+        unit's memory, then compute; Aladdin aladdin_sys_connection.h and
+        dma_interface.h). ``None`` means the job carries no syndrome data.
         """
-        if type(delay_ticks) is not int:
-            raise TypeError("delay_ticks must be an exact int")
-        if delay_ticks < 0:
-            raise ValueError("delay_ticks must be nonnegative")
+        if reserve_transfer is not None and not callable(reserve_transfer):
+            raise TypeError("reserve_transfer must be callable or None")
         self._reject_spent_job(job)
         if job.strong_decode_for is not None:
             self._admit_strong_request(job)
         elif job.on_done is None:
             self._admit_weak_decode(job)
         job.submitted = True
-        delivered = False
-        expected_delivery_tick = self.engine.now + delay_ticks
-        input_pool = (self.pool_for(job)
-                      if self.decoder_memory_stager.enabled else None)
-
-        def receive_once(delivered_job: DecodeJob) -> None:
-            nonlocal delivered
-            if delivered:
-                raise RuntimeError(
-                    f"decoder memory transport delivered {job.label!r} twice"
-                )
-            if delivered_job is not job:
-                raise RuntimeError(
-                    "decoder memory transport delivered a different job"
-                )
-            if self.engine.now != expected_delivery_tick:
-                raise RuntimeError(
-                    "decoder memory transport delivered at the wrong tick"
-                )
-            if job.decoder_input is not None:
-                raise RuntimeError(
-                    "decoder memory transport materialized an input before "
-                    "storage admission"
-                )
-            delivered = True
-            self.decoder_memory_stager.admit(
-                job, pool=input_pool,
-                on_admitted=enqueue_admitted_job,
-                on_materialized=release_upstream_hold,
-            )
-
-        def enqueue_admitted_job(admitted_job: DecodeJob) -> None:
-            self._enqueue_now(admitted_job, input_pool)
-
-        def release_upstream_hold(admitted_job: DecodeJob) -> None:
-            hold = admitted_job.input_hold
-            if hold is not None:
-                hold()
-                admitted_job.input_hold = None
-
-        self.decoder_memory_transfer.deliver(job, delay_ticks, receive_once)
+        job.reserve_transfer = reserve_transfer
+        self._enqueue_now(job)
 
     @staticmethod
     def _reject_spent_job(job: DecodeJob) -> None:
@@ -294,12 +251,6 @@ class DecoderManager:
                 self._release_decoder_input(job)
                 self.try_dispatch()                # returned credits may admit
                 return                             # cancelled across the link
-        if job.decoder_input is not None:
-            job.payloads = [
-                fragment
-                for round_input in job.decoder_input.rounds
-                for fragment in round_input.fragments
-            ]
         job.ready_time = self.engine.now
         pool = self.pool_for(job) if input_pool is None else input_pool
         queue = self.queue_for(pool)
@@ -478,14 +429,70 @@ class DecoderManager:
         self.pool_free[pool] -= 1
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
-        decoder = self.decoder_for(job)
         waited_ticks = self.engine.now - job.ready_time
         self.engine.log(self.log_name,
-                        f"START DECODE {job.label} "
+                        f"ASSIGN UNIT {job.label} "
                         f"(waited {fmt(waited_ticks).strip()} in queue, "
                         f"{self.pool_tag(pool)}units free now "
                         f"{self.pool_free[pool]})")
         self.queue_log.append((self.engine.now, self.queued_total()))
+        # Unit assigned: move every member request's rounds from Buffer 0 into
+        # this unit's decoder memory (one transfer per request, a merged strong
+        # batch has several), then start the decode when all have landed.
+        members = [live.request_job for live in self._running_strong_decodes.values()
+                   if live.service_job is job and live.request_job is not job]
+        members = members or [job]
+        pending = {"count": len(members)}
+        input_pool = pool if self.decoder_memory_stager.enabled else None
+
+        def landed(_member: DecodeJob) -> None:
+            pending["count"] -= 1
+            if pending["count"] == 0:
+                self._begin_service(job)
+
+        for member in members:
+            self._transfer_into_decoder_memory(member, input_pool, landed)
+
+    def _transfer_into_decoder_memory(self, job: DecodeJob, input_pool,
+                                      on_landed: Callable[[DecodeJob], None]) -> None:
+        delay_ticks = 0 if job.reserve_transfer is None else job.reserve_transfer()
+        job.reserve_transfer = None
+        expected_delivery_tick = self.engine.now + delay_ticks
+
+        def receive_once(delivered_job: DecodeJob) -> None:
+            if delivered_job is not job:
+                raise RuntimeError("decoder memory transport delivered a different job")
+            if self.engine.now != expected_delivery_tick:
+                raise RuntimeError("decoder memory transport delivered at the wrong tick")
+            if job.decoder_input is not None:
+                raise RuntimeError("decoder memory transport materialized an input "
+                                   "before storage admission")
+            self.decoder_memory_stager.admit(
+                job, pool=input_pool,
+                on_admitted=on_landed,
+                on_materialized=release_upstream_hold,
+            )
+
+        def release_upstream_hold(admitted_job: DecodeJob) -> None:
+            hold = admitted_job.input_hold
+            if hold is not None:
+                hold()
+                admitted_job.input_hold = None
+
+        self.decoder_memory_transfer.deliver(job, delay_ticks, receive_once)
+
+    def _begin_service(self, job: DecodeJob) -> None:
+        """The unit's memory holds the input: start the decode."""
+        if job.cancelled:                        # cancelled while its input was in flight
+            return
+        if job.decoder_input is not None:
+            job.payloads = [
+                fragment
+                for round_input in job.decoder_input.rounds
+                for fragment in round_input.fragments
+            ]
+        decoder = self.decoder_for(job)
+        self.engine.log(self.log_name, f"START DECODE {job.label}")
         run = getattr(decoder, "run", None)
         if run is not None:                 # staged decoder owns its stage events
             run(job, self.engine, lambda j=job: self._on_decode_done(j))

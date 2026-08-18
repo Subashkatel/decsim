@@ -62,6 +62,7 @@ class Controller:
         self._stream_binding_by_operation_id = {}
 
     def round_ticks_for(self, operation: Operation) -> int:
+        """The resolved QEC cycle length of one operation, in ticks."""
         return self._resolved_operations[operation.id].round_ticks
 
     def _round_ticks_for_patch(self, patch) -> int:
@@ -130,9 +131,11 @@ class Controller:
         self.runtime.load_program(program)
 
     def connect_runtime(self, runtime) -> None:
+        """Bind the execution runtime that owns readiness and completion."""
         self.runtime = runtime
 
     def can_start(self, operation: Operation) -> bool:
+        """False while a protected feedback stream holds the operation for its cycle boundary."""
         return not self._must_wait_for_round_boundary(operation)
 
     def issue_operation(self, operation: Operation, idle_rounds: int) -> int:
@@ -350,15 +353,18 @@ class Controller:
         self.stream_next_round[stream_id] = max(next_round, operation_end)
 
     def stream_binding_for(self, operation_id):
+        """(stream_id, stream_offset) an operation was bound to, or None."""
         return self._stream_binding_by_operation_id.get(operation_id)
 
     def _body_done(self, operation: Operation) -> None:
         self.runtime.body_done(operation)
 
     def before_successor_release(self, operation: Operation) -> None:
+        """A body finished: ask its protected regions to close on the boundary."""
         self._request_protected_region_closes(operation)
 
     def after_successor_release(self, operation: Operation) -> None:
+        """Successors released: close feedback boundaries, seal finished streams, stop the QPU when done."""
         self._close_feedback_boundary_if_needed(operation)
         self._seal_finished_streams_if_needed()
         if self.runtime.workload_complete:

@@ -81,8 +81,6 @@ _SEED_PATH_TAG = {"field": b"F", "string_key": b"S"}
 
 
 @dataclass(frozen=True)
-
-
 class RunSeedPathSegment:
     """One framed semantic edge in the run-level seed component graph."""
 
@@ -107,8 +105,6 @@ class RunSeedPathSegment:
 
 
 @dataclass(frozen=True)
-
-
 class RunSeedChild:
     """One semantic child edge exposed by a seed-graph composite."""
 
@@ -117,8 +113,6 @@ class RunSeedChild:
 
 
 @dataclass(frozen=True, eq=False)
-
-
 class RunSeedReservation:
     """A leaf-owned prepared RNG replacement plus manifest seed provenance."""
 
@@ -128,57 +122,59 @@ class RunSeedReservation:
 
 
 class SyndromePacketRouteKind(Enum):
+    """Where a completed round goes: a window input or a feedback-memory round."""
+
     WINDOW_INPUT = auto()
     FEEDBACK_MEMORY_ROUND = auto()
 
 
 @dataclass(frozen=True)
-
-
 class PotentialStrong:
+    """Buffer 0 hold: a window's rounds kept in case its weak result escalates."""
+
     window_key: tuple
 
 
 @dataclass(frozen=True)
-
-
 class PendingStrong:
+    """Buffer 0 hold: rounds kept for a strong request that is admitted but not yet served."""
+
     request_key: DecoderRequestKey
 
 
 @dataclass(frozen=True)
-
-
 class CsdInput:
+    """Buffer 0 hold: rounds in flight to a strong decoder over CSD."""
+
     request_key: DecoderRequestKey
 
 
 @dataclass(frozen=True)
-
-
 class DecoderInputHold:
+    """Buffer 0 hold: rounds a decode job needs until they land in unit memory."""
+
     request_key: DecoderRequestKey
 
 
 @dataclass(frozen=True)
-
-
 class Replay:
+    """Buffer 0 hold: rounds a window needs again for a speculative replay of one boundary generation."""
+
     window_key: tuple
     boundary_generation: int
 
 
 @dataclass(frozen=True)
-
-
 class RephaseGuard:
+    """Buffer 0 hold: rounds a rephased suffix keeps while its strong request is live."""
+
     request_key: DecoderRequestKey
 
 
 @dataclass(frozen=True)
-
-
 class SyndromePacketRoute:
+    """The route of one round from the controller: window input, or a feedback-memory round of a source operation."""
+
     kind: SyndromePacketRouteKind
     source_operation_id: Optional[Any] = None
 
@@ -191,8 +187,6 @@ WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
 
 
 @dataclass(frozen=True)
-
-
 class QPUReadout:
     """One QPU-side result awaiting controller availability handling.
 
@@ -210,8 +204,6 @@ class QPUReadout:
 
 
 @dataclass
-
-
 class SyndromePayload:
     """One binary detector-data round accepted by the controller."""
 
@@ -233,8 +225,6 @@ def normalize_binary_bits(bits: Any) -> Optional[tuple[int, ...]]:
 
 
 @dataclass(frozen=True)
-
-
 class RetainedSyndromeFragment:
     """One validated immutable fragment retained after controller ingress."""
 
@@ -260,8 +250,6 @@ class RetainedSyndromeFragment:
 
 
 @dataclass(frozen=True)
-
-
 class SyndromeRoundPacket:
     """One complete immutable syndrome round in transport-arrival order."""
 
@@ -280,8 +268,6 @@ class WindowProtocol(Enum):
 
 
 @dataclass
-
-
 class Window:
     """One decoder window inside an operation's syndrome stream.
 
@@ -323,8 +309,6 @@ class Window:
 
 
 @dataclass(frozen=True)
-
-
 class WindowInfo:
     """Read-only geometry and topology exposed to interaction policies."""
 
@@ -368,8 +352,6 @@ class WindowInfo:
 
 
 @dataclass(frozen=True)
-
-
 class ResolvedCodeGeometry:
     """Canonical planning/control geometry resolved once for one run."""
 
@@ -384,8 +366,6 @@ class ResolvedCodeGeometry:
 
 
 @dataclass(frozen=True)
-
-
 class ResolvedOperationPlanning:
     """Exact immutable planning/control facts for one operation."""
 
@@ -397,8 +377,6 @@ class ResolvedOperationPlanning:
 
 
 @dataclass(frozen=True)
-
-
 class ResolvedPatchPlanning:
     """Exact immutable cadence and idle-work facts for one patch."""
 
@@ -409,8 +387,6 @@ class ResolvedPatchPlanning:
 
 
 @dataclass(frozen=True)
-
-
 class WindowGeometry:
     """One immutable static window interval."""
 
@@ -426,8 +402,6 @@ class WindowGeometry:
 
 
 @dataclass(frozen=True)
-
-
 class OperationWindowPlan:
     """One scheme's complete immutable result for one operation."""
 
@@ -442,8 +416,6 @@ class OperationWindowPlan:
 
 
 @dataclass
-
-
 class WindowPlan:
     """Compile-time window layout handed to the window manager."""
 
@@ -464,8 +436,6 @@ class WindowPlan:
 
 
 @dataclass(frozen=True)
-
-
 class DependencyResidual:
     """Complete global detector effect plus its compatibility mask view."""
 
@@ -474,8 +444,6 @@ class DependencyResidual:
 
 
 @dataclass(frozen=True)
-
-
 class BoundaryDelivery:
     """One versioned boundary message offered to an interaction policy."""
 
@@ -499,8 +467,6 @@ class BoundaryDelivery:
 
 
 @dataclass(frozen=True)
-
-
 class BoundaryUpdate:
     """A policy's decision for one boundary arrival."""
 
@@ -517,8 +483,6 @@ class SeamFaultOwner(Enum):
 
 
 @dataclass(frozen=True)
-
-
 class StrongRegionPlan:
     """Geometry and seam ownership for one deferred strong decode."""
 
@@ -533,8 +497,6 @@ class StrongRegionPlan:
 
 
 @dataclass(frozen=True)
-
-
 class SoftOutputSource:
     """Exact provenance required to interpret one confidence threshold."""
 
@@ -548,8 +510,6 @@ class SoftOutputSource:
 
 
 @dataclass(frozen=True)
-
-
 class SoftOutput:
     """One nonnegative confidence gap with immutable interpretation."""
 
@@ -560,14 +520,16 @@ class SoftOutput:
 
 
 class DecoderTier(Enum):
+    """Weak (first, fast) or strong (escalated, slow) decode."""
+
     WEAK = "weak"
     STRONG = "strong"
 
 
 @dataclass(frozen=True)
-
-
 class DecoderRequestKey:
+    """Identity of one decode request: window, tier and the run-wide ordinal that keeps retries distinct."""
+
     operation_id: Any
     window_id: int
     tier: DecoderTier
@@ -575,15 +537,13 @@ class DecoderRequestKey:
 
 
 @dataclass(frozen=True)
-
-
 class DecoderServiceKey:
+    """Identity of one decoder service (a batch of requests served together)."""
+
     run_sequence: int
 
 
 @dataclass
-
-
 class DecodeJob:
     """One unit of decoder work in the ``logical_reference`` profile.
 
@@ -628,8 +588,6 @@ class DecodeJob:
 
 
 @dataclass
-
-
 class DecodeResult:
     """One window result; timing-only decoders leave optional fields unset."""
 
@@ -643,16 +601,14 @@ class DecodeResult:
 
 
 @dataclass(frozen=True)
-
-
 class StrongDecodeCompletion:
+    """A strong result paired with the request it answers."""
+
     request_key: DecoderRequestKey
     result: DecodeResult
 
 
 @dataclass
-
-
 class DecodeOutcome:
     """Joint decode outcome delivered to the strategy hook."""
 
@@ -664,8 +620,6 @@ class DecodeOutcome:
 
 
 @dataclass(frozen=True)
-
-
 class ResourceClaim:
     """Typed exclusivity claim on shared hardware. Only kind="qubits" is
     used today (layouts derive one claim from an op's qubit tuple)."""
@@ -675,8 +629,6 @@ class ResourceClaim:
 
 
 @dataclass(frozen=True)
-
-
 class Decision:
     """Feedback timing route for one target operation."""
 
@@ -685,8 +637,6 @@ class Decision:
 
 
 @dataclass(frozen=True)
-
-
 class ExecutionProgram:
     """Immutable controller program-load artifact."""
 
@@ -697,8 +647,6 @@ class ExecutionProgram:
 
 
 @dataclass(frozen=True)
-
-
 class StreamBinding:
     """Immutable runtime association between an operation and stream range."""
     stream_id: Any
@@ -706,8 +654,6 @@ class StreamBinding:
 
 
 @dataclass(frozen=True)
-
-
 class RunOperationBody:
     """Immutable controller-to-QPU command for one operation body."""
 
@@ -722,8 +668,6 @@ class RunOperationBody:
 
 
 @dataclass(frozen=True)
-
-
 class ProtectedRegion:
     """One patch allocation generation with inclusive operation endpoints."""
 
@@ -734,18 +678,18 @@ class ProtectedRegion:
 
 
 @dataclass(frozen=True)
-
-
 class SuccessorReadiness:
+    """How many rounds of a dependent operation have arrived, and how many it has."""
+
     operation_id: int
     rounds_arrived: int
     round_count: int
 
 
 @dataclass(frozen=True)
-
-
 class WindowReadiness:
+    """What a scheme sees when deciding whether a window has its data."""
+
     local_rounds_arrived: int
     local_round_count: int
     successors: tuple[SuccessorReadiness, ...]
@@ -766,8 +710,6 @@ class OpKind(Enum):
 
 
 @dataclass
-
-
 class Operation:
     """One logical operation in the circuit."""
 
@@ -804,8 +746,6 @@ class Operation:
 
 
 @dataclass(frozen=True)
-
-
 class OperationPlanningView:
     """Immutable operation configuration visible to planning collaborators."""
 

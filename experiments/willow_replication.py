@@ -435,7 +435,9 @@ def write_report(acc_rows: list, eps: dict, rt: dict, software_us: float,
               "reference link cards plus one measured software decode per window. Windows here are sliding "
               "(commit 5, buffer 5) and serial; the paper's decoder streams and kept latency constant for a "
               "million cycles, ours grows over 250 cycles because a single-threaded PyMatching call per "
-              "5-round window (about 22 us here) cannot keep pace with 1.1 us cycles; the paper's decoder "
+              f"5-round window ({software_us:.0f} us median here; one Python matching.decode call costs 5-7 us before "
+              "any matching work, the published sub-microsecond figures are decode_batch amortized over "
+              "thousands of shots) cannot keep pace with 1.1 us cycles; the paper's decoder "
               "is a multi-worker streaming design. Their real-time "
               "run used the 72-qubit processor data (not in this archive); ours replays the 105-qubit d=5 patch."]
     lines += ["", "## 3. What keeps the loop up with the QPU (d = 5, 1.1 us cycles, 250 recorded cycles)", "",

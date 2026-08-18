@@ -70,8 +70,6 @@ class SlidingWindowScheme:
         self,
         terminal_policy: SlidingTerminalPolicy = SlidingTerminalPolicy.QUITS_TAN_FLUSH,
     ) -> None:
-        if type(terminal_policy) is not SlidingTerminalPolicy:
-            raise TypeError("terminal_policy must be an exact SlidingTerminalPolicy")
         self.terminal_policy = terminal_policy
 
     def plan_operation(

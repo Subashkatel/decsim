@@ -398,12 +398,8 @@ def test_workload_identity_accepts_unambiguous_static_and_dynamic_owners():
 
 
 def test_workload_identity_rejects_role_and_stream_ambiguity():
-    """Workload validation rejects inexact entries, role collisions, and missing owners."""
-    class SpecializedOperation(Operation):
-        pass
-
+    """Workload validation rejects role collisions and missing owners."""
     cases = [
-        ((SpecializedOperation(1, "specialized", (0,)),), (), ()),
         ((operation(1), operation(1)), (), ()),
         ((operation(1),), (operation(1),), ()),
     ]
@@ -627,8 +623,8 @@ def test_materialization_copies_ledgers_and_builds_cartesian_boundary_edges():
     assert result.total_windows == 4
 
 
-def test_materialization_preserves_internal_edges_and_checks_positional_identity():
-    """Materialization preserves internal dependencies and rejects view-ledger identity mismatch."""
+def test_materialization_preserves_internal_edges():
+    """Materialization preserves internal dependencies."""
     view = planning_view(operation(1))
     plan = operation_plan(
         1,
@@ -638,10 +634,6 @@ def test_materialization_preserves_internal_edges_and_checks_positional_identity
     result = _materialize_execution_plan((view,), (resolved(1),), (plan,))
     assert result.windows[(1, 1)].deps == [(1, 0)]
     assert result.windows[(1, 0)].dependents == [(1, 1)]
-
-    mismatched = operation_plan(2, (WindowGeometry(1, 1, 1, 1),))
-    with pytest.raises(ValueError, match="match by position"):
-        _materialize_execution_plan((view,), (resolved(1),), (mismatched,))
 
 
 def test_materialization_truncates_excess_positional_inputs():

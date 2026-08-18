@@ -24,7 +24,7 @@ import math
 from typing import Any, Callable, Optional
 
 from .config import us
-from .message import is_stable_identity, stable_identity_order_key
+from .message import stable_identity_order_key
 
 
 @dataclass(frozen=True)
@@ -137,8 +137,6 @@ class PauliFrame:
         on_committed,
     ) -> None:
         """Accept one window correction once, charge its write, then continue."""
-        if not is_stable_identity(window_key):
-            raise TypeError("window_key must be a stable identity")
         if window_key in self._accepted_window_keys:
             self._duplicate_drops.append(
                 PauliFrameDuplicateDrop(

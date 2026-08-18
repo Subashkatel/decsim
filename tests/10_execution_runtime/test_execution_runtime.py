@@ -238,8 +238,8 @@ def test_timestamp_map_keys_are_the_only_lifecycle_membership_record():
     assert set(runtime.decode_release_time) == {2}
 
 
-def test_empty_program_completes_physically_and_second_load_is_atomic():
-    """An empty loaded program is complete, and a second load changes no lifecycle state."""
+def test_empty_program_completes_physically():
+    """An empty loaded program is complete."""
     runtime, engine, controller, factory = make_runtime()
     program = ExecutionProgram(
         (),
@@ -251,10 +251,6 @@ def test_empty_program_completes_physically_and_second_load_is_atomic():
 
     assert runtime.program is program
     assert runtime.workload_complete is True
-    before = mutable_runtime_state(runtime, engine, controller, factory)
-    with pytest.raises(RuntimeError, match="already loaded"):
-        runtime.load_program(ExecutionProgram((make_operation(9),)))
-    assert mutable_runtime_state(runtime, engine, controller, factory) == before
 
 
 def test_load_builds_ordered_dependency_edges_and_releases_successor_after_body():

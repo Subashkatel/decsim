@@ -134,12 +134,6 @@ class BackendDecodeOutcome:
     decoder_configuration_fingerprint: str
 
     def __post_init__(self) -> None:
-        if not isinstance(self.status, BackendDecodeStatus):
-            raise TypeError("status must be a BackendDecodeStatus")
-        if self.failure_reason is not None and not isinstance(
-            self.failure_reason, BackendFailureReason
-        ):
-            raise TypeError("failure_reason must be a BackendFailureReason or None")
         if self.status is BackendDecodeStatus.SUCCEEDED:
             if self.failure_reason is not None:
                 raise ValueError("a successful outcome cannot have a failure reason")

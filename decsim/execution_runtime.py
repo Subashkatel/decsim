@@ -35,8 +35,6 @@ class ExecutionRuntime:
                 self.operations.keys() == self.body_done_time.keys())
 
     def load_program(self, program: ExecutionProgram) -> None:
-        if self.program is not None:
-            raise RuntimeError("execution program is already loaded")
         self.program = program
         for operation in program.operations:
             self.operations[operation.id] = operation

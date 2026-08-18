@@ -198,14 +198,6 @@ def test_configuration_rejects_implicit_or_disappearing_costs():
 
 
 
-def test_unstable_window_identity_is_refused_before_reservation():
-    frame = RuntimePauliFrame(ManualEngine(), commit_ticks=0)
-    for unstable_key in ([1, 2], (1, object()), None):
-        with pytest.raises(TypeError, match="stable identity"):
-            accept(frame, unstable_key, (1,))
-    assert frame.snapshot().commit_count == 0
-
-
 def test_supplied_frame_card_must_resolve_to_a_runtime_owner():
     class MissingOwnerCard:
         def __init__(self):

@@ -42,12 +42,12 @@ POINTS = (
     "c2b_per_round",        # controller -> Buffer 0, one round (link latency + serialization + queue)
     "buffer_fill",          # first round in window arrives -> last round arrives (waiting on the QPU)
     "dep_block",            # window complete -> job queued (window dependencies)
-    "queue_wait",           # queued -> dispatched (CWD transfer, decoder memory, ready queue)
-    "cwd_per_window",       # window manager -> decoder memory, link CWD
+    "queue_wait",           # queued -> unit assigned (ready-queue wait only)
+    "cwd_per_window",       # unit assigned -> input in its decoder memory, link CWD
     "fetch",                # decoder engine: read the window out of decoder memory
     "algorithm",            # decoder engine: the decoding algorithm
     "release",              # decoder engine: correction write-out
-    "service",              # dispatched -> decode done (equals fetch+algorithm+release)
+    "service",              # unit assigned -> decode done (CWD transfer into its memory + fetch+algorithm+release)
     "wdo_per_window",       # decoder -> orchestrator, link WDO
     "frame_commit",         # Pauli frame accepted -> committed
     "last_round_to_frame",  # last round of the window arrives -> its correction is in the frame
@@ -226,6 +226,8 @@ def write_report(config: dict, rows: list, report_dir: Path) -> None:
         writer.writeheader()
         writer.writerows(rows)
     lines = ["# Baseline closed loop, per-point latency and throughput", "",
+             "Plots: latency_stack.png (per-point stack vs input round period), throughput.png "
+             "(decoded vs input rounds/us).", "",
              f"Circuit: {config['code_task']} d={config['distance']}, "
              f"{config['rounds_per_shot']} rounds per shot, p={config['noise_probability']}, "
              f"{len(config['seeds'])} shots per point. All latencies simulated, in microseconds, "
@@ -246,23 +248,71 @@ def write_report(config: dict, rows: list, report_dir: Path) -> None:
     lines += ["", "Reading the table. Windows are sliding (commit d, buffer d) and serial: window k+1 "
               "starts only after window k's boundary arrives, so the loop's capacity is one window "
               f"per serial chain. Measured chain at the fastest input: {chain_us:.2f} us per window "
-              f"= CWD transfer + decoder service + WDO delivery + boundary handoff, i.e. "
+              f"= unit assigned, CWD transfer into its memory, decoder service, WDO delivery, boundary handoff, i.e. "
               f"{commit_rounds / chain_us:.2f} rounds/us sustainable, a knee at a round period of "
               f"about {chain_us / commit_rounds:.2f} us. Faster input only grows dep_block (the wait "
-              "for the previous window). Decoder utilization at the LILLIPUT card is a few percent: "
-              "with these link cards the baseline is link-bound, not decoder-bound.",
+              "for the previous window). A unit is held from assignment through its input transfer to "
+              "the end of its decode, so utilization counts the CWD transfer; the decode itself is "
+              "the fetch+algorithm+release columns. With these link cards the baseline is link-bound, "
+              "not decoder-bound.",
               "", "Simulator wall clock per shot (host CPU, not a modeled latency): "
               + ", ".join(f"{r['sim_wall_seconds_per_shot']:.2f}s" for r in rows[:6]) + " ...",
               "", "Anchor comparison against published numbers: anchor.md (experiments/baseline_anchor.py)."]
     (report_dir / "sweep.md").write_text("\n".join(lines) + "\n")
 
 
+def plots(rows: list, report_dir: Path) -> None:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    algorithms = sorted({r["algorithm_latency_us"] for r in rows})
+    stack = ("buffer_fill", "dep_block", "cwd_per_window", "fetch", "algorithm", "release",
+             "wdo_per_window", "frame_commit")
+    fig, axes = plt.subplots(1, len(algorithms), figsize=(4.2 * len(algorithms), 3.8), sharey=True)
+    for ax, algorithm in zip(axes if len(algorithms) > 1 else [axes], algorithms):
+        group = sorted((r for r in rows if r["algorithm_latency_us"] == algorithm),
+                       key=lambda r: r["round_period_us"])
+        x = [str(r["round_period_us"]) for r in group]
+        bottom = [0.0] * len(group)
+        for point in stack:
+            values = [r[f"{point}_mean_us"] for r in group]
+            ax.bar(x, values, bottom=bottom, label=point)
+            bottom = [b + v for b, v in zip(bottom, values)]
+        ax.set_title(f"algorithm {algorithm:g} us")
+        ax.set_xlabel("input round period (us)")
+        ax.grid(alpha=0.3, axis="y")
+    (axes[0] if len(algorithms) > 1 else axes).set_ylabel("first round -> frame, mean us per window")
+    (axes[-1] if len(algorithms) > 1 else axes).legend(fontsize=6)
+    fig.tight_layout()
+    fig.savefig(report_dir / "latency_stack.png", dpi=150)
+
+    fig, ax = plt.subplots(figsize=(5, 3.6))
+    for algorithm in algorithms:
+        group = sorted((r for r in rows if r["algorithm_latency_us"] == algorithm),
+                       key=lambda r: r["round_period_us"])
+        ax.plot([1 / r["round_period_us"] for r in group],
+                [r["throughput_rounds_per_us"] for r in group], "o-", label=f"algorithm {algorithm:g} us")
+    limit = max(1 / r["round_period_us"] for r in rows)
+    ax.plot([0, limit], [0, limit], "k--", lw=0.8, label="keeps up (out = in)")
+    ax.set_xlabel("input rounds/us")
+    ax.set_ylabel("decoded rounds/us")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.grid(alpha=0.3, which="both")
+    ax.legend(fontsize=7)
+    fig.tight_layout()
+    fig.savefig(report_dir / "throughput.png", dpi=150)
+
+
 def main(argv) -> None:
     config_path = Path(argv[1]) if len(argv) > 1 else DEFAULT_CONFIG
     config = load_config(config_path)
     rows = summarize(run_sweep(config))
-    write_report(config, rows, Path(config["report_dir"]))
-    print(open(Path(config["report_dir"]) / "sweep.md").read())
+    report_dir = Path(config["report_dir"])
+    write_report(config, rows, report_dir)
+    plots(rows, report_dir)
+    print(open(report_dir / "sweep.md").read())
 
 
 if __name__ == "__main__":

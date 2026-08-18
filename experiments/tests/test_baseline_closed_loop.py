@@ -33,9 +33,12 @@ def test_every_point_is_measured_and_positive_where_it_must_be(shot):
         assert shot.means[charged] > 0, charged
 
 
-def test_decoder_service_is_exactly_the_engine_stages(shot):
+def test_decoder_service_is_transfer_plus_the_engine_stages(shot):
+    """Unit assigned -> decode done covers the CWD transfer into the unit's
+    memory and then the engine's three stages."""
     assert shot.means["service"] == pytest.approx(
-        shot.means["fetch"] + shot.means["algorithm"] + shot.means["release"])
+        shot.means["cwd_per_window"]
+        + shot.means["fetch"] + shot.means["algorithm"] + shot.means["release"])
     assert shot.means["algorithm"] == pytest.approx(0.028)
 
 
@@ -51,8 +54,7 @@ def test_configured_costs_appear_at_the_right_points(small_config, shot):
 def test_reaction_time_orders_the_points(shot):
     assert shot.means["last_round_to_frame"] <= shot.means["reaction_first_round"]
     assert shot.means["last_round_to_frame"] >= (
-        shot.means["cwd_per_window"] + shot.means["service"]
-        + shot.means["wdo_per_window"] + shot.means["frame_commit"])
+        shot.means["service"] + shot.means["wdo_per_window"] + shot.means["frame_commit"])
 
 
 def test_sweep_summary_and_report(small_config, tmp_path):

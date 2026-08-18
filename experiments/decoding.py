@@ -1,5 +1,7 @@
 """Fast offline window decoding without the event engine."""
 
+from __future__ import annotations
+
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 import hashlib
@@ -12,11 +14,7 @@ from decsim.detector_error_model import (
     decode_windowed,
     resolve_detector_rounds,
 )
-from decsim.adapters.window_decode_results import (
-    BackendDecodeStatus,
-    OfflineShotRecord,
-    summarize_offline_shots,
-)
+from decsim.adapters.window_decode_results import BackendDecodeStatus
 
 from .harness import Batch, offline_batch_seed, sample_batch_sha256
 from .results import (
@@ -26,6 +24,50 @@ from .results import (
     read_chunk_csv,
     reduce_chunks,
 )
+
+
+@dataclass(frozen=True)
+class OfflineShotRecord:
+    """One attempted shot: sampled truth, every window outcome, and the
+    accepted prediction (None when any window outcome failed)."""
+
+    shot_index: int
+    sampled_truth: tuple
+    window_outcomes: tuple
+    logical_prediction: tuple | None
+
+    @property
+    def accepted(self) -> bool:
+        return self.logical_prediction is not None
+
+    @property
+    def logical_failure(self) -> bool:
+        return not self.accepted or self.logical_prediction != self.sampled_truth
+
+
+@dataclass(frozen=True)
+class OfflineAccuracySummary:
+    """Unconditional primary LER plus explicitly conditional acceptance metrics."""
+
+    attempted_shots: int
+    primary_failures: int
+    accepted_shots: int
+    accepted_logical_failures: int
+
+
+def summarize_offline_shots(records) -> OfflineAccuracySummary:
+    """Summarize attempted shots without filtering failed backend outcomes."""
+    records = tuple(records)
+    accepted_records = [record for record in records if record.accepted]
+    return OfflineAccuracySummary(
+        attempted_shots=len(records),
+        primary_failures=sum(record.logical_failure for record in records),
+        accepted_shots=len(accepted_records),
+        accepted_logical_failures=sum(
+            record.logical_prediction != record.sampled_truth
+            for record in accepted_records),
+    )
+
 
 
 @dataclass(frozen=True)

@@ -2385,10 +2385,6 @@ class WindowManager:
         else:
             self._pending_strong_per_op.pop(op_id, None)
 
-    @property
-    def speculative_replays(self) -> int:
-        return self.speculative_recovery.replay_count
-
     def _send_boundary(self, window: Window, op: Operation, boundary, *,
                        source_request_key: DecoderRequestKey) -> None:
         """Schedule policy-selected boundary deliveries over the dd link."""
@@ -2728,11 +2724,3 @@ class WindowManager:
     def pending_strong_work_snapshot(self) -> tuple:
         """Snapshot strong slabs assigned but not yet admitted for service."""
         return self._escalations.snapshot_work()
-
-    @property
-    def peak_payloads(self) -> int:
-        return self.syndrome_buffer.peak_payloads
-
-    @property
-    def payloads_held(self) -> int:
-        return self.syndrome_buffer.payloads_held

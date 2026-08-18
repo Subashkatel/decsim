@@ -155,59 +155,6 @@ class PerRoundDecoder(FunctionLatencyDecoder):
         super().__init__(lambda job: job.n_rounds * self.tau_us)
 
 
-class SwitchingDecoder(_RandomSeedConsumer):
-    """Naive serial weak/strong switch: one job pays weak, handoff, and
-    strong latency back-to-back on the SAME unit.
-
-    This is the timing-only baseline for switching A/B studies. It produces no
-    correction, logical prediction, boundary data, or confidence. Unlike the
-    functional routed path (SwitchingRouter + Switching strategy), the strong
-    decode here is not a separate job, so it cannot queue for or contend over
-    strong units."""
-
-    def __init__(self, weak: "Decoder", strong: "Decoder", gamma_switch: float,
-                 handoff_us: float = 0.5, seed: Optional[int] = None,
-                 t_comm_weak_us: float = 0.0):
-        self.weak = weak
-        self.strong = strong
-        self.gamma_switch = _check_probability(gamma_switch, "gamma_switch")
-        self.handoff = us(handoff_us)
-        self.t_comm_weak = us(t_comm_weak_us)
-        self.fault_model_requirement = _decoder_fault_model_requirement(
-            weak
-        ).joined(_decoder_fault_model_requirement(strong))
-        self._initialize_run_seed_state(seed)
-        self.switches = 0                      # diagnostic: how many jobs escalated
-
-    def run_seed_children(self):
-        """Expose both decoder tiers beneath this stochastic wrapper."""
-        return (
-            RunSeedChild(
-                (RunSeedPathSegment("field", "weak"),),
-                self.weak,
-            ),
-            RunSeedChild(
-                (RunSeedPathSegment("field", "strong"),),
-                self.strong,
-            ),
-        )
-
-    def latency(self, job: DecodeJob) -> int:
-        """Weak latency, plus handoff and strong latency on a timing switch."""
-        latency_ticks = self.t_comm_weak + self.weak.latency(job)
-        self._mark_stochastic_use()
-        if self._rng.random() < self.gamma_switch:
-            self.switches += 1
-            # 2x: the handoff is a round trip (syndrome over to the strong
-            # decoder, result back)
-            latency_ticks += 2 * self.handoff + self.strong.latency(job)
-        return latency_ticks
-
-    def decode(self, job: DecodeJob) -> DecodeResult:
-        """Return the identity-only result of this timing baseline."""
-        return DecodeResult(job.op_id, job.window_id)
-
-
 class SwitchingRouter:
     """Route strong side jobs to the strong decoder and all other jobs to weak."""
 

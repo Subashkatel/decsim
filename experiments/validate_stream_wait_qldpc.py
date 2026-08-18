@@ -28,7 +28,7 @@ import numpy as np
 import pymatching
 import stim
 
-from decsim.adapters.stim_device import RecordedStimDevice
+from decsim.qpu.stim_device import RecordedStimDevice
 from decsim.config import TICKS_PER_US, TimingConfig
 from decsim.decoder_engine import DecoderEngine, DecoderTiming
 from decsim.decoders import PresetLatencyDecoder
@@ -36,8 +36,8 @@ from decsim.detector_error_model.detector_chronology import resolve_detector_rou
 from decsim.message import Operation
 from decsim.mwpm_decoder.decoder import PyMatchingDecoder
 from decsim.pauli_frame import PauliFrameConfig
-from decsim.policies import ExtendStream
-from decsim.rounds import PerOpRounds
+from decsim.controller.policies import ExtendStream
+from decsim.program.round_policies import PerOpRounds
 from decsim.run_spec import RunSpec
 from experiments.validate_timing_swiper import zero_latency_links
 from experiments.validate_windows_qldpc import run_qldpc

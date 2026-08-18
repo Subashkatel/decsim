@@ -17,7 +17,7 @@ from .message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob, Dec
                       stable_identity_order_key)
 from .links import (BoundaryTransferRelation, LinkPath,
                     RequestTransferRelation, TrafficAttribution)
-from .syndrome_buffer import SyndromeBuffer
+from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
 from .dynamic_windows import DynamicWindows
 from .speculative_recovery import SpeculativeRecovery
 

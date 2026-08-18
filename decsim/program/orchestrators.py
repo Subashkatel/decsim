@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import deque
 from typing import Callable, Optional
 
-from .message import Decision, DecodeResult, Operation
+from ..message import Decision, DecodeResult, Operation
 
 
 class ExecutionOrchestrator:

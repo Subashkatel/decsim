@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 import decsim
-from decsim.codes import SurfaceCodeModel
+from decsim.qpu.code_geometry import SurfaceCodeModel
 from decsim.config import TICKS_PER_US, TimingConfig, fmt, us
 from decsim.run_spec import RunSpec
 

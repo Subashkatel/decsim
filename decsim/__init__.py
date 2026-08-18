@@ -7,9 +7,9 @@ from .decoders import (PresetLatencyDecoder, PerRoundDecoder,
                        FunctionLatencyDecoder,
                        SwitchingRouter, SampledConfidenceDecoder,
                        switch_probability_per_round)
-from .factories import (InfiniteFactory, DistillationFactory,
+from .program.magic_state_factories import (InfiniteFactory, DistillationFactory,
                         MultiLevelDistillationFactory)
-from .frontends.circuit import (CircuitFrontend, SurgeryIRFrontend,
+from .program.circuit_frontend import (CircuitFrontend, SurgeryIRFrontend,
                                 three_cnot_circuit, cnot_plus_two_t_circuit,
                                 independent_t_circuit,
                                 three_cnot_six_qubits_circuit)

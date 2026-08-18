@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .message import OpKind
+from ..message import OpKind
 
 
 def _validated(value: int, source: str) -> int:

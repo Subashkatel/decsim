@@ -62,17 +62,17 @@ class ResolvedRunConfiguration:
 
 def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .decoders import CodeRouter
-    from .devices import SyndromeBitDevice, TimingOnlyDevice
+    from .qpu.syndrome_devices import SyndromeBitDevice, TimingOnlyDevice
     from .link_profiles import logical_reference_profile
-    from .planner import (_plan_execution, _validate_operation_graph,
+    from .program.planner import (_plan_execution, _validate_operation_graph,
                           _validate_workload_identity)
-    from .policies import Eager, Ignore
-    from .rounds import GateRounds
+    from .controller.policies import Eager, Ignore
+    from .program.round_policies import GateRounds
     from .schedulers import FifoScheduler
     from .schemes import SlidingWindowScheme
     from .switching import Baseline
-    from .syndrome_buffer import SyndromeBufferingConfig
-    from .syndrome_ingress import SyndromeIngressPolicy
+    from .syndrome_buffer.syndrome_buffer import SyndromeBufferingConfig
+    from .controller.syndrome_ingress import SyndromeIngressPolicy
     from .window_interactions import DefaultWindowInteraction
 
     strategy = spec.strategy if spec.strategy is not None else Baseline()
@@ -179,8 +179,8 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
 
 
 def _select_code(distance, code, layout):
-    from .codes import SurfaceCodeModel
-    from .layouts import UniformLayout
+    from .qpu.code_geometry import SurfaceCodeModel
+    from .qpu.layouts import UniformLayout
     if sum(value is not None for value in (distance, code, layout)) > 1:
         supplied = [name for name, value in (
             ("d", distance), ("code", code), ("layout", layout))
@@ -250,7 +250,7 @@ def _decode_plan_operations(ops, decode_ops, dynamic_streams, *,
 
 def check_factory_decode_service(factory, decoder_manager):
     """A distillation factory that decodes corrections uses the run's decoder manager."""
-    from .factories import DistillationFactory, MultiLevelDistillationFactory
+    from .program.magic_state_factories import DistillationFactory, MultiLevelDistillationFactory
     if type(factory) not in (DistillationFactory, MultiLevelDistillationFactory):
         return
     expected = decoder_manager if factory.n_corr > 0 else None

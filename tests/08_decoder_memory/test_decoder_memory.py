@@ -23,11 +23,11 @@ from decsim.detector_error_model.fault_model_contracts import (
 from decsim.detector_error_model.window_model_builders import (
     build_window_error_models,
 )
-from decsim.adapters.stim_device import StimDevice
+from decsim.qpu.stim_device import StimDevice
 from decsim.decoders import PerRoundDecoder
 from decsim.message import DecodeJob, Operation, RetainedSyndromeFragment
 from decsim.mwpm_decoder.decoder import PyMatchingDecoder
-from decsim.rounds import FixedRounds
+from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
 
@@ -528,7 +528,7 @@ def test_window_larger_than_the_unit_memory_stops_the_run() -> None:
 def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> None:
     from decsim.decoders import PerRoundDecoder
     from decsim.message import Operation
-    from decsim.rounds import FixedRounds
+    from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
     operations = [Operation(id=i, name=f"op {i}", qubits=(i,), patches=(i,)) for i in (1, 2)]
@@ -545,7 +545,7 @@ def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> Non
 def test_a_unit_too_small_for_its_window_fails_the_run_loudly() -> None:
     from decsim.decoders import PerRoundDecoder
     from decsim.message import Operation
-    from decsim.rounds import FixedRounds
+    from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
     with pytest.raises(DecoderMemoryCapacityExhaustion):

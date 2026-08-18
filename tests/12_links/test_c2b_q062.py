@@ -7,7 +7,7 @@ import pytest
 from decsim.config import us
 from decsim.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
 from decsim.links import LinkPath, TrafficAttribution
-from decsim.syndrome_ingress import SyndromePacketRouteKind, SyndromeIngress, _IngressSlotState
+from decsim.controller.syndrome_ingress import SyndromePacketRouteKind, SyndromeIngress, _IngressSlotState
 
 
 class _Engine:
@@ -198,11 +198,11 @@ def test_rounds_pipeline_on_c2b_instead_of_stop_and_wait():
     """Fast rounds arrive at Buffer 0 spaced by the round period, not by the C2B
     latency: the link serializes them FIFO and propagation is pipelined."""
     stim = pytest.importorskip("stim")
-    from decsim.adapters.stim_device import StimDevice
+    from decsim.qpu.stim_device import StimDevice
     from decsim.config import TimingConfig, TICKS_PER_US
     from decsim.decoders import PresetLatencyDecoder
     from decsim.message import Operation
-    from decsim.rounds import FixedRounds
+    from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
     circuit = stim.Circuit.generated(

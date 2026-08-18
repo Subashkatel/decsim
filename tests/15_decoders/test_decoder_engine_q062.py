@@ -144,10 +144,10 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
     unit: same logical answers as the bare decoder, three stages per window
     in the trace, no two windows overlapping on the single unit."""
     stim = pytest.importorskip("stim")
-    from decsim.adapters.stim_device import StimDevice
+    from decsim.qpu.stim_device import StimDevice
     from decsim.message import Operation
     from decsim.mwpm_decoder.decoder import PyMatchingDecoder
-    from decsim.rounds import FixedRounds
+    from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
     def build(decoder):
@@ -187,10 +187,10 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     call runs at algorithm start, the unit stays busy for exactly the measured
     time, and the result is released only then."""
     stim = pytest.importorskip("stim")
-    from decsim.adapters.stim_device import StimDevice
+    from decsim.qpu.stim_device import StimDevice
     from decsim.message import Operation
     from decsim.mwpm_decoder.decoder import PyMatchingDecoder
-    from decsim.rounds import FixedRounds
+    from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
     circuit = stim.Circuit.generated(

@@ -20,7 +20,7 @@ from decsim.message import (
     WindowPlan,
     WindowProtocol,
 )
-from decsim.planner import (
+from decsim.program.planner import (
     _RunPlan,
     _SyndromeBufferingPlan,
     _materialize_execution_plan,
@@ -29,7 +29,7 @@ from decsim.planner import (
     _validate_operation_graph,
     _validate_workload_identity,
 )
-from decsim.rounds import (
+from decsim.program.round_policies import (
     CodeRounds,
     FixedRounds,
     GateRounds,

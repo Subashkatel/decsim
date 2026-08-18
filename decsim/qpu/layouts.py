@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .protocols import CodeModel
+    from ..protocols import CodeModel
 
 
 class UniformLayout:
@@ -38,7 +38,7 @@ class UniformLayout:
 
     def resources_for(self, op) -> list:
         """Return one qubit exclusivity claim."""
-        from .message import ResourceClaim
+        from ..message import ResourceClaim
         return [ResourceClaim("qubits", frozenset(op.qubits))]
 
     def codes(self) -> list:

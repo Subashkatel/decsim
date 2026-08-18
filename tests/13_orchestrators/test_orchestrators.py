@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from decsim.orchestrators import ExecutionOrchestrator
+from decsim.program.orchestrators import ExecutionOrchestrator
 
 
 class RecordingEngine:

@@ -22,7 +22,7 @@ from pathlib import Path
 import stim
 import yaml
 
-from decsim.adapters.stim_device import StimDevice
+from decsim.qpu.stim_device import StimDevice
 from decsim.config import TICKS_PER_US, TimingConfig
 from decsim.decoder_engine import DecoderEngine, DecoderStage, DecoderTiming
 from decsim.decoder_memory import DecoderMemoryConfig
@@ -32,7 +32,7 @@ from decsim.link_profiles import with_controller_to_buffer_edge
 from decsim.message import Operation
 from decsim.mwpm_decoder.decoder import PyMatchingDecoder
 from decsim.pauli_frame import PauliFrameConfig
-from decsim.rounds import FixedRounds
+from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
 DEFAULT_CONFIG = Path(__file__).with_suffix(".yaml")

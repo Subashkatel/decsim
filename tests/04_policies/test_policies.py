@@ -2,10 +2,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from decsim import policies
-from decsim.controller import Controller
+from decsim.controller import policies
+from decsim.controller.controller import Controller
 from decsim.message import RunSeedReservation, SoftOutputSource
-from decsim.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
+from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
 from decsim.protocols import BoundaryPolicy, IdlePolicy
 from decsim.run_spec import RunSpec
 from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme

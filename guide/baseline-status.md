@@ -16,14 +16,15 @@ Status vocabulary:
 - The committed review prefix is modules `00_engine` through `14_planner`, 15 of
   32 core modules. Source of truth: `tmp/validation/CLEANUP_STATE.yaml`,
   `module_order` and `modules`.
-- Q-053 is complete. Links production commit `b538bc8`, test commit `207e3ee`;
-  the latest recorded accumulated and post-commit suite is **803 passed**.
-  Evidence: `tmp/validation/CLEANUP_STATE.yaml`,
-  `modules.12_links.q053_followup`, and `tmp/validation/OWNER_QUEUE.yaml`, Q-053.
-  This review did not rerun tests.
-- Q-062(b), the minimal Pauli-frame sink, Q-062(c), the weak-decoder cycle
-  model, and Q-062(d), the baseline experiment and report, are **BUILD PENDING**.
-  Q-062(f), published-number validation, is also pending. Evidence:
+- Q-053 is complete. Links production commit `b538bc8`, test commit `207e3ee`.
+- Q-062(b), the minimal Pauli-frame sink, is **DONE**: production commit
+  `efe7270`, test commit `bdd0b1f`; the latest accumulated suite is **818 passed**,
+  with compileall and the default smoke run green. The direct owner addendum in
+  `tmp/validation/OWNER_QUEUE.yaml` accepted the verified semantics and required
+  the short PECOS provenance header before commit.
+- Q-062(c), the weak-decoder cycle model, and Q-062(d), the baseline experiment
+  and report, are **BUILD PENDING**. Q-062(f), published-number validation, is
+  also pending. Evidence:
   `tmp/validation/OWNER_QUEUE.yaml`, Q-062. The module-review pipeline remains
   paused at module 15 until the Q-062 priority sequence completes.
 
@@ -41,7 +42,7 @@ Status vocabulary:
 | 8 | Window manager, fires decode when a window is ready | `decsim/window_manager.py` | EXISTS, REVIEW PENDING | Source exists; module 27 is pending. Q-057 binds zero weak/strong coordination in the baseline and keeps the parallel capability off, not deleted. |
 | 9 | Decoder manager and weak scheduler, unit assignment and manager-side push | `decsim/decoder_manager.py`; `decsim/schedulers.py`; `decsim/decoder_input_transfer.py` | EXISTS, REVIEW PENDING | Sources exist; schedulers module 16, transfer module 22, and manager module 26 are pending. Push DMA and its priced trigger are later Q-056 work, so the current existence claim is not a Q-056 completion claim. |
 | 10 | Weak decoder, memory plus compute engine | `decsim/decoders.py` | EXISTS, REVIEW PENDING; Q-062(c) BUILD PENDING | The current decoder source exists and module 21 is pending. The configurable cycle-stage model and ASIC frequency conversion have not landed. Q-062(c) owns that addition. |
-| 11 | Pauli frame, minimal weak-correction commit sink | `decsim/pauli_frame.py` | BUILD PENDING, Q-062(b) | No source file exists at this path in the audited snapshot. Q-062(b) requires the first minimal, toggleable, inert-when-off sink keyed by window identity. The full Q-054 mapping, lookup/update costs, storage, and capacity axes remain later work. |
+| 11 | Pauli frame, minimal weak-correction commit sink | `decsim/pauli_frame.py` | DONE, Q-062(b) | The toggleable final-weak sink is committed at production `efe7270` and tests `bdd0b1f`; 818 accumulated tests, compileall, and the default smoke run passed. The adapted PECOS XOR core carries the owner-required short provenance header. Full Q-054 mapping, lookup/update bandwidth, storage, and capacity axes remain later work. |
 | 12 | End-to-end throughput and per-point latency measurement | `decsim/views.py`; `decsim/metrics.py` | EXISTS, REVIEW PENDING; Q-062(d) BUILD PENDING | Both sources exist, but views module 29 and metrics module 30 are pending. `tmp/validation/ORIENTATION.md` defines them as the observation surface. The actual swept loop report is not done until Q-062(d) lands. |
 
 The minimal baseline commit path is therefore: real Stim input, both controller
@@ -85,7 +86,7 @@ These are existence checks only. They do not promote pending modules to DONE.
 | `decsim/orchestrators.py` | `ce678ba1bd17cf68f577db3f8ce4ec76e611f1aeeeb0e9bde661eb127fd576ad` |
 | `decsim/planner.py` | `88963f657f54db88b2d7d3a899895d38bfed0d7ab64fc275e0e1dfb3ee8e2459` |
 | `decsim/rounds.py` | `28a14fab95622e9b8c0c39b7979f1ea79baed3a776c74a4171ba999738c27ebd` |
-| `decsim/window_manager.py` | `582278d85786f998cfcf9e429b6d53d5b897cb45bf89556c29347fb9f1013f1c` |
+| `decsim/window_manager.py` | `99c0d922e359475d463a59aaedc03f9155d03b45966fa074af1aa713745cd625` |
 | `decsim/controller.py` | `07419197da6b80838358b6e80a7186642579c7b8e314bff4e5a6bde2cae2eeb5` |
 | `decsim/config.py` | `55ca221be303a4c96ad26f59e42ecbd7903504f1a3865e60f53841be900cc639` |
 | `decsim/qpu.py` | `6a99ebb366e692fe9f408d22a798c5c06065cd7ea699b62187b0d221d50877c2` |
@@ -100,7 +101,7 @@ These are existence checks only. They do not promote pending modules to DONE.
 | `decsim/metrics.py` | `de07758d42ab8b2395e8f70496a8f0ea6e9d2f2d3d5c9146cfeefab182bf69fa` |
 | `decsim/links.py` | `3c01b21ff91c7bf2495ed14ad432cb822a7e2435df341143ae6310ba30d38ce3` |
 | `decsim/factories.py` | `d66bbb5bc64349dd3b49fc36d6f5d60bf005f8dae9e74872bfe255cfea875426` |
-| `decsim/pauli_frame.py` | absent |
+| `decsim/pauli_frame.py` | `a23d0a987a12fd6ab2c8d8e53636d44a6e3dcfd891487121e6595a3497d754aa` |
 
 ## Maintenance rule
 

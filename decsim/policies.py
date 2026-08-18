@@ -7,8 +7,6 @@ through ``RunSpec`` without registration.
 """
 
 
-# BoundaryPolicy, protocol port 16
-
 class Eager:
     """Ships every committed boundary and requests replay when a later strong
     result revises it."""
@@ -26,7 +24,6 @@ class Held:
         return final
 
 
-# IdlePolicy, protocol port 17
 
 class Ignore:
     """Uses ordinary feedback-memory rounds without extra idle decode demand."""

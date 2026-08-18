@@ -15,9 +15,9 @@
 """Minimal final-weak Pauli-frame sink with explicitly priced writes.
 
 The frame records corrections that are final for their window; an
-escalation-pending weak result is withheld by design. Charging before the
-existing commit body also delays boundary handoff and potential-strong hold
-release; richer outstanding-write accounting belongs to Q-054 stage 2.
+escalation-pending weak result is withheld by design. The write cost is
+charged before the commit body, so it also delays boundary handoff and the
+potential-strong hold release; there is no outstanding-write queue.
 """
 from dataclasses import dataclass
 import math

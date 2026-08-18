@@ -1,9 +1,8 @@
-"""Decoder switching strategies (port 10): Baseline and Switching.
+"""Decoder switching strategies: Baseline and Switching.
 
-Part module: the strategy seam implementations (Contract 2c). Baseline is the
-default. Switching escalates weak decodes to strong; the weak/strong
-routing itself stays in the router (SwitchingRouter), and the pool owns unit
-bookkeeping, hold-or-deliver, and cancellation mechanics.
+Baseline is the default. Switching escalates weak decodes to strong; the
+weak/strong routing itself stays in the router (SwitchingRouter), and the
+decoder manager owns unit bookkeeping, hold-or-deliver, and cancellation.
 """
 
 from __future__ import annotations

@@ -278,8 +278,8 @@ def with_controller_to_buffer_edge(
 ) -> LinkModelConfig:
     """Return ``profile`` with the optional priced C2B round-transfer edge.
 
-    The caller must supply both experiment-card numbers and their provenance.
-    Existing cards remain unchanged and therefore preserve pre-Q-055 behavior.
+    The caller supplies both experiment-card numbers and their provenance;
+    a profile without this edge publishes rounds to Buffer 0 for free.
     """
     capacity = LinkCapacityConfig(
         aggregate_bits_per_us,

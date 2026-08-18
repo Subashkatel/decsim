@@ -1,9 +1,8 @@
 """Read-only simulation metrics.
 
-Every metric is an observer over the typed views in views.py (spec §8.9,
-principle 7): observe()/result() take a frozen snapshot of the core
-surface and compute from the view alone. Public numbers are unchanged
-from the pre-view implementations.
+Every metric is an observer over the typed views in views.py: observe() and
+result() take a frozen snapshot of the core surface and compute from the
+view alone; a metric never writes to the run.
 """
 
 

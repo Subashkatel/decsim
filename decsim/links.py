@@ -10,7 +10,7 @@ is one measured segment, named for the pair of runtime components it connects:
 
 - ``QC``  QPU -> controller: syndrome readout leaving the QPU (t_qc).
 - ``C2B`` controller -> syndrome buffer 0: a completed binary round published
-  to the window-input route. This optional extension is inert on legacy cards.
+  to the window-input route; a profile without this edge publishes for free.
 - ``CWD`` controller -> weak decoder: syndrome data reaching the weak tier,
   either as one round (``syndrome_ingress``) or as one weak window
   (``window_manager``) (t_cwd).

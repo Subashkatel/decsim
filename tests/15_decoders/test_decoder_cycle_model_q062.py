@@ -1,350 +1,255 @@
-"""Blind behavior tests for the Q-062(c) decoder cycle model."""
-
-from dataclasses import FrozenInstanceError
-from types import SimpleNamespace
+"""Behavior tests for the Q-062(c) staged weak decoder."""
 
 import pytest
 
-import decsim.decoder_cycle_model as cycle_model_module
+from decsim.config import us
 from decsim.decoder_cycle_model import (
     CycleQuantityBasis,
     DecoderCycleModel,
     DecoderPipelineStage,
+    StagedDecoder,
     StageCycleConfig,
 )
 from decsim.decoder_cycle_profiles import (
     delegated_latency_model,
     lookup_table_published_total_model,
 )
-from decsim.decoders import CycleModelDecoder, NO_FAULT_MODEL_REQUIRED
+from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
+from decsim.engine import Engine
+from decsim.message import DecodeJob, DecodeResult
+
+STAGES = tuple(DecoderPipelineStage)
 
 
-def _stage(cycles, basis=CycleQuantityBasis.PER_JOB, label="configured"):
-    return StageCycleConfig(
-        cycles=cycles,
-        basis=basis,
-        source=(
-            f"{label} is deliberately free in this card."
-            if cycles == 0
-            else f"{label} cycle budget source."
-        ),
-    )
+def _stage(cycles, basis=CycleQuantityBasis.PER_JOB):
+    return StageCycleConfig(cycles, basis, "test card")
 
 
-def _model(
-    *,
-    stages=None,
-    frequency_mhz=250.0,
-    frequency_source="Configured FPGA clock source.",
-    include_inner_latency=True,
-    model_name="test_card",
-):
-    stages = stages or (_stage(0),) * 5
+def _card(fetch=1, decode=1, execute=7, memory=1, writeback=1, *,
+          fetch_basis=CycleQuantityBasis.PER_JOB, frequency_mhz=250.0,
+          include_inner_latency=False):
     return DecoderCycleModel(
-        fetch=stages[0],
-        decode=stages[1],
-        execute=stages[2],
-        memory=stages[3],
-        writeback=stages[4],
-        frequency_mhz=frequency_mhz,
-        frequency_source=frequency_source,
-        include_inner_latency=include_inner_latency,
-        model_name=model_name,
-    )
+        fetch=_stage(fetch, fetch_basis), decode=_stage(decode),
+        execute=_stage(execute), memory=_stage(memory),
+        writeback=_stage(writeback), frequency_mhz=frequency_mhz,
+        frequency_source="test clock", include_inner_latency=include_inner_latency,
+        model_name="test")
 
 
-def test_stage_and_basis_vocabularies_are_closed_and_ordered():
-    """The card exposes exactly five ordered stages and two cycle bases."""
-    assert tuple(DecoderPipelineStage) == (
-        DecoderPipelineStage.FETCH,
-        DecoderPipelineStage.DECODE,
-        DecoderPipelineStage.EXECUTE,
-        DecoderPipelineStage.MEMORY,
-        DecoderPipelineStage.WRITEBACK,
-    )
-    assert tuple(stage.value for stage in DecoderPipelineStage) == (
-        "fetch",
-        "decode",
-        "execute",
-        "memory",
-        "writeback",
-    )
-    assert tuple(CycleQuantityBasis) == (
-        CycleQuantityBasis.PER_JOB,
-        CycleQuantityBasis.PER_ROUND,
-    )
+class _RecordingInner:
+    """Timing-only inner decoder that records when decode() ran."""
+
+    fault_model_requirement = PresetLatencyDecoder().fault_model_requirement
+
+    def __init__(self, latency_us=0.0):
+        self.latency_us = latency_us
+        self.decode_ticks = []
+
+    def latency(self, job):
+        return us(self.latency_us)
+
+    def decode(self, job):
+        self.decode_ticks.append(job.window_id)
+        return DecodeResult(job.op_id, job.window_id)
 
 
-def test_stage_rows_charge_job_and_round_bases_as_exact_integers():
-    """Per-job work is charged once while per-round work scales with job size."""
-    card = _model(
-        stages=(
-            _stage(2),
-            _stage(3, CycleQuantityBasis.PER_ROUND),
-            _stage(5),
-            _stage(7, CycleQuantityBasis.PER_ROUND),
-            _stage(11),
-        )
-    )
-
-    rows = card.stage_cycles(SimpleNamespace(n_rounds=4.0))
-
-    assert rows == (
-        (DecoderPipelineStage.FETCH, 2),
-        (DecoderPipelineStage.DECODE, 12),
-        (DecoderPipelineStage.EXECUTE, 5),
-        (DecoderPipelineStage.MEMORY, 28),
-        (DecoderPipelineStage.WRITEBACK, 11),
-    )
-    assert all(type(charged_cycles) is int for _, charged_cycles in rows)
-    assert card.total_cycles(SimpleNamespace(n_rounds=4)) == 58
+def _job(window_id=0, n_rounds=3):
+    return DecodeJob(op_id=1, window_id=window_id, n_rounds=n_rounds,
+                     label=f"W{window_id}")
 
 
-@pytest.mark.parametrize("cycles", [-1, 1.5, float("nan"), float("inf")])
-def test_stage_cycle_counts_refuse_non_whole_or_negative_values(cycles):
-    """A stage refuses cycle counts that cannot be nonnegative whole cycles."""
+def _run(decoder, engine, jobs):
+    done = []
+    for job in jobs:
+        decoder.run(job, engine, lambda j=job: done.append((j.window_id, engine.now)))
+    engine._start_running()
+    engine.run()
+    return done
+
+
+def test_one_job_walks_the_five_stages_in_order_with_stage_ticks():
+    engine = Engine(verbose=False)
+    inner = _RecordingInner()
+    decoder = StagedDecoder(inner, _card())
+    tick = us(1 / 250.0)                    # one cycle at 250 MHz
+
+    done = _run(decoder, engine, [_job()])
+
+    records = decoder.stage_records_for(1, 0)
+    assert tuple(r.stage for r in records) == STAGES
+    ends = [1, 2, 9, 10, 11]
+    assert [(r.start_ticks, r.end_ticks) for r in records] == [
+        ((e - c) * tick, e * tick)
+        for e, c in zip(ends, (1, 1, 7, 1, 1))]
+    assert done == [(0, 11 * tick)]
+    assert decoder.latency(_job()) == 11 * tick
+
+
+def test_execute_runs_the_real_decode_at_execute_entry_and_result_is_released():
+    engine = Engine(verbose=False)
+    inner = _RecordingInner()
+    decoder = StagedDecoder(inner, _card())
+    job = _job()
+    seen = {}
+
+    def on_done():
+        seen["done_at"] = engine.now
+        seen["result"] = decoder.decode(job)
+
+    decoder.run(job, engine, on_done)
+    engine._start_running()
+    engine.run()
+
+    execute = decoder.stage_records_for(1, 0)[2]
+    assert execute.stage is DecoderPipelineStage.EXECUTE
+    assert inner.decode_ticks == [0]
+    assert seen["result"].window_id == 0
+    assert seen["done_at"] == execute.end_ticks + 2 * us(1 / 250.0)
+    with pytest.raises(RuntimeError, match="not been released"):
+        decoder.decode(job)
+
+
+def test_fetch_charges_per_round_when_the_card_says_so():
+    engine = Engine(verbose=False)
+    decoder = StagedDecoder(
+        _RecordingInner(), _card(fetch=2, fetch_basis=CycleQuantityBasis.PER_ROUND))
+
+    _run(decoder, engine, [_job(n_rounds=5)])
+
+    fetch = decoder.stage_records_for(1, 0)[0]
+    assert fetch.cycles == 10
+    assert fetch.end_ticks - fetch.start_ticks == 10 * us(1 / 250.0)
+
+
+def test_inner_latency_is_added_to_execute_only():
+    inner = _RecordingInner(latency_us=3.0)
+    decoder = StagedDecoder(inner, _card(include_inner_latency=True))
+    engine = Engine(verbose=False)
+
+    _run(decoder, engine, [_job()])
+
+    records = decoder.stage_records_for(1, 0)
+    tick = us(1 / 250.0)
+    assert records[2].end_ticks - records[2].start_ticks == 7 * tick + us(3.0)
+    assert records[4].end_ticks == 11 * tick + us(3.0)
+    assert decoder.latency(_job()) == records[4].end_ticks
+
+
+def test_two_jobs_on_the_same_unit_do_not_overlap_when_started_back_to_back():
+    """One unit is one job at a time; the manager owns the unit count, so the
+    unit itself simply reports both walks with their true ticks."""
+    engine = Engine(verbose=False)
+    decoder = StagedDecoder(_RecordingInner(), _card())
+    first, second = _job(0), _job(1)
+    engine.schedule(0, lambda: decoder.run(first, engine, lambda: None))
+    engine.schedule(decoder.latency(first),
+                    lambda: decoder.run(second, engine, lambda: None))
+    engine._start_running()
+    engine.run()
+
+    a = decoder.stage_records_for(1, 0)
+    b = decoder.stage_records_for(1, 1)
+    assert a[-1].end_ticks <= b[0].start_ticks
+    assert tuple(r.stage for r in b) == STAGES
+
+
+def test_a_job_cannot_be_started_twice_while_running():
+    engine = Engine(verbose=False)
+    decoder = StagedDecoder(_RecordingInner(), _card())
+    job = _job()
+    decoder.run(job, engine, lambda: None)
+    with pytest.raises(RuntimeError, match="already running"):
+        decoder.run(job, engine, lambda: None)
+
+
+def test_cancelled_job_skips_the_real_decode_but_still_occupies_the_unit():
+    engine = Engine(verbose=False)
+    inner = _RecordingInner()
+    decoder = StagedDecoder(inner, _card())
+    job = _job()
+    job.cancelled = True
+
+    done = _run(decoder, engine, [job])
+
+    assert inner.decode_ticks == []
+    assert done == [(0, 11 * us(1 / 250.0))]
+
+
+def test_total_equals_sum_of_stage_cycles_at_the_clock_for_odd_clocks():
+    card = _card(fetch=1, decode=1, execute=3, memory=1, writeback=1,
+                 frequency_mhz=300.0)
+    decoder = StagedDecoder(_RecordingInner(), card)
+    engine = Engine(verbose=False)
+    _run(decoder, engine, [_job()])
+    records = decoder.stage_records_for(1, 0)
+    assert records[-1].end_ticks == us(7 / 300.0)
+    assert sum(r.end_ticks - r.start_ticks for r in records) == us(7 / 300.0)
+
+
+def test_card_guards():
     with pytest.raises(ValueError):
-        StageCycleConfig(
-            cycles=cycles,
-            basis=CycleQuantityBasis.PER_JOB,
-            source="Measured positive cycle source.",
-        )
-
-
-@pytest.mark.parametrize("round_count", [-1, 2.5, float("nan"), float("inf")])
-def test_per_round_work_refuses_invalid_job_sizes(round_count):
-    """Per-round pricing refuses negative, fractional, or nonfinite job sizes."""
-    card = _model(
-        stages=(
-            _stage(0),
-            _stage(1, CycleQuantityBasis.PER_ROUND),
-            _stage(0),
-            _stage(0),
-            _stage(0),
-        )
-    )
+        StageCycleConfig(-1, CycleQuantityBasis.PER_JOB, "x")
     with pytest.raises(ValueError):
-        card.total_cycles(SimpleNamespace(n_rounds=round_count))
-
-
-def test_stage_basis_must_be_one_of_the_closed_basis_members():
-    """A configured basis is selected from the closed quantity-basis enum."""
-    assert CycleQuantityBasis("per_job") is CycleQuantityBasis.PER_JOB
-    assert CycleQuantityBasis("per_round") is CycleQuantityBasis.PER_ROUND
+        _card(frequency_mhz=0.0)
     with pytest.raises(ValueError):
-        CycleQuantityBasis("per_batch")
+        _card(frequency_mhz=1e12)
 
 
-@pytest.mark.parametrize("frequency_mhz", [0, -1, float("nan"), float("inf")])
-def test_frequency_must_be_finite_and_positive(frequency_mhz):
-    """The hardware clock refuses nonpositive and nonfinite frequencies."""
-    with pytest.raises(ValueError):
-        _model(frequency_mhz=frequency_mhz)
+def test_profiles_delegated_card_is_exactly_the_wrapped_decoder_latency():
+    inner = PerRoundDecoder(tau_us=0.5)
+    decoder = StagedDecoder(inner, delegated_latency_model())
+    job = _job(n_rounds=4)
+    assert decoder.latency(job) == inner.latency(job)
 
 
-def test_frequency_refuses_a_clock_where_one_cycle_rounds_to_zero_ticks():
-    """A configured positive cycle can never become a free simulated hop."""
-    with pytest.raises(ValueError, match="one cycle must convert to at least one tick"):
-        _model(frequency_mhz=2_000_000.0)
+def test_profiles_lilliput_card_is_seven_cycles_at_250_mhz():
+    decoder = StagedDecoder(PresetLatencyDecoder(1.0),
+                            lookup_table_published_total_model())
+    assert decoder.latency(_job()) == us(7 / 250.0)
 
 
-def test_cycles_are_summed_before_exactly_one_time_conversion(monkeypatch):
-    """The complete cycle budget is converted once rather than stage by stage."""
-    card = _model(
-        stages=tuple(_stage(cycles) for cycles in (1, 2, 3, 4, 5)),
-        frequency_mhz=100.0,
-        include_inner_latency=False,
-    )
-    conversion_inputs = []
+def test_end_to_end_stim_memory_run_through_the_staged_decoder():
+    """A real rotated memory circuit decoded by PyMatching inside the staged
+    unit: same logical answers as the bare decoder, five stages per window in
+    the trace, and one unit never overlapping two windows."""
+    stim = pytest.importorskip("stim")
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.message import Operation
+    from decsim.mwpm_decoder.decoder import PyMatchingDecoder
+    from decsim.rounds import FixedRounds
+    from decsim.run_spec import RunSpec
 
-    def recording_conversion(microseconds):
-        conversion_inputs.append(microseconds)
-        return 12345
+    def build(decoder):
+        circuit = stim.Circuit.generated(
+            "surface_code:rotated_memory_z", rounds=6, distance=3,
+            after_clifford_depolarization=0.005,
+            before_measure_flip_probability=0.005,
+            after_reset_flip_probability=0.005,
+            before_round_data_depolarization=0.005)
+        operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
+                              circuit=circuit)
+        return RunSpec(ops=[operation], d=3, rounds_policy=FixedRounds(6),
+                       device=StimDevice(), decoder=decoder, seed=11).build()
 
-    monkeypatch.setattr(cycle_model_module, "us", recording_conversion)
+    bare = build(PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)))
+    staged_decoder = StagedDecoder(
+        PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)),
+        _card(fetch=1, fetch_basis=CycleQuantityBasis.PER_ROUND,
+              include_inner_latency=True))
+    staged = build(staged_decoder)
 
-    assert card.latency_ticks(SimpleNamespace(n_rounds=9), 0) == 12345
-    assert conversion_inputs == [15 / 100.0]
-
-
-def test_runtime_guard_rejects_positive_work_that_converts_to_zero(monkeypatch):
-    """A standing runtime check prevents future rounding changes from making work free."""
-    card = _model(stages=(_stage(1),) + (_stage(0),) * 4)
-    monkeypatch.setattr(cycle_model_module, "us", lambda _microseconds: 0)
-
-    with pytest.raises(RuntimeError, match="positive decoder work converted to zero ticks"):
-        card.latency_ticks(SimpleNamespace(n_rounds=1), 0)
-
-
-def test_excluded_inner_latency_is_ignored_by_the_cycle_card():
-    """The flag alone chooses whether supplied inner ticks contribute."""
-    card = _model(
-        stages=(_stage(1),) + (_stage(0),) * 4,
-        include_inner_latency=False,
-    )
-
-    assert card.latency_ticks(SimpleNamespace(n_rounds=1), 123456) == 4000
-
-
-def test_json_reports_every_knob_and_each_stage_attribution():
-    """The JSON card reports each stage source, clock, and inner-latency flag."""
-    card = _model(
-        stages=(
-            _stage(2, label="fetch"),
-            _stage(0, label="decode"),
-            _stage(3, CycleQuantityBasis.PER_ROUND, label="execute"),
-            _stage(0, label="memory"),
-            _stage(0, label="writeback"),
-        ),
-        frequency_mhz=500.0,
-        frequency_source="Measured ASIC clock.",
-        include_inner_latency=False,
-        model_name="fully_attributed",
-    )
-
-    assert card.to_json_value() == {
-        "model_name": "fully_attributed",
-        "stages": [
-            {
-                "stage": "fetch",
-                "cycles": 2,
-                "basis": "per_job",
-                "source": "fetch cycle budget source.",
-            },
-            {
-                "stage": "decode",
-                "cycles": 0,
-                "basis": "per_job",
-                "source": "decode is deliberately free in this card.",
-            },
-            {
-                "stage": "execute",
-                "cycles": 3,
-                "basis": "per_round",
-                "source": "execute cycle budget source.",
-            },
-            {
-                "stage": "memory",
-                "cycles": 0,
-                "basis": "per_job",
-                "source": "memory is deliberately free in this card.",
-            },
-            {
-                "stage": "writeback",
-                "cycles": 0,
-                "basis": "per_job",
-                "source": "writeback is deliberately free in this card.",
-            },
-        ],
-        "frequency_mhz": 500.0,
-        "frequency_source": "Measured ASIC clock.",
-        "include_inner_latency": False,
-    }
-
-
-def test_cycle_cards_are_frozen_after_validation():
-    """Validated stage and model cards cannot change underneath a running decoder."""
-    stage = _stage(1)
-    card = _model(stages=(stage,) * 5)
-    with pytest.raises(FrozenInstanceError):
-        stage.cycles = 2
-    with pytest.raises(FrozenInstanceError):
-        card.frequency_mhz = 1000.0
-
-
-def test_delegated_default_is_exactly_the_wrapped_decoder_latency():
-    """The default five-zero-stage card preserves wrapped latency for every job size."""
-    class InnerDecoder:
-        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
-
-        def __init__(self):
-            self.latency_calls = []
-
-        def latency(self, job):
-            self.latency_calls.append(job.n_rounds)
-            return 7000 + job.n_rounds
-
-        def decode(self, job):
-            return job
-
-    inner = InnerDecoder()
-    card = delegated_latency_model()
-    wrapped = CycleModelDecoder(inner, card)
-
-    assert card.model_name == "delegated_latency"
-    assert card.frequency_mhz == 250.0
-    assert card.include_inner_latency is True
-    assert card.to_json_value()["include_inner_latency"] is True
-    assert card.stage_cycles(SimpleNamespace(n_rounds=999)) == tuple(
-        (stage, 0) for stage in DecoderPipelineStage
-    )
-    for round_count in (0, 1, 17, 1000):
-        job = SimpleNamespace(n_rounds=round_count)
-        assert wrapped.latency(job) == 7000 + round_count
-    assert inner.latency_calls == [0, 1, 17, 1000]
-
-
-def test_lilliput_card_reproduces_seven_cycles_at_250_mhz():
-    """The published lookup card charges only aggregate execute and yields 28000 ticks."""
-    card = lookup_table_published_total_model()
-    job = SimpleNamespace(n_rounds=2)
-
-    assert card.model_name == "lilliput_d3_m2_embedded_memory"
-    assert card.frequency_mhz == 250.0
-    assert card.include_inner_latency is False
-    assert card.stage_cycles(job) == (
-        (DecoderPipelineStage.FETCH, 0),
-        (DecoderPipelineStage.DECODE, 0),
-        (DecoderPipelineStage.EXECUTE, 7),
-        (DecoderPipelineStage.MEMORY, 0),
-        (DecoderPipelineStage.WRITEBACK, 0),
-    )
-    assert card.total_cycles(job) == 7
-    assert card.latency_ticks(job, 0) == 28000
-    assert all(stage_row["source"] for stage_row in card.to_json_value()["stages"])
-
-
-def test_adapter_delegates_decode_fault_requirement_and_seed_child():
-    """The timing adapter preserves functional output, fault needs, and seed reachability."""
-    decode_result = object()
-
-    class FunctionalInner:
-        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
-
-        def latency(self, job):
-            return 99
-
-        def decode(self, job):
-            self.decoded_job = job
-            return decode_result
-
-    inner = FunctionalInner()
-    wrapped = CycleModelDecoder(inner, delegated_latency_model())
-    job = SimpleNamespace(n_rounds=3)
-
-    assert wrapped.decode(job) is decode_result
-    assert inner.decoded_job is job
-    assert wrapped.fault_model_requirement is inner.fault_model_requirement
-    children = wrapped.run_seed_children()
-    assert len(children) == 1
-    assert children[0].child is inner
-    assert len(children[0].relative_path) == 1
-    assert children[0].relative_path[0].kind == "field"
-    assert children[0].relative_path[0].value == "inner"
-
-
-def test_adapter_never_calls_inner_latency_when_the_card_excludes_it():
-    """A pure cycle card has no hidden call to the wrapped decoder's latency model."""
-    class InnerWhoseLatencyMustStayUnused:
-        fault_model_requirement = NO_FAULT_MODEL_REQUIRED
-
-        def latency(self, job):
-            raise AssertionError("inner latency must not be consulted")
-
-        def decode(self, job):
-            return job
-
-    card = lookup_table_published_total_model()
-    wrapped = CycleModelDecoder(InnerWhoseLatencyMustStayUnused(), card)
-
-    assert wrapped.latency(SimpleNamespace(n_rounds=2)) == 28000
+    assert staged.result.terminal_status == "complete"
+    assert ([r.logical_observables for r in staged.result.operation_results]
+            == [r.logical_observables for r in bare.result.operation_results])
+    records = staged_decoder.stage_records
+    windows = sorted({(r.op_id, r.window_id) for r in records})
+    assert windows
+    for key in windows:
+        assert tuple(r.stage for r in staged_decoder.stage_records_for(*key)) == STAGES
+    fetches = [r for r in records if r.stage is DecoderPipelineStage.FETCH]
+    assert all(f.rounds_read > 0 and f.cycles == f.rounds_read for f in fetches)
+    spans = sorted((staged_decoder.stage_records_for(*key)[0].start_ticks,
+                    staged_decoder.stage_records_for(*key)[-1].end_ticks)
+                   for key in windows)
+    assert all(a_end <= b_start for (_, a_end), (b_start, _) in zip(spans, spans[1:]))
+    assert any("EXECUTE" in line for line in staged.engine.log_lines)

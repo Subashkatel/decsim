@@ -12,9 +12,7 @@ from decsim.decoder_memory import (
     DecoderMemory,
     DecoderMemoryCapacityExhaustion,
     DecoderMemoryConfig,
-    DecoderMemoryOverflowPolicy,
     DecoderMemorySnapshot,
-    DecoderMemoryUnsatisfiableDemand,
     MaterializedSyndromeRound,
     materialize_decoder_input,
 )
@@ -113,9 +111,8 @@ def test_module_imports_only_kept_dependencies_and_has_no_stale_helper() -> None
     assert imports == [
         (0, "__future__", ("annotations",)),
         (0, "dataclasses", ("dataclass",)),
-        (0, "enum", ("Enum",)),
         (0, "types", ("MappingProxyType",)),
-        (0, "typing", ("Any", "Callable", "Mapping", "Optional")),
+        (0, "typing", ("Any", "Mapping", "Optional")),
         (
             1,
             "message",
@@ -547,285 +544,72 @@ def test_materialization_rejects_identity_outside_stable_domain() -> None:
         materialize_decoder_input(make_job([make_fragment(object(), 0)]))
 
 
-@pytest.mark.parametrize("capacity", [0, -1, True, 1.0])
-def test_store_capacity_requires_unbounded_or_positive_exact_integer(capacity: object) -> None:
-    """Store capacity accepts only unbounded or positive exact integers."""
-    with pytest.raises(TypeError, match="positive built-in int"):
-        DecoderMemory(pool="weak", round_capacity=capacity)
+# ---------------------------------------------------------------- per-unit memory
+
+def _unit_job(label, rounds, request_key=None):
+    payloads = [make_fragment(round_index=r, bits=(0, 1)) for r in rounds]
+    job = make_job(payloads, op_id=1, window_id=len(rounds), request_key=request_key)
+    job.label = label
+    return job
 
 
-def test_store_pool_requires_a_string_label() -> None:
-    """A store pool label must be an exact string-compatible label."""
-    with pytest.raises(TypeError, match="str label"):
-        DecoderMemory(pool=1, round_capacity=None)
+def test_config_is_rounds_per_unit_by_pool_and_absent_pools_are_unbounded() -> None:
+    config = DecoderMemoryConfig({"default": 6})
+    assert config.capacity_for("default") == 6
+    assert config.capacity_for("strong") is None
+    with pytest.raises(ValueError):
+        DecoderMemoryConfig({"default": 0})
+    with pytest.raises(TypeError):
+        DecoderMemoryConfig({3: 4})
 
 
-def test_unbounded_store_tracks_exact_round_credits_and_immutable_snapshot() -> None:
-    """An unbounded store accounts for reserved rounds in immutable snapshots."""
-    input_store = DecoderMemory(pool="weak", round_capacity=None)
-    input_store.reserve("reserved", 3)
-    input_store.reserve("deposited", 1)
-    input_store.deposit("deposited", make_job([make_fragment()]))
-
-    snapshot = input_store.snapshot()
-    assert snapshot == DecoderMemorySnapshot(
-        pool="weak",
-        capacity_rounds=None,
-        occupied_rounds=4,
-        peak_occupied_rounds=4,
-        slots_in_use=2,
-        admissions=2,
-    )
-    assert input_store.rounds_in_use == 4
-    with pytest.raises(FrozenInstanceError):
-        snapshot.occupied_rounds = 0
+def test_unit_memory_holds_one_job_input_and_frees_it_exactly() -> None:
+    memory = DecoderMemory("default", 0, capacity_rounds=4)
+    job = _unit_job("w0", (0, 1, 2))
+    decoder_input = memory.deposit(job)
+    assert isinstance(decoder_input, DecoderInput)
+    assert memory.occupied_rounds == 3 and memory.peak_occupied_rounds == 3
+    assert memory.snapshot() == DecoderMemorySnapshot("default", 0, 4, 3, 3, 1)
+    with pytest.raises(RuntimeError, match="already holds"):
+        memory.deposit(job)
+    memory.take(job)
+    assert memory.occupied_rounds == 0
+    memory.take(job)                       # a job it no longer holds is ignored
 
 
-@pytest.mark.parametrize("deposited", [False, True])
-def test_duplicate_reserve_reports_current_state_without_mutation(deposited: bool) -> None:
-    """Duplicate reservation reports the current state without changing credits."""
-    input_store = DecoderMemory(pool="weak", round_capacity=2)
-    input_store.reserve("request", 1)
-    if deposited:
-        input_store.deposit("request", make_job([make_fragment()]))
-    expected_state = "deposited" if deposited else "reserved"
-    before = input_store.snapshot()
-
-    with pytest.raises(RuntimeError, match=rf"request.*{expected_state}"):
-        input_store.reserve("request", 1)
-
-    assert input_store.snapshot() == before
-
-
-def test_equal_slot_keys_collide_loudly_without_mutation() -> None:
-    """Python-equal keys collide loudly rather than sharing round credits."""
-    input_store = DecoderMemory(pool="weak", round_capacity=2)
-    input_store.reserve(1, 1)
-    before = input_store.snapshot()
-
-    with pytest.raises(RuntimeError, match="already reserved"):
-        input_store.reserve(True, 1)
-
-    assert input_store.snapshot() == before
-
-
-def test_round_credit_reserve_deposit_take_and_discard_are_exact() -> None:
-    """Every lifecycle operation charges and returns exactly its request's rounds."""
-    input_store = DecoderMemory(pool="strong", round_capacity=5)
-    first_job = make_job([make_fragment(round_index=0), make_fragment(round_index=1)])
-    second_job = make_job([make_fragment(round_index=2)])
-    input_store.reserve("first", 2)
-    first_input = input_store.deposit("first", first_job)
-    input_store.reserve("second", 1)
-    input_store.deposit("second", second_job)
-    assert input_store.snapshot().occupied_rounds == 3
-
-    assert input_store.take("first") is first_input
-    assert input_store.snapshot().occupied_rounds == 1
-    input_store.discard("second")
-    assert input_store.snapshot() == DecoderMemorySnapshot(
-        pool="strong",
-        capacity_rounds=5,
-        occupied_rounds=0,
-        peak_occupied_rounds=3,
-        slots_in_use=0,
-        admissions=2,
-    )
-
-
-def test_capacity_exhaustion_is_enriched_and_snapshot_is_frozen() -> None:
-    """Aggregate overflow raises a typed diagnostic with its immutable snapshot."""
-    input_store = DecoderMemory(pool="strong", round_capacity=3)
-    input_store.reserve("first", 2)
-    before = input_store.snapshot()
-
+def test_window_larger_than_the_unit_memory_stops_the_run() -> None:
+    memory = DecoderMemory("default", 1, capacity_rounds=2)
     with pytest.raises(DecoderMemoryCapacityExhaustion) as caught:
-        input_store.reserve("second", 2)
-
-    error = caught.value
-    assert isinstance(error, RuntimeError)
-    assert (error.pool, error.requested_rounds, error.capacity_rounds) == (
-        "strong", 2, 3)
-    assert error.snapshot == before
-    assert input_store.snapshot() == before
-    with pytest.raises(FrozenInstanceError):
-        error.snapshot.occupied_rounds = 0
+        memory.deposit(_unit_job("big", (0, 1, 2)))
+    assert (caught.value.pool, caught.value.unit, caught.value.requested_rounds,
+            caught.value.capacity_rounds) == ("default", 1, 3, 2)
+    assert memory.occupied_rounds == 0
 
 
-def test_unsatisfiable_demand_is_distinct_and_does_not_reserve() -> None:
-    """A request larger than the whole budget fails distinctly without mutation."""
-    input_store = DecoderMemory(pool="weak", round_capacity=2)
+def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> None:
+    from decsim.decoders import PerRoundDecoder
+    from decsim.message import Operation
+    from decsim.rounds import FixedRounds
+    from decsim.run_spec import RunSpec
 
-    with pytest.raises(DecoderMemoryUnsatisfiableDemand) as caught:
-        input_store.reserve("too-large", 3)
-
-    error = caught.value
-    assert not isinstance(error, DecoderMemoryCapacityExhaustion)
-    assert (error.pool, error.requested_rounds, error.capacity_rounds) == (
-        "weak", 3, 2)
-    assert error.snapshot.occupied_rounds == 0
-    assert input_store.snapshot().slots_in_use == 0
-
-
-@pytest.mark.parametrize(
-    ("round_demand", "error_type"),
-    [(True, TypeError), (1.0, TypeError), (-1, ValueError)],
-)
-def test_round_demand_requires_a_nonnegative_exact_integer(
-    round_demand: object, error_type: type[Exception]
-) -> None:
-    """Round reservations reject nonexact or negative demand without mutation."""
-    input_store = DecoderMemory(pool="weak", round_capacity=2)
-    with pytest.raises(error_type):
-        input_store.reserve("request", round_demand)
-    assert input_store.snapshot().occupied_rounds == 0
+    operations = [Operation(id=i, name=f"op {i}", qubits=(i,), patches=(i,)) for i in (1, 2)]
+    completed = RunSpec(ops=operations, d=3, rounds_policy=FixedRounds(3),
+                        decoder=PerRoundDecoder(tau_us=1.0), num_units=2,
+                        decoder_memory=DecoderMemoryConfig({"default": 6})).build()
+    memories = completed.decoder_manager.decoder_memories
+    assert sorted(memories) == [("default", 0), ("default", 1)]
+    assert all(m.occupied_rounds == 0 for m in memories.values())
+    assert sum(m.admissions for m in memories.values()) >= 2
+    completed.decoder_manager.check_decode_work_settled()
 
 
-def test_deposit_rejects_overwrite_without_mutation() -> None:
-    """A second deposit preserves the original input and its credit charge."""
-    input_store = DecoderMemory(pool="weak", round_capacity=None)
-    input_store.reserve("request", 1)
-    original = input_store.deposit("request", make_job([make_fragment(1, 0)]))
-    before = input_store.snapshot()
+def test_a_unit_too_small_for_its_window_fails_the_run_loudly() -> None:
+    from decsim.decoders import PerRoundDecoder
+    from decsim.message import Operation
+    from decsim.rounds import FixedRounds
+    from decsim.run_spec import RunSpec
 
-    with pytest.raises(RuntimeError, match="already holds a deposit"):
-        input_store.deposit("request", make_job([make_fragment(1, 1)]))
-
-    assert input_store.snapshot() == before
-    assert input_store.take("request") is original
-
-
-def test_take_rejects_reserved_slot_without_mutation() -> None:
-    """Taking before deposit leaves both reservation and credits live."""
-    input_store = DecoderMemory(pool="weak", round_capacity=None)
-    input_store.reserve("request", 2)
-    before = input_store.snapshot()
-
-    with pytest.raises(RuntimeError, match="before any deposit"):
-        input_store.take("request")
-
-    assert input_store.snapshot() == before
-    input_store.discard("request")
-    assert input_store.rounds_in_use == 0
-
-
-@pytest.mark.parametrize("action", ["deposit", "take"])
-def test_unknown_deposit_and_take_raise_natural_key_error(action: str) -> None:
-    """Unknown deposit and take expose the mapping's natural key error."""
-    input_store = DecoderMemory(pool="weak", round_capacity=None)
-
-    with pytest.raises(KeyError) as error:
-        if action == "deposit":
-            input_store.deposit("missing", make_job())
-        else:
-            input_store.take("missing")
-
-    assert error.value.args == ("missing",)
-    assert input_store.snapshot().occupied_rounds == 0
-
-
-def test_discard_rejects_unknown_key_and_preserves_live_slot() -> None:
-    """Discarding an unknown key leaves every live credit untouched."""
-    input_store = DecoderMemory(pool="weak", round_capacity=None)
-    input_store.reserve("live", 2)
-    before = input_store.snapshot()
-
-    with pytest.raises(RuntimeError, match="discard of unknown"):
-        input_store.discard("missing")
-
-    assert input_store.snapshot() == before
-    input_store.discard("live")
-
-
-@pytest.mark.parametrize("deposited", [False, True])
-def test_discard_releases_reserved_and_deposited_credits(deposited: bool) -> None:
-    """Discard returns all rounds from either live slot state exactly once."""
-    input_store = DecoderMemory(pool="weak", round_capacity=2)
-    input_store.reserve("request", 2)
-    if deposited:
-        input_store.deposit(
-            "request",
-            make_job([make_fragment(round_index=0), make_fragment(round_index=1)]),
-        )
-
-    assert input_store.discard("request") is None
-    assert input_store.rounds_in_use == 0
-    with pytest.raises(RuntimeError, match="discard of unknown"):
-        input_store.discard("request")
-
-
-def test_failed_materialization_keeps_reserved_credits_for_caller_unwind() -> None:
-    """Failed materialization keeps its reservation until the caller unwinds it."""
-    input_store = DecoderMemory(pool="weak", round_capacity=1)
-    input_store.reserve("request", 1)
-
-    with pytest.raises(TypeError):
-        input_store.deposit(
-            "request",
-            make_job([
-                CompatibleRetainedFragment(
-                    operation_id=1,
-                    patch_id="patch",
-                    round_index=0,
-                    bits=(0,),
-                    code="surface",
-                    size_bits=1,
-                    fragment_index=0,
-                )
-            ]),
-        )
-
-    assert input_store.snapshot().occupied_rounds == 1
-    input_store.discard("request")
-    assert input_store.snapshot().occupied_rounds == 0
-
-
-def test_deposit_rejects_materialized_round_count_drift() -> None:
-    """Deposit fails loudly if reserved demand differs from materialized rounds."""
-    input_store = DecoderMemory(pool="weak", round_capacity=3)
-    input_store.reserve("request", 2)
-
-    with pytest.raises(RuntimeError, match="reserved 2 rounds but materialized 1"):
-        input_store.deposit("request", make_job([make_fragment(round_index=0)]))
-
-    assert input_store.snapshot().occupied_rounds == 2
-    input_store.discard("request")
-
-
-def test_config_is_frozen_and_copies_its_mapping_read_only() -> None:
-    """Configuration cannot change through its source, view, or frozen fields."""
-    capacities = {"weak": 2, "strong": 5}
-    config = DecoderMemoryConfig(capacities)
-    capacities["weak"] = 99
-
-    assert dict(config.round_capacity_by_pool) == {"weak": 2, "strong": 5}
-    with pytest.raises(TypeError):
-        config.round_capacity_by_pool["weak"] = 3
-    with pytest.raises(FrozenInstanceError):
-        config.overflow_policy = DecoderMemoryOverflowPolicy.FAIL_STOP
-
-
-@pytest.mark.parametrize(
-    "capacities",
-    [
-        {1: 2},
-        {"weak": 0},
-        {"weak": -1},
-        {"weak": True},
-        {"weak": 1.0},
-    ],
-)
-def test_config_requires_string_pools_and_positive_exact_integer_budgets(
-    capacities: object,
-) -> None:
-    """Finite configuration validates exact pool labels and round budgets."""
-    with pytest.raises(TypeError):
-        DecoderMemoryConfig(capacities)
-
-
-def test_config_rejects_duplicate_pool_entries_and_wrong_policy_type() -> None:
-    """Duplicate pool entries and nonpolicy overflow values fail loudly."""
-    with pytest.raises(ValueError, match="duplicate"):
-        DecoderMemoryConfig([("weak", 1), ("weak", 2)])
-    with pytest.raises(TypeError, match="overflow_policy"):
-        DecoderMemoryConfig({"weak": 1}, overflow_policy="stall")
+    with pytest.raises(DecoderMemoryCapacityExhaustion):
+        RunSpec(ops=[Operation(id=1, name="op", qubits=(1,), patches=(1,))], d=3,
+                rounds_policy=FixedRounds(3), decoder=PerRoundDecoder(tau_us=1.0),
+                decoder_memory=DecoderMemoryConfig({"default": 1})).build()

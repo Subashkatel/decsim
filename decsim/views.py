@@ -13,7 +13,7 @@ import copy
 from dataclasses import dataclass
 from typing import Optional
 
-from .decoder_memory import DecoderMemoryStallRecord
+from .decoder_memory import DecoderMemorySnapshot
 from .decoder_manager import TerminalRequestRecord, TerminalServiceRecord
 from .message import DecoderRequestKey, stable_identity_order_key
 
@@ -59,10 +59,9 @@ class WindowStageRow:
 class WindowLatencyView:
     """Per-window latency rows; `stages` is the pipeline stage sequence.
 
-    ``queue_wait`` stays composite: input transport, plus the wait for
-    decoder-input round credits when a finite store is configured, plus the
-    ready-queue wait. The storage stage is decomposed separately by
-    DecoderMemoryView.stall_records.
+    ``queue_wait`` is the ready-queue wait for a unit; ``service`` runs from
+    unit assignment through the input transfer into that unit's memory to the
+    end of the decode.
     """
 
     stages: tuple = WINDOW_STAGES
@@ -137,32 +136,10 @@ class FinalWindowRow:
 
 
 @dataclass(frozen=True)
-class DecoderMemoryPoolView:
-    """One decoder unit pool's input storage at one instant."""
-
-    pool: str
-    capacity_rounds: Optional[int]
-    occupied_rounds: int
-    peak_occupied_rounds: int
-    slots_in_use: int
-    waiting_jobs: int
-    waiting_rounds: int
-    stall_events: int
-    stall_ticks: int
-
-
-@dataclass(frozen=True)
 class DecoderMemoryView:
-    """Configured decoder memory at one instant.
+    """Every decoder unit's input memory at one instant, one row per unit."""
 
-    ``enabled`` is false when no finite store is configured; the run then keeps
-    one shared unbounded store that owns no per-pool budget, so there is
-    nothing to report and both tuples are empty.
-    """
-
-    enabled: bool
-    per_pool: tuple[DecoderMemoryPoolView, ...]
-    stall_records: tuple[DecoderMemoryStallRecord, ...]
+    per_unit: tuple[DecoderMemorySnapshot, ...]
 
 
 @dataclass(frozen=True)
@@ -344,32 +321,10 @@ def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
 
 
 def decoder_memory_view(decoder_manager) -> DecoderMemoryView:
-    """Snapshot decoder memory occupancy, waiting, and stalls."""
-    snapshot = decoder_manager.decoder_memory_stager.snapshot()
-    if not snapshot.enabled:
-        return DecoderMemoryView(
-            enabled=False, per_pool=(), stall_records=())
-    waiting_jobs_by_pool = dict(snapshot.waiting_jobs_by_pool)
-    waiting_rounds_by_pool = dict(snapshot.waiting_rounds_by_pool)
-    stall_events_by_pool = dict(snapshot.stall_events_by_pool)
-    stall_ticks_by_pool = dict(snapshot.stall_ticks_by_pool)
-    per_pool = tuple(
-        DecoderMemoryPoolView(
-            pool=store.pool,
-            capacity_rounds=store.capacity_rounds,
-            occupied_rounds=store.occupied_rounds,
-            peak_occupied_rounds=store.peak_occupied_rounds,
-            slots_in_use=store.slots_in_use,
-            waiting_jobs=waiting_jobs_by_pool[store.pool],
-            waiting_rounds=waiting_rounds_by_pool[store.pool],
-            stall_events=stall_events_by_pool[store.pool],
-            stall_ticks=stall_ticks_by_pool[store.pool],
-        )
-        for store in snapshot.per_pool_store
-    )
-    return DecoderMemoryView(
-        enabled=True, per_pool=per_pool,
-        stall_records=snapshot.stall_records)
+    """Snapshot every unit's input memory."""
+    return DecoderMemoryView(per_unit=tuple(
+        memory.snapshot()
+        for _key, memory in sorted(decoder_manager.decoder_memories.items())))
 
 
 def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsView:

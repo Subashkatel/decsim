@@ -28,7 +28,7 @@ decoder:
     frequency_mhz: 250.0                     # LILLIPUT [d=3,m=2] FPGA clock, 2108.06569 Table 4
     fetch_cycles_per_round: 1                # read one round out of decoder memory per cycle (LILLIPUT syndrome FIFO, sec. 4)
     release_cycles_per_job: 1                # correction register write-out; one cycle, experiment card
-decoder_memory_rounds: null                  # null = unbounded decoder memory (baseline: infinite buffers)
+decoder_memory_rounds: null                  # rounds of input memory PER DECODER UNIT; null = unbounded (baseline: infinite buffers)
 
 pauli_frame:
   commit_us: 0.004                           # one 250 MHz cycle to XOR the correction into the frame register (XQsim PFU precedent)

@@ -743,6 +743,8 @@ class DecodeJob:
     decoder_input: Optional[Any] = None             # materialized decoder memory value
     input_hold: Optional[Any] = None                # upstream hold released at transfer completion
     reserve_transfer: Optional[Callable[[], int]] = None   # called at dispatch: reserve the input link, return its delay in ticks
+    unit: Optional[int] = None                     # decoder unit assigned at dispatch
+    memory: Optional[Any] = None                   # that unit's DecoderMemory while it holds this job's input
     ready_time: int = 0                      # tick the job was enqueued (queue-wait accounting)
     on_done: Optional[Callable[[], None]] = None   # completion callback
     label: str = ""                          # log label

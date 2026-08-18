@@ -27,8 +27,8 @@ Window tail: qLDPC knows the circuit is 13 rounds and merges the last 7 into one
 | Tan 2209.09219 L952-955 | streaming design | last window may be smaller, both time boundaries closed, the entire window is the core region |
 | Skoric 2209.08552 L646-649 | streaming design | commit region of the last window is from the bottom of the regular commit region to the last round |
 | qLDPC sinter.py:786-789 | offline | last window absorbs the remainder (window + stride - 1 wide), commits all |
-| quits, realtime_decoding_qldpc (Huang and Puri) | offline | dedicated larger last window W_last, commits all |
+| quits sliding_window.py:46-53, realtime_decoding_qldpc (Huang and Puri) | offline | ceil((T-W)/F) regular windows, then a last window of T - F*that rounds committing all: for 13 rounds, d=3 exactly 10-13, the same as decsim |
 | SWIPER window_builder.py:320-353 | real-time | leftover flushed as its own smaller commit-only window |
-| decsim (dynamic stream and static planner) | real-time | last window's commit extended to the last round, no trailing buffer |
+| decsim (dynamic stream and static planner, schemes.py _finite_forward_window_geometries) | real-time | the QUITS/Skoric/Tan rule: regular d-round commits, the last window commits from its regular commit start to the last round (10-13 here) |
 
-All agree that the final window commits everything up to the last round because the end boundary is closed; they differ only in the width of that final window. decsim follows Skoric, Tan, ldpc and tesseract.
+All agree that the final window commits everything up to the last round because the end boundary is closed. On the width of that final window decsim equals QUITS, realtime_decoding_qldpc, Skoric and Tan (checked on 13, 14, 15 and 60 rounds); qLDPC absorbs the tail into a wider last window (7-13) and SWIPER flushes it as an extra one-round window (13-13); the three rules coincide at 60 rounds, which is why Gate 1 matched window for window.

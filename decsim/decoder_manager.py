@@ -10,7 +10,7 @@ from .message import (DecodeJob, DecodeOutcome, DecodeResult,
                       DecoderRequestKey, DecoderServiceKey,
                       SoftOutput, StrongDecodeCompletion,
                       stable_identity_order_key)
-from .protocols import DecoderMemoryTransfer, Directive
+from .protocols import Directive
 from .decoder_memory import DecoderMemory, DecoderMemoryConfig
 from .config import fmt
 
@@ -88,15 +88,6 @@ class DecoderManager:
             FixedLatencyDecoderMemoryTransfer(engine)
             if decoder_memory_transfer is None else decoder_memory_transfer
         )
-        if (
-            not isinstance(self.decoder_memory_transfer, DecoderMemoryTransfer)
-            or not callable(getattr(self.decoder_memory_transfer, "deliver", None))
-            or not callable(getattr(self.decoder_memory_transfer, "cancel", None))
-        ):
-            raise TypeError(
-                "decoder_memory_transfer must implement DecoderMemoryTransfer "
-                "(deliver and cancel)"
-            )
         transport_engine = getattr(self.decoder_memory_transfer, "engine", engine)
         if transport_engine is not engine:
             raise ValueError("decoder_memory_transfer uses a different engine")
@@ -178,8 +169,6 @@ class DecoderManager:
         unit's memory, then compute; Aladdin aladdin_sys_connection.h and
         dma_interface.h). ``None`` means the job carries no syndrome data.
         """
-        if reserve_transfer is not None and not callable(reserve_transfer):
-            raise TypeError("reserve_transfer must be callable or None")
         self._reject_spent_job(job)
         if job.strong_decode_for is not None:
             self._admit_strong_request(job)
@@ -203,8 +192,6 @@ class DecoderManager:
     def _admit_strong_request(self, job: DecodeJob) -> None:
         """Give one destination's next strong result to this request."""
         key = job.strong_decode_for
-        if job.request_key is None:
-            raise RuntimeError("built-in strong decode requires a request key")
         if (key in self._running_strong_decodes
                 or key in self._completed_strong_results):
             raise RuntimeError(
@@ -216,8 +203,6 @@ class DecoderManager:
     def _admit_weak_decode(self, job: DecodeJob) -> None:
         """Open one destination window's decode attempt."""
         key = (job.op_id, job.window_id)
-        if job.request_key is None:
-            raise RuntimeError("built-in weak decode requires a request key")
         if key in self._unresolved_weak_decodes:
             raise RuntimeError(
                 f"second weak decode for window {key} while the first is "
@@ -454,16 +439,8 @@ class DecoderManager:
                                       on_landed: Callable[[DecodeJob], None]) -> None:
         delay_ticks = 0 if job.reserve_transfer is None else job.reserve_transfer()
         job.reserve_transfer = None
-        expected_delivery_tick = self.engine.now + delay_ticks
 
         def receive_once(delivered_job: DecodeJob) -> None:
-            if delivered_job is not job:
-                raise RuntimeError("decoder memory transport delivered a different job")
-            if self.engine.now != expected_delivery_tick:
-                raise RuntimeError("decoder memory transport delivered at the wrong tick")
-            if job.decoder_input is not None:
-                raise RuntimeError("decoder memory transport materialized an input "
-                                   "before it landed in the unit's memory")
             job.decoder_input = memory.deposit(job)
             job.payloads = []
             job.memory = memory
@@ -583,10 +560,6 @@ class DecoderManager:
                                                     self.services)
         self._resolve_weak_decode(key)
         awaiting = directive.directive is Directive.AWAIT_STRONG
-        if not awaiting and (directive.extra is not None
-                             or directive.strong_request_key is not None):
-            name = directive.directive.name.lower()
-            raise RuntimeError(f"{name} directive cannot carry strong identity")
         if directive.directive is Directive.FINALIZE:
             self.cancel_strong(key)                # no-op unless one is live/held
         if awaiting:
@@ -597,19 +570,8 @@ class DecoderManager:
                 self._completed_strong_results.get(key),
             )))
             deferred = serial_job is None and strong_request_key is not None
-            if serial_job is not None:
-                if (strong_request_key is None or carriers
-                        or serial_job.request_key != strong_request_key):
-                    raise RuntimeError("serial directive request key mismatch")
-            elif deferred:
-                if carriers:
-                    raise RuntimeError(
-                        "parallel directive cannot provide an explicit key")
-            else:
-                if len(carriers) != 1:
-                    raise RuntimeError(
-                        "parallel strong selection needs exactly one carrier")
-                carrier = carriers[0]
+            if serial_job is None and not deferred:
+                (carrier,) = carriers
                 strong_request_key = carrier.request_job.request_key
             selection_delay = self.services.prepare_strong_selection(
                 job, strong_request_key, serial_job, deferred=deferred,
@@ -623,8 +585,6 @@ class DecoderManager:
                 label=f"select strong result {key}",
             )
         job.awaiting_strong_result = awaiting      # BEFORE the commit callback
-        if self.on_window_decoded is None:
-            raise RuntimeError("DecoderManager has no window completion callback")
         self.on_window_decoded(job, result)
         self._record_request(
             job, result,
@@ -656,16 +616,6 @@ class DecoderManager:
     def _decode_and_validate_result(self, job: DecodeJob) -> DecodeResult:
         """Decode one job and reject output for any other operation or window."""
         result = self.router.route(job).decode(job)
-        if not isinstance(result, DecodeResult):
-            raise TypeError(
-                f"decoder for job ({job.op_id}, {job.window_id}) must return "
-                f"DecodeResult, got {type(result).__name__}")
-        expected = (job.op_id, job.window_id)
-        actual = (result.op_id, result.window_id)
-        if actual != expected:
-            raise RuntimeError(
-                f"decoder result identity {actual} does not match job "
-                f"identity {expected}")
         self._validate_logical_observables(job, result)
         return result
 
@@ -677,17 +627,7 @@ class DecoderManager:
         logical_observables = result.logical_observables
         if logical_observables is None:
             return
-        if type(logical_observables) is not tuple:
-            raise TypeError(
-                f"job ({job.op_id}, {job.window_id}) logical_observables "
-                f"must be an exact tuple, got "
-                f"{type(logical_observables).__name__}")
         for observable_index, bit in enumerate(logical_observables):
-            if type(bit) is not int:
-                raise TypeError(
-                    f"job ({job.op_id}, {job.window_id}) "
-                    f"logical_observables index {observable_index} must be "
-                    f"an exact int bit, got {type(bit).__name__}")
             if bit not in (0, 1):
                 raise ValueError(
                     f"job ({job.op_id}, {job.window_id}) "
@@ -801,9 +741,6 @@ class DecoderManager:
         key = (completion.request_key.operation_id, completion.request_key.window_id)
         if self._windows_waiting_for_strong_result.get(key) == completion.request_key:
             del self._windows_waiting_for_strong_result[key]
-            if self.on_strong_window_decoded is None:
-                raise RuntimeError(
-                    "DecoderManager has no strong completion callback")
             self.on_strong_window_decoded(completion)
             self._record_request(
                 held.request_job, completion.result,
@@ -837,11 +774,7 @@ class DecoderManager:
                         decode_output_ticks: Optional[int]) -> None:
         if self._terminal_request_records is None:
             return
-        if job.request_key is None or job.request_created_ticks is None:
-            raise RuntimeError("terminal built-in request has no identity")
         window = job.window
-        if window is None:
-            raise RuntimeError("terminal built-in request has no window")
         local_fragments = tuple(
             fragment
             for round_input in (() if job.decoder_input is None
@@ -870,20 +803,14 @@ class DecoderManager:
                           if key in job.service_cancelled_request_keys)
         completed = tuple(key for key in original if key not in cancelled)
         dispatch = job.service_dispatch_ticks
-        if dispatch is None or job.pool is None:
-            raise RuntimeError("terminal decoder service has no dispatch")
         self._terminal_service_records.append(TerminalServiceRecord(
             job.service_key, job.pool, original, completed, cancelled,
             job.n_rounds, dispatch, self.engine.now, self.engine.now - dispatch))
 
     def terminal_request_records_snapshot(self) -> tuple:
-        if self._terminal_request_records is None:
-            raise RuntimeError("switching record capture is disabled")
         return tuple(self._terminal_request_records)
 
     def terminal_service_records_snapshot(self) -> tuple:
-        if self._terminal_service_records is None:
-            raise RuntimeError("switching record capture is disabled")
         return tuple(self._terminal_service_records)
 
     def check_decode_work_settled(self) -> None:

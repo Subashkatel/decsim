@@ -232,7 +232,7 @@ class Switching:
         static_decode_plan_selected,
         has_frontend,
     ) -> None:
-        from .policies import Eager, Held
+        from .controller.policies import Eager, Held
         from .schemes import SlidingTerminalPolicy, SlidingWindowScheme
 
         if (

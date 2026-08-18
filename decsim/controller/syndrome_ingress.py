@@ -10,10 +10,10 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
-from .link_profiles import logical_reference_profile
-from .links import LinkModel, LinkPath, TrafficAttribution
-from .syndrome_buffer import SyndromeBuffer, SyndromeBufferCapacityExhaustion
-from .message import (
+from ..link_profiles import logical_reference_profile
+from ..links import LinkModel, LinkPath, TrafficAttribution
+from ..syndrome_buffer.syndrome_buffer import SyndromeBuffer, SyndromeBufferCapacityExhaustion
+from ..message import (
     RetainedSyndromeFragment,
     SyndromePacketRoute,
     SyndromePacketRouteKind,
@@ -438,7 +438,7 @@ class SyndromeIngress:
         if slot_index is None:
             return
         slot = self._slots[slot_index]
-        from .syndrome_buffer import SyndromeBufferRoundState
+        from ..syndrome_buffer.syndrome_buffer import SyndromeBufferRoundState
         round_key = (identity[-2], identity[-1])
         state = self.syndrome_buffer.round_state(round_key)
         if state is not SyndromeBufferRoundState.ASSEMBLING:

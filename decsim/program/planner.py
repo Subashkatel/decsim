@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from .config import us
-from .message import (
+from ..config import us
+from ..message import (
     Operation,
     OperationPlanningView,
     OperationWindowPlan,

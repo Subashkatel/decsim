@@ -14,7 +14,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from typing import Optional
 
-from .message import (
+from ..message import (
     RephaseGuard,
     Replay,
     RetainedSyndromeFragment,

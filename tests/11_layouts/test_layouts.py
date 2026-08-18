@@ -5,10 +5,10 @@ import math
 
 import pytest
 
-import decsim.layouts as layouts_module
-from decsim.codes import SurfaceCodeModel
+import decsim.qpu.layouts as layouts_module
+from decsim.qpu.code_geometry import SurfaceCodeModel
 from decsim.decoders import PresetLatencyDecoder
-from decsim.layouts import UniformLayout
+from decsim.qpu.layouts import UniformLayout
 from decsim.message import Operation, OperationPlanningView, ResourceClaim
 from decsim.protocols import CodeModel, LayoutModel
 from decsim.run_spec import RunSpec

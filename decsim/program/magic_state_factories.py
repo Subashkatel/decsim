@@ -7,12 +7,12 @@ from dataclasses import dataclass
 import math
 from typing import Callable, Optional, TYPE_CHECKING
 
-from .config import fmt
-from .seeding import _RandomSeedConsumer
-from .engine import Engine
+from ..config import fmt
+from ..seeding import _RandomSeedConsumer
+from ..engine import Engine
 
 if TYPE_CHECKING:
-    from .protocols import ResourcePool as DecodeService
+    from ..protocols import ResourcePool as DecodeService
 
 
 def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -> None:

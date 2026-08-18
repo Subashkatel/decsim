@@ -22,9 +22,9 @@ bb-experiments = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.d
 where = ["."]
 include = ["decsim*"]
 
-# (decsim.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
+# (decsim.qpu.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
 [tool.setuptools.package-data]
-"decsim.stimcircuits" = ["LICENSE", "NOTICE.md"]
+"decsim.qpu.stimcircuits" = ["LICENSE", "NOTICE.md"]
 
 # docs/ holds cloned third-party artifacts (e.g. the SWIPER repo) whose own
 # test suites must not be collected by our `python -m pytest -q` entry point.

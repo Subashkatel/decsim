@@ -11,12 +11,12 @@ from pathlib import Path
 import pytest
 import stim
 
-from decsim.adapters.stim_device import StimDevice
+from decsim.qpu.stim_device import StimDevice
 from decsim.decoders import PerRoundDecoder
 from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
-from decsim.frontends.qlx import qlx_frontend
+from decsim.program.qlx_frontend import qlx_frontend
 from decsim.message import OpKind
-from decsim.rounds import GateRounds
+from decsim.program.round_policies import GateRounds
 from decsim.run_spec import RunSpec
 
 

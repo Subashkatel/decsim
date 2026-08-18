@@ -2,10 +2,10 @@
 every live patch yields one round per cycle, idle or not (SWIPER
 device_manager._generate_syndrome_round; Google 2207.06431 readout every cycle)."""
 
-from decsim.devices import TimingOnlyDevice
+from decsim.qpu.syndrome_devices import TimingOnlyDevice
 from decsim.engine import Engine
 from decsim.message import Operation, RunOperationBody
-from decsim.qpu import QPUDevice
+from decsim.qpu.cycle_clock import QPUDevice
 
 CYCLE = 10
 

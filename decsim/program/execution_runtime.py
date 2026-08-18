@@ -2,7 +2,7 @@
 from __future__ import annotations
 from types import MappingProxyType
 
-from .message import Decision, ExecutionProgram
+from ..message import Decision, ExecutionProgram
 
 
 class ExecutionRuntime:

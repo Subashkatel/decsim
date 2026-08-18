@@ -10,9 +10,9 @@ from dataclasses import replace
 from types import MappingProxyType
 from typing import Callable, Optional
 
-from .links import LinkPath, TrafficAttribution
+from ..links import LinkPath, TrafficAttribution
 
-from .message import (
+from ..message import (
     QPUReadout, RunOperationBody, StreamBinding, SyndromePacketRoute,
     normalize_binary_bits,
     SyndromePayload, ExecutionProgram, Decision, Operation,

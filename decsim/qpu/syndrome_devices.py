@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from typing import Optional, TYPE_CHECKING
 
-from .seeding import _RandomSeedConsumer
-from .message import (
+from ..seeding import _RandomSeedConsumer
+from ..message import (
     Operation,
     RunSeedChild,
     RunSeedPathSegment,
@@ -16,7 +16,7 @@ from .message import (
 )
 
 if TYPE_CHECKING:
-    from .protocols import CodeModel
+    from ..protocols import CodeModel
 
 
 def _stream_payload_target(op: Operation, round_index: int) -> tuple:

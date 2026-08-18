@@ -142,15 +142,15 @@ class RunSpec:
     def _build_once(self, engine, root_seed) -> CompletedRun:
         """Wire the run from its resolved configuration, in dependency order,
         run the engine to quiescence, and capture the result."""
-        from .controller import Controller
+        from .controller.controller import Controller
         from .decoder_manager import DecoderManager
-        from .execution_runtime import ExecutionRuntime
-        from .orchestrators import ExecutionOrchestrator
-        from .qpu import QPUDevice
+        from .program.execution_runtime import ExecutionRuntime
+        from .program.orchestrators import ExecutionOrchestrator
+        from .qpu.cycle_clock import QPUDevice
         from .run_configuration import (check_factory_decode_service,
                                         resolve_run_configuration)
-        from .syndrome_buffer import SyndromeBuffer
-        from .syndrome_ingress import SyndromeIngress
+        from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
+        from .controller.syndrome_ingress import SyndromeIngress
         from .views import capture_primary_result
         from .window_manager import WindowManager
 
@@ -322,7 +322,7 @@ def _seed_roots(**parts):
 
 
 def _make_infinite(engine):
-    from .factories import InfiniteFactory
+    from .program.magic_state_factories import InfiniteFactory
     return InfiniteFactory(engine)
 
 

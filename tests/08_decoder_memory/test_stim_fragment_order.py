@@ -4,7 +4,7 @@ from collections import defaultdict
 
 import stim
 
-from decsim.adapters.stim_device import StimDevice
+from decsim.qpu.stim_device import StimDevice
 from decsim.detector_error_model.fault_model_contracts import (
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
@@ -13,7 +13,7 @@ from decsim.detector_error_model.window_model_builders import (
 )
 from decsim.message import Operation, RunOperationBody
 from decsim.engine import Engine
-from decsim.qpu import QPUDevice
+from decsim.qpu.cycle_clock import QPUDevice
 
 
 ROUND_COUNT = 3

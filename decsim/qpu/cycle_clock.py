@@ -11,7 +11,7 @@ dependencies, windowing and decoder state live elsewhere.
 from __future__ import annotations
 from dataclasses import replace
 
-from .message import (
+from ..message import (
     RunOperationBody, QPUReadout, SyndromePacketRoute, WINDOW_INPUT_ROUTE,
 )
 

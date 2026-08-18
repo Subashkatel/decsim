@@ -39,7 +39,7 @@ import numpy as np
 import pymatching
 import stim
 
-from decsim.adapters.stim_device import RecordedStimDevice
+from decsim.qpu.stim_device import RecordedStimDevice
 from decsim.config import TICKS_PER_US, TimingConfig
 from decsim.decoder_engine import ALGORITHM_STAGE, DecoderEngine, DecoderStage, DecoderTiming
 from decsim.decoders import PresetLatencyDecoder
@@ -47,7 +47,7 @@ from decsim.link_profiles import logical_reference_profile, with_controller_to_b
 from decsim.message import Operation
 from decsim.mwpm_decoder.decoder import PyMatchingDecoder
 from decsim.pauli_frame import PauliFrameConfig
-from decsim.rounds import FixedRounds
+from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
 DATA = Path("tmp/references/data/willow/google_105Q_surface_code_d3_d5_d7")

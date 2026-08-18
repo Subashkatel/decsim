@@ -2,11 +2,11 @@
 
 import pytest
 
-from decsim.adapters.stim_device import RecordedStimDevice
+from decsim.qpu.stim_device import RecordedStimDevice
 from decsim.decoders import PresetLatencyDecoder
 from decsim.message import Operation
 from decsim.mwpm_decoder.decoder import PyMatchingDecoder
-from decsim.rounds import FixedRounds
+from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
 

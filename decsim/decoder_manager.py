@@ -479,7 +479,7 @@ class DecoderManager:
         self.pool_free[pool] -= 1
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
-        latency_ticks = self.decoder_for(job).latency(job)
+        decoder = self.decoder_for(job)
         waited_ticks = self.engine.now - job.ready_time
         self.engine.log(self.log_name,
                         f"START DECODE {job.label} "
@@ -487,8 +487,12 @@ class DecoderManager:
                         f"{self.pool_tag(pool)}units free now "
                         f"{self.pool_free[pool]})")
         self.queue_log.append((self.engine.now, self.queued_total()))
+        run = getattr(decoder, "run", None)
+        if run is not None:                 # staged decoder owns its stage events
+            run(job, self.engine, lambda j=job: self._on_decode_done(j))
+            return
         self.engine.schedule(
-            latency_ticks, lambda j=job: self._on_decode_done(j),
+            decoder.latency(job), lambda j=job: self._on_decode_done(j),
             label=f"decode_done({job.label})")
 
     def _cancel_decoder_input(self, job: DecodeJob) -> None:

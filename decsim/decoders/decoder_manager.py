@@ -13,6 +13,7 @@ from ..message import (DecodeJob, DecodeOutcome, DecodeResult,
                       DecoderRequestKey, DecoderServiceKey, SoftOutput)
 from ..protocols import Directive
 from .decoder_memory import DecoderMemory, DecoderMemoryConfig
+from .decoder_memory_transfer import DecoderInputStaging, FixedLatencyDecoderMemoryTransfer
 from .strong_escalation import HeldStrongCompletion, StrongRequestLedger
 from ..config import fmt
 
@@ -69,8 +70,6 @@ class DecoderManager:
                  decoder_memory: Optional[DecoderMemoryConfig] = None,
                  strategy, services, on_window_decoded: Callable,
                  on_strong_window_decoded: Callable):
-        from .decoder_memory_transfer import FixedLatencyDecoderMemoryTransfer
-
         self.engine = engine
         self.router = router
         self.decoder_memory_transfer = (
@@ -80,6 +79,7 @@ class DecoderManager:
         transport_engine = getattr(self.decoder_memory_transfer, "engine", engine)
         if transport_engine is not engine:
             raise ValueError("decoder_memory_transfer uses a different engine")
+        self.staging = DecoderInputStaging(self.decoder_memory_transfer)
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
@@ -184,7 +184,7 @@ class DecoderManager:
         if job.strong_decode_for is not None:
             live = self.strong.live(job.strong_decode_for)
             if live is None or live.request_job is not job:
-                self._release_decoder_input(job)
+                self.staging.release(job)
                 self.try_dispatch()                # returned credits may admit
                 return                             # cancelled across the link
         job.ready_time = self.engine.now
@@ -247,7 +247,7 @@ class DecoderManager:
             return
         job = live.service_job
         if job.pool is None:
-            self._cancel_decoder_input(job)
+            self.staging.cancel(job)
             for pool in self.unit_totals:
                 queue = self.queue_for(pool)
                 if job in queue:
@@ -255,7 +255,7 @@ class DecoderManager:
                     break
             # Credits belong to the original request, never to a batch service
             # job, and the request is its own service job before dispatch.
-            self._release_decoder_input(live.request_job)
+            self.staging.release(live.request_job)
             self._record_request(
                 live.request_job, None,
                 RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
@@ -264,15 +264,15 @@ class DecoderManager:
             job.service_cancelled_request_keys.add(live.request_job.request_key)
             if self.strong.has_survivors(job):
                 outcome = RequestProcessingOutcome.STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED
-                self._release_decoder_input(live.request_job)
+                self.staging.release(live.request_job)
             else:
                 outcome = RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE
                 job.cancelled = True
                 cancel = getattr(self.router.route(job), "cancel", None)
                 if cancel is not None:               # a staged decoder stops its stages
                     cancel(job)
-                self._cancel_decoder_input(job)
-                self._release_decoder_input(live.request_job)
+                self.staging.cancel(job)
+                self.staging.release(live.request_job)
                 self._free_unit(job)
                 self._record_service(job)
                 self.try_dispatch()
@@ -386,24 +386,7 @@ class DecoderManager:
                 self._begin_service(job)
 
         for member in members:
-            self._transfer_into_decoder_memory(member, memory, landed)
-
-    def _transfer_into_decoder_memory(self, job: DecodeJob, memory: DecoderMemory,
-                                      on_landed: Callable[[DecodeJob], None]) -> None:
-        delay_ticks = 0 if job.reserve_transfer is None else job.reserve_transfer()
-        job.reserve_transfer = None
-
-        def receive_once(delivered_job: DecodeJob) -> None:
-            job.decoder_input = memory.deposit(job)
-            job.payloads = []
-            job.memory = memory
-            hold = job.input_hold
-            if hold is not None:            # Buffer 0 may drop the rounds now
-                hold()
-                job.input_hold = None
-            on_landed(job)
-
-        self.decoder_memory_transfer.deliver(job, delay_ticks, receive_once)
+            self.staging.stage(member, memory, landed)
 
     def _begin_service(self, job: DecodeJob) -> None:
         """The unit's memory holds the input: start the decode."""
@@ -431,56 +414,19 @@ class DecoderManager:
         self.engine.schedule(decoder.latency(job), decode_now,
                              label=f"decode_done({job.label})")
 
-    def _cancel_decoder_input(self, job: DecodeJob) -> None:
-        """Drop one job from transport and storage, then free its upstream hold.
-
-        Both calls are idempotent, so cancelling a request that is in transport,
-        waiting for round credits, already stored, or already cleared is safe.
-        """
-        self.decoder_memory_transfer.cancel(job)
-        self._release_decoder_input(job)
-        hold = job.input_hold
-        if hold is not None:
-            hold()
-            job.input_hold = None
-
-    def _release_decoder_input(self, job: DecodeJob) -> None:
-        """Free the job's rounds from its unit's memory; a job holding none is untouched."""
-        memory = getattr(job, "memory", None)
-        if memory is not None:
-            memory.take(job)
-            job.memory = None
-        job.decoder_input = None
-
-    def _release_service_decoder_inputs(self, service_job: DecodeJob) -> None:
-        """Return the credits of every request still served by one decode.
-
-        A batch service job holds no credits of its own: they belong to the
-        original request jobs staged before dispatch, and every remaining member
-        must give them back before the live bookkeeping that names them is
-        dropped. Release is idempotent, so a single request whose service job is
-        itself is safe to release twice.
-        """
-        released_request_jobs = []
-        for member in self.strong.members_of(service_job):
-            if any(released is member for released in released_request_jobs):
-                continue
-            released_request_jobs.append(member)
-            self._release_decoder_input(member)
-
     def _on_decode_done(self, job: DecodeJob, result) -> None:
         """One decode finished: free the unit, ask the strategy, commit or await strong."""
         if job.cancelled:
-            self._release_decoder_input(job)
+            self.staging.release(job)
             self.try_dispatch()
             return
         if job.strong_decode_for is not None:
             self._validate_logical_observables(job, result)
-            self._release_decoder_input(job)
+            self.staging.release(job)
             strong_result_deliveries = self.strong.deliveries_for(job, result, self.engine.now)
             job.completed = True
             self._free_unit(job)
-            self._release_service_decoder_inputs(job)
+            self.staging.release_service_members(self.strong.members_of(job))
             self.strong.finish_service(job)
             self.strategy.on_decode_outcome(DecodeOutcome(job, result),
                                             self.services)   # FINALIZE_STRONG
@@ -498,7 +444,7 @@ class DecoderManager:
             # credits come back before its callback runs and before the
             # same-tick drain; a self-contained submit_decode job holds none
             # and this is a no-op.
-            self._release_decoder_input(job)
+            self.staging.release(job)
             self.engine.log(self.log_name,
                             f"DECODE DONE {job.label} "
                             f"({self.pool_tag(job.pool)}units free now "
@@ -542,7 +488,7 @@ class DecoderManager:
              RequestProcessingOutcome.WEAK_FORWARDED_FOR_DELIVERY),
             self.engine.now)
         self._record_service(job)
-        self._release_decoder_input(job)
+        self.staging.release(job)
         self.try_dispatch()
 
     def _select_strong_result(self, key: tuple,

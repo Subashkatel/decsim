@@ -1,0 +1,10 @@
+{
+"failure": {
+"message": "controller ingress capacity 8 is full at tick 12150000",
+"status": "controller_ingress_overflow",
+"tick": 12150000,
+"type": "SyndromeIngressOverflow"
+},
+"final_ticks": null,
+"log": []
+}

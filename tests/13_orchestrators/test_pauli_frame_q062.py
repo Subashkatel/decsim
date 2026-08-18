@@ -267,9 +267,12 @@ def test_final_weak_uses_the_sink_while_provisional_and_strong_paths_bypass_it()
     manager._commit_decode_done = lambda actual_job, actual_result: weak_commits.append(
         (actual_job, actual_result)
     )
+    handed_on = []
+    manager._hand_on_boundary = lambda *args: handed_on.append(final_engine.now)
 
     WindowManager.on_decode_done(manager, job, result)
     assert manager.windows[(4, 1)].t_done == 10
+    assert handed_on == [10]          # boundary leaves at decode done, before WDO and the sink
     assert sink_calls == []
     assert weak_commits == []
     final_engine.run_all()

@@ -595,13 +595,12 @@ class WindowManager:
             WindowInfo.from_window(window))
         if window_index > 0:
             previous_key = (stream_id, window_index - 1)
-            if (previous_key in self.committed_windows
-                    and previous_key not in self._held_boundary):
+            if previous_key in self._committed_boundaries:
                 # boundary already shipped (a held one is NOT available yet)
                 self._merge_available_boundary(
                     previous_key,
                     window,
-                    self._committed_boundaries.get(previous_key),
+                    self._committed_boundaries[previous_key],
                 )
             else:
                 window.deps.append(previous_key)
@@ -2020,13 +2019,21 @@ class WindowManager:
         }
 
     def on_decode_done(self, job: DecodeJob, res: DecodeResult) -> None:
-        """Publish an accepted weak result only after its WDO transfer."""
+        """Hand the boundary on as the decoder finishes; publish the accepted
+        weak result only after its WDO transfer.
+
+        The boundary is decoder state (residual defects at the commit edge), so
+        it leaves for the dependent windows at decode done, the way Skoric's
+        blocks, LILLIPUT's state register and qLDPC's net_error do; the frame
+        commit downstream never gates the next window.
+        """
         window = self.windows[(job.op_id, job.window_id)]
         window.t_done = self.engine.now
         if job.awaiting_strong_result:
             self._commit_decode_done(job, res)
             return
         op = self._ops[job.op_id]
+        self._hand_on_boundary(job, res, window, op)
         delivery_ticks = self._window_link_arrival(
             LinkPath.WDO,
             window,
@@ -2060,6 +2067,20 @@ class WindowManager:
         if not job.awaiting_strong_result and self._selected_request_keys is not None:
             self._selected_request_keys[key] = job.request_key
         self.lifecycle.update_committed_round_count(op.id)
+        if job.awaiting_strong_result:       # provisional: boundary leaves with the commit
+            self._hand_on_boundary(job, res, window, op)
+        if not job.awaiting_strong_result:
+            self._release_hold_if_live(
+                PotentialStrong(key))
+        self._check_deferred_strong_after_commit(key)
+        self.speculative_recovery.after_commit()
+        self._finish_operation_if_ready(op)
+        self.finish_workload_if_ready()
+
+    def _hand_on_boundary(self, job: DecodeJob, res: DecodeResult,
+                          window: Window, op: Operation) -> None:
+        """Ship the decoder's boundary to dependent windows, or hold it when the
+        policy waits for a final result."""
         boundary = self.window_interaction.boundary_from_result(res, None)
         if job.awaiting_strong_result:
             self.speculative_recovery.begin(job, boundary)
@@ -2068,15 +2089,8 @@ class WindowManager:
             self._send_boundary(
                 window, op, boundary, source_request_key=job.request_key)
         else:
-            self._held_boundary[key] = _HeldBoundary(
+            self._held_boundary[(job.op_id, job.window_id)] = _HeldBoundary(
                 job.request_key, op.id, boundary)
-        if not job.awaiting_strong_result:
-            self._release_hold_if_live(
-                PotentialStrong(key))
-        self._check_deferred_strong_after_commit(key)
-        self.speculative_recovery.after_commit()
-        self._finish_operation_if_ready(op)
-        self.finish_workload_if_ready()
 
     def _commit_window(self, job: DecodeJob, res: DecodeResult, key: tuple,
                        window: Window, op: Operation) -> None:

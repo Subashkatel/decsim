@@ -326,7 +326,7 @@ class ResourcePool(Protocol):
     and the final check that no decoder work is stranded.
     """
 
-    def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None: ...
+    def enqueue(self, job: DecodeJob, reserve_transfer=None) -> None: ...   # reserve_transfer() at dispatch -> transfer ticks
 
     def submit_decode(self, round_count: int, on_done: Callable[[], None],
                       label: str = "") -> None: ...

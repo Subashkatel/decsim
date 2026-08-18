@@ -169,9 +169,6 @@ class DecoderManager:
     def pool_tag(pool: str) -> str:
         return "" if pool == "default" else f"{pool} "
 
-    def decoder_for(self, job: DecodeJob):
-        return self.router.route(job)
-
     def enqueue(self, job: DecodeJob, reserve_transfer=None) -> None:
         """Admit once and queue the request; its rounds stay in Buffer 0.
 
@@ -277,7 +274,7 @@ class DecoderManager:
     def check_strong_route(self, weak_job: DecodeJob,
                            strong_job: DecodeJob) -> None:
         """Fail early when a strong job would route back to the weak decoder."""
-        if self.decoder_for(strong_job) is self.decoder_for(weak_job):
+        if self.router.route(strong_job) is self.router.route(weak_job):
             raise RuntimeError(
                 "Strong job routes to the same decoder as the weak job; pass a "
                 "router (e.g. SwitchingRouter) that sends hint='strong' to a "
@@ -329,7 +326,7 @@ class DecoderManager:
             else:
                 outcome = RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE
                 job.cancelled = True
-                cancel = getattr(self.decoder_for(job), "cancel", None)
+                cancel = getattr(self.router.route(job), "cancel", None)
                 if cancel is not None:               # a staged decoder stops its stages
                     cancel(job)
                 self._cancel_decoder_input(job)
@@ -482,7 +479,7 @@ class DecoderManager:
         """The unit's memory holds the input: start the decode."""
         if job.cancelled:                        # cancelled while its input was in flight
             return
-        decoder = self.decoder_for(job)
+        decoder = self.router.route(job)
         self.engine.log(self.log_name, f"START DECODE {job.label}")
         run = getattr(decoder, "run", None)
         if run is not None:                 # staged decoder reads memory itself
@@ -555,7 +552,8 @@ class DecoderManager:
             self._finish_strong_bookkeeping(job)
             self.strategy.on_decode_outcome(DecodeOutcome(job, result),
                                             self.services)   # FINALIZE_STRONG
-            self._handle_strong_decode_result(strong_result_deliveries)
+            for held in strong_result_deliveries:
+                self._complete_strong_result(held)
             self._record_service(job)
             self.try_dispatch()
             return
@@ -657,7 +655,7 @@ class DecoderManager:
 
     def _decode_and_validate_result(self, job: DecodeJob) -> DecodeResult:
         """Decode one job and reject output for any other operation or window."""
-        result = self.decoder_for(job).decode(job)
+        result = self.router.route(job).decode(job)
         if not isinstance(result, DecodeResult):
             raise TypeError(
                 f"decoder for job ({job.op_id}, {job.window_id}) must return "
@@ -796,12 +794,6 @@ class DecoderManager:
                 DecodeResult(op_id=key[0], window_id=key[1])),
             self.engine.now,
         ) for key, request in zip(keys, requests))
-
-    def _handle_strong_decode_result(
-        self, strong_result_deliveries: tuple,
-    ) -> None:
-        for held in strong_result_deliveries:
-            self._complete_strong_result(held)
 
     def _complete_strong_result(self, held: _HeldStrongCompletion) -> None:
         """Apply a strong result if demanded, otherwise hold it briefly."""

@@ -364,12 +364,28 @@ def plots(acc_rows, eps, rt_samples, out_dir: Path) -> None:
     fig.savefig(out_dir / "realtime_latency.png", dpi=150)
 
 
+def host_note() -> str:
+    import os, platform
+    cpu = platform.processor() or "unknown"
+    try:
+        for line in open("/proc/cpuinfo"):
+            if line.startswith("model name"):
+                cpu = line.split(":", 1)[1].strip()
+                break
+    except OSError:
+        pass
+    load = os.getloadavg()
+    return (f"Host: {cpu}; load average at run start {load[0]:.1f}, {load[1]:.1f}, {load[2]:.1f} "
+            "(measured decode times are only meaningful on an otherwise idle core).")
+
+
 def write_report(acc_rows: list, eps: dict, rt: dict, software_us: float,
                  agree_rows: list = (), resource_rows: list = ()) -> None:
     lines = ["# Willow data through the baseline loop", "",
              "Data: Zenodo 13273331 (arXiv:2408.13687), patches "
              + ", ".join(f"d={d}: {p}" for d, p in PATCHES.items()) + ".",
-             "Plots: logical_error_vs_cycles.png, eps_per_cycle_vs_distance.png, realtime_latency.png.", "",
+             "Plots: logical_error_vs_cycles.png, eps_per_cycle_vs_distance.png, realtime_latency.png, "
+             "latency_vs_window.png.", HOST_NOTE, "",
              "## 0. Correctness freeze: loop vs whole-shot PyMatching, shot for shot", "",
              "| d | cycles | shots | agree | differ (window-boundary cases) |", "|---|---|---|---|---|"]
     for r in agree_rows:
@@ -428,7 +444,12 @@ def write_report(acc_rows: list, eps: dict, rt: dict, software_us: float,
     print("\n".join(lines))
 
 
+HOST_NOTE = ""
+
+
 def main(argv) -> None:
+    global HOST_NOTE
+    HOST_NOTE = host_note()
     quick = "--quick" in argv
     shots = {3: 40, 5: 20, 7: 10} if quick else {3: 600, 5: 400, 7: 150}
     rounds_list = (10, 30) if quick else (10, 30, 50, 90)

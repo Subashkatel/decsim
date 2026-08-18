@@ -1,8 +1,9 @@
-"""Move one decoder request into its assigned unit's memory after an exact delay.
-
-The default transport owns delay and cancellation only. Materialization into
-the unit's ``DecoderMemory`` and the upstream hold release belong to the
-decoder manager's receiver.
+"""Moves a job's rounds from Buffer 0 into the assigned unit's memory: the
+transfer delay (a transport), the landing into DecoderMemory, the release,
+the cancel. DecoderInputStaging is the sole writer of job.decoder_input,
+job.memory and job.input_hold; the transport owns delay and cancellation of
+in-flight deliveries only, so a supplied transport cannot bypass decoder
+memory.
 """
 
 from __future__ import annotations
@@ -10,6 +11,59 @@ from __future__ import annotations
 from typing import Callable
 
 from ..message import DecodeJob
+
+
+class DecoderInputStaging:
+    def __init__(self, transport):
+        self.transport = transport
+
+    def stage(self, job: DecodeJob, memory, on_landed: Callable[[DecodeJob], None]) -> None:
+        """Reserve the input link (the job's reserve_transfer), then after the
+        transport delay deposit the rounds in the unit's memory, drop the
+        Buffer 0 hold and report the landing."""
+        delay_ticks = 0 if job.reserve_transfer is None else job.reserve_transfer()
+        job.reserve_transfer = None
+
+        def land(_delivered: DecodeJob) -> None:
+            job.decoder_input = memory.deposit(job)
+            job.payloads = []
+            job.memory = memory
+            hold = job.input_hold
+            if hold is not None:            # Buffer 0 may drop the rounds now
+                hold()
+                job.input_hold = None
+            on_landed(job)
+
+        self.transport.deliver(job, delay_ticks, land)
+
+    def cancel(self, job: DecodeJob) -> None:
+        """Drop one job from transport and storage, then free its upstream
+        hold; every step is idempotent, so a request in transport, waiting for
+        round credits, already stored or already cleared is safe to cancel."""
+        self.transport.cancel(job)
+        self.release(job)
+        hold = job.input_hold
+        if hold is not None:
+            hold()
+            job.input_hold = None
+
+    def release(self, job: DecodeJob) -> None:
+        """Free the job's rounds from its unit's memory; a job holding none is untouched."""
+        memory = getattr(job, "memory", None)
+        if memory is not None:
+            memory.take(job)
+            job.memory = None
+        job.decoder_input = None
+
+    def release_service_members(self, members) -> None:
+        """Return the credits of every request one decode still serves; a
+        batch service job holds none of its own. Release is idempotent."""
+        released = []
+        for member in members:
+            if any(done is member for done in released):
+                continue
+            released.append(member)
+            self.release(member)
 
 
 class FixedLatencyDecoderMemoryTransfer:

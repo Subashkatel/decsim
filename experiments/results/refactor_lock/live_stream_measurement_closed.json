@@ -1,0 +1,1116 @@
+{
+"controller": {
+"idle_rounds_emitted": 0
+},
+"decoder_manager": {
+"strong_cancelled": 0,
+"strong_needed": 0
+},
+"final_ticks": 4000000,
+"log": [
+"[  0.000 us] Controller: START A:T(q0)  (non-Clifford, qubits (0,))",
+"[  1.000 us] QPU: A:T(q0) fires round 1/2",
+"[  1.000 us] DecoderCluster: round 1 of live-stream arrived (op now has rounds 1..1)",
+"[  2.000 us] QPU: A:T(q0) fires round 2/2",
+"[  2.000 us] ExecutionRuntime: A:T(q0) body done",
+"[  2.000 us] DecoderCluster: round 2 of live-stream arrived (op now has rounds 1..2)",
+"[  2.000 us] DecoderCluster: live-stream W0 [commit 1-2] READY -> enqueue (ready-queue length = 1)",
+"[  2.000 us] DecoderCluster: ASSIGN UNIT live-stream W0 [commit 1-2] (waited 0.000 us in queue, units free now 0)",
+"[  2.000 us] DecoderCluster: START DECODE live-stream W0 [commit 1-2]",
+"[  2.000 us] DecoderCluster: DECODE DONE live-stream W0 [commit 1-2]",
+"[  2.000 us] Orchestrator: DISPATCH conditional release for op#2 -> controller -> controller sequencer",
+"[  2.000 us] ExecutionRuntime: CONSUMED release for B:T(q0); now trying to start",
+"[  2.000 us] Controller: START B:T(q0)  (non-Clifford, qubits (0,)) [unblocked by op#1]",
+"[  3.000 us] QPU: B:T(q0) fires round 1/2",
+"[  3.000 us] DecoderCluster: round 3 of live-stream arrived (op now has rounds 1..3)",
+"[  4.000 us] QPU: B:T(q0) fires round 2/2",
+"[  4.000 us] ExecutionRuntime: B:T(q0) body done",
+"[  4.000 us] ExecutionRuntime: QPU finished. All 2 operations are physically complete; decoder may still be draining.",
+"[  4.000 us] DecoderCluster: round 4 of live-stream arrived (op now has rounds 1..4)",
+"[  4.000 us] DecoderCluster: live-stream W1 [commit 3-4] READY -> enqueue (ready-queue length = 1)",
+"[  4.000 us] DecoderCluster: ASSIGN UNIT live-stream W1 [commit 3-4] (waited 0.000 us in queue, units free now 0)",
+"[  4.000 us] DecoderCluster: START DECODE live-stream W1 [commit 3-4]",
+"[  4.000 us] DecoderCluster: DECODE DONE live-stream W1 [commit 3-4]"
+],
+"op_results": {},
+"result": {
+"decode_work_settled": true,
+"event_queue_empty": true,
+"execution_done_ticks": 4000000,
+"execution_workload_complete": true,
+"fully_done_ticks": 4000000,
+"link_traffic": {
+"path_order": [
+"qc",
+"cwd",
+"wsd",
+"csd",
+"wdo",
+"dd",
+"do",
+"oc",
+"cq"
+],
+"physical_channels": [
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 4,
+"unknown_payload_transfer_count": 4
+},
+"member_paths": [
+"qc"
+],
+"physical_alias": "channel-0"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 2,
+"unknown_payload_transfer_count": 2
+},
+"member_paths": [
+"cwd"
+],
+"physical_alias": "channel-1"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"member_paths": [
+"wsd"
+],
+"physical_alias": "channel-2"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"member_paths": [
+"csd"
+],
+"physical_alias": "channel-3"
+},
+{
+"counters": {
+"known_payload_bits": 10000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 2,
+"unknown_payload_transfer_count": 0
+},
+"member_paths": [
+"wdo"
+],
+"physical_alias": "channel-4"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"member_paths": [
+"dd"
+],
+"physical_alias": "channel-5"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"member_paths": [
+"do"
+],
+"physical_alias": "channel-6"
+},
+{
+"counters": {
+"known_payload_bits": 20000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 1,
+"unknown_payload_transfer_count": 0
+},
+"member_paths": [
+"oc"
+],
+"physical_alias": "channel-7"
+},
+{
+"counters": {
+"known_payload_bits": 5000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 1,
+"unknown_payload_transfer_count": 0
+},
+"member_paths": [
+"cq"
+],
+"physical_alias": "channel-8"
+}
+],
+"reconciliation": [
+{
+"member_paths": [
+"qc"
+],
+"physical_alias": "channel-0",
+"physical_counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 4,
+"unknown_payload_transfer_count": 4
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 4,
+"unknown_payload_transfer_count": 4
+}
+},
+{
+"member_paths": [
+"cwd"
+],
+"physical_alias": "channel-1",
+"physical_counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 2,
+"unknown_payload_transfer_count": 2
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 2,
+"unknown_payload_transfer_count": 2
+}
+},
+{
+"member_paths": [
+"wsd"
+],
+"physical_alias": "channel-2",
+"physical_counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+}
+},
+{
+"member_paths": [
+"csd"
+],
+"physical_alias": "channel-3",
+"physical_counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+}
+},
+{
+"member_paths": [
+"wdo"
+],
+"physical_alias": "channel-4",
+"physical_counters": {
+"known_payload_bits": 10000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 2,
+"unknown_payload_transfer_count": 0
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 10000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 2,
+"unknown_payload_transfer_count": 0
+}
+},
+{
+"member_paths": [
+"dd"
+],
+"physical_alias": "channel-5",
+"physical_counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+}
+},
+{
+"member_paths": [
+"do"
+],
+"physical_alias": "channel-6",
+"physical_counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+}
+},
+{
+"member_paths": [
+"oc"
+],
+"physical_alias": "channel-7",
+"physical_counters": {
+"known_payload_bits": 20000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 1,
+"unknown_payload_transfer_count": 0
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 20000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 1,
+"unknown_payload_transfer_count": 0
+}
+},
+{
+"member_paths": [
+"cq"
+],
+"physical_alias": "channel-8",
+"physical_counters": {
+"known_payload_bits": 5000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 1,
+"unknown_payload_transfer_count": 0
+},
+"reconciles": true,
+"semantic_counter_sum": {
+"known_payload_bits": 5000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 1,
+"unknown_payload_transfer_count": 0
+}
+}
+],
+"schema_version": 1,
+"semantic_edges": [
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 4,
+"unknown_payload_transfer_count": 4
+},
+"path": "qc",
+"physical_alias": "channel-0"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 2,
+"unknown_payload_transfer_count": 2
+},
+"path": "cwd",
+"physical_alias": "channel-1"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"path": "wsd",
+"physical_alias": "channel-2"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"path": "csd",
+"physical_alias": "channel-3"
+},
+{
+"counters": {
+"known_payload_bits": 10000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 2,
+"unknown_payload_transfer_count": 0
+},
+"path": "wdo",
+"physical_alias": "channel-4"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"path": "dd",
+"physical_alias": "channel-5"
+},
+{
+"counters": {
+"known_payload_bits": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 0,
+"unknown_payload_transfer_count": 0
+},
+"path": "do",
+"physical_alias": "channel-6"
+},
+{
+"counters": {
+"known_payload_bits": 20000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 1,
+"unknown_payload_transfer_count": 0
+},
+"path": "oc",
+"physical_alias": "channel-7"
+},
+{
+"counters": {
+"known_payload_bits": 5000000,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"serialization_ticks": 0,
+"transfer_count": 1,
+"unknown_payload_transfer_count": 0
+},
+"path": "cq",
+"physical_alias": "channel-8"
+}
+],
+"transfers": [
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": null,
+"round_hi": 1,
+"round_lo": 1,
+"window_id": null
+},
+"delivery_ticks": 1000000,
+"path": "qc",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromePayload.size_bits",
+"physical_alias": "channel-0",
+"physical_sequence": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 1000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 1000000,
+"serializer_start_ticks": 1000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": null,
+"round_hi": 2,
+"round_lo": 2,
+"window_id": null
+},
+"delivery_ticks": 2000000,
+"path": "qc",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromePayload.size_bits",
+"physical_alias": "channel-0",
+"physical_sequence": 1,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 2000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 2000000,
+"serializer_start_ticks": 2000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 0,
+"tier": "weak",
+"window_id": 0
+}
+},
+"round_hi": 3,
+"round_lo": 1,
+"window_id": 0
+},
+"delivery_ticks": 2000000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 2000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 2000000,
+"serializer_start_ticks": 2000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 0,
+"tier": "weak",
+"window_id": 0
+}
+},
+"round_hi": 3,
+"round_lo": 1,
+"window_id": 0
+},
+"delivery_ticks": 2000000,
+"path": "wdo",
+"payload_bits": 5000000,
+"payload_selection": "configured_default",
+"payload_source": "Khalid do mapped to weak output",
+"physical_alias": "channel-4",
+"physical_sequence": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 2000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 2000000,
+"serializer_start_ticks": 2000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "2"
+},
+"patch_ids": [],
+"relation": null,
+"round_hi": null,
+"round_lo": null,
+"window_id": null
+},
+"delivery_ticks": 2000000,
+"path": "oc",
+"payload_bits": 20000000,
+"payload_selection": "configured_default",
+"payload_source": "Khalid oc",
+"physical_alias": "channel-7",
+"physical_sequence": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 2000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 2000000,
+"serializer_start_ticks": 2000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "2"
+},
+"patch_ids": [],
+"relation": null,
+"round_hi": null,
+"round_lo": null,
+"window_id": null
+},
+"delivery_ticks": 2000000,
+"path": "cq",
+"payload_bits": 5000000,
+"payload_selection": "configured_default",
+"payload_source": "Khalid cq",
+"physical_alias": "channel-8",
+"physical_sequence": 0,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 2000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 2000000,
+"serializer_start_ticks": 2000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": null,
+"round_hi": 3,
+"round_lo": 3,
+"window_id": null
+},
+"delivery_ticks": 3000000,
+"path": "qc",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromePayload.size_bits",
+"physical_alias": "channel-0",
+"physical_sequence": 2,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 3000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 3000000,
+"serializer_start_ticks": 3000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": null,
+"round_hi": 4,
+"round_lo": 4,
+"window_id": null
+},
+"delivery_ticks": 4000000,
+"path": "qc",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromePayload.size_bits",
+"physical_alias": "channel-0",
+"physical_sequence": 3,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 4000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 4000000,
+"serializer_start_ticks": 4000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 1,
+"tier": "weak",
+"window_id": 1
+}
+},
+"round_hi": 5,
+"round_lo": 3,
+"window_id": 1
+},
+"delivery_ticks": 4000000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 1,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 4000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 4000000,
+"serializer_start_ticks": 4000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 1,
+"tier": "weak",
+"window_id": 1
+}
+},
+"round_hi": 5,
+"round_lo": 3,
+"window_id": 1
+},
+"delivery_ticks": 4000000,
+"path": "wdo",
+"payload_bits": 5000000,
+"payload_selection": "configured_default",
+"payload_source": "Khalid do mapped to weak output",
+"physical_alias": "channel-4",
+"physical_sequence": 1,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 4000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 4000000,
+"serializer_start_ticks": 4000000,
+"total_delay_ticks": 0
+}
+]
+},
+"metric_results": [],
+"operation_results": [
+{
+"logical_failure": null,
+"logical_observables": null,
+"observable_truth": null,
+"operation_id": 0,
+"result_status": "no_logical_output",
+"stream_offset": null
+},
+{
+"logical_failure": null,
+"logical_observables": null,
+"observable_truth": null,
+"operation_id": 1,
+"result_status": "no_logical_output",
+"stream_offset": 0
+},
+{
+"logical_failure": null,
+"logical_observables": null,
+"observable_truth": null,
+"operation_id": 2,
+"result_status": "no_logical_output",
+"stream_offset": 2
+}
+],
+"terminal_status": "complete"
+},
+"runtime": {
+"body_done_time": {
+"1": 2000000,
+"2": 4000000
+},
+"decode_release_time": {
+"2": 2000000
+},
+"op_start_time": {
+"1": 0,
+"2": 2000000
+}
+},
+"syndrome_buffer": {
+"assembling_identities": [],
+"capacity": null,
+"free_slot_indices": [],
+"hold_counts": [],
+"identity_to_slot": [],
+"occupancy": 0,
+"packing_identities": [],
+"retained_identities": [],
+"tombstoned_identities": []
+},
+"views": {
+"backlog": {
+"per_lane": [
+[
+"",
+0
+]
+],
+"per_op_rounds": [
+[
+0,
+0
+],
+[
+1,
+0
+],
+[
+2,
+0
+]
+],
+"per_patch_rounds": [
+[
+0,
+0
+]
+],
+"ready_jobs": 0,
+"total_rounds": 0
+},
+"decoder_memory": {
+"per_unit": [
+{
+"admissions": 2,
+"capacity_rounds": null,
+"occupied_rounds": 0,
+"peak_occupied_rounds": 2,
+"pool": "default",
+"unit": 0
+}
+]
+},
+"reaction": {
+"body_done_time": [
+[
+1,
+2000000
+],
+[
+2,
+4000000
+]
+],
+"decode_release_time": [
+[
+2,
+2000000
+]
+],
+"execution_done": 4000000,
+"fully_done": 4000000,
+"ops": [
+{
+"blocked_by": null,
+"name": "A:T(q0)",
+"op": 1,
+"round_ticks": 1000000,
+"rounds": 2
+},
+{
+"blocked_by": 1,
+"name": "B:T(q0)",
+"op": 2,
+"round_ticks": 1000000,
+"rounds": 2
+}
+]
+},
+"strong_work": {
+"in_transit": {
+"full_input_rounds": 0,
+"jobs": 0
+},
+"queued": {
+"full_input_rounds": 0,
+"jobs": 0
+},
+"running": {
+"full_input_rounds": 0,
+"jobs": 0
+},
+"strong_needed": 0,
+"total_full_input_rounds": 0,
+"total_jobs": 0,
+"waiting_far_boundary": {
+"full_input_rounds": 0,
+"jobs": 0
+},
+"waiting_terminal_data": {
+"full_input_rounds": 0,
+"jobs": 0
+}
+},
+"switching_records": null,
+"utilization": {
+"busy_units": 0,
+"per_pool": [
+[
+"default",
+0,
+1
+]
+],
+"total_units": 1
+},
+"window_latency": {
+"rows": [
+{
+"buffer_fill": 1000000,
+"dep_block": 0,
+"op": 0,
+"queue_wait": 0,
+"service": 0,
+"total": 1000000,
+"window": 0
+},
+{
+"buffer_fill": 1000000,
+"dep_block": 0,
+"op": 0,
+"queue_wait": 0,
+"service": 0,
+"total": 1000000,
+"window": 1
+}
+],
+"stages": [
+"buffer_fill",
+"dep_block",
+"queue_wait",
+"service",
+"total"
+]
+}
+},
+"windows": [
+{
+"buffer_hi": 3,
+"buffer_lo": 1,
+"closed_temporal_boundaries": false,
+"commit_hi": 2,
+"commit_lo": 1,
+"committed": true,
+"dependents": [],
+"deps": [],
+"k": 0,
+"n_rounds": 3,
+"op_id": 0,
+"queued": true,
+"t_data_complete": 2000000,
+"t_dispatch": 2000000,
+"t_done": 2000000,
+"t_first_round": 1000000,
+"t_queued": 2000000
+},
+{
+"buffer_hi": 5,
+"buffer_lo": 3,
+"closed_temporal_boundaries": false,
+"commit_hi": 4,
+"commit_lo": 3,
+"committed": true,
+"dependents": [],
+"deps": [],
+"k": 1,
+"n_rounds": 3,
+"op_id": 0,
+"queued": true,
+"t_data_complete": 4000000,
+"t_dispatch": 4000000,
+"t_done": 4000000,
+"t_first_round": 3000000,
+"t_queued": 4000000
+}
+]
+}

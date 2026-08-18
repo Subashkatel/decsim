@@ -329,6 +329,9 @@ class DecoderManager:
             else:
                 outcome = RequestProcessingOutcome.STRONG_CANCELLED_DURING_SERVICE
                 job.cancelled = True
+                cancel = getattr(self.decoder_for(job), "cancel", None)
+                if cancel is not None:               # a staged decoder stops its stages
+                    cancel(job)
                 self._cancel_decoder_input(job)
                 self._release_decoder_input(live.request_job)
                 self._free_unit(job)
@@ -479,18 +482,18 @@ class DecoderManager:
         """The unit's memory holds the input: start the decode."""
         if job.cancelled:                        # cancelled while its input was in flight
             return
-        if job.decoder_input is not None:
+        decoder = self.decoder_for(job)
+        self.engine.log(self.log_name, f"START DECODE {job.label}")
+        run = getattr(decoder, "run", None)
+        if run is not None:                 # staged decoder reads memory itself
+            run(job, self.engine, lambda j=job: self._on_decode_done(j))
+            return
+        if job.decoder_input is not None:   # a plain decoder reads its memory now
             job.payloads = [
                 fragment
                 for round_input in job.decoder_input.rounds
                 for fragment in round_input.fragments
             ]
-        decoder = self.decoder_for(job)
-        self.engine.log(self.log_name, f"START DECODE {job.label}")
-        run = getattr(decoder, "run", None)
-        if run is not None:                 # staged decoder owns its stage events
-            run(job, self.engine, lambda j=job: self._on_decode_done(j))
-            return
         self.engine.schedule(
             decoder.latency(job), lambda j=job: self._on_decode_done(j),
             label=f"decode_done({job.label})")

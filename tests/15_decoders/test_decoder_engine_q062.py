@@ -215,3 +215,31 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
         assert record.end_ticks - record.start_ticks == us(record.measured_ns / 1000.0)
     with pytest.raises(RuntimeError, match="measured wall-clock"):
         PyMatchingDecoder(latency_model=None).latency(_job())
+
+
+def test_cancel_stops_the_remaining_stages_and_never_calls_on_done():
+    engine = Engine(verbose=False)
+    inner = _RecordingInner(engine, latency_us=5.0)
+    decoder = DecoderEngine(inner, _timing())
+    job = _job()
+    done = []
+    decoder.run(job, engine, lambda: done.append(engine.now))
+    engine.schedule(1, lambda: decoder.cancel(job))          # during fetch
+    engine._start_running()
+    engine.run()
+    assert done == []
+    assert inner.decode_ticks == []
+    assert [r.stage for r in decoder.stage_records_for(1, 0)] == ["fetch"]
+
+
+def test_a_hardware_stage_may_not_be_named_algorithm():
+    with pytest.raises(ValueError, match="names the decoder itself"):
+        DecoderTiming((DecoderStage(ALGORITHM_STAGE, cycles_per_job=1),), (), MHZ)
+
+
+def test_stage_ticks_sum_to_the_whole_job_at_the_clock_for_any_partition():
+    job = _job(n_rounds=3)
+    one = DecoderTiming((DecoderStage("a", cycles_per_job=2),), (), 300.0)
+    split = DecoderTiming((DecoderStage("a", cycles_per_job=1),
+                           DecoderStage("b", cycles_per_job=1)), (), 300.0)
+    assert sum(one.stage_ticks(job).values()) == sum(split.stage_ticks(job).values()) == us(2 / 300.0)

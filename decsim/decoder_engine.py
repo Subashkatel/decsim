@@ -55,9 +55,19 @@ class DecoderTiming:
     def __post_init__(self) -> None:
         if not math.isfinite(self.frequency_mhz) or self.frequency_mhz <= 0:
             raise ValueError("frequency_mhz must be finite and positive")
+        if any(s.name == ALGORITHM_STAGE for s in self.before + self.after):
+            raise ValueError(f"{ALGORITHM_STAGE!r} names the decoder itself, not a hardware stage")
 
-    def ticks_for(self, stage: DecoderStage, job: DecodeJob) -> int:
-        return us(stage.cycles_for(job) / self.frequency_mhz)
+    def stage_ticks(self, job: DecodeJob) -> dict:
+        """Ticks per stage, cut from the cumulative cycle count so the stages sum
+        to exactly the whole job's cycles at the clock, whatever the partition."""
+        ticks, cumulative, previous = {}, 0, 0
+        for stage in self.before + self.after:
+            cumulative += stage.cycles_for(job)
+            end = us(cumulative / self.frequency_mhz)
+            ticks[stage.name] = end - previous
+            previous = end
+        return ticks
 
 
 @dataclass(frozen=True)
@@ -78,6 +88,7 @@ class _RunningDecode:
     job: DecodeJob
     on_done: Callable[[], None]
     result: Optional[DecodeResult] = None
+    aborted: bool = False
 
 
 class DecoderEngine:
@@ -91,6 +102,7 @@ class DecoderEngine:
         self.timing = timing
         self.fault_model_requirement = _decoder_fault_model_requirement(decoder)
         self._completed: dict = {}
+        self._running: dict = {}
         self.stage_records: list[DecoderStageRecord] = []
 
     def run_seed_children(self):
@@ -107,24 +119,31 @@ class DecoderEngine:
         return bool(getattr(self.decoder, "measures_wall_clock", False))
 
     def latency(self, job: DecodeJob) -> int:
-        stages = self.timing.before + self.timing.after
-        return (sum(self.timing.ticks_for(stage, job) for stage in stages)
-                + self.decoder.latency(job))
+        return sum(self.timing.stage_ticks(job).values()) + self.decoder.latency(job)
 
     def run(self, job: DecodeJob, engine, on_done: Callable[[], None]) -> None:
         """Walk the stages as engine events on the unit the manager granted."""
         running = _RunningDecode(job, on_done)
-        steps = ([(s.name, s.cycles_for(job), self.timing.ticks_for(s, job))
-                  for s in self.timing.before]
+        ticks = self.timing.stage_ticks(job)
+        steps = ([(s.name, s.cycles_for(job), ticks[s.name]) for s in self.timing.before]
                  + [(ALGORITHM_STAGE, None, None)]
-                 + [(s.name, s.cycles_for(job), self.timing.ticks_for(s, job))
-                    for s in self.timing.after])
+                 + [(s.name, s.cycles_for(job), ticks[s.name]) for s in self.timing.after])
+        self._running[self._key(job)] = running
         self._enter(running, engine, steps, 0)
+
+    def cancel(self, job: DecodeJob) -> None:
+        """Abort a running job: no further stages, no completion callback."""
+        running = self._running.pop(self._key(job), None)
+        if running is not None:
+            running.aborted = True
 
     def _enter(self, running: _RunningDecode, engine, steps, index) -> None:
         job = running.job
+        if running.aborted:
+            return
         if index == len(steps):
             key = self._key(job)          # None for a self-contained external job
+            self._running.pop(key, None)
             if key is not None and running.result is not None:
                 self._completed[key] = running.result
             running.on_done()
@@ -133,6 +152,9 @@ class DecoderEngine:
         start = engine.now
         measured_ns = None
         if name == ALGORITHM_STAGE:
+            if job.decoder_input is not None:       # the read out of this unit's memory
+                job.payloads = [fragment for round_input in job.decoder_input.rounds
+                                for fragment in round_input.fragments]
             if self.measures_wall_clock:
                 # Software decoder on this host: run the real call now, hold the
                 # unit for exactly as long as it took, release the result then.

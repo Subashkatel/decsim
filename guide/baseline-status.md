@@ -40,6 +40,14 @@ Status vocabulary:
   (`anchor.md`). The controller-to-Buffer-0 hop is a priced optional link (C2B).
   Finding: with the reference link cards the serial sliding-window chain, not the
   decoder, bounds throughput (knee near a 1.2 us round period at d=3).
+- Willow replication (owner request 2026-08-18): `RecordedStimDevice` replays
+  Google's Zenodo 13273331 hardware detection events through the loop;
+  `experiments/willow_replication.py` reports the loop's logical error rate equal
+  to whole-shot PyMatching on the same recorded shots (d = 3, 5, 7) beside
+  Google's released decoder, and the real-time configuration (d = 5, 1.1 us
+  cycle) at 58.7 +- 30 us last-cycle-to-correction beside the paper's 63 +- 17 us,
+  sustaining 0.65 rounds/us against the 0.91 required
+  (`experiments/results/willow_replication/report.md`).
 
 ## Minimal baseline closed loop
 

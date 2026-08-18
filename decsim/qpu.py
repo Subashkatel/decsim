@@ -21,8 +21,6 @@ class QPUDevice:
 
     def __init__(self, engine, model, cycle_ticks: int, readout_receiver=None,
                  completion_receiver=None, idle_receiver=None):
-        if type(cycle_ticks) is not int or cycle_ticks <= 0:
-            raise ValueError("cycle_ticks must be a positive exact int")
         self.engine = engine
         self.model = model
         self.cycle_ticks = cycle_ticks
@@ -50,10 +48,6 @@ class QPUDevice:
 
     def issue(self, command: RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
-        if self.completion_receiver is None:
-            raise RuntimeError("QPU completion receiver is not connected")
-        if type(command) is not RunOperationBody:
-            raise TypeError("QPUDevice accepts only RunOperationBody commands")
         if command.round_ticks != self.cycle_ticks:
             raise ValueError("operation cadence must equal the QPU cycle")
         if command.round_count == 0 and command.emits_detector_data \
@@ -141,8 +135,6 @@ class QPUDevice:
     # ---------------------------------------------------------------- emit
 
     def _emit(self, payloads, operation) -> None:
-        if type(payloads) not in (list, tuple):
-            raise TypeError("QPU model payloads must be an exact list or tuple")
         if not payloads:
             raise ValueError("a detector-emitting round must emit at least one readout")
         if operation.syndrome_fragment_index is not None and len(payloads) != 1:
@@ -158,11 +150,7 @@ class QPUDevice:
             raise ValueError(
                 "declared syndrome fragment count must match emitted readouts")
         for local_index, payload in enumerate(payloads):
-            if type(payload) is not QPUReadout:
-                raise TypeError("QPU model must emit exact QPUReadout values")
             index = operation.syndrome_fragment_index if operation.syndrome_fragment_index is not None else local_index
-            if self.readout_receiver is None:
-                raise RuntimeError("QPU readout receiver is not connected")
             self.readout_receiver.accept_qpu_readout(
                 replace(payload, n_fragments=count, fragment_index=index),
                 WINDOW_INPUT_ROUTE,
@@ -178,8 +166,6 @@ class QPUDevice:
                                    round_index: int) -> None:
         """Produce the timing-only physical round of an idle patch."""
         payload = QPUReadout(("idle", operation_id, patch), patch, round_index)
-        if self.readout_receiver is None:
-            raise RuntimeError("QPU readout receiver is not connected")
         self.readout_receiver.accept_qpu_readout(
             payload, SyndromePacketRoute.feedback_memory_round(operation_id))
 

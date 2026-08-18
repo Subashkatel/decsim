@@ -128,22 +128,36 @@ class FunctionLatencyDecoder:
         return DecodeResult(job.op_id, job.window_id)
 
 
-class PresetLatencyDecoder(FunctionLatencyDecoder):
+class PresetLatencyDecoder:
     """Timing-only decoder with one fixed latency for every job
     (independent of window size)."""
 
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, latency_us: float = 1.0):
         self.latency_us = latency_us
-        super().__init__(lambda job: self.latency_us)
+
+    def latency(self, job: DecodeJob) -> int:
+        return us(self.latency_us)
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        return DecodeResult(job.op_id, job.window_id)
 
 
-class PerRoundDecoder(FunctionLatencyDecoder):
+class PerRoundDecoder:
     """Timing-only decoder with linear cost per syndrome round:
     n_rounds * tau_us."""
 
+    fault_model_requirement = NO_FAULT_MODEL_REQUIRED
+
     def __init__(self, tau_us: float = 1.0):
         self.tau_us = tau_us
-        super().__init__(lambda job: job.n_rounds * self.tau_us)
+
+    def latency(self, job: DecodeJob) -> int:
+        return us(job.n_rounds * self.tau_us)
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        return DecodeResult(job.op_id, job.window_id)
 
 
 class SwitchingRouter:

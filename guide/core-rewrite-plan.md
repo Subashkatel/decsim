@@ -9,6 +9,39 @@ not the goal, depth is: only six new modules, each hiding real state behind
 3 to 6 methods; everything else is deletion, inlining and reordering inside
 the existing file. New names are proposals until the owner approves them.
 
+## Rules for every change
+
+- A collaborator is a plain object built by run_spec and passed in by
+  constructor; it holds its own state, exposes 3 to 6 methods, takes and
+  returns value objects, never keeps a back reference to its caller (the
+  DefaultWindowInteraction shape). No base classes, no registries, no
+  pattern names beyond what the object does.
+- A feature the baseline does not run is a no-op collaborator with the same
+  interface (NoStrongTier, NoFeedbackStreams), never "if self.x is not None"
+  at each hook. Deleting the feature is deleting one class and one line in
+  run_defaults.
+- Observers (views, metrics) read one frozen snapshot() per owner; no getters
+  are added for them.
+- Every module opens with a comment stating what it hides and its
+  invariants, present tense; every public method has a one-line contract;
+  nothing narrates history.
+- Long methods that read as one ordering stay long; shallow forwarders are
+  inlined at their call site; nothing is split for length.
+- Owner decision 2026-08-18: remove __post_init__ blocks and internal
+  validation for now. Every dataclass __post_init__ that re-proves values
+  another decsim module built, and every type(x) is / isinstance guard on an
+  internal path, is deleted in Phase 0 (message.py 45 raises and 23 type
+  checks, links.py 44, syndrome_ingress 12, syndrome_buffer 8, engine 18,
+  seeding 14, qlx 46). Only six real invariants stay: qpu.issue cadence
+  equals the cycle; ExecutionRuntime._claim_resources no double allocation;
+  SyndromeBuffer duplicate and late-fragment checks; decoder memory capacity
+  exhaustion (fail-stop); RunSpec compatibility rules on user config (in
+  run_defaults); link card completeness. If a removed check turns out to
+  guard a real invariant it comes back with a one-line comment saying which.
+- Names are kept unless guide/core-layout-and-names.md renames them with a
+  reason; no shims, no re-exports; one lump per commit; the lock (tests,
+  smoke, sweep, gates) is byte-identical after each.
+
 ## A. Every core file: broken down or not
 
 | file | today | decision | leaves to | arrives from | deleted | file after |

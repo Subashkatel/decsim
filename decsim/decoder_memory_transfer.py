@@ -1,4 +1,4 @@
-"""Move one decoder request to the decoder side after an exact delay.
+"""Move one decoder request into decoder memory after an exact delay.
 
 The default transport owns delay and cancellation only. Storage admission,
 materialization, stored-input lifetime, and the upstream hold belong to
@@ -13,7 +13,7 @@ from typing import Callable
 from .message import DecodeJob
 
 
-class FixedLatencyDecoderInputTransfer:
+class FixedLatencyDecoderMemoryTransfer:
     """Deliver one admitted job to its receiver after a fixed delay.
 
     The decoder cannot read the input before delivery. One in-flight key per

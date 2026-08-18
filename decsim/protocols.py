@@ -274,7 +274,7 @@ class Scheduler(Protocol):
 
 
 @runtime_checkable
-class DecoderInputTransfer(Protocol):
+class DecoderMemoryTransfer(Protocol):
     """Port 22. Carry one admitted job to the decoder side after a delay.
 
     Implementations call ``receiver(job)`` exactly once after ``delay_ticks``,

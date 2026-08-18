@@ -15,7 +15,7 @@ from decsim.decoder_memory import (
     count_decoder_input_round_demand,
     materialize_decoder_input,
 )
-from decsim.decoder_input_transfer import FixedLatencyDecoderInputTransfer
+from decsim.decoder_memory_transfer import FixedLatencyDecoderMemoryTransfer
 from decsim.decoder_manager import DecoderManager
 from decsim.decoders import (
     PerRoundDecoder,
@@ -194,7 +194,7 @@ def make_manager(
         router=OneDecoderRouter(),
         scheduler=FifoScheduler(),
         unit_pools=unit_pools,
-        decoder_input_transfer=transfer,
+        decoder_memory_transfer=transfer,
         decoder_memory=config,
         bulk_strong=bulk_strong,
     )
@@ -424,7 +424,7 @@ def test_saturated_strong_pool_never_blocks_weak_admission() -> None:
 def test_transport_cancel_before_delivery_suppresses_receiver_idempotently() -> None:
     """Cancelling in-flight transport prevents delivery and repeated cancel is harmless."""
     engine = ManualEngine()
-    transfer = FixedLatencyDecoderInputTransfer(engine)
+    transfer = FixedLatencyDecoderMemoryTransfer(engine)
     job = make_job("cancelled", (0,))
     received = []
 
@@ -492,7 +492,7 @@ def test_unset_custom_transport_preserves_exact_arrival_and_late_pool_selection(
         scheduler=FifoScheduler(),
         unit_pools={"default": 1, "strong": 1},
         lane_policy=lane,
-        decoder_input_transfer=transfer,
+        decoder_memory_transfer=transfer,
         decoder_memory=None,
     )
     manager.pool_free = {"default": 0, "strong": 0}
@@ -525,7 +525,7 @@ def test_finite_pool_choice_is_closed_before_transport_without_mutating_job_pool
         scheduler=FifoScheduler(),
         unit_pools={"default": 1, "strong": 1},
         lane_policy=lane,
-        decoder_input_transfer=transfer,
+        decoder_memory_transfer=transfer,
         decoder_memory=DecoderMemoryConfig({"default": 1, "strong": 1}),
     )
     manager.pool_free = {"default": 0, "strong": 0}
@@ -963,7 +963,7 @@ def test_unset_custom_pure_delay_run_matches_default_timing_and_results() -> Non
     built_in = RunSpec(**shared).build()
     custom = RunSpec(
         **shared,
-        make_decoder_input_transfer=lambda engine, links, buffering: PureDelayTransfer(engine),
+        make_decoder_memory_transfer=lambda engine, links, buffering: PureDelayTransfer(engine),
     ).build()
 
     assert custom.result == built_in.result

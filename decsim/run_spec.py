@@ -126,7 +126,7 @@ class RunSpec:
     pauli_frame: Optional[Any] = None
     syndrome_ingress_policy: Optional[Any] = None
     make_syndrome_ingress: Optional[Callable] = None
-    make_decoder_input_transfer: Optional[Callable] = None
+    make_decoder_memory_transfer: Optional[Callable] = None
     make_factory: Optional[Callable] = None
     make_metrics: Optional[Callable] = None
     record_switching_windows: bool = False
@@ -322,20 +322,20 @@ class RunSpec:
         # A supplied transfer owns transport timing only: the decoder manager's
         # stager is always the receiver, so decoder memory cannot be
         # bypassed. The returned transfer must satisfy deliver plus cancel.
-        if self.make_decoder_input_transfer is None:
-            from .decoder_input_transfer import FixedLatencyDecoderInputTransfer
-            decoder_input_transfer = FixedLatencyDecoderInputTransfer(engine)
+        if self.make_decoder_memory_transfer is None:
+            from .decoder_memory_transfer import FixedLatencyDecoderMemoryTransfer
+            decoder_memory_transfer = FixedLatencyDecoderMemoryTransfer(engine)
         else:
-            decoder_input_transfer = self.make_decoder_input_transfer(
+            decoder_memory_transfer = self.make_decoder_memory_transfer(
                 engine, links, buffering
             )
         if (
-            self.make_decoder_input_transfer is not None
-            and decoder_input_transfer is None
+            self.make_decoder_memory_transfer is not None
+            and decoder_memory_transfer is None
         ):
             raise TypeError(
-                "make_decoder_input_transfer must return a "
-                "DecoderInputTransfer"
+                "make_decoder_memory_transfer must return a "
+                "DecoderMemoryTransfer"
             )
         decoder_manager = DecoderManager(
             engine, router=router, scheduler=scheduler,
@@ -344,9 +344,9 @@ class RunSpec:
             bulk_strong=bulk_strong,
             lane_policy=self.lane_policy,
             capture_enabled=self.record_switching_windows,
-            decoder_input_transfer=decoder_input_transfer,
+            decoder_memory_transfer=decoder_memory_transfer,
             decoder_memory=self.decoder_memory)
-        decoder_input_transfer = decoder_manager.decoder_input_transfer
+        decoder_memory_transfer = decoder_manager.decoder_memory_transfer
         services = StrategyServicesImpl(engine, window_manager, decoder_manager)
         window_manager.strategy = strategy
         window_manager.services = services
@@ -395,7 +395,7 @@ class RunSpec:
             device=device, error_model_provider=error_model_provider,
             decoder_router=router,
             factory=factory, strategy=strategy, scheduler=scheduler,
-            decoder_input_transfer=decoder_input_transfer,
+            decoder_memory_transfer=decoder_memory_transfer,
             lane_policy=self.lane_policy,
             boundary_policy=boundary_policy,
             window_interaction=window_interaction, idle_policy=idle_policy,

@@ -5,7 +5,7 @@ request reserves the rounds it will store, deposits one immutable input, and
 returns its credits when the decoder is finished with it or it is cancelled.
 
 ``DecoderMemoryStager`` is the storage-admission boundary that every
-decoder-input transport ends at. It counts a request's round demand, admits it
+decoder-memory transport ends at. It counts a request's round demand, admits it
 when the pool's credits fit, materializes the input once, releases the upstream
 hold, and hands the job to the manager continuation. A request that does not
 fit waits in strict FIFO order within its pool (``STALL``) or fails loudly
@@ -457,7 +457,7 @@ class DecoderMemoryStagerSnapshot:
 
 
 class DecoderMemoryStager:
-    """Admit decoder requests into storage after every decoder-input transport.
+    """Admit decoder requests into storage after every decoder-memory transport.
 
     The decoder manager owns one stager and every transport, built-in or
     supplied by a user, ends at it, so no transport can bypass the configured

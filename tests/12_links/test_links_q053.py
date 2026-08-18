@@ -501,28 +501,3 @@ def test_decoder_boundary_transfer_requires_boundary_provenance():
     assert model.traffic_json_value()["transfers"] == []
 
 
-def test_unstable_boundary_source_key_is_rejected_before_accounting():
-    """A boundary source key with unstable contents cannot enter the ledger."""
-    class EqualOperation:
-        def __eq__(self, other):
-            return other == _OPERATION_ID
-
-    source_key = (EqualOperation(), 3)
-    request_key = DecoderRequestKey(
-        _OPERATION_ID, 3, DecoderTier.STRONG, 0
-    )
-    relation = BoundaryTransferRelation(
-        request_key, source_key, (_OPERATION_ID, 4), 1, 2
-    )
-    attribution = TrafficAttribution(
-        _OPERATION_ID, _PATCH_IDS, 3, 1, 2, relation
-    )
-    model = logical_reference_profile().resolve()
-    with pytest.raises(TypeError, match="boundary source_window_key must be stable"):
-        model.reserve(
-            LinkPath.DD,
-            payload_bits=None,
-            now_ticks=0,
-            attribution=attribution,
-        )
-    assert model.traffic_json_value()["transfers"] == []

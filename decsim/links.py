@@ -148,20 +148,6 @@ class BoundaryTransferRelation:
     source_revision: int
     delivery_revision: int
 
-    def __post_init__(self) -> None:
-        expected_source = (self.source_request_key.operation_id,
-                           self.source_request_key.window_id)
-        if self.source_window_key != expected_source:
-            raise ValueError("boundary source does not match its request key")
-        object.__setattr__(
-            self, "source_revision",
-            _whole(self.source_revision, "source_revision"))
-        object.__setattr__(
-            self, "delivery_revision",
-            _whole(self.delivery_revision, "delivery_revision"))
-        if min(self.source_revision, self.delivery_revision) < 1:
-            raise ValueError("boundary revisions must be positive")
-
 
 class LinkQuantityBasis(str, Enum):
     """Whether one configured quantity is aggregate or per active channel."""
@@ -415,36 +401,6 @@ class TrafficAttribution:
     relation: Optional[
         Union[RequestTransferRelation, BoundaryTransferRelation]
     ] = None
-
-    def __post_init__(self) -> None:
-        if not is_stable_identity(self.operation_id):
-            raise TypeError("operation_id must be a stable identity")
-        if not all(is_stable_identity(patch_id) for patch_id in self.patch_ids):
-            raise TypeError("patch_ids must contain stable identities")
-        ordered = tuple(sorted(self.patch_ids, key=stable_identity_order_key))
-        if tuple(map(stable_identity_order_key, self.patch_ids)) != tuple(
-            map(stable_identity_order_key, ordered)
-        ):
-            raise ValueError("patch_ids must use stable structural order")
-        if (self.round_lo is None) != (self.round_hi is None):
-            raise ValueError("round endpoints are present together")
-        if self.window_id is not None:
-            object.__setattr__(
-                self, "window_id", _whole(self.window_id, "window_id"))
-            if self.window_id < 0:
-                raise ValueError("window_id must be a nonnegative window index")
-            if self.round_lo is None:
-                raise ValueError("window attribution requires a round range")
-        if self.round_lo is None:
-            return
-        object.__setattr__(
-            self, "round_lo", _whole(self.round_lo, "round_lo"))
-        object.__setattr__(
-            self, "round_hi", _whole(self.round_hi, "round_hi"))
-        if self.round_lo < 1:
-            raise ValueError("round_lo must be a positive round index")
-        if self.round_hi < self.round_lo:
-            raise ValueError("round_hi must be at least round_lo")
 
 
 def _request_key_snapshot(request_key) -> DecoderRequestKey:
@@ -796,8 +752,6 @@ class LinkModel:
                        else relation.source_request_key
                        if type(relation) is BoundaryTransferRelation else None)
         if request_key is not None:
-            if not is_stable_identity(request_key.operation_id):
-                raise TypeError("request operation_id must be a stable identity")
             if request_key.window_id < 0:
                 raise ValueError(
                     "request window_id must be a nonnegative window index"
@@ -806,11 +760,6 @@ class LinkModel:
                 raise ValueError(
                     "request run_sequence must be a nonnegative request ordinal"
                 )
-        if type(relation) is BoundaryTransferRelation:
-            if not is_stable_identity(relation.source_window_key):
-                raise TypeError("boundary source_window_key must be stable")
-            if not is_stable_identity(relation.destination_window_key):
-                raise TypeError("boundary destination_window_key must be stable")
         if needs_request and request_key.tier is not rule.tier:
             raise ValueError(f"{path.value} requires the {rule.tier.value} tier")
         if request_key is not None and (

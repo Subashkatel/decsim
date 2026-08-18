@@ -8,6 +8,36 @@ tests, the smoke snapshot, the baseline sweep and Gates 1 to 5, byte-identical
 after every commit. Names below marked "proposed" are new module or class
 names that need the owner's approval before they exist.
 
+Revision 2026-08-18 (owner question: fewer modules?). Module count is not
+the goal, depth is. Only six seams hide enough state and rule to earn a new
+module; the rest is deletion, inlining and reordering inside existing files.
+
+    new module              hides
+    strong_tier.py          the whole strong decoder feature: StrongEscalation
+                            (window side) and StrongRequestLedger (decoder side),
+                            registry, slabs, suffix rephase, batching, cancellation;
+                            about 1900 lines, one import, absent in the baseline
+    boundaries.py           BoundaryCourier: what a boundary is, versions, held
+                            boundaries, DD delivery, merge rule
+    logical_ledger.py       LogicalLedger: who owns which committed rounds and how
+                            observables compose over an interval
+    protected_streams.py    ProtectedStreamRegions: per-patch feedback stream state
+    defaults.py             the ten default choices and the compatibility rules
+                            (including the switching preconditions)
+    link_reports.py         JSON reporting of link traffic
+
+Kept in place, reorganized inside the existing file: window retention and the
+traffic functions (window_manager sections); idle relay folded into the
+existing idle policy objects (policies.py); the instruction relay stays a
+controller method; decoder input staging joins decoder_memory_transfer.py;
+terminal records become one small class at the bottom of decoder_manager.py;
+resource claims stay in execution_runtime.py as their own small class. Where
+a section below still names one of the smaller collaborators (WindowRetention,
+window_traffic, IdleRoundRelay, InstructionRelay, ResourceLedger,
+TerminalRecordLedger, DecoderInputStaging, SwitchingPreconditions), read it as
+"the same code, same interface, but a section or small class inside the
+existing file named here", not a new module.
+
 Conventions used throughout
 - A collaborator is a plain object built by the composition root and passed
   in by constructor; it holds its own state, exposes 3 to 6 methods, takes and

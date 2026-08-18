@@ -15,15 +15,21 @@ to say what it does inside its box. Run-level vocabulary and wiring stay at
 the top because every folder imports them.
 
 Rules
-- Two levels at most: decsim/<component>/<module>.py.
+- Two levels at most: decsim/<component>/<module>.py. Exceptions, stated
+  here once: the six decoder backend packages under decoders/, stimcircuits/
+  under qpu/, and detector_error_model/ keep their own internal structure
+  (a third level) because they move as sealed wholes.
 - A file keeps its name when the name is already exact (controller,
   syndrome_buffer, window_manager, decoder_manager, decoder_memory,
   pauli_frame, links, engine, message). It is renamed only when the current
   name does not say what the module does.
-- One moves-only commit first: git mv, import paths updated everywhere
-  (150 internal imports, 37 test and experiment files), no re-exports, no
-  shims, no content edits. History follows the files; every later refactor
-  diff stays readable. Then the content work of the rewrite plan.
+- Moves-only commits, one per component, each right before that
+  component's refactor phase (rewrite plan section C): git mv, import paths
+  updated everywhere (150 internal imports, 37 test and experiment files),
+  an import-surface test, no re-exports, no shims, no content edits. History
+  follows the files; every later refactor diff stays readable. Not one
+  global move first: that would move code that Phase 1 deletes and put the
+  whole import blast radius in one commit.
 - detector_error_model/, the six decoder backend packages and soft_output/
   keep their internal structure; they only move as a whole.
 
@@ -32,7 +38,8 @@ Rules
     decsim/
       engine.py                 discrete event engine (unchanged name)
       run_spec.py               RunSpec: configuration and composition root
-      run_defaults.py           NEW: default choices and compatibility rules
+      run_configuration.py      NEW: resolve_run_configuration, defaults and
+                                compatibility rules as one resolver
       message.py                the shared vocabulary (unchanged name)
       protocols.py              seams (unchanged name)
       seeding.py                run seed binding (unchanged name)
@@ -59,8 +66,10 @@ Rules
         controller.py             (unchanged name)
         feedback_streams.py       NEW: protected regions and feedback streams
                                   (today inside controller.py)
-        idle_policies.py          was policies.py: Ignore, ExtendStream,
-                                  SeparateDecodeJobs, and the boundary policies
+        policies.py               boundary policies Eager, Held and idle
+                                  policies Ignore, ExtendStream,
+                                  SeparateDecodeJobs (unchanged name: it
+                                  holds both axes)
         syndrome_ingress.py       packing and C2B arbitration (unchanged)
 
       syndrome_buffer/
@@ -81,7 +90,9 @@ Rules
         decoder_memory.py         per-unit input memory (unchanged)
         decoder_memory_transfer.py transfer and staging into unit memory (unchanged)
         decoder_engine.py         stages around one algorithm (unchanged)
-        decoder_routing.py        was decoders.py: router, latency models, soft output
+        decoders.py               router, latency models, sampled confidence
+                                  (unchanged name until those three owners
+                                  separate; decoder_routing would be false)
         schedulers.py             queue order (unchanged)
         weak_strong_switching.py  was switching.py: Baseline, Switching strategies
         strong_escalation.py      NEW: StrongEscalation and StrongRequestLedger
@@ -123,9 +134,7 @@ Rules
 | rounds.py | program/round_policies.py | it holds the round-count policies |
 | frontends/qlx.py, circuit.py | program/qlx_frontend.py, circuit_frontend.py | one word says the role |
 | factories.py | program/magic_state_factories.py | "factories" collides with the design-pattern meaning |
-| policies.py | controller/idle_policies.py | it is the idle and boundary policies the controller consults |
 | schemes.py | windows/windowing_schemes.py | "schemes" alone is opaque |
-| decoders.py | decoders/decoder_routing.py | it routes jobs to decoders and prices latency; it holds no decoder |
 | switching.py | decoders/weak_strong_switching.py | it is the weak-to-strong strategy |
 | adapters/window_decode_results.py | decoders/window_decode_results.py | it belongs to the decoders |
 | mwpm_decoder/, union_find_decoder/, tesseract_decoder/, relay_bp_decoder/, belief_matching_decoder/, bposd_decoder/ | decoders/mwpm/, union_find/, tesseract/, relay_bp/, belief_matching/, bposd/ | the folder already says decoders; each package moves whole, internals unchanged |
@@ -135,16 +144,21 @@ Rules
 | NEW boundaries | windows/window_boundaries.py | says whose boundaries |
 | NEW logical_ledger | windows/committed_rounds.py | says what it tracks |
 | NEW strong_tier | decoders/strong_escalation.py | says what happens, not which tier |
-| NEW defaults | run_defaults.py | says whose defaults |
+| NEW defaults | run_configuration.py | one resolver, resolve_run_configuration, not a file of default functions |
 | NEW link_reports | links/link_traffic_report.py | says what it reports |
 
 Unchanged names (already exact): engine, run_spec, message, protocols,
 seeding, config, planner, orchestrators, execution_runtime, layouts,
-controller, syndrome_ingress, syndrome_buffer, window_manager,
+controller, policies, syndrome_ingress, syndrome_buffer, window_manager,
 window_interactions, dynamic_windows, speculative_recovery, decoder_manager,
-decoder_memory, decoder_memory_transfer, decoder_engine, schedulers,
-pauli_frame, links, link_profiles, metrics, detector_error_model,
-stimcircuits.
+decoder_memory, decoder_memory_transfer, decoder_engine, decoders,
+schedulers, pauli_frame, links, link_profiles, metrics,
+detector_error_model, stimcircuits.
+
+Not in the tree on purpose: the reorder buffer between the syndrome buffer
+and the decoders that the meeting memo defers (decoder-architecture-meeting
+2026-08-17, lines 33-34). It gets a folder when it gets code; no empty
+module holds its place.
 
 ## 3. What each folder's __init__ contains
 
@@ -155,11 +169,14 @@ line and avoids the shim your rule forbids.
 
 ## 4. Order
 
-Phase 0a, before any content change: the moves-only commit. Steps: git mv
-per folder; sed the import paths in decsim/, tests/, experiments/; run the
-lock (pytest, smoke); commit "layout: components as folders, names say what
-modules do; moves only". Then Phase 0 (deletions, ceremony, comments) and
-Phases 1 to 4 of the rewrite plan, each inside the new tree.
+No global move. After the lock (rewrite plan Phase 0) and the dead
+deletions (Phase 1), each component gets its moves-only commit immediately
+before its refactor phase: qpu/, controller/, syndrome_buffer/, program/
+before the front path; decoders/, confidence/ before the decoder side;
+windows/ before the window manager; links/, observe/ before reports and
+observers. Steps per commit: git mv; sed the import paths in decsim/,
+tests/, experiments/; import-surface test; pytest and the differential
+matrix; commit "layout: <component> as a folder; moves only".
 
 ## 5. Open questions for the owner
 

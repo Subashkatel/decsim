@@ -235,7 +235,6 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
         idle_receiver=lambda *args: None,
     )
     issue_next()
-    engine._start_running()
     engine.run()
 
     assert tuple(

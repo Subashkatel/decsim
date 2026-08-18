@@ -87,7 +87,10 @@ Status vocabulary:
   idle loop, `max_idle_rounds`, `gates_start_on_round_boundaries`. Verified by
   tests/16_qpu, a decsim T-gate wait (14 idle rounds for a 14-round decode,
   successor starts on the boundary) beside SWIPER's RegularTSchedule rule,
-  Gate 1 and the baseline sweep unchanged; suite 772, smoke identical.
+  Gate 4 (`d49d009`, the rule written independently on SimPy: five cases with
+  fractional decode times, the 1.1 us Willow cycle and two patches, all
+  matching decsim), Gate 1 and the baseline sweep unchanged; suite 772, smoke
+  identical.
 
 ## Minimal baseline closed loop
 

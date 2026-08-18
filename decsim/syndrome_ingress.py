@@ -118,6 +118,8 @@ class _IngressContext:
     state: _IngressSlotState = _IngressSlotState.PARTIAL
     packet: Optional[SyndromeRoundPacket] = None
     packet_bits: Optional[int] = None
+    c2b_reserved: bool = False
+    c2b_delivered: bool = False
 
 
 class SyndromeIngress:
@@ -168,6 +170,10 @@ class SyndromeIngress:
         self._dropped_rounds: set = set()
         self.reassembly_timeouts = 0
         self.ingress_drops = 0
+        connect_ready = getattr(
+            window_input_receiver, "connect_window_input_ready_receiver", None)
+        if callable(connect_ready):
+            connect_ready(self.notify_window_input_ready)
 
     # ------------------------------------------------------- syndrome path
 
@@ -307,8 +313,10 @@ class SyndromeIngress:
     def _finish_packing(self, slot_index) -> None:
         slot = self._slots[slot_index]
         round_key = (slot.identity[-2], slot.identity[-1])
+        publication_tick = (
+            None if LinkPath.C2B in self.links.paths else self.engine.now)
         packet = self.syndrome_buffer.finish_packing(
-            round_key, publication_tick=self.engine.now)
+            round_key, publication_tick=publication_tick)
         slot.packet = packet
         fragment_sizes = [item.size_bits for item in packet.fragments]
         slot.packet_bits = (
@@ -346,19 +354,65 @@ class SyndromeIngress:
         if slot.state is not _IngressSlotState.PACKED_WAIT:
             return False
         if slot.route.kind is SyndromePacketRouteKind.WINDOW_INPUT:
-            accepted = self.window_input_receiver.accept_window_input(slot.packet)
-            if type(accepted) is not bool:
-                raise TypeError("window input receiver must return an exact bool")
-            if not accepted:
-                return False
-            slot.state = _IngressSlotState.DRAINING
-            release = lambda: self._release_slot(slot_index)
-            self.engine.schedule(
-                0, release, label="window input publication complete")
+            return self._transmit_window_input_round(slot_index, slot)
         else:
             slot.state = _IngressSlotState.DRAINING
             self._transmit_feedback_memory_round(slot_index, slot)
         return True
+
+    def _transmit_window_input_round(
+        self, slot_index: int, slot: _IngressContext,
+    ) -> bool:
+        """Reserve C2B once, then retain that reservation across backpressure."""
+        if not slot.c2b_reserved and LinkPath.C2B in self.links.paths:
+            packet = slot.packet
+            attribution = self._round_attribution(
+                packet.operation_id,
+                tuple(fragment.patch_id for fragment in packet.fragments),
+                packet.round_index,
+            )
+            delay_ticks = self._reserve(
+                LinkPath.C2B,
+                payload_bits=slot.packet_bits,
+                attribution=attribution,
+            )
+            slot.c2b_reserved = True
+            slot.state = _IngressSlotState.DRAINING
+            self.engine.schedule(
+                delay_ticks,
+                lambda: self._deliver_window_input_round(slot_index),
+                label="controller->syndrome buffer 0",
+            )
+            return True
+
+        # A legacy fabric has no C2B edge. A delivered-but-backpressured packet
+        # also returns here, without making a second reservation.
+        return self._deliver_window_input_round(slot_index)
+
+    def _deliver_window_input_round(self, slot_index: int) -> bool:
+        slot = self._slots[slot_index]
+        if LinkPath.C2B in self.links.paths and not slot.c2b_delivered:
+            round_identity = (slot.packet.operation_id, slot.packet.round_index)
+            self.syndrome_buffer.mark_publication_tick(
+                round_identity, self.engine.now)
+            slot.c2b_delivered = True
+        accepted = self.window_input_receiver.accept_window_input(slot.packet)
+        if type(accepted) is not bool:
+            raise TypeError("window input receiver must return an exact bool")
+        if not accepted:
+            slot.state = _IngressSlotState.PACKED_WAIT
+            return False
+        slot.state = _IngressSlotState.DRAINING
+        self.engine.schedule(
+            0,
+            lambda: self._release_slot(slot_index),
+            label="window input publication complete",
+        )
+        return True
+
+    def notify_window_input_ready(self) -> None:
+        """Retry a backpressured delivered packet without reserving C2B again."""
+        self._schedule_arbitration()
 
     def _transmit_feedback_memory_round(
         self, slot_index: int, slot: _IngressContext,

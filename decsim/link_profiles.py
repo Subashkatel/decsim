@@ -25,6 +25,8 @@ your own ``LinkModelConfig`` (or copy a card and edit it) in your own file.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 from .config import us
 from .links import (
     LinkCapacityConfig,
@@ -264,4 +266,35 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             "one controller-to-QPU payload per commit region",
         ),
         profile_name="bandwidth_limited",
+    )
+
+
+def with_controller_to_buffer_edge(
+    profile: LinkModelConfig,
+    *,
+    latency_us: float,
+    aggregate_bits_per_us: float,
+    source: str,
+) -> LinkModelConfig:
+    """Return ``profile`` with the optional priced C2B round-transfer edge.
+
+    The caller must supply both experiment-card numbers and their provenance.
+    Existing cards remain unchanged and therefore preserve pre-Q-055 behavior.
+    """
+    capacity = LinkCapacityConfig(
+        aggregate_bits_per_us,
+        LinkQuantityBasis.DIRECT_AGGREGATE,
+        None,
+        source,
+    )
+    channel = LinkConfig(us(latency_us), capacity, source)
+    edge = LinkEdgeConfig(
+        channel,
+        None,
+        "SyndromeRoundPacket.fragment_size_sum",
+    )
+    return replace(
+        profile,
+        c2b=edge,
+        profile_name=f"{profile.profile_name}+priced_c2b",
     )

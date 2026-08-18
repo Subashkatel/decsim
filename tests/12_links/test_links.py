@@ -39,7 +39,9 @@ from decsim.message import (
 
 OPERATION_ID = ("experiment", 7)
 PATCH_IDS = (1, 2)
-PATH_ORDER = ["qc", "cwd", "wsd", "csd", "wdo", "dd", "do", "oc", "cq"]
+PATH_ORDER = ["qc", "c2b", "cwd", "wsd", "csd", "wdo", "dd", "do", "oc", "cq"]
+# A shipped profile wires the nine required paths; C2B is optional and unset.
+REQUIRED_PATH_ORDER = [p for p in PATH_ORDER if p != "c2b"]
 
 
 def make_channel(*, capacity=None, propagation_ticks=7, source="test channel"):
@@ -79,7 +81,7 @@ def request_relation(*, tier, operation_id=OPERATION_ID, window_id=3, sequence=0
 
 
 def valid_attribution(path):
-    if path is LinkPath.QC:
+    if path in (LinkPath.QC, LinkPath.C2B):
         return TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, 2)
     if path is LinkPath.CWD:
         relation = request_relation(tier=DecoderTier.WEAK)
@@ -886,7 +888,7 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
 
     assert config.profile_name == "logical_reference"
     assert config.qc_excludes_controller_processing is False
-    assert topology["path_order"] == PATH_ORDER
+    assert topology["path_order"] == REQUIRED_PATH_ORDER
     assert len(topology["physical_channels"]) == 9
     assert all(channel["capacity"] is None for channel in topology["physical_channels"])
     propagation = {
@@ -1022,7 +1024,7 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
 
     assert config.profile_name == "bandwidth_limited"
     assert config.qc_excludes_controller_processing is False
-    assert topology["path_order"] == PATH_ORDER
+    assert topology["path_order"] == REQUIRED_PATH_ORDER
     assert len(topology["physical_channels"]) == 9
     assert capacities == expected_capacities
     assert fallbacks == expected_fallbacks

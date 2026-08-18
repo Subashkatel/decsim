@@ -386,6 +386,18 @@ class SyndromeBuffer:
             return None
         return slot.packet.fragments
 
+    def mark_publication_tick(self, round_identity, publication_tick: int) -> None:
+        """Stamp a retained round when its priced publication reaches Buffer 0."""
+        identity = _validated_round_identity(round_identity)
+        slot = self._rounds.get(identity)
+        if slot is None or slot.state is not SyndromeBufferRoundState.PACKED_RETAINED:
+            raise RuntimeError(f"round {identity!r} is not packed and retained")
+        if type(publication_tick) is not int or publication_tick < 0:
+            raise TypeError("publication_tick must be a nonnegative exact int")
+        if self._publication_ticks[identity] is not None:
+            raise RuntimeError(f"round {identity!r} was already published")
+        self._publication_ticks[identity] = publication_tick
+
     def publication_tick(self, round_identity) -> Optional[int]:
         return self._publication_ticks.get(_validated_round_identity(round_identity))
 

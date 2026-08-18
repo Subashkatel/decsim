@@ -1,14 +1,16 @@
-"""The nine reaction-path link segments, their channels, and the traffic ledger.
+"""The reaction-path link segments, their channels, and the traffic ledger.
 
 decsim prices TIME on the path from syndrome generation to corrected feedback.
 This module owns the transport part of that price: how long each hop takes and
 what evidence each hop leaves behind. It holds mechanism only. The number cards
 that fill it in live in ``decsim/link_profiles.py``.
 
-THE NINE PATHS. ``LinkPath`` is the closed reaction-path vocabulary. Each member
+THE PATHS. ``LinkPath`` is the closed reaction-path vocabulary. Each member
 is one measured segment, named for the pair of runtime components it connects:
 
 - ``QC``  QPU -> controller: syndrome readout leaving the QPU (t_qc).
+- ``C2B`` controller -> syndrome buffer 0: a completed binary round published
+  to the window-input route. This optional extension is inert on legacy cards.
 - ``CWD`` controller -> weak decoder: syndrome data reaching the weak tier,
   either as one round (``syndrome_ingress``) or as one weak window
   (``window_manager``) (t_cwd).
@@ -33,10 +35,10 @@ relation they must carry, and the decoder tier they belong to. It is the
 measurement decomposition, not a free-form axis, so a run cannot invent a
 segment and change what a latency report means.
 
-Closed does not mean frozen. Every one of the nine segments above is REQUIRED:
-its rule says so and a card that omits one is refused, so no fabric can quietly
-stop pricing part of the reaction path. A segment added later may be declared
-OPTIONAL in the same rule table, and a card then chooses whether to price it.
+Closed does not mean frozen. The original nine segments are REQUIRED: their
+rules say so and a card that omits one is refused. ``C2B`` is OPTIONAL so
+existing cards remain inert until
+they opt into the priced controller-to-buffer hop.
 The wired set of a card is therefore always a declared subset of the closed
 vocabulary, never an arbitrary set of names a run made up.
 
@@ -58,7 +60,7 @@ THE CONFIGURATION. Each path carries a ``LinkEdgeConfig``: the physical
 payload, and the name of the runtime quantity that supplies an actual payload
 size. ``LinkModelConfig`` is the whole fabric card: one edge per path plus a
 profile name. Two paths that are given the SAME ``LinkConfig`` object share one
-physical FIFO, so the number of physical channels behind the nine paths is
+physical FIFO, so the number of physical channels behind the wired paths is
 itself a configuration choice.
 
 QUANTITY RULES. Bandwidth is a real rate in bits per microsecond and only has to
@@ -176,9 +178,10 @@ def _require_known_basis(basis) -> None:
 
 
 class LinkPath(str, Enum):
-    """The nine measured reaction-path segments; see the module docstring."""
+    """The measured reaction-path segments; see the module docstring."""
 
     QC = "qc"
+    C2B = "c2b"
     CWD = "cwd"
     WSD = "wsd"
     CSD = "csd"
@@ -237,6 +240,10 @@ _PATH_RULES = {
         LinkAttributionScope.ROUND,
         "syndrome-round attribution without a window",
         LinkRelationRule.NONE, None, True),
+    LinkPath.C2B: LinkPathRule(
+        LinkAttributionScope.ROUND,
+        "syndrome-round attribution without a window",
+        LinkRelationRule.NONE, None, False),
     LinkPath.CWD: LinkPathRule(
         LinkAttributionScope.ROUND_OR_WINDOW,
         "syndrome-round or window-region attribution",
@@ -651,6 +658,7 @@ class LinkModelConfig:
     cq: LinkEdgeConfig
     profile_name: str
     qc_excludes_controller_processing: bool = False
+    c2b: Optional[LinkEdgeConfig] = None
 
     def wired_paths(self) -> tuple:
         """Return the paths this fabric card wires, in vocabulary order.

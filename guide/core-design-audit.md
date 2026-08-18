@@ -63,10 +63,10 @@ touched).
 | switching.py | 352 | extract SwitchingPreconditions (243-323) | validators are a distinct responsibility; class docstring narrates a paper comparison |
 | message.py | 1033 | leave as one vocabulary; move 6 hold tokens to syndrome_buffer, bring Submission/Directive/OutcomeDirective in from protocols | one responsibility, imported jointly by 20 modules; splitting adds imports and hides nothing |
 | protocols.py | 540 | keep as seams only after the three values move | 18 of 24 protocols are documentation only; fine as port docs |
-| links.py | 972 | split reporting out (828-972 to link_reports.py); trim _validate_attribution_shape | mechanism vs JSON reporting; 56 lines re-check what the caller constructs |
-| run_spec.py | 561 | move defaults and compatibility rules to defaults.py; replace 8 post-construction installs with constructor args | not a clean composition root today |
+| links.py | 972 | split reporting out (828-972 to link_traffic_report.py over a frozen link view); trim _validate_attribution_shape | mechanism vs JSON reporting; 56 lines re-check what the caller constructs |
+| run_spec.py | 561 | one resolver, resolve_run_configuration, for defaults and compatibility rules; replace 9 post-construction installs with constructor args | not a clean composition root today |
 | metrics.py | 742 | keep; decide BurstEscalationDetector (410-502, never wired) | delete from core or move to experiments |
-| views.py | 404 | keep; move capture_primary_result next to PrimaryRunResult; replace private reads with accessors | views reach into _ops, _selected_request_keys, engine internals, device._truth |
+| views.py | 404 | keep; move capture_primary_result next to PrimaryRunResult; replace private reads with purpose-built frozen views per owner | views reach into _ops, _selected_request_keys, engine internals, device._truth |
 | speculative_recovery.py | 419 | keep the seam, rewrite the body against the new collaborators | 30 private touches into window_manager, including 10 writes |
 | dynamic_windows.py | 313 | keep; invert seal callbacks | mostly deep; seal calls five manager mutators and admits it cannot roll back |
 | window_interactions.py | 197 | leave | the model collaborator: injected, no back reference, value objects in and out |
@@ -144,7 +144,7 @@ touched).
   unit and pool (dm 429,366,415), memory (dm 472,519), awaiting_strong_result
   (dm 627, read wm 2029-2119), service_* keys (dm 322,398-427),
   strong_label and dem (wm 870,1140-1150). Only dem has one owner.
-- run_spec installs 8 attributes after construction: syndrome_ingress
+- run_spec installs 9 attributes after construction: syndrome_ingress
   .syndrome_buffer 319; window_manager .strategy .services .submit_fn
   .on_workload_complete 349-355,406; decoder_manager .strategy .services
   .on_window_decoded .on_strong_window_decoded 349-355; and calls private
@@ -185,8 +185,8 @@ touched).
 | BurstEscalationDetector | metrics 410-502 | 93 | 0 | delete or move |
 | offline shot statistics | adapters/window_decode_results 404-501 | 98 | 0 | move |
 | dead accessors | window_manager speculative_replays 2389, peak_payloads 2733, payloads_held 2737; controller _patch_for_operation 365-370 | 12 | 0 | delete |
-| link JSON reporting | links 828-972 | 145 | 2 | move to link_reports.py |
-| provenance-as-data in core | links payload_selection 641, relation types 136-163, 406-448, SoftOutputSource.references 658-676 | about 120 plus 56 lines of validation | read only by traffic_json_value | retire or move to reporting |
+| link JSON reporting | links 828-972 | 145 | 2 | move to link_traffic_report.py |
+| provenance-as-data in core | SoftOutputSource.references 658-676 and the fields of the relation types that only the report reads | about 60 | read only by traffic_json_value | move to reporting. RequestTransferRelation itself stays: it drives request matching (links 789-795, 926); SoftOutputSource drives switching compatibility (switching 34-47, 151-176) |
 
 ## 6. The cut plan
 
@@ -195,7 +195,12 @@ feature; each is one commit; the lock (section 1) is green after each. Steps
 inside a phase are independent; phases are sequential because later
 extractions depend on earlier collaborators.
 
-Phase 0, zero-risk deletions and inlines (one commit)
+The phase list below is the first draft; the reviewed order (lock first,
+then deletions, then contracts, then components with per-component moves)
+is in guide/core-rewrite-plan.md section C and supersedes it.
+
+Phase 0, deletions and inlines (one commit; not zero-risk, the differential
+lock runs after it)
 - delete: window_manager speculative_replays, peak_payloads, payloads_held;
   controller _patch_for_operation; decoders SwitchingDecoder;
   controller.py 483-484 (fragment built only to validate).
@@ -210,12 +215,17 @@ Phase 0, zero-risk deletions and inlines (one commit)
   window_manager.
 - validation ceremony: delete the __post_init__ blocks and type guards that
   re-prove values another decsim module just built (message.py 45 raises /
-  23 type checks, links.py 44, ingress 12, buffer 8, engine 18, seeding 14,
-  qlx 46; roughly 300 lines). Keep only the six real invariants: qpu.issue
-  cadence equals the cycle; ExecutionRuntime._claim_resources no double
-  allocation; SyndromeBuffer duplicate and late-fragment checks; decoder
-  memory capacity exhaustion (fail-stop); RunSpec compatibility rules on
-  user config (moved to defaults.py); link card completeness.
+  23 type checks, links.py 44, ingress 12, buffer 8, engine 16, seeding 14;
+  roughly 250 lines), guard by guard from a keep/delete table, not by
+  category. Keep the six real invariants: qpu.issue cadence equals the
+  cycle; ExecutionRuntime._claim_resources no double allocation;
+  SyndromeBuffer duplicate and late-fragment checks; decoder memory capacity
+  exhaustion (fail-stop); RunSpec compatibility rules on user config (in the
+  resolver); link card completeness. Also keep the two engine clock checks
+  (engine.py 96-99 delay < 0, 183-185 event.time < now); they are not
+  ceremony, they keep simulated time monotone. RunSeedPathSegment.kind
+  (message.py 93-95) is replaced by a lookup by kind, no __post_init__.
+  frontends/qlx.py's 46 checks are the external input boundary and stay.
 - comments: convert the 10 history comments to present-tense invariants;
   add one-line invariants to the 14 undocumented message.py classes and the
   public methods listed in the audits.
@@ -304,14 +314,17 @@ Phase 3, window manager (order matters: 3a to 3c before 3d)
 Phase 4, wiring and vocabulary
 - protocols.py: move Submission, Directive, OutcomeDirective into message.py;
   message.py: move the six hold tokens (135-152) to syndrome_buffer.
-- links.py: reporting to link_reports.py; trim _validate_attribution_shape
-  to caller-facing rules; retire payload_selection (derive from
-  payload_source) and the relation types out of core mechanism, per the
-  no-provenance-as-data rule; keep source strings on config cards.
-- run_spec.py: defaults.py holds the ten default selections and five
-  compatibility rules (174-271, 550-557); _build_once becomes wiring plus
-  bind_run_seed; the engine phase machine gets a public run(); views and
-  metrics use small public accessors instead of private reads;
+- links.py: reporting to link_traffic_report.py over a frozen link view;
+  trim _validate_attribution_shape to caller-facing rules; retire
+  payload_selection (derive from payload_source) and the report-only
+  provenance fields; RequestTransferRelation stays (request matching); keep
+  source strings on config cards.
+- run_spec.py: resolve_run_configuration returns one frozen
+  ResolvedRunConfiguration (ten default selections, five compatibility
+  rules 174-271, 550-557, switching preconditions, factory check);
+  _build_once becomes wiring plus bind_run_seed; the engine phase machine
+  gets a public run(); views and metrics read purpose-built frozen views
+  instead of private reads;
   capture_primary_result moves next to PrimaryRunResult (breaks the
   run_spec to views import cycle).
 - schemes.py: WindowScheme protocol plus shared data_complete; drop the
@@ -334,7 +347,9 @@ Phase 4, wiring and vocabulary
 
 ## 8. Effort and order of value
 
-Phase 0 and Phase 1 are a day and remove the most-read entanglement on the
-baseline path (front path chains 6 to 9). Phase 2 is a day. Phase 3 is two to
-three days and is where the baseline stops paying for the strong tier. Phase 4
-is a day. Each phase ends with the lock green and a status note.
+The differential lock (rewrite plan section C, Phase 0) is about a day.
+Deletions and the front path are a day and remove the most-read entanglement
+on the baseline path (front path chains 6 to 9). The decoder side is a day.
+The window manager is two to three days and is where the baseline stops
+paying for the strong tier. Wiring and vocabulary is a day. Each phase ends
+with the lock green and a status note.

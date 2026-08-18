@@ -33,6 +33,7 @@ _OPERATION_ID = ("experiment", 7)
 _PATCH_IDS = (1, 2)
 _ENDPOINTS = {
     "qc": ("qpu", "controller"),
+    "c2b": ("controller", "syndrome buffer 0"),
     "cwd": ("controller", "weak decoder"),
     "wsd": ("weak decoder", "strong decoder"),
     "csd": ("controller", "strong decoder"),
@@ -108,11 +109,8 @@ def _topology(config):
 def test_link_module_documents_every_segment_endpoint_and_extension_step():
     """The module explains every fixed segment, endpoint pair, and extension step."""
     doc = links_module.__doc__ or ""
-    assert len(LinkPath) == 9
-    assert not any(
-        "controller" in path.name.lower() and "buffer" in path.name.lower()
-        for path in LinkPath
-    )
+    assert len(LinkPath) == 10
+    assert LinkPath.C2B in LinkPath          # optional controller-to-buffer hop
     for path in LinkPath:
         lines = [line.lower() for line in doc.splitlines() if f"``{path.name}``" in line]
         assert lines, f"missing documentation for {path.name}"
@@ -135,9 +133,10 @@ def test_link_module_documents_every_segment_endpoint_and_extension_step():
 
 
 def test_rule_table_and_reference_cards_cover_the_closed_vocabulary():
-    """One complete rule table and both cards cover all nine required paths."""
-    paths = tuple(LinkPath)
-    assert tuple(links_module._PATH_RULES) == paths
+    """One complete rule table; both cards wire the nine required paths."""
+    assert tuple(links_module._PATH_RULES) == tuple(LinkPath)
+    assert not links_module._PATH_RULES[LinkPath.C2B].required
+    paths = tuple(p for p in LinkPath if p is not LinkPath.C2B)
     assert all(links_module._PATH_RULES[path].required for path in paths)
     for profile in (logical_reference_profile, bandwidth_limited_profile):
         config = profile()
@@ -271,7 +270,7 @@ def test_scientific_guards_and_relation_rules_remain_at_trust_boundaries():
         link.reserve(payload_bits=1, now_ticks=1)
 
     model = logical_reference_profile().resolve()
-    for path in LinkPath:
+    for path in logical_reference_profile().wired_paths():
         edge = getattr(logical_reference_profile(), path.value)
         payload_bits = 1 if edge.actual_payload_source is not None else None
         model.reserve(

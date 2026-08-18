@@ -26,9 +26,7 @@ class Controller:
                  syndrome_ingress=None, binary_availability_ticks: int = 0,
                  links=None,
                  round_ticks: int, code_geometry, resolved_operations,
-                 resolved_patches, idle_policy,
-                 max_idle_rounds: Optional[int] = None,
-                 gates_start_on_round_boundaries: bool = False, protected_regions=()):
+                 resolved_patches, idle_policy, protected_regions=()):
         self.engine = engine
         self.qpu = qpu
         self.window_manager = window_manager
@@ -49,9 +47,6 @@ class Controller:
             patch.patch_identity: patch
             for patch in resolved_patches
         })
-        self.gates_start_on_round_boundaries = gates_start_on_round_boundaries
-        self.max_idle_rounds = max_idle_rounds if max_idle_rounds is not None \
-            else 100 * code_geometry.distance
         self._protected_regions = tuple(protected_regions)
         self._regions_starting_at = {}
         self._regions_ending_at = {}
@@ -65,8 +60,6 @@ class Controller:
         self._feedback_source_ids = set()
 
         self.idle_rounds_emitted = 0
-        self.idle_cap_hits: list[dict] = []
-        self._patches_emitting: set = set()
         self.stream_next_round: dict = {}
         self._stream_binding_by_operation_id = {}
 
@@ -152,8 +145,10 @@ class Controller:
     def can_start(self, operation: Operation) -> bool:
         return not self._must_wait_for_round_boundary(operation)
 
-    def issue_operation(self, operation: Operation, idle_rounds: int) -> None:
+    def issue_operation(self, operation: Operation, idle_rounds: int) -> int:
+        """Command the QPU; return the cycle boundary the operation starts on."""
         self._begin(operation, idle_rounds)
+        return self.qpu.next_boundary()
 
 
     def _must_wait_for_round_boundary(self, operation: Operation) -> bool:
@@ -163,9 +158,7 @@ class Controller:
             return True
         if active_patches:
             return not active_patches.issubset(self._boundary_open_patches)
-        if not self.gates_start_on_round_boundaries:
-            return False
-        return self._patch_for_operation(operation) in self._patches_emitting
+        return False
 
     def _protected_feedback_stream(self, operation: Operation):
         if operation.id not in self._feedback_source_ids:
@@ -384,8 +377,9 @@ class Controller:
 
     def after_successor_release(self, operation: Operation) -> None:
         self._close_feedback_boundary_if_needed(operation)
-        self._start_idle_stream_if_needed(operation)
         self._seal_finished_streams_if_needed()
+        if self.runtime.workload_complete:
+            self.qpu.finish()
 
     def _request_protected_region_closes(self, operation: Operation) -> None:
         ending_regions = self._regions_ending_at.get(operation.id, ())
@@ -429,60 +423,18 @@ class Controller:
                 continue
             self.window_manager.seal_stream(stream_id, total_rounds)
 
-    def _start_idle_stream_if_needed(self, operation: Operation) -> None:
-        if set(operation.patches).intersection(self._active_stream_id_by_patch):
-            return
-        if not self.runtime.waiting_blocked_successor(operation.id):
-            return
-        self.engine.log("Controller",
-                        f"{operation.name} patch idles (successor blocked on a "
-                        f"decode); emitting memory rounds every round until the "
-                        f"correction returns")
-        patch = self._patch_for_operation(operation)
-        self._patches_emitting.add(patch)
-        self.engine.schedule(
-            self._round_ticks_for_patch(patch),
-            lambda operation_id=operation.id, patch_id=patch:
-                self._emit_idle_round(operation_id, patch_id, 1),
-            label=f"idle-tick({operation.name},1)")
-
-
-    def _emit_idle_round(self, op_id: int, patch, round_index: int) -> None:
-        """Emit one idle round, run due work, and schedule the next round."""
-        if not self.runtime.waiting_blocked_successor(op_id):
-            self._patches_emitting.discard(patch)
-            return
-        if self._idle_round_cap_reached(op_id, patch, round_index):
+    def emit_idle_round(self, op_id: int, patch, round_index: int) -> None:
+        """One idle cycle of a patch nobody is operating on: syndrome extraction
+        never stops, so the round is produced, transmitted and accounted; the
+        window manager decides through the idle policy whether it costs decode
+        work. Patches on a live protected stream emit through that stream."""
+        if patch in self._active_stream_id_by_patch:
             return
         self._relay_idle_round(op_id, patch, round_index)
         self.runtime.record_idle_round(patch)
         self.idle_rounds_emitted += 1
         self.idle_policy.account(1, self.runtime.operations[op_id])
-        self.runtime.start_released_successors_on_boundary(op_id, patch)
         self._submit_idle_decode_if_due(op_id, patch, round_index)
-        self.engine.schedule(
-            self._round_ticks_for_patch(patch),
-            lambda operation_id=op_id, patch_id=patch, done=round_index:
-                self._emit_idle_round(operation_id, patch_id, done + 1),
-            label=f"idle-tick({self.runtime.operations[op_id].name},{round_index + 1})")
-
-    def _idle_round_cap_reached(self, op_id: int, patch,
-                                round_index: int) -> bool:
-        if round_index <= self.max_idle_rounds:
-            return False
-        self._patches_emitting.discard(patch)
-        self.idle_cap_hits.append({
-            "time": self.engine.now, "op_id": op_id, "patch": patch,
-            "round_index": round_index,
-            "max_idle_rounds": self.max_idle_rounds})
-        self.engine.log("Controller",
-                        f"WARNING: {self.runtime.operations[op_id].name} hit the idle-round cap "
-                        f"(max_idle_rounds={self.max_idle_rounds}) with its "
-                        f"blocked successor still waiting. No more memory rounds "
-                        f"will be emitted, so decoder load and backlog past this "
-                        f"point are understated. Raise max_idle_rounds for "
-                        f"long-reaction studies.")
-        return True
 
     def _relay_idle_round(self, op_id: int, patch, round_index: int) -> None:
         if self._relay_idle_round_to_live_stream(op_id, patch):
@@ -534,10 +486,6 @@ class Controller:
         self.syndrome_ingress.relay_qpu_readout(
             payload, route, processing_ticks=self.binary_availability_ticks)
 
-
-    def note_round_boundary(self, patch) -> None:
-        if self.gates_start_on_round_boundaries:
-            self._patches_emitting.discard(patch)
 
     def _submit_idle_decode_if_due(self, op_id: int, patch,
                                    round_index: int) -> None:

@@ -112,8 +112,6 @@ class RunSpec:
     boundary_policy: Optional[Any] = None
     window_interaction: Optional[Any] = None
     idle_policy: Optional[Any] = None
-    max_idle_rounds: Optional[int] = None
-    gates_start_on_round_boundaries: bool = False
     feedback_boundary_mode: str = "trailing_buffer"
     timing: TimingConfig = field(default_factory=TimingConfig)
     round_us: Optional[float] = None
@@ -362,7 +360,7 @@ class RunSpec:
             raise ValueError(
                 f"{type(factory).__name__} uses a different engine")
         _check_factory_decode_service(factory, decoder_manager)
-        qpu = QPUDevice(engine, device)
+        qpu = QPUDevice(engine, device, plan.round_ticks)
         window_manager.connect_idle_decode_demand_receiver(
             decoder_manager.submit_decode)
         controller = Controller(
@@ -373,8 +371,6 @@ class RunSpec:
             code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches, idle_policy=idle_policy,
-            max_idle_rounds=self.max_idle_rounds,
-            gates_start_on_round_boundaries=self.gates_start_on_round_boundaries,
             protected_regions=protected_regions)
         from .execution_runtime import ExecutionRuntime
         execution_runtime = ExecutionRuntime(
@@ -383,6 +379,7 @@ class RunSpec:
         controller.connect_runtime(execution_runtime)
         qpu.connect_readout_receiver(controller)
         qpu.connect_completion_receiver(controller._body_done)
+        qpu.connect_idle_receiver(controller.emit_idle_round)
         metrics = (self.make_metrics(
             engine, window_manager, decoder_manager, execution_runtime, factory)
             if self.make_metrics else [])

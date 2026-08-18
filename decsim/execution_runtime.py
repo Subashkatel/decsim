@@ -141,7 +141,7 @@ class ExecutionRuntime:
             return
         self.op_start_time[operation.id] = self.engine.now
         idle_rounds = self.consume_idle_rounds(operation)
-        self.controller.issue_operation(operation, idle_rounds)
+        self.op_start_time[operation.id] = self.controller.issue_operation(operation, idle_rounds)
 
     def body_done(self, operation):
         if operation.id not in self.operations:
@@ -175,23 +175,7 @@ class ExecutionRuntime:
                 continue
             if successor.id not in self.decode_release_time:
                 return True
-            if self.controller.gates_start_on_round_boundaries:
-                return True
         return False
-
-    def start_released_successors_on_boundary(self, operation_id, patch=None):
-        if not self.controller.gates_start_on_round_boundaries:
-            return
-        for successor_id in self.successors[operation_id]:
-            successor = self.operations[successor_id]
-            if (successor.blocked_by is not None and
-                    successor.id not in self.op_start_time and
-                    successor.id in self.decode_release_time and
-                    successor.id in self.state_ready and
-                    successor.id in self.schedule_released):
-                if patch is not None:
-                    self.controller.note_round_boundary(patch)
-                self._maybe_begin(successor)
 
     def retry_ready_operations(self):
         """Retry every state-ready operation after a controller cadence change."""

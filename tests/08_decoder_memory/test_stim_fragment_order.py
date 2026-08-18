@@ -12,6 +12,7 @@ from decsim.detector_error_model.window_model_builders import (
     build_window_error_models,
 )
 from decsim.message import Operation, RunOperationBody
+from decsim.engine import Engine
 from decsim.qpu import QPUDevice
 
 
@@ -178,14 +179,6 @@ def test_terminal_fragment_follows_ordinary_fragment_in_the_same_round() -> None
     assert terminal_payload.size_bits == DISTANCE
 
 
-class _ImmediateEngine:
-    def schedule(self, ticks, action, label=None) -> None:
-        action()
-
-    def log(self, component, message) -> None:
-        pass
-
-
 class _ReadoutCapture:
     def __init__(self) -> None:
         self.readouts = []
@@ -201,18 +194,8 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
     _, terminal_rows = _split_final_round_rows(rows_by_round)
     detector_sample = circuit.compile_detector_sampler().sample(shots=1)[0]
     capture = _ReadoutCapture()
-    qpu = QPUDevice(
-        _ImmediateEngine(),
-        StimDevice(
-            seed=17,
-            detector_rounds={STREAM_ID: detector_rounds},
-            terminal_detector_ids={STREAM_ID: terminal_rows},
-            terminal_data_bits={STREAM_ID: DISTANCE},
-        ),
-        readout_receiver=capture,
-        completion_receiver=lambda operation: None,
-    )
-
+    engine = Engine()
+    commands = []
     for stream_offset in range(ROUND_COUNT):
         fragment_index = 0 if stream_offset == ROUND_COUNT - 1 else None
         operation = _operation(
@@ -221,7 +204,7 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
             stream_offset=stream_offset,
             fragment_index=fragment_index,
         )
-        qpu.issue(RunOperationBody(operation, 1, 1, ROUND_COUNT))
+        commands.append(RunOperationBody(operation, 1, 1, ROUND_COUNT))
     finalizer = _operation(
         4,
         circuit,
@@ -229,15 +212,31 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
         fragment_index=1,
         finalizes_stream_round=True,
     )
-    qpu.issue(
-        RunOperationBody(
-            finalizer,
-            1,
-            0,
-            ROUND_COUNT,
-            finalizes_stream_round=True,
-        )
+    commands.append(RunOperationBody(finalizer, 1, 0, ROUND_COUNT, finalizes_stream_round=True))
+    commands.reverse()
+
+    def issue_next(_operation=None) -> None:      # one segment per cycle, in stream order
+        if commands:
+            qpu.issue(commands.pop())
+        else:
+            qpu.finish()
+
+    qpu = QPUDevice(
+        engine,
+        StimDevice(
+            seed=17,
+            detector_rounds={STREAM_ID: detector_rounds},
+            terminal_detector_ids={STREAM_ID: terminal_rows},
+            terminal_data_bits={STREAM_ID: DISTANCE},
+        ),
+        1,
+        readout_receiver=capture,
+        completion_receiver=issue_next,
+        idle_receiver=lambda *args: None,
     )
+    issue_next()
+    engine._start_running()
+    engine.run()
 
     assert tuple(
         (readout.round_index, readout.fragment_index, readout.n_fragments)

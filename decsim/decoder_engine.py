@@ -86,13 +86,15 @@ class DecoderStageRecord:
 @dataclass
 class _RunningDecode:
     job: DecodeJob
-    on_done: Callable[[], None]
+    on_result: Callable[[Optional[DecodeResult]], None]
     result: Optional[DecodeResult] = None
     aborted: bool = False
 
 
 class DecoderEngine:
-    """Decoder port plus ``run()``: stages before, the algorithm, stages after."""
+    """Decoder port plus ``run()``: stages before, the algorithm, stages after;
+    the result reaches the caller through the ``on_result`` callback when the
+    last stage ends (None when the job was cancelled meanwhile)."""
 
     log_name = "DecoderEngine"
 
@@ -101,7 +103,6 @@ class DecoderEngine:
         self.decoder = decoder
         self.timing = timing
         self.fault_model_requirement = _decoder_fault_model_requirement(decoder)
-        self._completed: dict = {}
         self._running: dict = {}
         self.stage_records: list[DecoderStageRecord] = []
 
@@ -121,9 +122,10 @@ class DecoderEngine:
     def latency(self, job: DecodeJob) -> int:
         return sum(self.timing.stage_ticks(job).values()) + self.decoder.latency(job)
 
-    def run(self, job: DecodeJob, engine, on_done: Callable[[], None]) -> None:
+    def run(self, job: DecodeJob, engine,
+            on_result: Callable[[Optional[DecodeResult]], None]) -> None:
         """Walk the stages as engine events on the unit the manager granted."""
-        running = _RunningDecode(job, on_done)
+        running = _RunningDecode(job, on_result)
         ticks = self.timing.stage_ticks(job)
         steps = ([(s.name, s.cycles_for(job), ticks[s.name]) for s in self.timing.before]
                  + [(ALGORITHM_STAGE, None, None)]
@@ -142,11 +144,8 @@ class DecoderEngine:
         if running.aborted:
             return
         if index == len(steps):
-            key = self._key(job)          # None for a self-contained external job
-            self._running.pop(key, None)
-            if key is not None and running.result is not None:
-                self._completed[key] = running.result
-            running.on_done()
+            self._running.pop(self._key(job), None)
+            running.on_result(running.result)
             return
         name, cycles, ticks = steps[index]
         start = engine.now
@@ -177,13 +176,6 @@ class DecoderEngine:
             self._enter(running, engine, steps, index + 1)
 
         engine.schedule(ticks, leave, label=f"{name}({job.label})")
-
-    def decode(self, job: DecodeJob) -> DecodeResult:
-        """Return the result the algorithm produced; released by run()."""
-        result = self._completed.pop(self._key(job), None)
-        if result is None:
-            raise RuntimeError(f"{job.label!r} has not completed")
-        return result
 
     def stage_records_for(self, op_id: int, window_id: int) -> tuple:
         return tuple(record for record in self.stage_records

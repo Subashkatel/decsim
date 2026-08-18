@@ -51,11 +51,11 @@ def _job(window_id=0, n_rounds=3):
 def _run(decoder, engine, job):
     seen = {}
 
-    def on_done():
+    def on_result(result):
         seen["done_at"] = engine.now
-        seen["result"] = decoder.decode(job)
+        seen["result"] = result
 
-    decoder.run(job, engine, on_done)
+    decoder.run(job, engine, on_result)
     engine.run()
     return seen
 
@@ -118,22 +118,18 @@ def test_cancelled_job_still_holds_the_unit_but_skips_the_algorithm():
     job = _job()
     job.cancelled = True
     done = []
-    decoder.run(job, engine, lambda: done.append(engine.now))
+    decoder.run(job, engine, lambda result: done.append((engine.now, result)))
     engine.run()
     assert inner.decode_ticks == []
-    assert done == [decoder.latency(job)]
-    with pytest.raises(RuntimeError, match="not completed"):
-        decoder.decode(job)
+    assert done == [(decoder.latency(job), None)]
 
 
-def test_result_can_be_read_once():
+def test_result_reaches_the_callback():
     engine = Engine(verbose=False)
     decoder = DecoderEngine(_RecordingInner(engine), _timing())
     job = _job()
     seen = _run(decoder, engine, job)
     assert seen["result"].op_id == 1
-    with pytest.raises(RuntimeError, match="not completed"):
-        decoder.decode(job)
 
 
 def test_guards():
@@ -221,7 +217,7 @@ def test_cancel_stops_the_remaining_stages_and_never_calls_on_done():
     decoder = DecoderEngine(inner, _timing())
     job = _job()
     done = []
-    decoder.run(job, engine, lambda: done.append(engine.now))
+    decoder.run(job, engine, lambda result: done.append(engine.now))
     engine.schedule(1, lambda: decoder.cancel(job))          # during fetch
     engine.run()
     assert done == []

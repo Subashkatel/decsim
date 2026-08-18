@@ -133,6 +133,7 @@ def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry
         ),
     )
     slot = SimpleNamespace(
+        identity="ctx", round_key=(17, 4),
         packet=packet,
         packet_bits=300,
         c2b_reserved=False,
@@ -144,11 +145,11 @@ def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry
     ingress.links = links
     ingress.window_input_receiver = receiver
     ingress.syndrome_buffer = publication
-    ingress._slots = [slot]
     slot.route = SimpleNamespace(kind=SyndromePacketRouteKind.WINDOW_INPUT)
-    ingress._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: [0]}
+    ingress._contexts = {"ctx": slot}
+    ingress._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: ["ctx"]}
 
-    assert ingress._transmit_window_input_round(0, slot) is True
+    assert ingress._transmit_window_input_round(slot) is True
     assert receiver.received == []
     assert publication.calls == []
     assert len(links.traffic_json_value()["transfers"]) == 1
@@ -160,7 +161,7 @@ def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry
     assert publication.calls == [((17, 4), arrival_tick)]
     assert slot.state is _IngressSlotState.PACKED_WAIT
 
-    assert ingress._transmit_window_input_round(0, slot) is True
+    assert ingress._transmit_window_input_round(slot) is True
     assert receiver.received == [packet, packet]
     assert publication.calls == [((17, 4), arrival_tick)]
     assert len(links.traffic_json_value()["transfers"]) == 1
@@ -176,6 +177,7 @@ def test_unwired_legacy_ingress_delivery_is_immediate_and_has_no_c2b_publication
         fragments=(SimpleNamespace(patch_id=1, size_bits=16),),
     )
     slot = SimpleNamespace(
+        identity="ctx", round_key=(3, 8),
         packet=packet, packet_bits=16, c2b_reserved=False,
         c2b_delivered=False, state=_IngressSlotState.PACKED_WAIT,
     )
@@ -184,11 +186,11 @@ def test_unwired_legacy_ingress_delivery_is_immediate_and_has_no_c2b_publication
     ingress.links = links
     ingress.window_input_receiver = receiver
     ingress.syndrome_buffer = publication
-    ingress._slots = [slot]
     slot.route = SimpleNamespace(kind=SyndromePacketRouteKind.WINDOW_INPUT)
-    ingress._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: [0]}
+    ingress._contexts = {"ctx": slot}
+    ingress._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: ["ctx"]}
 
-    assert ingress._transmit_window_input_round(0, slot) is True
+    assert ingress._transmit_window_input_round(slot) is True
     assert receiver.received == [packet]
     assert publication.calls == []
     assert "c2b" not in links.traffic_json_value()["path_order"]

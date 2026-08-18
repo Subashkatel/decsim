@@ -11,8 +11,7 @@ from .message import (DecodeJob, DecodeOutcome, DecodeResult,
                       SoftOutput, StrongDecodeCompletion,
                       stable_identity_order_key)
 from .protocols import DecoderInputTransfer, Directive
-from .decoder_input_store import (DecoderInputStoreConfig,
-                                  DecoderInputStoreStager)
+from .decoder_memory import DecoderMemoryConfig, DecoderMemoryStager
 from .config import fmt
 
 
@@ -80,7 +79,7 @@ class DecoderManager:
                  lane_policy=None, log_name: str = "DecoderCluster",
                  capture_enabled: bool = False,
                  decoder_input_transfer=None,
-                 decoder_input_store: Optional[DecoderInputStoreConfig] = None):
+                 decoder_memory: Optional[DecoderMemoryConfig] = None):
         from .decoder_input_transfer import FixedLatencyDecoderInputTransfer
 
         self.engine = engine
@@ -125,11 +124,11 @@ class DecoderManager:
 
         self.unit_totals = dict(unit_pools)
         self.pool_free = dict(unit_pools)
-        # One stager owns decoder-input storage behind every transport. A
+        # One stager owns decoder memory behind every transport. A
         # configured store needs one exact round budget per normalized unit
         # pool; with none the stager keeps a single unbounded store.
-        self.decoder_input_stager = DecoderInputStoreStager(
-            engine, config=decoder_input_store,
+        self.decoder_memory_stager = DecoderMemoryStager(
+            engine, config=decoder_memory,
             pool_names=tuple(self.unit_totals))
         self._dispatching = False
         self.num_units = self.unit_totals["default"]
@@ -197,7 +196,7 @@ class DecoderManager:
         delivered = False
         expected_delivery_tick = self.engine.now + delay_ticks
         input_pool = (self.pool_for(job)
-                      if self.decoder_input_stager.enabled else None)
+                      if self.decoder_memory_stager.enabled else None)
 
         def receive_once(delivered_job: DecodeJob) -> None:
             nonlocal delivered
@@ -219,7 +218,7 @@ class DecoderManager:
                     "storage admission"
                 )
             delivered = True
-            self.decoder_input_stager.admit(
+            self.decoder_memory_stager.admit(
                 job, pool=input_pool,
                 on_admitted=enqueue_admitted_job,
                 on_materialized=release_upstream_hold,
@@ -408,10 +407,10 @@ class DecoderManager:
         self._dispatching = True
         try:
             while True:
-                self.decoder_input_stager.drain_admissible_requests()
+                self.decoder_memory_stager.drain_admissible_requests()
                 for pool in self.unit_totals:
                     self._dispatch_pool(pool)
-                if not self.decoder_input_stager.has_drainable_work():
+                if not self.decoder_memory_stager.has_drainable_work():
                     return
         finally:
             self._dispatching = False
@@ -502,7 +501,7 @@ class DecoderManager:
         waiting for round credits, already stored, or already cleared is safe.
         """
         self.decoder_input_transfer.cancel(job)
-        self.decoder_input_stager.cancel(job)
+        self.decoder_memory_stager.cancel(job)
         hold = job.input_hold
         if hold is not None:
             hold()
@@ -510,7 +509,7 @@ class DecoderManager:
 
     def _release_decoder_input(self, job: DecodeJob) -> None:
         """Return one job's round credits; a job holding none is untouched."""
-        self.decoder_input_stager.release(job)
+        self.decoder_memory_stager.release(job)
 
     def _release_service_decoder_inputs(self, service_job: DecodeJob) -> None:
         """Return the credits of every request still served by one decode.
@@ -699,7 +698,7 @@ class DecoderManager:
         """Snapshot each physical strong job once in its authoritative phase.
 
         The ``in_transit`` phase means admitted but not yet queued: still in
-        input transport, or, with a configured decoder-input store, waiting for
+        input transport, or, with a configured decoder memory, waiting for
         round credits.
         """
         queue_memberships = {}
@@ -907,7 +906,7 @@ class DecoderManager:
                 ("decoding with no outcome", self._unresolved_weak_decodes),
             ) if keys
         }
-        storage_states = self.decoder_input_stager.unsettled_storage()
+        storage_states = self.decoder_memory_stager.unsettled_storage()
         for storage_state, pools in storage_states:
             unsettled[storage_state] = pools
         if unsettled:

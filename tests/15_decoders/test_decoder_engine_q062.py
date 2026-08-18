@@ -3,11 +3,11 @@
 import pytest
 
 from decsim.config import us
-from decsim.decoder_cycle_model import (
+from decsim.decoder_engine import (
     ALGORITHM_STAGE,
     DecoderStage,
     DecoderTiming,
-    TimedDecoder,
+    DecoderEngine,
 )
 from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
 from decsim.engine import Engine
@@ -64,7 +64,7 @@ def _run(decoder, engine, job):
 def test_stages_before_algorithm_after_in_order_with_ticks():
     engine = Engine(verbose=False)
     inner = _RecordingInner(engine)
-    decoder = TimedDecoder(inner, _timing())
+    decoder = DecoderEngine(inner, _timing())
 
     seen = _run(decoder, engine, _job(n_rounds=3))
 
@@ -82,7 +82,7 @@ def test_stages_before_algorithm_after_in_order_with_ticks():
 def test_the_result_is_produced_when_the_algorithm_time_ends():
     engine = Engine(verbose=False)
     inner = _RecordingInner(engine, latency_us=5.0)
-    decoder = TimedDecoder(inner, _timing())
+    decoder = DecoderEngine(inner, _timing())
 
     _run(decoder, engine, _job())
 
@@ -92,7 +92,7 @@ def test_the_result_is_produced_when_the_algorithm_time_ends():
 
 def test_algorithm_time_is_the_wrapped_decoder_latency_only():
     inner = PerRoundDecoder(tau_us=0.5)
-    decoder = TimedDecoder(inner, _timing(before=(), after=()))
+    decoder = DecoderEngine(inner, _timing(before=(), after=()))
     job = _job(n_rounds=4)
     assert decoder.latency(job) == inner.latency(job)
 
@@ -103,7 +103,7 @@ def test_hardware_stages_are_data_with_free_names():
         before=(DecoderStage("syndrome_ingest", cycles_per_round=2),
                 DecoderStage("predecode", cycles_per_round=3)),
         after=(DecoderStage("correction_output", cycles_per_job=4),))
-    decoder = TimedDecoder(_RecordingInner(engine, 0.0), timing)
+    decoder = DecoderEngine(_RecordingInner(engine, 0.0), timing)
 
     _run(decoder, engine, _job(n_rounds=2))
 
@@ -115,7 +115,7 @@ def test_hardware_stages_are_data_with_free_names():
 def test_cancelled_job_still_holds_the_unit_but_skips_the_algorithm():
     engine = Engine(verbose=False)
     inner = _RecordingInner(engine)
-    decoder = TimedDecoder(inner, _timing())
+    decoder = DecoderEngine(inner, _timing())
     job = _job()
     job.cancelled = True
     done = []
@@ -130,7 +130,7 @@ def test_cancelled_job_still_holds_the_unit_but_skips_the_algorithm():
 
 def test_result_can_be_read_once():
     engine = Engine(verbose=False)
-    decoder = TimedDecoder(_RecordingInner(engine), _timing())
+    decoder = DecoderEngine(_RecordingInner(engine), _timing())
     job = _job()
     seen = _run(decoder, engine, job)
     assert seen["result"].op_id == 1
@@ -169,7 +169,7 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
                        device=StimDevice(), decoder=decoder, seed=11).build()
 
     bare = build(PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)))
-    timed = TimedDecoder(PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)), _timing())
+    timed = DecoderEngine(PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)), _timing())
     staged = build(timed)
 
     assert staged.result.terminal_status == "complete"

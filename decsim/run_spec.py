@@ -17,7 +17,7 @@ from .message import ExecutionProgram, OperationPlanningView, RunSeedPathSegment
 from .seeding import bind_run_seed
 
 if TYPE_CHECKING:
-    from .decoder_input_store import DecoderInputStoreConfig
+    from .decoder_memory import DecoderMemoryConfig
 
 
 @dataclass(frozen=True)
@@ -122,7 +122,7 @@ class RunSpec:
     error_model_provider: Optional[Any] = None
     memory_model: Optional[Any] = None
     syndrome_buffering: Optional[Any] = None
-    decoder_input_store: Optional["DecoderInputStoreConfig"] = None
+    decoder_memory: Optional["DecoderMemoryConfig"] = None
     pauli_frame: Optional[Any] = None
     syndrome_ingress_policy: Optional[Any] = None
     make_syndrome_ingress: Optional[Callable] = None
@@ -320,7 +320,7 @@ class RunSpec:
         if self.make_syndrome_ingress is not None:
             syndrome_ingress.syndrome_buffer = syndrome_buffer
         # A supplied transfer owns transport timing only: the decoder manager's
-        # stager is always the receiver, so decoder-input storage cannot be
+        # stager is always the receiver, so decoder memory cannot be
         # bypassed. The returned transfer must satisfy deliver plus cancel.
         if self.make_decoder_input_transfer is None:
             from .decoder_input_transfer import FixedLatencyDecoderInputTransfer
@@ -345,7 +345,7 @@ class RunSpec:
             lane_policy=self.lane_policy,
             capture_enabled=self.record_switching_windows,
             decoder_input_transfer=decoder_input_transfer,
-            decoder_input_store=self.decoder_input_store)
+            decoder_memory=self.decoder_memory)
         decoder_input_transfer = decoder_manager.decoder_input_transfer
         services = StrategyServicesImpl(engine, window_manager, decoder_manager)
         window_manager.strategy = strategy

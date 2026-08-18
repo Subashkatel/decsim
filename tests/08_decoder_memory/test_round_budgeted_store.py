@@ -6,12 +6,12 @@ from types import SimpleNamespace
 import pytest
 
 import decsim
-from decsim.decoder_input_store import (
-    DecoderInputStoreCapacityExhaustion,
-    DecoderInputStoreConfig,
-    DecoderInputStoreOverflowPolicy,
-    DecoderInputStoreStager,
-    DecoderInputStoreUnsatisfiableDemand,
+from decsim.decoder_memory import (
+    DecoderMemoryCapacityExhaustion,
+    DecoderMemoryConfig,
+    DecoderMemoryOverflowPolicy,
+    DecoderMemoryStager,
+    DecoderMemoryUnsatisfiableDemand,
     count_decoder_input_round_demand,
     materialize_decoder_input,
 )
@@ -32,7 +32,7 @@ from decsim.message import (
     Operation,
     RetainedSyndromeFragment,
 )
-from decsim.metrics import DecoderInputStoreOccupancy, DecoderUtilization
+from decsim.metrics import DecoderMemoryOccupancy, DecoderUtilization
 from decsim.rounds import FixedRounds
 from decsim.run_spec import RunSpec
 from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
@@ -43,7 +43,7 @@ from decsim.syndrome_ingress import (
     SyndromeIngressPolicy,
 )
 from decsim.switching import Switching
-from decsim.views import decoder_input_store_view
+from decsim.views import decoder_memory_view
 
 
 class ManualEngine:
@@ -195,7 +195,7 @@ def make_manager(
         scheduler=FifoScheduler(),
         unit_pools=unit_pools,
         decoder_input_transfer=transfer,
-        decoder_input_store=config,
+        decoder_memory=config,
         bulk_strong=bulk_strong,
     )
 
@@ -232,15 +232,15 @@ def test_stager_materializes_once_after_credits_fit_and_unwinds_failures(
 ) -> None:
     """Admission materializes once after reserve and returns credits on failure."""
     engine = ManualEngine()
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         engine,
-        config=DecoderInputStoreConfig({"weak": 2}),
+        config=DecoderMemoryConfig({"weak": 2}),
         pool_names=("weak",),
     )
     job = make_job("job", (0, 1))
     materializations = 0
     original = __import__(
-        "decsim.decoder_input_store", fromlist=["materialize_decoder_input"]
+        "decsim.decoder_memory", fromlist=["materialize_decoder_input"]
     ).materialize_decoder_input
 
     def counted(candidate):
@@ -249,7 +249,7 @@ def test_stager_materializes_once_after_credits_fit_and_unwinds_failures(
         return original(candidate)
 
     monkeypatch.setattr(
-        "decsim.decoder_input_store.materialize_decoder_input", counted
+        "decsim.decoder_memory.materialize_decoder_input", counted
     )
 
     with pytest.raises(RuntimeError, match="continuation failed"):
@@ -269,9 +269,9 @@ def test_stager_materializes_once_after_credits_fit_and_unwinds_failures(
 def test_stall_uses_strict_fifo_and_retries_at_the_release_tick() -> None:
     """A released pool admits fitting FIFO heads at the same tick without skipping."""
     engine = ManualEngine()
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         engine,
-        config=DecoderInputStoreConfig({"strong": 3}),
+        config=DecoderMemoryConfig({"strong": 3}),
         pool_names=("strong",),
     )
     first = make_job("first", (0, 1), run_sequence=1)
@@ -301,9 +301,9 @@ def test_stall_uses_strict_fifo_and_retries_at_the_release_tick() -> None:
 def test_new_small_arrival_cannot_bypass_an_existing_fifo_head() -> None:
     """A later fitting request waits behind an older head that cannot fit yet."""
     engine = ManualEngine()
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         engine,
-        config=DecoderInputStoreConfig({"strong": 3}),
+        config=DecoderMemoryConfig({"strong": 3}),
         pool_names=("strong",),
     )
     occupying = make_job("occupying", (0, 1), run_sequence=1)
@@ -323,9 +323,9 @@ def test_new_small_arrival_cannot_bypass_an_existing_fifo_head() -> None:
 def test_cancel_stalled_request_has_no_callback_credit_or_stall_record() -> None:
     """A cancelled waiter keeps its arrival event but adds no record, ticks, callback, or credit."""
     engine = ManualEngine()
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         engine,
-        config=DecoderInputStoreConfig({"weak": 1}),
+        config=DecoderMemoryConfig({"weak": 1}),
         pool_names=("weak",),
     )
     occupying = make_job("occupying", (0,), run_sequence=1)
@@ -350,10 +350,10 @@ def test_cancel_stalled_request_has_no_callback_credit_or_stall_record() -> None
 def test_fail_stop_reports_typed_enriched_error_and_pre_failure_snapshot() -> None:
     """Fail-stop overflow exposes exact pool demand, capacity, and frozen state."""
     engine = ManualEngine()
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         engine,
-        config=DecoderInputStoreConfig(
-            {"weak": 2}, DecoderInputStoreOverflowPolicy.FAIL_STOP
+        config=DecoderMemoryConfig(
+            {"weak": 2}, DecoderMemoryOverflowPolicy.FAIL_STOP
         ),
         pool_names=("weak",),
     )
@@ -363,7 +363,7 @@ def test_fail_stop_reports_typed_enriched_error_and_pre_failure_snapshot() -> No
         on_admitted=lambda job: None,
     )
 
-    with pytest.raises(DecoderInputStoreCapacityExhaustion) as caught:
+    with pytest.raises(DecoderMemoryCapacityExhaustion) as caught:
         stager.admit(
             make_job("second", (1, 2), run_sequence=2),
             pool="weak",
@@ -380,13 +380,13 @@ def test_fail_stop_reports_typed_enriched_error_and_pre_failure_snapshot() -> No
 
 def test_unsatisfiable_stager_demand_never_enters_a_wait_queue() -> None:
     """A request exceeding its whole pool budget raises instead of stalling forever."""
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         ManualEngine(),
-        config=DecoderInputStoreConfig({"weak": 1}),
+        config=DecoderMemoryConfig({"weak": 1}),
         pool_names=("weak",),
     )
 
-    with pytest.raises(DecoderInputStoreUnsatisfiableDemand):
+    with pytest.raises(DecoderMemoryUnsatisfiableDemand):
         stager.admit(
             make_job("too-large", (0, 1)),
             pool="weak",
@@ -399,9 +399,9 @@ def test_unsatisfiable_stager_demand_never_enters_a_wait_queue() -> None:
 def test_saturated_strong_pool_never_blocks_weak_admission() -> None:
     """Strong saturation leaves an independently budgeted weak pool progressing."""
     engine = ManualEngine()
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         engine,
-        config=DecoderInputStoreConfig({"weak": 1, "strong": 1}),
+        config=DecoderMemoryConfig({"weak": 1, "strong": 1}),
         pool_names=("weak", "strong"),
     )
     callbacks = []
@@ -443,7 +443,7 @@ def test_custom_pure_delay_transport_always_ends_at_the_common_stager() -> None:
     transfer = PureDelayTransfer(engine)
     manager = make_manager(
         engine,
-        config=DecoderInputStoreConfig({"default": 1}),
+        config=DecoderMemoryConfig({"default": 1}),
         transfer=transfer,
     )
     manager.pool_free["default"] = 0
@@ -452,10 +452,10 @@ def test_custom_pure_delay_transport_always_ends_at_the_common_stager() -> None:
 
     manager.enqueue(first, delay_ticks=3)
     manager.enqueue(second, delay_ticks=3)
-    assert manager.decoder_input_stager.snapshot().per_pool_store[0].occupied_rounds == 0
+    assert manager.decoder_memory_stager.snapshot().per_pool_store[0].occupied_rounds == 0
     engine.advance(3)
 
-    snapshot = manager.decoder_input_stager.snapshot()
+    snapshot = manager.decoder_memory_stager.snapshot()
     assert transfer.deliveries == [(3, first), (3, second)]
     assert snapshot.per_pool_store[0].occupied_rounds == 1
     assert snapshot.waiting_jobs_by_pool == (("default", 1),)
@@ -493,7 +493,7 @@ def test_unset_custom_transport_preserves_exact_arrival_and_late_pool_selection(
         unit_pools={"default": 1, "strong": 1},
         lane_policy=lane,
         decoder_input_transfer=transfer,
-        decoder_input_store=None,
+        decoder_memory=None,
     )
     manager.pool_free = {"default": 0, "strong": 0}
     job = make_job("late-route", (0,), run_sequence=1)
@@ -505,7 +505,7 @@ def test_unset_custom_transport_preserves_exact_arrival_and_late_pool_selection(
     assert job.ready_time == 4
     assert job.pool is None
     assert manager.pool_ready["strong"] == [job]
-    assert manager.decoder_input_stager.snapshot().enabled is False
+    assert manager.decoder_memory_stager.snapshot().enabled is False
 
 
 def test_finite_pool_choice_is_closed_before_transport_without_mutating_job_pool() -> None:
@@ -526,7 +526,7 @@ def test_finite_pool_choice_is_closed_before_transport_without_mutating_job_pool
         unit_pools={"default": 1, "strong": 1},
         lane_policy=lane,
         decoder_input_transfer=transfer,
-        decoder_input_store=DecoderInputStoreConfig({"default": 1, "strong": 1}),
+        decoder_memory=DecoderMemoryConfig({"default": 1, "strong": 1}),
     )
     manager.pool_free = {"default": 0, "strong": 0}
     job = make_job("closed-route", (0,), run_sequence=1)
@@ -540,7 +540,7 @@ def test_finite_pool_choice_is_closed_before_transport_without_mutating_job_pool
     assert manager.pool_ready["strong"] == []
     stores = {
         row.pool: row
-        for row in manager.decoder_input_stager.snapshot().per_pool_store
+        for row in manager.decoder_memory_stager.snapshot().per_pool_store
     }
     assert stores["default"].occupied_rounds == 1
     assert stores["strong"].occupied_rounds == 0
@@ -552,13 +552,13 @@ def test_normalized_store_pool_keys_must_match_unit_pools_exactly() -> None:
     with pytest.raises(ValueError, match="must be exactly"):
         make_manager(
             engine,
-            config=DecoderInputStoreConfig({"default": 1, "extra": 1}),
+            config=DecoderMemoryConfig({"default": 1, "extra": 1}),
             unit_pools={"default": 1, "strong": 1},
         )
     with pytest.raises(ValueError, match="must be exactly"):
         make_manager(
             engine,
-            config=DecoderInputStoreConfig({"strong": 1}),
+            config=DecoderMemoryConfig({"strong": 1}),
             unit_pools={"default": 1, "strong": 1},
         )
 
@@ -568,7 +568,7 @@ def test_nonreentrant_dispatch_drains_every_same_tick_credit_return() -> None:
     engine = ManualEngine()
     manager = make_manager(
         engine,
-        config=DecoderInputStoreConfig({"default": 1}),
+        config=DecoderMemoryConfig({"default": 1}),
     )
     manager.pool_free["default"] = 0
     jobs = [make_job(name, (index,), run_sequence=index) for index, name in enumerate(
@@ -578,26 +578,26 @@ def test_nonreentrant_dispatch_drains_every_same_tick_credit_return() -> None:
 
     def admit_and_release(job) -> None:
         admitted.append((engine.now, job.label))
-        manager.decoder_input_stager.release(job)
+        manager.decoder_memory_stager.release(job)
         manager.try_dispatch()
 
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         jobs[0], pool="default", on_admitted=lambda job: None
     )
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         jobs[1], pool="default", on_admitted=admit_and_release
     )
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         jobs[2], pool="default", on_admitted=admit_and_release
     )
-    manager.decoder_input_stager.release(jobs[0])
+    manager.decoder_memory_stager.release(jobs[0])
     manager.try_dispatch()
 
     assert admitted == [(0, "second"), (0, "third")]
-    snapshot = manager.decoder_input_stager.snapshot()
+    snapshot = manager.decoder_memory_stager.snapshot()
     assert snapshot.waiting_jobs_by_pool == (("default", 0),)
     assert snapshot.per_pool_store[0].occupied_rounds == 0
-    assert not manager.decoder_input_stager.has_drainable_work()
+    assert not manager.decoder_memory_stager.has_drainable_work()
     assert engine.events == []
 
 
@@ -607,7 +607,7 @@ def test_bulk_strong_members_return_exactly_one_credit_each(mode: str) -> None:
     engine = ManualEngine()
     manager = make_manager(
         engine,
-        config=DecoderInputStoreConfig({"default": 1, "strong": 3}),
+        config=DecoderMemoryConfig({"default": 1, "strong": 3}),
         unit_pools={"default": 1, "strong": 1},
         bulk_strong=True,
     )
@@ -624,7 +624,7 @@ def test_bulk_strong_members_return_exactly_one_credit_each(mode: str) -> None:
     ]
     for job in jobs:
         manager._admit_strong_request(job)
-        manager.decoder_input_stager.admit(
+        manager.decoder_memory_stager.admit(
             job, pool="strong", on_admitted=lambda admitted: None
         )
     service_job = manager._merge_strong_batch(list(jobs))
@@ -632,14 +632,14 @@ def test_bulk_strong_members_return_exactly_one_credit_each(mode: str) -> None:
     manager.pool_free["strong"] = 0
     assert {
         row.pool: row.occupied_rounds
-        for row in manager.decoder_input_stager.snapshot().per_pool_store
+        for row in manager.decoder_memory_stager.snapshot().per_pool_store
     }["strong"] == 3
 
     if mode == "completion":
         manager._release_service_decoder_inputs(service_job)
     elif mode == "partial_cancel":
         manager.cancel_strong((1, 0))
-        assert manager.decoder_input_stager.snapshot().per_pool_store[1].occupied_rounds == 2
+        assert manager.decoder_memory_stager.snapshot().per_pool_store[1].occupied_rounds == 2
         manager._release_service_decoder_inputs(service_job)
     else:
         for key in ((1, 0), (2, 0), (3, 0)):
@@ -647,7 +647,7 @@ def test_bulk_strong_members_return_exactly_one_credit_each(mode: str) -> None:
 
     stores = {
         row.pool: row
-        for row in manager.decoder_input_stager.snapshot().per_pool_store
+        for row in manager.decoder_memory_stager.snapshot().per_pool_store
     }
     assert stores["strong"].occupied_rounds == 0
     assert stores["strong"].slots_in_use == 0
@@ -658,22 +658,22 @@ def test_settlement_rejects_storage_leaks_then_accepts_all_budgets_returned() ->
     """Terminal settlement rejects live storage and accepts exact budget return."""
     manager = make_manager(
         ManualEngine(),
-        config=DecoderInputStoreConfig({"default": 1}),
+        config=DecoderMemoryConfig({"default": 1}),
     )
     job = make_job("live", (0,))
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         job, pool="default", on_admitted=lambda admitted: None
     )
 
     with pytest.raises(RuntimeError, match="still holding decoder input"):
         manager.check_decode_work_settled()
 
-    manager.decoder_input_stager.release(job)
+    manager.decoder_memory_stager.release(job)
     with pytest.raises(RuntimeError, match="undrained"):
         manager.check_decode_work_settled()
     manager.try_dispatch()
     manager.check_decode_work_settled()
-    assert manager.decoder_input_stager.snapshot().per_pool_store[0].occupied_rounds == 0
+    assert manager.decoder_memory_stager.snapshot().per_pool_store[0].occupied_rounds == 0
 
 
 def test_frozen_view_reports_current_peak_waiting_and_stall_facts() -> None:
@@ -681,21 +681,21 @@ def test_frozen_view_reports_current_peak_waiting_and_stall_facts() -> None:
     engine = ManualEngine()
     manager = make_manager(
         engine,
-        config=DecoderInputStoreConfig({"default": 2}),
+        config=DecoderMemoryConfig({"default": 2}),
     )
     live = make_job("live", (0, 1), run_sequence=1)
     waiting = make_job("waiting", (2,), run_sequence=2)
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         live, pool="default", on_admitted=lambda job: None
     )
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         waiting, pool="default", on_admitted=lambda job: None
     )
     engine.now = 5
-    manager.decoder_input_stager.release(live)
+    manager.decoder_memory_stager.release(live)
     manager.try_dispatch()
 
-    view = decoder_input_store_view(manager)
+    view = decoder_memory_view(manager)
     assert view.enabled is True
     assert view.per_pool[0].occupied_rounds == 1
     assert view.per_pool[0].peak_occupied_rounds == 2
@@ -712,26 +712,26 @@ def test_opt_in_metric_reports_current_peak_time_average_wait_and_records() -> N
     engine = ManualEngine()
     manager = make_manager(
         engine,
-        config=DecoderInputStoreConfig({"default": 2}),
+        config=DecoderMemoryConfig({"default": 2}),
     )
-    metric = DecoderInputStoreOccupancy(manager)
+    metric = DecoderMemoryOccupancy(manager)
     live = make_job("live", (0, 1), run_sequence=1)
     waiting = make_job("waiting", (2,), run_sequence=2)
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         live, pool="default", on_admitted=lambda job: None
     )
     metric.observe(engine)
     engine.now = 5
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         waiting, pool="default", on_admitted=lambda job: None
     )
     metric.observe(engine)
     engine.now = 10
-    manager.decoder_input_stager.release(live)
+    manager.decoder_memory_stager.release(live)
     manager.try_dispatch()
     metric.observe(engine)
     engine.now = 20
-    manager.decoder_input_stager.release(waiting)
+    manager.decoder_memory_stager.release(waiting)
     manager.try_dispatch()
     metric.observe(engine)
 
@@ -769,9 +769,9 @@ def test_opt_in_metric_reports_current_peak_time_average_wait_and_records() -> N
 def test_unset_metric_is_empty_and_existing_public_schema_is_unchanged() -> None:
     """Unset storage reports disabled without adding finite-store observations."""
     manager = make_manager(ManualEngine(), config=None)
-    metric = DecoderInputStoreOccupancy(manager)
+    metric = DecoderMemoryOccupancy(manager)
 
-    assert decoder_input_store_view(manager).per_pool == ()
+    assert decoder_memory_view(manager).per_pool == ()
     assert metric.result() == {
         "enabled": False,
         "observation_span_ticks": 0,
@@ -783,9 +783,9 @@ def test_unset_metric_is_empty_and_existing_public_schema_is_unchanged() -> None
 
 def test_public_package_exports_only_the_new_metric() -> None:
     """The package exports the metric but keeps store configuration module-scoped."""
-    assert decsim.DecoderInputStoreOccupancy is DecoderInputStoreOccupancy
-    assert not hasattr(decsim, "DecoderInputStoreConfig")
-    assert not hasattr(decsim, "DecoderInputStoreOverflowPolicy")
+    assert decsim.DecoderMemoryOccupancy is DecoderMemoryOccupancy
+    assert not hasattr(decsim, "DecoderMemoryConfig")
+    assert not hasattr(decsim, "DecoderMemoryOverflowPolicy")
 
 
 def test_removed_decoder_input_slots_keyword_fails_loudly() -> None:
@@ -795,16 +795,16 @@ def test_removed_decoder_input_slots_keyword_fails_loudly() -> None:
     assert not hasattr(SyndromeBufferingConfig(), "decoder_input_slots")
 
 
-@pytest.mark.parametrize("store_config", [None, DecoderInputStoreConfig({"default": 2})])
+@pytest.mark.parametrize("store_config", [None, DecoderMemoryConfig({"default": 2})])
 def test_checked_custom_and_timing_materialization_survives_both_store_modes(
-    store_config: DecoderInputStoreConfig | None,
+    store_config: DecoderMemoryConfig | None,
 ) -> None:
     """Custom-model and timing-only inputs retain their checked materialization behavior."""
     class CustomModel:
         """Represent a decoder model with no row-layout contract."""
 
     engine = ManualEngine()
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         engine,
         config=store_config,
         pool_names=("default",),
@@ -826,9 +826,9 @@ def test_checked_custom_and_timing_materialization_survives_both_store_modes(
     assert stager.unsettled_storage() == ()
 
 
-@pytest.mark.parametrize("store_config", [None, DecoderInputStoreConfig({"default": 2})])
+@pytest.mark.parametrize("store_config", [None, DecoderMemoryConfig({"default": 2})])
 def test_two_operation_model_divergence_rolls_back_in_both_store_modes(
-    store_config: DecoderInputStoreConfig | None,
+    store_config: DecoderMemoryConfig | None,
 ) -> None:
     """A second operation cannot occupy a checked first-operation model in either mode."""
     model = SimpleNamespace(
@@ -838,7 +838,7 @@ def test_two_operation_model_divergence_rolls_back_in_both_store_modes(
     job = make_job("divergent", (0,), operation_id=2, run_sequence=1, bits=(1,))
     job.op_id = 1
     job.dem = model
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         ManualEngine(),
         config=store_config,
         pool_names=("default",),
@@ -864,11 +864,11 @@ def test_unbounded_upstream_isolates_local_stall_and_completes_finitely() -> Non
         d=3,
         rounds_policy=FixedRounds(3),
         decoder=PerRoundDecoder(tau_us=100),
-        decoder_input_store=DecoderInputStoreConfig({"default": 3}),
+        decoder_memory=DecoderMemoryConfig({"default": 3}),
         syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=None),
     ).build()
 
-    snapshot = completed.decoder_manager.decoder_input_stager.snapshot()
+    snapshot = completed.decoder_manager.decoder_memory_stager.snapshot()
     assert completed.result.terminal_status == "complete"
     assert snapshot.stall_events_by_pool == (("default", 2),)
     assert snapshot.per_pool_store[0].occupied_rounds == 0
@@ -888,7 +888,7 @@ def test_finite_upstream_fail_stop_is_attributed_to_ingress_not_local_store() ->
             d=3,
             rounds_policy=FixedRounds(3),
             decoder=PerRoundDecoder(tau_us=100),
-            decoder_input_store=DecoderInputStoreConfig({"default": 3}),
+            decoder_memory=DecoderMemoryConfig({"default": 3}),
             syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=3),
             syndrome_ingress_policy=SyndromeIngressPolicy(
                 overflow=IngressOverflowPolicy.FAIL_STOP
@@ -910,14 +910,14 @@ def test_finite_upstream_drop_is_attributed_without_false_local_admissions() -> 
         d=3,
         rounds_policy=FixedRounds(3),
         decoder=PerRoundDecoder(tau_us=100),
-        decoder_input_store=DecoderInputStoreConfig({"default": 3}),
+        decoder_memory=DecoderMemoryConfig({"default": 3}),
         syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=3),
         syndrome_ingress_policy=SyndromeIngressPolicy(
             overflow=IngressOverflowPolicy.DROP_ROUND
         ),
     ).build()
 
-    snapshot = completed.decoder_manager.decoder_input_stager.snapshot()
+    snapshot = completed.decoder_manager.decoder_memory_stager.snapshot()
     assert completed.result.terminal_status == "complete"
     assert snapshot.per_pool_store[0].admissions == 0
     assert snapshot.stall_records == ()
@@ -932,7 +932,7 @@ def test_default_smoke_metric_remains_exactly_the_frozen_baseline() -> None:
         ops=three_cnot_circuit(),
         decoder=PerRoundDecoder(tau_us=0.1),
         make_metrics=make_metrics,
-        decoder_input_store=None,
+        decoder_memory=None,
     ).build()
 
     assert completed.result.terminal_status == "complete"
@@ -947,7 +947,7 @@ def test_default_smoke_metric_remains_exactly_the_frozen_baseline() -> None:
             "per_pool_total_units": {"default": 1},
         }
     }
-    assert "decoder_input_store_occupancy" not in completed.result.metric_values()
+    assert "decoder_memory_occupancy" not in completed.result.metric_values()
 
 
 def test_unset_custom_pure_delay_run_matches_default_timing_and_results() -> None:
@@ -958,7 +958,7 @@ def test_unset_custom_pure_delay_run_matches_default_timing_and_results() -> Non
         d=3,
         rounds_policy=FixedRounds(3),
         decoder=PerRoundDecoder(tau_us=0.1),
-        decoder_input_store=None,
+        decoder_memory=None,
     )
     built_in = RunSpec(**shared).build()
     custom = RunSpec(
@@ -971,9 +971,9 @@ def test_unset_custom_pure_delay_run_matches_default_timing_and_results() -> Non
     assert custom.result.metric_results == ()
 
 
-@pytest.mark.parametrize("store_config", [None, DecoderInputStoreConfig({"default": 1})])
+@pytest.mark.parametrize("store_config", [None, DecoderMemoryConfig({"default": 1})])
 def test_manager_cancel_before_transport_delivery_never_reaches_storage(
-    store_config: DecoderInputStoreConfig | None,
+    store_config: DecoderMemoryConfig | None,
 ) -> None:
     """Cancelling a strong request in transport suppresses delivery in both modes."""
     engine = ManualEngine()
@@ -992,16 +992,16 @@ def test_manager_cancel_before_transport_delivery_never_reaches_storage(
 
     assert transfer.deliveries == []
     assert manager.ready == []
-    snapshot = manager.decoder_input_stager.snapshot()
+    snapshot = manager.decoder_memory_stager.snapshot()
     assert all(store.occupied_rounds == 0 for store in snapshot.per_pool_store)
     assert all(count == 0 for _, count in snapshot.waiting_jobs_by_pool)
 
 
 def test_admitted_release_and_cancel_are_idempotent_exact_credit_returns() -> None:
     """Repeated release or cancellation cannot return one request's credits twice."""
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         ManualEngine(),
-        config=DecoderInputStoreConfig({"default": 2}),
+        config=DecoderMemoryConfig({"default": 2}),
         pool_names=("default",),
     )
     released = make_job("released", (0,), run_sequence=1)
@@ -1024,22 +1024,22 @@ def test_settlement_rejects_waiters_as_well_as_live_and_drainable_credits() -> N
     """Terminal settlement names a pending FIFO until capacity returns and drains."""
     manager = make_manager(
         ManualEngine(),
-        config=DecoderInputStoreConfig({"default": 1}),
+        config=DecoderMemoryConfig({"default": 1}),
     )
     live = make_job("live", (0,), run_sequence=1)
     waiting = make_job("waiting", (1,), run_sequence=2)
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         live, pool="default", on_admitted=lambda job: None
     )
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         waiting, pool="default", on_admitted=lambda job: None
     )
 
     with pytest.raises(RuntimeError, match="waiting for decoder-input round credits"):
         manager.check_decode_work_settled()
 
-    manager.decoder_input_stager.cancel(waiting)
-    manager.decoder_input_stager.release(live)
+    manager.decoder_memory_stager.cancel(waiting)
+    manager.decoder_memory_stager.release(live)
     manager.try_dispatch()
     manager.check_decode_work_settled()
 
@@ -1056,7 +1056,7 @@ def test_same_size_within_round_fragment_permutation_remains_outside_layout_chec
     job.payloads = [second, first]
     job.dem = model
 
-    stager = DecoderInputStoreStager(
+    stager = DecoderMemoryStager(
         ManualEngine(), config=None, pool_names=("default",)
     )
     stager.admit(job, pool=None, on_admitted=lambda admitted: None)
@@ -1069,19 +1069,19 @@ def test_public_enqueued_external_job_returns_storage_credits_on_completion() ->
     engine = ManualEngine()
     manager = make_manager(
         engine,
-        config=DecoderInputStoreConfig({"default": 1}),
+        config=DecoderMemoryConfig({"default": 1}),
     )
     completed = []
     job = make_job("external", (0,), run_sequence=1)
     job.on_done = lambda: completed.append(engine.now)
 
     manager.enqueue(job)
-    assert manager.decoder_input_stager.snapshot().per_pool_store[0].occupied_rounds == 1
+    assert manager.decoder_memory_stager.snapshot().per_pool_store[0].occupied_rounds == 1
     engine.advance(1)
 
     assert completed == [1]
     manager.check_decode_work_settled()
-    assert manager.decoder_input_stager.snapshot().per_pool_store[0].occupied_rounds == 0
+    assert manager.decoder_memory_stager.snapshot().per_pool_store[0].occupied_rounds == 0
 
 
 def test_same_tick_metric_peak_uses_the_store_exact_high_water() -> None:
@@ -1089,19 +1089,19 @@ def test_same_tick_metric_peak_uses_the_store_exact_high_water() -> None:
     engine = ManualEngine()
     manager = make_manager(
         engine,
-        config=DecoderInputStoreConfig({"default": 3}),
+        config=DecoderMemoryConfig({"default": 3}),
     )
-    metric = DecoderInputStoreOccupancy(manager)
+    metric = DecoderMemoryOccupancy(manager)
     job = make_job("transient", (0, 1, 2), run_sequence=1)
 
-    manager.decoder_input_stager.admit(
+    manager.decoder_memory_stager.admit(
         job, pool="default", on_admitted=lambda admitted: None
     )
-    manager.decoder_input_stager.release(job)
+    manager.decoder_memory_stager.release(job)
     manager.try_dispatch()
     metric.observe(engine)
 
-    store = manager.decoder_input_stager.snapshot().per_pool_store[0]
+    store = manager.decoder_memory_stager.snapshot().per_pool_store[0]
     assert store.occupied_rounds == 0
     assert store.peak_occupied_rounds == 3
     assert metric.result()["per_pool"]["default"]["peak_occupied_rounds"] == 3
@@ -1122,7 +1122,7 @@ def test_every_finite_run_boundary_has_no_free_credit_with_a_fitting_fifo_head()
 
         def observe(self, engine) -> None:
             self.observations += 1
-            stager = self.decoder_manager.decoder_input_stager
+            stager = self.decoder_manager.decoder_memory_stager
             stores = {
                 row.pool: row for row in stager.snapshot().per_pool_store
             }
@@ -1153,7 +1153,7 @@ def test_every_finite_run_boundary_has_no_free_credit_with_a_fitting_fifo_head()
         d=3,
         rounds_policy=FixedRounds(3),
         decoder=PerRoundDecoder(tau_us=100),
-        decoder_input_store=DecoderInputStoreConfig({"default": 3}),
+        decoder_memory=DecoderMemoryConfig({"default": 3}),
         make_metrics=make_metrics,
     ).build()
 
@@ -1188,13 +1188,13 @@ def test_real_multi_patch_switching_storm_isolates_weak_and_strong_budgets() -> 
             run_both_at_once=True,
         ),
         unit_pools={"default": 1, "strong": 1},
-        decoder_input_store=DecoderInputStoreConfig(
+        decoder_memory=DecoderMemoryConfig(
             {"default": 9, "strong": 3}
         ),
         seed=7,
     ).build()
 
-    snapshot = completed.decoder_manager.decoder_input_stager.snapshot()
+    snapshot = completed.decoder_manager.decoder_memory_stager.snapshot()
     stores = {row.pool: row for row in snapshot.per_pool_store}
     records = snapshot.stall_records
     assert completed.result.terminal_status == "complete"
@@ -1227,4 +1227,4 @@ def test_real_multi_patch_switching_storm_isolates_weak_and_strong_budgets() -> 
     assert tuple(record.round_demand for record in records) == (3, 3)
     assert all(store.occupied_rounds == 0 for store in stores.values())
     assert dict(snapshot.waiting_jobs_by_pool) == {"default": 0, "strong": 0}
-    assert completed.decoder_manager.decoder_input_stager.unsettled_storage() == ()
+    assert completed.decoder_manager.decoder_memory_stager.unsettled_storage() == ()

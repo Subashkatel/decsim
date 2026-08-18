@@ -1,10 +1,10 @@
-"""Own decoder-side input storage and the admission boundary in front of it.
+"""Own the memory inside the decoder and the admission boundary in front of it.
 
-A ``DecoderInputStore`` owns one pool's round credits and its live slots: a
+A ``DecoderMemory`` owns one pool's round credits and its live slots: a
 request reserves the rounds it will store, deposits one immutable input, and
 returns its credits when the decoder is finished with it or it is cancelled.
 
-``DecoderInputStoreStager`` is the storage-admission boundary that every
+``DecoderMemoryStager`` is the storage-admission boundary that every
 decoder-input transport ends at. It counts a request's round demand, admits it
 when the pool's credits fit, materializes the input once, releases the upstream
 hold, and hands the job to the manager continuation. A request that does not
@@ -41,10 +41,10 @@ it never stands for a decoder unit pool.
 """
 
 
-class DecoderInputStoreCapacityExhaustion(RuntimeError):
+class DecoderMemoryCapacityExhaustion(RuntimeError):
     """A request's rounds did not fit in its pool's free round credits."""
 
-    status = "decoder_input_store_capacity_exhaustion"
+    status = "decoder_memory_capacity_exhaustion"
 
     def __init__(self, *, pool: str, requested_rounds: int,
                  capacity_rounds: Optional[int], snapshot) -> None:
@@ -53,20 +53,20 @@ class DecoderInputStoreCapacityExhaustion(RuntimeError):
         self.capacity_rounds = capacity_rounds
         self.snapshot = snapshot
         super().__init__(
-            f"decoder-input store pool {pool!r} holds "
+            f"decoder memory pool {pool!r} holds "
             f"{snapshot.occupied_rounds} of {capacity_rounds} rounds and "
             f"cannot admit {requested_rounds} more"
         )
 
 
-class DecoderInputStoreUnsatisfiableDemand(RuntimeError):
+class DecoderMemoryUnsatisfiableDemand(RuntimeError):
     """One request needs more rounds than its pool's whole budget.
 
     Distinct from capacity exhaustion because no release can ever make this
     request fit, so waiting for credits would never end.
     """
 
-    status = "decoder_input_store_unsatisfiable_demand"
+    status = "decoder_memory_unsatisfiable_demand"
 
     def __init__(self, *, pool: str, requested_rounds: int,
                  capacity_rounds: Optional[int], snapshot) -> None:
@@ -75,12 +75,12 @@ class DecoderInputStoreUnsatisfiableDemand(RuntimeError):
         self.capacity_rounds = capacity_rounds
         self.snapshot = snapshot
         super().__init__(
-            f"decoder-input store pool {pool!r} has a {capacity_rounds}-round "
+            f"decoder memory pool {pool!r} has a {capacity_rounds}-round "
             f"budget and can never admit a {requested_rounds}-round request"
         )
 
 
-class DecoderInputStoreOverflowPolicy(Enum):
+class DecoderMemoryOverflowPolicy(Enum):
     """What a configured finite store does with a request that does not fit."""
 
     STALL = "stall"
@@ -88,33 +88,33 @@ class DecoderInputStoreOverflowPolicy(Enum):
 
 
 @dataclass(frozen=True)
-class DecoderInputStoreConfig:
-    """Finite decoder-input storage, in syndrome rounds, per decoder unit pool.
+class DecoderMemoryConfig:
+    """Finite decoder memory, in syndrome rounds, per decoder unit pool.
 
     ``round_capacity_by_pool`` is copied and wrapped read-only, so a later edit
     of the caller's mapping cannot change a live run. Its pool names must equal
     the decoder manager's normalized unit pools; there is no conversion from
     decoder-request slots and no default budget. Leaving
-    ``RunSpec.decoder_input_store`` unset disables the finite model entirely.
+    ``RunSpec.decoder_memory`` unset disables the finite model entirely.
     """
 
     round_capacity_by_pool: Mapping[str, int]
-    overflow_policy: DecoderInputStoreOverflowPolicy = (
-        DecoderInputStoreOverflowPolicy.STALL)
+    overflow_policy: DecoderMemoryOverflowPolicy = (
+        DecoderMemoryOverflowPolicy.STALL)
 
     def __post_init__(self) -> None:
-        if type(self.overflow_policy) is not DecoderInputStoreOverflowPolicy:
+        if type(self.overflow_policy) is not DecoderMemoryOverflowPolicy:
             raise TypeError(
-                "overflow_policy must be a DecoderInputStoreOverflowPolicy")
+                "overflow_policy must be a DecoderMemoryOverflowPolicy")
         source = self.round_capacity_by_pool
         entries = source.items() if hasattr(source, "items") else source
         copied_capacity_by_pool: dict[str, int] = {}
         for pool_name, capacity_rounds in entries:
             if type(pool_name) is not str:
-                raise TypeError("decoder-input store pool names must be str")
+                raise TypeError("decoder memory pool names must be str")
             if pool_name in copied_capacity_by_pool:
                 raise ValueError(
-                    f"duplicate decoder-input store pool {pool_name!r}")
+                    f"duplicate decoder memory pool {pool_name!r}")
             if type(capacity_rounds) is not int or capacity_rounds < 1:
                 raise TypeError(
                     f"pool {pool_name!r} needs a positive built-in int round "
@@ -212,7 +212,7 @@ def _check_detector_row_layout(
         )
 
 def materialize_decoder_input(job: DecodeJob) -> DecoderInput:
-    """Build one immutable decoder-input store input from a job's fragments."""
+    """Build one immutable decoder memory input from a job's fragments."""
     fragments_by_round: dict[tuple, list[RetainedSyndromeFragment]] = {}
     for payload in job.payloads:
         if type(payload) is not RetainedSyndromeFragment:
@@ -244,7 +244,7 @@ def materialize_decoder_input(job: DecodeJob) -> DecoderInput:
 
 
 @dataclass(frozen=True)
-class DecoderInputStoreSnapshot:
+class DecoderMemorySnapshot:
     """Immutable observation of one pool's round credits and live slots."""
 
     pool: str
@@ -277,7 +277,7 @@ class _SlotState(Enum):
     DEPOSITED = "deposited"
 
 
-class DecoderInputStore:
+class DecoderMemory:
     """Own one pool's decoder-input round credits and its live slots.
 
     One key owns one slot holding the rounds it reserved.
@@ -288,7 +288,7 @@ class DecoderInputStore:
 
     def __init__(self, *, pool: str, round_capacity: Optional[int]) -> None:
         if type(pool) is not str:
-            raise TypeError("decoder-input store pool must be a str label")
+            raise TypeError("decoder memory pool must be a str label")
         if round_capacity is not None and (
                 type(round_capacity) is not int or round_capacity < 1):
             raise TypeError(
@@ -310,9 +310,9 @@ class DecoderInputStore:
     def rounds_in_use(self) -> int:
         return self._occupied_rounds
 
-    def snapshot(self) -> DecoderInputStoreSnapshot:
+    def snapshot(self) -> DecoderMemorySnapshot:
         """Take one immutable observation of this store."""
-        return DecoderInputStoreSnapshot(
+        return DecoderMemorySnapshot(
             pool=self.pool,
             capacity_rounds=self.round_capacity,
             occupied_rounds=self._occupied_rounds,
@@ -334,17 +334,17 @@ class DecoderInputStore:
 
     def unsatisfiable_demand_error(
         self, round_demand: int,
-    ) -> DecoderInputStoreUnsatisfiableDemand:
+    ) -> DecoderMemoryUnsatisfiableDemand:
         """Build the error for a request larger than the whole budget."""
-        return DecoderInputStoreUnsatisfiableDemand(
+        return DecoderMemoryUnsatisfiableDemand(
             pool=self.pool, requested_rounds=round_demand,
             capacity_rounds=self.round_capacity, snapshot=self.snapshot())
 
     def capacity_exhaustion_error(
         self, round_demand: int,
-    ) -> DecoderInputStoreCapacityExhaustion:
+    ) -> DecoderMemoryCapacityExhaustion:
         """Build the error for a request that does not fit right now."""
-        return DecoderInputStoreCapacityExhaustion(
+        return DecoderMemoryCapacityExhaustion(
             pool=self.pool, requested_rounds=round_demand,
             capacity_rounds=self.round_capacity, snapshot=self.snapshot())
 
@@ -356,7 +356,7 @@ class DecoderInputStore:
             raise ValueError("round_demand must be nonnegative")
         if key in self._slots:
             raise RuntimeError(
-                f"decoder-input store slot {key!r} is already "
+                f"decoder memory slot {key!r} is already "
                 f"{self._slots[key][0].value}")
         if self.exceeds_total_capacity(round_demand):
             raise self.unsatisfiable_demand_error(round_demand)
@@ -378,11 +378,11 @@ class DecoderInputStore:
         state, reserved_rounds, _ = self._slots[key]
         if state is not _SlotState.RESERVED:
             raise RuntimeError(
-                f"decoder-input store slot {key!r} already holds a deposit")
+                f"decoder memory slot {key!r} already holds a deposit")
         decoder_input = materialize_decoder_input(job)
         if len(decoder_input.rounds) != reserved_rounds:
             raise RuntimeError(
-                f"decoder-input store slot {key!r} reserved {reserved_rounds} "
+                f"decoder memory slot {key!r} reserved {reserved_rounds} "
                 f"rounds but materialized {len(decoder_input.rounds)}")
         self._slots[key] = (_SlotState.DEPOSITED, reserved_rounds,
                             decoder_input)
@@ -393,7 +393,7 @@ class DecoderInputStore:
         state, reserved_rounds, decoder_input = self._slots[key]
         if state is not _SlotState.DEPOSITED:
             raise RuntimeError(
-                f"take from decoder-input store slot {key!r} before any deposit")
+                f"take from decoder memory slot {key!r} before any deposit")
         del self._slots[key]
         self._occupied_rounds -= reserved_rounds
         return decoder_input
@@ -402,13 +402,13 @@ class DecoderInputStore:
         """Free one live slot (reserved or deposited) and return its credits."""
         if key not in self._slots:
             raise RuntimeError(
-                f"discard of unknown decoder-input store slot {key!r}")
+                f"discard of unknown decoder memory slot {key!r}")
         _, reserved_rounds, _ = self._slots.pop(key)
         self._occupied_rounds -= reserved_rounds
 
 
 @dataclass(frozen=True)
-class DecoderInputStoreStallRecord:
+class DecoderMemoryStallRecord:
     """One request's wait for round credits, from arrival to admission.
 
     Recorded only for a configured finite store, so a run without one keeps
@@ -423,7 +423,7 @@ class DecoderInputStoreStallRecord:
 
 
 @dataclass(frozen=True)
-class _PendingDecoderInputStoreRequest:
+class _PendingDecoderMemoryRequest:
     """One request waiting in a pool's FIFO for round credits.
 
     It holds the original job with its frozen upstream fragments and the
@@ -440,7 +440,7 @@ class _PendingDecoderInputStoreRequest:
 
 
 @dataclass(frozen=True)
-class DecoderInputStoreStagerSnapshot:
+class DecoderMemoryStagerSnapshot:
     """Immutable observation of every store plus the waiting and stall facts.
 
     The per-store rows are exact whether or not a finite store is configured;
@@ -448,15 +448,15 @@ class DecoderInputStoreStagerSnapshot:
     """
 
     enabled: bool
-    per_pool_store: tuple[DecoderInputStoreSnapshot, ...]
+    per_pool_store: tuple[DecoderMemorySnapshot, ...]
     waiting_jobs_by_pool: tuple[tuple[str, int], ...]
     waiting_rounds_by_pool: tuple[tuple[str, int], ...]
     stall_events_by_pool: tuple[tuple[str, int], ...]
     stall_ticks_by_pool: tuple[tuple[str, int], ...]
-    stall_records: tuple[DecoderInputStoreStallRecord, ...]
+    stall_records: tuple[DecoderMemoryStallRecord, ...]
 
 
-class DecoderInputStoreStager:
+class DecoderMemoryStager:
     """Admit decoder requests into storage after every decoder-input transport.
 
     The decoder manager owns one stager and every transport, built-in or
@@ -473,39 +473,39 @@ class DecoderInputStoreStager:
     from its own non-reentrant dispatch loop at a settled tick boundary.
     """
 
-    def __init__(self, engine, *, config: Optional[DecoderInputStoreConfig],
+    def __init__(self, engine, *, config: Optional[DecoderMemoryConfig],
                  pool_names: tuple[str, ...]) -> None:
-        if config is not None and type(config) is not DecoderInputStoreConfig:
+        if config is not None and type(config) is not DecoderMemoryConfig:
             raise TypeError(
-                "decoder_input_store must be a DecoderInputStoreConfig or None")
+                "decoder_memory must be a DecoderMemoryConfig or None")
         self.engine = engine
         self.enabled = config is not None
         self.overflow_policy = None if config is None else config.overflow_policy
         if config is None:
             self._stores = {
-                SHARED_UNBOUNDED_STORE_POOL: DecoderInputStore(
+                SHARED_UNBOUNDED_STORE_POOL: DecoderMemory(
                     pool=SHARED_UNBOUNDED_STORE_POOL, round_capacity=None),
             }
         else:
             configured_pools = set(config.round_capacity_by_pool)
             if configured_pools != set(pool_names):
                 raise ValueError(
-                    f"decoder-input store pools {sorted(configured_pools)} must "
+                    f"decoder memory pools {sorted(configured_pools)} must "
                     f"be exactly the decoder unit pools {sorted(pool_names)}")
             self._stores = {
-                pool_name: DecoderInputStore(
+                pool_name: DecoderMemory(
                     pool=pool_name,
                     round_capacity=config.round_capacity_by_pool[pool_name])
                 for pool_name in pool_names
             }
         self._waiting_by_pool: dict[
-            str, list[_PendingDecoderInputStoreRequest]] = {
+            str, list[_PendingDecoderMemoryRequest]] = {
             pool_name: [] for pool_name in self._stores}
         self._waiting_pool_by_key: dict[Any, str] = {}
         self._admitted_pool_by_key: dict[Any, str] = {}
         self._stall_events_by_pool = {pool_name: 0 for pool_name in self._stores}
         self._stall_ticks_by_pool = {pool_name: 0 for pool_name in self._stores}
-        self._stall_records: list[DecoderInputStoreStallRecord] = []
+        self._stall_records: list[DecoderMemoryStallRecord] = []
         self._drainable_pools: set[str] = set()
 
     @staticmethod
@@ -540,7 +540,7 @@ class DecoderInputStoreStager:
             self._admit_request(store, job, round_demand, on_admitted,
                                 on_materialized)
             return
-        if self.overflow_policy is DecoderInputStoreOverflowPolicy.FAIL_STOP:
+        if self.overflow_policy is DecoderMemoryOverflowPolicy.FAIL_STOP:
             # FAIL_STOP never queues, so its pools have no waiting requests and
             # this is always the genuine aggregate-overflow case.
             raise store.capacity_exhaustion_error(round_demand)
@@ -595,10 +595,10 @@ class DecoderInputStoreStager:
                     store, pending.job, pending.round_demand,
                     pending.on_admitted, pending.on_materialized)
 
-    def snapshot(self) -> DecoderInputStoreStagerSnapshot:
+    def snapshot(self) -> DecoderMemoryStagerSnapshot:
         """Take one immutable observation of storage, waiting, and stalls."""
         pool_names = sorted(self._stores)
-        return DecoderInputStoreStagerSnapshot(
+        return DecoderMemoryStagerSnapshot(
             enabled=self.enabled,
             per_pool_store=tuple(
                 self._stores[pool_name].snapshot() for pool_name in pool_names),
@@ -639,19 +639,19 @@ class DecoderInputStoreStager:
                  sorted(self._drainable_pools)))
         return tuple(unsettled)
 
-    def _store_for(self, pool: Optional[str]) -> DecoderInputStore:
+    def _store_for(self, pool: Optional[str]) -> DecoderMemory:
         """The store that owns this request's credits."""
         if not self.enabled:
             return self._stores[SHARED_UNBOUNDED_STORE_POOL]
         if pool is None:
             raise RuntimeError(
-                "a configured decoder-input store needs the request's pool")
+                "a configured decoder memory needs the request's pool")
         store = self._stores.get(pool)
         if store is None:
-            raise RuntimeError(f"unknown decoder-input store pool {pool!r}")
+            raise RuntimeError(f"unknown decoder memory pool {pool!r}")
         return store
 
-    def _admit_request(self, store: DecoderInputStore, job: DecodeJob,
+    def _admit_request(self, store: DecoderMemory, job: DecodeJob,
                        round_demand: int,
                        on_admitted: Callable[[DecodeJob], None],
                        on_materialized: Optional[Callable[[DecodeJob], None]],
@@ -676,7 +676,7 @@ class DecoderInputStoreStager:
             self._return_credits(job)
             raise
 
-    def _append_waiting_request(self, store: DecoderInputStore, job: DecodeJob,
+    def _append_waiting_request(self, store: DecoderMemory, job: DecodeJob,
                                 round_demand: int,
                                 on_admitted: Callable[[DecodeJob], None],
                                 on_materialized: Optional[
@@ -688,7 +688,7 @@ class DecoderInputStoreStager:
             raise RuntimeError(
                 f"decoder-input request {key!r} is already waiting for credits")
         self._waiting_by_pool[store.pool].append(
-            _PendingDecoderInputStoreRequest(
+            _PendingDecoderMemoryRequest(
                 job=job, round_demand=round_demand, pool=store.pool,
                 on_admitted=on_admitted, on_materialized=on_materialized,
                 arrival_tick=self.engine.now))
@@ -696,12 +696,12 @@ class DecoderInputStoreStager:
         self._stall_events_by_pool[store.pool] += 1
 
     def _record_stall(self,
-                      pending: _PendingDecoderInputStoreRequest) -> None:
+                      pending: _PendingDecoderMemoryRequest) -> None:
         """Record one wait that ended in admission, for stage decomposition."""
         admitted_tick = self.engine.now
         self._stall_ticks_by_pool[pending.pool] += (
             admitted_tick - pending.arrival_tick)
-        self._stall_records.append(DecoderInputStoreStallRecord(
+        self._stall_records.append(DecoderMemoryStallRecord(
             request_key=pending.job.request_key,
             pool=pending.pool,
             arrival_tick=pending.arrival_tick,
@@ -727,6 +727,6 @@ class DecoderInputStoreStager:
         else:
             taken = store.take(key)
             if taken is not job.decoder_input:
-                raise RuntimeError("decoder-input store input identity changed")
+                raise RuntimeError("decoder memory input identity changed")
             job.decoder_input = None
         self._drainable_pools.add(pool)

@@ -827,7 +827,7 @@ class WindowManager:
     def _bind_decoder_input_hold(self, job: DecodeJob, previous_owner) -> None:
         """Atomically transfer upstream retention to an admitted input request.
 
-        The callback is invoked only after decoder-input store materialization, so
+        The callback is invoked only after decoder memory materialization, so
         overlapping rounds remain upstream until their last consumer transfer.
 
         """

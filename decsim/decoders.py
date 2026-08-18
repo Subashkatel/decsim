@@ -54,15 +54,6 @@ class CodeRouter:
     def __init__(self, default, by_code: Optional[dict] = None):
         self.default = default
         self.by_code = dict(by_code) if by_code else {}
-        invalid_keys = [
-            key for key in self.by_code
-            if key is not None and type(key) is not str
-        ]
-        if invalid_keys:
-            raise TypeError(
-                "CodeRouter keys must be exact built-in str or None; "
-                f"got {invalid_keys[0]!r}"
-            )
         for decoder in (self.default, *self.by_code.values()):
             if decoder is not None:
                 _decoder_fault_model_requirement(decoder)
@@ -196,18 +187,7 @@ def _decoder_fault_model_requirement(
     decoder,
 ) -> DecoderFaultModelRequirement:
     """Return one decoder's explicitly declared fault-model requirement."""
-    try:
-        requirement = decoder.fault_model_requirement
-    except AttributeError as error:
-        raise TypeError(
-            f"{type(decoder).__name__} must declare fault_model_requirement"
-        ) from error
-    if not isinstance(requirement, DecoderFaultModelRequirement):
-        raise TypeError(
-            f"{type(decoder).__name__}.fault_model_requirement must be a "
-            "DecoderFaultModelRequirement"
-        )
-    return requirement
+    return decoder.fault_model_requirement
 
 
 def _fault_model_requirement_for(
@@ -217,13 +197,7 @@ def _fault_model_requirement_for(
     """Resolve either a leaf declaration or a code-aware routed declaration."""
     resolver = getattr(decoder_or_router, "fault_model_requirement_for", None)
     if resolver is not None:
-        requirement = resolver(code)
-        if not isinstance(requirement, DecoderFaultModelRequirement):
-            raise TypeError(
-                f"{type(decoder_or_router).__name__}.fault_model_requirement_for "
-                "must return DecoderFaultModelRequirement"
-            )
-        return requirement
+        return resolver(code)
     return _decoder_fault_model_requirement(decoder_or_router)
 
 
@@ -302,8 +276,6 @@ def switch_probability_per_round(gamma_switch: float, d: int):
     committing more rounds is proportionally more likely to escalate."""
 
     gamma_switch = _check_probability(gamma_switch, "gamma_switch")
-    if type(d) is not int:
-        raise TypeError(f"d must be a built-in int; got {d!r}")
     if d <= 0:
         raise ValueError(f"d must be positive; got {d!r}")
 
@@ -311,11 +283,6 @@ def switch_probability_per_round(gamma_switch: float, d: int):
         window = job.window
         commit_rounds = (window.commit_hi - window.commit_lo + 1) \
             if window is not None else job.n_rounds
-        if type(commit_rounds) is not int:
-            raise TypeError(
-                "commit_rounds must be a built-in int; "
-                f"got {commit_rounds!r}"
-            )
         if commit_rounds <= 0:
             raise ValueError(
                 f"commit_rounds must be positive; got {commit_rounds!r}"

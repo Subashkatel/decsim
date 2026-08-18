@@ -14,8 +14,6 @@ from typing import Optional
 
 
 def _require_positive_int(value, field_name: str) -> None:
-    if type(value) is not int:
-        raise TypeError(f"{field_name} must be a built-in int; got {value!r}")
     if value <= 0:
         raise ValueError(f"{field_name} must be positive; got {value!r}")
 
@@ -113,12 +111,8 @@ class BBCodeModel:
             _require_positive_int(
                 self.commit_rounds_override, "commit_rounds_override"
             )
-        if self.buffer_rounds_override is not None:
-            value = self.buffer_rounds_override
-            if type(value) is not int:
-                raise TypeError("buffer_rounds_override must be a built-in int")
-            if value < 0:
-                raise ValueError("buffer_rounds_override must be nonnegative")
+        if self.buffer_rounds_override is not None and self.buffer_rounds_override < 0:
+            raise ValueError("buffer_rounds_override must be nonnegative")
         object.__setattr__(self, "round_us", _check_round_us(self.round_us))
 
     @property

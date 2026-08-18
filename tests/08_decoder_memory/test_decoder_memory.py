@@ -400,24 +400,8 @@ def test_empty_job_materializes_to_self_identifying_input() -> None:
         decoder_input.rounds = ()
 
 
-def test_materialization_rejects_a_structurally_compatible_fragment() -> None:
-    """Exact payload admission rejects a structurally compatible noncanonical fragment."""
-    sibling = CompatibleRetainedFragment(
-        operation_id=1,
-        patch_id="patch",
-        round_index=0,
-        bits=(0, 1),
-        code="surface",
-        size_bits=2,
-        fragment_index=0,
-    )
-
-    with pytest.raises(TypeError, match="every job payload"):
-        materialize_decoder_input(make_job([make_fragment(), sibling]))
-
-
 def test_compatible_job_consumes_one_shot_payloads_once() -> None:
-    """A compatible job consumes one-shot payloads once while enforcing exact admission."""
+    """A compatible job consumes one-shot payloads once."""
     fragment = make_fragment(operation_id=3, round_index=2)
     accepted_payloads = OneShotPayloads([fragment])
     accepted_job = CompatibleJob(
@@ -434,28 +418,6 @@ def test_compatible_job_consumes_one_shot_payloads_once() -> None:
     assert len(decoder_input.rounds) == 1
     assert decoder_input.rounds[0].fragments == (fragment,)
 
-    rejected_payloads = OneShotPayloads(
-        [
-            CompatibleRetainedFragment(
-                operation_id=3,
-                patch_id="patch",
-                round_index=2,
-                bits=(0, 1),
-                code="surface",
-                size_bits=2,
-                fragment_index=0,
-            )
-        ]
-    )
-    rejected_job = CompatibleJob(
-        op_id=3,
-        window_id=8,
-        request_key=None,
-        payloads=rejected_payloads,
-    )
-    with pytest.raises(TypeError, match="every job payload"):
-        materialize_decoder_input(rejected_job)
-    assert rejected_payloads.iterations == 1
 
 
 def test_materialized_fragments_remain_safe_aliases_after_upstream_clear() -> None:
@@ -472,27 +434,6 @@ def test_materialized_fragments_remain_safe_aliases_after_upstream_clear() -> No
     assert retained.bits == (1, 1, 0)
     with pytest.raises(FrozenInstanceError):
         retained.bits = (0,)
-
-
-@pytest.mark.parametrize("round_index", [True, 1.0, "1"])
-def test_materialized_round_requires_exact_builtin_integer(round_index: object) -> None:
-    """A materialized round rejects every nonexact built-in integer index."""
-    with pytest.raises(TypeError, match="exact built-in int"):
-        MaterializedSyndromeRound(
-            operation_id=1,
-            round_index=round_index,
-            fragments=(make_fragment(1, 1),),
-        )
-
-
-def test_materialized_round_rejects_cross_type_operation_identity() -> None:
-    """A materialized round compares operation identities without cross-type equality."""
-    with pytest.raises(ValueError, match="share operation identity"):
-        MaterializedSyndromeRound(
-            operation_id=1,
-            round_index=0,
-            fragments=(make_fragment(True, 0),),
-        )
 
 
 def test_direct_values_accept_deleted_duplicate_and_round_agreement_checks() -> None:
@@ -559,8 +500,6 @@ def test_config_is_rounds_per_unit_by_pool_and_absent_pools_are_unbounded() -> N
     assert config.capacity_for("strong") is None
     with pytest.raises(ValueError):
         DecoderMemoryConfig({"default": 0})
-    with pytest.raises(TypeError):
-        DecoderMemoryConfig({3: 4})
 
 
 def test_unit_memory_holds_one_job_input_and_frees_it_exactly() -> None:

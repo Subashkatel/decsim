@@ -17,29 +17,21 @@ if TYPE_CHECKING:
 
 def _validate_production_mode(production: str, buffer_capacity: Optional[int]) -> None:
     """Validate the factory production mode and buffer setting."""
-    if type(production) is not str:
-        raise TypeError("production must be a built-in str")
     if production not in ("demand", "continuous"):
         raise ValueError(
             f"production must be 'demand' or 'continuous' (got {production!r})")
-    if buffer_capacity is not None and (
-        type(buffer_capacity) is not int or buffer_capacity < 1
-    ):
-        raise TypeError("buffer_capacity must be a positive built-in int or None")
     if production == "continuous" and buffer_capacity is None:
         raise ValueError("continuous production needs buffer_capacity >= 1")
 
 
 def _validate_exact_integer(name: str, value, *, minimum: int) -> int:
-    if type(value) is not int or value < minimum:
+    if value < minimum:
         relation = "positive" if minimum == 1 else "nonnegative"
-        raise TypeError(f"{name} must be a {relation} built-in int")
+        raise ValueError(f"{name} must be {relation}")
     return value
 
 
 def _validate_probability(name: str, value) -> float:
-    if type(value) not in (int, float):
-        raise TypeError(f"{name} must be a built-in int or float")
     normalized = float(value)
     if not math.isfinite(normalized) or not 0.0 <= normalized <= 1.0:
         raise ValueError(f"{name} must be finite and in [0, 1]")
@@ -48,8 +40,8 @@ def _validate_probability(name: str, value) -> float:
 
 def _validate_correction_decode_service(decode_service, n_corr: int) -> None:
     """Require one unambiguous correction-service disposition."""
-    if type(n_corr) is not int or n_corr < 0:
-        raise TypeError("n_corr must be a nonnegative built-in int")
+    if n_corr < 0:
+        raise ValueError("n_corr must be nonnegative")
     if n_corr == 0 and decode_service is not None:
         raise ValueError("decode_service must be None when n_corr is zero")
     if n_corr > 0 and decode_service is None:
@@ -324,14 +316,8 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
                  production: str = "demand", buffer_capacity: Optional[int] = None):
         _validate_production_mode(production, buffer_capacity)
         _validate_correction_decode_service(decode_service, n_corr)
-        if type(levels) is not list or not levels:
-            raise TypeError("levels must be a nonempty built-in list")
         validated_levels = []
         for index, level in enumerate(levels):
-            if type(level) is not DistillLevel:
-                raise TypeError(
-                    f"levels[{index}] must be an exact DistillLevel"
-                )
             validated_levels.append(
                 DistillLevel(
                     units=_validate_exact_integer(

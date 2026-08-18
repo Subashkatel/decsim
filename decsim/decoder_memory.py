@@ -51,9 +51,7 @@ class DecoderMemoryConfig:
     def __post_init__(self) -> None:
         copied = {}
         for pool, capacity in dict(self.capacity_rounds_by_pool).items():
-            if type(pool) is not str:
-                raise TypeError("decoder memory pool names must be str")
-            if type(capacity) is not int or capacity < 1:
+            if capacity < 1:
                 raise ValueError(f"pool {pool!r} needs a positive int round capacity")
             copied[pool] = capacity
         object.__setattr__(self, "capacity_rounds_by_pool", MappingProxyType(copied))
@@ -69,15 +67,6 @@ class MaterializedSyndromeRound:
     operation_id: Any
     round_index: int
     fragments: tuple[RetainedSyndromeFragment, ...]
-
-    def __post_init__(self) -> None:
-        if type(self.round_index) is not int:
-            raise TypeError("round_index must be an exact built-in int")
-        for fragment in self.fragments:
-            if not same_stable_identity(
-                    fragment.operation_id, self.operation_id):
-                raise ValueError(
-                    "materialized fragments must share operation identity")
 
 
 @dataclass(frozen=True)
@@ -153,9 +142,6 @@ def materialize_decoder_input(job: DecodeJob) -> DecoderInput:
     """Build one immutable decoder memory input from a job's fragments."""
     fragments_by_round: dict[tuple, list[RetainedSyndromeFragment]] = {}
     for payload in job.payloads:
-        if type(payload) is not RetainedSyndromeFragment:
-            raise TypeError(
-                "every job payload must be a RetainedSyndromeFragment")
         identity = (payload.operation_id, payload.round_index)
         fragments_by_round.setdefault(identity, []).append(payload)
     ordered = sorted(

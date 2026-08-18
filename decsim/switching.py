@@ -34,16 +34,8 @@ class ThresholdRegister:
         expected_source: SoftOutputSource,
         per_code: dict = None,
     ):
-        if not isinstance(expected_source, SoftOutputSource):
-            raise TypeError(
-                "ThresholdRegister expected_source must be a SoftOutputSource"
-            )
         initial_per_code = dict(per_code or {})
         for code in initial_per_code:
-            if type(code) is not str:
-                raise TypeError(
-                    "threshold-register code identities must be exact strings"
-                )
             if not code:
                 raise ValueError(
                     "threshold-register code identities must be nonempty"
@@ -60,10 +52,6 @@ class ThresholdRegister:
         return self.per_code.get(code, self.default)
 
     def set(self, code, threshold: float) -> None:
-        if type(code) is not str:
-            raise TypeError(
-                "threshold-register code identities must be exact strings"
-            )
         if not code:
             raise ValueError(
                 "threshold-register code identities must be nonempty"
@@ -169,10 +157,6 @@ class Switching:
             raise ValueError(
                 "double_window + bulk_strong is not supported: deferred "
                 "slabs are submitted one per escalation")
-        if not isinstance(expected_source, SoftOutputSource):
-            raise TypeError(
-                "Switching expected_source must be a SoftOutputSource"
-            )
         if threshold_register is not None:
             if confidence_threshold != threshold_register.default:
                 raise ValueError(

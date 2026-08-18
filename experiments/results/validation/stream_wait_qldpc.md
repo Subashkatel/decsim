@@ -17,3 +17,18 @@ Program: op1 (rounds 1-3), wait for its decode (window commit 3 buffer 3 complet
 The wait rounds are not filler: they are decoded (windows 4-6 and 7-9 above), and op2's data starts at round 11 exactly where the circuit continues, so the always-on QPU is verified with data, not only timing.
 
 Window tail: qLDPC knows the circuit is 13 rounds and merges the last 7 into one window; decsim's stream is cut in real time and cannot know at round 9 that the program ends at 13, so it commits 7-9 and then a final 10-13 window (the static planner, which knows the length, matches qLDPC's tail; Gate 1). The first windows are identical and every prediction agrees.
+
+## Last-window rule across reference code (survey 2026-08-18)
+
+| implementation | mode | last-window rule |
+|---|---|---|
+| ldpc (Roffe) base_overlapping_window_decoder.py:124-133 | offline | final decoding commits all of the last regular window |
+| tesseract simplex (Google) simplex.cc:205-289 | offline | loop clamped at the end; the last solve reaches the end and commits its tail |
+| Tan 2209.09219 L952-955 | streaming design | last window may be smaller, both time boundaries closed, the entire window is the core region |
+| Skoric 2209.08552 L646-649 | streaming design | commit region of the last window is from the bottom of the regular commit region to the last round |
+| qLDPC sinter.py:786-789 | offline | last window absorbs the remainder (window + stride - 1 wide), commits all |
+| quits, realtime_decoding_qldpc (Huang and Puri) | offline | dedicated larger last window W_last, commits all |
+| SWIPER window_builder.py:320-353 | real-time | leftover flushed as its own smaller commit-only window |
+| decsim (dynamic stream and static planner) | real-time | last window's commit extended to the last round, no trailing buffer |
+
+All agree that the final window commits everything up to the last round because the end boundary is closed; they differ only in the width of that final window. decsim follows Skoric, Tan, ldpc and tesseract.

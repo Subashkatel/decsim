@@ -47,7 +47,7 @@ Status vocabulary:
 | 6 | Syndrome packing, fragment reassembly and round packing | `decsim/syndrome_ingress.py` | EXISTS, REVIEW PENDING | Source exists; module 25 is pending. `tmp/validation/ORIENTATION.md` identifies reassembly and packing delay as this component's current role. Q-062(e) requires every configured cost to be explicit. |
 | 7 | Syndrome Buffer 0 | `decsim/syndrome_buffer.py` | EXISTS, REVIEW PENDING | Source exists; module 18 is pending. The standalone FIFO baseline shape and separately priced controller-to-buffer hop are binding Q-055 work. |
 | 8 | Window manager, fires decode when a window is ready | `decsim/window_manager.py` | EXISTS, REVIEW PENDING | Source exists; module 27 is pending. Q-057 binds zero weak/strong coordination in the baseline and keeps the parallel capability off, not deleted. |
-| 9 | Decoder manager and weak scheduler, unit assignment and manager-side push | `decsim/decoder_manager.py`; `decsim/schedulers.py`; `decsim/decoder_input_transfer.py` | EXISTS, REVIEW PENDING | Sources exist; schedulers module 16, transfer module 22, and manager module 26 are pending. Push DMA and its priced trigger are later Q-056 work, so the current existence claim is not a Q-056 completion claim. |
+| 9 | Decoder manager and weak scheduler, unit assignment and manager-side push | `decsim/decoder_manager.py`; `decsim/schedulers.py`; `decsim/decoder_memory_transfer.py` | EXISTS, REVIEW PENDING | Sources exist; schedulers module 16, transfer module 22, and manager module 26 are pending. Push DMA and its priced trigger are later Q-056 work, so the current existence claim is not a Q-056 completion claim. |
 | 10 | Weak decoder, memory plus compute engine | `decsim/decoder_engine.py` (`DecoderEngine`, `DecoderTiming`, `DecoderStage`, stage records) | DONE, Q-062(c) | Stages before the algorithm (fetch from decoder-side memory, cycles per round), the real decoder latency and decode() at its completion, stages after (release); every stage an engine event with start/end ticks; one job per unit. Hardware decoders declare their own named stages as data. |
 | 11 | Pauli frame, minimal weak-correction commit sink | `decsim/pauli_frame.py` | DONE, Q-062(b) | The toggleable final-weak sink is committed at production `efe7270` and tests `bdd0b1f`; 818 accumulated tests, compileall, and the default smoke run passed. The adapted PECOS XOR core carries the owner-required short provenance header. Full Q-054 mapping, lookup/update bandwidth, storage, and capacity axes remain later work. |
 | 12 | End-to-end throughput and per-point latency measurement | `decsim/views.py`; `decsim/metrics.py` | EXISTS, REVIEW PENDING; Q-062(d) BUILD PENDING | Both sources exist, but views module 29 and metrics module 30 are pending. `tmp/validation/ORIENTATION.md` defines them as the observation surface. The actual swept loop report is not done until Q-062(d) lands. |
@@ -100,9 +100,9 @@ These are existence checks only. They do not promote pending modules to DONE.
 | `decsim/devices.py` | `3b7544eeb171712a1795416d492e91e84c5942de569368606295d780e72aa00c` |
 | `decsim/syndrome_ingress.py` | `ade686c8f5d6ddb9d9d256892e901f3228cdd70fca1e2fa7b76aa34943eb5c1e` |
 | `decsim/syndrome_buffer.py` | `ee199a1bb7aeac7b79cd1bc44e2ae38df6ca5332b04c092bbbcab0bf67d7c6f2` |
-| `decsim/decoder_manager.py` | `845c1ab0ef8b8d53459e636d3f91bc435a2eedc58f1d3734cd53cbc06ac36e02` |
+| `decsim/decoder_manager.py` | `45954f75197e1f1939a055cb116c9f605883276b73d99272c24f326070808dea` |
 | `decsim/schedulers.py` | `1f44978718a8c7303f7089035c2fd1a728c491cfd181a940dc290c147f1acb81` |
-| `decsim/decoder_input_transfer.py` | `a21f20ab9f945a36e31c0e2a4ea3720f780b810b89cf3c411ee4c1ca9042aeed` |
+| `decsim/decoder_memory_transfer.py` | `171760e1c268b23ffe6e8f6e45e8c33bc091d34d6671f5e4bb4cdacbc1ad2f2c` |
 | `decsim/decoders.py` | `63c2b7522aa65d977c5baac90d60450fcbb7e6ee38bb670a428cb56d71931cf8` |
 | `decsim/decoder_engine.py` | `f465f213274503c9df4e5a19eb6d5800ad112161bf3e1518d393225d5aa10e15` |
 | `decsim/views.py` | `09d776107fd0681e38ea49cd3fb6364ba2fc41c7108799793fc7aec890f6fe85` |

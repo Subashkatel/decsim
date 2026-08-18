@@ -10,7 +10,7 @@ from .message import (DecodeJob, DecodeOutcome, DecodeResult,
                       DecoderRequestKey, DecoderServiceKey,
                       SoftOutput, StrongDecodeCompletion,
                       stable_identity_order_key)
-from .protocols import DecoderInputTransfer, Directive
+from .protocols import DecoderMemoryTransfer, Directive
 from .decoder_memory import DecoderMemoryConfig, DecoderMemoryStager
 from .config import fmt
 
@@ -78,28 +78,28 @@ class DecoderManager:
                  bulk_strong: bool = False,
                  lane_policy=None, log_name: str = "DecoderCluster",
                  capture_enabled: bool = False,
-                 decoder_input_transfer=None,
+                 decoder_memory_transfer=None,
                  decoder_memory: Optional[DecoderMemoryConfig] = None):
-        from .decoder_input_transfer import FixedLatencyDecoderInputTransfer
+        from .decoder_memory_transfer import FixedLatencyDecoderMemoryTransfer
 
         self.engine = engine
         self.router = router
-        self.decoder_input_transfer = (
-            FixedLatencyDecoderInputTransfer(engine)
-            if decoder_input_transfer is None else decoder_input_transfer
+        self.decoder_memory_transfer = (
+            FixedLatencyDecoderMemoryTransfer(engine)
+            if decoder_memory_transfer is None else decoder_memory_transfer
         )
         if (
-            not isinstance(self.decoder_input_transfer, DecoderInputTransfer)
-            or not callable(getattr(self.decoder_input_transfer, "deliver", None))
-            or not callable(getattr(self.decoder_input_transfer, "cancel", None))
+            not isinstance(self.decoder_memory_transfer, DecoderMemoryTransfer)
+            or not callable(getattr(self.decoder_memory_transfer, "deliver", None))
+            or not callable(getattr(self.decoder_memory_transfer, "cancel", None))
         ):
             raise TypeError(
-                "decoder_input_transfer must implement DecoderInputTransfer "
+                "decoder_memory_transfer must implement DecoderMemoryTransfer "
                 "(deliver and cancel)"
             )
-        transport_engine = getattr(self.decoder_input_transfer, "engine", engine)
+        transport_engine = getattr(self.decoder_memory_transfer, "engine", engine)
         if transport_engine is not engine:
-            raise ValueError("decoder_input_transfer uses a different engine")
+            raise ValueError("decoder_memory_transfer uses a different engine")
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
@@ -202,19 +202,19 @@ class DecoderManager:
             nonlocal delivered
             if delivered:
                 raise RuntimeError(
-                    f"decoder input transport delivered {job.label!r} twice"
+                    f"decoder memory transport delivered {job.label!r} twice"
                 )
             if delivered_job is not job:
                 raise RuntimeError(
-                    "decoder input transport delivered a different job"
+                    "decoder memory transport delivered a different job"
                 )
             if self.engine.now != expected_delivery_tick:
                 raise RuntimeError(
-                    "decoder input transport delivered at the wrong tick"
+                    "decoder memory transport delivered at the wrong tick"
                 )
             if job.decoder_input is not None:
                 raise RuntimeError(
-                    "decoder input transport materialized an input before "
+                    "decoder memory transport materialized an input before "
                     "storage admission"
                 )
             delivered = True
@@ -233,7 +233,7 @@ class DecoderManager:
                 hold()
                 admitted_job.input_hold = None
 
-        self.decoder_input_transfer.deliver(job, delay_ticks, receive_once)
+        self.decoder_memory_transfer.deliver(job, delay_ticks, receive_once)
 
     @staticmethod
     def _reject_spent_job(job: DecodeJob) -> None:
@@ -500,7 +500,7 @@ class DecoderManager:
         Both calls are idempotent, so cancelling a request that is in transport,
         waiting for round credits, already stored, or already cleared is safe.
         """
-        self.decoder_input_transfer.cancel(job)
+        self.decoder_memory_transfer.cancel(job)
         self.decoder_memory_stager.cancel(job)
         hold = job.input_hold
         if hold is not None:

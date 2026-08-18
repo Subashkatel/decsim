@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from .config import TimingConfig
-from .message import ExecutionProgram, OperationPlanningView, RunSeedPathSegment
+from .message import ExecutionProgram, RunSeedPathSegment
 from .seeding import bind_run_seed
 
 if TYPE_CHECKING:
@@ -140,347 +140,155 @@ class RunSpec:
         return self._build_once(Engine(verbose=verbose), _root_seed(self.seed))
 
     def _build_once(self, engine, root_seed) -> CompletedRun:
+        """Wire the run from its resolved configuration, in dependency order,
+        run the engine to quiescence, and capture the result."""
         from .controller import Controller
-        from .syndrome_ingress import SyndromeIngress, SyndromeIngressPolicy
-        from .decoder_manager import DecoderManager, StrategyServicesImpl
-        from .decoders import CodeRouter
-        from .devices import SyndromeBitDevice, TimingOnlyDevice
-        from .qpu import QPUDevice
-        from .link_profiles import logical_reference_profile
+        from .decoder_manager import DecoderManager
+        from .execution_runtime import ExecutionRuntime
         from .orchestrators import ExecutionOrchestrator
-        from .syndrome_buffer import SyndromeBuffer, SyndromeBufferingConfig
-        from .planner import (
-            _plan_execution,
-            _validate_operation_graph,
-            _validate_workload_identity,
-        )
-        from .rounds import GateRounds
-        from .policies import Eager, Ignore
-        from .schedulers import FifoScheduler
-        from .schemes import SlidingWindowScheme
-        from .switching import Baseline
-        from .window_interactions import DefaultWindowInteraction
+        from .qpu import QPUDevice
+        from .run_configuration import (check_factory_decode_service,
+                                        resolve_run_configuration)
+        from .syndrome_buffer import SyndromeBuffer
+        from .syndrome_ingress import SyndromeIngress
+        from .views import capture_primary_result
         from .window_manager import WindowManager
 
-        strategy = self.strategy if self.strategy is not None else Baseline()
-        requires_strong_context = strategy.requires_strong_context
-        bulk_strong = strategy.bulk_strong
-        double_window = strategy.double_window
-
-        if (self.ops is None) == (self.frontend is None):
-            raise ValueError("provide exactly one of ops= or frontend=")
-        source_ops = self.frontend.build() if self.frontend is not None else self.ops
-        protected_regions = tuple(self.protected_regions)
-        ops, decode_ops, dynamic_streams = _copy_workload(
-            source_ops, self.decode_ops or (), self.dynamic_streams or (),
-            self.feedback_boundary_mode)
-        _validate_workload_identity(ops, decode_ops, dynamic_streams)
-        if self.feedback_boundary_mode not in (
-            "trailing_buffer", "measurement_closed"):
-            raise ValueError("invalid feedback_boundary_mode")
-        all_operations = _unique_operations(ops + decode_ops + dynamic_streams)
-        views = tuple(OperationPlanningView.from_operation(op)
-                      for op in all_operations)
-        view_by_id = {view.id: view for view in views}
-        _validate_operation_graph(
-            list(ops), validate_blockers=True,
-            external_blocker_ids=(op.id for op in decode_ops + dynamic_streams))
-
-        code, layout = _select_code(self.d, self.code, self.layout)
-        scheme = self.scheme or SlidingWindowScheme()
-        rounds_policy = self.rounds_policy or GateRounds()
-        boundary_policy = self.boundary_policy or Eager()
-        window_interaction = self.window_interaction or DefaultWindowInteraction()
-        if dynamic_streams and type(scheme) is not SlidingWindowScheme:
-            raise ValueError("dynamic streams require SlidingWindowScheme")
-        strategy.validate_declared_run(
-            scheme=scheme, boundary_policy=boundary_policy,
-            has_dynamic_streams=bool(dynamic_streams),
-            static_decode_plan_selected=self.decode_ops is not None,
-            has_frontend=self.frontend is not None)
-        strategy.validate_operations(views)
-
-        planned_operations = _decode_plan_operations(
-            ops, decode_ops, dynamic_streams,
-            static_decode_selected=self.decode_ops is not None)
-        plan = _plan_execution(
-            operations=views,
-            planned_operation_ids=tuple(op.id for op in planned_operations),
-            code=code, layout=layout, scheme=scheme,
-            rounds_policy=rounds_policy,
-            fallback_round_us=(self.round_us if self.round_us is not None
-                               else self.timing.round_us),
-            retain_strong_context=requires_strong_context,
-            double_window=double_window,
-            has_open_ended_dynamic_streams=bool(dynamic_streams))
-        strategy.validate_code_geometry(plan.code_geometry)
-        resource_claims = {
-            op.id: tuple(layout.resources_for(view_by_id[op.id])) for op in ops}
-
-        device = self.device or TimingOnlyDevice()
-        _install_device_circuits(device, all_operations)
-        error_model_provider = (
-            device if self.error_model_provider is None
-            else self.error_model_provider)
-        if (error_model_provider is not device and
-                hasattr(error_model_provider, "operation_circuit_scope")):
-            _install_device_circuits(error_model_provider, all_operations)
-        if type(device) is SyndromeBitDevice and device.code is not code:
-            raise ValueError(
-                "SyndromeBitDevice.code must be the exact resolved run code")
-        if self.router is not None and (self.decoder is not None or self.decoders):
-            raise ValueError("router is exclusive with decoder and decoders")
-        if self.router is None and self.decoder is None and planned_operations:
-            raise ValueError("decoder is required when router is omitted")
-        router = self.router or CodeRouter(
-            default=self.decoder, by_code=dict(self.decoders))
-        scheduler = (
-            FifoScheduler() if self.scheduler is None else self.scheduler
-        )
-        idle_policy = self.idle_policy or Ignore()
-        orchestrator = (self.make_orchestrator(engine)
-                        if self.make_orchestrator
+        config = resolve_run_configuration(self, root_seed)
+        strategy, plan, timing = config.strategy, config.plan, config.timing
+        orchestrator = (config.make_orchestrator(engine) if config.make_orchestrator
                         else ExecutionOrchestrator(engine))
-        link_config = (self.links if self.links is not None else
-                       logical_reference_profile())
-        if (
-            self.timing.ticks("t_binary_availability") > 0
-            and not link_config.qc_excludes_controller_processing
-        ):
-            raise ValueError(
-                "a separate controller readout cost requires a link "
-                "profile whose QC latency excludes that cost"
-            )
-        links = link_config.resolve()
-        buffering = self.syndrome_buffering or SyndromeBufferingConfig()
+        links = config.link_config.resolve()
         syndrome_buffer = SyndromeBuffer(
-            capacity=buffering.upstream_packet_slots,
-            memory_model=self.memory_model,
-        )
-        pauli_frame = (
-            None if self.pauli_frame is None else self.pauli_frame.resolve(engine)
-        )
-        if self.pauli_frame is not None and pauli_frame is None:
-            raise TypeError("pauli_frame.resolve must return a PauliFrame")
+            capacity=config.buffering.upstream_packet_slots,
+            memory_model=config.memory_model)
+        pauli_frame = (None if config.pauli_frame is None
+                       else config.pauli_frame.resolve(engine))
+
+        # The window manager, the decoder manager and the factory refer to each
+        # other; the closures below bind those names at first call.
         window_manager = WindowManager(
-            engine, scheme=scheme, code_geometry=plan.code_geometry,
+            engine, scheme=config.scheme, code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches,
-            links=links,
-            orchestrator=orchestrator, boundary_policy=boundary_policy,
-            window_interaction=window_interaction,
-            planning_view_by_operation_id=view_by_id,
-            fault_model_requirement_for=router.fault_model_requirement_for,
-            feedback_boundary_mode=self.feedback_boundary_mode,
-            error_model_provider=error_model_provider,
-            syndrome_buffer=syndrome_buffer,
-            pauli_frame=pauli_frame,
-            retain_strong_context=requires_strong_context,
-            double_window=double_window,
-            capture_enabled=self.record_switching_windows)
-        if self.make_syndrome_ingress is not None and self.syndrome_ingress_policy is not None:
-            raise ValueError("syndrome_ingress_policy cannot be combined with make_syndrome_ingress")
+            links=links, orchestrator=orchestrator,
+            boundary_policy=config.boundary_policy,
+            window_interaction=config.window_interaction,
+            planning_view_by_operation_id=config.view_by_id,
+            fault_model_requirement_for=config.router.fault_model_requirement_for,
+            feedback_boundary_mode=config.feedback_boundary_mode,
+            error_model_provider=config.error_model_provider,
+            syndrome_buffer=syndrome_buffer, pauli_frame=pauli_frame,
+            retain_strong_context=strategy.requires_strong_context,
+            double_window=strategy.double_window,
+            capture_enabled=config.capture_switching_windows,
+            strategy=strategy,
+            submit_fn=lambda job, reserve_transfer=None:
+                decoder_manager.enqueue(job, reserve_transfer),
+            check_strong_route=lambda weak_job, strong_job:
+                decoder_manager.check_strong_route(weak_job, strong_job),
+            on_workload_complete=lambda: factory.shutdown())
         syndrome_ingress = (
-            self.make_syndrome_ingress(
-                engine, links, buffering, window_manager
-            )
-            if self.make_syndrome_ingress else SyndromeIngress(
-                engine, links=links, t_pack=self.timing.ticks("t_pack"),
-                ingress_context_capacity=buffering.upstream_packet_slots,
+            config.make_syndrome_ingress(engine, links, config.buffering,
+                                         window_manager, syndrome_buffer)
+            if config.make_syndrome_ingress else SyndromeIngress(
+                engine, links=links, t_pack=timing.ticks("t_pack"),
+                ingress_context_capacity=config.buffering.upstream_packet_slots,
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager,
                 syndrome_buffer=syndrome_buffer,
-                policy=(self.syndrome_ingress_policy
-                        if self.syndrome_ingress_policy is not None
-                        else SyndromeIngressPolicy()),
-            )
-        )
-        if self.make_syndrome_ingress is not None:
-            syndrome_ingress.syndrome_buffer = syndrome_buffer
-        # A supplied transfer owns transport timing only: the decoder manager's
-        # stager is always the receiver, so decoder memory cannot be
-        # bypassed. The returned transfer must satisfy deliver plus cancel.
-        if self.make_decoder_memory_transfer is None:
-            from .decoder_memory_transfer import FixedLatencyDecoderMemoryTransfer
-            decoder_memory_transfer = FixedLatencyDecoderMemoryTransfer(engine)
-        else:
-            decoder_memory_transfer = self.make_decoder_memory_transfer(
-                engine, links, buffering
-            )
-        if (
-            self.make_decoder_memory_transfer is not None
-            and decoder_memory_transfer is None
-        ):
-            raise TypeError(
-                "make_decoder_memory_transfer must return a "
-                "DecoderMemoryTransfer"
-            )
+                policy=config.syndrome_ingress_policy))
+        decoder_memory_transfer = (
+            config.make_decoder_memory_transfer(engine, links, config.buffering)
+            if config.make_decoder_memory_transfer else None)
         decoder_manager = DecoderManager(
-            engine, router=router, scheduler=scheduler,
-            unit_pools=self.unit_pools,
-            num_units=self.num_units if self.num_units is not None else 1,
-            bulk_strong=bulk_strong,
-            lane_policy=self.lane_policy,
-            capture_enabled=self.record_switching_windows,
+            engine, router=config.router, scheduler=config.scheduler,
+            unit_pools=config.unit_pools, num_units=config.num_units,
+            bulk_strong=strategy.bulk_strong, lane_policy=config.lane_policy,
+            capture_enabled=config.capture_switching_windows,
             decoder_memory_transfer=decoder_memory_transfer,
-            decoder_memory=self.decoder_memory)
-        decoder_memory_transfer = decoder_manager.decoder_memory_transfer
-        services = StrategyServicesImpl(engine, window_manager, decoder_manager)
-        window_manager.strategy = strategy
-        window_manager.services = services
-        window_manager.submit_fn = decoder_manager.enqueue
-        decoder_manager.strategy = strategy
-        decoder_manager.services = services
-        decoder_manager.on_window_decoded = window_manager.on_decode_done
-        decoder_manager.on_strong_window_decoded = window_manager.on_strong_decode_done
-
-        factory = (self.make_factory(engine, decoder_manager)
-                   if self.make_factory else _make_infinite(engine))
+            decoder_memory=config.decoder_memory,
+            strategy=strategy, services=window_manager,
+            on_window_decoded=window_manager.on_decode_done,
+            on_strong_window_decoded=window_manager.on_strong_decode_done)
+        window_manager.connect_idle_decode_demand_receiver(decoder_manager.submit_decode)
+        factory = (config.make_factory(engine, decoder_manager)
+                   if config.make_factory else _make_infinite(engine))
         if factory.engine is not engine:
-            raise ValueError(
-                f"{type(factory).__name__} uses a different engine")
-        _check_factory_decode_service(factory, decoder_manager)
-        qpu = QPUDevice(engine, device, plan.round_ticks)
-        window_manager.connect_idle_decode_demand_receiver(
-            decoder_manager.submit_decode)
+            raise ValueError(f"{type(factory).__name__} uses a different engine")
+        check_factory_decode_service(factory, decoder_manager)
+
+        qpu = QPUDevice(engine, config.device, plan.round_ticks)
         controller = Controller(
             engine, qpu=qpu, window_manager=window_manager,
             syndrome_ingress=syndrome_ingress,
-            binary_availability_ticks=self.timing.ticks("t_binary_availability"),
+            binary_availability_ticks=timing.ticks("t_binary_availability"),
             links=links, round_ticks=plan.round_ticks,
             code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
-            resolved_patches=plan.resolved_patches, idle_policy=idle_policy,
-            protected_regions=protected_regions)
-        from .execution_runtime import ExecutionRuntime
+            resolved_patches=plan.resolved_patches, idle_policy=config.idle_policy,
+            protected_regions=config.protected_regions)
         execution_runtime = ExecutionRuntime(
             engine, controller=controller, factory=factory,
-            resource_claims_by_operation_id=resource_claims)
+            resource_claims_by_operation_id=config.resource_claims)
         controller.connect_runtime(execution_runtime)
         qpu.connect_readout_receiver(controller)
         qpu.connect_completion_receiver(controller._body_done)
         qpu.connect_idle_receiver(controller.emit_idle_round)
-        metrics = (self.make_metrics(
-            engine, window_manager, decoder_manager, execution_runtime, factory)
-            if self.make_metrics else [])
-        if self.record_switching_windows:
+        metrics = (config.make_metrics(engine, window_manager, decoder_manager,
+                                       execution_runtime, factory)
+                   if config.make_metrics else [])
+        if config.capture_switching_windows:
             from .metrics import WindowSwitchingRecords
             metrics.append(WindowSwitchingRecords(window_manager, decoder_manager))
         metric_bindings = _metric_bindings(metrics)
         bind_run_seed(root_seed, _seed_roots(
-            code=code, scheme=scheme,
-            device=device, error_model_provider=error_model_provider,
-            decoder_router=router,
-            factory=factory, strategy=strategy, scheduler=scheduler,
-            decoder_memory_transfer=decoder_memory_transfer,
-            lane_policy=self.lane_policy,
-            boundary_policy=boundary_policy,
-            window_interaction=window_interaction, idle_policy=idle_policy,
+            code=config.code, scheme=config.scheme,
+            device=config.device, error_model_provider=config.error_model_provider,
+            decoder_router=config.router,
+            factory=factory, strategy=strategy, scheduler=config.scheduler,
+            decoder_memory_transfer=decoder_manager.decoder_memory_transfer,
+            lane_policy=config.lane_policy,
+            boundary_policy=config.boundary_policy,
+            window_interaction=config.window_interaction,
+            idle_policy=config.idle_policy,
             orchestrator=orchestrator, syndrome_ingress=syndrome_ingress,
             controller=controller, qpu=qpu,
             execution_runtime=execution_runtime,
             pauli_frame=pauli_frame,
-            memory_model=self.memory_model, metrics=metric_bindings))
+            memory_model=config.memory_model, metrics=metric_bindings))
 
         orchestrator.connect(controller, execution_runtime.on_decision)
-        window_manager.on_workload_complete = factory.shutdown
-        for op in ops:
+        for op in config.ops:
             if op.blocked_by is not None:
                 orchestrator.register_blocked_operation(op.id, op.blocked_by)
-        for op in planned_operations:
+        for op in config.planned_operations:
             window_manager.register_op(op)
         window_manager.load_execution_plan(plan.execution, plan.buffering)
         resolved_by_id = {op.operation_id: op for op in plan.resolved_operations}
-        for stream in dynamic_streams:
+        for stream in config.dynamic_streams:
             window_manager._register_dynamic_stream(stream, resolved_by_id[stream.id])
         for _, metric in metric_bindings:
             engine.add_metric(metric)
-        controller.load_program(ExecutionProgram(tuple(ops), tuple(decode_ops), tuple(dynamic_streams), tuple(protected_regions)))
+        controller.load_program(ExecutionProgram(
+            config.ops, config.decode_ops, config.dynamic_streams,
+            config.protected_regions))
         engine.run()
         if window_manager.pending_escalations:
             raise RuntimeError(
                 f"the run ended with pending strong escalations: "
                 f"{window_manager.pending_escalations}")
         decoder_manager.check_decode_work_settled()
-        check_ingress_settled = getattr(
-            syndrome_ingress, "check_work_settled", None)
+        check_ingress_settled = getattr(syndrome_ingress, "check_work_settled", None)
         if callable(check_ingress_settled):
             check_ingress_settled()
-        from .views import capture_primary_result
         result = capture_primary_result(
-            engine, execution_runtime, window_manager, all_operations,
-            metric_bindings, links, device)
+            engine, execution_runtime, window_manager, config.all_operations,
+            metric_bindings, links, config.device)
         return CompletedRun(
             result, engine, window_manager, decoder_manager, execution_runtime,
             controller, qpu, orchestrator, factory,
             syndrome_buffer, syndrome_ingress, pauli_frame=pauli_frame)
-
-
-def _select_code(distance, code, layout):
-    from .codes import SurfaceCodeModel
-    from .layouts import UniformLayout
-    if sum(value is not None for value in (distance, code, layout)) > 1:
-        supplied = [name for name, value in (
-            ("d", distance), ("code", code), ("layout", layout))
-            if value is not None]
-        raise ValueError(f"multiple code sources supplied: {', '.join(supplied)}")
-    if layout is not None:
-        codes = list(layout.codes())
-        if len(codes) != 1:
-            raise ValueError(
-                f"layout must declare exactly one code (got {len(codes)})")
-        return codes[0], layout
-    selected = code if code is not None else SurfaceCodeModel(
-        d=3 if distance is None else distance)
-    return selected, UniformLayout(selected)
-
-
-def _copy_workload(source_ops, decode_ops, dynamic_streams, feedback_mode):
-    copies = {}
-    def clone(operation):
-        if id(operation) not in copies:
-            private = copy.copy(operation)
-            if private.feedback_boundary_mode is None:
-                private.feedback_boundary_mode = feedback_mode
-            copies[id(operation)] = private
-        return copies[id(operation)]
-    return tuple(tuple(clone(op) for op in group)
-                 for group in (source_ops, decode_ops, dynamic_streams))
-
-
-def _install_device_circuits(device, operations):
-    scope = getattr(device, "operation_circuit_scope", None)
-    if scope == "none":
-        for operation in operations:
-            operation.circuit = None
-        return
-    if scope != "per_operation":
-        raise ValueError("device operation_circuit_scope must be none or per_operation")
-    import stim
-    for operation in operations:
-        if operation.circuit is None:
-            continue
-        operation.circuit = stim.Circuit(str(operation.circuit))
-
-
-def _unique_operations(operations):
-    unique = {}
-    for operation in operations:
-        unique.setdefault(operation.id, operation)
-    return tuple(unique.values())
-
-
-def _decode_plan_operations(ops, decode_ops, dynamic_streams, *,
-                            static_decode_selected):
-    if static_decode_selected:
-        return decode_ops
-    if not dynamic_streams:
-        return tuple(op for op in ops if op.emits_detector_data)
-    dynamic_ids = {stream.id for stream in dynamic_streams}
-    return tuple(
-        op for op in ops
-        if op.emits_detector_data and op.stream_id not in dynamic_ids
-    )
 
 
 def _metric_bindings(metrics):
@@ -516,16 +324,6 @@ def _seed_roots(**parts):
 def _make_infinite(engine):
     from .factories import InfiniteFactory
     return InfiniteFactory(engine)
-
-
-def _check_factory_decode_service(factory, decoder_manager):
-    from .factories import DistillationFactory, MultiLevelDistillationFactory
-    if type(factory) not in (DistillationFactory, MultiLevelDistillationFactory):
-        return
-    expected = decoder_manager if factory.n_corr > 0 else None
-    if factory.decode_service is not expected:
-        raise ValueError(
-            f"{type(factory).__name__} decode_service must be run-owned")
 
 
 def simulate(run: RunSpec, verbose: bool = False) -> CompletedRun:

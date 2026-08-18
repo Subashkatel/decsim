@@ -6,13 +6,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional
 
-from .message import (DecodeJob, DecodeOutcome, DecodeResult,
+from ..message import (DecodeJob, DecodeOutcome, DecodeResult,
                       DecoderRequestKey, DecoderServiceKey,
                       SoftOutput, StrongDecodeCompletion,
                       stable_identity_order_key)
-from .protocols import Directive
+from ..protocols import Directive
 from .decoder_memory import DecoderMemory, DecoderMemoryConfig
-from .config import fmt
+from ..config import fmt
 
 
 @dataclass(frozen=True)

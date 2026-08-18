@@ -6,24 +6,24 @@ import time
 
 from typing import TYPE_CHECKING, Optional
 
-from ..adapters.window_decode_results import (
+from ..window_decode_results import (
     check_syndrome_size,
     payload_syndrome,
     result_from_selected_faults,
 )
-from ..message import (
+from ...message import (
     DecodeJob,
     DecodeResult,
     RunSeedChild,
     RunSeedPathSegment,
 )
-from ..detector_error_model.fault_model_contracts import (
+from ...detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
 
 if TYPE_CHECKING:
-    from ..protocols import Decoder
+    from ...protocols import Decoder
 
 
 class PyMatchingDecoder:
@@ -84,7 +84,7 @@ class PyMatchingDecoder:
         entry = self._matchings.get(id(faults))
         matching = entry[1] if entry is not None and entry[0]() is faults else None
         if matching is None:
-            from ..detector_error_model.fault_identity_validation import (
+            from ...detector_error_model.fault_identity_validation import (
                 validate_graphlike_matrices,
             )
 

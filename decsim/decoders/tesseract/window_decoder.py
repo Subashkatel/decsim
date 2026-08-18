@@ -10,7 +10,7 @@ import secrets
 import threading
 from typing import Optional
 
-from ..adapters.window_decode_results import (
+from ..window_decode_results import (
     BackendDecodeOutcome,
     BackendDecodeStatus,
     BackendFailureReason,
@@ -18,11 +18,11 @@ from ..adapters.window_decode_results import (
     empty_fault_model_outcome,
     fault_model_fingerprint,
 )
-from ..detector_error_model.fault_identity_validation import (
+from ...detector_error_model.fault_identity_validation import (
     validate_placed_fault_matrices,
 )
-from ..detector_error_model.fault_model_contracts import FaultRepresentation
-from ..seeding import _AtomicRunSeedConsumer
+from ...detector_error_model.fault_model_contracts import FaultRepresentation
+from ...seeding import _AtomicRunSeedConsumer
 
 
 _DETECTOR_ORDER_METHODS = frozenset({

@@ -12,7 +12,7 @@ from __future__ import annotations
 import math
 from typing import TYPE_CHECKING, Optional
 
-from .message import (
+from ..message import (
     DecodeJob,
     DecodeResult,
     RunSeedChild,
@@ -20,9 +20,9 @@ from .message import (
     SoftOutput,
     SoftOutputSource,
 )
-from .config import us
-from .seeding import _RandomSeedConsumer
-from .detector_error_model.fault_model_contracts import (
+from ..config import us
+from ..seeding import _RandomSeedConsumer
+from ..detector_error_model.fault_model_contracts import (
     DecoderFaultModelRequirement,
     NO_FAULT_MODEL_REQUIRED,
 )
@@ -38,7 +38,7 @@ SAMPLED_CONFIDENCE_SOURCE = SoftOutputSource(
 )
 
 if TYPE_CHECKING:
-    from .protocols import Decoder
+    from ..protocols import Decoder
 
 
 def _check_probability(value, field_name: str) -> float:

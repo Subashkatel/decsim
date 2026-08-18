@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .message import DecodeJob
+from ..message import DecodeJob
 
 
 class FifoScheduler:

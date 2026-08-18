@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..adapters.window_decode_results import payload_syndrome
+from ..decoders.window_decode_results import payload_syndrome
 from ..message import (
     DecodeJob,
     DecodeResult,

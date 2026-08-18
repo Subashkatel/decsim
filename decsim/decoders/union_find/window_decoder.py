@@ -150,7 +150,7 @@ def _graph_from_model(
 ) -> UnionFindGraph:
     import numpy as np
 
-    from ..detector_error_model.fault_identity_validation import (
+    from ...detector_error_model.fault_identity_validation import (
         validate_graphlike_matrices,
     )
 
@@ -605,7 +605,7 @@ def decode_union_find_model(
     weight_step=0.1,
 ) -> UnionFindHardEvidence:
     """Decode one placed weighted graphlike model and return hard evidence."""
-    from ..detector_error_model.fault_model_contracts import FaultRepresentation
+    from ...detector_error_model.fault_model_contracts import FaultRepresentation
 
     faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
     graph = _graph_from_model(

@@ -12,7 +12,7 @@ import pytest
 import stim
 
 from decsim.qpu.stim_device import StimDevice
-from decsim.decoders import PerRoundDecoder
+from decsim.decoders.decoders import PerRoundDecoder
 from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
 from decsim.program.qlx_frontend import qlx_frontend
 from decsim.message import OpKind

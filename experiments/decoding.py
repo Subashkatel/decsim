@@ -14,7 +14,7 @@ from decsim.detector_error_model import (
     decode_windowed,
     resolve_detector_rounds,
 )
-from decsim.adapters.window_decode_results import BackendDecodeStatus
+from decsim.decoders.window_decode_results import BackendDecodeStatus
 
 from .harness import Batch, offline_batch_seed, sample_batch_sha256
 from .results import (

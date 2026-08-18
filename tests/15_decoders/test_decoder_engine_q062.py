@@ -3,13 +3,13 @@
 import pytest
 
 from decsim.config import us
-from decsim.decoder_engine import (
+from decsim.decoders.decoder_engine import (
     ALGORITHM_STAGE,
     DecoderStage,
     DecoderTiming,
     DecoderEngine,
 )
-from decsim.decoders import PerRoundDecoder, PresetLatencyDecoder
+from decsim.decoders.decoders import PerRoundDecoder, PresetLatencyDecoder
 from decsim.engine import Engine
 from decsim.message import DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier
 
@@ -146,7 +146,7 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
     stim = pytest.importorskip("stim")
     from decsim.qpu.stim_device import StimDevice
     from decsim.message import Operation
-    from decsim.mwpm_decoder.decoder import PyMatchingDecoder
+    from decsim.decoders.mwpm.decoder import PyMatchingDecoder
     from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
@@ -189,7 +189,7 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     stim = pytest.importorskip("stim")
     from decsim.qpu.stim_device import StimDevice
     from decsim.message import Operation
-    from decsim.mwpm_decoder.decoder import PyMatchingDecoder
+    from decsim.decoders.mwpm.decoder import PyMatchingDecoder
     from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 

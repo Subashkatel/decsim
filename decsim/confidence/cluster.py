@@ -12,8 +12,8 @@ from ..detector_error_model.fault_model_contracts import (
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
 from ..message import DecodeJob, DecodeResult, SoftOutput, SoftOutputSource
-from ..union_find_decoder.decoder import UnionFindDecoder
-from ..union_find_decoder.window_decoder import (
+from ..decoders.union_find.decoder import UnionFindDecoder
+from ..decoders.union_find.window_decoder import (
     Closed,
     Open,
     UnionFindGraph,

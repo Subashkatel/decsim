@@ -136,7 +136,7 @@ def test_atomic_consumer_initializes_default_hooks_and_live_label():
     with pytest.raises(NotImplementedError):
         consumer._install_run_seed_state(marker)
 
-    from decsim.relay_bp_decoder.window_decoder import RelayBpWindowDecoder
+    from decsim.decoders.relay_bp.window_decoder import RelayBpWindowDecoder
 
     relay = RelayBpWindowDecoder(gamma_table_seed=5)
     with pytest.raises(ValueError, match="explicit gamma-table seed"):

@@ -9,14 +9,14 @@ from importlib.metadata import PackageNotFoundError, version as package_version
 import json
 from pathlib import Path
 
-from decsim.bposd_decoder import bposd_window_decoder
+from decsim.decoders.bposd import bposd_window_decoder
 from decsim.detector_error_model import (
     FaultRepresentation,
     PHYSICAL_FAULT_MODEL_REQUIRED,
 )
 from decsim.schemes import SlidingWindowScheme
-from decsim.relay_bp_decoder import RelayBpWindowDecoder
-from decsim.tesseract_decoder import TesseractDecoderConfig, TesseractWindowDecoder
+from decsim.decoders.relay_bp import RelayBpWindowDecoder
+from decsim.decoders.tesseract import TesseractDecoderConfig, TesseractWindowDecoder
 
 from .bb import build_quits11_bb_memory
 from .decoding import (

@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..detector_error_model.fault_model_contracts import WindowErrorModel
+    from ...detector_error_model.fault_model_contracts import WindowErrorModel
 
 
 def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,
@@ -15,14 +15,14 @@ def bposd_window_decoder(max_iter: int = 2, osd_order: int = 0,
     cache: dict = {}
 
     def decode(model: "WindowErrorModel", syndrome):
-        from ..detector_error_model.fault_model_contracts import FaultRepresentation
+        from ...detector_error_model.fault_model_contracts import FaultRepresentation
 
         faults = model.require_faults(FaultRepresentation.PHYSICAL)
         decoder = cache.get(id(faults))
         if decoder is None:
             import weakref
 
-            from ..detector_error_model.fault_identity_validation import (
+            from ...detector_error_model.fault_identity_validation import (
                 validate_placed_fault_matrices,
             )
             from ldpc import BpOsdDecoder

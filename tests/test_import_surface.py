@@ -24,7 +24,13 @@ def test_no_module_of_the_old_flat_layout_remains():
     moved = ["qpu.py", "devices.py", "codes.py", "layouts.py", "planner.py",
              "orchestrators.py", "execution_runtime.py", "rounds.py",
              "factories.py", "controller.py", "policies.py",
-             "syndrome_ingress.py", "syndrome_buffer.py"]
+             "syndrome_ingress.py", "syndrome_buffer.py", "decoder_manager.py",
+             "decoder_memory.py", "decoder_memory_transfer.py", "decoder_engine.py",
+             "decoders.py", "schedulers.py", "switching.py"]
     assert [name for name in moved if (root / name).exists()] == []
     assert not (root / "frontends").exists()
     assert not (root / "stimcircuits").exists()
+    for old_package in ("adapters", "soft_output", "mwpm_decoder", "union_find_decoder",
+                        "tesseract_decoder", "relay_bp_decoder",
+                        "belief_matching_decoder", "bposd_decoder"):
+        assert not (root / old_package).exists()

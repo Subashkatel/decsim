@@ -7,7 +7,7 @@ import pytest
 
 import decsim.qpu.layouts as layouts_module
 from decsim.qpu.code_geometry import SurfaceCodeModel
-from decsim.decoders import PresetLatencyDecoder
+from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.qpu.layouts import UniformLayout
 from decsim.message import Operation, OperationPlanningView, ResourceClaim
 from decsim.protocols import CodeModel, LayoutModel

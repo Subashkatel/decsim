@@ -23,11 +23,11 @@ import pymatching
 import stim
 
 from decsim.qpu.stim_device import RecordedStimDevice
-from decsim.decoders import PresetLatencyDecoder
+from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.detector_error_model.fault_model_contracts import FaultRepresentation
 from decsim.message import Operation
-from decsim.mwpm_decoder.decoder import PyMatchingDecoder
-from decsim.mwpm_decoder.weights import matching_weights
+from decsim.decoders.mwpm.decoder import PyMatchingDecoder
+from decsim.decoders.mwpm.weights import matching_weights
 from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
@@ -46,7 +46,7 @@ class _CapturingDecoder(PyMatchingDecoder):
         result = super().decode(job)
         model = job.dem
         if model is not None:
-            from decsim.mwpm_decoder.decoder import payload_syndrome
+            from decsim.decoders.mwpm.decoder import payload_syndrome
             faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
             syndrome = payload_syndrome(job)
             matching = self._matching_for_model(faults)

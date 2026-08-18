@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 from ..message import SoftOutput, SoftOutputSource
 from ..detector_error_model.fault_model_contracts import GRAPHLIKE_FAULT_MODEL_REQUIRED
-from ..mwpm_decoder.weights import matching_weights
+from ..decoders.mwpm.weights import matching_weights
 
 if TYPE_CHECKING:
     import stim

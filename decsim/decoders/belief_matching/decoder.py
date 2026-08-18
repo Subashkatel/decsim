@@ -4,21 +4,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..adapters.window_decode_results import (
+from ..window_decode_results import (
     check_syndrome_size,
     payload_syndrome,
     result_from_selected_faults,
 )
-from ..message import DecodeResult, RunSeedChild, RunSeedPathSegment
-from ..detector_error_model.fault_model_contracts import (
+from ...message import DecodeResult, RunSeedChild, RunSeedPathSegment
+from ...detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     LINKED_FAULT_MODELS_REQUIRED,
 )
 from .window_decoder import belief_matching_window_decoder
 
 if TYPE_CHECKING:
-    from ..message import DecodeJob
-    from ..protocols import Decoder
+    from ...message import DecodeJob
+    from ...protocols import Decoder
 
 
 class BeliefMatchingDecoder:

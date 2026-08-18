@@ -4,18 +4,18 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..adapters.window_decode_results import (
+from ..window_decode_results import (
     DecoderAttemptFailed,
     check_syndrome_size,
     payload_syndrome,
     result_from_selected_faults,
     validate_backend_outcome,
 )
-from ..detector_error_model.fault_model_contracts import (
+from ...detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     PHYSICAL_FAULT_MODEL_REQUIRED,
 )
-from ..message import (
+from ...message import (
     DecodeJob,
     DecodeResult,
     RunSeedChild,

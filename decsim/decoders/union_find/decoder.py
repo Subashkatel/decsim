@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..adapters.window_decode_results import (
+from ..window_decode_results import (
     check_syndrome_size,
     payload_syndrome,
     result_from_selected_faults,
 )
-from ..detector_error_model.fault_model_contracts import (
+from ...detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
-from ..message import (
+from ...message import (
     DecodeJob,
     DecodeResult,
     RunSeedChild,

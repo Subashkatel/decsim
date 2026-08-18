@@ -30,11 +30,11 @@ import stim
 
 from decsim.qpu.stim_device import RecordedStimDevice
 from decsim.config import TICKS_PER_US, TimingConfig
-from decsim.decoder_engine import DecoderEngine, DecoderTiming
-from decsim.decoders import PresetLatencyDecoder
+from decsim.decoders.decoder_engine import DecoderEngine, DecoderTiming
+from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
 from decsim.message import Operation
-from decsim.mwpm_decoder.decoder import PyMatchingDecoder
+from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.pauli_frame import PauliFrameConfig
 from decsim.controller.policies import ExtendStream
 from decsim.program.round_policies import PerOpRounds

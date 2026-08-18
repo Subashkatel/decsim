@@ -6,8 +6,8 @@ from dataclasses import FrozenInstanceError, dataclass, fields
 
 import pytest
 
-import decsim.decoder_memory as decoder_memory
-from decsim.decoder_memory import (
+import decsim.decoders.decoder_memory as decoder_memory
+from decsim.decoders.decoder_memory import (
     DecoderInput,
     DecoderMemory,
     DecoderMemoryCapacityExhaustion,
@@ -24,9 +24,9 @@ from decsim.detector_error_model.window_model_builders import (
     build_window_error_models,
 )
 from decsim.qpu.stim_device import StimDevice
-from decsim.decoders import PerRoundDecoder
+from decsim.decoders.decoders import PerRoundDecoder
 from decsim.message import DecodeJob, Operation, RetainedSyndromeFragment
-from decsim.mwpm_decoder.decoder import PyMatchingDecoder
+from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
@@ -114,7 +114,7 @@ def test_module_imports_only_kept_dependencies_and_has_no_stale_helper() -> None
         (0, "types", ("MappingProxyType",)),
         (0, "typing", ("Any", "Mapping", "Optional")),
         (
-            1,
+            2,
             "message",
             (
                 "DecodeJob",
@@ -526,7 +526,7 @@ def test_window_larger_than_the_unit_memory_stops_the_run() -> None:
 
 
 def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> None:
-    from decsim.decoders import PerRoundDecoder
+    from decsim.decoders.decoders import PerRoundDecoder
     from decsim.message import Operation
     from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
@@ -543,7 +543,7 @@ def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> Non
 
 
 def test_a_unit_too_small_for_its_window_fails_the_run_loudly() -> None:
-    from decsim.decoders import PerRoundDecoder
+    from decsim.decoders.decoders import PerRoundDecoder
     from decsim.message import Operation
     from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec

@@ -45,7 +45,6 @@ def test_operations_start_on_the_next_cycle_boundary_and_share_one_clock():
     _issue(qpu, a, ra)
     engine.schedule(13, lambda: _issue(qpu, b, rb))     # issued mid-cycle: starts at 20
     engine.schedule(41, qpu.finish)
-    engine._start_running()
     engine.run()
 
     assert capture.rounds == [(10, 1, "A", 1), (20, 1, "A", 2), (30, 2, "B", 1), (40, 2, "B", 2)]
@@ -59,7 +58,6 @@ def test_an_idle_patch_keeps_extracting_every_cycle_until_its_next_operation():
     _issue(qpu, a, ra)                                  # rounds at 10, 20; done at 20
     engine.schedule(35, lambda: _issue(qpu, c, rc))     # starts at 40, its round at 50
     engine.schedule(50, qpu.finish)
-    engine._start_running()
     engine.run()
 
     assert capture.idle == [(30, 1, "A", 1), (40, 1, "A", 2)]      # cycles 20-30 and 30-40 idle
@@ -71,7 +69,6 @@ def test_finish_stops_idle_extraction_after_the_current_cycle():
     a, ra = _op(1, "A")
     _issue(qpu, a, ra)
     engine.schedule(25, qpu.finish)                     # idle round of cycle 20-30 still lands
-    engine._start_running()
     engine.run()
 
     assert capture.idle == [(30, 1, "A", 1)]
@@ -83,7 +80,6 @@ def test_a_body_without_detector_data_holds_its_patch_for_whole_cycles():
     t, rt = _op(1, "A", rounds=3, emits_detector_data=False)
     _issue(qpu, t, rt, emits_detector_data=False)
     engine.schedule(30, qpu.finish)
-    engine._start_running()
     engine.run()
 
     assert capture.rounds == []

@@ -130,23 +130,15 @@ class RunSpec:
     record_switching_windows: bool = False
     make_orchestrator: Optional[Callable] = None
     seed: Optional[int] = 0
-    _build_state: str = field(default="unstarted", init=False, repr=False)
+    _built: bool = field(default=False, init=False, repr=False)
 
     def build(self, verbose: bool = False) -> CompletedRun:
-        if self._build_state != "unstarted":
-            raise RuntimeError(f"RunSpec build is already {self._build_state}")
-        self._build_state = "committing"
+        """Wire and run this configuration once; a RunSpec is one run."""
+        if self._built:
+            raise RuntimeError("RunSpec was already built; make a new one per run")
+        self._built = True
         from .engine import Engine
-        engine = Engine(verbose=verbose)
-        try:
-            root_seed = _root_seed(self.seed)
-            completed = self._build_once(engine, root_seed)
-        except BaseException as error:
-            engine._invalidate(error)
-            self._build_state = "invalid"
-            raise
-        self._build_state = "complete"
-        return completed
+        return self._build_once(Engine(verbose=verbose), _root_seed(self.seed))
 
     def _build_once(self, engine, root_seed) -> CompletedRun:
         from .controller import Controller
@@ -416,7 +408,6 @@ class RunSpec:
         for _, metric in metric_bindings:
             engine.add_metric(metric)
         controller.load_program(ExecutionProgram(tuple(ops), tuple(decode_ops), tuple(dynamic_streams), tuple(protected_regions)))
-        engine._start_running()
         engine.run()
         if window_manager.pending_escalations:
             raise RuntimeError(
@@ -427,12 +418,10 @@ class RunSpec:
             syndrome_ingress, "check_work_settled", None)
         if callable(check_ingress_settled):
             check_ingress_settled()
-        engine._begin_finalization()
         from .views import capture_primary_result
         result = capture_primary_result(
             engine, execution_runtime, window_manager, all_operations,
             metric_bindings, links, device)
-        engine._complete()
         return CompletedRun(
             result, engine, window_manager, decoder_manager, execution_runtime,
             controller, qpu, orchestrator, factory,

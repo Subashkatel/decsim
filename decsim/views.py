@@ -387,10 +387,8 @@ def capture_primary_result(engine, execution_runtime, window_manager, operations
                          if binding is None else binding.stream_offset)
         rows.append(LogicalOperationResult(
             operation_id, status, bits, stream_offset, actual, failure))
-    metric_rows = tuple(MetricResultRecord(
-        name, copy.deepcopy(engine._invoke_metric_callback(
-            metric.result, callback_kind="result")))
-        for name, metric in metric_bindings)
+    metric_rows = tuple(MetricResultRecord(name, copy.deepcopy(metric.result()))
+                        for name, metric in metric_bindings)
     if engine._event_queue or not execution_runtime.workload_complete:
         raise RuntimeError("primary run ended before workload completed")
     return PrimaryRunResult(

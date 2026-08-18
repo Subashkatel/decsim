@@ -56,7 +56,6 @@ def _run(decoder, engine, job):
         seen["result"] = decoder.decode(job)
 
     decoder.run(job, engine, on_done)
-    engine._start_running()
     engine.run()
     return seen
 
@@ -120,7 +119,6 @@ def test_cancelled_job_still_holds_the_unit_but_skips_the_algorithm():
     job.cancelled = True
     done = []
     decoder.run(job, engine, lambda: done.append(engine.now))
-    engine._start_running()
     engine.run()
     assert inner.decode_ticks == []
     assert done == [decoder.latency(job)]
@@ -225,7 +223,6 @@ def test_cancel_stops_the_remaining_stages_and_never_calls_on_done():
     done = []
     decoder.run(job, engine, lambda: done.append(engine.now))
     engine.schedule(1, lambda: decoder.cancel(job))          # during fetch
-    engine._start_running()
     engine.run()
     assert done == []
     assert inner.decode_ticks == []

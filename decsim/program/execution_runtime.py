@@ -1,25 +1,88 @@
-"""Track operation readiness, resource ownership, and execution timestamps."""
+"""Track operation readiness, resource ownership, and execution timestamps.
+
+An operation starts when its predecessors are done, its scheduled start
+round has passed, its magic state (if any) is ready, its feedback release
+(if any) has arrived and the controller lets it onto the QPU. Resources
+(qubits, patches) are claimed at request and freed when the body is done;
+two operations never hold one resource without a dependency edge between
+them.
+"""
 from __future__ import annotations
 from types import MappingProxyType
 
 from ..message import Decision, ExecutionProgram
 
 
+class ResourceLedger:
+    """Which operation holds which resource; one holder per resource."""
+
+    def __init__(self, claims_by_operation_id):
+        self.claims = MappingProxyType(dict(claims_by_operation_id))
+        self.busy_claims = {}
+
+    def claim(self, operation, name_of) -> None:
+        if len(set(operation.qubits)) != len(operation.qubits):
+            raise RuntimeError(
+                f"{operation.name} lists a qubit more than once: {operation.qubits}")
+        keys_to_claim = []
+        prospective_keys = set()
+        for claim in self.claims[operation.id]:
+            for resource_id in sorted(claim.ids, key=repr):
+                key = (claim.kind, resource_id)
+                if key in self.busy_claims:
+                    holder_id = self.busy_claims[key]
+                elif key in prospective_keys:
+                    holder_id = operation.id
+                else:
+                    keys_to_claim.append(key)
+                    prospective_keys.add(key)
+                    continue
+                raise RuntimeError(
+                    f"{operation.name} and {name_of(holder_id)} share {claim.kind} "
+                    f"resource {resource_id!r} but have no dependency edge. "
+                    "The operation list is missing "
+                    "program-order wiring (run it through _wire_circuit / a frontend)")
+        for key in keys_to_claim:
+            self.busy_claims[key] = operation.id
+
+    def release(self, operation) -> None:
+        release_keys = []
+        unique_release_keys = set()
+        for claim in self.claims[operation.id]:
+            for resource_id in claim.ids:
+                key = (claim.kind, resource_id)
+                if key not in unique_release_keys:
+                    release_keys.append(key)
+                    unique_release_keys.add(key)
+        missing_holder = object()
+        for kind, resource_id in release_keys:
+            holder_id = self.busy_claims.get((kind, resource_id), missing_holder)
+            if holder_id is missing_holder:
+                raise RuntimeError(
+                    f"{operation.name} cannot release unclaimed {kind} "
+                    f"resource {resource_id!r}")
+            if holder_id != operation.id:
+                raise RuntimeError(
+                    f"{operation.name} cannot release {kind} resource "
+                    f"{resource_id!r} held by operation {holder_id!r}")
+        for key in release_keys:
+            del self.busy_claims[key]
+
+
 class ExecutionRuntime:
-    """Own the program DAG, resource claims, readiness, and timestamps."""
+    """Own the program DAG, readiness, and timestamps; the ledger owns resources."""
 
     def __init__(self, engine, *, controller, factory,
                  resource_claims_by_operation_id):
         self.engine = engine
         self.controller = controller
         self.factory = factory
-        self._claims = MappingProxyType(dict(resource_claims_by_operation_id))
+        self.resources = ResourceLedger(resource_claims_by_operation_id)
         self.program = None
         self.operations = {}
         self.dependencies_remaining = {}
         self.successors = {}
         self.schedule_released = set()
-        self.busy_claims = {}
         self.requested = set()
         self.state_ready = set()
         self.op_start_time = {}
@@ -67,7 +130,7 @@ class ExecutionRuntime:
                 operation.id not in self.schedule_released or
                 operation.id in self.requested):
             return
-        self._claim_resources(operation)
+        self.resources.claim(operation, lambda holder_id: self.operations[holder_id].name)
         self.requested.add(operation.id)
         if operation.needs_magic_state:
             self.engine.log("ExecutionRuntime",
@@ -76,56 +139,6 @@ class ExecutionRuntime:
                 lambda ready=operation: self._state_became_ready(ready))
         else:
             self._state_became_ready(operation)
-
-    def _claim_resources(self, operation):
-        if len(set(operation.qubits)) != len(operation.qubits):
-            raise RuntimeError(
-                f"{operation.name} lists a qubit more than once: {operation.qubits}")
-        keys_to_claim = []
-        prospective_keys = set()
-        for claim in self._claims[operation.id]:
-            for resource_id in sorted(claim.ids, key=repr):
-                key = (claim.kind, resource_id)
-                if key in self.busy_claims:
-                    holder_id = self.busy_claims[key]
-                elif key in prospective_keys:
-                    holder_id = operation.id
-                else:
-                    keys_to_claim.append(key)
-                    prospective_keys.add(key)
-                    continue
-                holder = self.operations[holder_id].name
-                raise RuntimeError(
-                    f"{operation.name} and {holder} share {claim.kind} "
-                    f"resource {resource_id!r} but have no dependency edge. "
-                    "The operation list is missing "
-                    "program-order wiring (run it through _wire_circuit / a frontend)")
-        for key in keys_to_claim:
-            self.busy_claims[key] = operation.id
-
-    def _free_resources(self, operation):
-        release_keys = []
-        unique_release_keys = set()
-        for claim in self._claims[operation.id]:
-            for resource_id in claim.ids:
-                key = (claim.kind, resource_id)
-                if key not in unique_release_keys:
-                    release_keys.append(key)
-                    unique_release_keys.add(key)
-
-        missing_holder = object()
-        for kind, resource_id in release_keys:
-            holder_id = self.busy_claims.get((kind, resource_id), missing_holder)
-            if holder_id is missing_holder:
-                raise RuntimeError(
-                    f"{operation.name} cannot release unclaimed {kind} "
-                    f"resource {resource_id!r}")
-            if holder_id != operation.id:
-                raise RuntimeError(
-                    f"{operation.name} cannot release {kind} resource "
-                    f"{resource_id!r} held by operation {holder_id!r}")
-        for key in release_keys:
-            del self.busy_claims[key]
 
     def _state_became_ready(self, operation):
         self.state_ready.add(operation.id)
@@ -157,7 +170,7 @@ class ExecutionRuntime:
         self.body_done_time[operation.id] = self.engine.now
         self.last_finish_time = max(self.last_finish_time, self.engine.now)
         self.engine.log("ExecutionRuntime", f"{operation.name} body done")
-        self._free_resources(operation)
+        self.resources.release(operation)
         self.controller.before_successor_release(operation)
         for successor_id in self.successors[operation.id]:
             self.dependencies_remaining[successor_id] -= 1

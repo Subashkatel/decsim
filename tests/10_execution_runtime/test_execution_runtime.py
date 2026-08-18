@@ -116,7 +116,7 @@ def make_runtime(*operations, round_ticks=1, claims=None):
 def mutable_runtime_state(runtime, engine, controller, factory):
     names = (
         "operations", "dependencies_remaining", "successors", "schedule_released",
-        "busy_claims", "requested", "state_ready", "op_start_time", "body_done_time",
+        "requested", "state_ready", "op_start_time", "body_done_time",
         "decode_release_time",
         "result_return_time_by_operation", "idle_rounds_by_patch",
     )
@@ -145,13 +145,13 @@ def test_construction_preserves_collaborators_and_shallow_copies_claim_mapping()
     assert runtime.engine is engine
     assert runtime.controller is controller
     assert runtime.factory is factory
-    assert runtime._claims[operation.id] is claim_list
+    assert runtime.resources.claims[operation.id] is claim_list
     supplied_claims[2] = []
-    assert 2 not in runtime._claims
+    assert 2 not in runtime.resources.claims
     claim_list.append(ResourceClaim("qubit", frozenset({"q"})))
-    assert runtime._claims[operation.id] == claim_list
+    assert runtime.resources.claims[operation.id] == claim_list
     with pytest.raises(TypeError):
-        runtime._claims[3] = []
+        runtime.resources.claims[3] = []
 
     bare_engine = object()
     bare_controller = object()
@@ -174,7 +174,7 @@ def test_construction_starts_with_the_documented_empty_lifecycle():
     assert runtime.program is None
     assert runtime.workload_complete is False
     for name in (
-        "operations", "dependencies_remaining", "successors", "busy_claims",
+        "operations", "dependencies_remaining", "successors",
         "op_start_time", "body_done_time", "decode_release_time",
         "result_return_time_by_operation", "idle_rounds_by_patch",
     ):
@@ -337,7 +337,7 @@ def test_magic_state_request_holds_resources_until_readiness_and_issues_once():
     runtime, engine, controller, factory = make_runtime(operation, claims=claims)
     runtime.load_program(ExecutionProgram((operation,)))
 
-    assert runtime.busy_claims == {("qubit", "data"): 1}
+    assert runtime.resources.busy_claims == {("qubit", "data"): 1}
     assert runtime.requested == {1}
     assert runtime.state_ready == set()
     assert controller.issued == []
@@ -397,8 +397,8 @@ def test_claim_publication_is_ordered_and_all_or_nothing():
     }
     runtime, _, _, _ = make_runtime(operation, claims=claims)
     runtime.operations[1] = operation
-    runtime._claim_resources(operation)
-    assert list(runtime.busy_claims) == [
+    runtime.resources.claim(operation, lambda holder_id: runtime.operations[holder_id].name)
+    assert list(runtime.resources.busy_claims) == [
         ("qubit", "a"), ("qubit", "b"), ("ancilla", 2)
     ]
 
@@ -412,11 +412,11 @@ def test_claim_publication_is_ordered_and_all_or_nothing():
     }
     conflict_runtime, _, _, _ = make_runtime(contender, claims=conflict_claims)
     conflict_runtime.operations.update({2: contender, 3: holder})
-    conflict_runtime.busy_claims[("qubit", "busy")] = 3
-    before = dict(conflict_runtime.busy_claims)
+    conflict_runtime.resources.busy_claims[("qubit", "busy")] = 3
+    before = dict(conflict_runtime.resources.busy_claims)
     with pytest.raises(RuntimeError, match="share qubit resource"):
-        conflict_runtime._claim_resources(contender)
-    assert conflict_runtime.busy_claims == before
+        conflict_runtime.resources.claim(contender, lambda holder_id: conflict_runtime.operations[holder_id].name)
+    assert conflict_runtime.resources.busy_claims == before
 
 
 def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_publication():
@@ -425,8 +425,8 @@ def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_public
     runtime, _, _, _ = make_runtime(duplicate_qubits)
     runtime.operations[1] = duplicate_qubits
     with pytest.raises(RuntimeError, match="more than once"):
-        runtime._claim_resources(duplicate_qubits)
-    assert runtime.busy_claims == {}
+        runtime.resources.claim(duplicate_qubits, lambda holder_id: runtime.operations[holder_id].name)
+    assert runtime.resources.busy_claims == {}
 
     duplicate_key = make_operation(2)
     duplicate_claims = {
@@ -438,8 +438,8 @@ def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_public
     duplicate_runtime, _, _, _ = make_runtime(duplicate_key, claims=duplicate_claims)
     duplicate_runtime.operations[2] = duplicate_key
     with pytest.raises(RuntimeError, match="share qubit resource"):
-        duplicate_runtime._claim_resources(duplicate_key)
-    assert duplicate_runtime.busy_claims == {}
+        duplicate_runtime.resources.claim(duplicate_key, lambda holder_id: duplicate_runtime.operations[holder_id].name)
+    assert duplicate_runtime.resources.busy_claims == {}
 
 
 def test_claim_shape_and_mapping_completeness_use_natural_failures():
@@ -448,23 +448,23 @@ def test_claim_shape_and_mapping_completeness_use_natural_failures():
     runtime, _, _, _ = make_runtime(missing, claims={99: []})
     runtime.operations[1] = missing
     with pytest.raises(KeyError):
-        runtime._claim_resources(missing)
+        runtime.resources.claim(missing, lambda holder_id: runtime.operations[holder_id].name)
     with pytest.raises(KeyError):
-        runtime._free_resources(missing)
-    assert runtime.busy_claims == {}
+        runtime.resources.release(missing)
+    assert runtime.resources.busy_claims == {}
 
     valid = make_operation(3)
     extra_runtime, _, _, _ = make_runtime(valid, claims={3: [], 99: object()})
     extra_runtime.operations[3] = valid
-    extra_runtime._claim_resources(valid)
-    assert extra_runtime.busy_claims == {}
+    extra_runtime.resources.claim(valid, lambda holder_id: extra_runtime.operations[holder_id].name)
+    assert extra_runtime.resources.busy_claims == {}
 
     unhashable = make_operation(2, qubits=([],))
     unhashable_runtime, _, _, _ = make_runtime(unhashable)
     unhashable_runtime.operations[2] = unhashable
     with pytest.raises(TypeError):
-        unhashable_runtime._claim_resources(unhashable)
-    assert unhashable_runtime.busy_claims == {}
+        unhashable_runtime.resources.claim(unhashable, lambda holder_id: unhashable_runtime.operations[holder_id].name)
+    assert unhashable_runtime.resources.busy_claims == {}
 
 
 def test_free_requires_exact_holders_and_is_all_or_nothing():
@@ -478,21 +478,21 @@ def test_free_requires_exact_holders_and_is_all_or_nothing():
     }
     runtime, _, _, _ = make_runtime(operation, claims=claims)
 
-    runtime.busy_claims = {("qubit", "a"): 1}
-    before = dict(runtime.busy_claims)
+    runtime.resources.busy_claims = {("qubit", "a"): 1}
+    before = dict(runtime.resources.busy_claims)
     with pytest.raises(RuntimeError, match="unclaimed"):
-        runtime._free_resources(operation)
-    assert runtime.busy_claims == before
+        runtime.resources.release(operation)
+    assert runtime.resources.busy_claims == before
 
-    runtime.busy_claims = {("qubit", "a"): 1, ("qubit", "b"): 9}
-    before = dict(runtime.busy_claims)
+    runtime.resources.busy_claims = {("qubit", "a"): 1, ("qubit", "b"): 9}
+    before = dict(runtime.resources.busy_claims)
     with pytest.raises(RuntimeError, match="held by operation"):
-        runtime._free_resources(operation)
-    assert runtime.busy_claims == before
+        runtime.resources.release(operation)
+    assert runtime.resources.busy_claims == before
 
-    runtime.busy_claims = {("qubit", "a"): 1, ("qubit", "b"): 1}
-    runtime._free_resources(operation)
-    assert runtime.busy_claims == {}
+    runtime.resources.busy_claims = {("qubit", "a"): 1, ("qubit", "b"): 1}
+    runtime.resources.release(operation)
+    assert runtime.resources.busy_claims == {}
 
 
 def test_body_done_invalid_callbacks_leave_all_runtime_and_collaborator_state_unchanged():
@@ -543,7 +543,7 @@ def test_body_done_preserves_valid_release_hook_issue_and_completion_order():
         ("issue", 2, 0),
         ("after", 1),
     ]
-    assert runtime.busy_claims == {("qubit", "shared"): 2}
+    assert runtime.resources.busy_claims == {("qubit", "shared"): 2}
     assert runtime.workload_complete is False
 
     engine.events.clear()

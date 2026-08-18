@@ -682,8 +682,6 @@ class ConditionalReactionTime:
         threshold_reason = self._threshold_failure(max_wait_rounds)
         if threshold_reason:
             return threshold_reason
-        if self._view().idle_cap_hits:
-            return "idle-round cap reached"
         if self.require_all_released and released_count < total_count:
             return "not all conditionals released"
         return ""

@@ -95,6 +95,35 @@ def run_decsim() -> dict:
     return result
 
 
+def swiper_feedback_wait() -> dict:
+    env = dict(os.environ, PYTHONPATH=str(SWIPER_REPO))
+    out = subprocess.run([str(SWIPER_PYTHON), str(EXTERNAL / "swiper_timeline.py"),
+                          str(D), str(DECODE_ROUNDS), "regular_t"],
+                         check=True, capture_output=True, text=True, env=env).stdout
+    return json.loads(out)
+
+
+def decsim_feedback_wait() -> dict:
+    """One D-round operation whose decode releases a blocked D-round successor on
+    the same patch (the T-gate wait), zero links, fixed decode time."""
+    us = lambda ticks: ticks / TICKS_PER_US
+    circuit = stim.Circuit.generated("surface_code:rotated_memory_z", distance=D, rounds=D,
+                                     after_clifford_depolarization=0.001)
+    source = Operation(id=1, name="merge", qubits=(0,), patches=(0,), circuit=circuit)
+    blocked = Operation(id=2, name="conditional", qubits=(0,), patches=(0,), circuit=circuit,
+                        predecessors=(1,), blocked_by=1)
+    engine = DecoderEngine(PyMatchingDecoder(PresetLatencyDecoder(float(DECODE_ROUNDS))),
+                           DecoderTiming(before=(), after=(), frequency_mhz=1000.0))
+    done = RunSpec(ops=[source, blocked], d=D, rounds_policy=FixedRounds(D), decoder=engine, num_units=1,
+                   timing=TimingConfig(round_us=1.0), links=zero_latency_links(),
+                   pauli_frame=PauliFrameConfig(commit_us=0.0, zero_commit_cost_justification="SWIPER prices rounds only"),
+                   seed=0).build()
+    runtime = done.execution_runtime
+    return dict(merge_end=us(runtime.body_done_time[1]), decode_done=us(runtime.decode_release_time[2]),
+                conditional_start=us(runtime.op_start_time[2]), idle_rounds=done.controller.idle_rounds_emitted,
+                device_rounds=us(runtime.body_done_time[2]))
+
+
 def link_deltas(n: int) -> dict:
     """Per-window (start, done) shift when one reference link is restored at a time."""
     zero = decsim_windows(n, zero_latency_links())
@@ -157,6 +186,22 @@ def main() -> None:
               "sent when the decode completes (Q-063). WDO carries the correction to the frame downstream and "
               "does not gate the next window; DO, OC, CQ, WSD, CSD are off the weak-only path. None of these "
               "shift a window."]
+    sw, ds = swiper_feedback_wait(), decsim_feedback_wait()
+    lines += ["", "## Feedback wait cadence (Q-064): the QPU keeps extracting syndromes while a patch waits on a decode", "",
+              "| quantity | SWIPER RegularTSchedule(1,0) | decsim merge -> blocked successor |", "|---|---|---|",
+              f"| operation ends at round | {sw['merge_end']} | {ds['merge_end']:g} |",
+              f"| decode of that operation completes | {sw['last_window_done'] + 1} | {ds['decode_done']:g} |",
+              f"| idle rounds emitted while waiting | {sw['decode_idle_rounds']} (two serial {DECODE_ROUNDS}-round windows) | {ds['idle_rounds']} (one {DECODE_ROUNDS}-round window) |",
+              f"| conditional operation starts | {sw['conditional_start']} | {ds['conditional_start']:g} |",
+              f"| device rounds total | {sw['device_rounds']} | {ds['device_rounds']:g} |", "",
+              "Same rule in both: the waiting patch emits one syndrome round every cycle from the end of its "
+              "operation to the completion of the decode (SWIPER DECODE_IDLE rows in device_manager.py "
+              "_generate_syndrome_round; decsim QPUDevice idle rounds), and the released operation starts on the "
+              "next cycle boundary. SWIPER's merge spans two patches whose windows are serial, so it waits two "
+              "decode times where decsim's single-patch merge waits one; the cadence, not the window count, is "
+              "what this section checks. Every window count and time above is in rounds; idle rounds count "
+              f"exactly the wait ({sw['conditional_start'] - sw['merge_end']} = {sw['decode_idle_rounds']} SWIPER, "
+              f"{ds['conditional_start'] - ds['merge_end']:g} = {ds['idle_rounds']} decsim)."]
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     REPORT.write_text("\n".join(lines) + "\n")
     print("\n".join(lines))

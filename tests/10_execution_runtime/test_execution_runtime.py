@@ -29,13 +29,11 @@ class RecordingEngine:
 
 
 class RecordingController:
-    def __init__(self, engine, *, round_ticks=1, gates=False):
+    def __init__(self, engine, *, round_ticks=1):
         self.engine = engine
         self.round_ticks = round_ticks
-        self.gates_start_on_round_boundaries = gates
         self.allowed = {}
         self.issued = []
-        self.boundaries = []
         self.runtime = None
         self.observed_at_issue = []
         self.lifecycle_observations = []
@@ -69,6 +67,7 @@ class RecordingController:
                 dict(self.runtime.idle_rounds_by_patch),
             ))
         self.engine.events.append(("issue", operation.id, idle_rounds))
+        return self.engine.now
 
     def before_successor_release(self, operation):
         self.observe_lifecycle("before_successor_release", operation.id)
@@ -77,11 +76,6 @@ class RecordingController:
     def after_successor_release(self, operation):
         self.observe_lifecycle("after_successor_release", operation.id)
         self.engine.events.append(("after", operation.id))
-
-    def note_round_boundary(self, patch):
-        self.observe_lifecycle("note_round_boundary", patch)
-        self.boundaries.append(patch)
-        self.engine.events.append(("boundary", patch))
 
 
 class RecordingFactory:
@@ -105,9 +99,9 @@ def claims_for(*operations):
     return {operation.id: [] for operation in operations}
 
 
-def make_runtime(*operations, round_ticks=1, gates=False, claims=None):
+def make_runtime(*operations, round_ticks=1, claims=None):
     engine = RecordingEngine()
-    controller = RecordingController(engine, round_ticks=round_ticks, gates=gates)
+    controller = RecordingController(engine, round_ticks=round_ticks)
     factory = RecordingFactory(engine)
     runtime = ExecutionRuntime(
         engine,
@@ -136,7 +130,6 @@ def mutable_runtime_state(runtime, engine, controller, factory):
     copied["scheduled"] = list(engine.scheduled)
     copied["issued"] = list(controller.issued)
     copied["observed_at_issue"] = list(controller.observed_at_issue)
-    copied["boundaries"] = list(controller.boundaries)
     copied["lifecycle_observations"] = list(controller.lifecycle_observations)
     copied["factory_requests"] = list(factory.requests)
     return copied
@@ -216,7 +209,7 @@ def test_timestamp_map_keys_are_the_only_lifecycle_membership_record():
     """Timestamp-map keys match lifecycle membership at every controller observation boundary."""
     root = make_operation(1)
     blocked_successor = make_operation(2, predecessors=(1,), blocked_by=1)
-    runtime, engine, controller, _ = make_runtime(root, blocked_successor, gates=True)
+    runtime, engine, controller, _ = make_runtime(root, blocked_successor, )
     controller.allowed[2] = False
 
     runtime.load_program(ExecutionProgram((root, blocked_successor)))
@@ -225,7 +218,7 @@ def test_timestamp_map_keys_are_the_only_lifecycle_membership_record():
     engine.now = 2
     runtime.on_decision(Decision(2, releases_operation=True))
     controller.allowed[2] = True
-    runtime.start_released_successors_on_boundary(1, patch="patch-a")
+    runtime.retry_ready_operations()
     engine.now = 3
     runtime.body_done(blocked_successor)
 
@@ -235,7 +228,6 @@ def test_timestamp_map_keys_are_the_only_lifecycle_membership_record():
         ("before_successor_release", 1, frozenset({1}), frozenset({1}), frozenset()),
         ("after_successor_release", 1, frozenset({1}), frozenset({1}), frozenset()),
         ("can_start", 2, frozenset({1}), frozenset({1}), frozenset({2})),
-        ("note_round_boundary", "patch-a", frozenset({1}), frozenset({1}), frozenset({2})),
         ("can_start", 2, frozenset({1}), frozenset({1}), frozenset({2})),
         ("issue_operation", 2, frozenset({1, 2}), frozenset({1}), frozenset({2})),
         ("before_successor_release", 2, frozenset({1, 2}), frozenset({1, 2}), frozenset({2})),
@@ -576,43 +568,13 @@ def test_waiting_blocked_successor_checks_only_direct_feedback_and_boundary_stat
     predecessor = make_operation(1)
     blocked = make_operation(2, predecessors=(1,), blocked_by=1, scheduled_start_round=8)
     unblocked = make_operation(3, predecessors=(1,))
-    runtime, _, controller, _ = make_runtime(predecessor, blocked, unblocked, gates=False)
+    runtime, _, controller, _ = make_runtime(predecessor, blocked, unblocked, )
     controller.allowed[2] = False
     runtime.load_program(ExecutionProgram((predecessor, blocked, unblocked)))
 
     assert runtime.waiting_blocked_successor(1) is True
     runtime.decode_release_time[2] = 0
     assert runtime.waiting_blocked_successor(1) is False
-    controller.gates_start_on_round_boundaries = True
-    assert runtime.waiting_blocked_successor(1) is True
-    runtime.op_start_time[2] = 0
-    assert runtime.waiting_blocked_successor(1) is False
-
-
-def test_round_boundary_retry_is_inert_off_and_notes_each_eligible_retry_before_start():
-    """Boundary cadence is inert when off and notes a supplied patch immediately before an eligible retry."""
-    predecessor = make_operation(1)
-    blocked = make_operation(2, predecessors=(1,), blocked_by=1)
-    runtime, engine, controller, _ = make_runtime(predecessor, blocked, gates=False)
-    runtime.load_program(ExecutionProgram((predecessor, blocked)))
-    runtime.decode_release_time[2] = 0
-    runtime.state_ready.add(2)
-    runtime.schedule_released.add(2)
-    runtime.dependencies_remaining[2] = 0
-    engine.events.clear()
-
-    runtime.start_released_successors_on_boundary(1, patch="patch-a")
-    assert engine.events == []
-    assert set(runtime.op_start_time) == {1}
-
-    controller.gates_start_on_round_boundaries = True
-    runtime.start_released_successors_on_boundary(1, patch="patch-a")
-    assert engine.events == [
-        ("boundary", "patch-a"),
-        ("can_start", 2),
-        ("issue", 2, 0),
-    ]
-    assert controller.boundaries == ["patch-a"]
 
 
 def test_ready_retry_offers_state_ready_operations_in_identity_order():

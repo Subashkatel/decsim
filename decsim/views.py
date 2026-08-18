@@ -87,7 +87,6 @@ class ReactionView:
     fully_done: int                 # engine.now at snapshot
     body_done_time: tuple           # ((op_id, tick), ...)
     decode_release_time: tuple      # ((op_id, tick), ...)
-    idle_cap_hits: tuple            # one record per capped patch
     ops: tuple                      # (OpReactionInfo, ...)
 
 
@@ -262,8 +261,6 @@ def reaction_view(execution_runtime) -> ReactionView:
         decode_release_time=tuple(sorted(
             execution_runtime.decode_release_time.items(),
             key=lambda item: stable_identity_order_key(item[0]))),
-        idle_cap_hits=tuple(tuple(sorted(hit.items()))
-                            for hit in controller.idle_cap_hits),
         ops=ops)
 
 def truth_view(window_manager, device) -> TruthView:

@@ -42,3 +42,15 @@ Verdict: PASS on every interior window and on the single-window case; the tail d
 | csd | 2 | 0 / 0 | 0 / 0 | 0 / 0 | 0 / 0 |
 
 QC delays every round and so every window by its latency once. CWD is paid per window on the serial chain: with one unit the next window is assigned only when the unit frees, and its input transfer then precedes its decode (assign-then-transfer). DD is paid once per boundary handoff, sent when the decode completes (Q-063). WDO carries the correction to the frame downstream and does not gate the next window; DO, OC, CQ, WSD, CSD are off the weak-only path. None of these shift a window.
+
+## Feedback wait cadence (Q-064): the QPU keeps extracting syndromes while a patch waits on a decode
+
+| quantity | SWIPER RegularTSchedule(1,0) | decsim merge -> blocked successor |
+|---|---|---|
+| operation ends at round | 14 | 7 |
+| decode of that operation completes | 42 | 21 |
+| idle rounds emitted while waiting | 28 (two serial 14-round windows) | 14 (one 14-round window) |
+| conditional operation starts | 42 | 21 |
+| device rounds total | 54 | 28 |
+
+Same rule in both: the waiting patch emits one syndrome round every cycle from the end of its operation to the completion of the decode (SWIPER DECODE_IDLE rows in device_manager.py _generate_syndrome_round; decsim QPUDevice idle rounds), and the released operation starts on the next cycle boundary. SWIPER's merge spans two patches whose windows are serial, so it waits two decode times where decsim's single-patch merge waits one; the cadence, not the window count, is what this section checks. Every window count and time above is in rounds; idle rounds count exactly the wait (28 = 28 SWIPER, 14 = 14 decsim).

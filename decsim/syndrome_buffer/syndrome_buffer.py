@@ -43,30 +43,16 @@ class SyndromeBufferRoundState(Enum):
     PACKED_RETAINED = auto()
 
 
-class SyndromeBufferCapacityExhaustion(RuntimeError):
-    """A new syndrome round could not claim a physical buffer slot."""
-
-    status = "syndrome_buffer_capacity_exhaustion"
-
-    def __init__(self, *, incoming_identity, capacity, snapshot) -> None:
-        self.incoming_identity = incoming_identity
-        self.capacity = capacity
-        self.snapshot = snapshot
-        super().__init__(
-            f"syndrome buffer capacity {capacity} is full; cannot allocate "
-            f"round {incoming_identity!r}"
-        )
-
-
 @dataclass(frozen=True)
 class FragmentAdmission:
-    """Outcome of one accepted fragment."""
+    """Outcome of offering one fragment: refused when the buffer has no free
+    slot for a new round, otherwise how far the round's assembly has come."""
 
     round_identity: tuple
-    slot_index: int
     received_fragments: int
     expected_fragments: int
     round_complete: bool
+    refused: bool = False
 
 
 @dataclass(frozen=True)
@@ -233,7 +219,8 @@ class SyndromeBuffer:
         *,
         expected_fragments: int,
     ) -> FragmentAdmission:
-        """Add one fragment. The first fragment allocates the round slot."""
+        """Add one fragment. The first fragment allocates the round slot; a
+        full buffer refuses the first fragment of a new round."""
         if fragment.operation_id not in self._open_operations:
             raise RuntimeError(
                 f"operation {fragment.operation_id!r} is not open"
@@ -245,6 +232,8 @@ class SyndromeBuffer:
             )
         slot = self._rounds.get(identity)
         if slot is None:
+            if self.capacity is not None and not self._free_slot_indices:
+                return FragmentAdmission(identity, 0, expected_fragments, False, refused=True)
             slot = self._allocate(identity, expected_fragments)
         elif slot.state is not SyndromeBufferRoundState.ASSEMBLING:
             raise ValueError(
@@ -266,19 +255,12 @@ class SyndromeBuffer:
             slot.state = SyndromeBufferRoundState.PACKING
         return FragmentAdmission(
             round_identity=identity,
-            slot_index=slot.slot_index,
             received_fragments=len(slot.fragments),
             expected_fragments=slot.expected_fragments,
             round_complete=slot.state is SyndromeBufferRoundState.PACKING,
         )
 
     def _allocate(self, identity, expected_fragments: int) -> _RoundSlot:
-        if self.capacity is not None and not self._free_slot_indices:
-            raise SyndromeBufferCapacityExhaustion(
-                incoming_identity=identity,
-                capacity=self.capacity,
-                snapshot=self.snapshot(),
-            )
         if self._free_slot_indices:
             slot_index = min(self._free_slot_indices)
             self._free_slot_indices.remove(slot_index)

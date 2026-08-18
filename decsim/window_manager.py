@@ -276,7 +276,7 @@ class WindowManager:
 
         self.strategy = None
         self.services = None
-        self.submit_fn: Optional[Callable] = None    # (job, delay_ticks) -> None
+        self.submit_fn: Optional[Callable] = None    # (job, reserve_transfer) -> None
         self.on_workload_complete: Optional[Callable[[], None]] = None
 
         self.syndrome_buffer = syndrome_buffer if syndrome_buffer is not None else SyndromeBuffer()
@@ -879,17 +879,20 @@ class WindowManager:
                         submission.job.request_key is not None
                         and self.syndrome_buffer.has_hold(
                             DecoderInputHold(submission.job.request_key))):
-                    self.submit_fn(submission.job, submission.delay_ticks)
+                    self.submit_fn(submission.job,
+                                   lambda delay=submission.delay_ticks: delay)
                     continue
                 self._bind_decoder_input_hold(submission.job, key)
-                input_arrival = self._link_arrival(
-                    LinkPath.CWD, submission.job,
-                    payload_bits=self._job_payload_bits(submission.job),
-                )
-                self.submit_fn(
-                    submission.job,
-                    input_arrival - self.engine.now + submission.delay_ticks,
-                )
+                weak_job = submission.job
+                payload_bits = self._job_payload_bits(weak_job)
+                extra_delay = submission.delay_ticks
+
+                def reserve_transfer(job=weak_job, bits=payload_bits, extra=extra_delay) -> int:
+                    # Unit assigned: move the window from Buffer 0 into its memory (CWD).
+                    return (self._link_arrival(LinkPath.CWD, job, payload_bits=bits)
+                            - self.engine.now + extra)
+
+                self.submit_fn(weak_job, reserve_transfer)
             else:
                 if submission.delay_ticks != 0:
                     raise ValueError(
@@ -1035,12 +1038,12 @@ class WindowManager:
         strong_job: DecodeJob,
         *,
         wsd_arrival_ticks: Optional[int] = None,
-    ) -> int:
-        csd_arrival_ticks = self._link_arrival(
-            LinkPath.CSD,
-            strong_job,
-            payload_bits=self._job_payload_bits(strong_job),
-        )
+    ) -> None:
+        """Queue a strong job now; its CSD input transfer is reserved at dispatch.
+
+        The unit is assigned first, then the input moves into that unit's memory
+        (CSD link); a serial job also waits for its WSD selection to arrive.
+        """
         request_key = strong_job.request_key
         window_key = strong_job.strong_decode_for
         if self.syndrome_buffer.has_hold(PotentialStrong(window_key)):
@@ -1053,13 +1056,15 @@ class WindowManager:
                 for fragment in strong_job.payloads))
             self.syndrome_buffer.register_hold(CsdInput(request_key), packet_ids)
         self._bind_decoder_input_hold(strong_job, CsdInput(request_key))
-        ready_ticks = (
-            csd_arrival_ticks
-            if wsd_arrival_ticks is None
-            else max(csd_arrival_ticks, wsd_arrival_ticks)
-        )
-        self.submit_fn(strong_job, ready_ticks - self.engine.now)
-        return csd_arrival_ticks
+        payload_bits = self._job_payload_bits(strong_job)
+
+        def reserve_transfer() -> int:
+            arrival = self._link_arrival(LinkPath.CSD, strong_job, payload_bits=payload_bits)
+            if wsd_arrival_ticks is not None:
+                arrival = max(arrival, wsd_arrival_ticks)
+            return arrival - self.engine.now
+
+        self.submit_fn(strong_job, reserve_transfer)
 
     def prepare_strong_selection(
         self,

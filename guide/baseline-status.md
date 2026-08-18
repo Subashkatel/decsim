@@ -38,8 +38,9 @@ Status vocabulary:
   reproduces PyMatching v2's published microseconds per shot on this host and
   checks the windowed loop's logical error rate against whole-circuit PyMatching
   (`anchor.md`). The controller-to-Buffer-0 hop is a priced optional link (C2B).
-  Finding: with the reference link cards the serial sliding-window chain, not the
-  decoder, bounds throughput (knee near a 1.2 us round period at d=3).
+  Finding: with the reference link cards the serial sliding-window chain (CWD
+  2 us + decode + DD 0.5 us per window), not the ASIC decoder, bounds throughput:
+  1.16 rounds/us sustained at d=3, knee near a 0.86 us round period (after Q-063).
 - Decoder-side shape after the owner rulings of 2026-08-18 (commits `cd43fdb`,
   `1d8b77f`, `b3c8943`, `ebae88f`): assign-then-transfer (a job is queued, a
   numbered unit is assigned, then its input is transferred into that unit's
@@ -69,10 +70,14 @@ Status vocabulary:
   (`validate_timing_swiper.py`, commit `adfb522`); Gate 3 Fusion Blossom exact
   MWPM vs decsim's PyMatching on the same window graphs, 2700/2700 same weight
   and logical class (`validate_mwpm_fusion_blossom.py`). Gate 2 also restored
-  the reference links one at a time: CWD, DD and WDO each accumulate on the
-  serial window chain, WDO because the boundary handed to the next window is
-  sent only after the weak result crossed WDO and committed to the frame
-  (open owner question, see queue).
+  the reference links one at a time: CWD and DD accumulate on the serial window
+  chain, nothing else does.
+- Q-063 (owner GO 2026-08-18, commits `2e4f068`, `b0d4ff2`): the boundary a
+  window hands to its successor (residual defects at the commit edge, decoder
+  state) leaves over DD at decode done; the WDO delivery and frame commit run
+  downstream, off the window-to-window path. Grounded in Skoric 2209.08552
+  App. D, Tan 2209.09219, LILLIPUT 2108.06569, qLDPC net_error, SWIPER's DAG.
+  Baseline sweep and Willow real-time rows rerun; suite 768, smoke identical.
 
 ## Minimal baseline closed loop
 

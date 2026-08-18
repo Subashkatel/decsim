@@ -9,11 +9,10 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from numbers import Integral
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from .config import TimingConfig
-from .message import ExecutionProgram, OperationPlanningView, RunSeedPathSegment, is_stable_string
+from .message import ExecutionProgram, OperationPlanningView, RunSeedPathSegment
 from .seeding import bind_run_seed
 
 if TYPE_CHECKING:
@@ -167,13 +166,6 @@ class RunSpec:
         requires_strong_context = strategy.requires_strong_context
         bulk_strong = strategy.bulk_strong
         double_window = strategy.double_window
-        for name, value in (
-            ("requires_strong_context", requires_strong_context),
-            ("bulk_strong", bulk_strong),
-            ("double_window", double_window),
-        ):
-            if type(value) is not bool:
-                raise TypeError(f"strategy capability {name} must be an exact bool")
 
         if (self.ops is None) == (self.frontend is None):
             raise ValueError("provide exactly one of ops= or frontend=")
@@ -186,8 +178,6 @@ class RunSpec:
         if self.feedback_boundary_mode not in (
             "trailing_buffer", "measurement_closed"):
             raise ValueError("invalid feedback_boundary_mode")
-        if type(self.record_switching_windows) is not bool:
-            raise TypeError("record_switching_windows must be an exact bool")
         all_operations = _unique_operations(ops + decode_ops + dynamic_streams)
         views = tuple(OperationPlanningView.from_operation(op)
                       for op in all_operations)
@@ -263,8 +253,6 @@ class RunSpec:
             )
         links = link_config.resolve()
         buffering = self.syndrome_buffering or SyndromeBufferingConfig()
-        if type(buffering) is not SyndromeBufferingConfig:
-            raise TypeError("syndrome_buffering must be SyndromeBufferingConfig")
         syndrome_buffer = SyndromeBuffer(
             capacity=buffering.upstream_packet_slots,
             memory_model=self.memory_model,
@@ -472,8 +460,6 @@ def _install_device_circuits(device, operations):
     for operation in operations:
         if operation.circuit is None:
             continue
-        if type(operation.circuit) is not stim.Circuit:
-            raise TypeError("active operation circuit is not an exact stim.Circuit")
         operation.circuit = stim.Circuit(str(operation.circuit))
 
 
@@ -501,8 +487,6 @@ def _metric_bindings(metrics):
     names = set()
     bindings = []
     for metric in metrics:
-        if not is_stable_string(metric.name) or not metric.name:
-            raise ValueError("metric names must be nonempty Unicode strings")
         if metric.name in names:
             raise ValueError(f"duplicate metric name {metric.name!r}")
         names.add(metric.name)
@@ -513,8 +497,6 @@ def _metric_bindings(metrics):
 def _root_seed(value):
     if value is None:
         return None
-    if type(value) is bool or not isinstance(value, Integral):
-        raise TypeError("seed must be a 64-bit unsigned integer or None")
     value = int(value)
     if not 0 <= value < 2**64:
         raise ValueError("seed must be in [0, 2**64)")

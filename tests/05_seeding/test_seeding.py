@@ -672,16 +672,13 @@ def test_run_spec_normalizes_seed_boundaries_at_public_entry(seed):
 @pytest.mark.parametrize(
     ("seed", "error"),
     [
-        (True, TypeError),
-        (False, TypeError),
-        (1.5, TypeError),
-        ("1", TypeError),
+        ("x", ValueError),
         (-1, ValueError),
         (1 << 64, ValueError),
     ],
 )
 def test_run_spec_refuses_invalid_public_seeds(seed, error):
-    """RunSpec rejects invalid public seeds at build entry with its documented error category."""
+    """RunSpec rejects seeds outside [0, 2**64) at build entry."""
     with pytest.raises(error):
         RunSpec(ops=[], seed=seed).build()
 

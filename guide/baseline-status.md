@@ -78,6 +78,16 @@ Status vocabulary:
   downstream, off the window-to-window path. Grounded in Skoric 2209.08552
   App. D, Tan 2209.09219, LILLIPUT 2108.06569, qLDPC net_error, SWIPER's DAG.
   Baseline sweep and Willow real-time rows rerun; suite 768, smoke identical.
+- Q-064 (owner GO 2026-08-18, commits `7a80d3a`, `5312f08`): the QPU runs one
+  QEC cycle clock; every live patch yields a syndrome round every cycle, idle
+  or not, tagged (patch, cycle); operations start on cycle boundaries and
+  consume whole cycles. Grounded in Google readout per cycle (2207.06431,
+  2408.13687), Skoric App. D, SWIPER device_manager `_generate_syndrome_round`,
+  XQsim chip-wide ESM. Removed: per-op private round chains, feedback-memory
+  idle loop, `max_idle_rounds`, `gates_start_on_round_boundaries`. Verified by
+  tests/16_qpu, a decsim T-gate wait (14 idle rounds for a 14-round decode,
+  successor starts on the boundary) beside SWIPER's RegularTSchedule rule,
+  Gate 1 and the baseline sweep unchanged; suite 772, smoke identical.
 
 ## Minimal baseline closed loop
 

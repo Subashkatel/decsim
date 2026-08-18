@@ -17,7 +17,7 @@ from .metrics import (DecoderMemoryOccupancy, DecoderUtilization,
                       ReadyQueueStats,
                       WindowLatencyBreakdown, MagicStateLatency,
                       StrongDecoderBacklog, ConditionalReactionTime)
-from .schemes import ParallelWindowScheme
+from .windows.windowing_schemes import ParallelWindowScheme
 from .run_spec import RunSpec, simulate
 from .decoders.weak_strong_switching import Switching
 from .config import TimingConfig, fmt, us

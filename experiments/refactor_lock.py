@@ -127,7 +127,7 @@ def _links(**path_latency_ticks):
 
 
 def _sliding():
-    from decsim.schemes import SlidingTerminalPolicy, SlidingWindowScheme
+    from decsim.windows.windowing_schemes import SlidingTerminalPolicy, SlidingWindowScheme
     return SlidingWindowScheme(
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD)
 
@@ -284,7 +284,7 @@ def _live_stream_spec(idle_policy, mode="trailing_buffer", decode_us=2.0):
     from decsim.qpu.syndrome_devices import TimingOnlyDevice
     from decsim.program.round_policies import PerOpRounds
     from decsim.run_spec import RunSpec
-    from decsim.schemes import SlidingWindowScheme
+    from decsim.windows.windowing_schemes import SlidingWindowScheme
     stream, operations = _live_stream_pair()
     rounds = {operations[0].id: 2, operations[1].id: 2}
     return RunSpec(ops=operations, dynamic_streams=[stream], idle_policy=idle_policy,
@@ -391,7 +391,7 @@ def parallel_ab_scheme():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
     from decsim.program.round_policies import FixedRounds
-    from decsim.schemes import ParallelWindowScheme
+    from decsim.windows.windowing_schemes import ParallelWindowScheme
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(30), round_us=1.0,
                    decoder=PresetLatencyDecoder(4.0), num_units=3,
                    scheme=ParallelWindowScheme(), links=_links(dd=100), seed=17)
@@ -401,7 +401,7 @@ def sandwich_scheme():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
     from decsim.program.round_policies import FixedRounds
-    from decsim.schemes import TanSandwichScheme
+    from decsim.windows.windowing_schemes import TanSandwichScheme
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(30), round_us=1.0,
                    decoder=PresetLatencyDecoder(4.0), num_units=3,
                    scheme=TanSandwichScheme(), links=_links(dd=100), seed=19)
@@ -411,7 +411,7 @@ def naive_online_scheme():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
     from decsim.program.round_policies import FixedRounds
-    from decsim.schemes import NaiveOnlineScheme
+    from decsim.windows.windowing_schemes import NaiveOnlineScheme
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(20), round_us=1.0,
                    decoder=PresetLatencyDecoder(1.0), num_units=1,
                    scheme=NaiveOnlineScheme(), seed=23)

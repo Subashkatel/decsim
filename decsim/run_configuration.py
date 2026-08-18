@@ -69,11 +69,11 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .controller.policies import Eager, Ignore
     from .program.round_policies import GateRounds
     from .decoders.schedulers import FifoScheduler
-    from .schemes import SlidingWindowScheme
+    from .windows.windowing_schemes import SlidingWindowScheme
     from .decoders.weak_strong_switching import Baseline
     from .syndrome_buffer.syndrome_buffer import SyndromeBufferingConfig
     from .controller.syndrome_ingress import SyndromeIngressPolicy
-    from .window_interactions import DefaultWindowInteraction
+    from .windows.window_interactions import DefaultWindowInteraction
 
     strategy = spec.strategy if spec.strategy is not None else Baseline()
 

@@ -36,7 +36,7 @@ from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
-from decsim.schemes import NaiveOnlineScheme
+from decsim.windows.windowing_schemes import NaiveOnlineScheme
 
 BENCH = Path("tmp/references/code/pymatching/benchmarks/surface_codes/"
              "surface_code_rotated_memory_x_p_0.001_d_5_7_9_13_17_23_29_39_50_both_bases")

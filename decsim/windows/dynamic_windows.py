@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .message import Operation, Window
+from ..message import Operation, Window
 
 
 class DynamicWindows:

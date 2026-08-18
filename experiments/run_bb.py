@@ -14,7 +14,7 @@ from decsim.detector_error_model import (
     FaultRepresentation,
     PHYSICAL_FAULT_MODEL_REQUIRED,
 )
-from decsim.schemes import SlidingWindowScheme
+from decsim.windows.windowing_schemes import SlidingWindowScheme
 from decsim.decoders.relay_bp import RelayBpWindowDecoder
 from decsim.decoders.tesseract import TesseractDecoderConfig, TesseractWindowDecoder
 

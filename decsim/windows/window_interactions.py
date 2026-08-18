@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .message import (
+from ..message import (
     BoundaryUpdate,
     DependencyResidual,
     SeamFaultOwner,

@@ -153,7 +153,7 @@ class RunSpec:
         from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
         from .controller.syndrome_ingress import SyndromeIngress
         from .views import capture_primary_result
-        from .window_manager import WindowManager
+        from .windows.window_manager import WindowManager
 
         config = resolve_run_configuration(self, root_seed)
         strategy, plan, timing = config.strategy, config.plan, config.timing

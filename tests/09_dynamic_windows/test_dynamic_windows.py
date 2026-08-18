@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from decsim.dynamic_windows import DynamicWindows
-from decsim.window_manager import WindowManager
+from decsim.windows.dynamic_windows import DynamicWindows
+from decsim.windows.window_manager import WindowManager
 
 
 class RecordingWindowManager:

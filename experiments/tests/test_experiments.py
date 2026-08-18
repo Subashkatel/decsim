@@ -393,7 +393,7 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
         decode_windowed,
     )
     from decsim.decoders.mwpm import matching_window_decoder
-    from decsim.schemes import SlidingWindowScheme
+    from decsim.windows.windowing_schemes import SlidingWindowScheme
 
     circuit = stim.Circuit.generated(
         "repetition_code:memory",

@@ -26,7 +26,9 @@ def test_no_module_of_the_old_flat_layout_remains():
              "factories.py", "controller.py", "policies.py",
              "syndrome_ingress.py", "syndrome_buffer.py", "decoder_manager.py",
              "decoder_memory.py", "decoder_memory_transfer.py", "decoder_engine.py",
-             "decoders.py", "schedulers.py", "switching.py"]
+             "decoders.py", "schedulers.py", "switching.py", "window_manager.py",
+             "schemes.py", "window_interactions.py", "dynamic_windows.py",
+             "speculative_recovery.py"]
     assert [name for name in moved if (root / name).exists()] == []
     assert not (root / "frontends").exists()
     assert not (root / "stimcircuits").exists()

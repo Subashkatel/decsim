@@ -233,7 +233,7 @@ class Switching:
         has_frontend,
     ) -> None:
         from ..controller.policies import Eager, Held
-        from ..schemes import SlidingTerminalPolicy, SlidingWindowScheme
+        from ..windows.windowing_schemes import SlidingTerminalPolicy, SlidingWindowScheme
 
         if (
             type(scheme) is SlidingWindowScheme

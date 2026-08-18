@@ -7,7 +7,7 @@ import pytest
 from decsim.config import us
 from decsim.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
 from decsim.links import LinkPath, TrafficAttribution
-from decsim.syndrome_ingress import SyndromeIngress, _IngressSlotState
+from decsim.syndrome_ingress import SyndromePacketRouteKind, SyndromeIngress, _IngressSlotState
 
 
 class _Engine:
@@ -145,6 +145,8 @@ def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry
     ingress.window_input_receiver = receiver
     ingress.syndrome_buffer = publication
     ingress._slots = [slot]
+    slot.route = SimpleNamespace(kind=SyndromePacketRouteKind.WINDOW_INPUT)
+    ingress._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: [0]}
 
     assert ingress._transmit_window_input_round(0, slot) is True
     assert receiver.received == []
@@ -183,8 +185,41 @@ def test_unwired_legacy_ingress_delivery_is_immediate_and_has_no_c2b_publication
     ingress.window_input_receiver = receiver
     ingress.syndrome_buffer = publication
     ingress._slots = [slot]
+    slot.route = SimpleNamespace(kind=SyndromePacketRouteKind.WINDOW_INPUT)
+    ingress._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: [0]}
 
     assert ingress._transmit_window_input_round(0, slot) is True
     assert receiver.received == [packet]
     assert publication.calls == []
     assert "c2b" not in links.traffic_json_value()["path_order"]
+
+
+def test_rounds_pipeline_on_c2b_instead_of_stop_and_wait():
+    """Fast rounds arrive at Buffer 0 spaced by the round period, not by the C2B
+    latency: the link serializes them FIFO and propagation is pipelined."""
+    stim = pytest.importorskip("stim")
+    from decsim.adapters.stim_device import StimDevice
+    from decsim.config import TimingConfig, TICKS_PER_US
+    from decsim.decoders import PresetLatencyDecoder
+    from decsim.message import Operation
+    from decsim.rounds import FixedRounds
+    from decsim.run_spec import RunSpec
+
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z", rounds=8, distance=3,
+        after_clifford_depolarization=0.001, before_measure_flip_probability=0.001,
+        after_reset_flip_probability=0.001, before_round_data_depolarization=0.001)
+    op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
+    completed = RunSpec(
+        ops=[op], d=3, rounds_policy=FixedRounds(8), device=StimDevice(),
+        decoder=PresetLatencyDecoder(0.01),
+        timing=TimingConfig(round_us=0.02),
+        links=with_controller_to_buffer_edge(
+            logical_reference_profile(), latency_us=0.25,
+            aggregate_bits_per_us=10_000.0, source="test"),
+        seed=0).build()
+    delivered = sorted(row["delivery_ticks"] for row in completed.result.link_traffic["transfers"]
+                       if row["path"] == "c2b")
+    assert len(delivered) == 8
+    gaps = [(b - a) / TICKS_PER_US for a, b in zip(delivered, delivered[1:])]
+    assert all(gap == pytest.approx(0.02, abs=1e-3) for gap in gaps), gaps   # first gap adds serialization

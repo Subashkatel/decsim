@@ -89,8 +89,10 @@ Status vocabulary:
   successor starts on the boundary) beside SWIPER's RegularTSchedule rule,
   Gate 4 (`d49d009`, the rule written independently on SimPy: five cases with
   fractional decode times, the 1.1 us Willow cycle and two patches, all
-  matching decsim), Gate 1 and the baseline sweep unchanged; suite 772, smoke
-  identical.
+  matching decsim), Gate 5 (real Stim data through a decode wait on one
+  stream: 300/300 shots, every emitted round's bits equal the sampled data,
+  predictions equal qLDPC and whole-circuit PyMatching), Gate 1 and the
+  baseline sweep unchanged; suite 772, smoke identical.
 
 ## Minimal baseline closed loop
 

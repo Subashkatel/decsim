@@ -395,3 +395,38 @@ class StimDevice(_AtomicRunSeedConsumer):
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=fault_exclusion_ranges)
+
+
+class RecordedStimDevice(StimDevice):
+    """Replay recorded detection events (hardware data) instead of sampling.
+
+    ``detection_events`` is a (shots, detectors) bool array in the detector
+    order of ``op.circuit``; ``observable_flips`` is (shots, observables);
+    ``shot`` selects the row. Round chronology and window error models come
+    from the circuit exactly as for sampled data.
+    """
+
+    def __init__(self, detection_events, observable_flips, shot: int, **kwargs):
+        super().__init__(**kwargs)
+        self.detection_events = detection_events
+        self.observable_flips = observable_flips
+        self.shot = shot
+
+    @staticmethod
+    def detector_rounds_from_coordinates(circuit, round_count: int) -> dict:
+        """One-based emitted round per detector for hardware circuits whose
+        detector coordinates are concatenated (x, y, t) triples (Google's
+        released memory experiments): the detector belongs to its latest t."""
+        rounds = {}
+        for detector_id, coords in circuit.get_detector_coordinates().items():
+            layer = int(max(coords[2::3]))
+            rounds[detector_id] = round_count if layer >= round_count else layer + 1
+        return rounds
+
+    def begin_operation(self, op, segment_round_count, source_round_count):
+        super().begin_operation(op, segment_round_count, source_round_count)
+        key = self._key(op)
+        self._dets[key] = self.detection_events[self.shot]
+        self._truth[key] = self.observable_flips[self.shot]
+        self._dets[op.id] = self._dets[key]
+        self._truth[op.id] = self._truth[key]

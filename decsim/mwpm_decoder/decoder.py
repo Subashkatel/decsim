@@ -95,11 +95,16 @@ class PyMatchingDecoder:
             )
             matching = pymatching.Matching.from_check_matrix(
                 faults.check, weights=self._weights_for(faults))
-            # PyMatching builds its internal graph lazily on the first decode;
-            # a real software decoder has the window graph prebuilt, so warm it
-            # here (the published benchmark method decodes one shot first).
+            # PyMatching builds its internal graph lazily and finishes warming
+            # only once it has matched real defects; a running software decoder
+            # has the window graph prebuilt and warm, so decode a few defect
+            # pairs before the first timed call.
             import numpy
-            matching.decode(numpy.zeros(faults.check.shape[0], dtype=numpy.uint8))
+            detectors = faults.check.shape[0]
+            for first in range(0, min(detectors - 1, 6), 2):
+                syndrome = numpy.zeros(detectors, dtype=numpy.uint8)
+                syndrome[first] = syndrome[first + 1] = 1
+                matching.decode(syndrome)
             self._matchings[id(faults)] = (weakref.ref(faults), matching)
         return matching
 

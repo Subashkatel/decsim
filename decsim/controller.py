@@ -362,13 +362,6 @@ class Controller:
     def stream_binding_for(self, operation_id):
         return self._stream_binding_by_operation_id.get(operation_id)
 
-    def _patch_for_operation(self, operation: Operation):
-        if operation.patches:
-            return operation.patches[0]
-        if operation.qubits:
-            return operation.qubits[0]
-        return 0
-
     def _body_done(self, operation: Operation) -> None:
         self.runtime.body_done(operation)
 
@@ -479,10 +472,6 @@ class Controller:
             fragment_index=readout.fragment_index,
             size_bits=readout.size_bits,
         )
-        # Validate the full immutable controller value before charging traffic.
-        from .message import RetainedSyndromeFragment
-        RetainedSyndromeFragment.from_payload(payload)
-
         self.syndrome_ingress.relay_qpu_readout(
             payload, route, processing_ticks=self.binary_availability_ticks)
 

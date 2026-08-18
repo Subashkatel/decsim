@@ -5,7 +5,7 @@ Compose a RunSpec (decsim.run_spec) and drive it with simulate().
 
 from .decoders import (PresetLatencyDecoder, PerRoundDecoder,
                        FunctionLatencyDecoder,
-                       SwitchingDecoder, SwitchingRouter, SampledConfidenceDecoder,
+                       SwitchingRouter, SampledConfidenceDecoder,
                        switch_probability_per_round)
 from .factories import (InfiniteFactory, DistillationFactory,
                         MultiLevelDistillationFactory)
@@ -29,7 +29,6 @@ __all__ = [
     "three_cnot_circuit", "cnot_plus_two_t_circuit", "independent_t_circuit",
     "three_cnot_six_qubits_circuit",
     "PresetLatencyDecoder", "PerRoundDecoder", "FunctionLatencyDecoder",
-    "SwitchingDecoder",
     "SwitchingRouter", "SampledConfidenceDecoder", "switch_probability_per_round",
     "InfiniteFactory", "DistillationFactory", "MultiLevelDistillationFactory",
     "ParallelWindowScheme",

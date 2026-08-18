@@ -344,8 +344,19 @@ class SyndromeIngress:
             route_queue = self._route_queues[kind]
             if not route_queue:
                 continue
-            slot_index = route_queue[0]
-            if not self._attempt_head(slot_index):
+            if kind is SyndromePacketRouteKind.WINDOW_INPUT:
+                # Rounds pipeline onto the C2B link: every waiting round behind
+                # in-flight ones is sent in order; a refused round stops the walk.
+                progressed = False
+                for slot_index in list(route_queue):
+                    slot = self._slots[slot_index]
+                    if slot.state is _IngressSlotState.PACKED_WAIT:
+                        if not self._attempt_head(slot_index):
+                            break
+                        progressed = True
+                if not progressed:
+                    continue
+            elif not self._attempt_head(route_queue[0]):
                 continue
             self._next_route_index = (kinds.index(kind) + 1) % len(kinds)
 
@@ -396,6 +407,11 @@ class SyndromeIngress:
             self.syndrome_buffer.mark_publication_tick(
                 round_identity, self.engine.now)
             slot.c2b_delivered = True
+        route_queue = self._route_queues[slot.route.kind]
+        if any(self._slots[ahead].state is _IngressSlotState.PACKED_WAIT
+               for ahead in route_queue[:route_queue.index(slot_index)]):
+            slot.state = _IngressSlotState.PACKED_WAIT   # a refused round is ahead; keep order
+            return False
         accepted = self.window_input_receiver.accept_window_input(slot.packet)
         if type(accepted) is not bool:
             raise TypeError("window input receiver must return an exact bool")

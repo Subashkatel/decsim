@@ -245,6 +245,11 @@ def _plan_execution(
         raise ValueError("resolved round cadence must be at least one tick")
 
     leading, trailing = code.buffering_floor()
+    for label, value, minimum in (("distance", code.distance, 1),
+                                  ("commit_round_count", code.commit_rounds(), 1),
+                                  ("buffer_round_count", code.buffer_rounds(), 0)):
+        if type(value) is not int or value < minimum:   # user code card; a zero or fractional geometry never terminates
+            raise TypeError(f"{label} must be an int >= {minimum}; got {value!r}")
     patch_count_by_id = {
         operation.id: max(
             1,

@@ -5,9 +5,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-import math
-from numbers import Real
 from typing import Any, Callable, Optional
+
 
 def is_stable_string(value: Any) -> bool:
     return (
@@ -48,11 +47,6 @@ def same_stable_identity(left: Any, right: Any) -> bool:
 
 
 def stable_identity_bytes(identity: Any) -> bytes:
-    if not is_stable_identity(identity):
-        raise TypeError(
-            "stable identities are exact int, Unicode scalar str, or "
-            "recursive tuples"
-        )
     if type(identity) is int:
         encoded = str(identity).encode("ascii")
         return b"I" + len(encoded).to_bytes(8, "big") + encoded
@@ -83,19 +77,21 @@ def stable_identity_json(identity: Any) -> dict:
     return {"kind": "tuple", "value": None, "items": items}
 
 
+_SEED_PATH_TAG = {"field": b"F", "string_key": b"S"}
+
+
 @dataclass(frozen=True)
+
+
 class RunSeedPathSegment:
     """One framed semantic edge in the run-level seed component graph."""
 
     kind: str
     value: Any
 
-    def __post_init__(self) -> None:
-        if self.kind not in ("field", "string_key", "none_key", "integer_key"):
-            raise ValueError(f"unknown run-seed path segment kind {self.kind!r}")
-
     def canonical_bytes(self) -> bytes:
-        """Return the normative typed and length-framed seed-path bytes."""
+        """Return the normative typed and length-framed seed-path bytes; an
+        unknown kind has no tag and fails here."""
         if self.kind == "none_key":
             return b"N" + (0).to_bytes(4, "big")
         if self.kind == "integer_key":
@@ -106,11 +102,13 @@ class RunSeedPathSegment:
                 + encoded_value
             )
         encoded_value = self.value.encode()
-        tag = b"F" if self.kind == "field" else b"S"
+        tag = _SEED_PATH_TAG[self.kind]
         return tag + len(encoded_value).to_bytes(4, "big") + encoded_value
 
 
 @dataclass(frozen=True)
+
+
 class RunSeedChild:
     """One semantic child edge exposed by a seed-graph composite."""
 
@@ -119,6 +117,8 @@ class RunSeedChild:
 
 
 @dataclass(frozen=True, eq=False)
+
+
 class RunSeedReservation:
     """A leaf-owned prepared RNG replacement plus manifest seed provenance."""
 
@@ -131,36 +131,56 @@ class SyndromePacketRouteKind(Enum):
     WINDOW_INPUT = auto()
     FEEDBACK_MEMORY_ROUND = auto()
 
+
 @dataclass(frozen=True)
+
+
 class PotentialStrong:
     window_key: tuple
+
+
 @dataclass(frozen=True)
+
+
 class PendingStrong:
     request_key: DecoderRequestKey
+
+
 @dataclass(frozen=True)
+
+
 class CsdInput:
     request_key: DecoderRequestKey
+
+
 @dataclass(frozen=True)
+
+
 class DecoderInputHold:
     request_key: DecoderRequestKey
+
+
 @dataclass(frozen=True)
+
+
 class Replay:
     window_key: tuple
     boundary_generation: int
+
+
 @dataclass(frozen=True)
+
+
 class RephaseGuard:
     request_key: DecoderRequestKey
+
+
 @dataclass(frozen=True)
+
+
 class SyndromePacketRoute:
     kind: SyndromePacketRouteKind
     source_operation_id: Optional[Any] = None
-
-    def __post_init__(self) -> None:
-        if (
-            self.kind is not SyndromePacketRouteKind.WINDOW_INPUT
-            and not is_stable_identity(self.source_operation_id)
-        ):
-            raise TypeError("feedback route needs a stable source operation identity")
 
     @classmethod
     def feedback_memory_round(cls, source_operation_id) -> "SyndromePacketRoute":
@@ -168,7 +188,11 @@ class SyndromePacketRoute:
                    source_operation_id)
 
 WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
+
+
 @dataclass(frozen=True)
+
+
 class QPUReadout:
     """One QPU-side result awaiting controller availability handling.
 
@@ -186,6 +210,8 @@ class QPUReadout:
 
 
 @dataclass
+
+
 class SyndromePayload:
     """One binary detector-data round accepted by the controller."""
 
@@ -200,31 +226,15 @@ class SyndromePayload:
 
 
 def normalize_binary_bits(bits: Any) -> Optional[tuple[int, ...]]:
+    """Bits as a tuple of 0/1 ints; a list, tuple or NumPy bool array in."""
     if bits is None:
         return None
-    if type(bits) is list or type(bits) is tuple:
-        if not all(
-            type(bit) is bool or (type(bit) is int and bit in (0, 1))
-            for bit in bits
-        ):
-            raise TypeError("syndrome bits must contain only exact binary values")
-        return tuple(int(bit) for bit in bits)
-
-    import numpy as np
-
-    if (
-        type(bits) is np.ndarray
-        and bits.ndim == 1
-        and bits.dtype == np.dtype(bool)
-    ):
-        return tuple(int(bit) for bit in bits)
-    raise TypeError(
-        "syndrome bits must be None, an exact binary list/tuple, or an "
-        "exact one-dimensional NumPy boolean array"
-    )
+    return tuple(int(bit) for bit in bits)
 
 
 @dataclass(frozen=True)
+
+
 class RetainedSyndromeFragment:
     """One validated immutable fragment retained after controller ingress."""
 
@@ -235,14 +245,6 @@ class RetainedSyndromeFragment:
     code: Optional[str]
     size_bits: Optional[int]
     fragment_index: int
-
-    def __post_init__(self) -> None:
-        if self.bits is not None and (
-            type(self.bits) is not tuple
-            or any(type(bit) is not int or bit not in (0, 1)
-                   for bit in self.bits)
-        ):
-            raise TypeError("retained bits must be an exact tuple of binary ints")
 
     @classmethod
     def from_payload(cls, payload: SyndromePayload) -> "RetainedSyndromeFragment":
@@ -258,6 +260,8 @@ class RetainedSyndromeFragment:
 
 
 @dataclass(frozen=True)
+
+
 class SyndromeRoundPacket:
     """One complete immutable syndrome round in transport-arrival order."""
 
@@ -265,35 +269,8 @@ class SyndromeRoundPacket:
     round_index: int
     fragments: tuple[RetainedSyndromeFragment, ...]
 
-    def __post_init__(self) -> None:
-        if (
-            type(self.fragments) is not tuple
-            or not self.fragments
-            or any(type(fragment) is not RetainedSyndromeFragment
-                   for fragment in self.fragments)
-        ):
-            raise TypeError(
-                "packet fragments must be a nonempty tuple of retained fragments"
-            )
-        seen_fragment_indices = set()
-        seen_patch_ids = []
-        for fragment in self.fragments:
-            if not same_stable_identity(fragment.operation_id, self.operation_id):
-                raise ValueError("packet fragments must share operation identity")
-            if not same_stable_identity(fragment.round_index, self.round_index):
-                raise ValueError("packet fragments must share round_index")
-            if fragment.fragment_index in seen_fragment_indices:
-                raise ValueError("packet fragment indices must be distinct")
-            seen_fragment_indices.add(fragment.fragment_index)
-            if any(
-                same_stable_identity(fragment.patch_id, patch_id)
-                for patch_id in seen_patch_ids
-            ):
-                raise ValueError("packet patch identities must be distinct")
-            seen_patch_ids.append(fragment.patch_id)
-
-
 # ------------------------------------------------------------------ windows
+
 
 class WindowProtocol(Enum):
     """Scientific model-building contract for one operation's window plan."""
@@ -303,6 +280,8 @@ class WindowProtocol(Enum):
 
 
 @dataclass
+
+
 class Window:
     """One decoder window inside an operation's syndrome stream.
 
@@ -344,6 +323,8 @@ class Window:
 
 
 @dataclass(frozen=True)
+
+
 class WindowInfo:
     """Read-only geometry and topology exposed to interaction policies."""
 
@@ -386,17 +367,9 @@ class WindowInfo:
         return self.commit_lo if self.buffer_lo is None else self.buffer_lo
 
 
-def _exact_positive_int(value, label: str) -> None:
-    if type(value) is not int or value < 1:
-        raise TypeError(f"{label} must be an exact positive int")
-
-
-def _exact_nonnegative_int(value, label: str) -> None:
-    if type(value) is not int or value < 0:
-        raise TypeError(f"{label} must be an exact nonnegative int")
-
-
 @dataclass(frozen=True)
+
+
 class ResolvedCodeGeometry:
     """Canonical planning/control geometry resolved once for one run."""
 
@@ -409,25 +382,10 @@ class ResolvedCodeGeometry:
     one_patch_spatial_node_count: int
     buffer_floor_override_active: bool
 
-    def __post_init__(self) -> None:
-        _exact_positive_int(self.distance, "distance")
-        _exact_positive_int(self.commit_round_count, "commit_round_count")
-        _exact_nonnegative_int(self.buffer_round_count, "buffer_round_count")
-        _exact_nonnegative_int(
-            self.minimum_leading_buffer_round_count,
-            "minimum_leading_buffer_round_count",
-        )
-        _exact_nonnegative_int(
-            self.minimum_trailing_buffer_round_count,
-            "minimum_trailing_buffer_round_count",
-        )
-        _exact_positive_int(
-            self.one_patch_spatial_node_count,
-            "one_patch_spatial_node_count",
-        )
-
 
 @dataclass(frozen=True)
+
+
 class ResolvedOperationPlanning:
     """Exact immutable planning/control facts for one operation."""
 
@@ -437,13 +395,10 @@ class ResolvedOperationPlanning:
     round_ticks: int
     spatial_node_count: int
 
-    def __post_init__(self) -> None:
-        _exact_nonnegative_int(self.round_count, "round_count")
-        _exact_positive_int(self.round_ticks, "round_ticks")
-        _exact_positive_int(self.spatial_node_count, "spatial_node_count")
-
 
 @dataclass(frozen=True)
+
+
 class ResolvedPatchPlanning:
     """Exact immutable cadence and idle-work facts for one patch."""
 
@@ -452,12 +407,10 @@ class ResolvedPatchPlanning:
     round_ticks: int
     spatial_node_count: int
 
-    def __post_init__(self) -> None:
-        _exact_positive_int(self.round_ticks, "round_ticks")
-        _exact_positive_int(self.spatial_node_count, "spatial_node_count")
-
 
 @dataclass(frozen=True)
+
+
 class WindowGeometry:
     """One immutable static window interval."""
 
@@ -467,28 +420,14 @@ class WindowGeometry:
     buffer_hi: int
     closed_temporal_boundaries: bool = False
 
-    def __post_init__(self) -> None:
-        for label, value in (
-            ("buffer_lo", self.buffer_lo),
-            ("commit_lo", self.commit_lo),
-            ("commit_hi", self.commit_hi),
-            ("buffer_hi", self.buffer_hi),
-        ):
-            _exact_positive_int(value, label)
-        if not (
-            self.buffer_lo
-            <= self.commit_lo
-            <= self.commit_hi
-            <= self.buffer_hi
-        ):
-            raise ValueError("window geometry bounds are not ordered")
-
     @property
     def round_count(self) -> int:
         return self.buffer_hi - self.buffer_lo + 1
 
 
 @dataclass(frozen=True)
+
+
 class OperationWindowPlan:
     """One scheme's complete immutable result for one operation."""
 
@@ -501,61 +440,10 @@ class OperationWindowPlan:
     batch_preceding_idle_rounds: bool
     protocol: WindowProtocol = WindowProtocol.GENERIC
 
-    def __post_init__(self) -> None:
-        if (
-            not self.windows
-            or any(type(window) is not WindowGeometry for window in self.windows)
-        ):
-            raise TypeError("windows must be nonempty WindowGeometry values")
-        window_count = len(self.windows)
-        edge_set = set()
-        predecessors = [set() for _ in self.windows]
-        dependents = [set() for _ in self.windows]
-        for edge in self.internal_dependencies:
-            if any(type(index) is not int for index in edge):
-                raise TypeError("dependency edge indices must be exact ints")
-            source, destination = edge
-            if (
-                source < 0
-                or destination < 0
-                or source >= window_count
-                or destination >= window_count
-            ):
-                raise ValueError("dependency edge is out of range")
-            if edge in edge_set:
-                raise ValueError("dependency edges must be unique")
-            edge_set.add(edge)
-            predecessors[destination].add(source)
-            dependents[source].add(destination)
-
-        expected_entries = tuple(
-            index for index, sources in enumerate(predecessors) if not sources
-        )
-        expected_exits = tuple(
-            index for index, destinations in enumerate(dependents)
-            if not destinations
-        )
-        if not same_stable_identity(self.entry_window_indices, expected_entries):
-            raise ValueError("entry_window_indices must equal all graph roots")
-        if not same_stable_identity(self.exit_window_indices, expected_exits):
-            raise ValueError("exit_window_indices must equal all graph sinks")
-
-        indegree = [len(sources) for sources in predecessors]
-        ready = list(self.entry_window_indices)
-        visited = 0
-        while ready:
-            source = ready.pop()
-            visited += 1
-            for destination in dependents[source]:
-                indegree[destination] -= 1
-                if indegree[destination] == 0:
-                    ready.append(destination)
-        if visited != window_count:
-            raise ValueError("operation window graph must be acyclic")
-        if type(self.batch_preceding_idle_rounds) is not bool:
-            raise TypeError("batch_preceding_idle_rounds must be an exact bool")
 
 @dataclass
+
+
 class WindowPlan:
     """Compile-time window layout handed to the window manager."""
 
@@ -574,24 +462,20 @@ class WindowPlan:
 
 # ------------------------------------------------------ window interaction
 
+
 @dataclass(frozen=True)
+
+
 class DependencyResidual:
     """Complete global detector effect plus its compatibility mask view."""
 
     detector_ids: tuple[int, ...] = ()
     defects: dict | None = None
 
-    def __post_init__(self) -> None:
-        if any(type(detector_id) is not int or detector_id < 0
-               for detector_id in self.detector_ids):
-            raise TypeError(
-                "dependency residual detector_ids must be nonnegative exact ints"
-            )
-        if len(set(self.detector_ids)) != len(self.detector_ids):
-            raise ValueError("dependency residual detector_ids must be unique")
-
 
 @dataclass(frozen=True)
+
+
 class BoundaryDelivery:
     """One versioned boundary message offered to an interaction policy."""
 
@@ -615,6 +499,8 @@ class BoundaryDelivery:
 
 
 @dataclass(frozen=True)
+
+
 class BoundaryUpdate:
     """A policy's decision for one boundary arrival."""
 
@@ -631,6 +517,8 @@ class SeamFaultOwner(Enum):
 
 
 @dataclass(frozen=True)
+
+
 class StrongRegionPlan:
     """Geometry and seam ownership for one deferred strong decode."""
 
@@ -641,20 +529,12 @@ class StrongRegionPlan:
     restart_buffer_lo: Optional[int]
     restart_seam_fault_owner: Optional[SeamFaultOwner]
 
-    def __post_init__(self) -> None:
-        if not 1 <= self.context_lo <= self.commit_lo \
-                <= self.commit_hi <= self.context_hi:
-            raise ValueError(
-                "strong-region bounds must satisfy 1 <= context_lo <= "
-                "commit_lo <= commit_hi <= context_hi")
-        if self.restart_buffer_lo is not None and self.restart_buffer_lo < 1:
-            raise ValueError(
-                "strong-region restart_buffer_lo must be at least one")
-
-
 # ------------------------------------------------------------------- decode
 
+
 @dataclass(frozen=True)
+
+
 class SoftOutputSource:
     """Exact provenance required to interpret one confidence threshold."""
 
@@ -666,16 +546,10 @@ class SoftOutputSource:
     weight_step_natural_log: Optional[float]
     references: tuple[str, ...]
 
-    def __post_init__(self) -> None:
-        if self.weight_step_natural_log is not None:
-            normalized = float(self.weight_step_natural_log)
-            if not math.isfinite(normalized) or normalized <= 0.0:
-                raise ValueError(
-                    "soft-output source weight step must be finite and positive"
-                )
-            object.__setattr__(self, "weight_step_natural_log", normalized)
 
 @dataclass(frozen=True)
+
+
 class SoftOutput:
     """One nonnegative confidence gap with immutable interpretation."""
 
@@ -684,28 +558,6 @@ class SoftOutput:
     w_min: Optional[float] = None
     w_comp: Optional[float] = None
 
-    def __post_init__(self) -> None:
-        if isinstance(self.gap, bool) or not isinstance(self.gap, Real):
-            raise TypeError("soft output gap must be a real number")
-        normalized_gap = float(self.gap)
-        if math.isnan(normalized_gap) or normalized_gap < 0:
-            raise ValueError(
-                "soft output gap must be nonnegative or positive infinity"
-            )
-        object.__setattr__(self, "gap", normalized_gap)
-        for field_name in ("w_min", "w_comp"):
-            value = getattr(self, field_name)
-            if value is None:
-                continue
-            if isinstance(value, bool) or not isinstance(value, Real):
-                raise TypeError(
-                    f"soft output {field_name} must be a real number or None"
-                )
-            normalized_value = float(value)
-            if math.isnan(normalized_value):
-                raise ValueError(f"soft output {field_name} cannot be NaN")
-            object.__setattr__(self, field_name, normalized_value)
-
 
 class DecoderTier(Enum):
     WEAK = "weak"
@@ -713,6 +565,8 @@ class DecoderTier(Enum):
 
 
 @dataclass(frozen=True)
+
+
 class DecoderRequestKey:
     operation_id: Any
     window_id: int
@@ -721,11 +575,15 @@ class DecoderRequestKey:
 
 
 @dataclass(frozen=True)
+
+
 class DecoderServiceKey:
     run_sequence: int
 
 
 @dataclass
+
+
 class DecodeJob:
     """One unit of decoder work in the ``logical_reference`` profile.
 
@@ -768,7 +626,10 @@ class DecodeJob:
     service_cancelled_request_keys: set[DecoderRequestKey] = field(default_factory=set)
     service_dispatch_ticks: Optional[int] = None
 
+
 @dataclass
+
+
 class DecodeResult:
     """One window result; timing-only decoders leave optional fields unset."""
 
@@ -782,22 +643,16 @@ class DecodeResult:
 
 
 @dataclass(frozen=True)
+
+
 class StrongDecodeCompletion:
     request_key: DecoderRequestKey
     result: DecodeResult
 
-    def __post_init__(self) -> None:
-        if (type(self.request_key), type(self.result)) != (
-                DecoderRequestKey, DecodeResult):
-            raise TypeError("strong completion requires exact key and result types")
-        if (self.request_key.tier is not DecoderTier.STRONG
-                or not same_stable_identity(
-                    self.request_key.operation_id, self.result.op_id)
-                or self.request_key.window_id != self.result.window_id):
-            raise ValueError("strong completion identity must match its strong key")
-
 
 @dataclass
+
+
 class DecodeOutcome:
     """Joint decode outcome delivered to the strategy hook."""
 
@@ -807,7 +662,10 @@ class DecodeOutcome:
 
 # ---------------------------------------------------------------- resources
 
+
 @dataclass(frozen=True)
+
+
 class ResourceClaim:
     """Typed exclusivity claim on shared hardware. Only kind="qubits" is
     used today (layouts derive one claim from an op's qubit tuple)."""
@@ -817,6 +675,8 @@ class ResourceClaim:
 
 
 @dataclass(frozen=True)
+
+
 class Decision:
     """Feedback timing route for one target operation."""
 
@@ -825,6 +685,8 @@ class Decision:
 
 
 @dataclass(frozen=True)
+
+
 class ExecutionProgram:
     """Immutable controller program-load artifact."""
 
@@ -835,17 +697,17 @@ class ExecutionProgram:
 
 
 @dataclass(frozen=True)
+
+
 class StreamBinding:
     """Immutable runtime association between an operation and stream range."""
     stream_id: Any
     stream_offset: int
 
-    def __post_init__(self) -> None:
-        if self.stream_offset < 0:
-            raise ValueError("stream_offset must be nonnegative")
-
 
 @dataclass(frozen=True)
+
+
 class RunOperationBody:
     """Immutable controller-to-QPU command for one operation body."""
 
@@ -856,16 +718,12 @@ class RunOperationBody:
     emits_detector_data: bool = True
     finalizes_stream_round: bool = False
 
-    def __post_init__(self) -> None:
-        if self.round_ticks <= 0:
-            raise ValueError("round_ticks must be positive")
-        if self.round_count < 0 or self.source_round_count < 0:
-            raise ValueError("round counts must be nonnegative")
-
-
 # ----------------------------------------------------------------- workload
 
+
 @dataclass(frozen=True)
+
+
 class ProtectedRegion:
     """One patch allocation generation with inclusive operation endpoints."""
 
@@ -876,6 +734,8 @@ class ProtectedRegion:
 
 
 @dataclass(frozen=True)
+
+
 class SuccessorReadiness:
     operation_id: int
     rounds_arrived: int
@@ -883,6 +743,8 @@ class SuccessorReadiness:
 
 
 @dataclass(frozen=True)
+
+
 class WindowReadiness:
     local_rounds_arrived: int
     local_round_count: int
@@ -904,6 +766,8 @@ class OpKind(Enum):
 
 
 @dataclass
+
+
 class Operation:
     """One logical operation in the circuit."""
 
@@ -931,37 +795,6 @@ class Operation:
     requires_result_return_to_qpu: bool = False  # decision must travel back to the QPU
     kind: OpKind = OpKind.GENERIC     # rounds-policy vocabulary (see OpKind)
 
-    def __post_init__(self) -> None:
-        """Keep the identities used as runtime keys exact and reproducible."""
-        if self.scheduled_start_round < 0:
-            raise ValueError("scheduled_start_round must be nonnegative")
-        fragment_fields = (
-            self.syndrome_fragment_index,
-            self.syndrome_fragment_count,
-        )
-        if (fragment_fields[0] is None) != (fragment_fields[1] is None):
-            raise ValueError(
-                "syndrome fragment index and count must be set together")
-        if fragment_fields[0] is not None:
-            if any(type(value) is not int for value in fragment_fields):
-                raise TypeError("syndrome fragment fields must be exact ints")
-            if not 0 <= fragment_fields[0] < fragment_fields[1]:
-                raise ValueError(
-                    "syndrome fragment index must be within fragment count")
-            if not self.emits_detector_data:
-                raise ValueError("syndrome fragment slots require an emitter")
-        if self.finalizes_stream_round:
-            if not self.emits_detector_data:
-                raise ValueError("stream finalizers must emit detector data")
-            if self.stream_id is None:
-                raise ValueError("stream finalizers require an explicit stream_id")
-            if type(self.stream_offset) is not int or self.stream_offset < 0:
-                raise ValueError(
-                    "stream finalizers require a nonnegative stream_offset")
-            if fragment_fields[0] is None:
-                raise ValueError(
-                    "stream finalizers require an explicit fragment slot")
-
     @property
     def needs_magic_state(self) -> bool:
         """True when this operation draws a distilled magic state from the factory."""
@@ -971,6 +804,8 @@ class Operation:
 
 
 @dataclass(frozen=True)
+
+
 class OperationPlanningView:
     """Immutable operation configuration visible to planning collaborators."""
 

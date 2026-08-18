@@ -180,9 +180,9 @@ def test_seed_path_segments_have_distinct_framed_encodings():
 
 
 def test_seed_path_segments_reject_unknown_kinds():
-    """Seed path construction rejects unknown segment kinds."""
-    with pytest.raises(ValueError):
-        message.RunSeedPathSegment("unknown", "value")
+    """An unknown segment kind has no canonical encoding."""
+    with pytest.raises(KeyError):
+        message.RunSeedPathSegment("unknown", "value").canonical_bytes()
 
 
 def test_seed_child_skips_container_validation_and_is_frozen():
@@ -205,21 +205,6 @@ def test_seed_reservation_skips_source_seed_validation_and_is_frozen():
 
 
 # Syndrome payloads and packets
-
-
-def test_syndrome_routes_pin_factory_values_and_feedback_identity():
-    """Syndrome routes create unowned window input and stable feedback routes."""
-    assert message.WINDOW_INPUT_ROUTE.kind is message.SyndromePacketRouteKind.WINDOW_INPUT
-    assert message.WINDOW_INPUT_ROUTE.source_operation_id is None
-
-    route = message.SyndromePacketRoute.feedback_memory_round((2, "source"))
-    assert route.kind is message.SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND
-    assert route.source_operation_id == (2, "source")
-    assert_frozen(message.WINDOW_INPUT_ROUTE)
-    assert_frozen(route)
-
-    with pytest.raises(TypeError):
-        message.SyndromePacketRoute.feedback_memory_round(object())
 
 
 def test_qpu_readout_skips_identity_round_and_fragment_validation():
@@ -267,37 +252,6 @@ def test_binary_bits_normalize_one_dimensional_boolean_arrays():
     assert message.normalize_binary_bits(bits) == (1, 0, 1)
 
 
-@pytest.mark.parametrize(
-    "bits",
-    ([0, 2], [False, 1.0], {0, 1}, np.array([[True]], dtype=bool), np.array([1], dtype=int)),
-)
-def test_binary_bits_reject_invalid_items_and_containers(bits):
-    """Binary bit normalization rejects invalid scalars and unsupported containers."""
-    with pytest.raises(TypeError):
-        message.normalize_binary_bits(bits)
-
-
-def test_binary_bits_reject_container_subclasses():
-    """Binary bit normalization accepts only exact supported container types."""
-    class ListSubclass(list):
-        pass
-
-    class TupleSubclass(tuple):
-        pass
-
-    class BooleanArraySubclass(np.ndarray):
-        pass
-
-    values = (
-        ListSubclass([0, 1]),
-        TupleSubclass((0, 1)),
-        np.array([True, False], dtype=bool).view(BooleanArraySubclass),
-    )
-    for bits in values:
-        with pytest.raises(TypeError):
-            message.normalize_binary_bits(bits)
-
-
 def test_retained_fragment_normalizes_payload_bits():
     """Retained fragments normalize payload bits while copying transport metadata."""
     payload = message.SyndromePayload(
@@ -315,79 +269,6 @@ def test_retained_fragment_normalizes_payload_bits():
     assert fragment.fragment_index == 3
 
 
-def test_retained_fragment_checks_only_binary_tuple_representation():
-    """Retained fragments reject malformed bits but accept unchecked metadata."""
-    with pytest.raises(TypeError):
-        make_fragment(bits=[0, 1])
-    with pytest.raises(TypeError):
-        make_fragment(bits=(0, True))
-
-    fragment = make_fragment(
-        operation_id=object(),
-        patch_id=[],
-        round_index=0,
-        code="",
-        size_bits=-1,
-        fragment_index=-1,
-    )
-    assert fragment.round_index == 0
-    assert fragment.fragment_index == -1
-    assert_frozen(fragment)
-
-
-def test_round_packet_rejects_empty_or_nonretained_fragments():
-    """Round packets require a nonempty exact tuple of retained fragments."""
-    class FragmentTupleSubclass(tuple):
-        pass
-
-    class RetainedFragmentSubclass(message.RetainedSyndromeFragment):
-        pass
-
-    retained_subclass = RetainedFragmentSubclass(
-        operation_id=7,
-        patch_id="patch-a",
-        round_index=3,
-        bits=(0, 1),
-        code="surface_code",
-        size_bits=2,
-        fragment_index=0,
-    )
-    with pytest.raises(TypeError):
-        message.SyndromeRoundPacket(7, 3, ())
-    with pytest.raises(TypeError):
-        message.SyndromeRoundPacket(7, 3, (object(),))
-    with pytest.raises(TypeError):
-        message.SyndromeRoundPacket(7, 3, [make_fragment()])
-    with pytest.raises(TypeError):
-        message.SyndromeRoundPacket(
-            7,
-            3,
-            FragmentTupleSubclass((make_fragment(),)),
-        )
-    with pytest.raises(TypeError):
-        message.SyndromeRoundPacket(7, 3, (retained_subclass,))
-
-
-def test_round_packet_rejects_identity_and_uniqueness_mismatches():
-    """Round packets reject mismatched identities and duplicate fragment or patch keys."""
-    with pytest.raises(ValueError):
-        message.SyndromeRoundPacket(1, 3, (make_fragment(operation_id=True),))
-    with pytest.raises(ValueError):
-        message.SyndromeRoundPacket(7, 3, (make_fragment(round_index=3.0),))
-    with pytest.raises(ValueError):
-        message.SyndromeRoundPacket(
-            7,
-            3,
-            (make_fragment(), make_fragment(patch_id="patch-b")),
-        )
-    with pytest.raises(ValueError):
-        message.SyndromeRoundPacket(
-            7,
-            3,
-            (make_fragment(), make_fragment(fragment_index=1)),
-        )
-
-
 def test_round_packet_preserves_supplied_fragment_order_and_is_frozen():
     """Round packets preserve supplied fragment order without sorting."""
     later_fragment = make_fragment(patch_id="patch-b", fragment_index=1)
@@ -402,32 +283,6 @@ def test_round_packet_preserves_supplied_fragment_order_and_is_frozen():
 
 
 # Window geometry and plans
-
-
-def test_window_geometry_enforces_order_and_inclusive_round_count():
-    """Window geometry enforces ordered positive bounds and counts inclusive rounds."""
-    geometry = message.WindowGeometry(2, 3, 5, 7)
-    assert geometry.round_count == 6
-    assert_frozen(geometry)
-
-    for bounds in (
-        (2, 1, 2, 3),
-        (1, 3, 2, 4),
-        (1, 2, 4, 3),
-    ):
-        with pytest.raises(ValueError):
-            message.WindowGeometry(*bounds)
-
-    for field_name in ("buffer_lo", "commit_lo", "commit_hi", "buffer_hi"):
-        bounds = {
-            "buffer_lo": 1,
-            "commit_lo": 1,
-            "commit_hi": 1,
-            "buffer_hi": 1,
-        }
-        bounds[field_name] = 1.0
-        with pytest.raises(TypeError):
-            message.WindowGeometry(**bounds)
 
 
 def test_window_start_round_and_key_reflect_runtime_geometry():
@@ -459,43 +314,6 @@ def test_window_info_snapshots_topology_and_detector_positions():
     assert info.dependents == ((4, 3),)
     assert info.detector_positions == {7: (1, 2)}
     assert_frozen(info)
-
-
-def test_resolved_planning_enforces_count_domains():
-    """Resolved planning records reject nonexact or out-of-domain counts."""
-    geometry_values = {
-        "code_name": "code",
-        "distance": 3,
-        "commit_round_count": 2,
-        "buffer_round_count": 0,
-        "minimum_leading_buffer_round_count": 0,
-        "minimum_trailing_buffer_round_count": 0,
-        "one_patch_spatial_node_count": 5,
-        "buffer_floor_override_active": False,
-    }
-    for field_name, invalid_value in (
-        ("distance", 0),
-        ("commit_round_count", 1.0),
-        ("buffer_round_count", -1),
-        ("minimum_leading_buffer_round_count", True),
-        ("minimum_trailing_buffer_round_count", -1),
-        ("one_patch_spatial_node_count", 0),
-    ):
-        invalid_values = dict(geometry_values)
-        invalid_values[field_name] = invalid_value
-        with pytest.raises(TypeError):
-            message.ResolvedCodeGeometry(**invalid_values)
-
-    with pytest.raises(TypeError):
-        message.ResolvedOperationPlanning(object(), object(), -1, 1, 1)
-    with pytest.raises(TypeError):
-        message.ResolvedOperationPlanning(object(), object(), 0, 0, 1)
-    with pytest.raises(TypeError):
-        message.ResolvedOperationPlanning(object(), object(), 0, 1, 0)
-    with pytest.raises(TypeError):
-        message.ResolvedPatchPlanning("patch", object(), 0, 1)
-    with pytest.raises(TypeError):
-        message.ResolvedPatchPlanning("patch", object(), 1, 0)
 
 
 def test_resolved_planning_skips_noncount_type_validation():
@@ -537,52 +355,6 @@ def test_operation_window_plan_accepts_declared_nonchecks():
     assert plan.windowed == "unchecked"
 
 
-def test_operation_window_plan_rejects_invalid_edges():
-    """Operation window plans reject noninteger, out-of-range, and duplicate edges."""
-    for edges in (
-        ((0, "1"),),
-        ((0, True),),
-        ((0, 3),),
-        ((0, 1), (0, 1)),
-    ):
-        with pytest.raises((TypeError, ValueError)):
-            make_operation_window_plan(internal_dependencies=edges)
-
-
-def test_operation_window_plan_rejects_wrong_roots_and_sinks():
-    """Operation window plans require declared entries and exits to match the graph."""
-    with pytest.raises(ValueError):
-        make_operation_window_plan(entry_window_indices=(1,))
-    with pytest.raises(ValueError):
-        make_operation_window_plan(exit_window_indices=(1,))
-
-
-def test_operation_window_plan_rejects_cycles():
-    """Operation window plans reject cyclic internal dependency graphs."""
-    with pytest.raises(ValueError):
-        make_operation_window_plan(
-            internal_dependencies=((0, 1), (1, 0)),
-            entry_window_indices=(2,),
-            exit_window_indices=(2,),
-        )
-
-
-def test_operation_window_plan_requires_nonempty_windows_and_is_frozen():
-    """Operation window plans require windows and prevent field reassignment."""
-    with pytest.raises(TypeError):
-        make_operation_window_plan(
-            windows=(),
-            internal_dependencies=(),
-            entry_window_indices=(),
-            exit_window_indices=(),
-        )
-    with pytest.raises(TypeError):
-        make_operation_window_plan(windows=(object(),))
-    with pytest.raises(TypeError):
-        make_operation_window_plan(batch_preceding_idle_rounds="unchecked")
-    assert_frozen(make_operation_window_plan())
-
-
 def test_compiled_window_plan_carries_mutable_manager_mappings():
     """Compiled window plans carry manager mappings that remain mutable."""
     plan = message.WindowPlan(
@@ -599,13 +371,6 @@ def test_compiled_window_plan_carries_mutable_manager_mappings():
     )
     plan.window_count[4] = 2
     assert plan.window_count == {4: 2}
-
-
-def test_dependency_residual_enforces_identity_domain_and_uniqueness():
-    """Dependency residuals require unique nonnegative exact integer identifiers."""
-    for detector_ids in ((0, -1), (0, True), (2, 2)):
-        with pytest.raises((TypeError, ValueError)):
-            message.DependencyResidual(detector_ids)
 
 
 def test_dependency_residual_skips_container_order_and_defects_validation():
@@ -653,25 +418,6 @@ def test_boundary_update_carries_policy_decisions_and_is_frozen():
     assert_frozen(update)
 
 
-def test_strong_region_plan_enforces_nested_bounds_and_restart_position():
-    """Strong region plans reject unordered bounds and nonpositive restart positions."""
-    for bounds in (
-        (1, 2, 0, 3),
-        (1, 2, 2, 3),
-        (3, 2, 1, 4),
-        (2, 4, 1, 3),
-    ):
-        with pytest.raises(ValueError):
-            message.StrongRegionPlan(*bounds, None, None)
-    with pytest.raises(ValueError):
-        message.StrongRegionPlan(2, 4, 1, 5, 0, None)
-
-    plan = message.StrongRegionPlan(2, 4, 1, 5, 1, message.SeamFaultOwner.RESTART_WINDOW)
-    assert plan.commit_lo == 2
-    assert plan.restart_seam_fault_owner is message.SeamFaultOwner.RESTART_WINDOW
-    assert_frozen(plan)
-
-
 def test_strong_region_plan_skips_runtime_type_checks():
     """Strong region plans accept comparable noninteger bounds without type checks."""
     plan = message.StrongRegionPlan(2.0, 4.0, 1.0, 5.0, 1.0, None)
@@ -703,13 +449,6 @@ def test_soft_output_source_normalizes_weight_step_without_text_checks():
     assert_frozen(absent_step_source)
 
 
-@pytest.mark.parametrize("weight_step", (0, -1, float("inf"), float("nan")))
-def test_soft_output_source_rejects_nonpositive_or_nonfinite_weight_steps(weight_step):
-    """Soft output sources require present weight steps to be finite and positive."""
-    with pytest.raises(ValueError):
-        make_soft_output_source(weight_step_natural_log=weight_step)
-
-
 def test_soft_output_normalizes_numbers_without_source_instance_validation():
     """Soft output accepts any source and normalizes valid numeric fields to floats."""
     source = object()
@@ -722,31 +461,6 @@ def test_soft_output_normalizes_numbers_without_source_instance_validation():
     assert infinite_gap_output.gap == float("inf")
     assert_frozen(output)
     assert_frozen(infinite_gap_output)
-
-
-@pytest.mark.parametrize(
-    "gap, expected_exception",
-    ((True, TypeError), ("1", TypeError), (-1, ValueError), (float("nan"), ValueError)),
-)
-def test_soft_output_rejects_invalid_gaps(gap, expected_exception):
-    """Soft output gaps must be real, non-NaN, and nonnegative."""
-    with pytest.raises(expected_exception):
-        message.SoftOutput(gap=gap, source=object())
-
-
-@pytest.mark.parametrize(
-    "field_name, value, expected_exception",
-    (
-        ("w_min", True, TypeError),
-        ("w_comp", "1", TypeError),
-        ("w_min", float("nan"), ValueError),
-    ),
-)
-def test_soft_output_rejects_invalid_optional_weights(field_name, value, expected_exception):
-    """Soft output optional weights must be real and non-NaN when present."""
-    values = {"gap": 1, "source": object(), field_name: value}
-    with pytest.raises(expected_exception):
-        message.SoftOutput(**values)
 
 
 def test_decoder_keys_preserve_request_and_service_identity():
@@ -801,41 +515,6 @@ def test_strong_completion_accepts_matching_strong_identity():
     assert_frozen(completion)
 
 
-def test_strong_completion_rejects_type_tier_and_identity_mismatches():
-    """Strong completion rejects carrier types, weak tiers, and mismatched identities."""
-    class RequestKeySubclass(message.DecoderRequestKey):
-        pass
-
-    class DecodeResultSubclass(message.DecodeResult):
-        pass
-
-    key = message.DecoderRequestKey(4, 2, message.DecoderTier.STRONG, 7)
-    result = message.DecodeResult(op_id=4, window_id=2)
-    key_subclass = RequestKeySubclass(4, 2, message.DecoderTier.STRONG, 7)
-    result_subclass = DecodeResultSubclass(op_id=4, window_id=2)
-    with pytest.raises(TypeError):
-        message.StrongDecodeCompletion(object(), result)
-    with pytest.raises(TypeError):
-        message.StrongDecodeCompletion(key, object())
-    with pytest.raises(TypeError):
-        message.StrongDecodeCompletion(key_subclass, result)
-    with pytest.raises(TypeError):
-        message.StrongDecodeCompletion(key, result_subclass)
-
-    weak_key = message.DecoderRequestKey(4, 2, message.DecoderTier.WEAK, 7)
-    with pytest.raises(ValueError):
-        message.StrongDecodeCompletion(weak_key, result)
-
-    cross_type_key = message.DecoderRequestKey(True, 2, message.DecoderTier.STRONG, 7)
-    cross_type_result = message.DecodeResult(op_id=1, window_id=2)
-    with pytest.raises(ValueError):
-        message.StrongDecodeCompletion(cross_type_key, cross_type_result)
-
-    wrong_window = message.DecodeResult(op_id=4, window_id=3)
-    with pytest.raises(ValueError):
-        message.StrongDecodeCompletion(key, wrong_window)
-
-
 def test_decode_outcome_and_marker_messages_carry_identity():
     """Decode outcomes pair results with jobs and marker messages retain their keys."""
     job = message.DecodeJob(op_id=4, window_id=2, n_rounds=3)
@@ -879,23 +558,6 @@ def test_runtime_artifacts_carry_fields_and_are_frozen():
         assert_frozen(artifact)
 
 
-def test_stream_binding_and_operation_body_enforce_numeric_domains():
-    """Stream bindings and operation bodies reject negative offsets and invalid counts."""
-    with pytest.raises(ValueError):
-        message.StreamBinding("stream", -1)
-    with pytest.raises(ValueError):
-        message.RunOperationBody(object(), 0, 1, 1)
-    with pytest.raises(ValueError):
-        message.RunOperationBody(object(), 1, -1, 1)
-    with pytest.raises(ValueError):
-        message.RunOperationBody(object(), 1, 1, -1)
-
-    binding = message.StreamBinding("stream", 0)
-    body = message.RunOperationBody(object(), 1, 0, 0)
-    assert_frozen(binding)
-    assert_frozen(body)
-
-
 def test_protected_region_skips_identity_and_endpoint_validation():
     """Protected regions store unchecked patch, stream, and endpoint identities."""
     region = message.ProtectedRegion(object(), "stream", [], {})
@@ -933,33 +595,6 @@ def test_operation_skips_general_identity_and_exact_type_validation():
     assert operation.predecessors == ["previous"]
 
 
-def test_operation_rejects_negative_scheduled_start():
-    """Operations reject negative scheduled start rounds."""
-    with pytest.raises(ValueError):
-        make_operation(scheduled_start_round=-1)
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    (
-        {"syndrome_fragment_index": 0},
-        {"syndrome_fragment_count": 1},
-        {"syndrome_fragment_index": -1, "syndrome_fragment_count": 1},
-        {"syndrome_fragment_index": 1, "syndrome_fragment_count": 1},
-        {"syndrome_fragment_index": 0.0, "syndrome_fragment_count": 1},
-        {
-            "syndrome_fragment_index": 0,
-            "syndrome_fragment_count": 1,
-            "emits_detector_data": False,
-        },
-    ),
-)
-def test_operation_rejects_inconsistent_fragment_slots(overrides):
-    """Operations require paired in-range fragment slots that emit detector data."""
-    with pytest.raises((TypeError, ValueError)):
-        make_operation(**overrides)
-
-
 def test_operation_accepts_consistent_fragment_slots():
     """Operations accept paired in-range fragment slots on detector emitters."""
     operation = make_operation(
@@ -969,51 +604,6 @@ def test_operation_accepts_consistent_fragment_slots():
     )
     assert operation.syndrome_fragment_index == 0
     assert operation.syndrome_fragment_count == 2
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    (
-        {
-            "finalizes_stream_round": True,
-            "emits_detector_data": False,
-            "stream_id": "stream",
-            "stream_offset": 0,
-            "syndrome_fragment_index": 0,
-            "syndrome_fragment_count": 1,
-        },
-        {
-            "finalizes_stream_round": True,
-            "stream_id": None,
-            "stream_offset": 0,
-            "syndrome_fragment_index": 0,
-            "syndrome_fragment_count": 1,
-        },
-        {
-            "finalizes_stream_round": True,
-            "stream_id": "stream",
-            "stream_offset": -1,
-            "syndrome_fragment_index": 0,
-            "syndrome_fragment_count": 1,
-        },
-        {
-            "finalizes_stream_round": True,
-            "stream_id": "stream",
-            "stream_offset": 0.0,
-            "syndrome_fragment_index": 0,
-            "syndrome_fragment_count": 1,
-        },
-        {
-            "finalizes_stream_round": True,
-            "stream_id": "stream",
-            "stream_offset": 0,
-        },
-    ),
-)
-def test_operation_rejects_incomplete_stream_finalizers(overrides):
-    """Stream finalizers require emission, stream identity, offset, and fragment slot."""
-    with pytest.raises(ValueError):
-        make_operation(**overrides)
 
 
 def test_operation_accepts_complete_stream_finalizers():

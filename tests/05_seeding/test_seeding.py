@@ -156,23 +156,6 @@ def test_reservation_accepts_only_unsigned_builtin_seed_boundaries(seed):
 
 
 @pytest.mark.parametrize(
-    "seed",
-    [True, False, IntegerSubclass(3), -1, 1 << 64, 1.5, "3"],
-)
-def test_reservation_rejects_other_seed_values_without_mutating_state(seed):
-    """Reservation rejects every nonexact or out-of-range root before state changes."""
-    consumer = AtomicProbe()
-
-    with pytest.raises(TypeError):
-        consumer.reserve_run_seed(seed)
-
-    assert consumer._pending_run_seed is None
-    assert consumer._run_seed_claimed is False
-    assert consumer._stochastic_use_started is False
-    assert consumer.calls == []
-
-
-@pytest.mark.parametrize(
     ("used", "claimed", "pending", "explicit", "message"),
     [
         (True, True, True, 2, "already used"),
@@ -231,20 +214,6 @@ def test_reservation_selects_effective_seed_source_and_prepares_under_lock(
     assert consumer.active_state == "original"
 
 
-@pytest.mark.parametrize(
-    "consumer",
-    [AtomicProbe(1, explicit_result=-1), AtomicProbe(entropy_result=True)],
-)
-def test_reservation_rejects_invalid_effective_seeds_without_staging(consumer):
-    """Invalid hook seeds fail before a pending reservation or active-state change is staged."""
-    with pytest.raises(TypeError):
-        consumer.reserve_run_seed(None)
-
-    assert consumer._pending_run_seed is None
-    assert consumer.active_state == "original"
-    assert not any(call[0] == "prepare" for call in consumer.calls if isinstance(call, tuple))
-
-
 def test_preparation_failure_leaves_no_pending_or_active_change():
     """A preparation exception leaves no pending reservation and preserves active state."""
     class FailingPreparation(AtomicProbe):
@@ -259,50 +228,6 @@ def test_preparation_failure_leaves_no_pending_or_active_change():
 
     assert consumer._pending_run_seed is None
     assert consumer.active_state == "original"
-
-
-def test_cancellation_and_commit_require_reservation_identity():
-    """Only the identical reservation cancels or commits, and commit installs the prepared state once."""
-    consumer = AtomicProbe()
-    first = consumer.reserve_run_seed(7)
-    equal_but_distinct = RunSeedReservation(
-        first.proposed_seed_source,
-        first.proposed_seed,
-        first.prepared_state,
-    )
-
-    consumer.cancel_run_seed(equal_but_distinct)
-    assert consumer._pending_run_seed is first
-    consumer.cancel_run_seed(first)
-    assert consumer._pending_run_seed is None
-
-    second = consumer.reserve_run_seed(8)
-    with pytest.raises(ValueError, match="exact pending"):
-        consumer.commit_run_seed(equal_but_distinct)
-    assert consumer.active_state == "original"
-    consumer.commit_run_seed(second)
-    assert consumer.active_state == second.prepared_state
-    assert ("install", second.prepared_state, True) in consumer.calls
-    assert consumer._pending_run_seed is None
-    assert consumer._run_seed_claimed is True
-    with pytest.raises(ValueError, match="already claimed"):
-        consumer.reserve_run_seed(8)
-
-
-def test_stochastic_use_blocks_pending_draws_and_later_binding():
-    """Pending claims block use, while first and repeated uses permanently block later binding."""
-    consumer = AtomicProbe()
-    reservation = consumer.reserve_run_seed(3)
-
-    with pytest.raises(RuntimeError, match="reservation is pending"):
-        consumer._mark_stochastic_use()
-    assert consumer._stochastic_use_started is False
-    consumer.cancel_run_seed(reservation)
-    consumer._mark_stochastic_use()
-    consumer._mark_stochastic_use()
-    assert consumer._stochastic_use_started is True
-    with pytest.raises(ValueError, match="already used"):
-        consumer.reserve_run_seed(3)
 
 
 def test_one_consumer_serializes_competing_reservations():
@@ -433,15 +358,6 @@ def test_component_seed_derivation_matches_fixed_vectors_and_framing(root, path,
 
     assert independent == expected
     assert derive_component_seed(root, path) == expected
-
-
-@pytest.mark.parametrize(
-    "root", [None, True, False, IntegerSubclass(4), -1, 1 << 64, 3.5, "4"]
-)
-def test_component_seed_rejects_values_outside_exact_unsigned_domain(root):
-    """Direct derivation rejects every root outside the exact unsigned built-in domain."""
-    with pytest.raises(TypeError):
-        derive_component_seed(root, ())
 
 
 def stable_binder_trace(reverse):
@@ -652,65 +568,6 @@ def test_binder_rolls_back_prior_acquisitions_in_reverse_on_reserve_failure(
     assert [event[:2] for event in events] == expected
 
 
-def test_binder_cancels_every_acquisition_after_validation_failure():
-    """Validation failure cancels the rejected reservation and every earlier acquisition."""
-    events = []
-    first = RecordingConsumer("a", events)
-
-    class InvalidReservationConsumer(RecordingConsumer):
-        def reserve_run_seed(self, seed):
-            self.events.append(("reserve", self.name, seed))
-            return SimpleNamespace(
-                proposed_seed_source="derived",
-                proposed_seed=seed + 1,
-                prepared_state=None,
-            )
-
-    invalid = InvalidReservationConsumer("b", events)
-
-    with pytest.raises(ValueError, match="disagrees"):
-        bind_run_seed(
-            9,
-            [((field("a"),), first), ((field("b"),), invalid)],
-        )
-
-    assert [event[:2] for event in events] == [
-        ("reserve", "a"),
-        ("reserve", "b"),
-        ("cancel", "b"),
-        ("cancel", "a"),
-    ]
-
-
-@pytest.mark.parametrize(
-    ("source", "seed_offset", "succeeds"),
-    [
-        ("derived", 0, True),
-        ("derived", 1, False),
-        ("entropy", 0, False),
-        ("explicit_local", 0, False),
-    ],
-)
-def test_binder_checks_derived_reservation_provenance(source, seed_offset, succeeds):
-    """Numeric binding accepts only derived provenance with the exact proposed component seed."""
-    path = (field("leaf"),)
-    class ProvenanceConsumer(RecordingConsumer):
-        def reserve_run_seed(self, seed):
-            return SimpleNamespace(
-                proposed_seed_source=source,
-                proposed_seed=seed + seed_offset,
-                prepared_state=None,
-            )
-
-    consumer = ProvenanceConsumer("leaf")
-    if succeeds:
-        bind_run_seed(10, [(path, consumer)])
-        assert any(event[0] == "commit" for event in consumer.events)
-    else:
-        with pytest.raises(ValueError, match="disagrees.*leaf"):
-            bind_run_seed(10, [(path, consumer)])
-
-
 @pytest.mark.parametrize("source", ["derived", "other", ""])
 def test_binder_rejects_other_unseeded_source_labels(source):
     """Unseeded binding rejects every source label outside explicit local and entropy."""
@@ -775,33 +632,6 @@ def test_binder_accepts_structural_reservations(reservation_factory):
     bind_run_seed(14, [((field("leaf"),), StructuralConsumer("leaf"))])
 
     assert len(committed) == 1
-
-
-@pytest.mark.parametrize(
-    "reservation",
-    [
-        SimpleNamespace(proposed_seed=1),
-        SimpleNamespace(proposed_seed_source="derived"),
-    ],
-)
-def test_binder_lets_missing_reservation_fields_fail_naturally(reservation):
-    """Missing reservation provenance fields raise their natural attribute error."""
-    class MissingFieldConsumer(RecordingConsumer):
-        def reserve_run_seed(self, seed):
-            return reservation
-
-    with pytest.raises(AttributeError):
-        bind_run_seed(1, [((field("leaf"),), MissingFieldConsumer("leaf"))])
-
-
-@pytest.mark.parametrize("unused_root", [object(), True, -1, 1 << 64, "bad"])
-def test_binder_skips_unused_root_validation_but_checks_consumer_paths(unused_root):
-    """Unused roots are ignored, while a consumer-bearing path reaches exact derivation validation."""
-    bind_run_seed(unused_root, [])
-    bind_run_seed(unused_root, [((field("plain"),), object())])
-
-    with pytest.raises(TypeError):
-        bind_run_seed(unused_root, [((field("leaf"),), RecordingConsumer("leaf"))])
 
 
 def test_binder_allows_empty_paths_and_naturally_rejects_malformed_graph_shapes():

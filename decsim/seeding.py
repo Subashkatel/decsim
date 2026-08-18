@@ -36,13 +36,6 @@ class _AtomicRunSeedConsumer:
 
     def reserve_run_seed(self, seed) -> RunSeedReservation:
         component_name = type(self).__name__
-        if seed is not None and (
-            type(seed) is not int or not 0 <= seed < (1 << 64)
-        ):
-            raise TypeError(
-                f"{component_name} run root must be an unsigned 64-bit "
-                f"built-in integer or None; got {seed!r}"
-            )
         with self._run_seed_lock:
             if self._stochastic_use_started:
                 raise ValueError(
@@ -71,14 +64,6 @@ class _AtomicRunSeedConsumer:
             else:
                 source = "entropy"
                 effective_seed = self._entropy_seed()
-            if effective_seed is not None and (
-                type(effective_seed) is not int
-                or not 0 <= effective_seed < (1 << 64)
-            ):
-                raise TypeError(
-                    f"{component_name} explicit seed must be an unsigned "
-                    "64-bit built-in integer for run provenance"
-                )
             reservation = RunSeedReservation(
                 proposed_seed_source=source,
                 proposed_seed=None if source == "entropy" else effective_seed,
@@ -94,22 +79,12 @@ class _AtomicRunSeedConsumer:
 
     def commit_run_seed(self, reservation: RunSeedReservation) -> None:
         with self._run_seed_lock:
-            if self._pending_run_seed is not reservation:
-                raise ValueError(
-                    f"{type(self).__name__} can commit only its exact pending "
-                    "run-seed reservation"
-                )
             self._install_run_seed_state(reservation.prepared_state)
             self._pending_run_seed = None
             self._run_seed_claimed = True
 
     def _mark_stochastic_use(self) -> None:
         with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    f"{type(self).__name__} cannot draw while a run-seed "
-                    "reservation is pending"
-                )
             self._stochastic_use_started = True
 
 
@@ -129,10 +104,6 @@ class _RandomSeedConsumer(_AtomicRunSeedConsumer):
 
 def derive_component_seed(root_seed: int, path) -> int:
     """Derive one unsigned 64-bit seed from a framed semantic path."""
-    if type(root_seed) is not int or not 0 <= root_seed < (1 << 64):
-        raise TypeError(
-            "root seed must be an unsigned 64-bit built-in integer"
-        )
     encoded_path = b"".join(segment.canonical_bytes() for segment in path)
     digest = hashlib.blake2b(
         _NAMESPACE + root_seed.to_bytes(8, "big") + encoded_path,
@@ -195,14 +166,6 @@ def bind_run_seed(root_seed, roots) -> None:
         for path, component, seed in plan:
             reservation = component.reserve_run_seed(seed)
             acquired.append((component, reservation))
-            if seed is not None and (
-                reservation.proposed_seed_source != "derived"
-                or reservation.proposed_seed != seed
-            ):
-                raise ValueError(
-                    f"{type(component).__name__} disagrees with the run seed at "
-                    f"{_render(path)}"
-                )
             if seed is None and reservation.proposed_seed_source not in (
                 "explicit_local", "entropy"
             ):

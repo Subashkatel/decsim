@@ -20,11 +20,21 @@ has been applied. Every finding cites file:line at HEAD 5299966.
 - Define errors out of existence: internal type-check ceremony on values the
   caller just built is cost without value; keep the checks that guard a real
   invariant.
-- Composition root (Rhodes): run_spec wires objects; policy defaults and
-  compatibility rules do not belong in the wiring.
-- Easy to delete (tef): put each feature the baseline does not run behind a
-  seam of 3 to 6 methods so it can be removed whole; boilerplate at the
-  edges, the core stays boring.
+- Composition at one place: run_spec wires objects (the dependency-injection
+  "composition root" idea; python-patterns.guide itself does not discuss
+  package layout); policy defaults and compatibility rules do not belong in
+  the wiring. Rhodes' rule that does apply: compose small objects rather than
+  scatter "if feature:" checks (his "if statement dodge"), so an absent
+  feature is a no-op collaborator, never a conditional at each hook.
+- Owners publish their state as one frozen view (snapshot()), never through
+  getters added for observers (Ousterhout ch. 19: accessor methods are shallow
+  and leak the detail they wrap).
+- Easy to delete (tef, step 6, after Parnas): isolate by likelihood of
+  change, not by functional similarity; the strong tier, decoder backends,
+  link cards, idle policies and windowing schemes are the thrust-2 sweep
+  axes and each sits behind a seam of 3 to 6 methods so it can be removed or
+  swapped whole; reporting boilerplate stays at the edge, the core stays
+  boring.
 - Tests as a lock, not a driver: 772 tests, the smoke snapshot, the baseline
   sweep, Gates 1 to 5 stay byte-identical after every commit; the sweep wall
   clock column and the smoke guard against silent performance regressions

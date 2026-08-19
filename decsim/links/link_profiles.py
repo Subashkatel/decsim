@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from .config import us
+from ..config import us
 from .links import (
     LinkCapacityConfig,
     LinkConfig,

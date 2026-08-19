@@ -28,7 +28,7 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Optional
 
-from ..links import LinkPath
+from ..links.links import LinkPath
 from ..message import (CsdInput, DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier,
                        LogicalContribution, Operation, PendingStrong, PotentialStrong,
                        RephaseGuard, SeamFaultOwner, StrongDecodeCompletion,

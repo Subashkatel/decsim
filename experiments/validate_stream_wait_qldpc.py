@@ -35,7 +35,7 @@ from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.pauli_frame import PauliFrameConfig
+from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.controller.policies import ExtendStream
 from decsim.program.round_policies import PerOpRounds
 from decsim.run_spec import RunSpec

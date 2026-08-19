@@ -63,7 +63,7 @@ class ResolvedRunConfiguration:
 def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .decoders.decoders import CodeRouter
     from .qpu.syndrome_devices import SyndromeBitDevice, TimingOnlyDevice
-    from .link_profiles import logical_reference_profile
+    from .links.link_profiles import logical_reference_profile
     from .program.planner import (_plan_execution, _validate_operation_graph,
                           _validate_workload_identity)
     from .controller.policies import Eager, Ignore

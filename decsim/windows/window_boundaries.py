@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Optional
 
-from ..links import BoundaryTransferRelation, LinkPath
+from ..links.links import BoundaryTransferRelation, LinkPath
 from ..message import (BoundaryDelivery, BoundaryUpdate, DecoderRequestKey, Operation,
                        Window, WindowInfo)
 

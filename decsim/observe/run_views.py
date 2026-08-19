@@ -12,9 +12,9 @@ import copy
 from dataclasses import dataclass
 from typing import Optional
 
-from .decoders.decoder_memory import DecoderMemorySnapshot
-from .decoders.decoder_manager import TerminalRequestRecord, TerminalServiceRecord
-from .message import DecoderRequestKey, stable_identity_order_key
+from ..decoders.decoder_memory import DecoderMemorySnapshot
+from ..decoders.decoder_manager import TerminalRequestRecord, TerminalServiceRecord
+from ..message import DecoderRequestKey, stable_identity_order_key
 
 
 WINDOW_STAGES = ("buffer_fill", "dep_block", "queue_wait", "service", "total")
@@ -358,7 +358,7 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
 def capture_primary_result(engine, execution_runtime, window_manager, operations,
                            metric_bindings, links, syndrome_source):
     """Project terminal runtime owners into the immutable run result."""
-    from .run_spec import LogicalOperationResult, MetricResultRecord, PrimaryRunResult
+    from ..run_spec import LogicalOperationResult, MetricResultRecord, PrimaryRunResult
 
     operation_by_id = {operation.id: operation for operation in operations}
     truth_for = getattr(syndrome_source, "logical_observable_truth", None)

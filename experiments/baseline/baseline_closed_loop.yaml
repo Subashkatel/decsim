@@ -48,8 +48,8 @@ decoder_memory_rounds: null                  # rounds of input memory PER DECODE
 pauli_frame:
   commit_us: 0.004                           # one 250 MHz cycle to XOR the correction into the frame register (XQsim PFU precedent)
 
-# Logical error rate sweep (ler.png, ler.csv): many shots through the same loop at one timing point,
-# over physical error probability; the latency card does not change the decoded outcome.
+# baseline_logical_error.py: many shots through the same loop at one timing point, over physical
+# error probability (ler.csv, ler.png); the latency card does not change the decoded outcome.
 ler_sweep:
   physical_error_probabilities: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
   shots: 200                                 # per probability; Wilson 95% interval on the plot

@@ -113,7 +113,8 @@ def weak_decoder(config: dict, algorithm_latency_us) -> DecoderEngine:
 
 def link_cards(config: dict):
     """Every path's latency and capacity from the yaml, on the reference card's
-    payload sizes; C2B is the priced controller-to-Buffer-0 hop."""
+    payload sizes; a null card keeps the reference card's numbers for that
+    path; C2B is the priced controller-to-Buffer-0 hop."""
     source = "experiments/baseline/baseline_closed_loop.yaml links"
     cards = dict(config["links"])
     c2b = cards.pop("c2b")
@@ -122,6 +123,8 @@ def link_cards(config: dict):
         aggregate_bits_per_us=c2b["bits_per_us"], source=source)
     channels = {}
     for path, card in cards.items():
+        if card is None:
+            continue
         capacity = None
         if card["bits_per_us"] is not None:
             capacity = LinkCapacityConfig(card["bits_per_us"], LinkQuantityBasis.DIRECT_AGGREGATE,

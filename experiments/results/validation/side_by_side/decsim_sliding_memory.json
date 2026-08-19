@@ -1,0 +1,81 @@
+{
+  "simulator": "decsim",
+  "distance": 3,
+  "rounds": 30,
+  "latency_rounds": 5,
+  "units": 1,
+  "rounds_count_from": 1,
+  "program_decoded_us": 56.0,
+  "windows": [
+    {
+      "commit_first_round": 1,
+      "commit_last_round": 3,
+      "data_ready_us": 6.0,
+      "dispatch_us": 6.0,
+      "done_us": 11.0
+    },
+    {
+      "commit_first_round": 4,
+      "commit_last_round": 6,
+      "data_ready_us": 9.0,
+      "dispatch_us": 11.0,
+      "done_us": 16.0
+    },
+    {
+      "commit_first_round": 7,
+      "commit_last_round": 9,
+      "data_ready_us": 12.0,
+      "dispatch_us": 16.0,
+      "done_us": 21.0
+    },
+    {
+      "commit_first_round": 10,
+      "commit_last_round": 12,
+      "data_ready_us": 15.0,
+      "dispatch_us": 21.0,
+      "done_us": 26.0
+    },
+    {
+      "commit_first_round": 13,
+      "commit_last_round": 15,
+      "data_ready_us": 18.0,
+      "dispatch_us": 26.0,
+      "done_us": 31.0
+    },
+    {
+      "commit_first_round": 16,
+      "commit_last_round": 18,
+      "data_ready_us": 21.0,
+      "dispatch_us": 31.0,
+      "done_us": 36.0
+    },
+    {
+      "commit_first_round": 19,
+      "commit_last_round": 21,
+      "data_ready_us": 24.0,
+      "dispatch_us": 36.0,
+      "done_us": 41.0
+    },
+    {
+      "commit_first_round": 22,
+      "commit_last_round": 24,
+      "data_ready_us": 27.0,
+      "dispatch_us": 41.0,
+      "done_us": 46.0
+    },
+    {
+      "commit_first_round": 25,
+      "commit_last_round": 27,
+      "data_ready_us": 30.0,
+      "dispatch_us": 46.0,
+      "done_us": 51.0
+    },
+    {
+      "commit_first_round": 28,
+      "commit_last_round": 30,
+      "data_ready_us": 30.0,
+      "dispatch_us": 51.0,
+      "done_us": 56.0
+    }
+  ]
+}

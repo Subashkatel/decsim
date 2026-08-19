@@ -6,12 +6,14 @@ QPU rounds -> controller (pulses to binary) -> packing -> link C2B -> Buffer 0
 PyMatching algorithm, release) -> link WDO -> Pauli frame commit. Nothing is
 skipped and every hop charges its configured cost.
 
-The yaml's ``sweep`` block names the axes (physical error probability, round
-period, decoder card) and the shots per point; every shot yields both the
-timing at each point of the path and whether the logical prediction was
-wrong, so one sweep reports latency, throughput and logical error rate per
-point. Few shots for timing, many shots for the error rate, many shots with
-all axes for both.
+The yaml's ``sweep`` is a list of blocks, each naming the axes (physical
+error probability, round period, decoder card) and the shots per point;
+every shot yields both the timing at each point of the path and whether the
+logical prediction was wrong, so one run reports latency, throughput and
+logical error rate per point. Blocks exist so shots go where they matter:
+a timing block sweeps many timing points with few shots, an LER block sweeps
+several probabilities with many shots at one timing point. A point and seed
+named by two blocks runs once.
 
 Usage: python -m experiments.baseline.baseline_closed_loop [config.yaml]
 """
@@ -386,20 +388,26 @@ def measure_shot(config: dict, *, physical_error_probability: float, round_perio
 # ---- the sweep -------------------------------------------------------------
 
 def run_sweep(config: dict) -> list:
-    """Every shot of every point of the yaml's sweep block."""
-    sweep = config["sweep"]
-    measurements = []
-    for physical_error_probability in sweep["physical_error_probability"]:
-        for algorithm_latency_us in sweep["algorithm_latency_us"]:
-            for round_period_us in sweep["round_period_us"]:
-                for seed in range(sweep["shots"]):
-                    measurements.append(measure_shot(
-                        config, physical_error_probability=physical_error_probability,
-                        round_period_us=round_period_us,
-                        algorithm_latency_us=algorithm_latency_us, seed=seed))
-                print(f"p {physical_error_probability}, algorithm {algorithm_latency_us} us, "
-                      f"round period {round_period_us} us: {sweep['shots']} shots done", file=sys.stderr)
-    return measurements
+    """Every shot of every point of the yaml's sweep blocks; a point and seed
+    named by more than one block runs once."""
+    measurements = {}
+    for block in config["sweep"]:
+        for physical_error_probability in block["physical_error_probability"]:
+            for algorithm_latency_us in block["algorithm_latency_us"]:
+                for round_period_us in block["round_period_us"]:
+                    for seed in range(block["shots"]):
+                        shot_key = (physical_error_probability, algorithm_latency_us,
+                                    round_period_us, seed)
+                        if shot_key in measurements:
+                            continue
+                        measurements[shot_key] = measure_shot(
+                            config, physical_error_probability=physical_error_probability,
+                            round_period_us=round_period_us,
+                            algorithm_latency_us=algorithm_latency_us, seed=seed)
+                    print(f"p {physical_error_probability}, algorithm {algorithm_latency_us} us, "
+                          f"round period {round_period_us} us: {block['shots']} shots done",
+                          file=sys.stderr)
+    return list(measurements.values())
 
 
 def wilson_interval(failures: int, shots: int, z: float = 1.96) -> tuple:

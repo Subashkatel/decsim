@@ -204,32 +204,47 @@ def one_window_plot(rows: list, algorithms: list, path: Path) -> None:
     figure.savefig(path, dpi=150)
 
 
-def ler_plot(rows: list, algorithms: list, path: Path) -> None:
-    """Logical error rate against physical error rate, Wilson 95% bars."""
-    import matplotlib.pyplot as plt
-    figure, axis = plt.subplots(figsize=(4.8, 3.6))
+def ler_groups(rows: list, algorithms: list) -> list:
+    """(card, round time, rows sorted by p) for every card and round time
+    that swept more than one physical error rate."""
     periods = sorted({row["round_period_us"] for row in rows})
+    groups = []
     for algorithm in algorithms:
         for period in periods:
             group = []
             for row in rows:
                 if row["algorithm_latency_us"] == algorithm and row["round_period_us"] == period:
                     group.append(row)
+            probabilities = {row["physical_error_probability"] for row in group}
+            if len(probabilities) < 2:
+                continue
             group.sort(key=lambda row: row["physical_error_probability"])
-            probabilities = []
-            rates = []
-            lower = []
-            upper = []
-            for row in group:
-                probabilities.append(row["physical_error_probability"])
-                rates.append(row["logical_error_rate"])
-                lower.append(row["logical_error_rate"] - row["ler_wilson_low"])
-                upper.append(row["ler_wilson_high"] - row["logical_error_rate"])
-            if len(periods) == 1:
-                label = card_label(algorithm)
-            else:
-                label = f"{card_label(algorithm)}, {period:g} µs"
-            axis.errorbar(probabilities, rates, yerr=[lower, upper], fmt="o-", capsize=3, label=label)
+            groups.append((algorithm, period, group))
+    return groups
+
+
+def ler_plot(rows: list, algorithms: list, path: Path) -> None:
+    """Logical error rate against physical error rate, Wilson 95% bars, one
+    line per card and round time that swept more than one p."""
+    import matplotlib.pyplot as plt
+    figure, axis = plt.subplots(figsize=(4.8, 3.6))
+    groups = ler_groups(rows, algorithms)
+    plotted_periods = {period for _, period, _ in groups}
+    for algorithm, period, group in groups:
+        probabilities = []
+        rates = []
+        lower = []
+        upper = []
+        for row in group:
+            probabilities.append(row["physical_error_probability"])
+            rates.append(row["logical_error_rate"])
+            lower.append(row["logical_error_rate"] - row["ler_wilson_low"])
+            upper.append(row["ler_wilson_high"] - row["logical_error_rate"])
+        if len(plotted_periods) == 1:
+            label = card_label(algorithm)
+        else:
+            label = f"{card_label(algorithm)}, {period:g} µs"
+        axis.errorbar(probabilities, rates, yerr=[lower, upper], fmt="o-", capsize=3, label=label)
     axis.set_xscale("log")
     axis.set_yscale("log")
     axis.set_xlabel("Physical error rate")

@@ -14,8 +14,8 @@ from experiments.baseline.baseline_closed_loop import (
 def small_config():
     config = load_config(DEFAULT_CONFIG)
     config["rounds_per_shot"] = 15
-    config["sweep"] = {"physical_error_probability": [0.001], "round_period_us": [1.0],
-                       "algorithm_latency_us": [0.028], "shots": 2}
+    config["sweep"] = [{"physical_error_probability": [0.001], "round_period_us": [1.0],
+                        "algorithm_latency_us": [0.028], "shots": 2}]
     return config
 
 
@@ -55,8 +55,8 @@ def test_configured_costs_appear_at_the_right_points(small_config, shot):
 
 
 def test_reaction_time_orders_the_points(shot):
-    assert shot.means["last_round_to_frame"] <= shot.means["reaction_first_round"]
-    assert shot.means["last_round_to_frame"] >= (
+    assert shot.means["buffer0_ready_to_frame"] <= shot.means["buffer0_first_round_to_frame"]
+    assert shot.means["buffer0_ready_to_frame"] >= (
         shot.means["service"] + shot.means["wdo_per_window"] + shot.means["frame_commit"])
 
 

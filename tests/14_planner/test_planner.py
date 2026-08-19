@@ -20,7 +20,7 @@ from decsim.message import (
     WindowPlan,
     WindowProtocol,
 )
-from decsim.orchestrator.planner import (
+from decsim.frontends.planner import (
     _RunPlan,
     _SyndromeBufferingPlan,
     _materialize_execution_plan,

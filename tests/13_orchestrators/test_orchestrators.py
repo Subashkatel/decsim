@@ -3,7 +3,7 @@ operations conditioned on it, over the controller."""
 
 from types import SimpleNamespace
 
-from decsim.orchestrator.conditional_release import ConditionalRelease
+from decsim.pauli_frame.conditional_release import ConditionalRelease
 
 
 class RecordingEngine:

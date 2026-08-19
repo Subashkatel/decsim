@@ -32,6 +32,7 @@ def test_no_module_of_the_old_flat_layout_remains():
              "pauli_frame.py", "metrics.py", "views.py"]
     assert [name for name in moved if (root / name).exists()] == []
     assert not (root / "program").exists()
+    assert not (root / "orchestrator").exists()
     assert not (root / "stimcircuits").exists()
     for old_package in ("adapters", "soft_output", "mwpm_decoder", "union_find_decoder",
                         "tesseract_decoder", "relay_bp_decoder",

@@ -774,148 +774,48 @@ class LinkModel:
             if self._bindings[path][1] is physical
         )
 
-    def topology_json_value(
-        self,
-        *,
-        controller_link_integration_assurance: str,
-    ) -> dict:
-        if controller_link_integration_assurance not in (
-            "shipped_controller",
-            "custom_controller_unverified",
-        ):
-            raise ValueError("unknown controller link integration assurance")
-        edges = []
-        for path in self._paths:
-            edge, physical = self._bindings[path]
-            edges.append({
-                "path": path.value,
-                "physical_alias": self._alias_by_link[physical],
-                "actual_payload_source": edge.actual_payload_source,
-                "default_payload": (
-                    None
-                    if edge.default_payload is None
-                    else edge.default_payload.to_json_value()
-                ),
-            })
-        physical_channels = []
-        for physical, alias in self._alias_by_link.items():
-            capacity = physical.config.capacity
-            physical_channels.append({
-                "physical_alias": alias,
-                "member_paths": [path.value for path in self._member_paths(physical)],
-                "propagation_latency_ticks": (
-                    physical.config.propagation_latency_ticks
-                ),
-                "capacity": (
-                    None if capacity is None else capacity.to_json_value()
-                ),
-                "configuration_source": physical.config.configuration_source,
-                "service_scope": "aggregate_fifo",
-            })
-        return {
-            "schema_version": 1,
-            "profile_name": self._config.profile_name,
-            "path_order": [path.value for path in self._paths],
-            "edges": edges,
-            "physical_channels": physical_channels,
-            "cancellation_semantics": "non_preemptive_irrevocable",
-            "controller_link_integration_assurance": (
-                controller_link_integration_assurance
-            ),
-        }
+    def snapshot(self) -> "LinkFabricSnapshot":
+        """Frozen view for reports: the wiring, every channel's counters and
+        the whole transfer ledger."""
+        channels = tuple(
+            LinkChannelSnapshot(
+                alias=alias,
+                member_paths=self._member_paths(physical),
+                config=physical.config,
+                counters=physical.counters_snapshot())
+            for physical, alias in self._alias_by_link.items())
+        edges = tuple(
+            LinkEdgeSnapshot(
+                path=path, physical_alias=self._alias_by_link[self._bindings[path][1]],
+                edge=self._bindings[path][0], counters=self._semantic_counters[path])
+            for path in self._paths)
+        return LinkFabricSnapshot(
+            profile_name=self._config.profile_name, paths=self._paths,
+            edges=edges, channels=channels, transfers=tuple(self._transfers))
 
-    def traffic_json_value(self) -> dict:
-        semantic_edges = []
-        for path in self._paths:
-            _edge, physical = self._bindings[path]
-            semantic_edges.append({
-                "path": path.value,
-                "physical_alias": self._alias_by_link[physical],
-                "counters": self._semantic_counters[path].to_json_value(),
-            })
-        physical_channels = []
-        reconciliation = []
-        for physical, alias in self._alias_by_link.items():
-            member_paths = self._member_paths(physical)
-            physical_counters = physical.counters_snapshot()
-            semantic_sum = TrafficCounters()
-            for path in member_paths:
-                semantic_sum = semantic_sum.plus(self._semantic_counters[path])
-            if semantic_sum != physical_counters:
-                raise RuntimeError(f"traffic counters do not reconcile for {alias}")
-            paths_json = [path.value for path in member_paths]
-            physical_channels.append({
-                "physical_alias": alias,
-                "member_paths": paths_json,
-                "counters": physical_counters.to_json_value(),
-            })
-            reconciliation.append({
-                "physical_alias": alias,
-                "member_paths": paths_json,
-                "semantic_counter_sum": semantic_sum.to_json_value(),
-                "physical_counters": physical_counters.to_json_value(),
-                "reconciles": True,
-            })
-        return {
-            "schema_version": 1,
-            "path_order": [path.value for path in self._paths],
-            "semantic_edges": semantic_edges,
-            "physical_channels": physical_channels,
-            "transfers": [self._transfer_json(record) for record in self._transfers],
-            "reconciliation": reconciliation,
-        }
 
-    @classmethod
-    def _transfer_json(cls, record: SemanticTransferRecord) -> dict:
-        reservation = record.reservation
-        attribution = record.attribution
-        relation = attribution.relation
-        relation_json = None
-        if relation is not None:
-            key = (relation.request_key if type(relation) is RequestTransferRelation
-                   else relation.source_request_key)
-            relation_json = {
-                "request_key": {
-                    "operation_id": stable_identity_json(key.operation_id),
-                    "window_id": key.window_id, "tier": key.tier.value,
-                    "run_sequence": key.run_sequence},
-            }
-            if type(relation) is BoundaryTransferRelation:
-                relation_json.update({
-                    "source_window_key": stable_identity_json(
-                        relation.source_window_key
-                    ),
-                    "destination_window_key": stable_identity_json(
-                        relation.destination_window_key
-                    ),
-                    "source_revision": relation.source_revision,
-                    "delivery_revision": relation.delivery_revision})
-        return {
-            "path": record.path.value,
-            "physical_alias": record.physical_alias,
-            "attribution": {
-                "operation_id": stable_identity_json(attribution.operation_id),
-                "patch_ids": [
-                    stable_identity_json(patch_id)
-                    for patch_id in attribution.patch_ids
-                ],
-                "window_id": attribution.window_id,
-                "round_lo": attribution.round_lo,
-                "round_hi": attribution.round_hi,
-                "relation": relation_json,
-            },
-            "payload_bits": reservation.payload_bits,
-            "payload_selection": record.payload_selection.value,
-            "payload_source": record.payload_source,
-            "send_ticks": reservation.send_ticks,
-            "serializer_start_ticks": reservation.serializer_start_ticks,
-            "serializer_end_ticks": reservation.serializer_end_ticks,
-            "delivery_ticks": (
-                reservation.send_ticks + reservation.total_delay_ticks
-            ),
-            "queue_wait_ticks": reservation.queue_wait_ticks,
-            "serialization_ticks": reservation.serialization_ticks,
-            "propagation_ticks": reservation.propagation_ticks,
-            "total_delay_ticks": reservation.total_delay_ticks,
-            "physical_sequence": reservation.physical_sequence,
-        }
+@dataclass(frozen=True)
+class LinkEdgeSnapshot:
+    path: LinkPath
+    physical_alias: str
+    edge: LinkEdgeConfig
+    counters: TrafficCounters
+
+
+@dataclass(frozen=True)
+class LinkChannelSnapshot:
+    alias: str
+    member_paths: tuple
+    config: LinkConfig
+    counters: TrafficCounters
+
+
+@dataclass(frozen=True)
+class LinkFabricSnapshot:
+    """What a run's link fabric looked like and carried, frozen for reports."""
+
+    profile_name: str
+    paths: tuple
+    edges: tuple
+    channels: tuple
+    transfers: tuple

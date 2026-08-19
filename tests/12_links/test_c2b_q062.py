@@ -8,6 +8,7 @@ from decsim.config import us
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
 from decsim.links.links import LinkPath, TrafficAttribution
 from decsim.controller.syndrome_ingress import SyndromePacketRouteKind, SyndromeIngress, _IngressSlotState
+from decsim.links.link_traffic_report import topology_json_value, traffic_json_value
 
 
 class _Engine:
@@ -71,7 +72,7 @@ def test_legacy_cards_leave_optional_c2b_absent_without_changing_edge_identity()
 def test_wired_c2b_card_preserves_positive_numbers_source_and_physical_topology():
     source = "explicit Q-062 PROJECT_DESIGN latency and bandwidth"
     model = _wired_profile(latency_us=0.25, bandwidth=120.0, source=source).resolve()
-    topology = model.topology_json_value(
+    topology = topology_json_value(model.snapshot(), 
         controller_link_integration_assurance="shipped_controller")
     c2b_edge = next(edge for edge in topology["edges"] if edge["path"] == "c2b")
     channel = next(
@@ -102,7 +103,7 @@ def test_c2b_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
             operation_id=7, patch_ids=(2, 9), window_id=None,
             round_lo=12, round_hi=12),
     )
-    traffic = model.traffic_json_value()
+    traffic = traffic_json_value(model.snapshot())
     rows = [row for row in traffic["transfers"] if row["path"] == "c2b"]
 
     assert first.serialization_ticks == us(3.0)
@@ -152,7 +153,7 @@ def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry
     assert ingress._transmit_window_input_round(slot) is True
     assert receiver.received == []
     assert publication.calls == []
-    assert len(links.traffic_json_value()["transfers"]) == 1
+    assert len(traffic_json_value(links.snapshot())["transfers"]) == 1
 
     engine.run_next()
     arrival_tick = 1_000 + us(0.25) + us(3.0)
@@ -164,7 +165,7 @@ def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry
     assert ingress._transmit_window_input_round(slot) is True
     assert receiver.received == [packet, packet]
     assert publication.calls == [((17, 4), arrival_tick)]
-    assert len(links.traffic_json_value()["transfers"]) == 1
+    assert len(traffic_json_value(links.snapshot())["transfers"]) == 1
 
 
 def test_unwired_legacy_ingress_delivery_is_immediate_and_has_no_c2b_publication():
@@ -193,7 +194,7 @@ def test_unwired_legacy_ingress_delivery_is_immediate_and_has_no_c2b_publication
     assert ingress._transmit_window_input_round(slot) is True
     assert receiver.received == [packet]
     assert publication.calls == []
-    assert "c2b" not in links.traffic_json_value()["path_order"]
+    assert "c2b" not in traffic_json_value(links.snapshot())["path_order"]
 
 
 def test_rounds_pipeline_on_c2b_instead_of_stop_and_wait():

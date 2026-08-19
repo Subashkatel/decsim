@@ -15,6 +15,7 @@ from typing import Optional
 from ..decoders.decoder_memory import DecoderMemorySnapshot
 from ..decoders.decoder_manager import TerminalRequestRecord, TerminalServiceRecord
 from ..message import DecoderRequestKey, stable_identity_order_key
+from ..links.link_traffic_report import topology_json_value, traffic_json_value
 
 
 WINDOW_STAGES = ("buffer_fill", "dep_block", "queue_wait", "service", "total")
@@ -392,6 +393,6 @@ def capture_primary_result(engine, execution_runtime, window_manager, operations
         raise RuntimeError("primary run ended before workload completed")
     return PrimaryRunResult(
         "complete", True, True, True, execution_runtime.last_finish_time, engine.now,
-        tuple(rows), copy.deepcopy(links.traffic_json_value()), metric_rows)
+        tuple(rows), copy.deepcopy(traffic_json_value(links.snapshot())), metric_rows)
 
 

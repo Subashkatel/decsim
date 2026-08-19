@@ -35,6 +35,7 @@ from decsim.message import (
     DecoderTier,
     stable_identity_json,
 )
+from decsim.links.link_traffic_report import topology_json_value, traffic_json_value
 
 
 OPERATION_ID = ("experiment", 7)
@@ -371,7 +372,7 @@ def test_every_semantic_path_accepts_its_real_attribution_shape(path):
         attribution=valid_attribution(path),
     )
     assert reservation.physical_sequence == 0
-    assert counters_from(model.traffic_json_value(), path)["transfer_count"] == 1
+    assert counters_from(traffic_json_value(model.snapshot()), path)["transfer_count"] == 1
 
 
 @pytest.mark.parametrize(
@@ -393,7 +394,7 @@ def test_semantic_paths_reject_wrong_geometry(path, attribution):
     model = make_model_config().resolve()
     with pytest.raises(ValueError):
         model.reserve(path, payload_bits=1, now_ticks=0, attribution=attribution)
-    assert counters_from(model.traffic_json_value(), path)["transfer_count"] == 0
+    assert counters_from(traffic_json_value(model.snapshot()), path)["transfer_count"] == 0
 
 
 def test_request_paths_enforce_relation_kind_tier_and_identity():
@@ -427,7 +428,7 @@ def test_request_paths_enforce_relation_kind_tier_and_identity():
                 now_ticks=0,
                 attribution=attribution,
             )
-    assert counters_from(model.traffic_json_value(), LinkPath.WSD)["transfer_count"] == 0
+    assert counters_from(traffic_json_value(model.snapshot()), LinkPath.WSD)["transfer_count"] == 0
 
 
 @pytest.mark.parametrize(
@@ -458,11 +459,11 @@ def test_model_admission_guards_inner_request_identity_before_mutation(key, exce
             now_ticks=0,
             attribution=attribution,
         )
-        transfer = model.traffic_json_value()["transfers"][0]
+        transfer = traffic_json_value(model.snapshot())["transfers"][0]
         request = transfer["attribution"]["relation"]["request_key"]
         assert request["run_sequence"] == 1
         assert counters_from(
-            model.traffic_json_value(), LinkPath.WSD
+            traffic_json_value(model.snapshot()), LinkPath.WSD
         )["transfer_count"] == 1
     else:
         with pytest.raises(exception):
@@ -473,7 +474,7 @@ def test_model_admission_guards_inner_request_identity_before_mutation(key, exce
                 attribution=attribution,
             )
         assert counters_from(
-            model.traffic_json_value(), LinkPath.WSD
+            traffic_json_value(model.snapshot()), LinkPath.WSD
         )["transfer_count"] == 0
 
 
@@ -508,7 +509,7 @@ def test_payload_selection_records_actual_default_and_unresolved_sources():
         attribution=valid_attribution(LinkPath.OC),
     )
 
-    transfers = model.traffic_json_value()["transfers"]
+    transfers = traffic_json_value(model.snapshot())["transfers"]
     assert [row["payload_bits"] for row in transfers] == [7, 12, None]
     assert [row["payload_selection"] for row in transfers] == [
         PayloadSelectionSource.ACTUAL.value,
@@ -559,7 +560,7 @@ def test_payload_admission_failures_leave_semantic_and_physical_state_untouched(
         attribution=valid_attribution(LinkPath.QC),
     )
 
-    report = model.traffic_json_value()
+    report = traffic_json_value(model.snapshot())
     assert accepted.physical_sequence == 0
     assert len(report["transfers"]) == 1
     assert counters_from(report, LinkPath.OC)["transfer_count"] == 0
@@ -615,7 +616,7 @@ def test_config_identity_controls_sharing_and_each_resolve_is_run_owned():
     assert cwd.queue_wait_ticks == qc.serialization_ticks
     assert oc.physical_sequence == 0
     assert fresh.physical_sequence == 0
-    topology = first_run.topology_json_value(
+    topology = topology_json_value(first_run.snapshot(),
         controller_link_integration_assurance="shipped_controller"
     )
     aliases = {edge["path"]: edge["physical_alias"] for edge in topology["edges"]}
@@ -645,7 +646,7 @@ def test_shared_fifo_counters_reconcile_across_member_paths():
         attribution=valid_attribution(LinkPath.CWD),
     )
 
-    report = model.traffic_json_value()
+    report = traffic_json_value(model.snapshot())
     shared_row = next(
         row for row in report["reconciliation"]
         if row["member_paths"] == ["qc", "cwd"]
@@ -667,7 +668,7 @@ def test_reconciliation_guard_rejects_silent_counter_divergence():
     )
     model._semantic_counters[LinkPath.QC] = TrafficCounters()
     with pytest.raises(RuntimeError, match="do not reconcile"):
-        model.traffic_json_value()
+        traffic_json_value(model.snapshot())
 
 
 def test_topology_json_reports_stable_fabric_and_integration_contract():
@@ -682,7 +683,7 @@ def test_topology_json_reports_stable_fabric_and_integration_contract():
     edge = LinkEdgeConfig(shared, payload, "actual source")
     model = make_model_config({LinkPath.QC: edge, LinkPath.CWD: edge}).resolve()
 
-    topology = model.topology_json_value(
+    topology = topology_json_value(model.snapshot(),
         controller_link_integration_assurance="custom_controller_unverified"
     )
     assert topology["schema_version"] == 1
@@ -702,7 +703,7 @@ def test_topology_json_reports_stable_fabric_and_integration_contract():
 
     for bad_assurance in ("", "third_party"):
         with pytest.raises(ValueError):
-            model.topology_json_value(
+            topology_json_value(model.snapshot(),
                 controller_link_integration_assurance=bad_assurance
             )
 
@@ -725,7 +726,7 @@ def test_traffic_json_preserves_typed_identity_and_timing_boundaries():
         attribution=boundary,
     )
 
-    report = model.traffic_json_value()
+    report = traffic_json_value(model.snapshot())
     assert report["schema_version"] == 1
     assert report["path_order"] == PATH_ORDER
     assert [row["path"] for row in report["transfers"]] == ["wsd", "dd"]
@@ -755,7 +756,7 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
     """The reference profile preserves its nine timing and payload configuration choices."""
     config = logical_reference_profile()
     model = config.resolve()
-    topology = model.topology_json_value(
+    topology = topology_json_value(model.snapshot(),
         controller_link_integration_assurance="shipped_controller"
     )
     expected_propagation = {
@@ -875,7 +876,7 @@ def test_links_expose_timing_only_without_scheduler_or_reclamation_ownership():
 def test_bandwidth_profile_declares_finite_calibrated_capacities():
     """The bandwidth profile exposes all calibrated capacities and fallback payloads."""
     config = bandwidth_limited_profile()
-    topology = config.resolve().topology_json_value(
+    topology = topology_json_value(config.resolve().snapshot(),
         controller_link_integration_assurance="shipped_controller"
     )
     expected_capacities = {
@@ -933,10 +934,10 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
     """The reference profile stays pure latency while shared semantic parameters match."""
     reference = logical_reference_profile()
     bandwidth = bandwidth_limited_profile()
-    reference_topology = reference.resolve().topology_json_value(
+    reference_topology = topology_json_value(reference.resolve().snapshot(),
         controller_link_integration_assurance="shipped_controller"
     )
-    bandwidth_topology = bandwidth.resolve().topology_json_value(
+    bandwidth_topology = topology_json_value(bandwidth.resolve().snapshot(),
         controller_link_integration_assurance="shipped_controller"
     )
 
@@ -1005,7 +1006,7 @@ def test_bandwidth_profile_serializes_and_queues_in_physical_fifo_order():
         now_ticks=0,
         attribution=valid_attribution(LinkPath.WSD),
     )
-    traffic = model.traffic_json_value()
+    traffic = traffic_json_value(model.snapshot())
     qc_transfers = [
         transfer for transfer in traffic["transfers"]
         if transfer["path"] == "qc"
@@ -1062,9 +1063,8 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
     }
 
     def aggregate_capacities(scale):
-        topology = bandwidth_limited_profile(
-            capacity_scale=scale
-        ).resolve().topology_json_value(
+        topology = topology_json_value(
+            bandwidth_limited_profile(capacity_scale=scale).resolve().snapshot(),
             controller_link_integration_assurance="shipped_controller"
         )
         return {

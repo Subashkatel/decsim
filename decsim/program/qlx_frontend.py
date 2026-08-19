@@ -36,15 +36,16 @@ Mapping rules (partially asserted by the ``tests/09_qlx_workloads`` suite):
 from __future__ import annotations
 
 import ast
+from types import MappingProxyType
 from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from ..message import Operation, OpKind, ProtectedRegion
 from .round_policies import PerOpRounds
 
-_KIND_BY_NAME = {"mz": OpKind.MEASURE, "mx": OpKind.MEASURE,
-                 "measure": OpKind.MEASURE, "inject": OpKind.INJECT,
-                 "merge": OpKind.MERGE, "measure_product": OpKind.MERGE}
+_KIND_BY_NAME = MappingProxyType({
+    "mz": OpKind.MEASURE, "mx": OpKind.MEASURE, "measure": OpKind.MEASURE,
+    "inject": OpKind.INJECT, "merge": OpKind.MERGE, "measure_product": OpKind.MERGE})
 
 # Op names that produce a classical bit usable for measurement feedback.
 # measure_product is a bit producer even though its round-count KIND is MERGE,

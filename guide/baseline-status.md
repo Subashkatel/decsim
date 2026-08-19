@@ -106,6 +106,25 @@ Status vocabulary:
   and delivery equal per transfer, PASS. decsim's link is ns-3's
   point-to-point link with an unbounded drop-tail queue and no inter-frame
   gap, plus the attribution ledger ns-3 does not have.
+- Gate 7 (2026-08-19, `experiments/validate_controller_simpy.py`,
+  `experiments/results/validation/controller_simpy.md`): the controller's
+  three parts against outside models fed the same inputs a decsim run saw,
+  read from outside the core (the seams wrapped, no core change). Syndrome
+  ingress: reassembly completes on the last fragment (RFC 815 hole list),
+  packing is a fixed SimPy service, C2B and CWD are ns-3 FIFO channels;
+  every round's packing and Buffer 0 publication tick and every
+  feedback-memory delivery agree on the QLX program, a two-fragment stream
+  with t_pack, Stim memory with a priced C2B hop, and feedback chains that
+  carry both routes. Feedback streams: a SimPy periodic process per
+  protected region (boundaries at start + k cadence, one round each, seal
+  on the end operation's boundary, held operations start on boundaries)
+  and a bump allocator for unprotected bindings agree on the protected
+  chains, the live stream pair and the two-fragment stream. Controller:
+  one load-only job per commit region of idle rounds (Skoric et al.
+  sliding window) and OC-then-CQ release timing (OC sent at the decision
+  tick, CQ at OC delivery, the QPU instructed at CQ delivery, both ns-3
+  FIFO). 132 checks, 0 disagreements, PASS; each reference was perturbed
+  by one tick or one round to confirm the checks fail when they should.
 
 ## Core rewrite (2026-08-18, commits 7eda59b to HEAD on audit/evidence-first-rebuild)
 

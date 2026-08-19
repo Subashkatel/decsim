@@ -161,9 +161,12 @@ Where the code differs from the plan, and why:
   Pauli frame unit; SWIPER has the same release-on-decoded rule and no
   frame), its unused history/stats/archive removed; magic_state_factories
   and round_policies moved to `qpu/`.
-- 2026-08-19 (owner): frontends/ and pauli_frame/ are their own components
-  again; orchestrator/ keeps planner, execution_runtime and
-  conditional_release (class ConditionalRelease; was logical_measurement).
+- 2026-08-19 (owner): no orchestrator/ folder. frontends/ holds qlx_frontend,
+  circuit_frontend, planner and execution_runtime (what happens to a program
+  before and while it runs); pauli_frame/ holds pauli_frame and
+  conditional_release (ConditionalRelease: a final result releases the
+  operations conditioned on it). Khalid's orchestrator = frontends/ plus
+  pauli_frame/.
 - Pre-existing, untouched: experiments/tests/ fail collection
   (FaultRepresentation moved before this work; `python -m pytest -q` at the
   root errors, use `tests`); a live stream with the Ignore or

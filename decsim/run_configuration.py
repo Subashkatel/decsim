@@ -64,7 +64,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .decoders.decoders import CodeRouter
     from .qpu.syndrome_devices import SyndromeBitDevice, TimingOnlyDevice
     from .links.link_profiles import logical_reference_profile
-    from .orchestrator.planner import (_plan_execution, _validate_operation_graph,
+    from .frontends.planner import (_plan_execution, _validate_operation_graph,
                           _validate_workload_identity)
     from .controller.policies import Eager, Ignore
     from .qpu.round_policies import GateRounds

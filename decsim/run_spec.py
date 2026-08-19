@@ -184,8 +184,8 @@ class RunSpec:
         from .controller.controller import Controller
         from .controller.feedback_streams import FeedbackStreams, NoFeedbackStreams
         from .decoders.decoder_manager import DecoderManager
-        from .orchestrator.execution_runtime import ExecutionRuntime
-        from .orchestrator.conditional_release import ConditionalRelease
+        from .frontends.execution_runtime import ExecutionRuntime
+        from .pauli_frame.conditional_release import ConditionalRelease
         from .qpu.cycle_clock import QPUDevice
         from .run_configuration import (check_factory_decode_service,
                                         resolve_run_configuration)

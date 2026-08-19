@@ -96,15 +96,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 import math
+from types import MappingProxyType
 from typing import Optional, Union
 
 from ..config import us
-from ..message import (
-    DecoderRequestKey, DecoderTier,
-    is_stable_identity,
-    stable_identity_json,
-    stable_identity_order_key,
-)
+from ..message import DecoderRequestKey, DecoderTier
 
 
 def _whole(value, name: str) -> int:
@@ -221,7 +217,7 @@ class LinkPathRule:
     required: bool
 
 
-_PATH_RULES = {
+_PATH_RULES = MappingProxyType({
     LinkPath.QC: LinkPathRule(
         LinkAttributionScope.ROUND,
         "syndrome-round attribution without a window",
@@ -255,7 +251,7 @@ _PATH_RULES = {
     LinkPath.CQ: LinkPathRule(
         LinkAttributionScope.OPERATION_ONLY, "operation-only attribution",
         LinkRelationRule.NONE, None, True),
-}
+})
 
 
 @dataclass(frozen=True, eq=False)

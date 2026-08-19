@@ -95,6 +95,62 @@ Status vocabulary:
   predictions equal qLDPC and whole-circuit PyMatching), Gate 1 and the
   baseline sweep unchanged; suite 772, smoke identical.
 
+## Core rewrite (2026-08-18, commits 7eda59b to HEAD on audit/evidence-first-rebuild)
+
+The plan of guide/core-rewrite-plan.md was applied in full, phase by phase,
+with the lock green after every commit: `python -m pytest -q tests` (648
+tests; the 772 of the plan minus the tests that asserted deleted validation)
+and `python -m experiments.refactor_lock check` (34 differential trace
+scenarios recorded at 7eda59b, byte-identical through the whole rewrite:
+strong tier serial/parallel/bulk/double-window/held, Eager replay, protected
+and live streams, feedback modes, idle policies, finite buffer fail-stop and
+drop, finite decoder memory, two-fragment rounds, the QLX program, every
+scheme, reference and bandwidth-limited links, the factory, the observers,
+Stim through PyMatching). After the last phase: Gates 1 to 5 rerun and equal,
+the baseline sweep rerun and equal cell for cell (experiments/results
+unchanged), the data-flow notebook re-executed on the new seams.
+
+What the tree is now (guide/core-layout-and-names.md applied):
+qpu/ (cycle_clock, syndrome_devices, stim_device, code_geometry, layouts,
+stimcircuits), program/ (planner, orchestrators, execution_runtime,
+round_policies, qlx_frontend, circuit_frontend, magic_state_factories),
+controller/ (controller, feedback_streams NEW, policies, syndrome_ingress),
+syndrome_buffer/, windows/ (window_manager 1150 lines, from 2738;
+window_boundaries NEW, committed_rounds NEW, windowing_schemes,
+window_interactions, dynamic_windows, speculative_recovery), decoders/
+(decoder_manager 600 lines, from 958; strong_escalation NEW with both owners
+of the strong tier, decoder_memory, decoder_memory_transfer with
+DecoderInputStaging, decoder_engine, decoders, schedulers,
+weak_strong_switching, window_decode_results, the six backends), confidence/
+(was soft_output), pauli_frame/, links/ (links, link_profiles,
+link_traffic_report NEW), observe/ (metrics, run_views), and at the top
+engine (clock, queue, metrics only), run_spec (wiring), run_configuration NEW
+(one resolver), message, protocols (seams only), seeding, config.
+
+Where the code differs from the plan, and why:
+- StrongEscalation and BoundaryCourier are built by the window manager and
+  work on its tables (a `wm` reference), the shape SpeculativeRecovery already
+  had; the strong tier's operations are operations on the manager's window
+  table, so a value-in value-out object was not honest. NoStrongTier is the
+  window side only; the decoder side keeps one StrongRequestLedger (empty for
+  a baseline run) because its weak-decode bookkeeping serves the baseline too.
+- The idle policies own their relay (Ignore, ExtendStream, SeparateDecodeJobs
+  implement relay(controller, operation, patch, round)); the mode string is
+  gone. FeedbackStreams (NoFeedbackStreams for a run without stream ids or
+  regions) owns bindings, the next-round ledger and protected regions.
+- run_defaults became run_configuration.resolve_run_configuration, per the
+  review; policies.py and decoders.py keep their names, per the review.
+- Every remaining `raise` is one the guard table marks keep
+  (guide/core-guard-table.md, "Applied" section lists the adjustments).
+- The window manager's stream surface (bind_stream_operation, seal_stream,
+  close_stream_boundary, has_dynamic_stream) stays as its public stream API;
+  the "controller holds lifecycle" inline was not done.
+- Pre-existing, untouched: experiments/tests/ fail collection
+  (FaultRepresentation moved before this work; `python -m pytest -q` at the
+  root errors, use `tests`); a live stream with the Ignore or
+  SeparateDecodeJobs idle policy raises KeyError in
+  window_manager.on_memory_round (never combined by any test or experiment).
+
 ## Minimal baseline closed loop
 
 | # | Target component | decsim home | Status | Evidence and boundary |

@@ -61,6 +61,31 @@ def _finite_forward_window_geometries(
     return tuple(windows)
 
 
+def sliding_data_complete(window: "Window", readiness: WindowReadiness) -> bool:
+    """A window has its data once its commit and buffer rounds are present;
+    a buffer that overflows past the operation's end is satisfied by a
+    successor's rounds, by memory rounds, by a closed tail, or by every
+    successor being exhausted. Every scheme here uses this rule."""
+    local_rounds_needed = min(window.buffer_hi, readiness.local_round_count)
+    if readiness.local_rounds_arrived < local_rounds_needed:
+        return False
+    overflow_rounds = window.buffer_hi - readiness.local_round_count
+    if overflow_rounds <= 0 or readiness.tail_closed:
+        return True
+    if not readiness.successors:
+        return True
+    successor_has_data = any(
+        successor.rounds_arrived >= overflow_rounds
+        for successor in readiness.successors
+    )
+    memory_has_data = readiness.memory_rounds_arrived >= overflow_rounds
+    all_successors_exhausted = all(
+        successor.rounds_arrived >= successor.round_count
+        for successor in readiness.successors
+    )
+    return successor_has_data or memory_has_data or all_successors_exhausted
+
+
 class SlidingWindowScheme:
     """Serial commit and look-ahead buffer windows."""
 
@@ -138,35 +163,12 @@ class SlidingWindowScheme:
                 f"windowed accuracy degrades (Skoric 2209.08552, Bombin "
                 f"2303.04846). Raise buffer_rounds_override or use d.")
 
-    def data_complete(
-        self,
-        window: "Window",
-        *,
-        readiness: WindowReadiness,
-        operation,
-    ) -> bool:
-        """Return True once commit and buffer data are present."""
-        local_rounds_needed = min(window.buffer_hi, readiness.local_round_count)
-        if readiness.local_rounds_arrived < local_rounds_needed:
-            return False
-        overflow_rounds = window.buffer_hi - readiness.local_round_count
-        if overflow_rounds <= 0 or readiness.tail_closed:
-            return True
-        if not readiness.successors:
-            return True
-        successor_has_data = any(
-            successor.rounds_arrived >= overflow_rounds
-            for successor in readiness.successors
-        )
-        memory_has_data = readiness.memory_rounds_arrived >= overflow_rounds
-        all_successors_exhausted = all(
-            successor.rounds_arrived >= successor.round_count
-            for successor in readiness.successors
-        )
-        return successor_has_data or memory_has_data or all_successors_exhausted
+    def data_complete(self, window: "Window", *, readiness: WindowReadiness,
+                      operation) -> bool:
+        return sliding_data_complete(window, readiness)
 
 
-class NaiveOnlineScheme(SlidingWindowScheme):
+class NaiveOnlineScheme:
     """Decode each operation as one full batch after all rounds arrive."""
 
     scheme_label = "naive online batch decode (no windowing)"
@@ -189,11 +191,16 @@ class NaiveOnlineScheme(SlidingWindowScheme):
             batch_preceding_idle_rounds=True,
         )
 
+    def data_complete(self, window: "Window", *, readiness: WindowReadiness,
+                      operation) -> bool:
+        return sliding_data_complete(window, readiness)
+
+
     def validate_buffer(self, geometry) -> None:
         pass
 
 
-class ParallelWindowScheme(SlidingWindowScheme):
+class ParallelWindowScheme:
     """Skoric block A/B windows with dependency-aware seam residuals."""
 
     scheme_label = "parallel block A/B window (Skoric 2209.08552 sec. I.C)"
@@ -299,6 +306,11 @@ class ParallelWindowScheme(SlidingWindowScheme):
             batch_preceding_idle_rounds=False,
         )
 
+    def data_complete(self, window: "Window", *, readiness: WindowReadiness,
+                      operation) -> bool:
+        return sliding_data_complete(window, readiness)
+
+
     def validate_buffer(self, geometry) -> None:
         if geometry.buffer_floor_override_active:
             return
@@ -314,7 +326,7 @@ class ParallelWindowScheme(SlidingWindowScheme):
             )
 
 
-class TanSandwichScheme(SlidingWindowScheme):
+class TanSandwichScheme:
     """Tan et al.'s zero-seam sandwich decoder for graphlike memory DEMs.
 
     ``commit_round_count`` is the paper's step ``s`` and
@@ -389,6 +401,11 @@ class TanSandwichScheme(SlidingWindowScheme):
             batch_preceding_idle_rounds=False,
             protocol=WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
         )
+
+    def data_complete(self, window: "Window", *, readiness: WindowReadiness,
+                      operation) -> bool:
+        return sliding_data_complete(window, readiness)
+
 
     def validate_buffer(self, geometry) -> None:
         if geometry.commit_round_count < 2:

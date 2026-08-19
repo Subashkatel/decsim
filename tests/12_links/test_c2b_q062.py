@@ -72,8 +72,7 @@ def test_legacy_cards_leave_optional_c2b_absent_without_changing_edge_identity()
 def test_wired_c2b_card_preserves_positive_numbers_source_and_physical_topology():
     source = "explicit Q-062 PROJECT_DESIGN latency and bandwidth"
     model = _wired_profile(latency_us=0.25, bandwidth=120.0, source=source).resolve()
-    topology = topology_json_value(model.snapshot(), 
-        controller_link_integration_assurance="shipped_controller")
+    topology = topology_json_value(model.snapshot())
     c2b_edge = next(edge for edge in topology["edges"] if edge["path"] == "c2b")
     channel = next(
         row for row in topology["physical_channels"]

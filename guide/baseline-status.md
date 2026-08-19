@@ -94,6 +94,18 @@ Status vocabulary:
   stream: 300/300 shots, every emitted round's bits equal the sampled data,
   predictions equal qLDPC and whole-circuit PyMatching), Gate 1 and the
   baseline sweep unchanged; suite 772, smoke identical.
+- Gate 6 (2026-08-19, `experiments/validate_links_ns3_simpy.py`,
+  `experiments/results/validation/links_ns3_simpy.md`): decsim's Link
+  against ns-3's point-to-point link (the rule transcribed from
+  point-to-point-net-device.cc TransmitStart/TransmitComplete,
+  data-rate.cc CalculateBitsTxTime, point-to-point-channel.cc TransmitStart:
+  FIFO device queue, txTime = bits / bps, receive at txTime + delay) and an
+  independent SimPy store-and-forward model. Four cases (unbounded channel,
+  bursty FIFO queueing, two paths WDO and DO sharing one channel, a random
+  fixed schedule on a reference fabric): serializer start, serializer end
+  and delivery equal per transfer, PASS. decsim's link is ns-3's
+  point-to-point link with an unbounded drop-tail queue and no inter-frame
+  gap, plus the attribution ledger ns-3 does not have.
 
 ## Core rewrite (2026-08-18, commits 7eda59b to HEAD on audit/evidence-first-rebuild)
 

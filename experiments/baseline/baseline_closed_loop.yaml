@@ -18,16 +18,18 @@ controller:
   t_binary_availability_us: 0.0              # pulses to binary; zero: readout classification is inside the priced round (Google 2023 Nature 614 sec. Methods)
   t_pack_us: 0.0                             # one fragment per round makes packing a no-op (StimDevice emits one fragment)
 links:                                       # one card per path: propagation latency and capacity (null = unbounded, propagation only)
+  # on the baseline path
   qc:  {latency_us: 0.15, bits_per_us: null}  # QPU -> controller, one readout
   c2b: {latency_us: 0.10, bits_per_us: 1000.0} # controller -> Buffer 0, one round
   cwd: {latency_us: 2.0,  bits_per_us: null}  # Buffer 0 -> weak decoder memory, one window
-  wsd: {latency_us: 0.5,  bits_per_us: null}  # weak -> strong escalation (unused in the baseline)
-  csd: {latency_us: 2.0,  bits_per_us: null}  # controller -> strong decoder (unused in the baseline)
-  wdo: {latency_us: 1.0,  bits_per_us: null}  # weak decoder -> Pauli frame
   dd:  {latency_us: 0.5,  bits_per_us: null}  # decoder -> decoder boundary handoff
-  do:  {latency_us: 1.0,  bits_per_us: null}  # strong decoder -> Pauli frame (unused in the baseline)
+  wdo: {latency_us: 1.0,  bits_per_us: null}  # weak decoder -> Pauli frame
+  # not on the baseline path (releases and the strong tier); priced only if a run uses them
   oc:  {latency_us: 4.0,  bits_per_us: null}  # Pauli frame -> controller, a release
   cq:  {latency_us: 0.15, bits_per_us: null}  # controller -> QPU, an instruction
+  wsd: {latency_us: 0.5,  bits_per_us: null}  # weak -> strong escalation
+  csd: {latency_us: 2.0,  bits_per_us: null}  # controller -> strong decoder
+  do:  {latency_us: 1.0,  bits_per_us: null}  # strong decoder -> Pauli frame
 # Latencies: Khalid et al. Table II; c2b is an experiment card. Payload sizes per path stay on the
 # logical_reference card in decsim/links/link_profiles.py; the baseline carries actual bits on qc, c2b, cwd.
 

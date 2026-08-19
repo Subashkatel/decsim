@@ -167,6 +167,12 @@ Where the code differs from the plan, and why:
   conditional_release (ConditionalRelease: a final result releases the
   operations conditioned on it). Khalid's orchestrator = frontends/ plus
   pauli_frame/.
+- 2026-08-19: the word "orchestrator" is gone from the code: WDO/DO end at
+  the Pauli frame, OC starts there (links.py vocabulary), the log tag is
+  "PauliFrame", the window manager holds `conditional_release`, RunSpec's
+  hook is `make_conditional_release`, the protocol is
+  ConditionalReleasePort. The lock was re-recorded once for that log tag
+  only (verified: every other byte of the 34 traces equal).
 - Pre-existing, untouched: experiments/tests/ fail collection
   (FaultRepresentation moved before this work; `python -m pytest -q` at the
   root errors, use `tests`); a live stream with the Ignore or

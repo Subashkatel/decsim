@@ -18,7 +18,7 @@
 "[  2.000 us] DecoderCluster: ASSIGN UNIT live-stream W0 [commit 1-2] (waited 0.000 us in queue, units free now 0)",
 "[  2.000 us] DecoderCluster: START DECODE live-stream W0 [commit 1-2]",
 "[  2.000 us] DecoderCluster: DECODE DONE live-stream W0 [commit 1-2]",
-"[  2.000 us] Orchestrator: DISPATCH conditional release for op#2 -> controller -> controller sequencer",
+"[  2.000 us] PauliFrame: DISPATCH conditional release for op#2 -> controller -> controller sequencer",
 "[  2.000 us] ExecutionRuntime: CONSUMED release for B:T(q0); now trying to start",
 "[  2.000 us] Controller: START B:T(q0)  (non-Clifford, qubits (0,)) [unblocked by op#1]",
 "[  3.000 us] QPU: B:T(q0) fires round 1/2",

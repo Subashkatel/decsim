@@ -120,7 +120,7 @@ def test_real_manager_constructs_with_segment_delivery_state_in_its_owner():
         resolved_operations=(),
         resolved_patches=(),
         links=SimpleNamespace(),
-        orchestrator=SimpleNamespace(),
+        conditional_release=SimpleNamespace(),
         boundary_policy=SimpleNamespace(),
         window_interaction=SimpleNamespace(),
         planning_view_by_operation_id={},

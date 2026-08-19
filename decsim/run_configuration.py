@@ -57,7 +57,7 @@ class ResolvedRunConfiguration:
     make_decoder_memory_transfer: Optional[Callable]
     make_factory: Optional[Callable]
     make_metrics: Optional[Callable]
-    make_orchestrator: Optional[Callable]
+    make_conditional_release: Optional[Callable]
 
 
 def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
@@ -175,7 +175,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         make_syndrome_ingress=spec.make_syndrome_ingress,
         make_decoder_memory_transfer=spec.make_decoder_memory_transfer,
         make_factory=spec.make_factory, make_metrics=spec.make_metrics,
-        make_orchestrator=spec.make_orchestrator)
+        make_conditional_release=spec.make_conditional_release)
 
 
 def _select_code(distance, code, layout):

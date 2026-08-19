@@ -78,10 +78,10 @@ def test_connected_integration_logs_then_relays_in_decision_order():
     assert unit.integrate(operation(7), result((1,))) is None
     assert [event[0] for event in events] == ["log", "relay", "log", "relay"]
     assert events[0] == (
-        "log", "Orchestrator",
+        "log", "PauliFrame",
         "DISPATCH conditional release for op#12 -> controller -> controller sequencer")
     assert events[2] == (
-        "log", "Orchestrator",
+        "log", "PauliFrame",
         "DISPATCH conditional release for op#4 -> controller -> controller sequencer")
     assert [events[index][1].target_operation_id for index in (1, 3)] == [12, 4]
     assert events[1][2] is sink and events[3][2] is sink
@@ -89,7 +89,7 @@ def test_connected_integration_logs_then_relays_in_decision_order():
     events.clear()
     unit.integrate(operation(9, requires_return=True), result((0,)))
     assert events[0] == (
-        "log", "Orchestrator",
+        "log", "PauliFrame",
         "DISPATCH result return for op#9 -> controller -> controller sequencer")
     assert events[1][0] == "relay" and events[1][1].releases_operation is False
 

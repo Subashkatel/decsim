@@ -36,7 +36,7 @@ class ConditionalRelease:
             instruction = ("conditional release" if decision.releases_operation
                            else "result return")
             self.engine.log(
-                "Orchestrator",
+                "PauliFrame",
                 f"DISPATCH {instruction} for "
                 f"op#{decision.target_operation_id} -> controller -> controller sequencer",
             )

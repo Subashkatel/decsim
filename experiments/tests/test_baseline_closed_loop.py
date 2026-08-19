@@ -47,8 +47,10 @@ def test_configured_costs_appear_at_the_right_points(small_config, shot):
     tick_us = 1 / engine["frequency_mhz"]
     assert shot.means["release"] == pytest.approx(engine["release_cycles_per_job"] * tick_us)
     assert shot.means["frame_commit"] == pytest.approx(small_config["pauli_frame"]["commit_us"])
-    c2b = small_config["controller_to_buffer"]
-    assert shot.means["c2b_per_round"] >= c2b["latency_us"]
+    links = small_config["links"]
+    assert shot.means["c2b_per_round"] >= links["c2b"]["latency_us"]
+    assert shot.means["cwd_per_window"] == pytest.approx(links["cwd"]["latency_us"])
+    assert shot.means["wdo_per_window"] == pytest.approx(links["wdo"]["latency_us"])
 
 
 def test_reaction_time_orders_the_points(shot):

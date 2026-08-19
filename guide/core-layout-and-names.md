@@ -5,6 +5,9 @@ guide/core-design-audit.md and guide/core-rewrite-plan.md. Differences from
 the tree below: policies.py and decoders.py kept their names (review);
 run_defaults is run_configuration.py (review); strong_escalation.py holds
 both owners; DecoderInputStaging lives in decoders/decoder_memory_transfer.py.
+2026-08-19: program/ became orchestrator/ (Khalid Fig. 2), pauli_frame
+joined it, orchestrators.py is logical_measurement.py, and
+magic_state_factories and round_policies moved to qpu/.
 
 Why. Ousterhout ch. 7 (different layer, different abstraction) and tef step
 6 (isolate by likelihood of change) argue for a tree that mirrors the

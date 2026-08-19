@@ -8,8 +8,8 @@ import zipfile
 
 import pytest
 
-from decsim.pauli_frame.pauli_frame import PauliFrame as RuntimePauliFrame
-from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+from decsim.orchestrator.pauli_frame import PauliFrame as RuntimePauliFrame
+from decsim.orchestrator.pauli_frame import PauliFrameConfig
 from decsim.protocols import PauliFrame as PauliFramePort
 import decsim.run_spec as run_spec_module
 from decsim.run_spec import RunSpec
@@ -326,7 +326,7 @@ def test_frame_owner_is_a_named_seed_root_and_snapshot_is_non_destructive():
 
 def test_short_provenance_header_round_trips_from_source_and_wheel(tmp_path):
     project_root = Path(__file__).resolve().parents[2]
-    module_bytes = (project_root / "decsim" / "pauli_frame" / "pauli_frame.py").read_bytes()
+    module_bytes = (project_root / "decsim" / "orchestrator" / "pauli_frame.py").read_bytes()
     module_lines = module_bytes.decode("ascii").splitlines()
     expected_prefix = [
         "# Data-core semantics adapted from PECOS PauliFrameAccumulator and ObsMask.",
@@ -367,7 +367,7 @@ def test_short_provenance_header_round_trips_from_source_and_wheel(tmp_path):
     wheel_paths = list(tmp_path.glob("*.whl"))
     assert len(wheel_paths) == 1
     with zipfile.ZipFile(wheel_paths[0]) as wheel:
-        shipped_module = wheel.read("decsim/pauli_frame/pauli_frame.py")
+        shipped_module = wheel.read("decsim/orchestrator/pauli_frame.py")
     assert shipped_module.startswith(("\n".join(module_lines[:13]) + "\n").encode("ascii"))
     assert b"BEGIN EMBEDDED APACHE" not in shipped_module
 

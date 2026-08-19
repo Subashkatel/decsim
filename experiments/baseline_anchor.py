@@ -34,7 +34,7 @@ from decsim.qpu.stim_device import StimDevice
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.program.round_policies import FixedRounds
+from decsim.qpu.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 from decsim.windows.windowing_schemes import NaiveOnlineScheme
 

@@ -64,10 +64,10 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .decoders.decoders import CodeRouter
     from .qpu.syndrome_devices import SyndromeBitDevice, TimingOnlyDevice
     from .links.link_profiles import logical_reference_profile
-    from .program.planner import (_plan_execution, _validate_operation_graph,
+    from .orchestrator.planner import (_plan_execution, _validate_operation_graph,
                           _validate_workload_identity)
     from .controller.policies import Eager, Ignore
-    from .program.round_policies import GateRounds
+    from .qpu.round_policies import GateRounds
     from .decoders.schedulers import FifoScheduler
     from .windows.windowing_schemes import SlidingWindowScheme
     from .decoders.weak_strong_switching import Baseline
@@ -250,7 +250,7 @@ def _decode_plan_operations(ops, decode_ops, dynamic_streams, *,
 
 def check_factory_decode_service(factory, decoder_manager):
     """A distillation factory that decodes corrections uses the run's decoder manager."""
-    from .program.magic_state_factories import DistillationFactory, MultiLevelDistillationFactory
+    from .qpu.magic_state_factories import DistillationFactory, MultiLevelDistillationFactory
     if type(factory) not in (DistillationFactory, MultiLevelDistillationFactory):
         return
     expected = decoder_manager if factory.n_corr > 0 else None

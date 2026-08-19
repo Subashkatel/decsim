@@ -147,7 +147,7 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
     from decsim.qpu.stim_device import StimDevice
     from decsim.message import Operation
     from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
     def build(decoder):
@@ -190,7 +190,7 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     from decsim.qpu.stim_device import StimDevice
     from decsim.message import Operation
     from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
     circuit = stim.Circuit.generated(

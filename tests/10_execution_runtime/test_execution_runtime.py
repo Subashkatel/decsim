@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import decsim.program.execution_runtime as execution_runtime
-from decsim.program.execution_runtime import ExecutionRuntime
+import decsim.orchestrator.execution_runtime as execution_runtime
+from decsim.orchestrator.execution_runtime import ExecutionRuntime
 from decsim.message import Decision, ExecutionProgram, Operation, ResourceClaim
 
 

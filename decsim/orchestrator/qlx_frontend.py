@@ -41,7 +41,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from ..message import Operation, OpKind, ProtectedRegion
-from .round_policies import PerOpRounds
+from ..qpu.round_policies import PerOpRounds
 
 _KIND_BY_NAME = MappingProxyType({
     "mz": OpKind.MEASURE, "mx": OpKind.MEASURE, "measure": OpKind.MEASURE,

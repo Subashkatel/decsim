@@ -35,9 +35,9 @@ from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+from decsim.orchestrator.pauli_frame import PauliFrameConfig
 from decsim.controller.policies import ExtendStream
-from decsim.program.round_policies import PerOpRounds
+from decsim.qpu.round_policies import PerOpRounds
 from decsim.run_spec import RunSpec
 from experiments.validate_timing_swiper import zero_latency_links
 from experiments.validate_windows_qldpc import run_qldpc

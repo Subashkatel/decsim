@@ -184,8 +184,8 @@ class RunSpec:
         from .controller.controller import Controller
         from .controller.feedback_streams import FeedbackStreams, NoFeedbackStreams
         from .decoders.decoder_manager import DecoderManager
-        from .program.execution_runtime import ExecutionRuntime
-        from .program.orchestrators import ExecutionOrchestrator
+        from .orchestrator.execution_runtime import ExecutionRuntime
+        from .orchestrator.logical_measurement import LogicalMeasurements
         from .qpu.cycle_clock import QPUDevice
         from .run_configuration import (check_factory_decode_service,
                                         resolve_run_configuration)
@@ -196,7 +196,7 @@ class RunSpec:
         config = resolve_run_configuration(self, root_seed)
         escalation_policy, plan, timing = config.escalation_policy, config.plan, config.timing
         orchestrator = (config.make_orchestrator(engine) if config.make_orchestrator
-                        else ExecutionOrchestrator(engine))
+                        else LogicalMeasurements(engine))
         links = config.link_config.resolve()
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,
@@ -370,7 +370,7 @@ def _seed_roots(**parts):
 
 
 def _make_infinite(engine):
-    from .program.magic_state_factories import InfiniteFactory
+    from .qpu.magic_state_factories import InfiniteFactory
     return InfiniteFactory(engine)
 
 

@@ -1,0 +1,1 @@
+"""syndrome_buffer component."""

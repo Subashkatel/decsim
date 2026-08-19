@@ -20,6 +20,7 @@ from ..links import LinkPath, RequestTransferRelation, TrafficAttribution
 from ..syndrome_buffer.syndrome_buffer import SyndromeBuffer
 from .dynamic_windows import DynamicWindows
 from .speculative_recovery import SpeculativeRecovery
+from .committed_rounds import LogicalLedger
 from .window_boundaries import BoundaryCourier, HeldBoundary
 
 
@@ -94,8 +95,7 @@ class WindowManager:
         self.segment_results_sent: set = set()
         self._required_stream_end_by_operation_id: dict[int, int] = {}
         self._stream_binding_by_operation_id: dict[int, tuple[object, int]] = {}
-        self.logical_contributions: dict[tuple, LogicalContribution] = {}
-        self._observable_arity_by_stream: dict[object, int] = {}
+        self.ledger = LogicalLedger()
         self.courier = BoundaryCourier(self)
         self._pending_strong_windows: set[tuple] = set()
         self._pending_strong_per_op: dict[int, int] = {}
@@ -892,12 +892,12 @@ class WindowManager:
         self.engine.log("DecoderCluster",
                         f"DECODE DONE {op.name} W{window.k} "
                         f"[commit {window.commit_lo}-{window.commit_hi}]")
-        existing_contribution = self.logical_contributions.get(key)
+        existing_contribution = self.ledger.get(key)
         if (
             existing_contribution is None
             or existing_contribution.ownership_kind != "strong_slab"
         ):
-            self._install_logical_contribution(
+            self.ledger.install(
                 LogicalContribution(
                     owner_key=key,
                     commit_lo=window.commit_lo,
@@ -909,181 +909,6 @@ class WindowManager:
         if job.awaiting_strong_result:
             self._mark_window_waiting_for_strong(key, op.id)
 
-    def _install_logical_contribution(
-        self,
-        contribution: LogicalContribution,
-    ) -> None:
-        if contribution.ownership_kind not in (
-            "ordinary_window",
-            "strong_slab",
-        ):
-            raise ValueError(
-                "logical contribution ownership_kind must be "
-                "'ordinary_window' or 'strong_slab'")
-        if (
-            contribution.commit_lo < 1
-            or contribution.commit_hi < contribution.commit_lo
-        ):
-            raise ValueError(
-                f"logical contribution {contribution.owner_key} has invalid "
-                f"extent {contribution.commit_lo}-{contribution.commit_hi}")
-
-        logical_observables = contribution.logical_observables
-        stream_id = contribution.owner_key[0]
-        previous = self.logical_contributions.get(contribution.owner_key)
-        if previous is not None and (
-            previous.commit_lo != contribution.commit_lo
-            or previous.commit_hi != contribution.commit_hi
-            or previous.ownership_kind != contribution.ownership_kind
-        ):
-            raise RuntimeError(
-                f"logical contribution {contribution.owner_key} cannot "
-                f"change ownership from {previous.ownership_kind} "
-                f"{previous.commit_lo}-{previous.commit_hi} to "
-                f"{contribution.ownership_kind} "
-                f"{contribution.commit_lo}-{contribution.commit_hi}")
-
-        for other_key, other in self.logical_contributions.items():
-            if other_key == contribution.owner_key \
-                    or other_key[0] != stream_id:
-                continue
-            if (
-                contribution.commit_lo <= other.commit_hi
-                and other.commit_lo <= contribution.commit_hi
-            ):
-                raise RuntimeError(
-                    f"logical contribution {contribution.owner_key} extent "
-                    f"{contribution.commit_lo}-{contribution.commit_hi} "
-                    f"overlaps {other_key} extent "
-                    f"{other.commit_lo}-{other.commit_hi}")
-
-        if logical_observables is not None:
-            observed_arity = len(logical_observables)
-            expected_arity = self._observable_arity_by_stream.get(stream_id)
-            if (
-                expected_arity is not None
-                and observed_arity != expected_arity
-            ):
-                raise ValueError(
-                    f"logical contribution {contribution.owner_key} has "
-                    f"observable length {observed_arity}; expected "
-                    f"{expected_arity} for stream {stream_id!r}")
-            if expected_arity is None:
-                self._observable_arity_by_stream[stream_id] = observed_arity
-
-        self.logical_contributions[contribution.owner_key] = contribution
-
-    def _logical_observables_for_interval(
-        self,
-        stream_id,
-        commit_lo: int,
-        commit_hi: int,
-        *,
-        boundary_policy: str,
-    ) -> Optional[tuple[int, ...]]:
-        if boundary_policy not in ("strict", "stream_segment"):
-            raise ValueError(
-                f"unknown logical contribution boundary policy "
-                f"{boundary_policy!r}")
-        if commit_lo < 1 or commit_hi < commit_lo:
-            raise ValueError(
-                f"invalid logical prediction interval "
-                f"{commit_lo}-{commit_hi}")
-
-        contributions = sorted(
-            (
-                contribution
-                for key, contribution in self.logical_contributions.items()
-                if key[0] == stream_id
-                and contribution.commit_lo <= commit_hi
-                and contribution.commit_hi >= commit_lo
-            ),
-            key=lambda contribution: (
-                contribution.commit_lo,
-                contribution.commit_hi,
-                repr(contribution.owner_key),
-            ),
-        )
-        if not contributions:
-            raise RuntimeError(
-                f"logical prediction interval {stream_id!r} "
-                f"{commit_lo}-{commit_hi} has no contribution coverage")
-
-        cursor = commit_lo
-        for contribution in contributions:
-            covered_lo = max(contribution.commit_lo, commit_lo)
-            covered_hi = min(contribution.commit_hi, commit_hi)
-            if covered_lo != cursor:
-                relation = "overlap" \
-                    if covered_lo < cursor else "gap"
-                raise RuntimeError(
-                    f"logical prediction interval {stream_id!r} "
-                    f"{commit_lo}-{commit_hi} has a contribution "
-                    f"{relation} at round {cursor}")
-            cursor = covered_hi + 1
-        if cursor != commit_hi + 1:
-            raise RuntimeError(
-                f"logical prediction interval {stream_id!r} "
-                f"{commit_lo}-{commit_hi} has a contribution gap at "
-                f"round {cursor}")
-
-        for contribution in contributions:
-            crosses_boundary = (
-                contribution.commit_lo < commit_lo
-                or contribution.commit_hi > commit_hi
-            )
-            if not crosses_boundary:
-                continue
-            if (
-                boundary_policy == "stream_segment"
-                and contribution.logical_observables is None
-            ):
-                continue
-            if boundary_policy == "stream_segment":
-                raise RuntimeError(
-                    f"functional logical contribution "
-                    f"{contribution.owner_key} crosses stream-segment "
-                    f"boundary {commit_lo}-{commit_hi}")
-            raise RuntimeError(
-                f"logical contribution {contribution.owner_key} crosses "
-                f"strict interval boundary {commit_lo}-{commit_hi}")
-
-        if any(
-            contribution.logical_observables is None
-            for contribution in contributions
-        ):
-            return None
-
-        arity = len(contributions[0].logical_observables)
-        aggregate = [0] * arity
-        for contribution in contributions:
-            logical_observables = contribution.logical_observables
-            if len(logical_observables) != arity:
-                raise RuntimeError(
-                    f"logical prediction interval {stream_id!r} changed "
-                    "observable arity during aggregation")
-            for observable_index, bit in enumerate(logical_observables):
-                aggregate[observable_index] ^= bit
-        return tuple(aggregate)
-
-    def _replace_contribution_prediction(
-        self,
-        owner_key: tuple,
-        logical_observables: tuple[int, ...],
-    ) -> None:
-        contribution = self.logical_contributions.get(owner_key)
-        if contribution is None:
-            raise RuntimeError(
-                f"result for {owner_key} has no logical contribution owner")
-        self._install_logical_contribution(
-            LogicalContribution(
-                owner_key=contribution.owner_key,
-                commit_lo=contribution.commit_lo,
-                commit_hi=contribution.commit_hi,
-                ownership_kind=contribution.ownership_kind,
-                logical_observables=logical_observables,
-            )
-        )
 
     def _mark_window_waiting_for_strong(self, key: tuple, op_id: int) -> None:
         if key in self._pending_strong_windows:
@@ -1131,7 +956,7 @@ class WindowManager:
         if self.speculative_recovery.complete(completion):
             return
         if result.logical_observables is not None:
-            self._replace_contribution_prediction(
+            self.ledger.replace_prediction(
                 key,
                 result.logical_observables,
             )
@@ -1207,7 +1032,7 @@ class WindowManager:
             self.windows[key].commit_hi
             for key in window_keys
         )
-        logical_observables = self._logical_observables_for_interval(
+        logical_observables = self.ledger.observables_for_interval(
             op.id,
             commit_lo,
             commit_hi,
@@ -1248,7 +1073,7 @@ class WindowManager:
                 continue
             operation_stream_offset = operation.stream_offset if binding is None else binding[1]
             segment_start = operation_stream_offset + 1
-            logical_observables = self._logical_observables_for_interval(
+            logical_observables = self.ledger.observables_for_interval(
                 stream_id,
                 segment_start,
                 segment_end,

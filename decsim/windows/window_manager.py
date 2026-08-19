@@ -889,6 +889,33 @@ class WindowManager:
             self.courier.hold((job.op_id, job.window_id),
                               HeldBoundary(job.request_key, op.id, boundary))
 
+    def rounds_backlog(self) -> tuple:
+        """Per operation, in stable order: (op_id, patch, rounds arrived but
+        not yet decoded in an unbroken prefix from round 1)."""
+        rows = []
+        for op_id in sorted(self._ops, key=stable_identity_order_key):
+            op = self._ops[op_id]
+            committed_ranges = sorted(
+                (self.windows[key].commit_lo, self.windows[key].commit_hi)
+                for key in self.committed_windows if key[0] == op_id)
+            decoded = 0
+            for start_round, end_round in committed_ranges:
+                if start_round <= decoded + 1:
+                    decoded = max(decoded, end_round)
+                else:
+                    break
+            waiting = max(0, self.rounds_arrived.get(op_id, 0) - decoded)
+            patch = (op.patches[0] if op.patches else op.qubits[0] if op.qubits else op_id)
+            rows.append((op_id, patch, waiting))
+        return tuple(rows)
+
+    def selected_request_key(self, key: tuple):
+        """The request whose result a window finally published, when the run
+        captures switching records; None otherwise."""
+        if self._selected_request_keys is None:
+            return None
+        return self._selected_request_keys.get(key)
+
     def uncommit_window(self, window: Window) -> None:
         """A committed window is about to be replayed: it leaves the committed set."""
         self.committed_windows.discard(window.key)

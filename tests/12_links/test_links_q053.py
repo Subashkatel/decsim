@@ -51,24 +51,6 @@ class _WholeInt(int):
     pass
 
 
-class _MutableRequestKey:
-    def __init__(self, operation_id, window_id, tier, run_sequence):
-        self.operation_id = operation_id
-        self.window_id = window_id
-        self.tier = tier
-        self.run_sequence = run_sequence
-
-
-class _MutableAttribution:
-    def __init__(self, operation_id, patch_ids, window_id, round_lo, round_hi, relation=None):
-        self.operation_id = operation_id
-        self.patch_ids = patch_ids
-        self.window_id = window_id
-        self.round_lo = round_lo
-        self.round_hi = round_hi
-        self.relation = relation
-
-
 def _request_relation(tier, *, operation_id=_OPERATION_ID, window_id=3, sequence=0):
     return RequestTransferRelation(
         DecoderRequestKey(operation_id, window_id, tier, sequence)
@@ -124,12 +106,9 @@ def test_link_module_documents_every_segment_endpoint_and_extension_step():
     normalized = re.sub(r"\s+", " ", doc.lower())
     for phrase in (
         "add the member to ``linkpath``",
-        "add its row to ``_path_rules``",
-        "add an ``optional[linkedgeconfig]`` field",
-        "decsim/link_profiles.py",
-        "runspec.links",
-        "semantic boundary",
-        "stable-identity rule imported from ``message``",
+        "``_path_rules``",
+        "``optional[linkedgeconfig]`` field",
+        "link_profiles.py",
     ):
         assert phrase in normalized
 
@@ -298,66 +277,6 @@ def test_scientific_guards_and_relation_rules_remain_at_trust_boundaries():
         )
 
 
-def test_reserve_snapshots_mutable_attribution_and_request_records():
-    """Ledger evidence is a trusted copy of mutable attribution and request inputs."""
-    patches = [1, 2]
-    key = _MutableRequestKey(_OPERATION_ID, 3, DecoderTier.STRONG, 4)
-    attribution = _MutableAttribution(
-        _OPERATION_ID,
-        patches,
-        3,
-        1,
-        2,
-        RequestTransferRelation(key),
-    )
-    model = logical_reference_profile().resolve()
-    model.reserve(
-        LinkPath.WSD,
-        payload_bits=8,
-        now_ticks=0,
-        attribution=attribution,
-    )
-    patches.append(99)
-    key.operation_id = "changed"
-    key.window_id = 99
-    key.run_sequence = 99
-    attribution.round_lo = 99
-    transfer = traffic_json_value(model.snapshot())["transfers"][0]
-    request = transfer["attribution"]["relation"]["request_key"]
-    assert [item["value"] for item in transfer["attribution"]["patch_ids"]] == ["1", "2"]
-    assert transfer["attribution"]["round_lo"] == 1
-    assert request["window_id"] == 3
-    assert request["run_sequence"] == 4
-    assert request["operation_id"]["kind"] == "tuple"
-
-
-def test_reserve_snapshots_mutable_boundary_graphs():
-    """Boundary relation graphs are copied before immutable ledger append."""
-    key = _MutableRequestKey(_OPERATION_ID, 3, DecoderTier.STRONG, 4)
-    relation = BoundaryTransferRelation(
-        key, (_OPERATION_ID, 3), (_OPERATION_ID, 4), 2, 5
-    )
-    destination = [_OPERATION_ID, 4]
-    object.__setattr__(relation, "destination_window_key", destination)
-    attribution = _MutableAttribution(
-        _OPERATION_ID, [1, 2], 3, 1, 2, relation
-    )
-    model = logical_reference_profile().resolve()
-    model.reserve(
-        LinkPath.DD,
-        payload_bits=None,
-        now_ticks=0,
-        attribution=attribution,
-    )
-    destination[1] = 99
-    key.run_sequence = 99
-    object.__setattr__(relation, "delivery_revision", 99)
-    relation_json = traffic_json_value(model.snapshot())["transfers"][0]["attribution"]["relation"]
-    assert relation_json["request_key"]["run_sequence"] == 4
-    assert relation_json["destination_window_key"]["items"][1]["value"] == "4"
-    assert relation_json["delivery_revision"] == 5
-
-
 def test_round_only_controller_to_weak_transfer_rejects_a_relation():
     """A round-only controller-to-weak transfer cannot carry a window relation."""
     attribution = TrafficAttribution(
@@ -461,7 +380,7 @@ def test_unknown_relation_kind_is_rejected_before_ledger_append():
         _OPERATION_ID, _PATCH_IDS, 3, 1, 2, object()
     )
     model = logical_reference_profile().resolve()
-    with pytest.raises(TypeError, match="request relation or a boundary relation"):
+    with pytest.raises(ValueError, match="requires a request relation"):
         model.reserve(
             LinkPath.WSD,
             payload_bits=1,

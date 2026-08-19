@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from .config import TimingConfig
 from .message import ExecutionProgram, RunSeedPathSegment
+from .links.link_traffic_report import traffic_json_value
 from .seeding import bind_run_seed
 
 if TYPE_CHECKING:
@@ -66,6 +67,44 @@ class PrimaryRunResult:
     def metric_values(self) -> dict[str, Any]:
         return {row.name: copy.deepcopy(row.value)
                 for row in self.metric_results}
+
+
+def capture_primary_result(engine, execution_runtime, window_manager, operations,
+                           metric_bindings, links, syndrome_source):
+    """Project terminal runtime owners into the immutable run result."""
+    operation_by_id = {operation.id: operation for operation in operations}
+    truth_for = getattr(syndrome_source, "logical_observable_truth", None)
+    rows = []
+    for operation_id in sorted(operation_by_id):
+        logical = window_manager.op_results.get(operation_id)
+        if logical is not None:
+            bits = tuple(logical)
+            status = "logical_observables"
+        else:
+            bits = None
+            status = "no_logical_output"
+        actual = None if truth_for is None else truth_for(operation_id)
+        if actual is not None:
+            actual = tuple(actual)
+        failure = None
+        if bits is not None and actual is not None:
+            if len(bits) != len(actual):
+                raise RuntimeError(
+                    f"operation {operation_id} predicted {len(bits)} logical "
+                    f"observables but the syndrome source sampled {len(actual)}")
+            failure = bits != actual
+        binding = execution_runtime.controller.stream_binding_for(operation_id)
+        stream_offset = (operation_by_id[operation_id].stream_offset
+                         if binding is None else binding.stream_offset)
+        rows.append(LogicalOperationResult(
+            operation_id, status, bits, stream_offset, actual, failure))
+    metric_rows = tuple(MetricResultRecord(name, copy.deepcopy(metric.result()))
+                        for name, metric in metric_bindings)
+    if not engine.idle or not execution_runtime.workload_complete:
+        raise RuntimeError("primary run ended before workload completed")
+    return PrimaryRunResult(
+        "complete", True, True, True, execution_runtime.last_finish_time, engine.now,
+        tuple(rows), copy.deepcopy(traffic_json_value(links.snapshot())), metric_rows)
 
 
 @dataclass(frozen=True)
@@ -152,7 +191,6 @@ class RunSpec:
                                         resolve_run_configuration)
         from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
         from .controller.syndrome_ingress import SyndromeIngress
-        from .observe.run_views import capture_primary_result
         from .windows.window_manager import WindowManager
 
         config = resolve_run_configuration(self, root_seed)

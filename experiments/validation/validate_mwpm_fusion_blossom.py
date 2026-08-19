@@ -9,7 +9,7 @@ matching weight, whether the correction satisfies the syndrome, and the
 predicted logical class. Ties between equal-weight matchings may legitimately
 give different physical corrections; only weight and logical class must agree.
 
-Usage: python -m experiments.validate_mwpm_fusion_blossom [shots]
+Usage: python -m experiments.validation.validate_mwpm_fusion_blossom [shots]
 """
 
 from __future__ import annotations

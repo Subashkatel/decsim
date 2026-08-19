@@ -30,11 +30,11 @@ Status vocabulary:
   after (release). Stages are data with free names, one engine event and one
   record each; the manager dispatches through `run(job, engine, on_done)`.
   Owner-session implementation 2026-08-18. Suite 826 passed, smoke identical.
-- Q-062(d) and (f) are **DONE** (owner session, 2026-08-18): `experiments/baseline_closed_loop.py`
-  with its single config `experiments/baseline_closed_loop.yaml` runs real Stim
+- Q-062(d) and (f) are **DONE** (owner session, 2026-08-18): `experiments/baseline/baseline_closed_loop.py`
+  with its single config `experiments/baseline/baseline_closed_loop.yaml` runs real Stim
   rotated memory data through the whole loop and reports latency at thirteen
   points, throughput, utilization, backlog and LER per sweep point
-  (`experiments/results/baseline_closed_loop/sweep.md`); `experiments/baseline_anchor.py`
+  (`experiments/results/baseline_closed_loop/sweep.md`); `experiments/baseline/baseline_anchor.py`
   reproduces PyMatching v2's published microseconds per shot on this host and
   checks the windowed loop's logical error rate against whole-circuit PyMatching
   (`anchor.md`). The controller-to-Buffer-0 hop is a priced optional link (C2B).
@@ -51,7 +51,7 @@ Status vocabulary:
   smoke rebaselined for assign-then-transfer.
 - Willow replication (owner request 2026-08-18, final at `a7336f2`):
   `RecordedStimDevice` replays Google's Zenodo 13273331 hardware detection
-  events through the loop; `experiments/willow_replication.py` reports the loop
+  events through the loop; `experiments/baseline/willow_replication.py` reports the loop
   identical shot for shot to whole-shot PyMatching (1999/2000, 1000/1000,
   500/500 at d = 3, 5, 7; the one difference is an equal-weight tie),
   epsilon per cycle 1.086 / 0.748 / 0.509 % (Lambda 1.47 vs 1.49 whole-shot;
@@ -94,7 +94,7 @@ Status vocabulary:
   stream: 300/300 shots, every emitted round's bits equal the sampled data,
   predictions equal qLDPC and whole-circuit PyMatching), Gate 1 and the
   baseline sweep unchanged; suite 772, smoke identical.
-- Gate 6 (2026-08-19, `experiments/validate_links_ns3_simpy.py`,
+- Gate 6 (2026-08-19, `experiments/validation/validate_links_ns3_simpy.py`,
   `experiments/results/validation/links_ns3_simpy.md`): decsim's Link
   against ns-3's point-to-point link (the rule transcribed from
   point-to-point-net-device.cc TransmitStart/TransmitComplete,
@@ -106,7 +106,7 @@ Status vocabulary:
   and delivery equal per transfer, PASS. decsim's link is ns-3's
   point-to-point link with an unbounded drop-tail queue and no inter-frame
   gap, plus the attribution ledger ns-3 does not have.
-- Gate 7 (2026-08-19, `experiments/validate_controller_simpy.py`,
+- Gate 7 (2026-08-19, `experiments/validation/validate_controller_simpy.py`,
   `experiments/results/validation/controller_simpy.md`): the controller's
   three parts against outside models fed the same inputs a decsim run saw,
   read from outside the core (the seams wrapped, no core change). Syndrome
@@ -125,7 +125,7 @@ Status vocabulary:
   tick, CQ at OC delivery, the QPU instructed at CQ delivery, both ns-3
   FIFO). 132 checks, 0 disagreements, PASS; each reference was perturbed
   by one tick or one round to confirm the checks fail when they should.
-- Gate 8 (2026-08-19, `experiments/validate_loop_swiper.py`,
+- Gate 8 (2026-08-19, `experiments/validation/validate_loop_swiper.py`,
   `experiments/results/validation/loop_swiper.md`): the whole weak-decoder
   loop against SWIPER (Vittal et al., ASPLOS 2025; tmp/references/code/swiper,
   run in its own Python 3.12 venv), an independent published simulator of
@@ -246,7 +246,7 @@ Where the code differs from the plan, and why:
 | 9 | Decoder manager and weak scheduler, unit assignment and manager-side push | `decsim/decoder_manager.py`; `decsim/schedulers.py`; `decsim/decoder_memory_transfer.py` | EXISTS, REVIEW PENDING | Sources exist; schedulers module 16, transfer module 22, and manager module 26 are pending. Push DMA and its priced trigger are later Q-056 work, so the current existence claim is not a Q-056 completion claim. |
 | 10 | Weak decoder, memory plus compute engine | `decsim/decoder_engine.py` (`DecoderEngine`, `DecoderTiming`, `DecoderStage`, stage records) | DONE, Q-062(c) | Stages before the algorithm (fetch from decoder-side memory, cycles per round), the real decoder latency and decode() at its completion, stages after (release); every stage an engine event with start/end ticks; one job per unit. Hardware decoders declare their own named stages as data. |
 | 11 | Pauli frame, minimal weak-correction commit sink | `decsim/pauli_frame.py` | DONE, Q-062(b) | The toggleable final-weak sink is committed at production `efe7270` and tests `bdd0b1f`; 818 accumulated tests, compileall, and the default smoke run passed. The adapted PECOS XOR core carries the owner-required short provenance header. Full Q-054 mapping, lookup/update bandwidth, storage, and capacity axes remain later work. |
-| 12 | End-to-end throughput and per-point latency measurement | `decsim/views.py`; `decsim/metrics.py`; `experiments/baseline_closed_loop.py` | DONE for the baseline experiment, Q-062(d); views/metrics review pending | Both sources exist, but views module 29 and metrics module 30 are pending. `tmp/validation/ORIENTATION.md` defines them as the observation surface. The actual swept loop report is not done until Q-062(d) lands. |
+| 12 | End-to-end throughput and per-point latency measurement | `decsim/views.py`; `decsim/metrics.py`; `experiments/baseline/baseline_closed_loop.py` | DONE for the baseline experiment, Q-062(d); views/metrics review pending | Both sources exist, but views module 29 and metrics module 30 are pending. `tmp/validation/ORIENTATION.md` defines them as the observation surface. The actual swept loop report is not done until Q-062(d) lands. |
 
 The minimal baseline commit path is therefore: real Stim input, both controller
 conversions, packing, Buffer 0, window readiness, manager dispatch, one weak

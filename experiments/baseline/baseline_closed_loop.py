@@ -7,7 +7,7 @@ PyMatching algorithm, release) -> link WDO -> Pauli frame commit. Nothing is
 skipped and every hop charges its configured cost; the report shows the
 simulated latency at each point and the throughput, per sweep point.
 
-Usage: python -m experiments.baseline_closed_loop [config.yaml]
+Usage: python -m experiments.baseline.baseline_closed_loop [config.yaml]
 """
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ def link_cards(config: dict):
     c2b = config["controller_to_buffer"]
     return with_controller_to_buffer_edge(
         profile, latency_us=c2b["latency_us"], aggregate_bits_per_us=c2b["aggregate_bits_per_us"],
-        source="experiments/baseline_closed_loop.yaml controller_to_buffer")
+        source="experiments/baseline/baseline_closed_loop.yaml controller_to_buffer")
 
 
 def decoder_memory(config: dict):

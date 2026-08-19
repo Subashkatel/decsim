@@ -11,9 +11,9 @@ import sys
 import pytest
 
 from decsim.detector_error_model import FaultRepresentation, decode_windowed
-import experiments.run_surface as surface_runner
+import experiments.offline.run_surface as surface_runner
 
-from experiments.results import (
+from experiments.offline.results import (
     ChunkResult,
     ShardConflictError,
     canonical_chunk_csv,
@@ -22,12 +22,12 @@ from experiments.results import (
     canonical_surface_plot_csv,
     surface_plot_row,
 )
-from experiments.plotting import (
+from experiments.offline.plotting import (
     _binomial_interval,
     plot_logical_error_rate,
     write_logical_error_rate_card,
 )
-from experiments.run_surface import (
+from experiments.offline.run_surface import (
     _SurfaceMwpmFactory,
     _circuit,
     _new_output_directory,
@@ -35,14 +35,14 @@ from experiments.run_surface import (
     run_surface_configuration,
     write_surface_snapshot,
 )
-from experiments.harness import (
+from experiments.offline.harness import (
     Experiment,
     SamplePlan,
     exact_batches,
     offline_batch_seed,
     sample_batch_sha256,
 )
-from experiments.decoding import (
+from experiments.offline.decoding import (
     DecodedBatch,
     OfflineBatchDecoder,
     load_layered_stim_input,
@@ -123,7 +123,7 @@ def _run_surface_module(tmp_path, configuration, *, output_name="output"):
     command = [
         sys.executable,
         "-m",
-        "experiments.run_surface",
+        "experiments.offline.run_surface",
         "--config",
         str(configuration_path),
         "--output",
@@ -583,7 +583,7 @@ def test_parallel_offline_run_matches_one_worker_byte_for_byte(tmp_path):
 def test_slurm_array_maps_one_index_to_one_configuration(tmp_path):
     configurations = tmp_path / "configurations.txt"
     configurations.write_text("first.json\nsecond.json\nthird.json\n")
-    script = Path(__file__).parents[1] / "slurm_array.sh"
+    script = Path(__file__).parents[1] / "offline" / "slurm_array.sh"
     environment = {
         **os.environ,
         "SLURM_ARRAY_TASK_ID": "1",
@@ -599,7 +599,7 @@ def test_slurm_array_maps_one_index_to_one_configuration(tmp_path):
     )
 
     assert completed.stdout.strip() == (
-        "-m experiments.run_surface --ignored-option "
+        "-m experiments.offline.run_surface --ignored-option "
         f"--config second.json --output {tmp_path / 'output'}"
     )
     assert "%" not in script.read_text()
@@ -810,7 +810,7 @@ def test_surface_snapshot_requires_explicit_inputs_before_writing(
         [
             str(Path(__file__).parents[2] / ".venv" / "bin" / "python"),
             "-m",
-            "experiments.run_surface",
+            "experiments.offline.run_surface",
             "--config",
             str(configuration_path),
             "--output",
@@ -944,7 +944,7 @@ def test_surface_snapshot_artifacts_are_exact_and_honestly_scoped(tmp_path):
         "index": 1, "first_shot": 2, "shots": 1
     }
     assert invocation["replay_argv"][:3] == [
-        sys.executable, "-m", "experiments.run_surface"
+        sys.executable, "-m", "experiments.offline.run_surface"
     ]
     assert invocation["process_argv_observed"] != invocation["replay_argv"]
     assert Path(invocation["cwd_observed"]) == _REPOSITORY

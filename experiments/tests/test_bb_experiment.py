@@ -10,7 +10,7 @@ import numpy as np
 import pytest
 import stim
 
-from experiments.bb import build_quits11_bb_memory
+from experiments.offline.bb import build_quits11_bb_memory
 from decsim.decoders.window_decode_results import (
     BackendDecodeOutcome,
     BackendDecodeStatus,
@@ -22,12 +22,12 @@ from decsim.detector_error_model import (
     PHYSICAL_FAULT_MODEL_REQUIRED,
     decode_windowed,
 )
-from experiments.decoding import (
+from experiments.offline.decoding import (
     OfflineBackendBatchDecoder, OfflineBatchDecoder, _chunk_row,
 )
-from experiments.harness import Batch, SamplePlan, sample_batch_sha256
-from experiments.results import read_chunk_csv
-from experiments.run_bb import (
+from experiments.offline.harness import Batch, SamplePlan, sample_batch_sha256
+from experiments.offline.results import read_chunk_csv
+from experiments.offline.run_bb import (
     _BbDecoderFactory, _run_parts,
     _sliding_window_entries,
     run_bb_configuration,
@@ -157,7 +157,7 @@ def test_backend_batch_maps_each_terminal_status_exactly(
         })()
 
     monkeypatch.setattr(
-        "experiments.decoding.decode_windowed_backend_outcomes", failed_walk
+        "experiments.offline.decoding.decode_windowed_backend_outcomes", failed_walk
     )
     decoded = OfflineBackendBatchDecoder(
         Circuit(), (object(), object()), object(), FaultRepresentation.PHYSICAL
@@ -262,7 +262,7 @@ def test_bb_runner_rejects_invalid_configuration_before_output(tmp_path, changes
 
 
 def test_bb_provider_rejects_the_wrong_quits_distribution(monkeypatch):
-    monkeypatch.setattr("experiments.bb.package_version", lambda _: "9.9.9")
+    monkeypatch.setattr("experiments.offline.bb.package_version", lambda _: "9.9.9")
 
     with pytest.raises(RuntimeError, match="installed quits version 9.9.9"):
         build_quits11_bb_memory(
@@ -391,8 +391,8 @@ def test_sample_identity_tracks_physics_but_not_decode_execution(monkeypatch):
     def fake_builder(**selection):
         return json.dumps(selection, sort_keys=True), {}, selection["syndrome_round_count"] + 2
 
-    monkeypatch.setattr("experiments.run_bb.SamplePlan", RecordingSamplePlan)
-    monkeypatch.setattr("experiments.run_bb.build_quits11_bb_memory", fake_builder)
+    monkeypatch.setattr("experiments.offline.run_bb.SamplePlan", RecordingSamplePlan)
+    monkeypatch.setattr("experiments.offline.run_bb.build_quits11_bb_memory", fake_builder)
 
     def run_parts(**changes):
         return _run_parts(_configuration(**changes))
@@ -557,9 +557,9 @@ def test_optional_backend_dependency_fails_before_output(
     def missing(_):
         raise PackageNotFoundError
 
-    monkeypatch.setattr("experiments.run_bb.package_version", missing)
+    monkeypatch.setattr("experiments.offline.run_bb.package_version", missing)
     monkeypatch.setattr(
-        "experiments.run_bb._run_parts",
+        "experiments.offline.run_bb._run_parts",
         lambda _: ({"decoder": decoder}, None, None, None),
     )
     output = tmp_path / decoder
@@ -595,7 +595,7 @@ def test_bb_cli_matches_the_direct_runner(tmp_path):
     command = [
         sys.executable,
         "-m",
-        "experiments.run_bb",
+        "experiments.offline.run_bb",
         "--config",
         str(configuration_path),
         "--output",

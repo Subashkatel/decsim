@@ -24,7 +24,7 @@ SWIPER needs Python 3.10+; it is run in a subprocess with the interpreter
 named by SWIPER_PYTHON (default: the reference venv used for the Toffoli
 timing study). decsim runs in the current interpreter.
 
-    python -m experiments.validate_loop_swiper
+    python -m experiments.validation.validate_loop_swiper
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 SWIPER = REPO / "tmp" / "references" / "code" / "swiper"
 SWIPER_PYTHON = os.environ.get(
     "SWIPER_PYTHON",

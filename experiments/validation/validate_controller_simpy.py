@@ -33,7 +33,7 @@ reference fed the same inputs a decsim run saw:
    release is ns-3 replayed over the OC and CQ channels: OC sent at the
    decision tick, CQ sent at OC delivery, the QPU instructed at CQ delivery.
 
-    python -m experiments.validate_controller_simpy
+    python -m experiments.validation.validate_controller_simpy
 """
 
 from __future__ import annotations
@@ -42,14 +42,14 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tmp" / "references" / "code" / "simpy" / "src"))
 
 import simpy  # noqa: E402
 
 from experiments import refactor_lock as lock  # noqa: E402
-from experiments.validate_links_ns3_simpy import ns3_point_to_point  # noqa: E402
+from experiments.validation.validate_links_ns3_simpy import ns3_point_to_point  # noqa: E402
 
 REPORT = REPO / "experiments" / "results" / "validation" / "controller_simpy.md"
 

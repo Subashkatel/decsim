@@ -16,7 +16,7 @@ Checked per shot, on recorded Stim detection events:
   stride d) on the same DEM, and the final logical prediction equals qLDPC's
   and whole-circuit PyMatching's, shot for shot.
 
-Usage: python -m experiments.validate_stream_wait_qldpc [shots]
+Usage: python -m experiments.validation.validate_stream_wait_qldpc [shots]
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.controller.policies import ExtendStream
 from decsim.qpu.round_policies import PerOpRounds
 from decsim.run_spec import RunSpec
-from experiments.validate_timing_swiper import zero_latency_links
-from experiments.validate_windows_qldpc import run_qldpc
+from experiments.validation.validate_timing_swiper import zero_latency_links
+from experiments.validation.validate_windows_qldpc import run_qldpc
 
 REPORT = Path("experiments/results/validation/stream_wait_qldpc.md")
 D, SEG, DECODE_US, ROUNDS, STREAM = 3, 3, 4.0, 13, 100

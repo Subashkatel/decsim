@@ -8,7 +8,7 @@ holds no window logic and no decoder logic; it writes inputs, invokes both, and
 compares named fields: window count, per-window detector sets, per-window
 commit sets, and the final logical prediction of every shot.
 
-Usage: python -m experiments.validate_windows_qldpc [shots]
+Usage: python -m experiments.validation.validate_windows_qldpc [shots]
 """
 
 from __future__ import annotations

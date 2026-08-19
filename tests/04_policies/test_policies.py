@@ -20,16 +20,11 @@ class ExternalBoundaryPolicy:
 
 class ExternalIdlePolicy:
     def __init__(self):
-        self.calls = []
         self.relayed = []
 
     def relay(self, controller, operation, patch, round_index):
         self.relayed.append((operation, patch, round_index))
         controller.emit_memory_round(operation, patch, round_index)
-
-    def account(self, idle_rounds, op):
-        self.calls.append((idle_rounds, op))
-        return object()
 
 
 class EngineProbe:
@@ -211,14 +206,9 @@ def test_recovery_uses_optional_speculation_and_skips_inert_cases():
     assert not recovery.has_finality_blockers
 
 
-def test_idle_policy_accounts_are_stateless_no_ops():
-    """Built-in idle accounts accept arbitrary values, return nothing, and mutate no state."""
-    operation = {"history": []}
-
+def test_policies_are_stateless():
     for policy in (Ignore(), ExtendStream(), SeparateDecodeJobs()):
-        assert policy.account(object(), operation) is None
         assert vars(policy) == {}
-    assert operation == {"history": []}
     assert vars(Eager()) == {}
     assert vars(Held()) == {}
 
@@ -373,8 +363,8 @@ def test_an_external_idle_policy_relays_through_the_controller():
 
 
 def test_controller_accounts_every_idle_round_except_on_a_live_protected_stream():
-    """Every idle cycle the QPU reports is emitted and accounted once; a patch on a
-    live protected stream emits through that stream instead."""
+    """Every idle cycle the QPU reports is emitted once; a patch on a live
+    protected stream emits through that stream instead."""
     idle_policy = ExternalIdlePolicy()
     controller, engine, qpu, _ = make_controller(idle_policy)
 
@@ -383,9 +373,7 @@ def test_controller_accounts_every_idle_round_except_on_a_live_protected_stream(
     controller.streams.live_protected_patches.add("patch-a")
     controller.emit_idle_round(7, "patch-a", 3)
 
-    operation = controller.runtime.operations[7]
     assert qpu.feedback_rounds == [(7, "patch-a", 1), (7, "patch-a", 2)]
-    assert idle_policy.calls == [(1, operation), (1, operation)]
     assert controller.runtime.idle_round_records == ["patch-a", "patch-a"]
     assert controller.runtime.idle_rounds_by_patch == {"patch-a": 2}
     assert controller.idle_rounds_emitted == 2

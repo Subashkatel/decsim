@@ -206,14 +206,11 @@ class WindowInteraction(Protocol):
 
 @runtime_checkable
 class IdlePolicy(Protocol):
-    """How idle rounds are handled while an op waits for feedback (see
+    """How idle rounds travel while an op waits for feedback (see
     controller/policies.py for the three built-in policies). relay() carries
-    one idle round through the controller it is given; account() records the
-    idle rounds emitted for an op."""
+    one idle round through the controller it is given."""
 
     def relay(self, controller, operation, patch, round_index: int) -> None: ...
-
-    def account(self, idle_rounds: int, op) -> None: ...
 
 
 # -------------------------------------------------------------- decode stage

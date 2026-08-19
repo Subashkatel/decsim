@@ -81,6 +81,16 @@ class StimDevice(_AtomicRunSeedConsumer):
             return None
         return tuple(int(bit) for bit in sampled)
 
+    def sampled_detection_events(self, operation_id) -> tuple[bool, ...]:
+        """The detection events sampled for this operation or stream identity,
+        in the circuit's detector order, as an immutable tuple of bools."""
+        sampled_events = self._dets.get(operation_id)
+        if sampled_events is None:
+            raise KeyError(
+                f"no sampled detection events for identity {operation_id!r}; "
+                "the operation has not begun")
+        return tuple(bool(bit) for bit in sampled_events)
+
     @staticmethod
     def _validate_sample_key(key) -> None:
         """Reject identities whose equality can alias a legal cache key."""

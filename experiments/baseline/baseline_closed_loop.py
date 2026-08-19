@@ -26,6 +26,8 @@ import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+import numpy as np
+import pymatching
 import stim
 import yaml
 
@@ -78,6 +80,9 @@ class ShotMeasurement:
     means: dict            # point -> mean us over windows of this shot
     maxes: dict            # point -> max us
     load: float            # chain service per window / window inter-arrival (rho)
+    direct_failure: bool   # whole-circuit PyMatching on the same sampled events failed
+    direct_mismatch: bool  # the loop's prediction differs from direct PyMatching's
+    backlog: list          # (time us, windows ready but not decoded) over the shot
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     decoder_utilization: float
@@ -90,8 +95,17 @@ def us(ticks: int) -> float:
 
 
 def load_config(path: Path) -> dict:
+    """The yaml as a dict; a file with `extends: other.yaml` starts from that
+    file's blocks (same folder) and overrides the blocks it names."""
+    path = Path(path)
     with open(path) as handle:
-        return yaml.safe_load(handle)
+        config = yaml.safe_load(handle)
+    base_name = config.pop("extends", None)
+    if base_name is None:
+        return config
+    base = load_config(path.parent / base_name)
+    base.update(config)
+    return base
 
 
 # ---- one run ---------------------------------------------------------------
@@ -251,6 +265,35 @@ def collect_samples(completed, decoder_engine) -> dict:
     return samples
 
 
+def direct_prediction(completed, circuit: stim.Circuit) -> tuple:
+    """Whole-circuit PyMatching on the detection events the device sampled:
+    the reference the loop must agree with."""
+    matching = pymatching.Matching.from_detector_error_model(
+        circuit.detector_error_model(decompose_errors=True))
+    operation_id = completed.result.operation_results[0].operation_id
+    events = np.asarray(completed.qpu.model._dets[operation_id], dtype=bool)
+    predicted = matching.decode(events)
+    return tuple(int(bit) for bit in predicted)
+
+
+def backlog_trajectory(completed) -> list:
+    """(time us, number of windows whose data is complete but whose decode is
+    not done) at every change, over the shot."""
+    changes = []
+    for window in completed.window_manager.windows.values():
+        if window.t_data_complete is None or window.t_done is None:
+            continue
+        changes.append((window.t_data_complete, +1))
+        changes.append((window.t_done, -1))
+    changes.sort()
+    trajectory = [(0.0, 0)]
+    outstanding = 0
+    for tick, delta in changes:
+        outstanding += delta
+        trajectory.append((us(tick), outstanding))
+    return trajectory
+
+
 def chain_load(samples: dict, config: dict, round_period_us: float) -> float:
     """rho: the serial chain's service per window (unit assigned -> decode done,
     plus the DD boundary handoff) over the window inter-arrival time (commit
@@ -284,22 +327,28 @@ def measure_shot(config: dict, *, physical_error_probability: float, round_perio
     samples = collect_samples(completed, decoder_engine)
     decoded_windows = len(samples["service"])
     load = chain_load(samples, config, round_period_us)
+    operation_result = completed.result.operation_results[0]
+    truth = tuple(operation_result.observable_truth)
+    loop_prediction = tuple(operation_result.logical_observables)
+    reference_prediction = direct_prediction(completed, spec.ops[0].circuit)
     windows = completed.window_manager.windows.values()
     first_round_tick = min(w.t_first_round for w in windows if w.t_first_round is not None)
     last_commit_tick = max(r.committed_ticks for r in completed.pauli_frame.snapshot().records)
     span_us = us(last_commit_tick - first_round_tick)
-    operation_result = completed.result.operation_results[0]
     queue_depths = [depth for _, depth in completed.decoder_manager.queue_log]
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,
         round_period_us=round_period_us, algorithm_latency_us=algorithm_latency_us,
         seed=seed, windows=decoded_windows,
-        logical_failure=operation_result.logical_observables != operation_result.observable_truth,
+        logical_failure=loop_prediction != truth,
         samples=samples,
         means={point: (statistics.fmean(values) if values else 0.0)
                for point, values in samples.items()},
         maxes={point: (max(values) if values else 0.0) for point, values in samples.items()},
         load=load,
+        direct_failure=reference_prediction != truth,
+        direct_mismatch=loop_prediction != reference_prediction,
+        backlog=backlog_trajectory(completed),
         throughput_windows_per_us=decoded_windows / span_us,
         throughput_rounds_per_us=config["rounds_per_shot"] / span_us,
         decoder_utilization=sum(samples["service"]) / span_us,
@@ -347,6 +396,8 @@ def summarize_point(group: list) -> dict:
     physical_error_probability, algorithm_latency_us, round_period_us = sweep_point_of(group[0])
     failures = sum(m.logical_failure for m in group)
     ler_low, ler_high = wilson_interval(failures, len(group))
+    direct_failures = sum(m.direct_failure for m in group)
+    mismatches = sum(m.direct_mismatch for m in group)
     row = {"physical_error_probability": physical_error_probability,
            "algorithm_latency_us": algorithm_latency_us,
            "round_period_us": round_period_us,
@@ -356,6 +407,9 @@ def summarize_point(group: list) -> dict:
            "logical_error_rate": failures / len(group),
            "ler_wilson_low": ler_low,
            "ler_wilson_high": ler_high,
+           "direct_pymatching_failures": direct_failures,
+           "prediction_mismatches_vs_direct": mismatches,
+           "backlog_trajectory": group[0].backlog,
            "throughput_windows_per_us": statistics.fmean(m.throughput_windows_per_us for m in group),
            "throughput_rounds_per_us": statistics.fmean(m.throughput_rounds_per_us for m in group),
            "decoder_utilization": statistics.fmean(m.decoder_utilization for m in group),
@@ -367,6 +421,7 @@ def summarize_point(group: list) -> dict:
         for measurement in group:
             pooled.extend(measurement.samples[point])
         row[f"{point}_mean_us"] = statistics.fmean(m.means[point] for m in group)
+        row[f"{point}_median_us"] = percentile(pooled, 0.50)
         row[f"{point}_p99_us"] = percentile(pooled, 0.99)
         row[f"{point}_max_us"] = max(m.maxes[point] for m in group)
     return row
@@ -374,7 +429,8 @@ def summarize_point(group: list) -> dict:
 
 def summarize(measurements: list) -> list:
     """One row per sweep point, in a stable order."""
-    sweep_points = sorted({sweep_point_of(m) for m in measurements}, key=str)
+    sweep_points = sorted({sweep_point_of(m) for m in measurements},
+                          key=lambda point: (point[0], str(point[1]), -point[2]))
     rows = []
     for sweep_point in sweep_points:
         group = [m for m in measurements if sweep_point_of(m) == sweep_point]
@@ -391,15 +447,21 @@ def algorithm_label(algorithm_latency_us) -> str:
 
 
 def write_csv(rows: list, path: Path) -> None:
+    """Every scalar column; the backlog trajectory is a list and stays out of the CSV."""
+    scalar_rows = []
+    for row in rows:
+        scalar_row = {key: value for key, value in row.items() if key != "backlog_trajectory"}
+        scalar_rows.append(scalar_row)
     with open(path, "w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=list(scalar_rows[0]))
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(scalar_rows)
 
 
 def table_lines(rows: list) -> list:
-    head = (["p", "algo us", "round us", "rate MHz", "load", "LER", "fails/shots", "win/us", "rounds/us",
-             "util", "max q"] + list(POINTS) + ["reaction p99"])
+    head = (["p", "algo us", "round us", "rate MHz", "load", "LER", "fails/shots", "direct fails",
+             "mismatch vs direct", "win/us", "rounds/us", "util", "max q"] + list(POINTS)
+            + ["ready->frame median", "ready->frame p99"])
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for row in rows:
         algorithm = row["algorithm_latency_us"]
@@ -410,12 +472,15 @@ def table_lines(rows: list) -> list:
                  f"{row['load']:.2f}",
                  f"{row['logical_error_rate']:.3f}",
                  f"{row['logical_failures']}/{row['shots']}",
+                 f"{row['direct_pymatching_failures']}",
+                 f"{row['prediction_mismatches_vs_direct']}",
                  f"{row['throughput_windows_per_us']:.4f}",
                  f"{row['throughput_rounds_per_us']:.3f}",
                  f"{row['decoder_utilization']:.3f}",
                  f"{row['max_queued_windows']}"]
         cells += [f"{row[f'{point}_mean_us']:.3f}" for point in POINTS]
-        cells.append(f"{row['reaction_first_round_p99_us']:.3f}")
+        cells.append(f"{row['last_round_to_frame_median_us']:.3f}")
+        cells.append(f"{row['last_round_to_frame_p99_us']:.3f}")
         lines.append("| " + " | ".join(cells) + " |")
     return lines
 

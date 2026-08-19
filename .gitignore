@@ -65,3 +65,6 @@ experiments/scratch*/
 /HANDOFF_*.md
 /DESIGN_*.md
 /*.html
+
+# core dumps
+core.[0-9]*

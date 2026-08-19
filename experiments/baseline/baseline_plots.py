@@ -141,6 +141,7 @@ def backlog_plot(rows: list, algorithms: list, path: Path) -> None:
     overloaded) per decoder card, each with its own time axis. A trace that
     stays low keeps up; one that climbs does not."""
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import MaxNLocator
     columns = 3
     figure, axes = plt.subplots(len(algorithms), columns, figsize=(4.0 * columns, 2.6 * len(algorithms)),
                                 squeeze=False)
@@ -159,6 +160,7 @@ def backlog_plot(rows: list, algorithms: list, path: Path) -> None:
                 times.append(time_us)
                 depths.append(depth)
             axis.step(times, depths, where="post", color="tab:blue")
+            axis.yaxis.set_major_locator(MaxNLocator(integer=True))
             axis.set_title(f"{operating_point_name(row)}, {round_period_us(row):g} µs rounds, "
                            f"{algorithm_label(algorithm)} decoder", fontsize=8)
             axis.set_xlabel("Time (µs)", fontsize=8)

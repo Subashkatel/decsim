@@ -1,6 +1,9 @@
-"""The typed messages the simulator's modules pass to each other.
-
-"""
+"""The vocabulary every component speaks: the frozen values that travel
+between the QPU, the controller, Buffer 0, the window manager, the decoders
+and the Pauli frame (readouts, payloads, packets, windows, plans, jobs,
+results, boundaries, requests, seeds), and the stable-identity helpers that
+make operation and window keys hashable and orderable across types. Nothing
+here has behavior beyond a value's own derived views."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -502,12 +505,10 @@ class DecoderServiceKey:
 
 @dataclass
 class DecodeJob:
-    """One unit of decoder work in the ``logical_reference`` profile.
-
-    During the Phase-A migration, ``payloads`` is an upstream source view used
-    to construct the decoder memory value. Decoders must not observe it before
-    input-transfer completion. Boundary processing may replace an entry with a
-    new immutable transformed fragment. The field is removed in Phase B.
+    """One unit of decoder work: a window's rounds, its model, its identity
+    in the decoder queues, and the timestamps of its life. ``payloads`` is the
+    Buffer 0 view of the rounds until the transfer lands them in a unit's
+    memory (``decoder_input``); a decoder reads only its unit's memory.
     """
 
     op_id: int                               # operation the window belongs to

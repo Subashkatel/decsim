@@ -38,17 +38,18 @@ from experiments.baseline.baseline_closed_loop import (DEFAULT_CONFIG, build_run
 REPORT = Path(__file__).resolve().parents[1] / "results" / "validation" / "windowing_vs_reference.md"
 
 
-def run_loop(config: dict, scheme: str, seed: int):
+def run_loop(config: dict, scheme: str, physical_error_probability: float, seed: int):
     """One shot through the loop with the named scheme; returns the completed run."""
     point_config = dict(config)
     point_config["windowing"] = dict(config["windowing"], scheme=scheme)
-    spec, _ = build_run(point_config, round_period_us=1.0, algorithm_latency_us=0.028, seed=seed)
+    spec, _ = build_run(point_config, physical_error_probability=physical_error_probability,
+                        round_period_us=1.0, algorithm_latency_us=0.028, seed=seed)
     return spec.build()
 
 
 def sampled_events(done, operation_id: int) -> np.ndarray:
     """The detection events the QPU device sampled for this shot."""
-    return np.asarray(done.qpu.model._dets[operation_id], dtype=bool)
+    return np.asarray(done.qpu.model.sampled_detection_events(operation_id), dtype=bool)
 
 
 def prediction(done) -> tuple:
@@ -83,8 +84,8 @@ def no_window_timing_rule(done, config: dict) -> tuple:
 def main(argv) -> None:
     shots = int(argv[1]) if len(argv) > 1 else 200
     config = load_config(DEFAULT_CONFIG)
-    config["physical_error_probability"] = 0.005     # enough failures to compare rates
-    circuit = memory_circuit(config)
+    physical_error_probability = 0.005               # enough failures to compare rates
+    circuit = memory_circuit(config, physical_error_probability)
     matching = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
 
@@ -92,8 +93,8 @@ def main(argv) -> None:
     disagreements = {"sliding": 0, "naive_online": 0}
     timing_problems = 0
     for seed in range(shots):
-        sliding = run_loop(config, "sliding", seed)
-        unwindowed = run_loop(config, "naive_online", seed)
+        sliding = run_loop(config, "sliding", physical_error_probability, seed)
+        unwindowed = run_loop(config, "naive_online", physical_error_probability, seed)
         events = sampled_events(sliding, 1)
         if not np.array_equal(events, sampled_events(unwindowed, 1)):
             raise RuntimeError(f"seed {seed}: the two runs sampled different shots")
@@ -113,7 +114,7 @@ def main(argv) -> None:
 
     lines = ["# Gate 9: windowed and unwindowed loop vs whole-circuit PyMatching, same shots", "",
              f"Circuit: {config['code_task']} d={config['distance']}, {config['rounds_per_shot']} rounds, "
-             f"p={config['physical_error_probability']}, {shots} shots, identical detection events to all three.", "",
+             f"p={physical_error_probability}, {shots} shots, identical detection events to all three.", "",
              "| decoder | logical failures | LER | shots disagreeing with PyMatching |",
              "|---|---|---|---|"]
     for name in ("sliding", "naive_online", "pymatching"):

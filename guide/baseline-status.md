@@ -146,6 +146,49 @@ Status vocabulary:
   the program's decoded-at round agrees (38) and the window lists are
   printed. 833 checks, 0 disagreements, PASS; a one-round latency
   perturbation produces 20 disagreements.
+- Gate 9 (2026-08-19, `experiments/validation/validate_windowing_vs_reference.py`,
+  `experiments/results/validation/windowing_vs_reference.md`): windowed and
+  unwindowed decoding through the whole loop against whole-circuit PyMatching
+  on the identical sampled detection events, d=3, 60 rounds, p=0.005, 200
+  shots. The no-window loop (naive_online) predicts exactly what PyMatching
+  predicts on every shot (0 disagreements, identical LER 0.26); the sliding
+  loop differs only on equal-weight tie-breaks. The no-window decode obeys
+  its timing rule (dispatch at the last round, done after CWD + fetch +
+  algorithm + release, commit after WDO + frame) on 200/200 shots. PASS.
+- Gate 10 (2026-08-19, `experiments/validation/validate_timing_invariance.py`,
+  `experiments/results/validation/timing_invariance.md`): timing knobs must
+  not change what the loop decodes. 50 seeds x 8 timing points (round
+  periods 1.0/0.9/0.5/0.1 us x preset algorithm cards 0.028/0.28 us), same
+  circuit and seed per comparison: sampled detection events, observable
+  truth, windowed prediction, whole-circuit PyMatching prediction and the
+  logical-failure result identical at all 400 comparisons (16/50 seeds had a
+  real logical failure, so check 5 was exercised); the last frame commit
+  tick moved between the slowest and fastest round period on every seed.
+  PASS.
+- Focused review fixes (2026-08-19), applied after an outside review of the
+  baseline experiment; validated by `python -m pytest -q tests` (629 passed),
+  `python -m experiments.refactor_lock check` (34/34 unchanged) and Gates
+  7 (132 checks PASS), 8 (833 checks PASS), 9 (PASS), 10 (PASS):
+  - Decoder-card wording: the yaml's fixed cards price the PyMatching
+    functional decoder's algorithm core only (fetch and release are charged
+    separately), so 0.028 us is a LILLIPUT-class core, not LILLIPUT's total
+    28 ns input-to-correction latency; 0.28 us is a 10x sensitivity card
+    with no separate hardware source.
+  - Latency-metric origins: `last_round_to_frame` and `reaction_first_round`
+    started the clock at Buffer 0 publication and are renamed
+    `buffer0_ready_to_frame` and `buffer0_first_round_to_frame`; new
+    QPU-origin points `qpu_last_round_to_frame` and `qpu_first_round_to_frame`
+    start at the round's QC send, so they add QC + controller processing +
+    packing + C2B (0.258 us at the reference cards).
+  - `c2b.bits_per_us: null` now honors the yaml contract (unbounded
+    bandwidth, propagation only): `with_controller_to_buffer_edge` builds no
+    capacity when the rate is null; two contract tests added in
+    `tests/12_links/test_c2b_q062.py` (finite serialization, unbounded).
+  - Sweep knee points 0.9, 0.85, 0.8 us added between 1.0 and 0.5 us
+    (the 0.028 card's load = 1 sits near a 0.85 us round period).
+  - Sampled detection events are now a public read-only API,
+    `StimDevice.sampled_detection_events(operation_id)`; Gate 9 and the
+    experiment's direct-PyMatching reference no longer read `_dets`.
 
 ## Core rewrite (2026-08-18, commits 7eda59b to HEAD on audit/evidence-first-rebuild)
 

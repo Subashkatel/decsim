@@ -116,8 +116,8 @@ def reaction_plot(rows: list, algorithms: list, path: Path) -> None:
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     for algorithm in algorithms:
         group = rows_of_card(rows, algorithm)
-        median = values_by_time(group, times, "last_round_to_frame_median_us")
-        p99 = values_by_time(group, times, "last_round_to_frame_p99_us")
+        median = values_by_time(group, times, "buffer0_ready_to_frame_median_us")
+        p99 = values_by_time(group, times, "buffer0_ready_to_frame_p99_us")
         line, = axis.plot(positions, median, "o-", label=card_label(algorithm))
         axis.plot(positions, p99, "--", color=line.get_color(), alpha=0.8)
     category_axis(axis, times)

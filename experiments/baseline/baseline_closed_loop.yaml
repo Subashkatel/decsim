@@ -17,9 +17,14 @@ windowing:
 sweep:
   physical_error_probability: [0.001]        # p on every physical operation, as Stim's guide and sinter do: after_clifford_depolarization,
                                              # before_round_data_depolarization, before_measure_flip_probability, after_reset_flip_probability
-  round_period_us: [10.0, 5.0, 2.0, 1.0, 0.5, 0.2, 0.1, 0.05, 0.02]   # input round period (QEC cycle time seen by the controller), slow to fast
-  algorithm_latency_us: [0.028, 0.28, measured]       # weak decoder algorithm latency per window, or "measured":
-                                             # 0.028 = LILLIPUT [d=3, m=2] 7 cycles at 250 MHz, 2108.06569 sec. 6.3 and Table 4 (ASIC card)
+  round_period_us: [10.0, 5.0, 2.0, 1.0, 0.9, 0.85, 0.8, 0.5, 0.2, 0.1, 0.05, 0.02]   # input round period (QEC cycle time seen by the controller),
+                                             # slow to fast; 0.9/0.85/0.8 bracket the load = 1 knee of the 0.028 card
+  algorithm_latency_us: [0.028, 0.28, measured]       # per-window latency of the PyMatching functional decoder's algorithm core, or "measured".
+                                             # Each card prices the algorithm stage ONLY; fetch and release cycles are charged separately
+                                             # below, so no card is a total decoder latency.
+                                             # 0.028 = LILLIPUT-class algorithm core: [d=3, m=2] 7 cycles at 250 MHz, 2108.06569 sec. 6.3 and Table 4
+                                             #         (LILLIPUT's 28 ns is its FPGA input-to-correction latency; here it prices the core alone)
+                                             # 0.28  = 10x algorithm-latency sensitivity card (no separate hardware source)
                                              # measured = wall clock of each real PyMatching call on this host (software decoder)
   shots: 10
 

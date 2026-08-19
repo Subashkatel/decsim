@@ -162,53 +162,17 @@ class DynamicWindows:
         if stream_state["sealed"]:
             return
         wm.validate_stream_length(stream_id, stream_round_count)
-
-        local_state_snapshot = (
-            stream_state["next_window"],
-            stream_state["sealed_round_count"],
-            stream_state["sealed"],
+        self.grow(
+            stream_id,
+            rounds_to_plan=stream_round_count,
+            sealed_round_cap=stream_round_count,
         )
-        seal_phase = "window growth"
-        try:
-            self.grow(
-                stream_id,
-                rounds_to_plan=stream_round_count,
-                sealed_round_cap=stream_round_count,
-            )
-            if stream_state["finite_geometries"] is None:
-                seal_phase = "tail trimming"
-                self._trim_tail(stream_id, stream_round_count)
-        except Exception as error:
-            (
-                stream_state["next_window"],
-                stream_state["sealed_round_count"],
-                stream_state["sealed"],
-            ) = local_state_snapshot
-            raise RuntimeError(
-                f"FAIL_STOP: sealing stream {stream_id!r} at "
-                f"{stream_round_count} rounds failed during {seal_phase}; local "
-                "seal state was restored, but delegated WindowManager side "
-                "effects may not be rollbackable, so execution cannot continue"
-            ) from error
-
+        if stream_state["finite_geometries"] is None:
+            self._trim_tail(stream_id, stream_round_count)
         stream_state["sealed_round_count"] = stream_round_count
         stream_state["sealed"] = True
-        try:
-            wm.check_windows_for_operation(stream_id)
-        except Exception as error:
-            raise RuntimeError(
-                f"FAIL_STOP: stream {stream_id!r} sealed at "
-                f"{stream_round_count} rounds, but its postcommit window check "
-                "failed; execution cannot continue"
-            ) from error
-        try:
-            wm.finish_workload_if_ready()
-        except Exception as error:
-            raise RuntimeError(
-                f"FAIL_STOP: stream {stream_id!r} sealed at "
-                f"{stream_round_count} rounds, but its postcommit workload "
-                "completion failed; execution cannot continue"
-            ) from error
+        wm.check_windows_for_operation(stream_id)
+        wm.finish_workload_if_ready()
 
     def _trim_tail(self, stream_id, stream_round_count: int) -> None:
         """Clip the final open-stream commit region to the sealed length."""

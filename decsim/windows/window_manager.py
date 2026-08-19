@@ -882,6 +882,16 @@ class WindowManager:
             self.courier.hold((job.op_id, job.window_id),
                               HeldBoundary(job.request_key, op.id, boundary))
 
+    def uncommit_window(self, window: Window) -> None:
+        """A committed window is about to be replayed: it leaves the committed set."""
+        self.committed_windows.discard(window.key)
+        remaining = self._committed_per_op.get(window.op_id, 0) - 1
+        if remaining > 0:
+            self._committed_per_op[window.op_id] = remaining
+        else:
+            self._committed_per_op.pop(window.op_id, None)
+        window.committed = False
+
     def _commit_window(self, job: DecodeJob, res: DecodeResult, key: tuple,
                        window: Window, op: Operation) -> None:
         window.committed = True

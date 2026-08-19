@@ -273,14 +273,7 @@ class SpeculativeRecovery:
         runtime.ledger.drop(key)
         runtime.op_results.pop(window.op_id, None)
         if window.committed:
-            runtime.committed_windows.discard(key)
-            remaining = runtime._committed_per_op.get(window.op_id, 0) - 1
-            if remaining > 0:
-                runtime._committed_per_op[window.op_id] = remaining
-            else:
-                runtime._committed_per_op.pop(window.op_id, None)
-
-        window.committed = False
+            runtime.uncommit_window(window)
         window.queued = False
         window.blocked_logged = False
         window.t_queued = None

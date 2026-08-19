@@ -125,6 +125,27 @@ Status vocabulary:
   tick, CQ at OC delivery, the QPU instructed at CQ delivery, both ns-3
   FIFO). 132 checks, 0 disagreements, PASS; each reference was perturbed
   by one tick or one round to confirm the checks fail when they should.
+- Gate 8 (2026-08-19, `experiments/validate_loop_swiper.py`,
+  `experiments/results/validation/loop_swiper.md`): the whole weak-decoder
+  loop against SWIPER (Vittal et al., ASPLOS 2025; tmp/references/code/swiper,
+  run in its own Python 3.12 venv), an independent published simulator of
+  windowed decoding, on the same program with decsim's links set to zero.
+  Memory with sliding windows (commit d, buffer d): 24 configurations over
+  d in {3, 5}, 30 and 47 rounds, decoder latency 2, 5, 11 rounds, 1 and 2
+  units; every window's commit span, decode start round and result round
+  and the program's decoded-at round agree (SWIPER counts rounds from 0 and
+  records the last busy round; decsim from 1 and the tick the result
+  exists). Conditional S on a patch stream (idle d, idle d, S conditioned on
+  the second's decode; decsim: a dynamic stream with ExtendStream idle
+  rounds and a blocked operation): the rounds the conditional waits agree
+  in all six cases (5, 10, 18 at d=3; 7, 10, 18 at d=5 for latency 2, 5, 9)
+  and so do the stream's windows before the release; after the release
+  SWIPER cuts a short window at the instruction boundary while decsim keeps
+  full buffers (documented, not compared). Parallel windows: SWIPER's
+  source/sink construction and decsim's Skoric A/B are different windows;
+  the program's decoded-at round agrees (38) and the window lists are
+  printed. 833 checks, 0 disagreements, PASS; a one-round latency
+  perturbation produces 20 disagreements.
 
 ## Core rewrite (2026-08-18, commits 7eda59b to HEAD on audit/evidence-first-rebuild)
 

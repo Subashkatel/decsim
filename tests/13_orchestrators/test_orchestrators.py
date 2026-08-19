@@ -1,9 +1,9 @@
-"""Behavior tests for the logical measurement unit: a final result releases
-the operations conditioned on it, over the controller."""
+"""Behavior tests for conditional release: a final result releases the
+operations conditioned on it, over the controller."""
 
 from types import SimpleNamespace
 
-from decsim.orchestrator.logical_measurement import LogicalMeasurements
+from decsim.orchestrator.conditional_release import ConditionalRelease
 
 
 class RecordingEngine:
@@ -36,7 +36,7 @@ def result(logical_observables=None, **fields):
 
 
 def test_registration_keeps_order_and_duplicates():
-    unit = LogicalMeasurements(RecordingEngine())
+    unit = ConditionalRelease(RecordingEngine())
     unit.register_blocked_operation(9, 4)
     unit.register_blocked_operation(3, 4)
     unit.register_blocked_operation(9, 4)
@@ -47,7 +47,7 @@ def test_blocked_results_release_once_in_order_and_take_priority_over_return():
     """Blocked dependents are released first, in registration order, and the
     bucket is consumed; a later result of the same source falls back to a
     result return when the operation asks for one."""
-    unit = LogicalMeasurements(RecordingEngine(now=11))
+    unit = ConditionalRelease(RecordingEngine(now=11))
     source = operation(4, name="measure", requires_return=True)
     unit.register_blocked_operation(9, 4)
     unit.register_blocked_operation(3, 4)
@@ -70,7 +70,7 @@ def test_connected_integration_logs_then_relays_in_decision_order():
     engine = RecordingEngine(now=13, events=events)
     controller = RecordingController(events)
     sink = object()
-    unit = LogicalMeasurements(engine)
+    unit = ConditionalRelease(engine)
     unit.connect(controller, sink)
     unit.register_blocked_operation(12, 7)
     unit.register_blocked_operation(4, 7)

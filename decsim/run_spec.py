@@ -185,7 +185,7 @@ class RunSpec:
         from .controller.feedback_streams import FeedbackStreams, NoFeedbackStreams
         from .decoders.decoder_manager import DecoderManager
         from .orchestrator.execution_runtime import ExecutionRuntime
-        from .orchestrator.logical_measurement import LogicalMeasurements
+        from .orchestrator.conditional_release import ConditionalRelease
         from .qpu.cycle_clock import QPUDevice
         from .run_configuration import (check_factory_decode_service,
                                         resolve_run_configuration)
@@ -196,7 +196,7 @@ class RunSpec:
         config = resolve_run_configuration(self, root_seed)
         escalation_policy, plan, timing = config.escalation_policy, config.plan, config.timing
         orchestrator = (config.make_orchestrator(engine) if config.make_orchestrator
-                        else LogicalMeasurements(engine))
+                        else ConditionalRelease(engine))
         links = config.link_config.resolve()
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,

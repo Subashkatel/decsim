@@ -31,7 +31,7 @@ from decsim.links import link_profiles
 from decsim.links.link_profiles import with_controller_to_buffer_edge
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.orchestrator.pauli_frame import PauliFrameConfig
+from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 

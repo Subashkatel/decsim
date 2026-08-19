@@ -14,7 +14,7 @@ import stim
 from decsim.qpu.stim_device import StimDevice
 from decsim.decoders.decoders import PerRoundDecoder
 from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
-from decsim.orchestrator.qlx_frontend import qlx_frontend
+from decsim.frontends.qlx_frontend import qlx_frontend
 from decsim.message import OpKind
 from decsim.qpu.round_policies import GateRounds
 from decsim.run_spec import RunSpec

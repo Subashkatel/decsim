@@ -31,7 +31,7 @@ from decsim.decoders.decoder_engine import DecoderEngine, DecoderTiming
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.orchestrator.pauli_frame import PauliFrameConfig
+from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 

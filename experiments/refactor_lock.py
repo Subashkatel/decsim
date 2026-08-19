@@ -206,7 +206,7 @@ def stim_pymatching():
     from decsim.links.link_profiles import logical_reference_profile
     from decsim.message import Operation
     from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-    from decsim.orchestrator.pauli_frame import PauliFrameConfig
+    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
     from decsim.run_spec import RunSpec
     from decsim.qpu.round_policies import FixedRounds
     p = 0.003
@@ -350,7 +350,7 @@ def protected_chain_feedback():
 def _feedback_chain_spec(mode, idle_policy=None):
     from decsim.qpu.code_geometry import SurfaceCodeModel
     from decsim.decoders.decoders import PresetLatencyDecoder
-    from decsim.orchestrator.circuit_frontend import CircuitFrontend
+    from decsim.frontends.circuit_frontend import CircuitFrontend
     from decsim.message import Operation
     from decsim.observe.metrics import BacklogTrajectory, ConditionalReactionTime
     from decsim.qpu.round_policies import FixedRounds
@@ -492,7 +492,7 @@ def qlx_multi_fragment():
     from decsim.qpu.stim_device import StimDevice
     from decsim.config import TimingConfig
     from decsim.decoders.decoders import PerRoundDecoder
-    from decsim.orchestrator.qlx_frontend import qlx_frontend
+    from decsim.frontends.qlx_frontend import qlx_frontend
     from decsim.message import OpKind
     from decsim.qpu.round_policies import GateRounds
     from decsim.run_spec import RunSpec

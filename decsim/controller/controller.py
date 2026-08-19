@@ -41,7 +41,8 @@ class Controller:
         """The resolved QEC cycle length of one operation, in ticks."""
         return self._resolved_operations[operation.id].round_ticks
 
-    def _round_count_for(self, operation: Operation) -> int:
+    def round_count_for(self, operation: Operation) -> int:
+        """The resolved round count of one operation."""
         return self._resolved_operations[operation.id].round_count
 
     def connect_runtime(self, runtime) -> None:
@@ -79,7 +80,7 @@ class Controller:
         self.qpu.issue(RunOperationBody(
             operation=effective_operation,
             round_ticks=self.round_ticks_for(operation),
-            round_count=self._round_count_for(operation),
+            round_count=self.round_count_for(operation),
             source_round_count=self._resolved_operations[source_operation_id].round_count,
             emits_detector_data=operation.emits_detector_data,
             finalizes_stream_round=operation.finalizes_stream_round,

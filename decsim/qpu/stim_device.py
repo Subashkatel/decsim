@@ -68,6 +68,10 @@ class StimDevice(_AtomicRunSeedConsumer):
     def _key(op: Operation):
         return op.stream_id if op.stream_id is not None else op.id
 
+    def sampled_truth(self) -> dict:
+        """Every sampled observable-flip vector by operation or stream identity."""
+        return {key: tuple(int(bit) for bit in bits) for key, bits in self._truth.items()}
+
     def logical_observable_truth(
         self, operation_id: int
     ) -> Optional[tuple[int, ...]]:

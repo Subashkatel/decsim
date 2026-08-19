@@ -45,6 +45,11 @@ class Engine:
         event = Event(self.now + delay, priority, next(self._seq), action, label)
         heapq.heappush(self._event_queue, event)
 
+    @property
+    def idle(self) -> bool:
+        """No event is scheduled."""
+        return not self._event_queue
+
     def log(self, who: str, msg: str) -> None:
         """Store one timestamped log line and print it when verbose."""
         line = f"[{fmt(self.now)}] {who}: {msg}"

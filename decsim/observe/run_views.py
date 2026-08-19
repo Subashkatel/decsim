@@ -163,31 +163,6 @@ def utilization_view(decoder_manager) -> UtilizationView:
     return UtilizationView(busy, total, per_pool)
 
 
-def _rounds_decoded(window_manager, op_id) -> int:
-    """Rounds decoded in an unbroken prefix from round 1."""
-    committed_ranges = sorted(
-        (window_manager.windows[key].commit_lo,
-         window_manager.windows[key].commit_hi)
-        for key in window_manager.committed_windows
-        if key[0] == op_id)
-    decoded = 0
-    for start_round, end_round in committed_ranges:
-        if start_round <= decoded + 1:
-            decoded = max(decoded, end_round)
-        else:
-            break
-    return decoded
-
-
-def _patch_of(op, op_id):
-    """The patch a metric attributes an op to."""
-    if op is not None and op.patches:
-        return op.patches[0]
-    if op is not None and op.qubits:
-        return op.qubits[0]
-    return op_id
-
-
 def backlog_view(window_manager, decoder_manager,
                  include_rounds: bool = True) -> BacklogView:
     """Snapshot job queues + per-op/per-patch/system syndrome backlog.
@@ -202,14 +177,8 @@ def backlog_view(window_manager, decoder_manager,
         ready_jobs += sum(len(queue) for queue in pools.values())
 
     per_op, per_patch = [], {}
-    for op_id in sorted(
-        (window_manager._ops if include_rounds else ()),
-        key=stable_identity_order_key,
-    ):
-        waiting = max(0, window_manager.rounds_arrived.get(op_id, 0)
-                      - _rounds_decoded(window_manager, op_id))
+    for op_id, patch, waiting in (window_manager.rounds_backlog() if include_rounds else ()):
         per_op.append((op_id, waiting))
-        patch = _patch_of(window_manager._ops.get(op_id), op_id)
         per_patch[patch] = per_patch.get(patch, 0) + waiting
     return BacklogView(ready_jobs=ready_jobs,
                        per_lane=tuple(per_lane),
@@ -248,7 +217,7 @@ def reaction_view(execution_runtime) -> ReactionView:
     ops = tuple(
         OpReactionInfo(op=op_id, name=op.name, blocked_by=op.blocked_by,
                        round_ticks=controller.round_ticks_for(op),
-                       rounds=controller._round_count_for(op))
+                       rounds=controller.round_count_for(op))
         for op_id, op in sorted(
             execution_runtime.operations.items(),
             key=lambda item: stable_identity_order_key(item[0])))
@@ -265,14 +234,10 @@ def reaction_view(execution_runtime) -> ReactionView:
 
 def truth_view(window_manager, device) -> TruthView:
     """Snapshot sampled truth (device) next to published predictions."""
-    truth = getattr(device, "_truth", {}) or {}
-    observables = tuple(sorted(
-        (
-            (op_id, tuple(int(bit) for bit in bits))
-            for op_id, bits in truth.items()
-        ),
-        key=lambda item: stable_identity_order_key(item[0]),
-    ))
+    sampled_truth = getattr(device, "sampled_truth", None)
+    truth = sampled_truth() if sampled_truth is not None else {}
+    observables = tuple(sorted(truth.items(),
+                               key=lambda item: stable_identity_order_key(item[0])))
     predictions = tuple(sorted(
         window_manager.op_results.items(),
         key=lambda item: stable_identity_order_key(item[0]),
@@ -350,7 +315,7 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
             None if absorbed else contribution.commit_hi,
             "absorbed" if absorbed else contribution.ownership_kind,
             absorbed_into, None if absorbed else
-            window_manager._selected_request_keys.get(key)))
+            window_manager.selected_request_key(key)))
     return SwitchingRecordsView(
         tuple(rows), decoder_manager.terminal_request_records_snapshot(),
         decoder_manager.terminal_service_records_snapshot())
@@ -389,7 +354,7 @@ def capture_primary_result(engine, execution_runtime, window_manager, operations
             operation_id, status, bits, stream_offset, actual, failure))
     metric_rows = tuple(MetricResultRecord(name, copy.deepcopy(metric.result()))
                         for name, metric in metric_bindings)
-    if engine._event_queue or not execution_runtime.workload_complete:
+    if not engine.idle or not execution_runtime.workload_complete:
         raise RuntimeError("primary run ended before workload completed")
     return PrimaryRunResult(
         "complete", True, True, True, execution_runtime.last_finish_time, engine.now,

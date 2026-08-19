@@ -1,6 +1,7 @@
 """Contract tests for link cards, vocabulary, and trust boundaries."""
 
 from dataclasses import replace
+from types import MappingProxyType
 from fractions import Fraction
 import math
 from pathlib import Path
@@ -155,9 +156,9 @@ def test_unwired_optional_path_is_rejected_before_attribution(monkeypatch):
     """An unwired declared optional path fails before attribution is inspected."""
     path = LinkPath.CQ
     rule = links_module._PATH_RULES[path]
-    monkeypatch.setitem(
-        links_module._PATH_RULES, path, replace(rule, required=False)
-    )
+    monkeypatch.setattr(
+        links_module, "_PATH_RULES",
+        MappingProxyType({**links_module._PATH_RULES, path: replace(rule, required=False)}))
     model = replace(logical_reference_profile(), cq=None).resolve()
     assert path not in model.paths
 

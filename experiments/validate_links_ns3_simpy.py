@@ -33,6 +33,10 @@ FIFO; (4) many channels of a full reference fabric with a random but fixed
 send schedule. Compared per transfer: serializer start, serializer end and
 delivery tick, exactly (integer ticks; the references compute in exact
 rationals and are rounded to ticks the same way decsim's us() rounds).
+(5) A whole closed loop on real Stim data with the bandwidth-limited card:
+every transfer in the ledger carries the real payload (the round's detector
+bits, a window's summed bits), its timing arithmetic holds, and its queue
+wait equals ns-3's FIFO replayed over its channel.
 
 Usage: python -m experiments.validate_links_ns3_simpy
 """
@@ -229,6 +233,88 @@ def case_random_fabric():
     return "reference fabric, random fixed schedule on QC and CWD", rows, ok
 
 
+def case_real_run_payloads():
+    """A whole closed loop (Stim rotated memory d=3, 12 rounds, the bandwidth
+    limited card at a quarter of its rates so every channel queues) and, from
+    its traffic ledger, three checks per transfer: (a) the payload the link
+    priced is the real one (QC: the detector bits of that round; CWD per
+    window: the sum of its rounds' bits; C2B: the packed round's bits);
+    (b) serialization = round(bits / bandwidth) and delivery = send + wait +
+    serialization + propagation; (c) the queue waits equal ns-3's FIFO rule
+    replayed over that channel's transfers in send order."""
+    import stim
+    from decsim.links.link_profiles import bandwidth_limited_profile, with_controller_to_buffer_edge
+    from decsim.decoders.decoders import PresetLatencyDecoder
+    from decsim.message import Operation
+    from decsim.qpu.round_policies import FixedRounds
+    from decsim.qpu.stim_device import StimDevice
+    from decsim.run_spec import RunSpec
+    rounds = 12
+    circuit = stim.Circuit.generated("surface_code:rotated_memory_z", rounds=rounds, distance=3,
+                                     after_clifford_depolarization=0.003)
+    op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
+    links = with_controller_to_buffer_edge(bandwidth_limited_profile(capacity_scale=0.25),
+                                           latency_us=0.1, aggregate_bits_per_us=8.0, source="gate6 c2b")
+    done = RunSpec(ops=[op], d=3, rounds_policy=FixedRounds(rounds), device=StimDevice(),
+                   decoder=PresetLatencyDecoder(1.0), num_units=1, links=links, seed=3).build()
+    report = done.result.link_traffic
+    transfers = report["transfers"]
+    # detectors per emitted round: the circuit's own chronology (the final
+    # data-qubit detectors belong to the last round; Gate 5 checked the bits)
+    from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
+    bits_of_round = {}
+    for round_index in resolve_detector_rounds(circuit, None, rounds).values():
+        bits_of_round[round_index] = bits_of_round.get(round_index, 0) + 1
+    windows = done.window_manager.windows
+    checks = {"payload equals the real bits": 0, "timing arithmetic": 0, "FIFO waits equal ns-3": 0}
+    problems = []
+    for row in transfers:
+        bits = row["payload_bits"]
+        if row["path"] == "qc":
+            round_index = row["attribution"]["round_lo"]
+            expected = bits_of_round[round_index]
+            if bits != expected:
+                problems.append(("qc bits", round_index, bits, expected))
+            checks["payload equals the real bits"] += 1
+        elif row["path"] == "cwd" and row["attribution"]["window_id"] is not None:
+            window = windows[(1, row["attribution"]["window_id"])]
+            expected = sum(bits_of_round[r]
+                           for r in range(window.start_round, min(window.buffer_hi, rounds) + 1))
+            if bits != expected:
+                problems.append(("cwd bits", row["attribution"]["window_id"], bits, expected))
+            checks["payload equals the real bits"] += 1
+        elif row["path"] == "c2b":
+            round_index = row["attribution"]["round_lo"]
+            expected = bits_of_round[round_index]
+            if bits != expected:
+                problems.append(("c2b bits", round_index, bits, expected))
+            checks["payload equals the real bits"] += 1
+        arithmetic = (row["delivery_ticks"] == row["send_ticks"] + row["queue_wait_ticks"]
+                      + row["serialization_ticks"] + row["propagation_ticks"])
+        if not arithmetic:
+            problems.append(("arithmetic", row["path"], row["send_ticks"]))
+        checks["timing arithmetic"] += 1
+    # (c) per physical channel: replay ns-3 over the transfers in send order
+    channel_of = {edge["path"]: edge["physical_alias"] for edge in report["semantic_edges"]}
+    fabric = links.resolve().snapshot()
+    rate_of_alias = {ch.alias: (None if ch.config.capacity is None else ch.config.capacity.aggregate_bits_per_us,
+                                ch.config.propagation_latency_ticks) for ch in fabric.channels}
+    by_channel = {}
+    for row in transfers:
+        by_channel.setdefault(channel_of[row["path"]], []).append(row)
+    for alias, rows in by_channel.items():
+        rows.sort(key=lambda r: (r["send_ticks"], r["physical_sequence"]))
+        rate, propagation = rate_of_alias[alias]
+        sends = [(r["send_ticks"], r["payload_bits"] if r["payload_bits"] is not None else 0) for r in rows]
+        expected = ns3_point_to_point(sends, bits_per_us=rate, propagation_ticks=propagation)
+        for r, (tx_start, tx_complete, receive) in zip(rows, expected):
+            ours = (r["serializer_start_ticks"], r["serializer_end_ticks"], r["delivery_ticks"])
+            if ours != (tx_start, tx_complete, receive):
+                problems.append(("fifo", alias, r["path"], ours, (tx_start, tx_complete, receive)))
+            checks["FIFO waits equal ns-3"] += 1
+    return checks, problems, len(transfers)
+
+
 def main(argv) -> None:
     lines = ["# Gate 6: decsim links vs ns-3 point-to-point and a SimPy store-and-forward model", "",
              "Per transfer: (serializer start, serializer end, delivery) in ticks (1 us = 1,000,000). "
@@ -248,6 +334,16 @@ def main(argv) -> None:
     all_ok = all_ok and ok
     lines += [f"## {title}", "", "| path | sends | decsim = ns-3 = SimPy |", "|---|---|---|"]
     lines += [f"| {p} | {n} | {'yes' if a else 'NO'} |" for p, n, a in rows]
+    checks, problems, transfer_count = case_real_run_payloads()
+    all_ok = all_ok and not problems
+    lines += ["", "## a real closed loop: Stim rotated memory d=3, 12 rounds, bandwidth-limited card at 0.25, priced C2B",
+              "", f"{transfer_count} transfers in the ledger.", "", "| check | transfers checked | problems |", "|---|---|---|"]
+    kind_of = {"payload equals the real bits": ("qc bits", "cwd bits", "c2b bits"),
+               "timing arithmetic": ("arithmetic",), "FIFO waits equal ns-3": ("fifo",)}
+    lines += [f"| {name} | {count} | {sum(1 for p in problems if p[0] in kind_of[name])} |"
+              for name, count in checks.items()]
+    if problems:
+        lines += ["", "Problems: " + "; ".join(map(str, problems[:10]))]
     lines += ["", f"Verdict: {'PASS' if all_ok else 'FAIL'}. decsim's Link is ns-3's point-to-point link "
               "with an unbounded drop-tail queue and no inter-frame gap: one serializer per channel, "
               "first come first served, bits / bandwidth, then a fixed propagation delay; two semantic "

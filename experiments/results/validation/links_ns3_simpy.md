@@ -38,4 +38,14 @@ Per transfer: (serializer start, serializer end, delivery) in ticks (1 us = 1,00
 | qc | 12 | yes |
 | cwd | 12 | yes |
 
+## a real closed loop: Stim rotated memory d=3, 12 rounds, bandwidth-limited card at 0.25, priced C2B
+
+32 transfers in the ledger.
+
+| check | transfers checked | problems |
+|---|---|---|
+| payload equals the real bits | 27 | 0 |
+| timing arithmetic | 32 | 0 |
+| FIFO waits equal ns-3 | 32 | 0 |
+
 Verdict: PASS. decsim's Link is ns-3's point-to-point link with an unbounded drop-tail queue and no inter-frame gap: one serializer per channel, first come first served, bits / bandwidth, then a fixed propagation delay; two semantic paths on one channel share that serializer, and the per-path counters reconcile with the channel's. What decsim adds on top is the attribution ledger (whose transfer this was, on which path, for which window or round), which ns-3 has no counterpart for.

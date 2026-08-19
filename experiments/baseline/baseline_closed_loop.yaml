@@ -19,7 +19,7 @@ controller:
   t_pack_us: 0.0                             # one fragment per round makes packing a no-op (StimDevice emits one fragment)
 links:                                       # one card per path: propagation latency and capacity (null = unbounded, propagation only)
   qc:  {latency_us: 0.15, bits_per_us: null}  # QPU -> controller, one readout
-  c2b: {latency_us: 0.10, bits_per_us: 1000.0}# controller -> Buffer 0, one round
+  c2b: {latency_us: 0.10, bits_per_us: 1000.0} # controller -> Buffer 0, one round
   cwd: {latency_us: 2.0,  bits_per_us: null}  # Buffer 0 -> weak decoder memory, one window
   wsd: {latency_us: 0.5,  bits_per_us: null}  # weak -> strong escalation (unused in the baseline)
   csd: {latency_us: 2.0,  bits_per_us: null}  # controller -> strong decoder (unused in the baseline)

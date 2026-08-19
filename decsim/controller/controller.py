@@ -128,7 +128,6 @@ class Controller:
         self.idle_policy.relay(self, operation, patch, round_index)
         self.runtime.record_idle_round(patch)
         self.idle_rounds_emitted += 1
-        self.idle_policy.account(1, operation)
 
     def emit_memory_round(self, operation: Operation, patch, round_index: int) -> None:
         """An idle round travels as an ordinary feedback-memory round of the operation."""

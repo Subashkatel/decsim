@@ -1,10 +1,7 @@
-"""Policies supplied through ``RunSpec`` at the two runtime seams.
-
-``RunSpec.boundary_policy`` reaches ``WindowManager`` for ``on_commit`` and
-optional speculative recovery. ``RunSpec.idle_policy`` reaches ``Controller``
-for mode routing and account callbacks. Compatible external objects enter
-through ``RunSpec`` without registration.
-"""
+"""The two policy seams a RunSpec fills: ``boundary_policy`` tells the window
+manager when a committed boundary ships (Eager, Held); ``idle_policy`` tells
+the controller how an idle round of a waiting patch travels (Ignore,
+ExtendStream, SeparateDecodeJobs). Any object with the same methods works."""
 
 
 class Eager:
@@ -24,15 +21,12 @@ class Held:
         return final
 
 
-
 class Ignore:
     """Idle rounds travel as ordinary feedback-memory rounds and cost no extra decode work."""
 
     def relay(self, controller, operation, patch, round_index: int) -> None:
         controller.emit_memory_round(operation, patch, round_index)
 
-    def account(self, idle_rounds: int, op) -> None:
-        pass
 
 
 class ExtendStream:
@@ -43,8 +37,6 @@ class ExtendStream:
         if not controller.extend_live_stream(operation, patch):
             controller.emit_memory_round(operation, patch, round_index)
 
-    def account(self, idle_rounds: int, op) -> None:
-        pass
 
 
 class SeparateDecodeJobs:
@@ -56,5 +48,3 @@ class SeparateDecodeJobs:
         controller.emit_memory_round(operation, patch, round_index)
         controller.submit_idle_decode_if_due(operation, patch, round_index)
 
-    def account(self, idle_rounds: int, op) -> None:
-        pass

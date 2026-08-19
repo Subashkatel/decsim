@@ -683,7 +683,7 @@ def test_run_spec_refuses_invalid_public_seeds(seed, error):
         RunSpec(ops=[], seed=seed).build()
 
 
-def test_run_spec_binding_failure_precedes_orchestrator_connection():
+def test_run_spec_binding_failure_precedes_conditional_release_connection():
     """A seed reservation failure stops the build before runtime owners are connected."""
     events = []
 
@@ -696,7 +696,7 @@ def test_run_spec_binding_failure_precedes_orchestrator_connection():
         def connect(self, controller, callback):
             events.append("connect")
 
-    def make_orchestrator(engine):
+    def make_conditional_release(engine):
         events.append("construct")
         return OrchestratorProbe()
 
@@ -704,7 +704,7 @@ def test_run_spec_binding_failure_precedes_orchestrator_connection():
         RunSpec(
             ops=[],
             boundary_policy=FailingPolicy("boundary"),
-            make_orchestrator=make_orchestrator,
+            make_conditional_release=make_conditional_release,
             seed=4,
         ).build()
 

@@ -84,7 +84,7 @@
 "[ 21.150 us] DecoderCluster: B W3 [commit 10-12] READY -> enqueue (ready-queue length = 1)",
 "[ 21.150 us] DecoderCluster: ASSIGN UNIT B W3 [commit 10-12] (waited 0.000 us in queue, units free now 1)",
 "[ 21.650 us] DecoderCluster: DECODE DONE A W2 [commit 7-9]",
-"[ 21.650 us] Orchestrator: DISPATCH conditional release for op#2 -> controller -> controller sequencer",
+"[ 21.650 us] PauliFrame: DISPATCH conditional release for op#2 -> controller -> controller sequencer",
 "[ 21.650 us] DecoderCluster: DECODE DONE B W2 [commit 7-9]",
 "[ 22.150 us] DecoderCluster: memory round for A (idle buffer rounds: 5)",
 "[ 23.150 us] DecoderCluster: START DECODE B W3 [commit 10-12]",

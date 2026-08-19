@@ -118,7 +118,7 @@ class CompletedRun:
     execution_runtime: Any
     controller: Any
     qpu: Any
-    orchestrator: Any
+    conditional_release: Any
     factory: Any
     syndrome_buffer: Any
     syndrome_ingress: Any
@@ -166,7 +166,7 @@ class RunSpec:
     make_factory: Optional[Callable] = None
     make_metrics: Optional[Callable] = None
     record_switching_windows: bool = False
-    make_orchestrator: Optional[Callable] = None
+    make_conditional_release: Optional[Callable] = None
     seed: Optional[int] = 0
     _built: bool = field(default=False, init=False, repr=False)
 
@@ -195,8 +195,9 @@ class RunSpec:
 
         config = resolve_run_configuration(self, root_seed)
         escalation_policy, plan, timing = config.escalation_policy, config.plan, config.timing
-        orchestrator = (config.make_orchestrator(engine) if config.make_orchestrator
-                        else ConditionalRelease(engine))
+        conditional_release = (config.make_conditional_release(engine)
+                               if config.make_conditional_release
+                               else ConditionalRelease(engine))
         links = config.link_config.resolve()
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,
@@ -210,7 +211,7 @@ class RunSpec:
             engine, scheme=config.scheme, code_geometry=plan.code_geometry,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches,
-            links=links, orchestrator=orchestrator,
+            links=links, conditional_release=conditional_release,
             boundary_policy=config.boundary_policy,
             window_interaction=config.window_interaction,
             planning_view_by_operation_id=config.view_by_id,
@@ -300,16 +301,16 @@ class RunSpec:
             boundary_policy=config.boundary_policy,
             window_interaction=config.window_interaction,
             idle_policy=config.idle_policy,
-            orchestrator=orchestrator, syndrome_ingress=syndrome_ingress,
+            conditional_release=conditional_release, syndrome_ingress=syndrome_ingress,
             controller=controller, qpu=qpu,
             execution_runtime=execution_runtime,
             pauli_frame=pauli_frame,
             memory_model=config.memory_model, metrics=metric_bindings))
 
-        orchestrator.connect(controller, execution_runtime.on_decision)
+        conditional_release.connect(controller, execution_runtime.on_decision)
         for op in config.ops:
             if op.blocked_by is not None:
-                orchestrator.register_blocked_operation(op.id, op.blocked_by)
+                conditional_release.register_blocked_operation(op.id, op.blocked_by)
         for op in config.planned_operations:
             window_manager.register_op(op)
         window_manager.load_execution_plan(plan.execution, plan.buffering)
@@ -335,7 +336,7 @@ class RunSpec:
             metric_bindings, links, config.device)
         return CompletedRun(
             result, engine, window_manager, decoder_manager, execution_runtime,
-            controller, qpu, orchestrator, factory,
+            controller, qpu, conditional_release, factory,
             syndrome_buffer, syndrome_ingress, pauli_frame=pauli_frame)
 
 

@@ -1,6 +1,6 @@
 """The controller: admitted operations become QPU commands, QPU readouts
-become controller-side binary handed to syndrome ingress, and orchestrator
-decisions travel OC then CQ back to the QPU. The QEC cycle itself is the
+become controller-side binary handed to syndrome ingress, and conditional
+releases from the Pauli frame travel OC then CQ back to the QPU. The QEC cycle itself is the
 QPU's; execution admission is the ExecutionRuntime's; stream bookkeeping and
 protected regions are FeedbackStreams'."""
 
@@ -176,4 +176,4 @@ class Controller:
         oc = self.links.reserve(
             LinkPath.OC, payload_bits=None, now_ticks=self.engine.now,
             attribution=attribution).total_delay_ticks
-        self.engine.schedule(oc, at_controller, label="orchestrator->controller")
+        self.engine.schedule(oc, at_controller, label="pauli frame->controller")

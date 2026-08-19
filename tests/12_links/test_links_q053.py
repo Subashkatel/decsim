@@ -39,10 +39,10 @@ _ENDPOINTS = {
     "cwd": ("controller", "weak decoder"),
     "wsd": ("weak decoder", "strong decoder"),
     "csd": ("controller", "strong decoder"),
-    "wdo": ("weak decoder", "orchestrator"),
+    "wdo": ("weak decoder", "pauli frame"),
     "dd": ("decoder", "decoder"),
-    "do": ("strong decoder", "orchestrator"),
-    "oc": ("orchestrator", "controller"),
+    "do": ("strong decoder", "pauli frame"),
+    "oc": ("pauli frame", "controller"),
     "cq": ("controller", "qpu"),
 }
 

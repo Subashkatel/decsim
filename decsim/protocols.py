@@ -275,7 +275,7 @@ class PauliFrame(Protocol):
     logical observables, their decoder-request provenance, and a zero-argument
     continuation. Implementations call the continuation at most once per call
     and exactly once per accepted write, never before the configured write cost
-    has elapsed. They never mutate caller-owned values or call the orchestrator,
+    has elapsed. They never mutate caller-owned values or call the conditional release,
     controller, or execution runtime. ``snapshot`` is immutable and does not
     mutate the frame.
     """
@@ -374,8 +374,9 @@ class SyndromeTransport(Protocol):
 
 
 @runtime_checkable
-class Orchestrator(Protocol):
-    """Port 15. Records final predictions and releases blocked operations."""
+class ConditionalReleasePort(Protocol):
+    """Receives each operation's final result and releases the operations
+    conditioned on it (the OC hop). pauli_frame/conditional_release.py."""
     def connect(self, controller, decision_sink: Callable) -> None: ...
 
     def register_blocked_operation(self, blocked_op_id: int,

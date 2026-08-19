@@ -18,14 +18,14 @@ is one measured segment, named for the pair of runtime components it connects:
   window to the strong tier (t_wsd).
 - ``CSD`` controller -> strong decoder: the strong window's syndrome input
   (t_csd).
-- ``WDO`` weak decoder -> orchestrator: the weak correction leaving the weak
-  tier. This is the weak-tier counterpart of ``DO``; the research program in
-  ORIENTATION.md names eight t segments and does not name this one separately.
+- ``WDO`` weak decoder -> Pauli frame: the weak correction leaving the weak
+  tier for the frame and the conditional release. The weak-tier counterpart
+  of ``DO``.
 - ``DD``  decoder -> decoder: a committed window boundary handed to a dependent
   window (t_dd).
-- ``DO``  strong decoder -> orchestrator: the strong correction leaving the
+- ``DO``  strong decoder -> Pauli frame: the strong correction leaving the
   strong tier (t_do).
-- ``OC``  orchestrator -> controller: the resolved decision returning to the
+- ``OC``  Pauli frame -> controller: the conditional release returning to the
   controller (t_oc).
 - ``CQ``  controller -> QPU: the instruction delivered back to the QPU (t_cq).
 

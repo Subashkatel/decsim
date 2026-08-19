@@ -48,7 +48,7 @@ POINTS = (
     "algorithm",            # decoder engine: the decoding algorithm
     "release",              # decoder engine: correction write-out
     "service",              # unit assigned -> decode done (CWD transfer into its memory + fetch+algorithm+release)
-    "wdo_per_window",       # decoder -> orchestrator, link WDO
+    "wdo_per_window",       # decoder -> Pauli frame, link WDO
     "frame_commit",         # Pauli frame accepted -> committed
     "last_round_to_frame",  # last round of the window arrives -> its correction is in the frame
     "reaction_first_round", # first round of the window arrives -> correction in the frame

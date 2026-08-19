@@ -20,7 +20,7 @@
 "[  3.000 us] DecoderCluster: START DECODE live-stream W0 [commit 1-2]",
 "[  4.000 us] DecoderCluster: round 4 of live-stream arrived (op now has rounds 1..4)",
 "[  5.000 us] DecoderCluster: DECODE DONE live-stream W0 [commit 1-2]",
-"[  5.000 us] Orchestrator: DISPATCH conditional release for op#2 -> controller -> controller sequencer",
+"[  5.000 us] PauliFrame: DISPATCH conditional release for op#2 -> controller -> controller sequencer",
 "[  5.000 us] DecoderCluster: round 5 of live-stream arrived (op now has rounds 1..5)",
 "[  5.000 us] DecoderCluster: live-stream W1 [commit 3-4] READY -> enqueue (ready-queue length = 1)",
 "[  5.000 us] DecoderCluster: ASSIGN UNIT live-stream W1 [commit 3-4] (waited 0.000 us in queue, units free now 0)",

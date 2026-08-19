@@ -24,7 +24,7 @@
 "[  6.000 us] DecoderCluster: START DECODE T0 W0 [commit 1-3]",
 "[  7.000 us] DecoderCluster: memory round for T0 (idle buffer rounds: 4)",
 "[  8.000 us] DecoderCluster: DECODE DONE T0 W0 [commit 1-3]",
-"[  8.000 us] Orchestrator: DISPATCH conditional release for op#1 -> controller -> controller sequencer",
+"[  8.000 us] PauliFrame: DISPATCH conditional release for op#1 -> controller -> controller sequencer",
 "[  8.000 us] ExecutionRuntime: CONSUMED release for T1; now trying to start",
 "[  8.000 us] Controller: START T1  (non-Clifford, qubits (0,)) [unblocked by op#0]",
 "[  8.000 us] DecoderCluster: memory round for T0 (idle buffer rounds: 5)",

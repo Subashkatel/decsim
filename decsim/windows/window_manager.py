@@ -1,6 +1,6 @@
 """Owns the window life cycle of every operation: which rounds each window
 needs, when it is ready, when its result commits and reaches the
-orchestrator and the Pauli frame. Boundaries between windows are the
+Pauli frame and its conditional release. Boundaries between windows are the
 BoundaryCourier's, ownership of committed rounds is the LogicalLedger's, the
 strong tier is StrongEscalation's (NoStrongTier when the policy never
 escalates), dynamic streams are DynamicWindows', replays are the
@@ -38,7 +38,7 @@ class WindowManager:
 
     def __init__(self, engine, *, scheme, code_geometry,
                  resolved_operations, resolved_patches,
-                 links, orchestrator, boundary_policy,
+                 links, conditional_release, boundary_policy,
                  window_interaction,
                  planning_view_by_operation_id,
                  fault_model_requirement_for,
@@ -62,7 +62,7 @@ class WindowManager:
             for patch in resolved_patches
         })
         self.links = links
-        self.orchestrator = orchestrator
+        self.conditional_release = conditional_release
         self.pauli_frame = pauli_frame
         self.boundary_policy = boundary_policy
         self.window_interaction = window_interaction
@@ -841,7 +841,7 @@ class WindowManager:
         self.engine.schedule(
             delivery_ticks - self.engine.now,
             lambda: self._sink_weak_correction(job, res),
-            label=f"weak result {op.name}W{window.k}->orchestrator",
+            label=f"weak result {op.name}W{window.k}->pauli frame",
         )
 
     def _sink_weak_correction(self, job: DecodeJob, res: DecodeResult) -> None:
@@ -977,7 +977,7 @@ class WindowManager:
         self.engine.schedule(
             delivery_ticks - self.engine.now,
             lambda: self._commit_strong_decode_done(completion),
-            label=f"strong result {op.name}W{window.k}->orchestrator",
+            label=f"strong result {op.name}W{window.k}->pauli frame",
         )
 
     def _commit_strong_decode_done(
@@ -1092,7 +1092,7 @@ class WindowManager:
             self.window_count[op.id] - 1,
             logical_observables=logical_observables,
         )
-        self.orchestrator.integrate(op, result)
+        self.conditional_release.integrate(op, result)
 
     def release_stream_segments_at_commit(self, stream_id,
                                           committed_round_count: int) -> None:
@@ -1129,7 +1129,7 @@ class WindowManager:
             else:
                 self.op_results[operation.id] = logical_observables
             self.segment_results_sent.add(operation.id)
-            self.orchestrator.integrate(
+            self.conditional_release.integrate(
                 operation,
                 DecodeResult(
                     operation.id,

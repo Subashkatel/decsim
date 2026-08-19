@@ -28,7 +28,7 @@
 "[ 10.650 us] DecoderCluster: protected stream W1 [commit 3-4] READY -> enqueue (ready-queue length = 1)",
 "[ 10.650 us] DecoderCluster: ASSIGN UNIT protected stream W1 [commit 3-4] (waited 0.000 us in queue, units free now 0)",
 "[ 11.150 us] DecoderCluster: DECODE DONE protected stream W0 [commit 1-2]",
-"[ 11.150 us] Orchestrator: DISPATCH conditional release for op#3 -> controller -> controller sequencer",
+"[ 11.150 us] PauliFrame: DISPATCH conditional release for op#3 -> controller -> controller sequencer",
 "[ 11.150 us] DecoderCluster: round 11 of protected stream arrived (op now has rounds 1..11)",
 "[ 12.150 us] DecoderCluster: round 12 of protected stream arrived (op now has rounds 1..12)",
 "[ 12.650 us] DecoderCluster: START DECODE protected stream W1 [commit 3-4]",

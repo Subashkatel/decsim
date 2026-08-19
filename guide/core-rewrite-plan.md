@@ -1,5 +1,11 @@
 # Core rewrite plan, file by file
 
+Status 2026-08-18: APPLIED, commits 7eda59b to the head of
+audit/evidence-first-rebuild. The lock held after every commit; Gates 1 to
+5 and the baseline sweep are unchanged. The tree, the deviations and the
+pre-existing issues are recorded in guide/baseline-status.md ("Core
+rewrite"). This document is the plan as it stood before the work.
+
 Companion to guide/core-design-audit.md (findings with file:line) and
 guide/core-layout-and-names.md (folders and names; the file names below use
 that layout). Behavior

@@ -1,8 +1,10 @@
 # Package layout and module names
 
-Proposal, 2026-08-18. Companion to guide/core-design-audit.md and
-guide/core-rewrite-plan.md. Nothing here is applied; every rename below
-needs the owner's yes.
+Applied 2026-08-18 (owner: "apply all the change"). Companion to
+guide/core-design-audit.md and guide/core-rewrite-plan.md. Differences from
+the tree below: policies.py and decoders.py kept their names (review);
+run_defaults is run_configuration.py (review); strong_escalation.py holds
+both owners; DecoderInputStaging lives in decoders/decoder_memory_transfer.py.
 
 Why. Ousterhout ch. 7 (different layer, different abstraction) and tef step
 6 (isolate by likelihood of change) argue for a tree that mirrors the

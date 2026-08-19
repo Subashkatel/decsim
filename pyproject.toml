@@ -13,6 +13,8 @@ dependencies = []
 [project.optional-dependencies]
 stim = ["stim"]
 pymatching = ["pymatching"]
+experiments = ["stim", "pymatching", "numpy", "scipy", "matplotlib"]
+bb-experiments = ["quits==1.1.0", "relay-bp==0.2.2", "tesseract-decoder==0.1.1.dev20260802231159"]
 
 # Flat layout: the decsim/ package sits at the repo root. Discover it (and its
 # subpackages decsim.adapters / decsim.frontends) from there. No package-dir remap.
@@ -20,11 +22,11 @@ pymatching = ["pymatching"]
 where = ["."]
 include = ["decsim*"]
 
-# (decsim.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
+# (decsim.qpu.stimcircuits is Apache-2.0 / Oscar Higgott; the license must travel with it).
 [tool.setuptools.package-data]
-"decsim.stimcircuits" = ["LICENSE", "NOTICE.md"]
+"decsim.qpu.stimcircuits" = ["LICENSE", "NOTICE.md"]
 
 # docs/ holds cloned third-party artifacts (e.g. the SWIPER repo) whose own
 # test suites must not be collected by our `python -m pytest -q` entry point.
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "experiments/tests"]

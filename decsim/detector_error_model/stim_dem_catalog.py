@@ -1,0 +1,365 @@
+"""Stim canonicalisation and global fault-catalog compilation.
+
+Canonicalises Stim error instructions into physical and decomposed identities,
+merges independent probabilities, compiles one global fault catalog per
+requested domain, reconciles the linked graphlike/physical domains, and
+dispatches the catalog set a DecoderFaultModelRequirement asks for.
+
+Package-internal seams: _catalog_from_dem, _prepare_linked_fault_catalogs and
+_prepare_fault_catalogs are package-private; _prepare_fault_catalogs is
+imported by window_slicer.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import math
+from typing import Optional
+
+from .fault_model_contracts import (
+    DecoderFaultModelRequirement,
+    FaultRepresentation,
+    _FaultCatalog,
+)
+from .fault_identity_validation import (
+    _xor_target_ids,
+    validate_fault_identity,
+    validate_graphlike_fault,
+)
+
+
+@dataclass(frozen=True)
+class CanonicalErrorComponent:
+    """One parity-reduced component of a physical Stim error instruction."""
+
+    component_ordinal: int
+    detectors: tuple[int, ...]
+    logical_observables: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class CanonicalErrorInstruction:
+    """Both physical and decomposed identities of one Stim error mechanism."""
+
+    error_ordinal: int
+    probability: float
+    aggregate_detectors: tuple[int, ...]
+    aggregate_logical_observables: tuple[int, ...]
+    components: tuple[CanonicalErrorComponent, ...]
+
+
+def _merge_probability(current: float, incoming: float) -> float:
+    """Merge independent faults with p (+) q = p(1-q) + q(1-p)."""
+    return current * (1 - incoming) + incoming * (1 - current)
+
+
+def _canonical_error_instruction(
+    instruction,
+    error_ordinal: int,
+) -> Optional[CanonicalErrorInstruction]:
+    """Parse one complete error before any consumer sees its components."""
+    raw_components: list[tuple[list[int], list[int]]] = []
+    component_detectors: list[int] = []
+    component_logicals: list[int] = []
+    aggregate_detectors: list[int] = []
+    aggregate_logicals: list[int] = []
+
+    for target in instruction.targets_copy():
+        if target.is_separator():
+            raw_components.append(
+                (component_detectors, component_logicals)
+            )
+            component_detectors = []
+            component_logicals = []
+        elif target.is_relative_detector_id():
+            component_detectors.append(target.val)
+            aggregate_detectors.append(target.val)
+        elif target.is_logical_observable_id():
+            component_logicals.append(target.val)
+            aggregate_logicals.append(target.val)
+    raw_components.append((component_detectors, component_logicals))
+
+    canonical_aggregate_detectors = _xor_target_ids(aggregate_detectors)
+    canonical_aggregate_logicals = _xor_target_ids(aggregate_logicals)
+    if not canonical_aggregate_detectors:
+        if canonical_aggregate_logicals:
+            raise ValueError(
+                f"error {error_ordinal} is a detectorless logical "
+                "mechanism after instruction-wide XOR reduction: "
+                f"logical observables {canonical_aggregate_logicals}"
+            )
+        return None
+
+    canonical_components: list[CanonicalErrorComponent] = []
+    for component_ordinal, (
+        raw_detectors,
+        raw_logicals,
+    ) in enumerate(raw_components):
+        detectors = _xor_target_ids(raw_detectors)
+        logical_observables = _xor_target_ids(raw_logicals)
+        if not detectors:
+            if logical_observables:
+                raise ValueError(
+                    f"error {error_ordinal} component "
+                    f"{component_ordinal} is a detectorless logical "
+                    "mechanism after component XOR reduction: "
+                    f"logical observables {logical_observables}"
+                )
+            continue
+        canonical_components.append(
+            CanonicalErrorComponent(
+                component_ordinal=component_ordinal,
+                detectors=detectors,
+                logical_observables=logical_observables,
+            )
+        )
+
+    return CanonicalErrorInstruction(
+        error_ordinal=error_ordinal,
+        probability=float(instruction.args_copy()[0]),
+        aggregate_detectors=canonical_aggregate_detectors,
+        aggregate_logical_observables=canonical_aggregate_logicals,
+        components=tuple(canonical_components),
+    )
+
+
+def canonical_error_instructions(dem) -> tuple[CanonicalErrorInstruction, ...]:
+    """Return canonical physical errors from one flattened Stim DEM.
+
+    Detector and logical identities are reduced across the complete
+    instruction before its ``^``-separated components can be consumed.
+    """
+    records: list[CanonicalErrorInstruction] = []
+    error_ordinal = 0
+    for instruction in dem.flattened():
+        if instruction.type != "error":
+            continue
+        record = _canonical_error_instruction(
+            instruction,
+            error_ordinal,
+        )
+        if record is not None:
+            records.append(record)
+        error_ordinal += 1
+    return tuple(records)
+
+
+def _odd_component_keys(record, validator) -> tuple:
+    """Return component identities that occur oddly within one instruction.
+
+    Stim's ``^`` separator partitions one correlated error mechanism; it does
+    not create independent Bernoulli faults. Equal components therefore cancel
+    modulo two before probabilities are merged across independent instructions.
+    """
+    odd: dict = {}
+    for component in record.components:
+        key = validator(
+            component.detectors,
+            component.logical_observables,
+            location=(
+                f"error {record.error_ordinal} component "
+                f"{component.component_ordinal}"
+            ),
+        )
+        if key in odd:
+            del odd[key]
+        else:
+            odd[key] = None
+    return tuple(odd)
+
+
+def detector_error_model_to_faults(dem) -> tuple:
+    """Convert a Stim detector error model into merged fault columns."""
+    merged: dict = {}
+    for record in canonical_error_instructions(dem):
+        for key in _odd_component_keys(record, validate_fault_identity):
+            current_probability = merged.get(key, 0.0)
+            merged[key] = _merge_probability(
+                current_probability,
+                record.probability,
+            )
+    det_sets = [k[0] for k in merged]
+    obs_sets = [k[1] for k in merged]
+    priors = list(merged.values())
+    return det_sets, obs_sets, priors
+
+
+def _catalog_from_dem(
+    dem,
+    representation: FaultRepresentation,
+) -> _FaultCatalog:
+    """Build one independently sourced global fault catalog."""
+    if representation is FaultRepresentation.GRAPHLIKE:
+        detector_sets, observable_sets, priors = detector_error_model_to_faults(dem)
+    else:
+        merged = {}
+        for record in canonical_error_instructions(dem):
+            key = (
+                record.aggregate_detectors,
+                record.aggregate_logical_observables,
+            )
+            merged[key] = _merge_probability(
+                merged.get(key, 0.0), record.probability)
+        detector_sets = [key[0] for key in merged]
+        observable_sets = [key[1] for key in merged]
+        priors = list(merged.values())
+    return _FaultCatalog(
+        representation=representation,
+        detector_sets=tuple(tuple(values) for values in detector_sets),
+        observable_sets=tuple(tuple(values) for values in observable_sets),
+        priors=tuple(float(value) for value in priors),
+    )
+
+
+def _prepare_linked_fault_catalogs(decomposed_dem, physical_dem):
+    """Keep distinct physical mechanisms when their graph decompositions differ.
+
+    Global half of the linked fault domain; the window-local half is
+    window_placement._local_physical_to_graphlike_detector_projection.
+    """
+    import numpy as np
+
+    graphlike_catalog = _catalog_from_dem(
+        decomposed_dem,
+        FaultRepresentation.GRAPHLIKE,
+    )
+    graphlike_index = {
+        (detectors, observables): index
+        for index, (detectors, observables) in enumerate(zip(
+            graphlike_catalog.detector_sets,
+            graphlike_catalog.observable_sets,
+        ))
+    }
+    mechanisms: dict[
+        tuple[
+            tuple[tuple[int, ...], tuple[int, ...]],
+            tuple[tuple[tuple[int, ...], tuple[int, ...]], ...],
+        ],
+        float,
+    ] = {}
+    for record in canonical_error_instructions(decomposed_dem):
+        physical_key = (
+            record.aggregate_detectors,
+            record.aggregate_logical_observables,
+        )
+        component_keys = tuple(sorted(_odd_component_keys(
+            record,
+            validate_graphlike_fault,
+        )))
+        mechanism_key = (physical_key, component_keys)
+        mechanisms[mechanism_key] = _merge_probability(
+            mechanisms.get(mechanism_key, 0.0),
+            record.probability,
+        )
+
+    physical_detector_sets = []
+    physical_observable_sets = []
+    physical_priors = []
+    link = np.zeros(
+        (len(graphlike_catalog.detector_sets), len(mechanisms)),
+        dtype=np.uint8,
+    )
+    for physical_column, ((physical_key, component_keys), prior) in enumerate(
+        mechanisms.items()
+    ):
+        physical_detector_sets.append(physical_key[0])
+        physical_observable_sets.append(physical_key[1])
+        physical_priors.append(prior)
+        for component_key in component_keys:
+            graphlike_column = graphlike_index[component_key]
+            link[graphlike_column, physical_column] = 1
+
+    physical_catalog = _FaultCatalog(
+        representation=FaultRepresentation.PHYSICAL,
+        detector_sets=tuple(physical_detector_sets),
+        observable_sets=tuple(physical_observable_sets),
+        priors=tuple(physical_priors),
+    )
+    undecomposed_catalog = _catalog_from_dem(
+        physical_dem,
+        FaultRepresentation.PHYSICAL,
+    )
+    undecomposed = {
+        (detectors, observables): prior
+        for detectors, observables, prior in zip(
+            undecomposed_catalog.detector_sets,
+            undecomposed_catalog.observable_sets,
+            undecomposed_catalog.priors,
+        )
+    }
+    reconstructed: dict = {}
+    for detectors, observables, prior in zip(
+        physical_catalog.detector_sets,
+        physical_catalog.observable_sets,
+        physical_catalog.priors,
+    ):
+        key = (detectors, observables)
+        reconstructed[key] = _merge_probability(
+            reconstructed.get(key, 0.0), prior)
+    if set(reconstructed) != set(undecomposed) or any(
+        not math.isclose(reconstructed[key], undecomposed[key], rel_tol=0, abs_tol=1e-15)
+        for key in reconstructed
+    ):
+        raise ValueError(
+            "decomposed and undecomposed Stim models disagree on physical faults"
+        )
+
+    derived_check = np.zeros(
+        (max((detector_id for detectors in graphlike_catalog.detector_sets
+              for detector_id in detectors), default=-1) + 1,
+         len(physical_catalog.detector_sets)),
+        dtype=np.uint8,
+    )
+    graph_check = np.zeros(
+        (derived_check.shape[0], len(graphlike_catalog.detector_sets)),
+        dtype=np.uint8,
+    )
+    for column, detectors in enumerate(graphlike_catalog.detector_sets):
+        graph_check[list(detectors), column] = 1
+    for column, detectors in enumerate(physical_catalog.detector_sets):
+        derived_check[list(detectors), column] = 1
+    if not np.array_equal((graph_check @ link) % 2, derived_check):
+        raise ValueError(
+            "physical detector effects do not equal their graphlike components"
+        )
+    for physical_column, observable_ids in enumerate(
+        physical_catalog.observable_sets
+    ):
+        derived_observables = _xor_target_ids(
+            observable_id
+            for graphlike_column in np.nonzero(link[:, physical_column])[0]
+            for observable_id in graphlike_catalog.observable_sets[graphlike_column]
+        )
+        if derived_observables != observable_ids:
+            raise ValueError(
+                "physical logical effects do not equal their graphlike components"
+            )
+    return graphlike_catalog, physical_catalog, link
+
+
+def _prepare_fault_catalogs(
+    circuit,
+    requirement: DecoderFaultModelRequirement,
+) -> tuple[dict[FaultRepresentation, _FaultCatalog], "object"]:
+    """Build only the fault domains requested for this operation's code."""
+    catalogs: dict[FaultRepresentation, _FaultCatalog] = {}
+    if requirement.require_physical_to_graphlike_link:
+        graphlike, physical, link = _prepare_linked_fault_catalogs(
+            circuit.detector_error_model(decompose_errors=True),
+            circuit.detector_error_model(decompose_errors=False),
+        )
+        catalogs[FaultRepresentation.GRAPHLIKE] = graphlike
+        catalogs[FaultRepresentation.PHYSICAL] = physical
+        return catalogs, link
+
+    if FaultRepresentation.GRAPHLIKE in requirement.representations:
+        catalogs[FaultRepresentation.GRAPHLIKE] = _catalog_from_dem(
+            circuit.detector_error_model(decompose_errors=True),
+            FaultRepresentation.GRAPHLIKE,
+        )
+    if FaultRepresentation.PHYSICAL in requirement.representations:
+        catalogs[FaultRepresentation.PHYSICAL] = _catalog_from_dem(
+            circuit.detector_error_model(decompose_errors=False),
+            FaultRepresentation.PHYSICAL,
+        )
+    return catalogs, None

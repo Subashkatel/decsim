@@ -1,8 +1,7 @@
 """The baseline's figures, one question each, from the sweep rows.
 
-keep_up.png        Can it keep up?   output time per window vs input round time
-reaction.png       Reaction time     median, window ready -> frame commit
-reaction_p99.png   Reaction time     p99, same definition
+keep_up.png        Can it keep up?   output rate / input rate vs input round time
+reaction.png       Reaction time     window ready -> frame commit, median solid, p99 dashed
 backlog_<card>.png Backlog           three panels (safe, near limit, overloaded)
 one_window.png     One window        where the time goes, from window ready
 ler.png            logical error rate vs physical error rate, when p was swept
@@ -79,28 +78,27 @@ def values_by_time(group: list, times: list, key) -> list:
     return values
 
 
-def output_time_per_window(row: dict) -> float:
-    return 1 / row["throughput_windows_per_us"]
+def output_over_input(row: dict) -> float:
+    """Rounds committed per us over rounds arriving per us: 1 means the loop keeps up."""
+    input_rounds_per_us = 1 / row["round_period_us"]
+    return row["throughput_rounds_per_us"] / input_rounds_per_us
 
 
-def keep_up_plot(rows: list, algorithms: list, commit_rounds: int, path: Path) -> None:
-    """Output time per committed window against input round time; Ideal is
-    the input pacing, one window every commit_rounds x round time."""
+def keep_up_plot(rows: list, algorithms: list, path: Path) -> None:
+    """Output rate over input rate against input round time: 1 is keeping up,
+    below 1 the loop falls behind."""
     import matplotlib.pyplot as plt
     times = round_times(rows)
     positions = list(range(len(times)))
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     for algorithm in algorithms:
         group = rows_of_card(rows, algorithm)
-        output_time = values_by_time(group, times, output_time_per_window)
-        axis.plot(positions, output_time, "o-", label=card_label(algorithm))
-    ideal = []
-    for time in times:
-        ideal.append(commit_rounds * time)
-    axis.plot(positions, ideal, "k--", lw=0.8, label="Ideal")
+        ratio = values_by_time(group, times, output_over_input)
+        axis.plot(positions, ratio, "o-", label=card_label(algorithm))
+    axis.axhline(1.0, color="k", ls="--", lw=0.8, label="Keeps up")
     category_axis(axis, times)
-    axis.set_yscale("log")
-    axis.set_ylabel("Output time per window (µs)")
+    axis.set_ylim(0, 1.1)
+    axis.set_ylabel("Output rate / input rate")
     axis.set_title("Can it keep up?")
     axis.grid(alpha=0.3, axis="y")
     axis.legend(fontsize=8)
@@ -108,25 +106,28 @@ def keep_up_plot(rows: list, algorithms: list, commit_rounds: int, path: Path) -
     figure.savefig(path, dpi=150)
 
 
-def reaction_plot(rows: list, algorithms: list, statistic: str, path: Path) -> None:
-    """Reaction time (window ready -> frame commit) against input round time;
-    statistic is "median" or "p99"."""
+def reaction_plot(rows: list, algorithms: list, path: Path) -> None:
+    """Reaction time (window ready -> frame commit) against input round time:
+    median solid, p99 dashed, one color per decoder card."""
     import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
     times = round_times(rows)
     positions = list(range(len(times)))
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     for algorithm in algorithms:
         group = rows_of_card(rows, algorithm)
-        reaction = values_by_time(group, times, f"last_round_to_frame_{statistic}_us")
-        axis.plot(positions, reaction, "o-", label=card_label(algorithm))
+        median = values_by_time(group, times, "last_round_to_frame_median_us")
+        p99 = values_by_time(group, times, "last_round_to_frame_p99_us")
+        line, = axis.plot(positions, median, "o-", label=card_label(algorithm))
+        axis.plot(positions, p99, "--", color=line.get_color(), alpha=0.8)
     category_axis(axis, times)
     axis.set_ylabel("Reaction time (µs)")
-    if statistic == "median":
-        axis.set_title("Reaction time")
-    else:
-        axis.set_title("Reaction time (p99)")
+    axis.set_title("Reaction time")
     axis.grid(alpha=0.3, axis="y")
-    axis.legend(fontsize=8)
+    card_legend = axis.legend(fontsize=8, loc="upper left")
+    axis.add_artist(card_legend)
+    style_handles = [Line2D([], [], color="k", ls="-", marker="o"), Line2D([], [], color="k", ls="--")]
+    axis.legend(style_handles, ["Median", "p99"], fontsize=8, loc="lower right")
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
@@ -240,7 +241,7 @@ def ler_plot(rows: list, algorithms: list, path: Path) -> None:
     figure.savefig(path, dpi=150)
 
 
-def plots(rows: list, report_dir: Path, commit_rounds: int) -> None:
+def plots(rows: list, report_dir: Path) -> None:
     """The sweep figures when more than one round time was swept, the LER
     figure when more than one physical error rate was."""
     import matplotlib
@@ -249,9 +250,8 @@ def plots(rows: list, report_dir: Path, commit_rounds: int) -> None:
     periods = {row["round_period_us"] for row in rows}
     probabilities = {row["physical_error_probability"] for row in rows}
     if len(periods) > 1:
-        keep_up_plot(rows, algorithms, commit_rounds, report_dir / "keep_up.png")
-        reaction_plot(rows, algorithms, "median", report_dir / "reaction.png")
-        reaction_plot(rows, algorithms, "p99", report_dir / "reaction_p99.png")
+        keep_up_plot(rows, algorithms, report_dir / "keep_up.png")
+        reaction_plot(rows, algorithms, report_dir / "reaction.png")
         for algorithm in algorithms:
             backlog_plot(rows, algorithm, report_dir / f"backlog_{card_file_name(algorithm)}.png")
         one_window_plot(rows, algorithms, report_dir / "one_window.png")

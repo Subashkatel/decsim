@@ -11,6 +11,11 @@ def us(microseconds: float) -> int:
     return int(round(microseconds * TICKS_PER_US))
 
 
+def microseconds(ticks: int) -> float:
+    """Convert integer ticks to microseconds, three decimals."""
+    return round(ticks / TICKS_PER_US, 3)
+
+
 def fmt(ticks: int) -> str:
     """Format ticks as microseconds for readability in logs."""
     return f"{ticks / TICKS_PER_US:7.3f} us"

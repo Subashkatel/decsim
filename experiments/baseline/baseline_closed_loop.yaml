@@ -31,8 +31,6 @@ links:                                       # one card per path: propagation la
   wsd: null                                   # weak -> strong escalation
   csd: null                                   # controller -> strong decoder
   do:  null                                   # strong decoder -> Pauli frame
-# Latencies: Khalid et al. Table II; c2b is an experiment card. Payload sizes per path stay on the
-# logical_reference card in decsim/links/link_profiles.py; the baseline carries actual bits on qc, c2b, cwd.
 
 decoder:
   units: 1                                   # one weak ASIC

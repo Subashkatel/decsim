@@ -85,9 +85,7 @@ def _valid_attribution(path):
 
 
 def _topology(config):
-    return topology_json_value(config.resolve().snapshot(),
-        controller_link_integration_assurance="shipped_controller"
-    )
+    return topology_json_value(config.resolve().snapshot())
 
 
 def test_link_module_documents_every_segment_endpoint_and_extension_step():

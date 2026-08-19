@@ -561,9 +561,7 @@ def test_config_identity_controls_sharing_and_each_resolve_is_run_owned():
     assert cwd.queue_wait_ticks == qc.serialization_ticks
     assert oc.physical_sequence == 0
     assert fresh.physical_sequence == 0
-    topology = topology_json_value(first_run.snapshot(),
-        controller_link_integration_assurance="shipped_controller"
-    )
+    topology = topology_json_value(first_run.snapshot())
     aliases = {edge["path"]: edge["physical_alias"] for edge in topology["edges"]}
     assert aliases["qc"] == aliases["cwd"]
     assert aliases["qc"] != aliases["oc"]
@@ -616,7 +614,7 @@ def test_reconciliation_guard_rejects_silent_counter_divergence():
         traffic_json_value(model.snapshot())
 
 
-def test_topology_json_reports_stable_fabric_and_integration_contract():
+def test_topology_json_reports_stable_fabric():
     """Topology evidence reports ordered routing, channel policy, and provenance."""
     capacity = LinkCapacityConfig(
         4.0, LinkQuantityBasis.PER_CHANNEL, 2, "capacity source"
@@ -628,14 +626,11 @@ def test_topology_json_reports_stable_fabric_and_integration_contract():
     edge = LinkEdgeConfig(shared, payload, "actual source")
     model = make_model_config({LinkPath.QC: edge, LinkPath.CWD: edge}).resolve()
 
-    topology = topology_json_value(model.snapshot(),
-        controller_link_integration_assurance="custom_controller_unverified"
-    )
+    topology = topology_json_value(model.snapshot())
     assert topology["schema_version"] == 1
     assert topology["profile_name"] == "test fabric"
     assert topology["path_order"] == PATH_ORDER
     assert topology["cancellation_semantics"] == "non_preemptive_irrevocable"
-    assert topology["controller_link_integration_assurance"] == "custom_controller_unverified"
     qc_edge = topology["edges"][0]
     assert qc_edge["actual_payload_source"] == "actual source"
     assert qc_edge["default_payload"]["aggregate_bits"] == 12
@@ -645,12 +640,6 @@ def test_topology_json_reports_stable_fabric_and_integration_contract():
     assert channel["capacity"]["aggregate_bits_per_us"] == 8.0
     assert channel["configuration_source"] == "wire"
     assert channel["service_scope"] == "aggregate_fifo"
-
-    for bad_assurance in ("", "third_party"):
-        with pytest.raises(ValueError):
-            topology_json_value(model.snapshot(),
-                controller_link_integration_assurance=bad_assurance
-            )
 
 
 def test_traffic_json_preserves_typed_identity_and_timing_boundaries():
@@ -701,9 +690,7 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
     """The reference profile preserves its nine timing and payload configuration choices."""
     config = logical_reference_profile()
     model = config.resolve()
-    topology = topology_json_value(model.snapshot(),
-        controller_link_integration_assurance="shipped_controller"
-    )
+    topology = topology_json_value(model.snapshot())
     expected_propagation = {
         "qc": us(0.15),
         "cwd": us(2.0),
@@ -821,9 +808,7 @@ def test_links_expose_timing_only_without_scheduler_or_reclamation_ownership():
 def test_bandwidth_profile_declares_finite_calibrated_capacities():
     """The bandwidth profile exposes all calibrated capacities and fallback payloads."""
     config = bandwidth_limited_profile()
-    topology = topology_json_value(config.resolve().snapshot(),
-        controller_link_integration_assurance="shipped_controller"
-    )
+    topology = topology_json_value(config.resolve().snapshot())
     expected_capacities = {
         "qc": (24.0, "direct_aggregate", None, 24.0),
         "cwd": (48.0, "direct_aggregate", None, 48.0),
@@ -879,12 +864,8 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
     """The reference profile stays pure latency while shared semantic parameters match."""
     reference = logical_reference_profile()
     bandwidth = bandwidth_limited_profile()
-    reference_topology = topology_json_value(reference.resolve().snapshot(),
-        controller_link_integration_assurance="shipped_controller"
-    )
-    bandwidth_topology = topology_json_value(bandwidth.resolve().snapshot(),
-        controller_link_integration_assurance="shipped_controller"
-    )
+    reference_topology = topology_json_value(reference.resolve().snapshot())
+    bandwidth_topology = topology_json_value(bandwidth.resolve().snapshot())
 
     def propagation_by_path(topology):
         return {
@@ -1009,9 +990,7 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
 
     def aggregate_capacities(scale):
         topology = topology_json_value(
-            bandwidth_limited_profile(capacity_scale=scale).resolve().snapshot(),
-            controller_link_integration_assurance="shipped_controller"
-        )
+            bandwidth_limited_profile(capacity_scale=scale).resolve().snapshot())
         return {
             channel["member_paths"][0]: channel["capacity"][
                 "aggregate_bits_per_us"

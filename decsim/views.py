@@ -328,12 +328,12 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
     rows = []
     for key, window in sorted(window_manager.windows.items(),
                               key=lambda item: stable_identity_order_key(item[0])):
-        contribution = window_manager.logical_contributions.get(key)
+        contribution = window_manager.ledger.contributions.get(key)
         absorbed = key in window_manager.absorbed_windows
         absorbed_into = None
         if absorbed:
             owners = [owner for owner, value in
-                      window_manager.logical_contributions.items()
+                      window_manager.ledger.contributions.items()
                       if value.ownership_kind == "strong_slab"
                       and value.commit_lo <= window.commit_lo
                       and value.commit_hi >= window.commit_hi]

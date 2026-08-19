@@ -606,7 +606,7 @@ class StrongEscalation:
         round is stored (waiting_terminal_data). One strong job per
         escalation; duplicates raise."""
         key = (weak_job.op_id, weak_job.window_id)
-        existing_contribution = self.wm.logical_contributions.get(key)
+        existing_contribution = self.wm.ledger.contributions.get(key)
         if (
             self._escalations.peek_key(key) is not None
             or (
@@ -695,7 +695,7 @@ class StrongEscalation:
                 proposed_restart, list(resolved_region.restart_read_keys))
             self.wm.syndrome_buffer.register_hold(guard, guarded)
         try:
-            self.wm.logical_contributions = logical_candidate
+            self.wm.ledger.contributions = logical_candidate
             phase = (
                 _EscalationPhase.WAITING_TERMINAL_DATA
                 if restart_key is None
@@ -871,7 +871,7 @@ class StrongEscalation:
                 raise RuntimeError(
                     f"cannot rephase historical window {affected_key}")
             if (self.wm.courier.is_published(affected_key)
-                    or affected_key in self.wm.logical_contributions):
+                    or affected_key in self.wm.ledger.contributions):
                 raise RuntimeError(
                     f"cannot rephase window {affected_key} with published state")
             if self._escalations.peek_key(affected_key) is not None:
@@ -1023,7 +1023,7 @@ class StrongEscalation:
         total_windows_snapshot = self.wm.total_windows
         window_models_snapshot = dict(self.wm.window_models)
         committed_count_snapshot = self.wm._committed_per_op.get(op_id, absent)
-        logical_snapshot = self.wm.logical_contributions
+        logical_snapshot = self.wm.ledger.contributions
         escalated_dependents = list(weak_window.dependents)
 
         self.wm.syndrome_buffer.register_hold(guard, guarded_reads)
@@ -1059,7 +1059,7 @@ class StrongEscalation:
                 self.wm.window_models.pop(affected_key, None)
             for model_key, model in zip(retained_keys, suffix_models):
                 self.wm.window_models[model_key] = model
-            self.wm.logical_contributions = logical_candidate
+            self.wm.ledger.contributions = logical_candidate
             self._escalations.register_far(pending, restart_window.key)
             registered = True
             for token, old_reads in owner_snapshot.items():
@@ -1085,7 +1085,7 @@ class StrongEscalation:
                 self.wm._committed_per_op.pop(op_id, None)
             else:
                 self.wm._committed_per_op[op_id] = committed_count_snapshot
-            self.wm.logical_contributions = logical_snapshot
+            self.wm.ledger.contributions = logical_snapshot
             if registered:
                 self._escalations.take_far(restart_window.key, pending)
             self.wm._release_hold_if_live(guard)
@@ -1121,7 +1121,7 @@ class StrongEscalation:
         }
         candidate = {
             owner_key: contribution
-            for owner_key, contribution in self.wm.logical_contributions.items()
+            for owner_key, contribution in self.wm.ledger.contributions.items()
             if owner_key not in replaced_owner_keys
         }
         for other_key, contribution in candidate.items():

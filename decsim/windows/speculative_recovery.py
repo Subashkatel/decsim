@@ -161,7 +161,7 @@ class SpeculativeRecovery:
         source_op = runtime._ops[key[0]]
 
         if result is not None and result.logical_observables is not None:
-            runtime._replace_contribution_prediction(
+            runtime.ledger.replace_prediction(
                 key, result.logical_observables)
         corrected_boundary = record.strong_boundary
         runtime.courier.set_committed(key, corrected_boundary)
@@ -270,7 +270,7 @@ class SpeculativeRecovery:
         runtime = self.runtime
         window = runtime.windows[key]
         runtime.courier.invalidate(window)
-        runtime.logical_contributions.pop(key, None)
+        runtime.ledger.drop(key)
         runtime.op_results.pop(window.op_id, None)
         if window.committed:
             runtime.committed_windows.discard(key)

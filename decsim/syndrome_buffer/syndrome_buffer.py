@@ -15,8 +15,6 @@ from enum import Enum, auto
 from typing import Optional
 
 from ..message import (
-    RephaseGuard,
-    Replay,
     RetainedSyndromeFragment,
     SyndromeRoundPacket,
     same_stable_identity,
@@ -41,6 +39,51 @@ class SyndromeBufferRoundState(Enum):
     ASSEMBLING = auto()
     PACKING = auto()
     PACKED_RETAINED = auto()
+
+
+# ---- consumer hold tokens: who keeps rounds in Buffer 0 and why
+
+@dataclass(frozen=True)
+class PotentialStrong:
+    """Buffer 0 hold: a window's rounds kept in case its weak result escalates."""
+
+    window_key: tuple
+
+
+@dataclass(frozen=True)
+class PendingStrong:
+    """Buffer 0 hold: rounds kept for a strong request that is admitted but not yet served."""
+
+    request_key: DecoderRequestKey
+
+
+@dataclass(frozen=True)
+class CsdInput:
+    """Buffer 0 hold: rounds in flight to a strong decoder over CSD."""
+
+    request_key: DecoderRequestKey
+
+
+@dataclass(frozen=True)
+class DecoderInputHold:
+    """Buffer 0 hold: rounds a decode job needs until they land in unit memory."""
+
+    request_key: DecoderRequestKey
+
+
+@dataclass(frozen=True)
+class Replay:
+    """Buffer 0 hold: rounds a window needs again for a speculative replay of one boundary generation."""
+
+    window_key: tuple
+    boundary_generation: int
+
+
+@dataclass(frozen=True)
+class RephaseGuard:
+    """Buffer 0 hold: rounds a rephased suffix keeps while its strong request is live."""
+
+    request_key: DecoderRequestKey
 
 
 @dataclass(frozen=True)

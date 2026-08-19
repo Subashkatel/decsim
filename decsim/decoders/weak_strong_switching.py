@@ -15,7 +15,7 @@ from ..message import (
     RunSeedPathSegment,
     SoftOutputSource,
 )
-from ..protocols import Directive, OutcomeDirective, Submission
+from ..message import Directive, OutcomeDirective, Submission
 
 
 class ThresholdRegister:

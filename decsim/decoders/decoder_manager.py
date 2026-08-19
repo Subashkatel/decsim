@@ -11,7 +11,7 @@ from typing import Callable, Optional
 
 from ..message import (DecodeJob, DecodeOutcome, DecodeResult,
                       DecoderRequestKey, DecoderServiceKey, SoftOutput)
-from ..protocols import Directive
+from ..message import Directive
 from .decoder_memory import DecoderMemory, DecoderMemoryConfig
 from .decoder_memory_transfer import DecoderInputStaging, FixedLatencyDecoderMemoryTransfer
 from .strong_escalation import HeldStrongCompletion, StrongRequestLedger

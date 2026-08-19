@@ -14,7 +14,6 @@ from ..message import (
     Operation,
     OperationPlanningView,
     OperationWindowPlan,
-    PotentialStrong,
     ResolvedCodeGeometry,
     ResolvedOperationPlanning,
     ResolvedPatchPlanning,
@@ -23,6 +22,7 @@ from ..message import (
     same_stable_identity,
     stable_identity_bytes,
 )
+from ..syndrome_buffer.syndrome_buffer import PotentialStrong
 
 
 @dataclass(frozen=True)

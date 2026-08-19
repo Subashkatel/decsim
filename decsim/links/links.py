@@ -25,8 +25,8 @@ components on the reaction path:
 
 Each path's meaning is declared once, in ``_PATH_RULES``: what its transfers
 are attributed to (an operation, a round, a window), which provenance relation
-they carry (a decoder request, a boundary), which decoder tier they belong to,
-and whether every card must wire it. Adding a segment: add the member to
+they carry (a decoder request, a boundary), and whether every card must wire
+it. Adding a segment: add the member to
 ``LinkPath``, its row to ``_PATH_RULES`` (optional while adopted), and an
 ``Optional[LinkEdgeConfig]`` field to ``LinkModelConfig``; nothing else changes
 because everything iterates the card's wired paths.
@@ -52,7 +52,7 @@ from types import MappingProxyType
 from typing import Optional, Union
 
 from ..config import us
-from ..message import DecoderRequestKey, DecoderTier
+from ..message import DecoderRequestKey
 
 
 # ---- quantities on the cards -------------------------------------------------
@@ -242,48 +242,27 @@ class LinkRelationRule(str, Enum):
 
 @dataclass(frozen=True)
 class LinkPathRule:
-    """The fixed meaning of one segment. ``required`` says every card must wire
-    it; the original nine are required, a segment added later may be optional
-    while it is adopted."""
+    """The fixed meaning of one segment: what its transfers are attributed
+    to, which provenance they carry, and whether every card must wire it (the
+    original nine are required; a segment added later may be optional)."""
 
     scope: LinkAttributionScope
-    scope_description: str
     relation: LinkRelationRule
-    tier: Optional[DecoderTier]
     required: bool
 
 
 _PATH_RULES = MappingProxyType({
-    LinkPath.QC: LinkPathRule(
-        LinkAttributionScope.ROUND, "syndrome-round attribution without a window",
-        LinkRelationRule.NONE, None, True),
-    LinkPath.C2B: LinkPathRule(
-        LinkAttributionScope.ROUND, "syndrome-round attribution without a window",
-        LinkRelationRule.NONE, None, False),
-    LinkPath.CWD: LinkPathRule(
-        LinkAttributionScope.ROUND_OR_WINDOW, "syndrome-round or window-region attribution",
-        LinkRelationRule.REQUEST_WHEN_WINDOWED, DecoderTier.WEAK, True),
-    LinkPath.WSD: LinkPathRule(
-        LinkAttributionScope.WINDOW, "window-region attribution",
-        LinkRelationRule.REQUEST, DecoderTier.STRONG, True),
-    LinkPath.CSD: LinkPathRule(
-        LinkAttributionScope.WINDOW, "window-region attribution",
-        LinkRelationRule.REQUEST, DecoderTier.STRONG, True),
-    LinkPath.WDO: LinkPathRule(
-        LinkAttributionScope.WINDOW, "window-region attribution",
-        LinkRelationRule.REQUEST, DecoderTier.WEAK, True),
-    LinkPath.DD: LinkPathRule(
-        LinkAttributionScope.WINDOW, "window-region attribution",
-        LinkRelationRule.BOUNDARY, None, True),
-    LinkPath.DO: LinkPathRule(
-        LinkAttributionScope.WINDOW, "window-region attribution",
-        LinkRelationRule.REQUEST, DecoderTier.STRONG, True),
-    LinkPath.OC: LinkPathRule(
-        LinkAttributionScope.OPERATION_ONLY, "operation-only attribution",
-        LinkRelationRule.NONE, None, True),
-    LinkPath.CQ: LinkPathRule(
-        LinkAttributionScope.OPERATION_ONLY, "operation-only attribution",
-        LinkRelationRule.NONE, None, True),
+    LinkPath.QC: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, True),
+    LinkPath.C2B: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, False),
+    LinkPath.CWD: LinkPathRule(LinkAttributionScope.ROUND_OR_WINDOW,
+                               LinkRelationRule.REQUEST_WHEN_WINDOWED, True),
+    LinkPath.WSD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
+    LinkPath.CSD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
+    LinkPath.WDO: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
+    LinkPath.DD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.BOUNDARY, True),
+    LinkPath.DO: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
+    LinkPath.OC: LinkPathRule(LinkAttributionScope.OPERATION_ONLY, LinkRelationRule.NONE, True),
+    LinkPath.CQ: LinkPathRule(LinkAttributionScope.OPERATION_ONLY, LinkRelationRule.NONE, True),
 })
 
 
@@ -611,9 +590,9 @@ def _select_payload(path: LinkPath, edge: LinkEdgeConfig, payload_bits):
 
 
 def _check_attribution(path: LinkPath, attribution: TrafficAttribution) -> None:
-    """The attribution must have the shape the path's rule declares: the right
-    scope (round, window, operation), the right relation kind and tier, and a
-    relation that names the same operation and window as the attribution."""
+    """The attribution has the shape the path's rule declares: the right scope
+    (round, window, operation), the right relation kind, and a relation that
+    names the same operation and window as the attribution."""
     rule = _PATH_RULES[path]
     has_window = attribution.window_id is not None
     has_rounds = attribution.round_lo is not None
@@ -624,7 +603,7 @@ def _check_attribution(path: LinkPath, attribution: TrafficAttribution) -> None:
         LinkAttributionScope.OPERATION_ONLY: not has_window and not has_rounds,
     }[rule.scope]
     if not scope_ok:
-        raise ValueError(f"{path.value} requires {rule.scope_description}")
+        raise ValueError(f"{path.value} requires {rule.scope.value} attribution")
 
     relation = attribution.relation
     needs_request = (rule.relation is LinkRelationRule.REQUEST
@@ -637,18 +616,12 @@ def _check_attribution(path: LinkPath, attribution: TrafficAttribution) -> None:
     if not needs_request and not needs_boundary and relation is not None:
         raise ValueError(f"{path.value} does not accept a relation")
 
-    if type(relation) is RequestTransferRelation:
+    if needs_request:
         request_key = relation.request_key
-    elif type(relation) is BoundaryTransferRelation:
+    elif needs_boundary:
         request_key = relation.source_request_key
     else:
         return
-    if request_key.window_id < 0:
-        raise ValueError("request window_id must be a nonnegative window index")
-    if request_key.run_sequence < 0:
-        raise ValueError("request run_sequence must be a nonnegative request ordinal")
-    if needs_request and request_key.tier is not rule.tier:
-        raise ValueError(f"{path.value} requires the {rule.tier.value} tier")
     if (request_key.operation_id != attribution.operation_id
             or request_key.window_id != attribution.window_id):
         raise ValueError("transfer relation does not match attribution")

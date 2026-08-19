@@ -68,7 +68,7 @@ class DecoderManager:
                  capture_enabled: bool = False,
                  decoder_memory_transfer=None,
                  decoder_memory: Optional[DecoderMemoryConfig] = None,
-                 strategy, services, on_window_decoded: Callable,
+                 escalation_policy, services, on_window_decoded: Callable,
                  on_strong_window_decoded: Callable):
         self.engine = engine
         self.router = router
@@ -87,8 +87,8 @@ class DecoderManager:
         self._terminal_request_records = [] if capture_enabled else None
         self._terminal_service_records = [] if capture_enabled else None
 
-        self.strategy = strategy
-        self.services = services                     # the StrategyServices seam (the window manager)
+        self.escalation_policy = escalation_policy
+        self.services = services                     # the EscalationServices seam (the window manager)
         self.on_window_decoded = on_window_decoded
         self.on_strong_window_decoded = on_strong_window_decoded
 
@@ -415,7 +415,7 @@ class DecoderManager:
                              label=f"decode_done({job.label})")
 
     def _on_decode_done(self, job: DecodeJob, result) -> None:
-        """One decode finished: free the unit, ask the strategy, commit or await strong."""
+        """One decode finished: free the unit, ask the escalation_policy, commit or await strong."""
         if job.cancelled:
             self.staging.release(job)
             self.try_dispatch()
@@ -428,7 +428,7 @@ class DecoderManager:
             self._free_unit(job)
             self.staging.release_service_members(self.strong.members_of(job))
             self.strong.finish_service(job)
-            self.strategy.on_decode_outcome(DecodeOutcome(job, result),
+            self.escalation_policy.on_decode_outcome(DecodeOutcome(job, result),
                                             self.services)   # FINALIZE_STRONG
             for held in strong_result_deliveries:
                 self._complete_strong_result(held)
@@ -457,7 +457,7 @@ class DecoderManager:
         job.completed = True
         self._free_unit(job)
         key = (job.op_id, job.window_id)
-        directive = self.strategy.on_decode_outcome(DecodeOutcome(job, result),
+        directive = self.escalation_policy.on_decode_outcome(DecodeOutcome(job, result),
                                                     self.services)
         self.strong.resolve_weak(key)
         awaiting = directive.directive is Directive.AWAIT_STRONG

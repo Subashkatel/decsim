@@ -71,7 +71,7 @@ decoder = SoftOutputDecoder(
     PyMatchingDecoder(latency),
     ComplementaryGapMetricFactory(),
 )
-strategy = Switching(
+escalation_policy = Switching(
     confidence_threshold=8.0,
     expected_source=COMPLEMENTARY_GAP_SOURCE,
 )

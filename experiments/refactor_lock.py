@@ -153,7 +153,7 @@ def _switching_spec(*, rounds=27, probability=0.3, seed=1, **switching_kwargs):
     return RunSpec(
         ops=[_memory_op()], num_units=1, d=3, rounds_policy=FixedRounds(rounds),
         round_us=1.0, scheme=_sliding(),
-        strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE,
+        escalation_policy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE,
                            confidence_threshold=0.5, **switching_kwargs),
         router=SwitchingRouter(weak, strong),
         unit_pools={"default": 1, "strong": 1}, seed=seed, **extra)
@@ -613,7 +613,7 @@ def _recovery_spec(boundary_policy, *, run_both_at_once=False, rounds=15, seed=4
     from decsim.decoders.weak_strong_switching import Switching
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(rounds),
                    scheme=_sliding(),
-                   strategy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE,
+                   escalation_policy=Switching(expected_source=SAMPLED_CONFIDENCE_SOURCE,
                                       confidence_threshold=0.5,
                                       run_both_at_once=run_both_at_once),
                    boundary_policy=boundary_policy,

@@ -20,7 +20,7 @@ class ResolvedRunConfiguration:
     """Every resolved choice of one run, in the vocabulary the wiring uses."""
 
     root_seed: Optional[int]
-    strategy: Any
+    escalation_policy: Any
     ops: tuple
     decode_ops: tuple
     dynamic_streams: tuple
@@ -75,7 +75,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .controller.syndrome_ingress import SyndromeIngressPolicy
     from .windows.window_interactions import DefaultWindowInteraction
 
-    strategy = spec.strategy if spec.strategy is not None else Baseline()
+    escalation_policy = spec.escalation_policy if spec.escalation_policy is not None else Baseline()
 
     if (spec.ops is None) == (spec.frontend is None):
         raise ValueError("provide exactly one of ops= or frontend=")
@@ -100,12 +100,12 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     window_interaction = spec.window_interaction or DefaultWindowInteraction()
     if dynamic_streams and type(scheme) is not SlidingWindowScheme:
         raise ValueError("dynamic streams require SlidingWindowScheme")
-    strategy.validate_declared_run(
+    escalation_policy.validate_declared_run(
         scheme=scheme, boundary_policy=boundary_policy,
         has_dynamic_streams=bool(dynamic_streams),
         static_decode_plan_selected=spec.decode_ops is not None,
         has_frontend=spec.frontend is not None)
-    strategy.validate_operations(views)
+    escalation_policy.validate_operations(views)
 
     planned_operations = _decode_plan_operations(
         ops, decode_ops, dynamic_streams,
@@ -116,10 +116,10 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         code=code, layout=layout, scheme=scheme, rounds_policy=rounds_policy,
         fallback_round_us=(spec.round_us if spec.round_us is not None
                            else spec.timing.round_us),
-        retain_strong_context=strategy.requires_strong_context,
-        double_window=strategy.double_window,
+        retain_strong_context=escalation_policy.requires_strong_context,
+        double_window=escalation_policy.double_window,
         has_open_ended_dynamic_streams=bool(dynamic_streams))
-    strategy.validate_code_geometry(plan.code_geometry)
+    escalation_policy.validate_code_geometry(plan.code_geometry)
     resource_claims = {op.id: tuple(layout.resources_for(view_by_id[op.id]))
                        for op in ops}
 
@@ -148,7 +148,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         raise ValueError("syndrome_ingress_policy cannot be combined with make_syndrome_ingress")
 
     return ResolvedRunConfiguration(
-        root_seed=root_seed, strategy=strategy,
+        root_seed=root_seed, escalation_policy=escalation_policy,
         ops=tuple(ops), decode_ops=tuple(decode_ops),
         dynamic_streams=tuple(dynamic_streams),
         protected_regions=tuple(spec.protected_regions),

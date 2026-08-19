@@ -140,7 +140,7 @@ class RunSpec:
     decoder: Optional[Any] = None
     decoders: dict = field(default_factory=dict)
     router: Optional[Any] = None
-    strategy: Optional[Any] = None
+    escalation_policy: Optional[Any] = None
     scheduler: Optional[Any] = None
     lane_policy: Optional[Any] = None
     unit_pools: Optional[dict] = None
@@ -194,7 +194,7 @@ class RunSpec:
         from .windows.window_manager import WindowManager
 
         config = resolve_run_configuration(self, root_seed)
-        strategy, plan, timing = config.strategy, config.plan, config.timing
+        escalation_policy, plan, timing = config.escalation_policy, config.plan, config.timing
         orchestrator = (config.make_orchestrator(engine) if config.make_orchestrator
                         else ExecutionOrchestrator(engine))
         links = config.link_config.resolve()
@@ -218,10 +218,10 @@ class RunSpec:
             feedback_boundary_mode=config.feedback_boundary_mode,
             error_model_provider=config.error_model_provider,
             syndrome_buffer=syndrome_buffer, pauli_frame=pauli_frame,
-            retain_strong_context=strategy.requires_strong_context,
-            double_window=strategy.double_window,
+            retain_strong_context=escalation_policy.requires_strong_context,
+            double_window=escalation_policy.double_window,
             capture_enabled=config.capture_switching_windows,
-            strategy=strategy,
+            escalation_policy=escalation_policy,
             submit_fn=lambda job, reserve_transfer=None:
                 decoder_manager.enqueue(job, reserve_transfer),
             check_strong_route=lambda weak_job, strong_job:
@@ -243,11 +243,11 @@ class RunSpec:
         decoder_manager = DecoderManager(
             engine, router=config.router, scheduler=config.scheduler,
             unit_pools=config.unit_pools, num_units=config.num_units,
-            bulk_strong=strategy.bulk_strong, lane_policy=config.lane_policy,
+            bulk_strong=escalation_policy.bulk_strong, lane_policy=config.lane_policy,
             capture_enabled=config.capture_switching_windows,
             decoder_memory_transfer=decoder_memory_transfer,
             decoder_memory=config.decoder_memory,
-            strategy=strategy, services=window_manager.escalation,
+            escalation_policy=escalation_policy, services=window_manager.escalation,
             on_window_decoded=window_manager.on_decode_done,
             on_strong_window_decoded=window_manager.on_strong_decode_done)
         window_manager.connect_idle_decode_demand_receiver(decoder_manager.submit_decode)
@@ -294,7 +294,7 @@ class RunSpec:
             code=config.code, scheme=config.scheme,
             device=config.device, error_model_provider=config.error_model_provider,
             decoder_router=config.router,
-            factory=factory, strategy=strategy, scheduler=config.scheduler,
+            factory=factory, escalation_policy=escalation_policy, scheduler=config.scheduler,
             decoder_memory_transfer=decoder_manager.decoder_memory_transfer,
             lane_policy=config.lane_policy,
             boundary_policy=config.boundary_policy,

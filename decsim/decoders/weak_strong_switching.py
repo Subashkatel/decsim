@@ -1,6 +1,6 @@
-"""Decoder switching strategies: Baseline and Switching.
+"""The two escalation policies: Baseline and Switching.
 
-Baseline is the default. Switching escalates weak decodes to strong; the
+Baseline is the default (weak decoder only). Switching escalates weak decodes to strong; the
 weak/strong routing itself stays in the router (SwitchingRouter), and the
 decoder manager owns unit bookkeeping, hold-or-deliver, and cancellation.
 """

@@ -145,6 +145,12 @@ Where the code differs from the plan, and why:
 - The window manager's stream surface (bind_stream_operation, seal_stream,
   close_stream_boundary, has_dynamic_stream) stays as its public stream API;
   the "controller holds lifecycle" inline was not done.
+- Renamed 2026-08-19 at the owner's request: the protocol DecodingScheme is
+  WindowingScheme (how rounds are cut into windows), DecodingStrategy is
+  EscalationPolicy (whether and when the strong tier decodes a window again;
+  Baseline, Switching), StrategyServices is EscalationServices; RunSpec's
+  `strategy=` is `escalation_policy=`; the window and decoder managers hold
+  `.escalation_policy`.
 - Pre-existing, untouched: experiments/tests/ fail collection
   (FaultRepresentation moved before this work; `python -m pytest -q` at the
   root errors, use `tests`); a live stream with the Ignore or

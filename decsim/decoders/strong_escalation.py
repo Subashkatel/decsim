@@ -462,7 +462,7 @@ class StrongEscalation:
         self._escalations = _EscalationRegistry()
 
     def submit_strong(self, strong_job) -> None:
-        """A strategy submitted a strong job alongside the weak one (run both at once)."""
+        """An escalation policy submitted a strong job alongside the weak one (run both at once)."""
         self._submit_strong_with_csd(strong_job)
 
     def after_weak_commit(self, key) -> None:

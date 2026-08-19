@@ -571,7 +571,7 @@ class DecodeResult:
 
 @dataclass
 class Submission:
-    """One decode job a strategy wants enqueued, optionally after a delay.
+    """One decode job an escalation policy wants enqueued, optionally after a delay.
 
     A strong redo job gets its ready time when it reaches the queue, so link
     delay is not charged as queue wait.
@@ -590,7 +590,7 @@ class Directive(Enum):
 
 @dataclass
 class OutcomeDirective:
-    """A strategy's verdict on one decode outcome."""
+    """An escalation policy's verdict on one decode outcome."""
     directive: Directive
     extra: Optional[Submission] = None
     strong_request_key: Optional[DecoderRequestKey] = None
@@ -606,7 +606,7 @@ class StrongDecodeCompletion:
 
 @dataclass
 class DecodeOutcome:
-    """Joint decode outcome delivered to the strategy hook."""
+    """Joint decode outcome delivered to the escalation policy hook."""
 
     job: DecodeJob
     result: DecodeResult

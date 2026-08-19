@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from decsim.windows.dynamic_windows import DynamicWindows
+from decsim.windows.window_boundaries import BoundaryCourier
 from decsim.windows.window_manager import WindowManager
 
 
@@ -553,8 +554,7 @@ def test_real_manager_links_overlapping_online_windows_by_temporal_dependency():
     manager.window_interaction = SimpleNamespace(
         initial_boundary_state=lambda _window_info: "initial")
     manager.committed_windows = set()
-    manager._held_boundary = {}
-    manager._committed_boundaries = {}
+    manager.courier = BoundaryCourier(manager)
     manager.windows = {}
     manager.op_windows = {"stream": []}
     manager.window_count = {"stream": 0}

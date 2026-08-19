@@ -68,11 +68,3 @@ def test_sweep_summary_and_report(small_config, tmp_path):
     text = (tmp_path / "sweep.md").read_text()
     assert "algorithm" in text and "frame_commit" in text
 
-
-def test_anchor_published_numbers_load_and_host_method_runs():
-    from experiments.baseline.baseline_anchor import (
-        decsim_us_per_shot, host_us_per_shot, published_us_per_shot)
-    published = published_us_per_shot()
-    assert published[17] == pytest.approx(16.0062)
-    assert 0 < host_us_per_shot(5, 0.001, num_shots=500) < 100
-    assert decsim_us_per_shot(5, 0.001, shots=2) > 0

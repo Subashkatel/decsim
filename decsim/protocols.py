@@ -76,11 +76,11 @@ class RunSeedComposite(Protocol):
     def run_seed_children(self) -> Iterable[RunSeedChild]: ...
 
 
-# --------------------------------------------------------------- strategy seam
+# ------------------------------------------------------ escalation policy seam
 
 @runtime_checkable
-class StrategyServices(Protocol):
-    """Strong-job construction and strong-result selection offered to a strategy."""
+class EscalationServices(Protocol):
+    """Strong-job construction and strong-result selection offered to an escalation policy."""
 
     def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
                         label: str) -> DecodeJob: ...
@@ -100,12 +100,12 @@ class StrategyServices(Protocol):
 
 
 @runtime_checkable
-class DecodingStrategy(Protocol):
-    """Port 10. Decides how each window gets decoded: which jobs to submit
-    when a window is ready, and what to do with each outcome (accept it,
-    escalate it, hold it). For a weak job, on_decode_outcome runs BEFORE
-    the core's commit bookkeeping, so its directive decides whether the
-    result is held awaiting a strong redo."""
+class EscalationPolicy(Protocol):
+    """Whether and when a window is decoded again by the strong tier: which
+    jobs to submit when a window is ready (Baseline: the weak job only), and
+    what to do with each outcome (accept it, escalate it, hold it). For a weak
+    job, on_decode_outcome runs BEFORE the core's commit bookkeeping, so its
+    directive decides whether the result is held awaiting a strong redo."""
 
     requires_strong_context: bool
     bulk_strong: bool
@@ -132,10 +132,10 @@ class DecodingStrategy(Protocol):
     ) -> None: ...
 
     def on_window_ready(self, window: Window, weak_job: DecodeJob,
-                        services: StrategyServices) -> list[Submission]: ...
+                        services: EscalationServices) -> list[Submission]: ...
 
     def on_decode_outcome(self, outcome: DecodeOutcome,
-                          services: StrategyServices) -> OutcomeDirective: ...
+                          services: EscalationServices) -> OutcomeDirective: ...
 
 
 # ----------------------------------------------------------- runtime policies
@@ -227,7 +227,7 @@ class Decoder(Protocol):
     manager schedules completion that many ticks later and then calls
     ``decode(job)`` for the result. Timing evaluation must not mutate routing
     or accuracy-bearing job state; functional decisions belong to decode and
-    strategy owners.
+    escalation policy owners.
 
     A decoder that simulates its own internal stages also offers
     ``run(job, engine, on_done)``: the manager calls it instead of scheduling
@@ -458,8 +458,10 @@ class RoundsPolicy(Protocol):
 
 
 @runtime_checkable
-class DecodingScheme(Protocol):
-    """Port 6. Complete static topology plus runtime readiness."""
+class WindowingScheme(Protocol):
+    """How an operation's rounds are cut into windows: the static window
+    graph of an operation, when a window has its data, and the buffer floor
+    the scheme needs."""
 
     def plan_operation(
         self,

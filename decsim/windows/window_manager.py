@@ -2,7 +2,7 @@
 needs, when it is ready, when its result commits and reaches the
 orchestrator and the Pauli frame. Boundaries between windows are the
 BoundaryCourier's, ownership of committed rounds is the LogicalLedger's, the
-strong tier is StrongEscalation's (NoStrongTier when the strategy never
+strong tier is StrongEscalation's (NoStrongTier when the policy never
 escalates), dynamic streams are DynamicWindows', replays are the
 SpeculativeRecovery's; all of them are built here and work on this manager's
 tables. Reading path for one round: on_syndrome_arrival, check_window,
@@ -48,7 +48,7 @@ class WindowManager:
                  syndrome_buffer: Optional[SyndromeBuffer] = None,
                  pauli_frame=None,
                  capture_enabled: bool = False,
-                 strategy, submit_fn: Callable, check_strong_route: Callable,
+                 escalation_policy, submit_fn: Callable, check_strong_route: Callable,
                  on_workload_complete: Callable[[], None]):
         self.engine = engine
         self.scheme = scheme
@@ -77,7 +77,7 @@ class WindowManager:
         self._next_decoder_request_sequence = 0
         self._selected_request_keys = {} if capture_enabled else None
 
-        self.strategy = strategy
+        self.escalation_policy = escalation_policy
         self._idle_decode_demand_receiver = None
         self.submit_fn = submit_fn                   # (job, reserve_transfer) -> None
         self.escalation = (StrongEscalation(self, check_strong_route)
@@ -499,7 +499,7 @@ class WindowManager:
             self.check_window((op_id, window_index))
 
     def check_window(self, key: tuple) -> None:
-        """If a window has its data and dependencies, submit via the strategy."""
+        """If a window has its data and dependencies, submit via the escalation policy."""
         window = self.windows[key]
         if window.queued or window.committed:
             return
@@ -621,7 +621,7 @@ class WindowManager:
 
     def _submit_window_decode(self, key: tuple, window: Window,
                               op: Operation) -> None:
-        """Build the weak job, ask the strategy, and enqueue its submissions."""
+        """Build the weak job, ask the escalation_policy, and enqueue its submissions."""
         self._stamp_first_round_tick(window)
         window.t_queued = self.engine.now
         request_key = self._new_request_key(
@@ -646,7 +646,7 @@ class WindowManager:
                         request_key=request_key,
                         request_created_ticks=self.engine.now)
         window.queued = True
-        for submission in self.strategy.on_window_ready(window, job, self.escalation):
+        for submission in self.escalation_policy.on_window_ready(window, job, self.escalation):
             if submission.job.strong_decode_for is None:
                 if submission.job.submitted or (
                         submission.job.request_key is not None
@@ -805,7 +805,7 @@ class WindowManager:
         return self.engine.now + reservation.total_delay_ticks
 
 
-    # ---- the StrategyServices seam: what a strategy may ask of the run
+    # ---- the EscalationServices seam: what an escalation policy may ask of the run
 
 
     @staticmethod

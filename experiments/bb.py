@@ -93,7 +93,7 @@ def build_quits11_bb_memory(
     )
     error_rates = tuple(physical_error_rate * ratio for ratio in noise_ratios)
     circuit = code.build_circuit(
-        strategy="custom",
+        escalation_policy="custom",
         num_rounds=syndrome_round_count,
         basis=basis,
         error_model=ErrorModel(

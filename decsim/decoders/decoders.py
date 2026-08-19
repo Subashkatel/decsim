@@ -223,7 +223,7 @@ class SampledConfidenceDecoder(_RandomSeedConsumer):
     compute a real confidence from; this wrapper asserts one as an
     experimental input. After the inner (weak) decode, a seeded coin sets a
     typed branch-marker confidence: gap 0.0 with
-    ``escalation_probability`` (low confidence — the Switching strategy
+    ``escalation_probability`` (low confidence — the Switching policy
     escalates the window), else gap 1.0 (keep the weak result).
     ``probability_for`` replaces the flat rate
     with a per-job function (see switch_probability_per_round). Latency

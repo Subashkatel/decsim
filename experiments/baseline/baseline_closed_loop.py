@@ -16,19 +16,19 @@ import csv
 import statistics
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import stim
 import yaml
 
-from decsim.config import TICKS_PER_US, TimingConfig
+from decsim.config import TICKS_PER_US, TimingConfig, us as us_ticks
 from decsim.decoders.decoder_engine import DecoderEngine, DecoderStage, DecoderTiming
 from decsim.decoders.decoder_memory import DecoderMemoryConfig
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.links import link_profiles
-from decsim.links.link_profiles import with_controller_to_buffer_edge
+from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
+from decsim.links.links import LinkCapacityConfig, LinkConfig, LinkQuantityBasis
 from decsim.message import Operation
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
@@ -112,12 +112,22 @@ def weak_decoder(config: dict, algorithm_latency_us) -> DecoderEngine:
 
 
 def link_cards(config: dict):
-    """The named link profile plus the priced controller-to-Buffer-0 hop."""
-    profile = getattr(link_profiles, config["links_profile"])()
-    c2b = config["controller_to_buffer"]
-    return with_controller_to_buffer_edge(
-        profile, latency_us=c2b["latency_us"], aggregate_bits_per_us=c2b["aggregate_bits_per_us"],
-        source="experiments/baseline/baseline_closed_loop.yaml controller_to_buffer")
+    """Every path's latency and capacity from the yaml, on the reference card's
+    payload sizes; C2B is the priced controller-to-Buffer-0 hop."""
+    cards = dict(config["links"])
+    c2b = cards.pop("c2b")
+    profile = with_controller_to_buffer_edge(
+        logical_reference_profile(), latency_us=c2b["latency_us"],
+        aggregate_bits_per_us=c2b["bits_per_us"], source=c2b["source"])
+    channels = {}
+    for path, card in cards.items():
+        capacity = None
+        if card["bits_per_us"] is not None:
+            capacity = LinkCapacityConfig(card["bits_per_us"], LinkQuantityBasis.DIRECT_AGGREGATE,
+                                          None, card["source"])
+        channel = LinkConfig(us_ticks(card["latency_us"]), capacity, card["source"])
+        channels[path] = replace(getattr(profile, path), channel=channel)
+    return replace(profile, **channels, profile_name="baseline_closed_loop.yaml")
 
 
 def decoder_memory(config: dict):

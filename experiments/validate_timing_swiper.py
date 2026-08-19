@@ -25,13 +25,13 @@ from pathlib import Path
 
 import stim
 
-from decsim import link_profiles
+from decsim.links import link_profiles
 from decsim.config import TICKS_PER_US, TimingConfig
 from decsim.decoders.decoder_engine import DecoderEngine, DecoderTiming
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.pauli_frame import PauliFrameConfig
+from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 

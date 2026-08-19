@@ -152,7 +152,7 @@ class RunSpec:
                                         resolve_run_configuration)
         from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
         from .controller.syndrome_ingress import SyndromeIngress
-        from .views import capture_primary_result
+        from .observe.run_views import capture_primary_result
         from .windows.window_manager import WindowManager
 
         config = resolve_run_configuration(self, root_seed)
@@ -249,7 +249,7 @@ class RunSpec:
                                        execution_runtime, factory)
                    if config.make_metrics else [])
         if config.capture_switching_windows:
-            from .metrics import WindowSwitchingRecords
+            from .observe.metrics import WindowSwitchingRecords
             metrics.append(WindowSwitchingRecords(window_manager, decoder_manager))
         metric_bindings = _metric_bindings(metrics)
         bind_run_seed(root_seed, _seed_roots(

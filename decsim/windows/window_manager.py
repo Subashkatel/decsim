@@ -24,7 +24,7 @@ from ..message import (CsdInput, DecodeJob, DecoderInputHold,
                       WindowPlan, WindowProtocol, WindowReadiness,
                       stable_identity_order_key)
 from ..decoders.strong_escalation import NoStrongTier, StrongEscalation
-from ..links import LinkPath, RequestTransferRelation, TrafficAttribution
+from ..links.links import LinkPath, RequestTransferRelation, TrafficAttribution
 from ..syndrome_buffer.syndrome_buffer import SyndromeBuffer
 from .dynamic_windows import DynamicWindows
 from .speculative_recovery import SpeculativeRecovery

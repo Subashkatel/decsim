@@ -89,7 +89,7 @@ def capture(completed) -> dict:
     state["controller"] = {name: canonical(getattr(ctl, name))
                           for name in ("idle_rounds_emitted",)
                           if hasattr(ctl, name)}
-    from decsim import views
+    from decsim.observe import run_views as views
     state["views"] = {
         "utilization": canonical(views.utilization_view(dm)),
         "backlog": canonical(views.backlog_view(wm, dm)),
@@ -115,7 +115,7 @@ def _links(**path_latency_ticks):
     """Isolated fixed-latency link cards, zero by default (the legacy
     conftest helper)."""
     from dataclasses import fields, replace
-    from decsim.link_profiles import logical_reference_profile
+    from decsim.links.link_profiles import logical_reference_profile
     reference = logical_reference_profile()
     edges = {f.name: getattr(reference, f.name) for f in fields(reference)}
     for name, edge in edges.items():
@@ -172,7 +172,7 @@ def baseline_reference_links():
     """Two patches, two units, the reference link cards, so every card is
     priced and the C2B arbitration sees two sources."""
     from decsim.decoders.decoders import PresetLatencyDecoder
-    from decsim.link_profiles import logical_reference_profile
+    from decsim.links.link_profiles import logical_reference_profile
     from decsim.run_spec import RunSpec
     from decsim.program.round_policies import FixedRounds
     return RunSpec(ops=[_memory_op(0, 0), _memory_op(1, 1)], d=3,
@@ -185,7 +185,7 @@ def bandwidth_limited_links():
     """The bandwidth-limited profile: link FIFO capacity and reserve paths,
     two patches contending on C2B."""
     from decsim.decoders.decoders import PresetLatencyDecoder
-    from decsim.link_profiles import bandwidth_limited_profile
+    from decsim.links.link_profiles import bandwidth_limited_profile
     from decsim.run_spec import RunSpec
     from decsim.program.round_policies import FixedRounds
     return RunSpec(ops=[_memory_op(0, 0), _memory_op(1, 1)], d=5,
@@ -203,10 +203,10 @@ def stim_pymatching():
     from decsim.decoders.decoder_engine import DecoderEngine, DecoderStage, DecoderTiming
     from decsim.decoders.decoder_memory import DecoderMemoryConfig
     from decsim.decoders.decoders import PresetLatencyDecoder
-    from decsim.link_profiles import logical_reference_profile
+    from decsim.links.link_profiles import logical_reference_profile
     from decsim.message import Operation
     from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-    from decsim.pauli_frame import PauliFrameConfig
+    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
     from decsim.run_spec import RunSpec
     from decsim.program.round_policies import FixedRounds
     p = 0.003
@@ -255,7 +255,7 @@ def switching_all_escalate():
 
 
 def switching_with_observers():
-    from decsim.metrics import (DecodeBacklog, DecoderUtilization,
+    from decsim.observe.metrics import (DecodeBacklog, DecoderUtilization,
                                 DecoderMemoryOccupancy, ReadyQueueStats,
                                 StrongDecoderBacklog, WindowLatencyBreakdown)
     def metrics(engine, wm, dm, runtime, factory):
@@ -352,7 +352,7 @@ def _feedback_chain_spec(mode, idle_policy=None):
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.program.circuit_frontend import CircuitFrontend
     from decsim.message import Operation
-    from decsim.metrics import BacklogTrajectory, ConditionalReactionTime
+    from decsim.observe.metrics import BacklogTrajectory, ConditionalReactionTime
     from decsim.program.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
     ops = CircuitFrontend([

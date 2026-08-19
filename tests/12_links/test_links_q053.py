@@ -9,11 +9,11 @@ import re
 import pytest
 
 import decsim
-import decsim.link_profiles as link_profiles
-import decsim.links as links_module
+import decsim.links.link_profiles as link_profiles
+import decsim.links.links as links_module
 from decsim.config import us
-from decsim.link_profiles import bandwidth_limited_profile, logical_reference_profile
-from decsim.links import (
+from decsim.links.link_profiles import bandwidth_limited_profile, logical_reference_profile
+from decsim.links.links import (
     BoundaryTransferRelation,
     Link,
     LinkCapacityConfig,
@@ -380,7 +380,7 @@ def test_profile_functions_live_only_in_the_configuration_data_module():
     for name in ("logical_reference_profile", "bandwidth_limited_profile"):
         function = getattr(link_profiles, name)
         assert callable(function)
-        assert function.__module__ == "decsim.link_profiles"
+        assert function.__module__ == "decsim.links.link_profiles"
         assert not hasattr(links_module, name)
         assert not hasattr(decsim, name)
 

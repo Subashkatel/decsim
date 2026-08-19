@@ -13,7 +13,7 @@ from .program.circuit_frontend import (CircuitFrontend, SurgeryIRFrontend,
                                 three_cnot_circuit, cnot_plus_two_t_circuit,
                                 independent_t_circuit,
                                 three_cnot_six_qubits_circuit)
-from .metrics import (DecoderMemoryOccupancy, DecoderUtilization,
+from .observe.metrics import (DecoderMemoryOccupancy, DecoderUtilization,
                       ReadyQueueStats,
                       WindowLatencyBreakdown, MagicStateLatency,
                       StrongDecoderBacklog, ConditionalReactionTime)

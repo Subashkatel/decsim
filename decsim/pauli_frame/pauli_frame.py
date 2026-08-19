@@ -23,8 +23,8 @@ from dataclasses import dataclass
 import math
 from typing import Any, Callable, Optional
 
-from .config import us
-from .message import stable_identity_order_key
+from ..config import us
+from ..message import stable_identity_order_key
 
 
 @dataclass(frozen=True)

@@ -10,8 +10,8 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Optional
 
-from ..link_profiles import logical_reference_profile
-from ..links import LinkModel, LinkPath, TrafficAttribution
+from ..links.link_profiles import logical_reference_profile
+from ..links.links import LinkModel, LinkPath, TrafficAttribution
 from ..syndrome_buffer.syndrome_buffer import SyndromeBuffer
 from ..message import (
     RetainedSyndromeFragment,

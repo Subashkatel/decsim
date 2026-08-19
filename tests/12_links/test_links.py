@@ -7,13 +7,13 @@ from types import SimpleNamespace
 
 import pytest
 
-import decsim.links as links_module
+import decsim.links.links as links_module
 from decsim.config import us
-from decsim.link_profiles import (
+from decsim.links.link_profiles import (
     bandwidth_limited_profile,
     logical_reference_profile,
 )
-from decsim.links import (
+from decsim.links.links import (
     BoundaryTransferRelation,
     Link,
     LinkCapacityConfig,

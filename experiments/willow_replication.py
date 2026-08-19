@@ -43,10 +43,10 @@ from decsim.qpu.stim_device import RecordedStimDevice
 from decsim.config import TICKS_PER_US, TimingConfig
 from decsim.decoders.decoder_engine import ALGORITHM_STAGE, DecoderEngine, DecoderStage, DecoderTiming
 from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
+from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.pauli_frame import PauliFrameConfig
+from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.program.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 

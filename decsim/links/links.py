@@ -98,8 +98,8 @@ from enum import Enum
 import math
 from typing import Optional, Union
 
-from .config import us
-from .message import (
+from ..config import us
+from ..message import (
     DecoderRequestKey, DecoderTier,
     is_stable_identity,
     stable_identity_json,

@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from decsim.config import us
-from decsim.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
-from decsim.links import LinkPath, TrafficAttribution
+from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
+from decsim.links.links import LinkPath, TrafficAttribution
 from decsim.controller.syndrome_ingress import SyndromePacketRouteKind, SyndromeIngress, _IngressSlotState
 
 

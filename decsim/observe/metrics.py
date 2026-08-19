@@ -13,14 +13,14 @@ from enum import Enum
 import math
 from typing import TYPE_CHECKING, Optional
 
-from .message import (DecoderRequestKey, stable_identity_json,
+from ..message import (DecoderRequestKey, stable_identity_json,
                       stable_identity_order_key)
-from .views import (WINDOW_STAGES, backlog_view, decoder_memory_view,
+from .run_views import (WINDOW_STAGES, backlog_view, decoder_memory_view,
                     reaction_view, strong_work_view, utilization_view,
                     switching_records_view, window_latency_view)
 
 if TYPE_CHECKING:
-    from .engine import Engine
+    from ..engine import Engine
 
 
 class WindowSwitchingRecords:

@@ -14,20 +14,27 @@
 
 from pathlib import Path
 
-from experiments.baseline.baseline_closed_loop import algorithm_label
+def algorithm_label(algorithm) -> str:
+    """Short legend name: 28 ns, 280 ns, measured."""
+    if isinstance(algorithm, str):
+        return algorithm
+    nanoseconds = algorithm * 1000
+    if nanoseconds >= 1000:
+        return f"{algorithm:g} us"
+    return f"{nanoseconds:g} ns"
 
 # A window's path in order: (label, point, kind). Waiting is time spent
 # waiting on something else; service is time spent doing the step.
 WINDOW_PATH = (
-    ("wait for the window's rounds to arrive", "buffer_fill", "waiting"),
-    ("wait for the previous window's result", "dep_block", "waiting"),
-    ("wait for a free decoder unit", "queue_wait", "waiting"),
-    ("transfer into the decoder's memory", "cwd_per_window", "service"),
-    ("decoder fetch", "fetch", "service"),
-    ("decoder algorithm", "algorithm", "service"),
-    ("decoder release", "release", "service"),
-    ("send the correction to the Pauli frame", "wdo_per_window", "service"),
-    ("Pauli frame commit", "frame_commit", "service"),
+    ("Buffer fill", "buffer_fill", "waiting"),
+    ("Dependency wait", "dep_block", "waiting"),
+    ("Queue wait", "queue_wait", "waiting"),
+    ("Transfer", "cwd_per_window", "service"),
+    ("Fetch", "fetch", "service"),
+    ("Decode", "algorithm", "service"),
+    ("Release", "release", "service"),
+    ("Frame transfer", "wdo_per_window", "service"),
+    ("Frame commit", "frame_commit", "service"),
 )
 
 
@@ -55,10 +62,10 @@ def input_rounds_per_us(row: dict) -> float:
 def operating_point_name(row: dict) -> str:
     load = row["load"]
     if load < 0.8:
-        return "safe"
+        return "Safe"
     if load <= 1.25:
-        return "near saturation"
-    return "overloaded"
+        return "Near saturation"
+    return "Overloaded"
 
 
 def throughput_plot(rows: list, algorithms: list, path: Path) -> None:
@@ -73,18 +80,16 @@ def throughput_plot(rows: list, algorithms: list, path: Path) -> None:
         for row in group:
             periods.append(round_period_us(row))
             committed.append(row["throughput_rounds_per_us"])
-        axis.plot(periods, committed, "o-", label=f"{algorithm_label(algorithm)} decoder")
+        axis.plot(periods, committed, "o-", label=algorithm_label(algorithm))
     all_periods = sorted({round_period_us(row) for row in rows})
-    axis.plot(all_periods, [1 / period for period in all_periods], "k--", lw=0.8,
-              label="input: one round per period")
+    axis.plot(all_periods, [1 / period for period in all_periods], "k--", lw=0.8, label="Input")
     axis.set_xscale("log")
     axis.set_yscale("log")
     axis.invert_xaxis()
-    axis.set_xlabel("QEC round period (us per round); faster input to the right")
-    axis.set_ylabel("rounds decoded and committed per us")
-    axis.set_title("Does the loop keep up with the input?", fontsize=10)
+    axis.set_xlabel("Round period (µs)")
+    axis.set_ylabel("Throughput (rounds/µs)")
     axis.grid(alpha=0.3, which="both")
-    axis.legend(fontsize=7)
+    axis.legend(title="Decoder", fontsize=7, title_fontsize=7)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
@@ -103,16 +108,15 @@ def reaction_plot(rows: list, algorithms: list, path: Path) -> None:
             periods.append(round_period_us(row))
             medians.append(row["last_round_to_frame_median_us"])
             p99s.append(row["last_round_to_frame_p99_us"])
-        line, = axis.plot(periods, medians, "o-", label=f"{algorithm_label(algorithm)} decoder, median")
+        line, = axis.plot(periods, medians, "o-", label=f"{algorithm_label(algorithm)} median")
         axis.plot(periods, p99s, "--", color=line.get_color(), alpha=0.7,
-                  label=f"{algorithm_label(algorithm)} decoder, p99")
+                  label=f"{algorithm_label(algorithm)} p99")
     axis.set_xscale("log")
     axis.invert_xaxis()
-    axis.set_xlabel("QEC round period (us per round); faster input to the right")
-    axis.set_ylabel("reaction time (us): last round of the window -> correction in frame")
-    axis.set_title("Reaction time vs input speed", fontsize=10)
+    axis.set_xlabel("Round period (µs)")
+    axis.set_ylabel("Reaction time (µs)")
     axis.grid(alpha=0.3, which="both")
-    axis.legend(fontsize=6)
+    axis.legend(title="Decoder", fontsize=7, title_fontsize=7)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
@@ -155,12 +159,11 @@ def backlog_plot(rows: list, algorithms: list, path: Path) -> None:
                 times.append(time_us)
                 depths.append(depth)
             axis.step(times, depths, where="post", color="tab:blue")
-            axis.set_title(f"{operating_point_name(row)}: {round_period_us(row):g} us rounds, "
-                           f"{algorithm_label(algorithm)} decoder (load {row['load']:.2f})", fontsize=8)
-            axis.set_xlabel("time since the shot started (us)", fontsize=8)
+            axis.set_title(f"{operating_point_name(row)}, {round_period_us(row):g} µs rounds, "
+                           f"{algorithm_label(algorithm)} decoder", fontsize=8)
+            axis.set_xlabel("Time (µs)", fontsize=8)
             axis.grid(alpha=0.3)
-        axes[row_index][0].set_ylabel("windows waiting\nto be decoded", fontsize=8)
-    figure.suptitle("Backlog over one 60-round shot: does the queue of waiting windows stay bounded?", fontsize=10)
+        axes[row_index][0].set_ylabel("Backlog (windows)", fontsize=8)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
@@ -186,12 +189,13 @@ def window_timeline_plot(rows: list, algorithms: list, path: Path) -> None:
         axis.set_yticks(range(len(step_labels)))
         axis.set_yticklabels(step_labels, fontsize=7)
         axis.invert_yaxis()
-        axis.set_title(f"{algorithm_label(algorithm)} decoder, {round_period_us(row):g} us rounds: "
-                       f"{start:.1f} us from first round to correction", fontsize=8)
-        axis.set_xlabel("us since the window's first round arrived", fontsize=8)
+        axis.set_title(f"{algorithm_label(algorithm)} decoder, {round_period_us(row):g} µs rounds", fontsize=8)
+        axis.set_xlabel("Time (µs)", fontsize=8)
         axis.grid(alpha=0.3, axis="x")
-    figure.suptitle("Where one window's time goes (orange: waiting, blue: doing work)", fontsize=10)
-    figure.tight_layout()
+    waiting_patch = plt.Rectangle((0, 0), 1, 1, color="tab:orange")
+    service_patch = plt.Rectangle((0, 0), 1, 1, color="tab:blue")
+    figure.legend([waiting_patch, service_patch], ["Waiting", "Service"], loc="lower right", fontsize=7, ncol=2)
+    figure.tight_layout(rect=(0, 0.06, 1, 1))
     figure.savefig(path, dpi=150)
 
 
@@ -218,13 +222,13 @@ def ler_plot(rows: list, algorithms: list, path: Path) -> None:
                 lower.append(row["logical_error_rate"] - row["ler_wilson_low"])
                 upper.append(row["ler_wilson_high"] - row["logical_error_rate"])
             axis.errorbar(probabilities, rates, yerr=[lower, upper], fmt="o-", capsize=3,
-                          label=f"{algorithm_label(algorithm)} decoder, {period:g} us round")
+                          label=f"{algorithm_label(algorithm)}, {period:g} µs rounds")
     axis.set_xscale("log")
     axis.set_yscale("log")
-    axis.set_xlabel("physical error probability")
-    axis.set_ylabel("logical error rate per shot")
+    axis.set_xlabel("Physical error rate")
+    axis.set_ylabel("Logical error rate")
     axis.grid(alpha=0.3, which="both")
-    axis.legend(fontsize=6)
+    axis.legend(fontsize=7)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 

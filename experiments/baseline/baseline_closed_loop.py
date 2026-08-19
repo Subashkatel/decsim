@@ -394,22 +394,11 @@ def table_lines(rows: list) -> list:
     return lines
 
 
-def write_report(config: dict, rows: list, report_dir: Path) -> None:
+def write_report(rows: list, report_dir: Path) -> None:
+    """sweep.csv (every column) and sweep.md (the table)."""
     report_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, report_dir / "sweep.csv")
-    lines = ["# Baseline closed loop, per-point latency and throughput", "",
-             "Plots: reaction_vs_rate.png (end-to-end window reaction time vs syndrome input rate, mean "
-             "and p99, one curve per decoder card), components.png (where the reaction time goes, four "
-             "categories, per card), reaction_vs_load.png (the same against the chain load rho, rho = 1 "
-             "marked), throughput.png (decoded vs input rounds/us). load = chain service per window "
-             "(unit assigned to decode done plus the DD handoff) over the window inter-arrival time.", "",
-             f"Circuit: {config['code_task']} d={config['distance']}, "
-             f"{config['rounds_per_shot']} rounds per shot, p={config['physical_error_probability']}, "
-             f"{len(config['seeds'])} shots per point. All latencies simulated, in microseconds, "
-             "mean over decoded windows (max in the CSV). algorithm = 'measured' charges the wall "
-             "clock of each real PyMatching call; numeric values charge the stated latency.", ""]
-    lines += table_lines(rows)
-    (report_dir / "sweep.md").write_text("\n".join(lines) + "\n")
+    (report_dir / "sweep.md").write_text("\n".join(table_lines(rows)) + "\n")
 
 
 # ---- the plots -------------------------------------------------------------
@@ -525,7 +514,7 @@ def main(argv) -> None:
     config = load_config(config_path)
     report_dir = Path(config["report_dir"])
     rows = summarize(run_sweep(config))
-    write_report(config, rows, report_dir)
+    write_report(rows, report_dir)
     plots(rows, report_dir)
     print((report_dir / "sweep.md").read_text())
 

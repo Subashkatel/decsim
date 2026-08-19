@@ -314,66 +314,16 @@ def table_lines(rows: list) -> list:
     return lines
 
 
-def host_cpu_name() -> str:
-    import platform
-    try:
-        for line in open("/proc/cpuinfo"):
-            if line.startswith("model name"):
-                return line.split(":", 1)[1].strip()
-    except OSError:
-        pass
-    return platform.processor() or "unknown"
-
-
-def serial_chain_notes(rows: list, commit_rounds: int) -> list:
-    """Per algorithm at the fastest input: the measured serial chain per window
-    and the round period at which the loop stops keeping up."""
-    fastest_period = min(row["round_period_us"] for row in rows)
-    notes = []
-    for row in rows:
-        if row["round_period_us"] != fastest_period:
-            continue
-        chain_us = 1 / row["throughput_windows_per_us"]
-        notes.append(f"{algorithm_label(row['algorithm_latency_us'])}: {chain_us:.2f} us per window, "
-                     f"{commit_rounds / chain_us:.2f} rounds/us, knee near a "
-                     f"{chain_us / commit_rounds:.2f} us round period")
-    return notes
-
-
 def write_report(config: dict, rows: list, report_dir: Path) -> None:
     report_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, report_dir / "sweep.csv")
     lines = ["# Baseline closed loop, per-point latency and throughput", "",
-             "Plots: latency_stack.png (per-point stack vs input round period), throughput.png "
-             "(decoded vs input rounds/us).", "",
              f"Circuit: {config['code_task']} d={config['distance']}, "
              f"{config['rounds_per_shot']} rounds per shot, p={config['noise_probability']}, "
              f"{len(config['seeds'])} shots per point. All latencies simulated, in microseconds, "
-             "mean over decoded windows (max in the CSV).", ""]
+             "mean over decoded windows (max in the CSV). algorithm = 'measured' charges the wall "
+             "clock of each real PyMatching call; numeric values charge the stated latency.", ""]
     lines += table_lines(rows)
-    chains = serial_chain_notes(rows, commit_rounds=config["distance"])
-    wall_clocks = ", ".join(f"{row['sim_wall_seconds_per_shot']:.2f}s" for row in rows[:6])
-    lines += [
-        "",
-        f"algorithm = 'measured' rows charge the wall clock of each real PyMatching call "
-        f"(software decoder on this host: {host_cpu_name()}, one thread, graph cached); numeric rows charge "
-        "the stated modeled latency (an ASIC card).",
-        "",
-        "Reading the table. Windows are sliding (commit d, buffer d) and serial: window k+1 "
-        "starts only after window k's boundary arrives, so the loop's capacity is one window "
-        "per serial chain = unit assigned, CWD transfer into its memory, decoder service, boundary "
-        "handoff over DD at decode done (the WDO delivery and frame commit run downstream, off the "
-        "chain). Measured chain at the fastest input, per algorithm: " + "; ".join(chains) + ". "
-        "Faster input only grows dep_block (the wait for the previous window). A unit is held from "
-        "assignment through its input transfer to the end of its decode, so utilization counts the "
-        "CWD transfer; the decode itself is the fetch+algorithm+release columns. With these link "
-        "cards the ASIC rows are link-bound (CWD 2 us + DD 0.5 us per window), not decoder-bound; "
-        "the measured software row is decoder-bound.",
-        "",
-        f"Simulator wall clock per shot (host CPU, not a modeled latency): {wall_clocks} ...",
-        "",
-        "Anchor comparison against published numbers: anchor.md (experiments/baseline_anchor.py).",
-    ]
     (report_dir / "sweep.md").write_text("\n".join(lines) + "\n")
 
 

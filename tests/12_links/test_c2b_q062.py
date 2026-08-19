@@ -119,6 +119,37 @@ def test_c2b_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
     assert all(row["reconciles"] for row in traffic["reconciliation"])
 
 
+def test_finite_c2b_bandwidth_charges_serialization_plus_propagation():
+    model = _wired_profile(latency_us=0.10, bandwidth=1000.0).resolve()
+
+    reservation = model.reserve(
+        LinkPath.C2B, payload_bits=500, now_ticks=0,
+        attribution=TrafficAttribution(
+            operation_id=1, patch_ids=(0,), window_id=None, round_lo=1, round_hi=1))
+
+    assert reservation.serialization_ticks == us(0.5)   # 500 bits at 1000 bits/us
+    assert reservation.propagation_ticks == us(0.10)
+    assert reservation.total_delay_ticks == us(0.60)
+
+
+def test_unbounded_c2b_bandwidth_charges_propagation_only():
+    model = _wired_profile(latency_us=0.10, bandwidth=None).resolve()
+
+    first = model.reserve(
+        LinkPath.C2B, payload_bits=500, now_ticks=0,
+        attribution=TrafficAttribution(
+            operation_id=1, patch_ids=(0,), window_id=None, round_lo=1, round_hi=1))
+    second = model.reserve(
+        LinkPath.C2B, payload_bits=500, now_ticks=0,
+        attribution=TrafficAttribution(
+            operation_id=1, patch_ids=(0,), window_id=None, round_lo=2, round_hi=2))
+
+    assert first.serialization_ticks == 0
+    assert first.total_delay_ticks == us(0.10)
+    assert second.queue_wait_ticks == 0                 # no serialization, so no FIFO wait
+    assert second.total_delay_ticks == us(0.10)
+
+
 def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry():
     engine = _Engine(now=1_000)
     links = _wired_profile(latency_us=0.25, bandwidth=100.0).resolve()

@@ -64,8 +64,13 @@ POINTS = (
     "dd_per_window",        # decoder -> next window's decoder, the boundary handoff, link DD
     "wdo_per_window",       # decoder -> Pauli frame, link WDO
     "frame_commit",         # Pauli frame accepted -> committed
-    "last_round_to_frame",  # last round of the window arrives -> its correction is in the frame
-    "reaction_first_round", # first round of the window arrives -> correction in the frame
+    # Totals. The buffer0 pair starts the clock at Buffer 0 publication; the
+    # qpu pair starts it when the round leaves the QPU (the QC send), so it
+    # includes QC, controller processing, packing and C2B.
+    "buffer0_ready_to_frame",        # window complete in Buffer 0 -> its correction is in the frame
+    "buffer0_first_round_to_frame",  # window's first round published in Buffer 0 -> correction in the frame
+    "qpu_last_round_to_frame",       # window's last required round leaves the QPU -> correction in the frame
+    "qpu_first_round_to_frame",      # window's first required round leaves the QPU -> correction in the frame
 )
 
 @dataclass(frozen=True)
@@ -121,9 +126,11 @@ def memory_circuit(config: dict, physical_error_probability: float) -> stim.Circ
 
 
 def weak_decoder(config: dict, algorithm_latency_us) -> DecoderEngine:
-    """PyMatching inside the decoder engine: fetch cycles before it, release
-    cycles after it, at the engine clock. The algorithm charges either its real
-    wall clock (MEASURED) or the stated ASIC latency."""
+    """PyMatching functional decoder inside the decoder engine: fetch cycles
+    before it, release cycles after it, at the engine clock. The algorithm
+    charges either its real wall clock (MEASURED) or the card's fixed
+    algorithm-core latency; a card prices the algorithm stage only, never a
+    total decoder latency, because fetch and release are charged separately."""
     if algorithm_latency_us == MEASURED:
         algorithm = PyMatchingDecoder(latency_model=None)
     else:
@@ -225,9 +232,25 @@ def c2b_delays_us(transfers: list) -> list:
             for row in transfers if row["path"] == "c2b"]
 
 
-def window_points_us(window, frame_record, stage_us: dict, link_delay: dict) -> dict:
+def qc_send_ticks(transfers: list) -> dict:
+    """round -> tick that round left the QPU (its earliest QC send)."""
+    send = {}
+    for row in transfers:
+        if row["path"] != "qc":
+            continue
+        round_index = row["attribution"]["round_lo"]
+        earlier = send.get(round_index)
+        if earlier is None or row["send_ticks"] < earlier:
+            send[round_index] = row["send_ticks"]
+    return send
+
+
+def window_points_us(window, frame_record, stage_us: dict, link_delay: dict,
+                     qc_send: dict) -> dict:
     """The per-window latency points, in microseconds, for one decoded window."""
     window_id = window.key[1]
+    last_emitted_round = max(qc_send)
+    last_required_round = min(window.buffer_hi, last_emitted_round)
     return {
         "buffer_fill": us(window.t_data_complete - window.t_first_round),
         "dep_block": us(window.t_queued - window.t_data_complete),
@@ -240,8 +263,10 @@ def window_points_us(window, frame_record, stage_us: dict, link_delay: dict) -> 
         "dd_per_window": us(link_delay.get(("dd", window_id), 0)),
         "wdo_per_window": us(link_delay.get(("wdo", window_id), 0)),
         "frame_commit": us(frame_record.committed_ticks - frame_record.accepted_ticks),
-        "last_round_to_frame": us(frame_record.committed_ticks - window.t_data_complete),
-        "reaction_first_round": us(frame_record.committed_ticks - window.t_first_round),
+        "buffer0_ready_to_frame": us(frame_record.committed_ticks - window.t_data_complete),
+        "buffer0_first_round_to_frame": us(frame_record.committed_ticks - window.t_first_round),
+        "qpu_last_round_to_frame": us(frame_record.committed_ticks - qc_send[last_required_round]),
+        "qpu_first_round_to_frame": us(frame_record.committed_ticks - qc_send[window.start_round]),
     }
 
 
@@ -249,6 +274,7 @@ def collect_samples(completed, decoder_engine) -> dict:
     """point -> list of microsecond samples over this shot's decoded windows."""
     transfers = completed.result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
+    qc_send = qc_send_ticks(transfers)
     frame_by_window = {record.window_key[1]: record
                        for record in completed.pauli_frame.snapshot().records}
     samples = {point: [] for point in POINTS}
@@ -260,7 +286,8 @@ def collect_samples(completed, decoder_engine) -> dict:
             continue
         stage_us = {record.stage: us(record.end_ticks - record.start_ticks)
                     for record in decoder_engine.stage_records_for(op_id, window_id)}
-        for point, value in window_points_us(window, frame_record, stage_us, link_delay).items():
+        points = window_points_us(window, frame_record, stage_us, link_delay, qc_send)
+        for point, value in points.items():
             samples[point].append(value)
     return samples
 
@@ -271,7 +298,7 @@ def direct_prediction(completed, circuit: stim.Circuit) -> tuple:
     matching = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
     operation_id = completed.result.operation_results[0].operation_id
-    events = np.asarray(completed.qpu.model._dets[operation_id], dtype=bool)
+    events = np.asarray(completed.qpu.model.sampled_detection_events(operation_id), dtype=bool)
     predicted = matching.decode(events)
     return tuple(int(bit) for bit in predicted)
 
@@ -479,8 +506,8 @@ def table_lines(rows: list) -> list:
                  f"{row['decoder_utilization']:.3f}",
                  f"{row['max_queued_windows']}"]
         cells += [f"{row[f'{point}_mean_us']:.3f}" for point in POINTS]
-        cells.append(f"{row['last_round_to_frame_median_us']:.3f}")
-        cells.append(f"{row['last_round_to_frame_p99_us']:.3f}")
+        cells.append(f"{row['buffer0_ready_to_frame_median_us']:.3f}")
+        cells.append(f"{row['buffer0_ready_to_frame_p99_us']:.3f}")
         lines.append("| " + " | ".join(cells) + " |")
     return lines
 

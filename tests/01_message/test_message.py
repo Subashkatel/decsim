@@ -515,24 +515,12 @@ def test_strong_completion_accepts_matching_strong_identity():
     assert_frozen(completion)
 
 
-def test_decode_outcome_and_marker_messages_carry_identity():
-    """Decode outcomes pair results with jobs and marker messages retain their keys."""
+def test_decode_outcome_pairs_result_with_job():
     job = message.DecodeJob(op_id=4, window_id=2, n_rounds=3)
     result = message.DecodeResult(op_id=4, window_id=2)
     outcome = message.DecodeOutcome(job, result)
-    request_key = message.DecoderRequestKey(4, 2, message.DecoderTier.STRONG, 7)
-    markers = (
-        message.PotentialStrong((4, 2)),
-        message.PendingStrong(request_key),
-        message.CsdInput(request_key),
-        message.DecoderInputHold(request_key),
-        message.Replay((4, 2), 1),
-        message.RephaseGuard(request_key),
-    )
     assert outcome.job is job
     assert outcome.result is result
-    for marker in markers:
-        assert_frozen(marker)
 
 
 def test_soft_output_does_not_enforce_weight_relationships():

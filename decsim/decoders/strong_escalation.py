@@ -29,10 +29,11 @@ from types import MappingProxyType
 from typing import Optional
 
 from ..links.links import LinkPath
-from ..message import (CsdInput, DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier,
-                       LogicalContribution, Operation, PendingStrong, PotentialStrong,
-                       RephaseGuard, SeamFaultOwner, StrongDecodeCompletion,
+from ..message import (DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier,
+                       LogicalContribution, Operation, SeamFaultOwner, StrongDecodeCompletion,
                        StrongRegionPlan, Window, WindowInfo, stable_identity_order_key)
+from ..syndrome_buffer.syndrome_buffer import (CsdInput, PendingStrong, PotentialStrong,
+                                               RephaseGuard)
 
 
 @dataclass(frozen=True)

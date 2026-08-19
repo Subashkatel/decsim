@@ -11,7 +11,7 @@ from enum import Enum, auto
 from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
                     runtime_checkable)
 
-from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
+from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, Directive, OutcomeDirective, Submission,
                       DecoderRequestKey,
                       DecodeOutcome, DecodeResult, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
@@ -77,33 +77,6 @@ class RunSeedComposite(Protocol):
 
 
 # --------------------------------------------------------------- strategy seam
-
-@dataclass
-class Submission:
-    """One decode job a strategy wants enqueued, optionally after a delay.
-
-    A strong redo job gets its ready time when it reaches the queue, so link
-    delay is not charged as queue wait.
-    """
-
-    job: DecodeJob
-    delay_ticks: int = 0
-
-
-class Directive(Enum):
-    """What the core should do with a decode outcome."""
-    FINALIZE = auto()          # accept the weak result; cancel any parallel strong
-    AWAIT_STRONG = auto()      # hold the weak result; .extra may carry the strong redo
-    FINALIZE_STRONG = auto()   # a strong result landed; core applies hold-or-deliver
-
-
-@dataclass
-class OutcomeDirective:
-    """A strategy's verdict on one decode outcome."""
-    directive: Directive
-    extra: Optional[Submission] = None
-    strong_request_key: Optional[DecoderRequestKey] = None
-
 
 @runtime_checkable
 class StrategyServices(Protocol):

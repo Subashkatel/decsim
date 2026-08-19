@@ -129,49 +129,6 @@ class SyndromePacketRouteKind(Enum):
 
 
 @dataclass(frozen=True)
-class PotentialStrong:
-    """Buffer 0 hold: a window's rounds kept in case its weak result escalates."""
-
-    window_key: tuple
-
-
-@dataclass(frozen=True)
-class PendingStrong:
-    """Buffer 0 hold: rounds kept for a strong request that is admitted but not yet served."""
-
-    request_key: DecoderRequestKey
-
-
-@dataclass(frozen=True)
-class CsdInput:
-    """Buffer 0 hold: rounds in flight to a strong decoder over CSD."""
-
-    request_key: DecoderRequestKey
-
-
-@dataclass(frozen=True)
-class DecoderInputHold:
-    """Buffer 0 hold: rounds a decode job needs until they land in unit memory."""
-
-    request_key: DecoderRequestKey
-
-
-@dataclass(frozen=True)
-class Replay:
-    """Buffer 0 hold: rounds a window needs again for a speculative replay of one boundary generation."""
-
-    window_key: tuple
-    boundary_generation: int
-
-
-@dataclass(frozen=True)
-class RephaseGuard:
-    """Buffer 0 hold: rounds a rephased suffix keeps while its strong request is live."""
-
-    request_key: DecoderRequestKey
-
-
-@dataclass(frozen=True)
 class SyndromePacketRoute:
     """The route of one round from the controller: window input, or a feedback-memory round of a source operation."""
 
@@ -609,6 +566,33 @@ class DecodeResult:
     soft_output: Optional["SoftOutput"] = None  # source-compatible confidence
     boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
+
+
+@dataclass
+class Submission:
+    """One decode job a strategy wants enqueued, optionally after a delay.
+
+    A strong redo job gets its ready time when it reaches the queue, so link
+    delay is not charged as queue wait.
+    """
+
+    job: DecodeJob
+    delay_ticks: int = 0
+
+
+class Directive(Enum):
+    """What the core should do with a decode outcome."""
+    FINALIZE = auto()          # accept the weak result; cancel any parallel strong
+    AWAIT_STRONG = auto()      # hold the weak result; .extra may carry the strong redo
+    FINALIZE_STRONG = auto()   # a strong result landed; core applies hold-or-deliver
+
+
+@dataclass
+class OutcomeDirective:
+    """A strategy's verdict on one decode outcome."""
+    directive: Directive
+    extra: Optional[Submission] = None
+    strong_request_key: Optional[DecoderRequestKey] = None
 
 
 @dataclass(frozen=True)

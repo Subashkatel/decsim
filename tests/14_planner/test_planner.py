@@ -7,12 +7,12 @@ import numpy as np
 import pytest
 
 from decsim.config import TICKS_PER_US
+from decsim.syndrome_buffer.syndrome_buffer import PotentialStrong
 from decsim.message import (
     Operation,
     OperationPlanningView,
     OperationWindowPlan,
     OpKind,
-    PotentialStrong,
     ResolvedCodeGeometry,
     ResolvedOperationPlanning,
     Window,

@@ -52,15 +52,20 @@ POINTS = (
     "algorithm",            # decoder engine: the decoding algorithm
     "release",              # decoder engine: correction write-out
     "service",              # unit assigned -> decode done (CWD transfer into its memory + fetch+algorithm+release)
+    "dd_per_window",        # decoder -> next window's decoder, the boundary handoff, link DD
     "wdo_per_window",       # decoder -> Pauli frame, link WDO
     "frame_commit",         # Pauli frame accepted -> committed
     "last_round_to_frame",  # last round of the window arrives -> its correction is in the frame
     "reaction_first_round", # first round of the window arrives -> correction in the frame
 )
 
-# The points stacked in latency_stack.png: the first-round-to-frame path, hop by hop.
-STACKED_POINTS = ("buffer_fill", "dep_block", "cwd_per_window", "fetch", "algorithm", "release",
-                  "wdo_per_window", "frame_commit")
+# Where a window's reaction time goes, in four categories (components.png).
+COMPONENTS = {
+    "dependency wait": ("dep_block", "queue_wait"),
+    "data collection": ("buffer_fill",),
+    "decoder compute": ("fetch", "algorithm", "release"),
+    "other classical path": ("cwd_per_window", "wdo_per_window", "frame_commit"),
+}
 
 
 @dataclass(frozen=True)
@@ -70,8 +75,10 @@ class ShotMeasurement:
     seed: int
     windows: int
     logical_failure: bool
+    samples: dict          # point -> list of us, one per decoded window (or per round for c2b)
     means: dict            # point -> mean us over windows of this shot
     maxes: dict            # point -> max us
+    load: float            # chain service per window / window inter-arrival (rho)
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     decoder_utilization: float
@@ -216,6 +223,7 @@ def window_points_us(window, frame_record, stage_us: dict, link_delay: dict) -> 
         "algorithm": stage_us["algorithm"],
         "release": stage_us["release"],
         "service": us(window.t_done - window.t_dispatch),
+        "dd_per_window": us(link_delay.get(("dd", window_id), 0)),
         "wdo_per_window": us(link_delay.get(("wdo", window_id), 0)),
         "frame_commit": us(frame_record.committed_ticks - frame_record.accepted_ticks),
         "last_round_to_frame": us(frame_record.committed_ticks - window.t_data_complete),
@@ -243,6 +251,25 @@ def collect_samples(completed, decoder_engine) -> dict:
     return samples
 
 
+def chain_load(samples: dict, config: dict, round_period_us: float) -> float:
+    """rho: the serial chain's service per window (unit assigned -> decode done,
+    plus the DD boundary handoff) over the window inter-arrival time (commit
+    rounds x round period). Above 1 the chain cannot keep up."""
+    service_us = statistics.fmean(samples["service"]) if samples["service"] else 0.0
+    handoff_us = statistics.fmean(samples["dd_per_window"]) if samples["dd_per_window"] else 0.0
+    commit_rounds = config["windowing"]["commit_rounds"] or config["distance"]
+    inter_arrival_us = commit_rounds * round_period_us
+    return (service_us + handoff_us) / inter_arrival_us
+
+
+def percentile(values: list, fraction: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = min(len(ordered) - 1, int(round(fraction * (len(ordered) - 1))))
+    return ordered[index]
+
+
 def measure_shot(config: dict, *, round_period_us: float, algorithm_latency_us,
                  seed: int) -> ShotMeasurement:
     spec, decoder_engine = build_run(config, round_period_us=round_period_us,
@@ -255,6 +282,7 @@ def measure_shot(config: dict, *, round_period_us: float, algorithm_latency_us,
 
     samples = collect_samples(completed, decoder_engine)
     decoded_windows = len(samples["service"])
+    load = chain_load(samples, config, round_period_us)
     windows = completed.window_manager.windows.values()
     first_round_tick = min(w.t_first_round for w in windows if w.t_first_round is not None)
     last_commit_tick = max(r.committed_ticks for r in completed.pauli_frame.snapshot().records)
@@ -265,9 +293,11 @@ def measure_shot(config: dict, *, round_period_us: float, algorithm_latency_us,
         round_period_us=round_period_us, algorithm_latency_us=algorithm_latency_us,
         seed=seed, windows=decoded_windows,
         logical_failure=operation_result.logical_observables != operation_result.observable_truth,
+        samples=samples,
         means={point: (statistics.fmean(values) if values else 0.0)
                for point, values in samples.items()},
         maxes={point: (max(values) if values else 0.0) for point, values in samples.items()},
+        load=load,
         throughput_windows_per_us=decoded_windows / span_us,
         throughput_rounds_per_us=config["rounds_per_shot"] / span_us,
         decoder_utilization=sum(samples["service"]) / span_us,
@@ -306,9 +336,14 @@ def summarize_point(group: list) -> dict:
            "throughput_rounds_per_us": statistics.fmean(m.throughput_rounds_per_us for m in group),
            "decoder_utilization": statistics.fmean(m.decoder_utilization for m in group),
            "max_queued_windows": max(m.max_queued_windows for m in group),
+           "load": statistics.fmean(m.load for m in group),
            "sim_wall_seconds_per_shot": statistics.fmean(m.sim_wall_seconds for m in group)}
     for point in POINTS:
+        pooled = []
+        for measurement in group:
+            pooled.extend(measurement.samples[point])
         row[f"{point}_mean_us"] = statistics.fmean(m.means[point] for m in group)
+        row[f"{point}_p99_us"] = percentile(pooled, 0.99)
         row[f"{point}_max_us"] = max(m.maxes[point] for m in group)
     return row
 
@@ -339,18 +374,22 @@ def write_csv(rows: list, path: Path) -> None:
 
 
 def table_lines(rows: list) -> list:
-    head = ["algo us", "round us", "LER", "win/us", "rounds/us", "util", "max q"] + list(POINTS)
+    head = (["algo us", "round us", "rate MHz", "load", "LER", "win/us", "rounds/us", "util", "max q"]
+            + list(POINTS) + ["reaction p99"])
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for row in rows:
         algorithm = row["algorithm_latency_us"]
         cells = [algorithm if isinstance(algorithm, str) else f"{algorithm:g}",
                  f"{row['round_period_us']:g}",
+                 f"{1 / row['round_period_us']:g}",
+                 f"{row['load']:.2f}",
                  f"{row['logical_error_rate']:.2f}",
                  f"{row['throughput_windows_per_us']:.4f}",
                  f"{row['throughput_rounds_per_us']:.3f}",
                  f"{row['decoder_utilization']:.3f}",
                  f"{row['max_queued_windows']}"]
         cells += [f"{row[f'{point}_mean_us']:.3f}" for point in POINTS]
+        cells.append(f"{row['reaction_first_round_p99_us']:.3f}")
         lines.append("| " + " | ".join(cells) + " |")
     return lines
 
@@ -359,6 +398,11 @@ def write_report(config: dict, rows: list, report_dir: Path) -> None:
     report_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, report_dir / "sweep.csv")
     lines = ["# Baseline closed loop, per-point latency and throughput", "",
+             "Plots: reaction_vs_rate.png (end-to-end window reaction time vs syndrome input rate, mean "
+             "and p99, one curve per decoder card), components.png (where the reaction time goes, four "
+             "categories, per card), reaction_vs_load.png (the same against the chain load rho, rho = 1 "
+             "marked), throughput.png (decoded vs input rounds/us). load = chain service per window "
+             "(unit assigned to decode done plus the DD handoff) over the window inter-arrival time.", "",
              f"Circuit: {config['code_task']} d={config['distance']}, "
              f"{config['rounds_per_shot']} rounds per shot, p={config['physical_error_probability']}, "
              f"{len(config['seeds'])} shots per point. All latencies simulated, in microseconds, "
@@ -371,28 +415,76 @@ def write_report(config: dict, rows: list, report_dir: Path) -> None:
 # ---- the plots -------------------------------------------------------------
 
 def rows_of_algorithm(rows: list, algorithm) -> list:
-    """This algorithm's rows, fastest input last."""
+    """This algorithm's rows, slowest input first."""
     return sorted((row for row in rows if row["algorithm_latency_us"] == algorithm),
-                  key=lambda row: row["round_period_us"])
+                  key=lambda row: row["round_period_us"], reverse=True)
 
 
-def latency_stack_plot(rows: list, algorithms: list, path: Path) -> None:
+def input_rate_mhz(row: dict) -> float:
+    return 1 / row["round_period_us"]
+
+
+def reaction_vs_rate_plot(rows: list, algorithms: list, path: Path) -> None:
+    """End-to-end window reaction time (first round -> correction in the frame)
+    against the syndrome input rate: mean solid, p99 dashed, one color per card."""
     import matplotlib.pyplot as plt
-    figure, axes = plt.subplots(1, len(algorithms), figsize=(4.2 * len(algorithms), 3.8), sharey=True)
+    figure, axis = plt.subplots(figsize=(5.4, 3.8))
+    for algorithm in algorithms:
+        group = rows_of_algorithm(rows, algorithm)
+        rates = [input_rate_mhz(row) for row in group]
+        means = [row["reaction_first_round_mean_us"] for row in group]
+        p99s = [row["reaction_first_round_p99_us"] for row in group]
+        line, = axis.plot(rates, means, "o-", label=f"{algorithm_label(algorithm)} decoder, mean")
+        axis.plot(rates, p99s, "--", color=line.get_color(), alpha=0.7, label=f"{algorithm_label(algorithm)} decoder, p99")
+    axis.set_xscale("log")
+    axis.set_xlabel("syndrome input rate (MHz)")
+    axis.set_ylabel("window reaction time, first round -> frame (us)")
+    axis.set_title("Reaction time vs input rate (mean solid, p99 dashed)", fontsize=9)
+    axis.grid(alpha=0.3, which="both")
+    axis.legend(fontsize=6)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+
+
+def components_plot(rows: list, algorithms: list, path: Path) -> None:
+    """Where the reaction time goes, per card: four categories as curves from zero."""
+    import matplotlib.pyplot as plt
+    figure, axes = plt.subplots(1, len(algorithms), figsize=(4.2 * len(algorithms), 3.6), sharey=True)
     axes = list(axes) if len(algorithms) > 1 else [axes]
     for axis, algorithm in zip(axes, algorithms):
         group = rows_of_algorithm(rows, algorithm)
-        x_labels = [str(row["round_period_us"]) for row in group]
-        bottom = [0.0] * len(group)
-        for point in STACKED_POINTS:
-            values = [row[f"{point}_mean_us"] for row in group]
-            axis.bar(x_labels, values, bottom=bottom, label=point)
-            bottom = [below + value for below, value in zip(bottom, values)]
-        axis.set_title(f"algorithm {algorithm_label(algorithm)}")
-        axis.set_xlabel("input round period (us)")
-        axis.grid(alpha=0.3, axis="y")
-    axes[0].set_ylabel("first round -> frame, mean us per window")
-    axes[-1].legend(fontsize=6)
+        rates = [input_rate_mhz(row) for row in group]
+        for name, points in COMPONENTS.items():
+            values = []
+            for row in group:
+                values.append(sum(row[f"{point}_mean_us"] for point in points))
+            axis.plot(rates, values, "o-", label=name)
+        axis.set_xscale("log")
+        axis.set_title(f"{algorithm_label(algorithm)} decoder")
+        axis.set_xlabel("syndrome input rate (MHz)")
+        axis.grid(alpha=0.3, which="both")
+    axes[0].set_ylabel("mean us per window")
+    axes[-1].legend(fontsize=7)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+
+
+def reaction_vs_load_plot(rows: list, algorithms: list, path: Path) -> None:
+    """Reaction time against the chain load rho; rho = 1 is where the serial
+    chain stops keeping up with window arrivals."""
+    import matplotlib.pyplot as plt
+    figure, axis = plt.subplots(figsize=(5.4, 3.8))
+    for algorithm in algorithms:
+        group = rows_of_algorithm(rows, algorithm)
+        loads = [row["load"] for row in group]
+        means = [row["reaction_first_round_mean_us"] for row in group]
+        axis.plot(loads, means, "o-", label=f"{algorithm_label(algorithm)} decoder")
+    axis.axvline(1.0, color="k", lw=0.8, ls=":", label="rho = 1 (chain saturated)")
+    axis.set_xscale("log")
+    axis.set_xlabel("chain load rho = service per window / window inter-arrival")
+    axis.set_ylabel("window reaction time, first round -> frame (us)")
+    axis.grid(alpha=0.3, which="both")
+    axis.legend(fontsize=7)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
@@ -402,11 +494,11 @@ def throughput_plot(rows: list, algorithms: list, path: Path) -> None:
     figure, axis = plt.subplots(figsize=(5, 3.6))
     for algorithm in algorithms:
         group = rows_of_algorithm(rows, algorithm)
-        input_rounds_per_us = [1 / row["round_period_us"] for row in group]
+        input_rounds_per_us = [input_rate_mhz(row) for row in group]
         decoded_rounds_per_us = [row["throughput_rounds_per_us"] for row in group]
         axis.plot(input_rounds_per_us, decoded_rounds_per_us, "o-",
-                  label=f"algorithm {algorithm_label(algorithm)}")
-    fastest_input = max(1 / row["round_period_us"] for row in rows)
+                  label=f"{algorithm_label(algorithm)} decoder")
+    fastest_input = max(input_rate_mhz(row) for row in rows)
     axis.plot([0, fastest_input], [0, fastest_input], "k--", lw=0.8, label="keeps up (out = in)")
     axis.set_xlabel("input rounds/us")
     axis.set_ylabel("decoded rounds/us")
@@ -422,7 +514,9 @@ def plots(rows: list, report_dir: Path) -> None:
     import matplotlib
     matplotlib.use("Agg")
     algorithms = sorted({row["algorithm_latency_us"] for row in rows}, key=str)
-    latency_stack_plot(rows, algorithms, report_dir / "latency_stack.png")
+    reaction_vs_rate_plot(rows, algorithms, report_dir / "reaction_vs_rate.png")
+    components_plot(rows, algorithms, report_dir / "components.png")
+    reaction_vs_load_plot(rows, algorithms, report_dir / "reaction_vs_load.png")
     throughput_plot(rows, algorithms, report_dir / "throughput.png")
 
 

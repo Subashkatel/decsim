@@ -140,5 +140,5 @@ runner with an explicit configuration and output directory:
 
 ```bash
 python -m pip install -e ".[experiments]"
-python -m experiments.run_surface --config run.json --output experiment-results
+python -m experiments.offline.run_surface --config run.json --output experiment-results
 ```

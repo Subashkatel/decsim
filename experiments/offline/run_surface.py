@@ -172,7 +172,7 @@ def _new_output_directory(output_root, run_name, config_id):
 
 
 def _invocation_observation(config_path, output_root, process_argv):
-    replay_argv = [sys.executable, "-m", "experiments.run_surface", "--config",
+    replay_argv = [sys.executable, "-m", "experiments.offline.run_surface", "--config",
                    str(Path(config_path).resolve()), "--output",
                    str(Path(output_root).resolve())]
     return {
@@ -184,7 +184,7 @@ def _invocation_observation(config_path, output_root, process_argv):
 
 
 def _environment_observation():
-    repository = Path(__file__).parents[1]
+    repository = Path(__file__).parents[2]
     revision = subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=repository, text=True
     ).strip()

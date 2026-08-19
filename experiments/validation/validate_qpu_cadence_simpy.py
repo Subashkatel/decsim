@@ -16,7 +16,7 @@ operation is one window, so decode completes exactly one decoder latency after
 the operation's last round. Compared per case: every operation's start, body
 done and decode release time, and the number of idle rounds emitted.
 
-Usage: python -m experiments.validate_qpu_cadence_simpy
+Usage: python -m experiments.validation.validate_qpu_cadence_simpy
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
-from experiments.validate_timing_swiper import zero_latency_links
+from experiments.validation.validate_timing_swiper import zero_latency_links
 
 sys.path.insert(0, str(Path("tmp/references/code/simpy/src")))
 import simpy  # noqa: E402

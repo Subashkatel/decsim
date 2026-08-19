@@ -15,7 +15,7 @@ Two checks, both on real Stim data:
    reproduce the whole-circuit PyMatching error rate on the same circuit
    within statistics; a windowed decoder may be slightly worse, never better.
 
-Usage: python -m experiments.baseline_anchor
+Usage: python -m experiments.baseline.baseline_anchor
 """
 
 from __future__ import annotations

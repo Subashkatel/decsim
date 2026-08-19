@@ -24,7 +24,7 @@ sampled data does; only the syndrome source is the hardware record.
    link cards. Reported: last-round-to-frame per window and throughput. This
    compares structure and order of magnitude, not their exact decoder.
 
-Usage: python -m experiments.willow_replication [--quick]
+Usage: python -m experiments.baseline.willow_replication [--quick]
 """
 
 from __future__ import annotations
@@ -166,7 +166,7 @@ def realtime(shots: int, algorithm_us: float) -> dict:
     circuit, dets, obs, google, meta = load_cell(d, "X", rounds)
     links = with_controller_to_buffer_edge(logical_reference_profile(), latency_us=0.10,
                                            aggregate_bits_per_us=1000.0,
-                                           source="experiments/baseline_closed_loop.yaml controller_to_buffer")
+                                           source="experiments/baseline/baseline_closed_loop.yaml controller_to_buffer")
     matching = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
     whole_pred = matching.decode_batch(dets[:shots])
@@ -235,7 +235,7 @@ def resources(shots: int, software_us: float) -> list:
     circuit, dets, obs, google, meta = load_cell(5, "X", 250)
     links = with_controller_to_buffer_edge(logical_reference_profile(), latency_us=0.10,
                                            aggregate_bits_per_us=1000.0,
-                                           source="experiments/baseline_closed_loop.yaml controller_to_buffer")
+                                           source="experiments/baseline/baseline_closed_loop.yaml controller_to_buffer")
     rows = []
     for scheme_name, make_scheme in (("serial sliding", SlidingWindowScheme),
                                      ("parallel A/B (Skoric)", ParallelWindowScheme)):

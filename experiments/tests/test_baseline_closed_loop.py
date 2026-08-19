@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from experiments.baseline_closed_loop import (
+from experiments.baseline.baseline_closed_loop import (
     DEFAULT_CONFIG, POINTS, load_config, measure_shot, run_sweep, summarize,
     write_report,
 )
@@ -70,7 +70,7 @@ def test_sweep_summary_and_report(small_config, tmp_path):
 
 
 def test_anchor_published_numbers_load_and_host_method_runs():
-    from experiments.baseline_anchor import (
+    from experiments.baseline.baseline_anchor import (
         decsim_us_per_shot, host_us_per_shot, published_us_per_shot)
     published = published_us_per_shot()
     assert published[17] == pytest.approx(16.0062)

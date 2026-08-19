@@ -38,7 +38,7 @@ every transfer in the ledger carries the real payload (the round's detector
 bits, a window's summed bits), its timing arithmetic holds, and its queue
 wait equals ns-3's FIFO replayed over its channel.
 
-Usage: python -m experiments.validate_links_ns3_simpy
+Usage: python -m experiments.validation.validate_links_ns3_simpy
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ from decsim.links.links import (LinkCapacityConfig, LinkConfig, LinkEdgeConfig,
 sys.path.insert(0, str(Path("tmp/references/code/simpy/src")))
 import simpy  # noqa: E402
 
-RESULTS = Path(__file__).resolve().parent / "results" / "validation" / "links_ns3_simpy.md"
+RESULTS = Path(__file__).resolve().parents[1] / "results" / "validation" / "links_ns3_simpy.md"
 
 
 def ticks_of(us_value: Fraction) -> int:

@@ -81,7 +81,7 @@ useful than a polite "yes".
    keep any name the plan renames?
 
 9. Behavior preservation. The lock is: tests/ (772 tests), tmp/validation/
-   smoke_run.py, experiments/baseline_closed_loop.py, and Gates 1 to 5 under
+   smoke_run.py, experiments/baseline/baseline_closed_loop.py, and Gates 1 to 5 under
    experiments/results/validation/. Is that lock sufficient to prove "what
    the code does did not change" for each phase? What would slip through
    (name at least two concrete risks, e.g. timing changes on paths the

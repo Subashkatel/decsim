@@ -12,7 +12,7 @@ count and total decode time. SWIPER rounds are zero-based slots, decsim rounds
 are one-based, so a SWIPER window that starts in slot s and completes in slot e
 maps to decsim start s us and completion e+1 us.
 
-Usage: python -m experiments.validate_timing_swiper
+Usage: python -m experiments.validation.validate_timing_swiper
 """
 
 from __future__ import annotations

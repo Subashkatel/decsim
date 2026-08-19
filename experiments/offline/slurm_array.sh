@@ -6,5 +6,5 @@ output_root=$2
 shift 2
 mapfile -t configurations < "$configurations_file"
 configuration=${configurations[$SLURM_ARRAY_TASK_ID]}
-exec "${DECSIM_PYTHON:-python}" -m experiments.run_surface \
+exec "${DECSIM_PYTHON:-python}" -m experiments.offline.run_surface \
   "$@" --config "$configuration" --output "$output_root"

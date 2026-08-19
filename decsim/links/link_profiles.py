@@ -28,168 +28,76 @@ from .links import (
 )
 
 
+def _aggregate_payload(bits: int, source: str) -> PayloadSizeConfig:
+    return PayloadSizeConfig(bits, LinkQuantityBasis.DIRECT_AGGREGATE, None, source)
+
+
+def _per_channel_payload(bits: int, count: int, source: str) -> PayloadSizeConfig:
+    return PayloadSizeConfig(bits, LinkQuantityBasis.PER_CHANNEL, count, source)
+
+
 def logical_reference_profile() -> LinkModelConfig:
-    """Return the default fabric card: propagation only, no finite bandwidth."""
-    def channel(latency_us: float, source: str) -> LinkConfig:
+    """The default card: Khalid's latencies, unbounded bandwidth (propagation
+    only, nothing ever queues). Actual-payload edges price the runtime's own
+    bit counts; default-payload edges price Khalid's Table II sizes."""
+    def unbounded(latency_us: float, source: str) -> LinkConfig:
         return LinkConfig(us(latency_us), None, source)
 
-    def actual_edge(latency_us: float, source: str, actual: str):
-        return LinkEdgeConfig(channel(latency_us, source), None, actual)
+    def actual_edge(latency_us: float, source: str, actual: str) -> LinkEdgeConfig:
+        return LinkEdgeConfig(unbounded(latency_us, source), None, actual)
 
-    def direct_default(latency_us: float, bits: int, source: str):
-        return LinkEdgeConfig(
-            channel(latency_us, source),
-            PayloadSizeConfig(
-                bits,
-                LinkQuantityBasis.DIRECT_AGGREGATE,
-                None,
-                source,
-            ),
-            None,
-        )
-
-    def per_channel_default(
-        latency_us: float,
-        bits: int,
-        count: int,
-        source: str,
-    ):
-        return LinkEdgeConfig(
-            channel(latency_us, source),
-            PayloadSizeConfig(
-                bits,
-                LinkQuantityBasis.PER_CHANNEL,
-                count,
-                source,
-            ),
-            None,
-        )
+    def default_edge(latency_us: float, payload: PayloadSizeConfig) -> LinkEdgeConfig:
+        return LinkEdgeConfig(unbounded(latency_us, payload.source), payload, None)
 
     return LinkModelConfig(
         qc=actual_edge(0.15, "Khalid qc effective time", "SyndromePayload.size_bits"),
-        cwd=actual_edge(
-            2.0,
-            "Khalid cd latency; logical_reference integrated weak-input transfer",
-            "SyndromeRoundPacket.fragment_size_sum",
-        ),
-        wsd=actual_edge(
-            0.5,
-            "repository weak-to-strong model choice",
-            "switching decision payload_bits",
-        ),
-        csd=actual_edge(
-            2.0,
-            "Khalid cd mapped to controller-to-strong",
-            "DecodeJob.retained_payload_size_bits",
-        ),
-        wdo=per_channel_default(
-            1.0,
-            50_000,
-            100,
-            "Khalid do mapped to weak output",
-        ),
-        dd=direct_default(
-            0.5,
-            100,
-            "Khalid dd representative aggregate transaction",
-        ),
-        do=per_channel_default(1.0, 50_000, 100, "Khalid do"),
-        oc=per_channel_default(4.0, 20_000, 1000, "Khalid oc"),
-        cq=per_channel_default(0.15, 1, 5_000_000, "Khalid cq"),
+        cwd=actual_edge(2.0, "Khalid cd latency; logical_reference integrated weak-input transfer",
+                        "SyndromeRoundPacket.fragment_size_sum"),
+        wsd=actual_edge(0.5, "repository weak-to-strong model choice", "switching decision payload_bits"),
+        csd=actual_edge(2.0, "Khalid cd mapped to controller-to-strong", "DecodeJob.retained_payload_size_bits"),
+        wdo=default_edge(1.0, _per_channel_payload(50_000, 100, "Khalid do mapped to weak output")),
+        dd=default_edge(0.5, _aggregate_payload(100, "Khalid dd representative aggregate transaction")),
+        do=default_edge(1.0, _per_channel_payload(50_000, 100, "Khalid do")),
+        oc=default_edge(4.0, _per_channel_payload(20_000, 1000, "Khalid oc")),
+        cq=default_edge(0.15, _per_channel_payload(1, 5_000_000, "Khalid cq")),
         profile_name="logical_reference",
     )
 
 
 def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig:
-    """Return the reference fabric with finite, calibrated channel rates.
+    """The reference card with finite, calibrated rates: same latencies, paths
+    and default payloads as logical_reference_profile, so switching cards
+    changes bandwidth and nothing else. Capacity is bits per microsecond.
 
-    Propagation latencies, path mapping and the configured default payloads
-    match logical_reference_profile, so switching profiles changes bandwidth
-    and nothing else. Capacity is bits per microsecond, which equals Mbps.
-
-    The calibration point is one distance-5 surface-code logical qubit whose
-    syndrome round is modelled as 24 bits, produced once per 1.0 us, that is
-    24 Mbps. Both figures are REPOSITORY MODELLING CHOICES with no cited
-    source: no reference here states a bit width for a distance-5 syndrome
-    round, and none uses a 1.0 us period.
-
-    What the references do fix is the setting and the envelope. The
-    distance-5 surface code with an integrated real-time decoder is
-    tmp/references/papers/2408.13687v1.txt:68-71, and its reported cadence is
-    tmp/references/papers/2408.13687v1.txt:87, "fast 1.1 µs cycle duration.",
-    which is also the decsim default (config.py TimingConfig.round_us = 1.1),
-    so the 1.0 us used here is a round number slightly faster than the
-    reported cadence and is conservative in the direction of more bandwidth
-    per round than a run consumes.
-    tmp/references/papers/2303.00054.txt:141-143 reports that "QEC rounds were performed every ∼1 µs"
-    and estimates "a few tens of Mbps of syndrome data" per logical qubit, the
-    envelope the 24 Mbps anchor sits inside.
-
-    Each channel carries its nominal transfer at the cadence that transfer
-    occurs and no channel is provisioned below that 24 Mbps anchor.
-    capacity_scale multiplies every channel, so sweeping it moves the whole
-    fabric through its contention regimes.
+    Calibration point: one distance-5 patch, 24 syndrome bits per 1.0 us
+    round, 24 bits/us; a repository modelling choice (no reference states the
+    bit width; the setting is 2408.13687v1.txt:68-71 with a 1.1 us cycle at
+    :87, and 2303.00054.txt:141-143 puts syndrome data at "a few tens of
+    Mbps" per logical qubit). Each channel carries its nominal transfer once
+    per commit region and no channel is provisioned below the 24 bits/us
+    anchor. ``capacity_scale`` multiplies every channel.
     """
     syndrome_bits_per_round = 24
     round_us = 1.0
     commit_rounds = 5
     buffer_rounds = 5
     commit_region_us = commit_rounds * round_us
-    weak_window_bits = (
-        (commit_rounds + buffer_rounds) * syndrome_bits_per_round
-    )
-    strong_window_bits = (
-        (commit_rounds + 2 * buffer_rounds) * syndrome_bits_per_round
-    )
+    weak_window_bits = (commit_rounds + buffer_rounds) * syndrome_bits_per_round
+    strong_window_bits = (commit_rounds + 2 * buffer_rounds) * syndrome_bits_per_round
     anchor_bits_per_us = syndrome_bits_per_round / round_us
 
-    def aggregate_edge(
-        latency_us: float,
-        bits: int,
-        nominal_bits_per_us: float,
-        source: str,
-        actual_payload_source,
-    ):
-        capacity = LinkCapacityConfig(
-            max(anchor_bits_per_us, nominal_bits_per_us) * capacity_scale,
-            LinkQuantityBasis.DIRECT_AGGREGATE,
-            None,
-            source,
-        )
-        return LinkEdgeConfig(
-            LinkConfig(us(latency_us), capacity, source),
-            PayloadSizeConfig(
-                bits,
-                LinkQuantityBasis.DIRECT_AGGREGATE,
-                None,
-                source,
-            ),
-            actual_payload_source,
-        )
+    def aggregate_edge(latency_us: float, bits: int, nominal_bits_per_us: float,
+                       source: str, actual_payload_source) -> LinkEdgeConfig:
+        rate = max(anchor_bits_per_us, nominal_bits_per_us) * capacity_scale
+        capacity = LinkCapacityConfig(rate, LinkQuantityBasis.DIRECT_AGGREGATE, None, source)
+        channel = LinkConfig(us(latency_us), capacity, source)
+        return LinkEdgeConfig(channel, _aggregate_payload(bits, source), actual_payload_source)
 
-    def per_channel_edge(
-        latency_us: float,
-        bits: int,
-        count: int,
-        source: str,
-    ):
-        capacity = LinkCapacityConfig(
-            max(anchor_bits_per_us / count, bits / commit_region_us)
-            * capacity_scale,
-            LinkQuantityBasis.PER_CHANNEL,
-            count,
-            source,
-        )
-        return LinkEdgeConfig(
-            LinkConfig(us(latency_us), capacity, source),
-            PayloadSizeConfig(
-                bits,
-                LinkQuantityBasis.PER_CHANNEL,
-                count,
-                source,
-            ),
-            None,
-        )
+    def per_channel_edge(latency_us: float, bits: int, count: int, source: str) -> LinkEdgeConfig:
+        rate = max(anchor_bits_per_us / count, bits / commit_region_us) * capacity_scale
+        capacity = LinkCapacityConfig(rate, LinkQuantityBasis.PER_CHANNEL, count, source)
+        channel = LinkConfig(us(latency_us), capacity, source)
+        return LinkEdgeConfig(channel, _per_channel_payload(bits, count, source), None)
 
     return LinkModelConfig(
         qc=aggregate_edge(

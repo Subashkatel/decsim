@@ -27,6 +27,7 @@ from decsim.links.links import (
 )
 from decsim.message import DecoderRequestKey, DecoderTier
 from decsim.run_spec import RunSpec
+from decsim.links.link_traffic_report import topology_json_value, traffic_json_value
 
 
 _OPERATION_ID = ("experiment", 7)
@@ -101,7 +102,7 @@ def _valid_attribution(path):
 
 
 def _topology(config):
-    return config.resolve().topology_json_value(
+    return topology_json_value(config.resolve().snapshot(),
         controller_link_integration_assurance="shipped_controller"
     )
 
@@ -320,7 +321,7 @@ def test_reserve_snapshots_mutable_attribution_and_request_records():
     key.window_id = 99
     key.run_sequence = 99
     attribution.round_lo = 99
-    transfer = model.traffic_json_value()["transfers"][0]
+    transfer = traffic_json_value(model.snapshot())["transfers"][0]
     request = transfer["attribution"]["relation"]["request_key"]
     assert [item["value"] for item in transfer["attribution"]["patch_ids"]] == ["1", "2"]
     assert transfer["attribution"]["round_lo"] == 1
@@ -350,7 +351,7 @@ def test_reserve_snapshots_mutable_boundary_graphs():
     destination[1] = 99
     key.run_sequence = 99
     object.__setattr__(relation, "delivery_revision", 99)
-    relation_json = model.traffic_json_value()["transfers"][0]["attribution"]["relation"]
+    relation_json = traffic_json_value(model.snapshot())["transfers"][0]["attribution"]["relation"]
     assert relation_json["request_key"]["run_sequence"] == 4
     assert relation_json["destination_window_key"]["items"][1]["value"] == "4"
     assert relation_json["delivery_revision"] == 5
@@ -466,7 +467,7 @@ def test_unknown_relation_kind_is_rejected_before_ledger_append():
             now_ticks=0,
             attribution=attribution,
         )
-    assert model.traffic_json_value()["transfers"] == []
+    assert traffic_json_value(model.snapshot())["transfers"] == []
 
 
 def test_negative_reservation_payload_is_rejected_before_accounting():
@@ -498,6 +499,6 @@ def test_decoder_boundary_transfer_requires_boundary_provenance():
             now_ticks=0,
             attribution=attribution,
         )
-    assert model.traffic_json_value()["transfers"] == []
+    assert traffic_json_value(model.snapshot())["transfers"] == []
 
 

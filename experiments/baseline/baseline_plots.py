@@ -4,8 +4,6 @@ keep_up.png        Can it keep up?   output rate / input rate vs input round tim
 reaction.png       Reaction time     window ready -> frame commit, median solid, p99 dashed
 backlog_<card>.png Backlog           three panels (safe, near limit, overloaded)
 one_window.png     One window        where the time goes, from window ready
-loop.png           The loop          boxes and links with the time at each
-stops.png          Time at each stop bars per stop in loop order, one per card, at 1 us rounds
 ler.png            logical error rate vs physical error rate, when p was swept
 
 Every time is in microseconds. The x axis of the sweep figures is the input
@@ -206,142 +204,6 @@ def one_window_plot(rows: list, algorithms: list, path: Path) -> None:
     figure.savefig(path, dpi=150)
 
 
-# The loop as boxes and arrows. Each box shows the time a window spends
-# there; each arrow the link that carries it and its time.
-LOOP_BOXES = (
-    ("QPU", None),
-    ("Controller", ("binary", "pack")),
-    ("Buffer 0", ("buffer_fill",)),
-    ("Window\nmanager", ("dep_block", "queue_wait")),
-    ("Decoder", ("fetch", "algorithm", "release")),
-    ("Pauli\nframe", ("frame_commit",)),
-)
-LOOP_ARROWS = (
-    ("QC", "qc"),
-    ("C2B", "c2b_per_round"),
-    ("", None),
-    ("CWD", "cwd_per_window"),
-    ("WDO", "wdo_per_window"),
-)
-
-
-def stage_time(row: dict, point, config: dict) -> float:
-    """Mean per-window time of one point; card values for the unmeasured ones."""
-    if point == "qc":
-        return config["links"]["qc"]["latency_us"]
-    if point == "binary":
-        return config["controller"]["t_binary_availability_us"]
-    if point == "pack":
-        return config["controller"]["t_pack_us"]
-    return row[f"{point}_mean_us"]
-
-
-def loop_plot(rows: list, algorithms: list, config: dict, path: Path) -> None:
-    """The whole loop, one row per decoder card at the input round time nearest
-    the limit: boxes are where a window waits or is worked on, arrows are the
-    links; each carries its mean time in microseconds. The DD arrow is the
-    boundary handed back to the next window."""
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
-    figure, axes = plt.subplots(len(algorithms), 1, figsize=(10, 2.2 * len(algorithms)))
-    axes = list(axes) if len(algorithms) > 1 else [axes]
-    box_width = 1.3
-    gap = 0.9
-    for axis, algorithm in zip(axes, algorithms):
-        group = rows_of_card(rows, algorithm)
-        row = min(group, key=lambda candidate: abs(candidate["load"] - 1.0))
-        x = 0.0
-        centers = []
-        for label, points in LOOP_BOXES:
-            box = FancyBboxPatch((x, 0.3), box_width, 0.9, boxstyle="round,pad=0.02",
-                                 facecolor="#eef2f7", edgecolor="#335")
-            axis.add_patch(box)
-            axis.text(x + box_width / 2, 0.95, label, ha="center", va="center", fontsize=9)
-            if points is None:
-                inside = f"1 round / {row['round_period_us']:g} µs"
-            else:
-                total = 0.0
-                for point in points:
-                    total += stage_time(row, point, config)
-                inside = f"{total:.2f} µs"
-            axis.text(x + box_width / 2, 0.5, inside, ha="center", va="center", fontsize=8, color="#a33")
-            centers.append(x + box_width / 2)
-            x += box_width + gap
-        for index, (label, point) in enumerate(LOOP_ARROWS):
-            start = centers[index] + box_width / 2
-            end = centers[index + 1] - box_width / 2
-            arrow = FancyArrowPatch((start, 0.75), (end, 0.75), arrowstyle="-|>", mutation_scale=12, color="#335")
-            axis.add_patch(arrow)
-            if point is not None:
-                time_us = stage_time(row, point, config)
-                axis.text((start + end) / 2, 0.88, f"{label}\n{time_us:.2f} µs", ha="center", va="bottom", fontsize=7)
-        # DD: the boundary back from the decoder to the next window
-        decoder_center = centers[4]
-        window_center = centers[3]
-        feedback = FancyArrowPatch((decoder_center, 0.28), (window_center, 0.28), arrowstyle="-|>",
-                                   mutation_scale=12, color="#777", connectionstyle="arc3,rad=-0.45")
-        axis.add_patch(feedback)
-        axis.text((decoder_center + window_center) / 2, -0.3, f"DD {row['dd_per_window_mean_us']:.2f} µs",
-                  ha="center", va="top", fontsize=7, color="#555")
-        reaction = row["last_round_to_frame_mean_us"]
-        axis.set_title(f"{card_label(algorithm)} decoder, {row['round_period_us']:g} µs rounds: "
-                       f"window ready -> frame {reaction:.1f} µs", fontsize=9, loc="left")
-        axis.set_xlim(-0.2, x - gap + 0.2)
-        axis.set_ylim(-0.6, 1.5)
-        axis.axis("off")
-    figure.tight_layout()
-    figure.savefig(path, dpi=150)
-
-
-# The stops of the loop in order, for the bar plot: (label, points summed).
-LOOP_STOPS = (
-    ("QC", ("qc",)),
-    ("Controller", ("binary", "pack")),
-    ("C2B", ("c2b_per_round",)),
-    ("Buffer 0", ("buffer_fill",)),
-    ("Window\nmanager", ("dep_block", "queue_wait")),
-    ("CWD", ("cwd_per_window",)),
-    ("Decoder", ("fetch", "algorithm", "release")),
-    ("DD", ("dd_per_window",)),
-    ("WDO", ("wdo_per_window",)),
-    ("Pauli\nframe", ("frame_commit",)),
-)
-
-
-def stops_plot(rows: list, algorithms: list, config: dict, round_time: float, path: Path) -> None:
-    """Time a window spends at each stop of the loop, in loop order, one bar
-    per decoder card, at one input round time."""
-    import matplotlib.pyplot as plt
-    import numpy as np
-    figure, axis = plt.subplots(figsize=(8, 3.6))
-    positions = np.arange(len(LOOP_STOPS))
-    width = 0.8 / len(algorithms)
-    for card_index, algorithm in enumerate(algorithms):
-        group = rows_of_card(rows, algorithm)
-        row = min(group, key=lambda candidate: abs(candidate["round_period_us"] - round_time))
-        times = []
-        for label, points in LOOP_STOPS:
-            total = 0.0
-            for point in points:
-                total += stage_time(row, point, config)
-            times.append(total)
-        offsets = positions + (card_index - (len(algorithms) - 1) / 2) * width
-        bars = axis.bar(offsets, times, width, label=card_label(algorithm))
-        for bar, time_us in zip(bars, times):
-            axis.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{time_us:.2f}",
-                      ha="center", va="bottom", fontsize=5, rotation=90)
-    axis.set_xticks(positions)
-    axis.set_xticklabels([label for label, _ in LOOP_STOPS], fontsize=8)
-    axis.set_yscale("symlog", linthresh=0.1)
-    axis.set_ylim(0, 200)
-    axis.set_ylabel("Time per window (µs)")
-    axis.set_title(f"Time at each stop, {round_time:g} µs rounds")
-    axis.grid(alpha=0.3, axis="y")
-    axis.legend(fontsize=8)
-    figure.tight_layout()
-    figure.savefig(path, dpi=150)
-
-
 def ler_plot(rows: list, algorithms: list, path: Path) -> None:
     """Logical error rate against physical error rate, Wilson 95% bars."""
     import matplotlib.pyplot as plt
@@ -379,7 +241,7 @@ def ler_plot(rows: list, algorithms: list, path: Path) -> None:
     figure.savefig(path, dpi=150)
 
 
-def plots(rows: list, report_dir: Path, config: dict) -> None:
+def plots(rows: list, report_dir: Path) -> None:
     """The sweep figures when more than one round time was swept, the LER
     figure when more than one physical error rate was."""
     import matplotlib
@@ -393,7 +255,5 @@ def plots(rows: list, report_dir: Path, config: dict) -> None:
         for algorithm in algorithms:
             backlog_plot(rows, algorithm, report_dir / f"backlog_{card_file_name(algorithm)}.png")
         one_window_plot(rows, algorithms, report_dir / "one_window.png")
-        loop_plot(rows, algorithms, config, report_dir / "loop.png")
-        stops_plot(rows, algorithms, config, 1.0, report_dir / "stops.png")
     if len(probabilities) > 1:
         ler_plot(rows, algorithms, report_dir / "ler.png")

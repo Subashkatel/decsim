@@ -499,7 +499,7 @@ def main(argv) -> None:
     rows = summarize(run_sweep(config))
     write_report(rows, report_dir)
     from experiments.baseline.baseline_plots import plots
-    plots(rows, report_dir, config)
+    plots(rows, report_dir)
     print((report_dir / "sweep.md").read_text())
 
 

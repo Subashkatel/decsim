@@ -1,42 +1,45 @@
-"""The baseline's figures, from the sweep rows (see baseline_closed_loop.py).
+"""The baseline's figures, one question each, from the sweep rows.
 
-1. throughput.png: committed syndrome rate vs incoming syndrome rate, with
-   the y = x line; where the curve leaves the line the loop saturates.
-2. reaction.png: reaction time (window ready -> correction in the frame)
-   vs incoming rate, median and p99, one curve per decoder card.
-3. backlog.png: windows ready but not decoded, over the shot, at three
-   operating points (safe, near saturation, overloaded) chosen from the
-   measured load.
-4. window_timeline.png: one window's path as bars: waiting steps and
-   service steps, with the microseconds.
-5. ler.png when more than one physical error probability was swept.
+keep_up.png        Can it keep up?   output time per window vs input round time
+reaction.png       Reaction time     median, window ready -> frame commit
+reaction_p99.png   Reaction time     p99, same definition
+backlog_<card>.png Backlog           three panels (safe, near limit, overloaded)
+one_window.png     One window        where the time goes, from window ready
+ler.png            logical error rate vs physical error rate, when p was swept
+
+Every time is in microseconds. The x axis of the sweep figures is the input
+round time as categories, slow to fast from left to right.
 """
 
 from pathlib import Path
 
-def algorithm_label(algorithm) -> str:
-    """Short legend name: 0.028 µs, 0.28 µs, measured."""
-    if isinstance(algorithm, str):
-        return algorithm
-    return f"{algorithm:g} µs"
-
-# A window's path in order: (label, point, kind). Waiting is time spent
-# waiting on something else; service is time spent doing the step.
-WINDOW_PATH = (
-    ("Buffer fill", "buffer_fill", "waiting"),
-    ("Dependency wait", "dep_block", "waiting"),
-    ("Queue wait", "queue_wait", "waiting"),
-    ("Transfer", "cwd_per_window", "service"),
-    ("Fetch", "fetch", "service"),
-    ("Decode", "algorithm", "service"),
-    ("Release", "release", "service"),
-    ("Frame transfer", "wdo_per_window", "service"),
-    ("Frame commit", "frame_commit", "service"),
+# One window's path after it is ready, in order: (label, points summed, kind).
+ONE_WINDOW_STAGES = (
+    ("Wait", ("dep_block", "queue_wait"), "waiting"),
+    ("Transfer", ("cwd_per_window",), "service"),
+    ("Decode", ("fetch", "algorithm", "release"), "service"),
+    ("Commit", ("wdo_per_window", "frame_commit"), "service"),
 )
 
+WAITING_COLOR = "tab:orange"
+SERVICE_COLOR = "tab:blue"
 
-def rows_of_algorithm(rows: list, algorithm) -> list:
-    """This algorithm's rows at the lowest physical error probability, slowest input first."""
+
+def card_label(algorithm) -> str:
+    """Legend name of a decoder card: 0.028 µs, 0.28 µs, Measured."""
+    if isinstance(algorithm, str):
+        return algorithm.capitalize()
+    return f"{algorithm:g} µs"
+
+
+def card_file_name(algorithm) -> str:
+    if isinstance(algorithm, str):
+        return algorithm
+    return f"{algorithm:g}us"
+
+
+def rows_of_card(rows: list, algorithm) -> list:
+    """This card's rows at the lowest physical error rate, slow input first."""
     lowest_p = min(row["physical_error_probability"] for row in rows)
     selected = []
     for row in rows:
@@ -48,161 +51,162 @@ def rows_of_algorithm(rows: list, algorithm) -> list:
     return sorted(selected, key=lambda row: row["round_period_us"], reverse=True)
 
 
-def round_period_us(row: dict) -> float:
-    return row["round_period_us"]
+def round_times(rows: list) -> list:
+    """The swept input round times, slow to fast."""
+    return sorted({row["round_period_us"] for row in rows}, reverse=True)
 
 
-def input_rounds_per_us(row: dict) -> float:
-    return 1 / row["round_period_us"]
+def category_axis(axis, times: list) -> None:
+    """Input round time as evenly spaced categories, slow to fast."""
+    positions = list(range(len(times)))
+    labels = [f"{time:g}" for time in times]
+    axis.set_xticks(positions)
+    axis.set_xticklabels(labels)
+    axis.set_xlabel("Input round time (µs)")
 
 
-def operating_point_name(row: dict) -> str:
-    load = row["load"]
-    if load < 0.8:
-        return "Safe"
-    if load <= 1.25:
-        return "Near saturation"
-    return "Overloaded"
+def values_by_time(group: list, times: list, key) -> list:
+    """One value per round time, in the order of `times`; key is a column name or a function of the row."""
+    by_time = {}
+    for row in group:
+        if callable(key):
+            by_time[row["round_period_us"]] = key(row)
+        else:
+            by_time[row["round_period_us"]] = row[key]
+    values = []
+    for time in times:
+        values.append(by_time.get(time))
+    return values
 
 
-def throughput_plot(rows: list, algorithms: list, path: Path) -> None:
-    """Rounds decoded and committed per microsecond against the QEC round
-    period; the dashed line is the input itself (one round per period)."""
+def output_time_per_window(row: dict) -> float:
+    return 1 / row["throughput_windows_per_us"]
+
+
+def keep_up_plot(rows: list, algorithms: list, commit_rounds: int, path: Path) -> None:
+    """Output time per committed window against input round time; Ideal is
+    the input pacing, one window every commit_rounds x round time."""
     import matplotlib.pyplot as plt
-    figure, axis = plt.subplots(figsize=(5.2, 3.8))
+    times = round_times(rows)
+    positions = list(range(len(times)))
+    figure, axis = plt.subplots(figsize=(4.8, 3.6))
     for algorithm in algorithms:
-        group = rows_of_algorithm(rows, algorithm)
-        periods = []
-        committed = []
-        for row in group:
-            periods.append(round_period_us(row))
-            committed.append(row["throughput_rounds_per_us"])
-        axis.plot(periods, committed, "o-", label=algorithm_label(algorithm))
-    all_periods = sorted({round_period_us(row) for row in rows})
-    axis.plot(all_periods, [1 / period for period in all_periods], "k--", lw=0.8, label="Input")
-    axis.set_xscale("log")
+        group = rows_of_card(rows, algorithm)
+        output_time = values_by_time(group, times, output_time_per_window)
+        axis.plot(positions, output_time, "o-", label=card_label(algorithm))
+    ideal = []
+    for time in times:
+        ideal.append(commit_rounds * time)
+    axis.plot(positions, ideal, "k--", lw=0.8, label="Ideal")
+    category_axis(axis, times)
     axis.set_yscale("log")
-    axis.invert_xaxis()
-    axis.set_xlabel("Round period (µs)")
-    axis.set_ylabel("Throughput (rounds/µs)")
-    axis.grid(alpha=0.3, which="both")
-    axis.legend(title="Decoder", fontsize=7, title_fontsize=7)
+    axis.set_ylabel("Output time per window (µs)")
+    axis.set_title("Can it keep up?")
+    axis.grid(alpha=0.3, axis="y")
+    axis.legend(fontsize=8)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
 
-def reaction_plot(rows: list, algorithms: list, path: Path) -> None:
-    """Reaction time (the window's last round arrives -> its correction is in
-    the Pauli frame) against the QEC round period, median and p99."""
+def reaction_plot(rows: list, algorithms: list, statistic: str, path: Path) -> None:
+    """Reaction time (window ready -> frame commit) against input round time;
+    statistic is "median" or "p99"."""
     import matplotlib.pyplot as plt
-    figure, axis = plt.subplots(figsize=(5.2, 3.8))
+    times = round_times(rows)
+    positions = list(range(len(times)))
+    figure, axis = plt.subplots(figsize=(4.8, 3.6))
     for algorithm in algorithms:
-        group = rows_of_algorithm(rows, algorithm)
-        periods = []
-        medians = []
-        p99s = []
-        for row in group:
-            periods.append(round_period_us(row))
-            medians.append(row["last_round_to_frame_median_us"])
-            p99s.append(row["last_round_to_frame_p99_us"])
-        line, = axis.plot(periods, medians, "o-", label=f"{algorithm_label(algorithm)} median")
-        axis.plot(periods, p99s, "--", color=line.get_color(), alpha=0.7,
-                  label=f"{algorithm_label(algorithm)} p99")
-    axis.set_xscale("log")
-    axis.invert_xaxis()
-    axis.set_xlabel("Round period (µs)")
+        group = rows_of_card(rows, algorithm)
+        reaction = values_by_time(group, times, f"last_round_to_frame_{statistic}_us")
+        axis.plot(positions, reaction, "o-", label=card_label(algorithm))
+    category_axis(axis, times)
     axis.set_ylabel("Reaction time (µs)")
-    axis.grid(alpha=0.3, which="both")
-    axis.legend(title="Decoder", fontsize=7, title_fontsize=7)
+    if statistic == "median":
+        axis.set_title("Reaction time")
+    else:
+        axis.set_title("Reaction time (p99)")
+    axis.grid(alpha=0.3, axis="y")
+    axis.legend(fontsize=8)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
 
 def operating_points(group: list) -> list:
-    """Three rows of one decoder card: the safest (lowest load), the one
-    nearest load 1, and the most overloaded."""
+    """Three rows of one card: the safest (lowest load), the one nearest
+    load 1, and the most overloaded."""
     by_load = sorted(group, key=lambda row: row["load"])
     safest = by_load[0]
-    nearest_saturation = min(group, key=lambda row: abs(row["load"] - 1.0))
+    nearest_limit = min(group, key=lambda row: abs(row["load"] - 1.0))
     most_overloaded = by_load[-1]
     points = []
-    for row in (safest, nearest_saturation, most_overloaded):
+    for row in (safest, nearest_limit, most_overloaded):
         if row not in points:
             points.append(row)
     return points
 
 
-def backlog_plot(rows: list, algorithms: list, path: Path) -> None:
-    """Windows whose rounds have all arrived but whose decode is not done,
-    over one shot: one panel per operating point (safe, near saturation,
-    overloaded) per decoder card, each with its own time axis. A trace that
-    stays low keeps up; one that climbs does not."""
+def backlog_plot(rows: list, algorithm, path: Path) -> None:
+    """One card: backlog (windows ready but not decoded) over one shot at
+    three input round times, safe to overloaded."""
     import matplotlib.pyplot as plt
     from matplotlib.ticker import MaxNLocator
-    columns = 3
-    figure, axes = plt.subplots(len(algorithms), columns, figsize=(4.0 * columns, 2.6 * len(algorithms)),
-                                squeeze=False, sharey=True)
-    for row_index, algorithm in enumerate(algorithms):
-        group = rows_of_algorithm(rows, algorithm)
-        points = operating_points(group)
-        for column_index in range(columns):
-            axis = axes[row_index][column_index]
-            if column_index >= len(points):
-                axis.axis("off")
-                continue
-            row = points[column_index]
-            times = []
-            depths = []
-            for time_us, depth in row["backlog_trajectory"]:
-                times.append(time_us)
-                depths.append(depth)
-            axis.step(times, depths, where="post", color="tab:blue")
-            axis.yaxis.set_major_locator(MaxNLocator(integer=True))
-            axis.set_title(f"{operating_point_name(row)}, {round_period_us(row):g} µs rounds, "
-                           f"{algorithm_label(algorithm)} decoder", fontsize=8)
-            axis.set_xlabel("Time (µs)", fontsize=8)
-            axis.grid(alpha=0.3)
-        axes[row_index][0].set_ylabel("Backlog (windows)", fontsize=8)
+    group = rows_of_card(rows, algorithm)
+    points = operating_points(group)
+    figure, axes = plt.subplots(1, len(points), figsize=(3.4 * len(points), 2.8), sharey=True)
+    axes = list(axes) if len(points) > 1 else [axes]
+    for axis, row in zip(axes, points):
+        times = []
+        depths = []
+        for time_us, depth in row["backlog_trajectory"]:
+            times.append(time_us)
+            depths.append(depth)
+        axis.step(times, depths, where="post", color=SERVICE_COLOR)
+        axis.yaxis.set_major_locator(MaxNLocator(integer=True))
+        axis.set_title(f"{row['round_period_us']:g} µs")
+        axis.set_xlabel("Time (µs)")
+        axis.grid(alpha=0.3)
+    axes[0].set_ylabel("Backlog (windows)")
+    figure.suptitle(f"Backlog, {card_label(algorithm)} decoder")
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
 
-def window_timeline_plot(rows: list, algorithms: list, path: Path) -> None:
-    """One window's path as a Gantt chart (mean per-window times at the
-    operating point nearest saturation), one row per step: waiting steps in
-    orange, service steps in blue, the duration written at the bar's end."""
+def one_window_plot(rows: list, algorithms: list, path: Path) -> None:
+    """Where one window's time goes after it is ready, at the input round
+    time nearest the limit: Wait, Transfer, Decode, Commit (mean per window)."""
     import matplotlib.pyplot as plt
-    figure, axes = plt.subplots(1, len(algorithms), figsize=(4.6 * len(algorithms), 3.4), sharey=True)
+    figure, axes = plt.subplots(1, len(algorithms), figsize=(3.6 * len(algorithms), 2.6), sharey=True)
     axes = list(axes) if len(algorithms) > 1 else [axes]
-    step_labels = [label for label, _, _ in WINDOW_PATH]
+    stage_labels = []
+    for label, _, _ in ONE_WINDOW_STAGES:
+        stage_labels.append(label)
     for axis, algorithm in zip(axes, algorithms):
-        group = rows_of_algorithm(rows, algorithm)
+        group = rows_of_card(rows, algorithm)
         row = min(group, key=lambda candidate: abs(candidate["load"] - 1.0))
         start = 0.0
-        for step_index, (label, point, kind) in enumerate(WINDOW_PATH):
-            duration = row[f"{point}_mean_us"]
-            color = "tab:orange" if kind == "waiting" else "tab:blue"
-            axis.barh(step_index, duration, left=start, color=color, height=0.6)
-            axis.text(start + duration, step_index, f" {duration:.2f}", va="center", fontsize=6)
+        for stage_index, (label, points, kind) in enumerate(ONE_WINDOW_STAGES):
+            duration = 0.0
+            for point in points:
+                duration += row[f"{point}_mean_us"]
+            color = WAITING_COLOR if kind == "waiting" else SERVICE_COLOR
+            axis.barh(stage_index, duration, left=start, color=color, height=0.6)
+            axis.text(start + duration, stage_index, f" {duration:.1f}", va="center", fontsize=7)
             start += duration
-        axis.set_yticks(range(len(step_labels)))
-        axis.set_yticklabels(step_labels, fontsize=7)
+        axis.set_yticks(range(len(stage_labels)))
+        axis.set_yticklabels(stage_labels)
         axis.invert_yaxis()
-        axis.set_title(f"{algorithm_label(algorithm)} decoder, {round_period_us(row):g} µs rounds", fontsize=8)
-        axis.set_xlabel("Time (µs)", fontsize=8)
+        axis.set_title(f"{card_label(algorithm)}, {row['round_period_us']:g} µs rounds", fontsize=9)
+        axis.set_xlabel("Time from window ready (µs)")
         axis.grid(alpha=0.3, axis="x")
-    waiting_patch = plt.Rectangle((0, 0), 1, 1, color="tab:orange")
-    service_patch = plt.Rectangle((0, 0), 1, 1, color="tab:blue")
-    figure.legend([waiting_patch, service_patch], ["Waiting", "Service"], loc="lower right", fontsize=7, ncol=2)
-    figure.tight_layout(rect=(0, 0.06, 1, 1))
+    figure.suptitle("One window")
+    figure.tight_layout()
     figure.savefig(path, dpi=150)
 
 
 def ler_plot(rows: list, algorithms: list, path: Path) -> None:
-    """Logical error rate against physical error probability, one curve per
-    (decoder card, round period), Wilson 95% bars."""
+    """Logical error rate against physical error rate, Wilson 95% bars."""
     import matplotlib.pyplot as plt
-    figure, axis = plt.subplots(figsize=(5.2, 3.8))
+    figure, axis = plt.subplots(figsize=(4.8, 3.6))
     periods = sorted({row["round_period_us"] for row in rows})
     for algorithm in algorithms:
         for period in periods:
@@ -220,30 +224,36 @@ def ler_plot(rows: list, algorithms: list, path: Path) -> None:
                 rates.append(row["logical_error_rate"])
                 lower.append(row["logical_error_rate"] - row["ler_wilson_low"])
                 upper.append(row["ler_wilson_high"] - row["logical_error_rate"])
-            axis.errorbar(probabilities, rates, yerr=[lower, upper], fmt="o-", capsize=3,
-                          label=f"{algorithm_label(algorithm)}, {period:g} µs rounds")
+            if len(periods) == 1:
+                label = card_label(algorithm)
+            else:
+                label = f"{card_label(algorithm)}, {period:g} µs"
+            axis.errorbar(probabilities, rates, yerr=[lower, upper], fmt="o-", capsize=3, label=label)
     axis.set_xscale("log")
     axis.set_yscale("log")
     axis.set_xlabel("Physical error rate")
     axis.set_ylabel("Logical error rate")
+    axis.set_title("Logical error rate")
     axis.grid(alpha=0.3, which="both")
-    axis.legend(fontsize=7)
+    axis.legend(fontsize=8)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
 
 
-def plots(rows: list, report_dir: Path) -> None:
-    """The four timing figures when more than one round period was swept,
-    the LER figure when more than one physical error probability was."""
+def plots(rows: list, report_dir: Path, commit_rounds: int) -> None:
+    """The sweep figures when more than one round time was swept, the LER
+    figure when more than one physical error rate was."""
     import matplotlib
     matplotlib.use("Agg")
     algorithms = sorted({row["algorithm_latency_us"] for row in rows}, key=str)
     periods = {row["round_period_us"] for row in rows}
     probabilities = {row["physical_error_probability"] for row in rows}
     if len(periods) > 1:
-        throughput_plot(rows, algorithms, report_dir / "throughput.png")
-        reaction_plot(rows, algorithms, report_dir / "reaction.png")
-        backlog_plot(rows, algorithms, report_dir / "backlog.png")
-        window_timeline_plot(rows, algorithms, report_dir / "window_timeline.png")
+        keep_up_plot(rows, algorithms, commit_rounds, report_dir / "keep_up.png")
+        reaction_plot(rows, algorithms, "median", report_dir / "reaction.png")
+        reaction_plot(rows, algorithms, "p99", report_dir / "reaction_p99.png")
+        for algorithm in algorithms:
+            backlog_plot(rows, algorithm, report_dir / f"backlog_{card_file_name(algorithm)}.png")
+        one_window_plot(rows, algorithms, report_dir / "one_window.png")
     if len(probabilities) > 1:
         ler_plot(rows, algorithms, report_dir / "ler.png")

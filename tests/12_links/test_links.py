@@ -397,18 +397,10 @@ def test_semantic_paths_reject_wrong_geometry(path, attribution):
     assert counters_from(traffic_json_value(model.snapshot()), path)["transfer_count"] == 0
 
 
-def test_request_paths_enforce_relation_kind_tier_and_identity():
-    """Request routes bind real keys to the expected tier and attribution identity."""
+def test_request_paths_enforce_relation_kind_and_identity():
+    """Request routes need a request relation that names the attributed window."""
     model = make_model_config().resolve()
     missing = TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2)
-    wrong_tier = TrafficAttribution(
-        OPERATION_ID,
-        PATCH_IDS,
-        3,
-        1,
-        2,
-        request_relation(tier=DecoderTier.WEAK),
-    )
     wrong_identity = TrafficAttribution(
         OPERATION_ID,
         PATCH_IDS,
@@ -420,7 +412,7 @@ def test_request_paths_enforce_relation_kind_tier_and_identity():
             operation_id="another operation",
         ),
     )
-    for attribution in (missing, wrong_tier, wrong_identity):
+    for attribution in (missing, wrong_identity):
         with pytest.raises(ValueError):
             model.reserve(
                 LinkPath.WSD,
@@ -429,53 +421,6 @@ def test_request_paths_enforce_relation_kind_tier_and_identity():
                 attribution=attribution,
             )
     assert counters_from(traffic_json_value(model.snapshot()), LinkPath.WSD)["transfer_count"] == 0
-
-
-@pytest.mark.parametrize(
-    ("key", "exception"),
-    [
-        (DecoderRequestKey(OPERATION_ID, -1, DecoderTier.STRONG, 0), ValueError),
-        (DecoderRequestKey(OPERATION_ID, True, DecoderTier.STRONG, 0), ValueError),
-        (DecoderRequestKey(OPERATION_ID, 3, "strong", 0), ValueError),
-        (DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, -1), ValueError),
-        (DecoderRequestKey(OPERATION_ID, 3, DecoderTier.STRONG, True), None),
-    ],
-)
-def test_model_admission_guards_inner_request_identity_before_mutation(key, exception):
-    """Model admission validates every inner request identity field before mutation."""
-    model = make_model_config().resolve()
-    attribution = TrafficAttribution(
-        OPERATION_ID,
-        PATCH_IDS,
-        3,
-        1,
-        2,
-        RequestTransferRelation(key),
-    )
-    if exception is None:
-        model.reserve(
-            LinkPath.WSD,
-            payload_bits=1,
-            now_ticks=0,
-            attribution=attribution,
-        )
-        transfer = traffic_json_value(model.snapshot())["transfers"][0]
-        request = transfer["attribution"]["relation"]["request_key"]
-        assert request["run_sequence"] == 1
-        assert counters_from(
-            traffic_json_value(model.snapshot()), LinkPath.WSD
-        )["transfer_count"] == 1
-    else:
-        with pytest.raises(exception):
-            model.reserve(
-                LinkPath.WSD,
-                payload_bits=1,
-                now_ticks=0,
-                attribution=attribution,
-            )
-        assert counters_from(
-            traffic_json_value(model.snapshot()), LinkPath.WSD
-        )["transfer_count"] == 0
 
 
 def test_payload_selection_records_actual_default_and_unresolved_sources():

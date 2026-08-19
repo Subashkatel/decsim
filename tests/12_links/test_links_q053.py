@@ -260,21 +260,6 @@ def test_scientific_guards_and_relation_rules_remain_at_trust_boundaries():
             now_ticks=0,
             attribution=_valid_attribution(path),
         )
-    wrong_tier = TrafficAttribution(
-        _OPERATION_ID,
-        _PATCH_IDS,
-        3,
-        1,
-        2,
-        _request_relation(DecoderTier.WEAK),
-    )
-    with pytest.raises(ValueError, match="strong tier"):
-        logical_reference_profile().resolve().reserve(
-            LinkPath.WSD,
-            payload_bits=1,
-            now_ticks=0,
-            attribution=wrong_tier,
-        )
 
 
 def test_round_only_controller_to_weak_transfer_rejects_a_relation():

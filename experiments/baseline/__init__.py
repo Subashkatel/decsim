@@ -1,1 +1,1 @@
-"""The baseline closed loop on real data: the sweep, its anchor, the Willow replay, the walkthrough notebook."""
+"""The baseline closed loop on real data: baseline_closed_loop.py and its config."""

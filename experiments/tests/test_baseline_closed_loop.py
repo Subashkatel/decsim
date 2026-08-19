@@ -13,14 +13,15 @@ from experiments.baseline.baseline_closed_loop import (
 @pytest.fixture(scope="module")
 def small_config():
     config = load_config(DEFAULT_CONFIG)
-    config.update(rounds_per_shot=15, seeds=[0, 1], round_period_us=[1.0],
-                  algorithm_latency_us=[0.028])
+    config["rounds_per_shot"] = 15
+    config["sweep"] = {"physical_error_probability": [0.001], "round_period_us": [1.0],
+                       "algorithm_latency_us": [0.028], "shots": 2}
     return config
 
 
 @pytest.fixture(scope="module")
 def shot(small_config):
-    return measure_shot(small_config, round_period_us=1.0,
+    return measure_shot(small_config, physical_error_probability=0.001, round_period_us=1.0,
                         algorithm_latency_us=0.028, seed=0)
 
 

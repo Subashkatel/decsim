@@ -281,7 +281,7 @@ def truth_view(window_manager, device) -> TruthView:
 
 def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
     """Compose exact global strong work from its two lifecycle owners."""
-    pending = window_manager.pending_strong_work_snapshot()
+    pending = window_manager.escalation.pending_strong_work_snapshot()
     admitted = decoder_manager.admitted_strong_work_snapshot()
     pending_keys = {key for key, _, _ in pending}
     admitted_keys = {key for keys, _, _ in admitted for key in keys}

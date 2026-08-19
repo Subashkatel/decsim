@@ -587,6 +587,17 @@ class DecodeJob:
     service_dispatch_ticks: Optional[int] = None
 
 
+@dataclass(frozen=True)
+class LogicalContribution:
+    """One decoder prediction owner over an exact inclusive round extent of a stream."""
+
+    owner_key: tuple
+    commit_lo: int
+    commit_hi: int
+    ownership_kind: str
+    logical_observables: Optional[tuple[int, ...]]
+
+
 @dataclass
 class DecodeResult:
     """One window result; timing-only decoders leave optional fields unset."""

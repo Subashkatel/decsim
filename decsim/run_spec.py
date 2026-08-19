@@ -209,7 +209,7 @@ class RunSpec:
             capture_enabled=config.capture_switching_windows,
             decoder_memory_transfer=decoder_memory_transfer,
             decoder_memory=config.decoder_memory,
-            strategy=strategy, services=window_manager,
+            strategy=strategy, services=window_manager.escalation,
             on_window_decoded=window_manager.on_decode_done,
             on_strong_window_decoded=window_manager.on_strong_decode_done)
         window_manager.connect_idle_decode_demand_receiver(decoder_manager.submit_decode)
@@ -284,10 +284,10 @@ class RunSpec:
             config.ops, config.decode_ops, config.dynamic_streams,
             config.protected_regions))
         engine.run()
-        if window_manager.pending_escalations:
+        if window_manager.escalation.pending_escalations:
             raise RuntimeError(
                 f"the run ended with pending strong escalations: "
-                f"{window_manager.pending_escalations}")
+                f"{window_manager.escalation.pending_escalations}")
         decoder_manager.check_decode_work_settled()
         check_ingress_settled = getattr(syndrome_ingress, "check_work_settled", None)
         if callable(check_ingress_settled):

@@ -1,4 +1,12 @@
-"""Window lifecycle, switching, boundary delivery, and logical ownership."""
+"""Owns the window life cycle of every operation: which rounds each window
+needs, when it is ready, when its result commits and reaches the
+orchestrator and the Pauli frame. Boundaries between windows are the
+BoundaryCourier's, ownership of committed rounds is the LogicalLedger's, the
+strong tier is StrongEscalation's (NoStrongTier when the strategy never
+escalates), dynamic streams are DynamicWindows', replays are the
+SpeculativeRecovery's; all of them are built here and work on this manager's
+tables. Reading path for one round: on_syndrome_arrival, check_window,
+_submit_window_decode, on_decode_done, _commit_window."""
 
 from __future__ import annotations
 
@@ -26,7 +34,6 @@ from .window_boundaries import BoundaryCourier, HeldBoundary
 
 
 class WindowManager:
-    """Own window state, readiness, commits, and boundary handoff."""
 
     def __init__(self, engine, *, scheme, code_geometry,
                  resolved_operations, resolved_patches,

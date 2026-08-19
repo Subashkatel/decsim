@@ -1,26 +1,16 @@
-"""Prebuilt link fabric cards: the numbers, with their sources, in one place.
+"""The link number cards: the two reference fabrics and one optional edge.
 
-``decsim/links.py`` holds link mechanism. This module holds the two reference
-number cards that mechanism is normally filled in with, in the same spirit as
-``codes.py`` and ``layouts.py``: data an owner or an outside scientist can read,
-copy, and tweak without touching core.
+``logical_reference_profile`` is the default when ``RunSpec.links`` is unset:
+every channel unbounded, so it prices propagation only and no transfer ever
+queues; latencies from Khalid et al. Table II. ``bandwidth_limited_profile``
+is the same fabric with finite calibrated rates so contention becomes
+measurable; ``capacity_scale`` sweeps the whole fabric.
+``with_controller_to_buffer_edge`` adds the priced C2B hop to either.
 
-``logical_reference_profile`` is the DEFAULT used when ``RunSpec.links`` is
-unset. Every channel is unbounded, so it prices propagation only and no
-transfer ever queues. Its latency numbers come from the owner's draft.
-
-``bandwidth_limited_profile`` is the same fabric with finite, calibrated
-channel rates, so contention becomes measurable; ``capacity_scale`` sweeps the
-whole fabric. Its calibration and its literature locators are stated in its
-docstring.
-
-Every configured number carries a ``source`` string that travels into the
-topology and traffic reports, so any figure in a run's output can be traced
-back to the claim that set it. Paper locators are line numbers in the extracted
-text under ``tmp/references/papers/`` (repository-root relative).
-
-To use a card, pass it to ``RunSpec(links=...)``; to change one number, build
-your own ``LinkModelConfig`` (or copy a card and edit it) in your own file.
+Every number carries a ``source`` string that travels into the topology and
+traffic reports; paper locators are line numbers in tmp/references/papers/.
+To change a number, copy a card into your own file and edit it, then pass it
+as ``RunSpec(links=...)``.
 """
 
 from __future__ import annotations

@@ -144,7 +144,7 @@ def backlog_plot(rows: list, algorithms: list, path: Path) -> None:
     from matplotlib.ticker import MaxNLocator
     columns = 3
     figure, axes = plt.subplots(len(algorithms), columns, figsize=(4.0 * columns, 2.6 * len(algorithms)),
-                                squeeze=False)
+                                squeeze=False, sharey=True)
     for row_index, algorithm in enumerate(algorithms):
         group = rows_of_algorithm(rows, algorithm)
         points = operating_points(group)

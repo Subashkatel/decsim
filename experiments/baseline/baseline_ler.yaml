@@ -1,0 +1,10 @@
+# The logical error rate run of the same loop: baseline_closed_loop.yaml with the sweep block replaced.
+# python -m experiments.baseline.baseline_closed_loop experiments/baseline/baseline_ler.yaml
+# Every other block is read from baseline_closed_loop.yaml (see `extends`).
+extends: baseline_closed_loop.yaml
+sweep:
+  physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
+  round_period_us: [1.0]
+  algorithm_latency_us: [0.028]
+  shots: 200                                 # Wilson 95% interval on the plot
+report_dir: experiments/results/baseline_closed_loop/ler

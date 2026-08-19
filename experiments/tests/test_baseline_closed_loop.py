@@ -65,7 +65,7 @@ def test_sweep_summary_and_report(small_config, tmp_path):
     row = rows[0]
     assert row["shots"] == 2 and 0 <= row["logical_error_rate"] <= 1
     assert row["throughput_rounds_per_us"] > 0 and 0 < row["decoder_utilization"] < 1
-    write_report(small_config, rows, tmp_path)
+    write_report(rows, tmp_path)
     assert (tmp_path / "sweep.csv").exists()
     text = (tmp_path / "sweep.md").read_text()
     assert "algorithm" in text and "frame_commit" in text

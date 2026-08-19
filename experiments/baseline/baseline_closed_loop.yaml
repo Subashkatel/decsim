@@ -3,7 +3,11 @@
 
 code_task: surface_code:rotated_memory_z     # stim generator task (real detector data)
 distance: 3
-rounds_per_shot: 60                          # QEC rounds per shot; windows are (commit d, buffer d) sliding
+rounds_per_shot: 60                          # QEC rounds per shot
+windowing:
+  scheme: sliding                            # sliding | parallel | sandwich | naive_online (no windowing: one decode per operation after all rounds)
+  commit_rounds: null                        # rounds committed per window; null = d
+  buffer_rounds: null                        # look-ahead rounds per window; null = d
 physical_error_probability: 0.001            # p on every physical operation, as Stim's guide and sinter do: after_clifford_depolarization,
                                              # before_round_data_depolarization, before_measure_flip_probability, after_reset_flip_probability
 seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]        # one shot per seed at each sweep point

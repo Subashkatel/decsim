@@ -31,9 +31,12 @@ from decsim.links.link_profiles import logical_reference_profile, with_controlle
 from decsim.links.links import LinkCapacityConfig, LinkConfig, LinkQuantityBasis
 from decsim.message import Operation
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+from decsim.qpu.code_geometry import SurfaceCodeModel
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.stim_device import StimDevice
 from decsim.run_spec import RunSpec
+from decsim.windows.windowing_schemes import (NaiveOnlineScheme, ParallelWindowScheme,
+                                              SlidingWindowScheme, TanSandwichScheme)
 
 DEFAULT_CONFIG = Path(__file__).with_suffix(".yaml")
 MEASURED = "measured"   # the algorithm-latency card that charges the real PyMatching wall clock
@@ -135,6 +138,29 @@ def link_cards(config: dict):
     return replace(profile, **channels, profile_name="baseline_closed_loop.yaml")
 
 
+WINDOWING_SCHEMES = {
+    "sliding": SlidingWindowScheme,
+    "parallel": ParallelWindowScheme,
+    "sandwich": TanSandwichScheme,
+    "naive_online": NaiveOnlineScheme,
+}
+
+
+def windowing_scheme(config: dict):
+    """The window scheme named in the yaml."""
+    name = config["windowing"]["scheme"]
+    return WINDOWING_SCHEMES[name]()
+
+
+def code_model(config: dict) -> SurfaceCodeModel:
+    """The surface code at the yaml's distance, with the window commit and
+    buffer sizes (null = d)."""
+    windowing = config["windowing"]
+    return SurfaceCodeModel(d=config["distance"],
+                            commit_rounds_override=windowing["commit_rounds"],
+                            buffer_rounds_override=windowing["buffer_rounds"])
+
+
 def decoder_memory(config: dict):
     """Per-unit input memory in rounds; None is unbounded (the baseline)."""
     memory_rounds = config["decoder_memory_rounds"]
@@ -152,7 +178,7 @@ def build_run(config: dict, *, round_period_us: float, algorithm_latency_us, see
                           t_binary_availability_us=controller["t_binary_availability_us"],
                           t_pack_us=controller["t_pack_us"])
     spec = RunSpec(
-        ops=[operation], d=config["distance"],
+        ops=[operation], code=code_model(config), scheme=windowing_scheme(config),
         rounds_policy=FixedRounds(config["rounds_per_shot"]),
         device=StimDevice(), decoder=decoder_engine, num_units=config["decoder"]["units"],
         timing=timing, links=link_cards(config), decoder_memory=decoder_memory(config),

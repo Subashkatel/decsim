@@ -16,6 +16,7 @@ as ``RunSpec(links=...)``.
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Optional
 
 from ..config import us
 from .links import (
@@ -171,20 +172,24 @@ def with_controller_to_buffer_edge(
     profile: LinkModelConfig,
     *,
     latency_us: float,
-    aggregate_bits_per_us: float,
+    aggregate_bits_per_us: Optional[float],
     source: str,
 ) -> LinkModelConfig:
     """Return ``profile`` with the optional priced C2B round-transfer edge.
 
     The caller supplies both experiment-card numbers and their provenance;
-    a profile without this edge publishes rounds to Buffer 0 for free.
+    ``aggregate_bits_per_us`` of ``None`` means unbounded bandwidth (the edge
+    charges propagation latency only); a profile without this edge publishes
+    rounds to Buffer 0 for free.
     """
-    capacity = LinkCapacityConfig(
-        aggregate_bits_per_us,
-        LinkQuantityBasis.DIRECT_AGGREGATE,
-        None,
-        source,
-    )
+    capacity = None
+    if aggregate_bits_per_us is not None:
+        capacity = LinkCapacityConfig(
+            aggregate_bits_per_us,
+            LinkQuantityBasis.DIRECT_AGGREGATE,
+            None,
+            source,
+        )
     channel = LinkConfig(us(latency_us), capacity, source)
     edge = LinkEdgeConfig(
         channel,

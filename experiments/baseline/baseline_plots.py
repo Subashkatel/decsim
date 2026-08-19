@@ -15,13 +15,10 @@
 from pathlib import Path
 
 def algorithm_label(algorithm) -> str:
-    """Short legend name: 28 ns, 280 ns, measured."""
+    """Short legend name: 0.028 µs, 0.28 µs, measured."""
     if isinstance(algorithm, str):
         return algorithm
-    nanoseconds = algorithm * 1000
-    if nanoseconds >= 1000:
-        return f"{algorithm:g} us"
-    return f"{nanoseconds:g} ns"
+    return f"{algorithm:g} µs"
 
 # A window's path in order: (label, point, kind). Waiting is time spent
 # waiting on something else; service is time spent doing the step.

@@ -1,26 +1,17 @@
-"""The typed messages the simulator's modules pass to each other.
-
-Ordered by pipeline stage: syndrome rounds measured on the chip
-(SyndromePayload), the decode windows planned over them (Window, WindowPlan),
-the jobs and results that flow through the decoder cluster (DecodeJob,
-DecodeResult), and the feedback decisions sent back toward the chip
-(Decision). Operation, at the bottom, describes the workload itself.
-
-This module imports nothing from the rest of decsim, so any module can
-depend on it without creating an import cycle.
-"""
-
+"""The vocabulary every component speaks: the frozen values that travel
+between the QPU, the controller, Buffer 0, the window manager, the decoders
+and the Pauli frame (readouts, payloads, packets, windows, plans, jobs,
+results, boundaries, requests, seeds), and the stable-identity helpers that
+make operation and window keys hashable and orderable across types. Nothing
+here has behavior beyond a value's own derived views."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-import math
-from numbers import Real
 from typing import Any, Callable, Optional
 
 
 def is_stable_string(value: Any) -> bool:
-    """Whether a value is an exact Unicode-scalar string."""
     return (
         type(value) is str
         and all(
@@ -31,7 +22,6 @@ def is_stable_string(value: Any) -> bool:
 
 
 def is_stable_identity(value: Any) -> bool:
-    """Whether a value has deterministic, recursively typed identity."""
     value_type = type(value)
     if value_type is int:
         return True
@@ -60,12 +50,6 @@ def same_stable_identity(left: Any, right: Any) -> bool:
 
 
 def stable_identity_bytes(identity: Any) -> bytes:
-    """Encode one stable identity with exact recursive type framing."""
-    if not is_stable_identity(identity):
-        raise TypeError(
-            "stable identities are exact int, Unicode scalar str, or "
-            "recursive tuples"
-        )
     if type(identity) is int:
         encoded = str(identity).encode("ascii")
         return b"I" + len(encoded).to_bytes(8, "big") + encoded
@@ -84,8 +68,19 @@ def stable_identity_bytes(identity: Any) -> bytes:
 
 
 def stable_identity_order_key(identity: Any) -> bytes:
-    """Return the version-stable structural ordering key for an identity."""
     return stable_identity_bytes(identity)
+
+
+def stable_identity_json(identity: Any) -> dict:
+    if type(identity) is int:
+        return {"kind": "integer", "value": str(identity), "items": None}
+    if type(identity) is str:
+        return {"kind": "string", "value": identity, "items": None}
+    items = [stable_identity_json(item) for item in identity]
+    return {"kind": "tuple", "value": None, "items": items}
+
+
+_SEED_PATH_TAG = {"field": b"F", "string_key": b"S"}
 
 
 @dataclass(frozen=True)
@@ -95,37 +90,9 @@ class RunSeedPathSegment:
     kind: str
     value: Any
 
-    def __post_init__(self) -> None:
-        if self.kind == "field":
-            if not is_stable_string(self.value) or not self.value:
-                raise ValueError(
-                    "run-seed field segments require a nonempty Unicode "
-                    "scalar string"
-                )
-            return
-        if self.kind == "string_key":
-            if not is_stable_string(self.value):
-                raise TypeError(
-                    "run-seed string-key segments require a Unicode scalar "
-                    "string"
-                )
-            return
-        if self.kind == "none_key":
-            if self.value is not None:
-                raise ValueError(
-                    "run-seed none-key segments cannot carry a value"
-                )
-            return
-        if self.kind == "integer_key":
-            if type(self.value) is not int:
-                raise TypeError(
-                    "run-seed integer-key segments require a built-in int"
-                )
-            return
-        raise ValueError(f"unknown run-seed path segment kind {self.kind!r}")
-
     def canonical_bytes(self) -> bytes:
-        """Return the normative typed and length-framed seed-path bytes."""
+        """Return the normative typed and length-framed seed-path bytes; an
+        unknown kind has no tag and fails here."""
         if self.kind == "none_key":
             return b"N" + (0).to_bytes(4, "big")
         if self.kind == "integer_key":
@@ -136,7 +103,7 @@ class RunSeedPathSegment:
                 + encoded_value
             )
         encoded_value = self.value.encode()
-        tag = b"F" if self.kind == "field" else b"S"
+        tag = _SEED_PATH_TAG[self.kind]
         return tag + len(encoded_value).to_bytes(4, "big") + encoded_value
 
 
@@ -147,19 +114,6 @@ class RunSeedChild:
     relative_path: tuple[RunSeedPathSegment, ...]
     child: Any
 
-    def __post_init__(self) -> None:
-        if type(self.relative_path) is not tuple or not self.relative_path:
-            raise ValueError(
-                "run-seed child paths must be nonempty tuples"
-            )
-        if not all(
-            isinstance(segment, RunSeedPathSegment)
-            for segment in self.relative_path
-        ):
-            raise TypeError(
-                "run-seed child paths contain only RunSeedPathSegment values"
-            )
-
 
 @dataclass(frozen=True, eq=False)
 class RunSeedReservation:
@@ -169,34 +123,49 @@ class RunSeedReservation:
     proposed_seed: Optional[int]
     prepared_state: Any = field(repr=False)
 
-    def __post_init__(self) -> None:
-        if self.proposed_seed_source not in (
-            "derived",
-            "explicit_local",
-            "entropy",
-        ):
-            raise ValueError(
-                f"unknown run-seed source {self.proposed_seed_source!r}"
-            )
-        if self.proposed_seed_source == "entropy":
-            if self.proposed_seed is not None:
-                raise ValueError("entropy reservations cannot carry a seed")
-            return
-        if (
-            type(self.proposed_seed) is not int
-            or not 0 <= self.proposed_seed < (1 << 64)
-        ):
-            raise ValueError(
-                f"{self.proposed_seed_source} reservations require an unsigned "
-                f"64-bit built-in integer seed"
-            )
+
+class SyndromePacketRouteKind(Enum):
+    """Where a completed round goes: a window input or a feedback-memory round."""
+
+    WINDOW_INPUT = auto()
+    FEEDBACK_MEMORY_ROUND = auto()
 
 
-# ----------------------------------------------------------------- syndrome
+@dataclass(frozen=True)
+class SyndromePacketRoute:
+    """The route of one round from the controller: window input, or a feedback-memory round of a source operation."""
+
+    kind: SyndromePacketRouteKind
+    source_operation_id: Optional[Any] = None
+
+    @classmethod
+    def feedback_memory_round(cls, source_operation_id) -> "SyndromePacketRoute":
+        return cls(SyndromePacketRouteKind.FEEDBACK_MEMORY_ROUND,
+                   source_operation_id)
+
+WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
+
+
+@dataclass(frozen=True)
+class QPUReadout:
+    """One QPU-side result awaiting controller availability handling.
+
+    Values are detector events or timing-only markers; decsim does not simulate the preceding analog or measurement-to-detection stages.
+    """
+
+    operation_id: Any
+    patch_id: Any
+    round_index: int
+    bits: Optional[Any] = None
+    code: Optional[str] = None
+    n_fragments: int = 1
+    fragment_index: int = 0
+    size_bits: Optional[int] = None
+
 
 @dataclass
 class SyndromePayload:
-    """One measured syndrome round for one logical operation."""
+    """One binary detector-data round accepted by the controller."""
 
     operation_id: int                 # op whose stream this round belongs to
     patch_id: int                     # patch that produced the round
@@ -204,36 +173,15 @@ class SyndromePayload:
     bits: Optional[Any] = None        # detector bits (None = timing-only run)
     code: Optional[str] = None        # code name; drives CodeRouter routing
     n_fragments: int = 1              # link-layer fragments the round arrives in
+    fragment_index: int = 0           # stable position within the complete round
     size_bits: Optional[int] = None   # wire size, for bandwidth/packing models
 
-    def __post_init__(self) -> None:
-        if self.n_fragments < 1:
-            raise ValueError(f"n_fragments must be >= 1 (got {self.n_fragments})")
 
-
-def _retained_bits(bits: Any) -> Optional[tuple[int, ...]]:
+def normalize_binary_bits(bits: Any) -> Optional[tuple[int, ...]]:
+    """Bits as a tuple of 0/1 ints; a list, tuple or NumPy bool array in."""
     if bits is None:
         return None
-    if type(bits) is list or type(bits) is tuple:
-        if not all(
-            type(bit) is bool or (type(bit) is int and bit in (0, 1))
-            for bit in bits
-        ):
-            raise TypeError("syndrome bits must contain only exact binary values")
-        return tuple(int(bit) for bit in bits)
-
-    import numpy as np
-
-    if (
-        type(bits) is np.ndarray
-        and bits.ndim == 1
-        and bits.dtype == np.dtype(bool)
-    ):
-        return tuple(int(bit) for bit in bits)
-    raise TypeError(
-        "syndrome bits must be None, an exact binary list/tuple, or an "
-        "exact one-dimensional NumPy boolean array"
-    )
+    return tuple(int(bit) for bit in bits)
 
 
 @dataclass(frozen=True)
@@ -246,32 +194,7 @@ class RetainedSyndromeFragment:
     bits: Optional[tuple[int, ...]]
     code: Optional[str]
     size_bits: Optional[int]
-
-    def __post_init__(self) -> None:
-        if not is_stable_identity(self.operation_id):
-            raise TypeError("operation_id must be a stable identity")
-        if not is_stable_identity(self.patch_id):
-            raise TypeError("patch_id must be a stable identity")
-        if type(self.round_index) is not int:
-            raise TypeError("round_index must be an exact built-in int")
-        if self.round_index < 1:
-            raise ValueError("round_index must be at least one")
-        if self.bits is not None and (
-            type(self.bits) is not tuple
-            or any(type(bit) is not int or bit not in (0, 1)
-                   for bit in self.bits)
-        ):
-            raise TypeError("retained bits must be an exact tuple of binary ints")
-        if self.code is not None:
-            if not is_stable_string(self.code):
-                raise TypeError("code must be a Unicode scalar built-in string")
-            if not self.code:
-                raise ValueError("code must be nonempty when supplied")
-        if self.size_bits is not None:
-            if type(self.size_bits) is not int:
-                raise TypeError("size_bits must be an exact built-in int")
-            if self.size_bits < 0:
-                raise ValueError("size_bits must be nonnegative")
+    fragment_index: int
 
     @classmethod
     def from_payload(cls, payload: SyndromePayload) -> "RetainedSyndromeFragment":
@@ -279,9 +202,10 @@ class RetainedSyndromeFragment:
             operation_id=payload.operation_id,
             patch_id=payload.patch_id,
             round_index=payload.round_index,
-            bits=_retained_bits(payload.bits),
+            bits=normalize_binary_bits(payload.bits),
             code=payload.code,
             size_bits=payload.size_bits,
+            fragment_index=payload.fragment_index,
         )
 
 
@@ -293,35 +217,15 @@ class SyndromeRoundPacket:
     round_index: int
     fragments: tuple[RetainedSyndromeFragment, ...]
 
-    def __post_init__(self) -> None:
-        if not is_stable_identity(self.operation_id):
-            raise TypeError("packet operation_id must be a stable identity")
-        if type(self.round_index) is not int:
-            raise TypeError("packet round_index must be an exact built-in int")
-        if self.round_index < 1:
-            raise ValueError("packet round_index must be at least one")
-        if (
-            type(self.fragments) is not tuple
-            or not self.fragments
-            or any(type(fragment) is not RetainedSyndromeFragment
-                   for fragment in self.fragments)
-        ):
-            raise TypeError(
-                "packet fragments must be a nonempty tuple of retained fragments"
-            )
-        seen_patch_ids = []
-        for fragment in self.fragments:
-            if not same_stable_identity(fragment.operation_id, self.operation_id):
-                raise ValueError("packet fragments must share operation identity")
-            if fragment.round_index != self.round_index:
-                raise ValueError("packet fragments must share round_index")
-            if any(same_stable_identity(fragment.patch_id, seen)
-                   for seen in seen_patch_ids):
-                raise ValueError("packet patch identities must be distinct")
-            seen_patch_ids.append(fragment.patch_id)
-
-
 # ------------------------------------------------------------------ windows
+
+
+class WindowProtocol(Enum):
+    """Scientific model-building contract for one operation's window plan."""
+
+    GENERIC = auto()
+    TAN_ZERO_SEAM_GRAPHLIKE = auto()
+
 
 @dataclass
 class Window:
@@ -337,7 +241,8 @@ class Window:
     commit_hi: int                    # last round this window commits
     buffer_hi: int                    # last round it reads (trailing buffer)
     n_rounds: int                     # rounds the decode spans (sets job size)
-    buffer_lo: Optional[int] = None   # leading-buffer start (parallel-scheme layer B)
+    buffer_lo: Optional[int] = None   # leading-buffer start (for two-sided A windows)
+    closed_temporal_boundaries: bool = False
     batched_preceding_idle_round_count: int = 0
     deps: list = field(default_factory=list)        # window keys this one waits on
     dependents: list = field(default_factory=list)  # window keys waiting on this one
@@ -376,9 +281,15 @@ class WindowInfo:
     buffer_lo: Optional[int]
     deps: tuple
     dependents: tuple
+    detector_positions: Optional[dict] = None
 
     @classmethod
-    def from_window(cls, window: Window) -> "WindowInfo":
+    def from_window(
+        cls,
+        window: Window,
+        *,
+        detector_positions: Optional[dict] = None,
+    ) -> "WindowInfo":
         return cls(
             op_id=window.op_id,
             k=window.k,
@@ -389,44 +300,15 @@ class WindowInfo:
             buffer_lo=window.buffer_lo,
             deps=tuple(window.deps),
             dependents=tuple(window.dependents),
+            detector_positions=(
+                None if detector_positions is None
+                else dict(detector_positions)
+            ),
         )
 
     @property
     def start_round(self) -> int:
         return self.commit_lo if self.buffer_lo is None else self.buffer_lo
-
-    @property
-    def key(self) -> tuple:
-        return (self.op_id, self.k)
-
-
-class WindowGraph:
-    """Windows plus dependency edges; mutated only by WindowManager/DynamicWindows."""
-
-    def __init__(self) -> None:
-        self.windows: dict[tuple, Window] = {}
-
-    def add_window(self, window: Window) -> None:
-        if window.key in self.windows:
-            raise ValueError(f"duplicate window {window.key}")
-        self.windows[window.key] = window
-
-    def wire_dep(self, src_key: tuple, dst_key: tuple) -> None:
-        """src must hand its boundary to dst before dst may decode."""
-        src, dst = self.windows[src_key], self.windows[dst_key]
-        src.dependents.append(dst_key)
-        dst.deps.append(src_key)
-        dst.deps_remaining += 1
-
-
-def _exact_positive_int(value, label: str) -> None:
-    if type(value) is not int or value < 1:
-        raise TypeError(f"{label} must be an exact positive int")
-
-
-def _exact_nonnegative_int(value, label: str) -> None:
-    if type(value) is not int or value < 0:
-        raise TypeError(f"{label} must be an exact nonnegative int")
 
 
 @dataclass(frozen=True)
@@ -442,31 +324,6 @@ class ResolvedCodeGeometry:
     one_patch_spatial_node_count: int
     buffer_floor_override_active: bool
 
-    def __post_init__(self) -> None:
-        if type(self.code_name) is not str or not self.code_name:
-            raise TypeError("code_name must be a nonempty exact str")
-        try:
-            self.code_name.encode("utf-8")
-        except UnicodeEncodeError as exc:
-            raise ValueError("code_name must contain only Unicode scalars") from exc
-        _exact_positive_int(self.distance, "distance")
-        _exact_positive_int(self.commit_round_count, "commit_round_count")
-        _exact_nonnegative_int(self.buffer_round_count, "buffer_round_count")
-        _exact_nonnegative_int(
-            self.minimum_leading_buffer_round_count,
-            "minimum_leading_buffer_round_count",
-        )
-        _exact_nonnegative_int(
-            self.minimum_trailing_buffer_round_count,
-            "minimum_trailing_buffer_round_count",
-        )
-        _exact_positive_int(
-            self.one_patch_spatial_node_count,
-            "one_patch_spatial_node_count",
-        )
-        if type(self.buffer_floor_override_active) is not bool:
-            raise TypeError("buffer_floor_override_active must be an exact bool")
-
 
 @dataclass(frozen=True)
 class ResolvedOperationPlanning:
@@ -478,15 +335,6 @@ class ResolvedOperationPlanning:
     round_ticks: int
     spatial_node_count: int
 
-    def __post_init__(self) -> None:
-        if type(self.operation_id) is not int:
-            raise TypeError("operation_id must be an exact int")
-        if type(self.code_geometry) is not ResolvedCodeGeometry:
-            raise TypeError("code_geometry must be an exact ResolvedCodeGeometry")
-        _exact_positive_int(self.round_count, "round_count")
-        _exact_positive_int(self.round_ticks, "round_ticks")
-        _exact_positive_int(self.spatial_node_count, "spatial_node_count")
-
 
 @dataclass(frozen=True)
 class ResolvedPatchPlanning:
@@ -497,12 +345,6 @@ class ResolvedPatchPlanning:
     round_ticks: int
     spatial_node_count: int
 
-    def __post_init__(self) -> None:
-        if type(self.code_geometry) is not ResolvedCodeGeometry:
-            raise TypeError("code_geometry must be an exact ResolvedCodeGeometry")
-        _exact_positive_int(self.round_ticks, "round_ticks")
-        _exact_positive_int(self.spatial_node_count, "spatial_node_count")
-
 
 @dataclass(frozen=True)
 class WindowGeometry:
@@ -512,22 +354,7 @@ class WindowGeometry:
     commit_lo: int
     commit_hi: int
     buffer_hi: int
-
-    def __post_init__(self) -> None:
-        for label, value in (
-            ("buffer_lo", self.buffer_lo),
-            ("commit_lo", self.commit_lo),
-            ("commit_hi", self.commit_hi),
-            ("buffer_hi", self.buffer_hi),
-        ):
-            _exact_positive_int(value, label)
-        if not (
-            self.buffer_lo
-            <= self.commit_lo
-            <= self.commit_hi
-            <= self.buffer_hi
-        ):
-            raise ValueError("window geometry bounds are not ordered")
+    closed_temporal_boundaries: bool = False
 
     @property
     def round_count(self) -> int:
@@ -545,97 +372,7 @@ class OperationWindowPlan:
     exit_window_indices: tuple[int, ...]
     windowed: bool
     batch_preceding_idle_rounds: bool
-
-    def __post_init__(self) -> None:
-        if type(self.operation_id) is not int:
-            raise TypeError("operation_id must be an exact int")
-        if (
-            type(self.windows) is not tuple
-            or not self.windows
-            or any(type(window) is not WindowGeometry for window in self.windows)
-        ):
-            raise TypeError("windows must be a nonempty tuple of WindowGeometry")
-        if type(self.internal_dependencies) is not tuple:
-            raise TypeError("internal_dependencies must be an exact tuple")
-        window_count = len(self.windows)
-        edge_set = set()
-        predecessors = [set() for _ in self.windows]
-        dependents = [set() for _ in self.windows]
-        for edge in self.internal_dependencies:
-            if (
-                type(edge) is not tuple
-                or len(edge) != 2
-                or any(type(index) is not int for index in edge)
-            ):
-                raise TypeError("dependency edges must be exact (int, int) pairs")
-            source, destination = edge
-            if (
-                source < 0
-                or destination < 0
-                or source >= window_count
-                or destination >= window_count
-                or source == destination
-            ):
-                raise ValueError("dependency edge is out of range or self-directed")
-            if edge in edge_set:
-                raise ValueError("dependency edges must be unique")
-            edge_set.add(edge)
-            predecessors[destination].add(source)
-            dependents[source].add(destination)
-
-        self._validate_boundary_indices(
-            self.entry_window_indices,
-            "entry_window_indices",
-            window_count,
-        )
-        self._validate_boundary_indices(
-            self.exit_window_indices,
-            "exit_window_indices",
-            window_count,
-        )
-        expected_entries = tuple(
-            index for index, sources in enumerate(predecessors) if not sources
-        )
-        expected_exits = tuple(
-            index for index, destinations in enumerate(dependents)
-            if not destinations
-        )
-        if self.entry_window_indices != expected_entries:
-            raise ValueError("entry_window_indices must equal all graph roots")
-        if self.exit_window_indices != expected_exits:
-            raise ValueError("exit_window_indices must equal all graph sinks")
-
-        indegree = [len(sources) for sources in predecessors]
-        ready = list(self.entry_window_indices)
-        visited = 0
-        while ready:
-            source = ready.pop()
-            visited += 1
-            for destination in dependents[source]:
-                indegree[destination] -= 1
-                if indegree[destination] == 0:
-                    ready.append(destination)
-        if visited != window_count:
-            raise ValueError("operation window graph must be acyclic")
-        if type(self.windowed) is not bool:
-            raise TypeError("windowed must be an exact bool")
-        if type(self.batch_preceding_idle_rounds) is not bool:
-            raise TypeError("batch_preceding_idle_rounds must be an exact bool")
-
-    @staticmethod
-    def _validate_boundary_indices(indices, label, window_count) -> None:
-        if (
-            type(indices) is not tuple
-            or not indices
-            or any(type(index) is not int for index in indices)
-        ):
-            raise TypeError(f"{label} must be a nonempty tuple of exact ints")
-        if len(set(indices)) != len(indices):
-            raise ValueError(f"{label} must contain unique indices")
-        if tuple(sorted(indices)) != indices:
-            raise ValueError(f"{label} must be ascending")
-        if any(index < 0 or index >= window_count for index in indices):
-            raise ValueError(f"{label} contains an out-of-range index")
+    protocol: WindowProtocol = WindowProtocol.GENERIC
 
 
 @dataclass
@@ -652,9 +389,19 @@ class WindowPlan:
     total_windows: int
     windowed_by_operation: dict
     batch_preceding_idle_rounds_by_operation: dict
+    protocol_by_operation: dict = field(default_factory=dict)
 
 
 # ------------------------------------------------------ window interaction
+
+
+@dataclass(frozen=True)
+class DependencyResidual:
+    """Complete global detector effect plus its compatibility mask view."""
+
+    detector_ids: tuple[int, ...] = ()
+    defects: dict | None = None
+
 
 @dataclass(frozen=True)
 class BoundaryDelivery:
@@ -706,31 +453,8 @@ class StrongRegionPlan:
     restart_buffer_lo: Optional[int]
     restart_seam_fault_owner: Optional[SeamFaultOwner]
 
-    def __post_init__(self) -> None:
-        bounds = (
-            self.context_lo,
-            self.commit_lo,
-            self.commit_hi,
-            self.context_hi,
-        )
-        if any(type(bound) is not int for bound in bounds):
-            raise TypeError("strong-region bounds must be exact built-in ints")
-        if not 1 <= self.context_lo <= self.commit_lo \
-                <= self.commit_hi <= self.context_hi:
-            raise ValueError(
-                "strong-region bounds must satisfy 1 <= context_lo <= "
-                "commit_lo <= commit_hi <= context_hi")
-        if self.restart_buffer_lo is not None:
-            if type(self.restart_buffer_lo) is not int:
-                raise TypeError(
-                    "strong-region restart_buffer_lo must be an exact "
-                    "built-in int or None")
-            if self.restart_buffer_lo < 1:
-                raise ValueError(
-                    "strong-region restart_buffer_lo must be at least one")
-
-
 # ------------------------------------------------------------------- decode
+
 
 @dataclass(frozen=True)
 class SoftOutputSource:
@@ -741,40 +465,9 @@ class SoftOutputSource:
     growth_schedule: str
     gap_units: str
     correction: str
+    weight_step_natural_log: Optional[float]
     references: tuple[str, ...]
 
-    def __post_init__(self) -> None:
-        string_fields = (
-            ("method", self.method),
-            ("cluster_origin", self.cluster_origin),
-            ("growth_schedule", self.growth_schedule),
-            ("gap_units", self.gap_units),
-            ("correction", self.correction),
-        )
-        for field_name, value in string_fields:
-            if type(value) is not str:
-                raise TypeError(
-                    f"soft-output source {field_name} must be an exact string"
-                )
-            if not value or not is_stable_string(value):
-                raise ValueError(
-                    f"soft-output source {field_name} must be a nonempty "
-                    "Unicode-scalar string"
-                )
-        if type(self.references) is not tuple:
-            raise TypeError("soft-output source references must be an exact tuple")
-        if not self.references:
-            raise ValueError("soft-output source references must be nonempty")
-        for reference in self.references:
-            if type(reference) is not str:
-                raise TypeError(
-                    "soft-output source references must be exact strings"
-                )
-            if not reference or not is_stable_string(reference):
-                raise ValueError(
-                    "soft-output source references must be nonempty "
-                    "Unicode-scalar strings"
-                )
 
 @dataclass(frozen=True)
 class SoftOutput:
@@ -785,42 +478,50 @@ class SoftOutput:
     w_min: Optional[float] = None
     w_comp: Optional[float] = None
 
-    def __post_init__(self) -> None:
-        if not isinstance(self.source, SoftOutputSource):
-            raise TypeError("soft output source must be a SoftOutputSource")
-        if isinstance(self.gap, bool) or not isinstance(self.gap, Real):
-            raise TypeError("soft output gap must be a real number")
-        normalized_gap = float(self.gap)
-        if math.isnan(normalized_gap) or normalized_gap < 0:
-            raise ValueError(
-                "soft output gap must be nonnegative or positive infinity"
-            )
-        object.__setattr__(self, "gap", normalized_gap)
-        for field_name in ("w_min", "w_comp"):
-            value = getattr(self, field_name)
-            if value is None:
-                continue
-            if isinstance(value, bool) or not isinstance(value, Real):
-                raise TypeError(
-                    f"soft output {field_name} must be a real number or None"
-                )
-            normalized_value = float(value)
-            if math.isnan(normalized_value):
-                raise ValueError(f"soft output {field_name} cannot be NaN")
-            object.__setattr__(self, field_name, normalized_value)
+
+class DecoderTier(Enum):
+    """Weak (first, fast) or strong (escalated, slow) decode."""
+
+    WEAK = "weak"
+    STRONG = "strong"
+
+
+@dataclass(frozen=True)
+class DecoderRequestKey:
+    """Identity of one decode request: window, tier and the run-wide ordinal that keeps retries distinct."""
+
+    operation_id: Any
+    window_id: int
+    tier: DecoderTier
+    run_sequence: int
+
+
+@dataclass(frozen=True)
+class DecoderServiceKey:
+    """Identity of one decoder service (a batch of requests served together)."""
+
+    run_sequence: int
 
 
 @dataclass
 class DecodeJob:
-    """One unit of decoder work."""
+    """One unit of decoder work: a window's rounds, its model, its identity
+    in the decoder queues, and the timestamps of its life. ``payloads`` is the
+    Buffer 0 view of the rounds until the transfer lands them in a unit's
+    memory (``decoder_input``); a decoder reads only its unit's memory.
+    """
 
     op_id: int                               # operation the window belongs to
     window_id: int                           # window index within that op
     n_rounds: int                            # syndrome rounds in the window
     dem: Optional[Any] = None                # window detector error model (data-path decoders)
-    payloads: list = field(default_factory=list)   # SyndromePayloads with the window's bits
+    payloads: list = field(default_factory=list)   # transfer-source view; cleared after materialization
+    decoder_input: Optional[Any] = None             # materialized decoder memory value
+    input_hold: Optional[Any] = None                # upstream hold released at transfer completion
+    reserve_transfer: Optional[Callable[[], int]] = None   # called at dispatch: reserve the input link, return its delay in ticks
+    unit: Optional[int] = None                     # decoder unit assigned at dispatch
+    memory: Optional[Any] = None                   # that unit's DecoderMemory while it holds this job's input
     ready_time: int = 0                      # tick the job was enqueued (queue-wait accounting)
-    deadline: int = 0                        # tick stamped by the DeadlinePolicy (EDF)
     on_done: Optional[Callable[[], None]] = None   # completion callback
     label: str = ""                          # log label
     strong_label: Optional[str] = None       # manager-owned label for a strong sibling
@@ -828,42 +529,91 @@ class DecodeJob:
     code: Optional[str] = None               # code name, drives CodeRouter routing
     attempt: int = 0                         # 0 = first (weak) decode, 1 = strong redo
     hint: Optional[str] = None               # routing override, e.g. "strong"
-    pool: Optional[str] = None               # unit pool assigned at enqueue
+    pool: Optional[str] = None               # unit pool assigned at dispatch
     window: Optional[Window] = None          # back-reference to the source window
     strong_decode_for: Optional[tuple] = None      # (op_id, window_id) this strong job re-decodes
     awaiting_strong_result: bool = False     # weak result held non-final until the strong sibling lands
-    cancelled: bool = False                  # set when a speculative sibling is cancelled;
-                                             # the completion callback then discards the result
-    completed: bool = False                  # guards against duplicate completion delivery
-    submitted: bool = False                  # set once the pool admits the job; a job holds one
-                                             # queue slot and one unit, so it is enqueued once
+    cancelled: bool = False                  # cancelled siblings discard completion
+    completed: bool = False                  # terminal flag; admission refuses reuse of a completed job
+    submitted: bool = False                  # admitted once to one queue slot and unit
+    request_key: Optional[DecoderRequestKey] = None
+    request_created_ticks: Optional[int] = None
+    request_admitted_ticks: Optional[int] = None
+    service_key: Optional[DecoderServiceKey] = None
+    service_original_request_keys: tuple[DecoderRequestKey, ...] = ()
+    service_cancelled_request_keys: set[DecoderRequestKey] = field(default_factory=set)
+    service_dispatch_ticks: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class LogicalContribution:
+    """One decoder prediction owner over an exact inclusive round extent of a stream."""
+
+    owner_key: tuple
+    commit_lo: int
+    commit_hi: int
+    ownership_kind: str
+    logical_observables: Optional[tuple[int, ...]]
 
 
 @dataclass
 class DecodeResult:
-    """Decoder output for one window. Timing-only decoders leave every
-    optional field None; data-path decoders fill what they compute."""
+    """One window result; timing-only decoders leave optional fields unset."""
 
     op_id: int
     window_id: int
     correction: Optional[Any] = None         # correction operator (None = timing-only)
-    logical_observables: Optional[tuple[int, ...]] = None
-    # Complete predicted logical-observable vector; None is timing-only.
-    soft_output: Optional["SoftOutput"] = None
-    # Typed decoder confidence; below a source-compatible threshold escalates.
+    logical_observables: Optional[tuple[int, ...]] = None  # full prediction
+    soft_output: Optional["SoftOutput"] = None  # source-compatible confidence
     boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
 
 
 @dataclass
+class Submission:
+    """One decode job an escalation policy wants enqueued, optionally after a delay.
+
+    A strong redo job gets its ready time when it reaches the queue, so link
+    delay is not charged as queue wait.
+    """
+
+    job: DecodeJob
+    delay_ticks: int = 0
+
+
+class Directive(Enum):
+    """What the core should do with a decode outcome."""
+    FINALIZE = auto()          # accept the weak result; cancel any parallel strong
+    AWAIT_STRONG = auto()      # hold the weak result; .extra may carry the strong redo
+    FINALIZE_STRONG = auto()   # a strong result landed; core applies hold-or-deliver
+
+
+@dataclass
+class OutcomeDirective:
+    """An escalation policy's verdict on one decode outcome."""
+    directive: Directive
+    extra: Optional[Submission] = None
+    strong_request_key: Optional[DecoderRequestKey] = None
+
+
+@dataclass(frozen=True)
+class StrongDecodeCompletion:
+    """A strong result paired with the request it answers."""
+
+    request_key: DecoderRequestKey
+    result: DecodeResult
+
+
+@dataclass
 class DecodeOutcome:
-    """Joint decode outcome delivered to the strategy hook."""
+    """Joint decode outcome delivered to the escalation policy hook."""
 
     job: DecodeJob
     result: DecodeResult
 
 
 # ---------------------------------------------------------------- resources
+
 
 @dataclass(frozen=True)
 class ResourceClaim:
@@ -874,90 +624,74 @@ class ResourceClaim:
     ids: frozenset
 
 
-# ----------------------------------------------------------------- feedback
-
-@dataclass(frozen=True)
-class IntrinsicMeasurement:
-    """Supplied intrinsic measurement with stable trajectory provenance."""
-
-    operation_id: Any
-    trajectory_id: Any
-    value: int
-    source: str
-
-    def __post_init__(self) -> None:
-        if not is_stable_identity(self.operation_id):
-            raise TypeError(
-                "intrinsic measurement operation_id must be a stable "
-                "built-in int, str, or recursive tuple")
-        if not is_stable_identity(self.trajectory_id):
-            raise TypeError(
-                "intrinsic measurement trajectory_id must be a stable "
-                "built-in int, str, or recursive tuple")
-        if type(self.value) is not int:
-            raise TypeError(
-                "intrinsic measurement value must be an exact int bit")
-        if self.value not in (0, 1):
-            raise ValueError(
-                f"intrinsic measurement value must be 0 or 1, got "
-                f"{self.value}")
-        if type(self.source) is not str:
-            raise TypeError("intrinsic measurement source must be a string")
-        if not self.source.strip():
-            raise ValueError(
-                "intrinsic measurement source must be nonempty")
-
-
-@dataclass(frozen=True)
-class FeedbackEffect:
-    """One complete functional consequence selected from a decode vector."""
-
-    logical_observable_index: int
-    decoded_value: int
-    intrinsic_measurement: Optional[IntrinsicMeasurement]
-    correction_value: int
-    basis: str
-    pauli: str
-    apply_s: bool
-
-    def __post_init__(self) -> None:
-        if type(self.logical_observable_index) is not int:
-            raise TypeError(
-                "logical_observable_index must be an exact int")
-        if self.logical_observable_index < 0:
-            raise ValueError(
-                "logical_observable_index must be nonnegative")
-        for field_name in ("decoded_value", "correction_value"):
-            value = getattr(self, field_name)
-            if type(value) is not int:
-                raise TypeError(f"{field_name} must be an exact int bit")
-            if value not in (0, 1):
-                raise ValueError(f"{field_name} must be 0 or 1, got {value}")
-        if (
-            self.intrinsic_measurement is not None
-            and type(self.intrinsic_measurement) is not IntrinsicMeasurement
-        ):
-            raise TypeError(
-                "intrinsic_measurement must be IntrinsicMeasurement or None")
-        if type(self.basis) is not str or not self.basis:
-            raise ValueError("basis must be a nonempty string")
-        if type(self.pauli) is not str or not self.pauli:
-            raise ValueError("pauli must be a nonempty string")
-        if type(self.apply_s) is not bool:
-            raise TypeError("apply_s must be an exact bool")
-
-
 @dataclass(frozen=True)
 class Decision:
-    """Feedback timing plus an optional functional effect."""
+    """Feedback timing route for one target operation."""
 
     target_operation_id: int
-    effect: Optional[FeedbackEffect] = None
-    releases_operation: bool = True   # False = result-return only, no op waiting
-    strong_committed: bool = False    # mirrors op.requires_strong_commit (marker)
+    releases_operation: bool = True
 
+
+@dataclass(frozen=True)
+class ExecutionProgram:
+    """Immutable controller program-load artifact."""
+
+    operations: tuple
+    decode_operations: tuple = ()
+    dynamic_streams: tuple = ()
+    protected_regions: tuple = ()
+
+
+@dataclass(frozen=True)
+class StreamBinding:
+    """Immutable runtime association between an operation and stream range."""
+    stream_id: Any
+    stream_offset: int
+
+
+@dataclass(frozen=True)
+class RunOperationBody:
+    """Immutable controller-to-QPU command for one operation body."""
+
+    operation: Any
+    round_ticks: int
+    round_count: int
+    source_round_count: int
+    emits_detector_data: bool = True
+    finalizes_stream_round: bool = False
 
 # ----------------------------------------------------------------- workload
+
+
+@dataclass(frozen=True)
+class ProtectedRegion:
+    """One patch allocation generation with inclusive operation endpoints."""
+
+    patch_id: Any
+    stream_id: int
+    start_operation_id: int
+    end_operation_id: int
+
+
+@dataclass(frozen=True)
+class SuccessorReadiness:
+    """How many rounds of a dependent operation have arrived, and how many it has."""
+
+    operation_id: int
+    rounds_arrived: int
+    round_count: int
+
+
+@dataclass(frozen=True)
+class WindowReadiness:
+    """What a scheme sees when deciding whether a window has its data."""
+
+    local_rounds_arrived: int
+    local_round_count: int
+    successors: tuple[SuccessorReadiness, ...]
+    memory_rounds_arrived: int
+    tail_closed: bool
+
 
 class OpKind(Enum):
     """Logical-op kind vocabulary: lets a RoundsPolicy distinguish a
@@ -982,74 +716,22 @@ class Operation:
     circuit: Optional[Any] = None     # stim circuit for real-syndrome (data-path) runs
     consumes_magic_state: Optional[bool] = None  # override; None = infer from clifford
     patches: tuple = ()               # patch ids whose syndrome streams feed the op
-    predecessors: tuple = ()          # op ids whose windows must decode first
-    has_successor: bool = False       # a later op consumes this op's boundary
+    predecessors: tuple = ()          # workload op ids that must complete first
+    decoder_boundary_predecessors: tuple = ()  # prior decode streams at a boundary
     # Decode stream this segment's rounds fold into. Seeded StimDevice runs
     # require an exact built-in int/str; unseeded and non-Stim devices may use
     # another identity type accepted by that device.
     stream_id: Optional[Any] = None
     stream_offset: Optional[int] = None  # global-round offset of the segment in its stream
+    scheduled_start_round: int = 0
+    emits_detector_data: bool = True
+    finalizes_stream_round: bool = False
+    syndrome_fragment_index: Optional[int] = None
+    syndrome_fragment_count: Optional[int] = None
     blocked_by: Optional[int] = None  # op id whose Decision must release this op
     feedback_boundary_mode: Optional[str] = None  # per-op override of the RunSpec mode
-    requires_result_return_to_chip: bool = False  # decision must travel back to the QPU
-    requires_strong_commit: bool = False  # marker only; release stays unconditional
-    byproduct_pauli: str = "X"        # Pauli applied to the successor on measurement 1
-    measurement_basis: str = "Z"
-    logical_observable_index: Optional[int] = None
-    intrinsic_measurement: Optional[IntrinsicMeasurement] = None
+    requires_result_return_to_qpu: bool = False  # decision must travel back to the QPU
     kind: OpKind = OpKind.GENERIC     # rounds-policy vocabulary (see OpKind)
-
-    def __post_init__(self) -> None:
-        """Keep the identities used as runtime keys exact and reproducible."""
-        if type(self.id) is not int:
-            raise TypeError("operation id must be an exact built-in int")
-        for field_name in ("qubits", "patches"):
-            identities = getattr(self, field_name)
-            if type(identities) is not tuple or not all(
-                is_stable_identity(identity) for identity in identities
-            ):
-                raise TypeError(
-                    f"operation {self.id} {field_name} must contain stable "
-                    "built-in identities")
-        if type(self.predecessors) is not tuple or any(
-            type(predecessor) is not int for predecessor in self.predecessors
-        ):
-            raise TypeError(
-                f"operation {self.id} predecessors must contain exact "
-                "built-in int operation ids")
-        if self.blocked_by is not None and type(self.blocked_by) is not int:
-            raise TypeError(
-                f"operation {self.id} blocked_by must be an exact built-in "
-                "int operation id or None")
-        if self.stream_id is not None and not is_stable_identity(self.stream_id):
-            raise TypeError(
-                f"operation {self.id} stream_id must be a stable built-in "
-                "identity or None")
-        if self.logical_observable_index is not None:
-            if type(self.logical_observable_index) is not int:
-                raise TypeError(
-                    f"operation {self.id} logical_observable_index must be "
-                    "an exact int")
-            if self.logical_observable_index < 0:
-                raise ValueError(
-                    f"operation {self.id} logical_observable_index must be "
-                    "nonnegative")
-        measurement = self.intrinsic_measurement
-        if measurement is None:
-            return
-        if type(measurement) is not IntrinsicMeasurement:
-            raise TypeError(
-                f"operation {self.id} intrinsic_measurement must be "
-                "IntrinsicMeasurement")
-        trajectory_id = self.stream_id if self.stream_id is not None else self.id
-        if not same_stable_identity(measurement.operation_id, self.id):
-            raise ValueError(
-                f"operation {self.id} intrinsic_measurement operation_id "
-                "does not match")
-        if not same_stable_identity(measurement.trajectory_id, trajectory_id):
-            raise ValueError(
-                f"operation {self.id} intrinsic_measurement trajectory_id "
-                "does not match")
 
     @property
     def needs_magic_state(self) -> bool:
@@ -1070,17 +752,17 @@ class OperationPlanningView:
     consumes_magic_state: Optional[bool]
     patches: tuple
     predecessors: tuple
-    has_successor: bool
-    stream_id: Optional[int]
+    decoder_boundary_predecessors: tuple
+    stream_id: Optional[Any]
     stream_offset: Optional[int]
+    scheduled_start_round: int
+    emits_detector_data: bool
+    finalizes_stream_round: bool
+    syndrome_fragment_index: Optional[int]
+    syndrome_fragment_count: Optional[int]
     blocked_by: Optional[int]
     feedback_boundary_mode: str
-    requires_result_return_to_chip: bool
-    requires_strong_commit: bool
-    byproduct_pauli: str
-    measurement_basis: str
-    logical_observable_index: Optional[int]
-    intrinsic_measurement: Optional[IntrinsicMeasurement]
+    requires_result_return_to_qpu: bool
     kind: OpKind
 
     @classmethod
@@ -1099,28 +781,24 @@ class OperationPlanningView:
             consumes_magic_state=operation.consumes_magic_state,
             patches=tuple(operation.patches),
             predecessors=tuple(operation.predecessors),
-            has_successor=operation.has_successor,
+            decoder_boundary_predecessors=tuple(
+                operation.decoder_boundary_predecessors
+            ),
             stream_id=operation.stream_id,
             stream_offset=operation.stream_offset,
+            scheduled_start_round=operation.scheduled_start_round,
+            emits_detector_data=operation.emits_detector_data,
+            finalizes_stream_round=operation.finalizes_stream_round,
+            syndrome_fragment_index=operation.syndrome_fragment_index,
+            syndrome_fragment_count=operation.syndrome_fragment_count,
             blocked_by=operation.blocked_by,
             feedback_boundary_mode=(
                 operation.feedback_boundary_mode
                 if operation.feedback_boundary_mode is not None
                 else default_feedback_boundary_mode
             ),
-            requires_result_return_to_chip=(
-                operation.requires_result_return_to_chip
+            requires_result_return_to_qpu=(
+                operation.requires_result_return_to_qpu
             ),
-            requires_strong_commit=operation.requires_strong_commit,
-            byproduct_pauli=operation.byproduct_pauli,
-            measurement_basis=operation.measurement_basis,
-            logical_observable_index=operation.logical_observable_index,
-            intrinsic_measurement=operation.intrinsic_measurement,
             kind=operation.kind,
         )
-
-    @property
-    def needs_magic_state(self) -> bool:
-        if self.consumes_magic_state is not None:
-            return self.consumes_magic_state
-        return not self.clifford

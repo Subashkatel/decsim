@@ -28,6 +28,7 @@ env/
 .ruff_cache/
 .DS_Store
 Thumbs.db
+*.png
 
 # Local research notes and experiment scripts.
 # Claim-bearing text (predeclarations, ledger, reviews, pitch matrix)
@@ -39,7 +40,10 @@ docs/*
 !docs/reviews/
 !docs/pitch/
 !docs/papers/
+!docs/architecture/
+!docs/architecture/*.md
 tools/
+/tmp/
 
 # Experiments: artifact dirs are small text/json — tracked for audit
 # (same review finding); anything bulky must go under a raw_big/ dir
@@ -61,3 +65,6 @@ experiments/scratch*/
 /HANDOFF_*.md
 /DESIGN_*.md
 /*.html
+
+# core dumps
+core.[0-9]*

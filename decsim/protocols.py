@@ -1,13 +1,7 @@
-"""One Protocol per pluggable piece of the simulator.
+"""Interfaces for the simulator parts that users may replace.
 
-Every swappable part — decoder, scheduler, windowing scheme, controller,
-and so on — plugs into the pipeline through exactly one interface below.
-RunSpec.build() picks one implementation per port; the port numbers are
-the stable names tests and docstrings use to refer to these seams.
-
-This module declares interfaces only (plus the small strategy seam types
-Submission / Directive / OutcomeDirective that DecodingStrategy hooks use
-to answer the core). It imports nothing from decsim except message types.
+Each protocol describes one construction seam used by ``RunSpec``. Runtime
+state and implementation logic belong in the implementing modules.
 """
 
 from __future__ import annotations
@@ -17,11 +11,13 @@ from enum import Enum, auto
 from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
                     runtime_checkable)
 
-from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob,
+from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, Directive, OutcomeDirective, Submission,
+                      DecoderRequestKey,
                       DecodeOutcome, DecodeResult, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
-                      StrongRegionPlan, SyndromePayload, SyndromeRoundPacket,
-                      Window, WindowInfo)
+                      QPUReadout, StrongRegionPlan, SyndromePacketRoute,
+                      SyndromePayload,
+                      Window, WindowInfo, WindowReadiness)
 
 
 # ------------------------------------------------------ run seed capabilities
@@ -80,67 +76,40 @@ class RunSeedComposite(Protocol):
     def run_seed_children(self) -> Iterable[RunSeedChild]: ...
 
 
-# --------------------------------------------------------------- strategy seam
-
-@dataclass
-class Submission:
-    """One decode job a strategy wants enqueued, optionally after a delay
-    (e.g. the weak->strong ws hop). A strong redo job gets its
-    ready_time stamped when it reaches the ready queue, so the delay does not
-    count as queue wait. Its configured deadline remains the physical
-    obligation stamped from the source window before the hop."""
-
-    job: DecodeJob
-    delay_ticks: int = 0
-
-
-class Directive(Enum):
-    """What the core should do with a decode outcome."""
-    FINALIZE = auto()          # accept the weak result; cancel any parallel strong
-    AWAIT_STRONG = auto()      # hold the weak result; .extra may carry the strong redo
-    FINALIZE_STRONG = auto()   # a strong result landed; core applies hold-or-deliver
-
-
-@dataclass
-class OutcomeDirective:
-    """A strategy's verdict on one decode outcome."""
-    directive: Directive
-    extra: Optional[Submission] = None
-
+# ------------------------------------------------------ escalation policy seam
 
 @runtime_checkable
-class StrategyServices(Protocol):
-    """What the core offers a strategy inside its hooks: the clock, strong-job
-    construction/cancellation, and strong-result selection transport."""
-
-    @property
-    def now(self) -> int: ...
+class EscalationServices(Protocol):
+    """Strong-job construction and strong-result selection offered to an escalation policy."""
 
     def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
                         label: str) -> DecodeJob: ...
 
     def defer_strong_escalation(
         self, weak_job: DecodeJob,
-    ) -> None: ...
+    ) -> DecoderRequestKey: ...
 
     def check_strong_route(
         self, weak_job: DecodeJob, strong_job: DecodeJob,
     ) -> None: ...
 
-    def cancel_strong(self, key: tuple) -> None: ...
-
     def prepare_strong_selection(
-        self, weak_job: DecodeJob, serial_submission: Optional[Submission],
+        self, weak_job: DecodeJob, strong_request_key: DecoderRequestKey,
+        serial_strong_job: Optional[DecodeJob], *, deferred: bool,
     ) -> int: ...
 
 
 @runtime_checkable
-class DecodingStrategy(Protocol):
-    """Port 10. Decides how each window gets decoded: which jobs to submit
-    when a window is ready, and what to do with each outcome (accept it,
-    escalate it, hold it). For a weak job, on_decode_outcome runs BEFORE
-    the core's commit bookkeeping, so its directive decides whether the
-    result is held awaiting a strong redo."""
+class EscalationPolicy(Protocol):
+    """Whether and when a window is decoded again by the strong tier: which
+    jobs to submit when a window is ready (Baseline: the weak job only), and
+    what to do with each outcome (accept it, escalate it, hold it). For a weak
+    job, on_decode_outcome runs BEFORE the core's commit bookkeeping, so its
+    directive decides whether the result is held awaiting a strong redo."""
+
+    requires_strong_context: bool
+    bulk_strong: bool
+    double_window: bool
 
     def validate_declared_run(
         self,
@@ -163,12 +132,10 @@ class DecodingStrategy(Protocol):
     ) -> None: ...
 
     def on_window_ready(self, window: Window, weak_job: DecodeJob,
-                        services: StrategyServices) -> list[Submission]: ...
+                        services: EscalationServices) -> list[Submission]: ...
 
     def on_decode_outcome(self, outcome: DecodeOutcome,
-                          services: StrategyServices) -> OutcomeDirective: ...
-
-    def metrics(self) -> dict: ...
+                          services: EscalationServices) -> OutcomeDirective: ...
 
 
 # ----------------------------------------------------------- runtime policies
@@ -239,23 +206,11 @@ class WindowInteraction(Protocol):
 
 @runtime_checkable
 class IdlePolicy(Protocol):
-    """Port 17. How idle rounds are handled while an op waits for feedback
-    (see policies.py for the three modes). The reaction gate branches
-    on .mode; account() records the idle rounds emitted for an op."""
+    """How idle rounds travel while an op waits for feedback (see
+    controller/policies.py for the three built-in policies). relay() carries
+    one idle round through the controller it is given."""
 
-    mode: str
-
-    def account(self, idle_rounds: int, op) -> None: ...
-
-
-@runtime_checkable
-class DeadlinePolicy(Protocol):
-    """Port 13. Stamps DecodeJob.deadline when the job is built; the EDF
-    scheduler dispatches by it. Window.t_first_round may be absent; policies
-    that require arrival provenance must reject that incomplete input."""
-
-    def deadline(self, op, window: Window, now: int, *,
-                 on_reaction_path: bool) -> int: ...
+    def relay(self, controller, operation, patch, round_index: int) -> None: ...
 
 
 # -------------------------------------------------------------- decode stage
@@ -269,7 +224,13 @@ class Decoder(Protocol):
     manager schedules completion that many ticks later and then calls
     ``decode(job)`` for the result. Timing evaluation must not mutate routing
     or accuracy-bearing job state; functional decisions belong to decode and
-    strategy owners."""
+    escalation policy owners.
+
+    A decoder that simulates its own internal stages also offers
+    ``run(job, engine, on_done)``: the manager calls it instead of scheduling
+    ``latency(job)``, the decoder walks its stages as engine events on the
+    unit the manager granted, calls ``on_done`` once when its output is
+    released, and ``decode(job)`` then returns the released result."""
 
     def decode(self, job: DecodeJob) -> DecodeResult: ...
 
@@ -277,144 +238,113 @@ class Decoder(Protocol):
 
 
 @runtime_checkable
-class DecoderRouter(Protocol):
-    """Port 9. Selects a decoder for each job."""
+class Scheduler(Protocol):
+    """Port 11. Select the next ready job from one decoder-pool queue."""
 
-    def route(self, job: DecodeJob) -> Decoder: ...
-
-    def fault_model_requirement_for(self, code: Optional[str]): ...
+    def pop(self, queue: list[DecodeJob]) -> DecodeJob: ...
 
 
 @runtime_checkable
-class Scheduler(Protocol):
-    """Port 11. Queue discipline for one decode lane (FIFO or EDF):
-    insert() places a job in the ready queue, and pop() picks the next job
-    using the dispatch owner's exact current tick."""
+class DecoderMemoryTransfer(Protocol):
+    """Port 22. Carry one admitted job to the decoder side after a delay.
 
-    def insert(self, queue: list, job: DecodeJob) -> None: ...
+    Implementations call ``receiver(job)`` exactly once after ``delay_ticks``,
+    unless the request is cancelled first. ``cancel(job)`` is idempotent: the
+    receiver is never invoked for a request cancelled before its delivery, and
+    cancelling an unknown or already delivered request does nothing. Storage
+    admission, materialization, stored-input lifetime, link reservation,
+    admission, service, and result handling belong elsewhere.
+    """
 
-    def pop(self, queue: list, now_ticks: int) -> DecodeJob: ...
+    def deliver(
+        self, job: DecodeJob, delay_ticks: int,
+        receiver: Callable[[DecodeJob], None],
+    ) -> None: ...
+
+    def cancel(self, job: DecodeJob) -> None: ...
+
+
+@runtime_checkable
+class PauliFrame(Protocol):
+    """Port 23. Optional final-weak correction sink, inert when absent.
+
+    The caller supplies a stable ``(op_id, window_id)`` identity, the delivered
+    logical observables, their decoder-request provenance, and a zero-argument
+    continuation. Implementations call the continuation at most once per call
+    and exactly once per accepted write, never before the configured write cost
+    has elapsed. They never mutate caller-owned values or call the conditional release,
+    controller, or execution runtime. ``snapshot`` is immutable and does not
+    mutate the frame.
+    """
+
+    def commit_weak_correction(
+        self,
+        *,
+        window_key,
+        logical_observables,
+        request_key,
+        on_committed: Callable[[], None],
+    ) -> None: ...
+
+    def snapshot(self): ...
 
 
 @runtime_checkable
 class ResourcePool(Protocol):
-    """Port 12. The decode units and their ready queues (implemented by
-    DecoderManager).
+    """Port 12. Admit decoder jobs and own decoder queues and service units.
 
-    A DecodeJob is submitted once. enqueue raises, before touching any state,
-    on a job it has already admitted, completed or cancelled; admitted spans
-    the whole time the job holds a queue slot or a unit, from the moment
-    enqueue accepts it through crossing the weak->strong link, queueing and
-    execution. A refused submission leaves the job and the pool untouched, so
-    a strong request refused as a duplicate may be built again and submitted
-    once the destination's result is consumed.
+    A job may be submitted once. The pool also owns strong-request cancellation
+    and the final check that no decoder work is stranded.
+    """
 
-    A destination window owns at most one unconsumed strong result, either a
-    live request or a completion held for a demand that has not registered
-    yet. enqueue raises on a second strong request while the first is
-    unconsumed, and checks nothing else about the destination: whether a
-    result will be consumed is decided when it completes, so a strategy may
-    return its Submissions in any order and may cancel and replace a request
-    from any hook position.
-
-    A completing strong result is delivered to its destination if the
-    destination registered a strong demand (AWAIT_STRONG); held if that
-    destination's weak decode is still open and may raise one; and otherwise
-    raises, because nothing would consume it.
-
-    That ownership is per destination window, not per decode attempt, so it
-    needs at most one of a destination's weak decodes open at a time: with two,
-    either decode's directive consumes whichever result the destination owns
-    and the other attempt is left waiting for one that never comes. enqueue
-    therefore refuses a second weak decode for a destination whose first has
-    not yet produced a directive. A decode produces its directive by returning
-    from on_decode_outcome, so the refusal covers that whole call: a strategy
-    calling enqueue from inside its own outcome hook is refused a second weak
-    decode of the destination it is deciding, and the destination reopens
-    before the returned directive is applied. Per-attempt ownership, which
-    would let a destination decode twice at once, needs the attempt carried
-    through the request, the hold and the demand, and this port does not carry
-    it.
-
-    Two shipped components keep clear of that refusal, and both are
-    load-bearing: the window manager queues a window once and re-queues it only
-    after its decode has produced a directive, and the Switching strategy lists
-    one weak Submission per window. A new strategy is as able to break the rule
-    as a change to the window manager.
-
-    check_decode_work_settled raises when the run has gone quiescent with any
-    destination still recorded as decoding, waiting for a strong result,
-    holding an unclaimed one, or holding a strong request. Each of those is a
-    window that never became final, which no metric or view would otherwise
-    report.
-
-    cancel_strong is atomic at the event-queue pop: a queued job, or one still
-    crossing the weak->strong link, is removed outright and never dispatched;
-    an executing job is marked cancelled, releases its modeled unit at the
-    cancel, and delivers nothing on completion; a held completion is
-    discarded. A batched strong decode with siblings that are still wanted
-    keeps running and drops only the cancelled key from delivery. A cancel
-    ends one request and passes no verdict on the destination, which may be
-    given a replacement."""
-
-    def enqueue(self, job: DecodeJob, delay_ticks: int = 0) -> None: ...
+    def enqueue(self, job: DecodeJob, reserve_transfer=None) -> None: ...   # reserve_transfer() at dispatch -> transfer ticks
 
     def submit_decode(self, round_count: int, on_done: Callable[[], None],
                       label: str = "") -> None: ...
 
     def cancel_strong(self, key: tuple) -> None: ...
 
-    def try_dispatch(self) -> None: ...
-
     def check_decode_work_settled(self) -> None: ...
 
 
 # ------------------------------------------------------------------ dataflow
 
-@runtime_checkable
-class SyndromeSource(Protocol):
-    """Port 2. Clocked source of syndrome rounds: start() begins emitting
-    an op's rounds on the round clock. Idle rounds are the Chip's job —
-    it only asks the source for their payloads (idle_round_payloads)."""
-
-    def start(self, op, round_ticks: int,
-              on_body_done: Callable[[Any], None]) -> None: ...
-
-    def idle_round_payloads(self, op, stream_id, global_round: int,
-                            patch) -> list: ...
-
 
 @runtime_checkable
 class SyndromeDevice(Protocol):
-    """The unclocked syndrome and error-model source supplied to RunSpec."""
+    """Unclocked physical source used only by ``QPUDevice``."""
 
     operation_circuit_scope: str
-
-    def begin_operation(self, op, resolved_round_count: int) -> None: ...
-
-    def round_payloads(self, op, round_index: int) -> list: ...
-
+    def begin_operation(
+        self, op, segment_round_count: int, source_round_count: int,
+    ) -> None: ...
+    def round_payloads(self, op, round_index: int) -> list[QPUReadout]: ...
+    def finalize_stream_round(
+        self, op, source_round_count: int,
+    ) -> list[QPUReadout]: ...
     def idle_round_payloads(
         self, op, stream_id, global_round: int, patch,
-    ) -> list: ...
+    ) -> list[QPUReadout]: ...
+
+
+@runtime_checkable
+class ErrorModelProvider(Protocol):
+    """Build decoder-facing models without owning physical QPU cadence."""
 
     def register_dynamic_stream(
         self, stream_op, round_count: int, *, fault_model_requirement,
     ): ...
-
     def validate_stream_length(
         self, stream_op, stream_round_count: int,
     ) -> None: ...
-
     def window_models_for_operation(
         self, op, windows: list, round_count: int, *,
-        fault_model_requirement,
+        fault_model_requirement, fault_exclusion_ranges: tuple,
+        window_protocol,
     ) -> list: ...
-
     def window_model_for_stream(
         self, stream_id, window, *, is_last: bool,
     ): ...
-
     def strong_window_model_for_operation(
         self, op, window, round_count: int, *,
         fault_model_requirement, exclude_faults_touching=None,
@@ -432,28 +362,18 @@ class MultiFaultExclusionSyndromeDevice(Protocol):
 
 
 @runtime_checkable
-class Controller(Protocol):
-    """Port 14. Reserves and delivers QC/CWD and OC/CQ reaction-path hops
-    through the exact run-owned semantic link fabric."""
-
-    links: Any
-
-    def relay_syndrome(
-        self,
-        payload: SyndromePayload,
-        deliver: Callable[[SyndromeRoundPacket], None],
+class SyndromeTransport(Protocol):
+    """Port 14. Reassembles and forwards transient syndrome packets."""
+    def relay_qpu_readout(
+        self, payload: SyndromePayload, route: SyndromePacketRoute, *,
+        processing_ticks: int,
     ) -> None: ...
 
-    def relay_instruction(self, decision, deliver: Callable) -> None: ...
 
 @runtime_checkable
-class Orchestrator(Protocol):
-    """Port 15. Turns final decoded measurements into Decisions (the Pauli
-    byproduct / S-gate algebra) and releases the operations they block."""
-
-    engine: Any
-    frame: Any
-
+class ConditionalReleasePort(Protocol):
+    """Receives each operation's final result and releases the operations
+    conditioned on it (the OC hop). pauli_frame/conditional_release.py."""
     def connect(self, controller, decision_sink: Callable) -> None: ...
 
     def register_blocked_operation(self, blocked_op_id: int,
@@ -536,8 +456,10 @@ class RoundsPolicy(Protocol):
 
 
 @runtime_checkable
-class DecodingScheme(Protocol):
-    """Port 6. Complete static topology plus runtime readiness."""
+class WindowingScheme(Protocol):
+    """How an operation's rounds are cut into windows: the static window
+    graph of an operation, when a window has its data, and the buffer floor
+    the scheme needs."""
 
     def plan_operation(
         self,
@@ -548,19 +470,10 @@ class DecodingScheme(Protocol):
         buffer_round_count: int,
     ): ...
 
-    def data_complete(self, window: Window, *, rounds_arrived: int,
-                      successor_rounds: int, memory_rounds: int,
-                      round_count: int, has_successor: bool,
+    def data_complete(self, window: Window, *, readiness: WindowReadiness,
                       operation: OperationPlanningView) -> bool: ...
 
     def validate_buffer(self, geometry: ResolvedCodeGeometry) -> None: ...
-
-
-@runtime_checkable
-class CrossPartValidator(Protocol):
-    """Optional exact capability for parts that reject whole-run combinations."""
-
-    def validate(self, spec, planning) -> None: ...
 
 
 # ----------------------------------------------------------------- resources
@@ -592,7 +505,7 @@ class Metric(Protocol):
 
 @runtime_checkable
 class MemoryModel(Protocol):
-    """Port 18. Observes physical payload storage inside the PayloadStore:
+    """Port 18. Observes retained payload storage inside SyndromeBuffer:
     store()/evict() fire on exactly the fragments held. Optional — when
     absent, storage is unbounded."""
 

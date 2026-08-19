@@ -88,10 +88,13 @@ def load_config(path: Path) -> dict:
 # ---- one run ---------------------------------------------------------------
 
 def memory_circuit(config: dict) -> stim.Circuit:
-    """The real data: Stim's generated memory circuit with the yaml's physical noise."""
+    """The real data: Stim's generated memory circuit, one physical error
+    probability on all four of Stim's noise channels (as Stim's guide does)."""
+    p = config["physical_error_probability"]
     return stim.Circuit.generated(
         config["code_task"], rounds=config["rounds_per_shot"], distance=config["distance"],
-        **config["physical_noise"])
+        after_clifford_depolarization=p, before_round_data_depolarization=p,
+        before_measure_flip_probability=p, after_reset_flip_probability=p)
 
 
 def weak_decoder(config: dict, algorithm_latency_us) -> DecoderEngine:
@@ -331,7 +334,7 @@ def write_report(config: dict, rows: list, report_dir: Path) -> None:
     write_csv(rows, report_dir / "sweep.csv")
     lines = ["# Baseline closed loop, per-point latency and throughput", "",
              f"Circuit: {config['code_task']} d={config['distance']}, "
-             f"{config['rounds_per_shot']} rounds per shot, physical noise {config['physical_noise']}, "
+             f"{config['rounds_per_shot']} rounds per shot, p={config['physical_error_probability']}, "
              f"{len(config['seeds'])} shots per point. All latencies simulated, in microseconds, "
              "mean over decoded windows (max in the CSV). algorithm = 'measured' charges the wall "
              "clock of each real PyMatching call; numeric values charge the stated latency.", ""]

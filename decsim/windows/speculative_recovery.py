@@ -164,7 +164,7 @@ class SpeculativeRecovery:
             runtime._replace_contribution_prediction(
                 key, result.logical_observables)
         corrected_boundary = record.strong_boundary
-        runtime._committed_boundaries[key] = corrected_boundary
+        runtime.courier.set_committed(key, corrected_boundary)
 
         superseded = [item for item in descendants if item in self._records]
         replacement_ids = self._replay_packet_identities(descendants)
@@ -198,7 +198,7 @@ class SpeculativeRecovery:
         record.state = _RecoveryState.REPLAYING
         runtime._resolve_strong_wait(key, key[0])
         self.replay_count += 1
-        runtime._send_boundary(
+        runtime.courier.send(
             source_window, source_op, corrected_boundary,
             source_request_key=completion.request_key)
         runtime.release_stream_segments_at_commit(
@@ -269,15 +269,7 @@ class SpeculativeRecovery:
     def _reset_window(self, key: tuple) -> None:
         runtime = self.runtime
         window = runtime.windows[key]
-        # A boundary already in transit belongs to the invalidated decode.
-        # Advancing the generation makes its scheduled callback a no-op.
-        runtime._boundary_versions[key] = \
-            runtime._boundary_versions.get(key, 0) + 1
-        for dependency in window.deps:
-            delivery_key = (dependency, key)
-            runtime._boundary_delivery_versions[delivery_key] = \
-                runtime._boundary_delivery_versions.get(delivery_key, 0) + 1
-            runtime._released_boundary_dependencies.discard(delivery_key)
+        runtime.courier.invalidate(window)
         runtime.logical_contributions.pop(key, None)
         runtime.op_results.pop(window.op_id, None)
         if window.committed:
@@ -297,8 +289,6 @@ class SpeculativeRecovery:
         window.boundary_in = \
             runtime.window_interaction.initial_boundary_state(
                 runtime._window_infos()[key])
-        runtime._committed_boundaries.pop(key, None)
-        runtime._held_boundary.pop(key, None)
         if runtime.syndrome_buffer.has_hold(key):
             runtime._replace_window_read_refs(key, window)
 
@@ -312,12 +302,7 @@ class SpeculativeRecovery:
                 remaining += 1
                 continue
             if dependency in runtime.committed_windows:
-                runtime._merge_available_boundary(
-                    dependency,
-                    window,
-                    runtime._committed_boundaries.get(dependency),
-                )
-                runtime._released_boundary_dependencies.add((dependency, key))
+                runtime.courier.restore_dependency(dependency, window)
             else:
                 remaining += 1
         window.deps_remaining = remaining

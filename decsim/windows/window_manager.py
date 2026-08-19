@@ -8,7 +8,7 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Callable, Optional
 
-from ..message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob, DecoderInputHold,
+from ..message import (CsdInput, DecodeJob, DecoderInputHold,
                       DecodeResult, DecoderRequestKey, DecoderTier, LogicalContribution,
                       Operation, PendingStrong, PotentialStrong, RephaseGuard,
                       SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
@@ -16,18 +16,11 @@ from ..message import (BoundaryDelivery, BoundaryUpdate, CsdInput, DecodeJob, De
                       WindowPlan, WindowProtocol, WindowReadiness,
                       stable_identity_order_key)
 from ..decoders.strong_escalation import NoStrongTier, StrongEscalation
-from ..links import (BoundaryTransferRelation, LinkPath,
-                    RequestTransferRelation, TrafficAttribution)
+from ..links import LinkPath, RequestTransferRelation, TrafficAttribution
 from ..syndrome_buffer.syndrome_buffer import SyndromeBuffer
 from .dynamic_windows import DynamicWindows
 from .speculative_recovery import SpeculativeRecovery
-
-
-@dataclass(frozen=True)
-class _HeldBoundary:
-    source_request_key: DecoderRequestKey
-    operation_id: object
-    boundary: object
+from .window_boundaries import BoundaryCourier, HeldBoundary
 
 
 
@@ -103,11 +96,7 @@ class WindowManager:
         self._stream_binding_by_operation_id: dict[int, tuple[object, int]] = {}
         self.logical_contributions: dict[tuple, LogicalContribution] = {}
         self._observable_arity_by_stream: dict[object, int] = {}
-        self._committed_boundaries: dict[tuple, object] = {}
-        self._boundary_versions: dict[tuple, int] = {}
-        self._boundary_delivery_versions: dict[tuple, int] = {}
-        self._released_boundary_dependencies: set[tuple] = set()
-        self._held_boundary: dict[tuple, _HeldBoundary] = {}
+        self.courier = BoundaryCourier(self)
         self._pending_strong_windows: set[tuple] = set()
         self._pending_strong_per_op: dict[int, int] = {}
         self.absorbed_windows: set[tuple] = set()        # skipped by the weak chain
@@ -383,13 +372,10 @@ class WindowManager:
             WindowInfo.from_window(window))
         if window_index > 0:
             previous_key = (stream_id, window_index - 1)
-            if previous_key in self._committed_boundaries:
+            if self.courier.has_committed(previous_key):
                 # boundary already shipped (a held one is NOT available yet)
-                self._merge_available_boundary(
-                    previous_key,
-                    window,
-                    self._committed_boundaries[previous_key],
-                )
+                self.courier.merge_available(
+                    previous_key, window, self.courier.committed(previous_key))
             else:
                 window.deps.append(previous_key)
                 window.deps_remaining = 1
@@ -890,11 +876,11 @@ class WindowManager:
             self.speculative_recovery.begin(job, boundary)
         final = not job.awaiting_strong_result
         if self.boundary_policy.on_commit(window, final=final):
-            self._send_boundary(
+            self.courier.send(
                 window, op, boundary, source_request_key=job.request_key)
         else:
-            self._held_boundary[(job.op_id, job.window_id)] = _HeldBoundary(
-                job.request_key, op.id, boundary)
+            self.courier.hold((job.op_id, job.window_id),
+                              HeldBoundary(job.request_key, op.id, boundary))
 
     def _commit_window(self, job: DecodeJob, res: DecodeResult, key: tuple,
                        window: Window, op: Operation) -> None:
@@ -1150,9 +1136,9 @@ class WindowManager:
                 result.logical_observables,
             )
         self._resolve_strong_wait(key, op.id)
-        if key in self._held_boundary:                        # Held: ship now
-            held = self._held_boundary.pop(key)
-            self._send_boundary(
+        held = self.courier.take_held(key)                    # Held: ship now
+        if held is not None:
+            self.courier.send(
                 window, self._ops[held.operation_id],
                 self.window_interaction.boundary_from_result(
                     result, held.boundary),
@@ -1173,171 +1159,6 @@ class WindowManager:
         else:
             self._pending_strong_per_op.pop(op_id, None)
 
-    def _send_boundary(self, window: Window, op: Operation, boundary, *,
-                       source_request_key: DecoderRequestKey) -> None:
-        """Schedule policy-selected boundary deliveries over the dd link."""
-        source_key = (window.op_id, window.k)
-        selected_targets = tuple(self.window_interaction.boundary_targets(
-            WindowInfo.from_window(window), self._window_infos()))
-        if len(set(selected_targets)) != len(selected_targets):
-            raise RuntimeError(
-                f"window interaction selected duplicate boundary targets "
-                f"for source {source_key}: {selected_targets}")
-        targets = tuple(
-            key for key in selected_targets
-            if key not in self.absorbed_windows
-        )
-        for dep_key in targets:
-            if dep_key not in self.windows:
-                raise RuntimeError(
-                    f"window interaction selected unknown boundary target "
-                    f"{dep_key} for source {source_key}")
-            target = self.windows[dep_key]
-            if source_key not in target.deps:
-                raise RuntimeError(
-                    f"window interaction selected boundary target {dep_key} "
-                    f"for source {source_key}, but it is not a live "
-                    f"dependency declared by the window scheme")
-            if target.queued or target.committed:
-                raise RuntimeError(
-                    f"window interaction selected boundary target {dep_key} "
-                    f"for source {source_key} after its decode lifecycle "
-                    f"started")
-
-        version = self._boundary_versions.get(source_key, 0) + 1
-        deliveries = []
-        for dep_key in targets:
-            delivery_key = (source_key, dep_key)
-            delivery_version = \
-                self._boundary_delivery_versions.get(delivery_key, 0) + 1
-            deliveries.append((dep_key, delivery_key, delivery_version))
-
-        self._boundary_versions[source_key] = version
-        self._committed_boundaries[source_key] = boundary
-        for dep_key, delivery_key, delivery_version in deliveries:
-            self._boundary_delivery_versions[delivery_key] = delivery_version
-            reservation = self.links.reserve(
-                LinkPath.DD,
-                payload_bits=None,
-                now_ticks=self.engine.now,
-                attribution=replace(
-                    self._window_attribution(window, op, source_request_key),
-                    relation=BoundaryTransferRelation(
-                        source_request_key, source_key, dep_key,
-                        version, delivery_version)),
-            )
-            self.engine.schedule(
-                reservation.total_delay_ticks,
-                lambda dk=dep_key, so=op.id, bd=boundary,
-                       sk=source_key, v=version, dv=delivery_version:
-                    self._receive_boundary(dk, so, bd, sk, v, dv),
-                label=f"boundary {op.name}W{window.k}->W{dep_key}")
-
-    def _merge_available_boundary(
-        self, source_key: tuple, destination: Window, boundary,
-    ) -> None:
-        """Merge an already-delivered predecessor into a newly built window."""
-        delivery_key = (source_key, destination.key)
-        delivery = BoundaryDelivery(
-            source_key=source_key,
-            destination_key=destination.key,
-            source_revision=self._boundary_versions.get(source_key, 0),
-            delivery_revision=self._boundary_delivery_versions.get(
-                delivery_key, 0),
-            latest_source_revision=self._boundary_versions.get(source_key, 0),
-            latest_delivery_revision=self._boundary_delivery_versions.get(
-                delivery_key, 0),
-            source_operation_round_count=self.rounds_for(
-                self._ops[source_key[0]]),
-            dependency_released=True,
-            payload=boundary,
-        )
-        update = self._propose_boundary_update(delivery, destination)
-        if update.release_dependency:
-            raise RuntimeError(
-                f"window interaction released boundary dependency "
-                f"{delivery_key} more than once")
-        if update.accepted:
-            destination.boundary_in = update.state
-
-    def _receive_boundary(self, key: tuple, src_op_id: int,
-                          defects: Optional[dict] = None,
-                          source_key: Optional[tuple] = None,
-                          version: Optional[int] = None,
-                          delivery_version: Optional[int] = None) -> None:
-        if source_key is None or version is None or delivery_version is None:
-            raise RuntimeError("boundary delivery is missing source provenance")
-        delivery_key = (source_key, key)
-        w = self.windows[key]
-        dependency_released = \
-            delivery_key in self._released_boundary_dependencies
-        delivery = BoundaryDelivery(
-            source_key=source_key,
-            destination_key=key,
-            source_revision=version,
-            delivery_revision=delivery_version,
-            latest_source_revision=self._boundary_versions.get(source_key, 0),
-            latest_delivery_revision=self._boundary_delivery_versions.get(
-                delivery_key, 0),
-            source_operation_round_count=self.rounds_for(self._ops[src_op_id]),
-            dependency_released=dependency_released,
-            payload=defects,
-        )
-        update = self._propose_boundary_update(delivery, w)
-        if update.accepted and (w.queued or w.committed):
-            raise RuntimeError(
-                f"accepted boundary delivery {delivery_key} reached window "
-                f"{key} after its decode lifecycle started")
-        if update.release_dependency:
-            if dependency_released:
-                raise RuntimeError(
-                    f"window interaction released boundary dependency "
-                    f"{delivery_key} more than once")
-            if source_key not in w.deps or w.deps_remaining <= 0:
-                raise RuntimeError(
-                    f"window interaction released unresolved edge "
-                    f"{delivery_key}, but it is not a live dependency")
-        if update.accepted:
-            w.boundary_in = update.state
-            if update.release_dependency:
-                self._released_boundary_dependencies.add(delivery_key)
-                w.deps_remaining -= 1
-        self.check_window(key)
-
-    def _propose_boundary_update(
-        self, delivery: BoundaryDelivery, destination: Window,
-    ) -> BoundaryUpdate:
-        """Let the interaction modify an isolated candidate boundary state."""
-        try:
-            candidate_state = deepcopy(destination.boundary_in)
-        except Exception as error:
-            raise TypeError(
-                f"boundary state for {delivery.destination_key} must support "
-                "deep copying before merge_boundary"
-            ) from error
-        destination_model = self.window_models.get(destination.key)
-        update = self.window_interaction.merge_boundary(
-            delivery,
-            WindowInfo.from_window(
-                destination,
-                detector_positions=(
-                    None if destination_model is None
-                    else destination_model.defect_positions
-                ),
-            ),
-            candidate_state,
-        )
-        self._validate_boundary_update(delivery, update)
-        return update
-
-    @staticmethod
-    def _validate_boundary_update(
-        delivery: BoundaryDelivery, update,
-    ) -> None:
-        if not update.accepted and update.release_dependency:
-            raise RuntimeError(
-                f"rejected boundary {delivery.source_key}->"
-                f"{delivery.destination_key} cannot release a dependency")
 
     def _window_infos(self):
         return MappingProxyType({

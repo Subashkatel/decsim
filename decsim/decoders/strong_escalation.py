@@ -861,12 +861,6 @@ class StrongEscalation:
             self.wm.absorbed_windows,
             self.wm._pending_strong_windows,
         )
-        historical_maps = (
-            self.wm._held_boundary,
-            self.wm._committed_boundaries,
-            self.wm._boundary_versions,
-            self.wm.logical_contributions,
-        )
         for affected_key in affected_keys:
             window = self.wm.windows[affected_key]
             if window.queued or window.committed:
@@ -876,7 +870,8 @@ class StrongEscalation:
             if any(affected_key in values for values in historical_sets):
                 raise RuntimeError(
                     f"cannot rephase historical window {affected_key}")
-            if any(affected_key in values for values in historical_maps):
+            if (self.wm.courier.is_published(affected_key)
+                    or affected_key in self.wm.logical_contributions):
                 raise RuntimeError(
                     f"cannot rephase window {affected_key} with published state")
             if self._escalations.peek_key(affected_key) is not None:
@@ -887,13 +882,7 @@ class StrongEscalation:
                 raise RuntimeError(
                     f"cannot rephase readiness key {affected_key}: owned by "
                     f"pending escalation {readiness_owner.key}")
-        if any(
-            source in affected_keys or destination in affected_keys
-            for source, destination in self.wm._boundary_delivery_versions
-        ) or any(
-            source in affected_keys or destination in affected_keys
-            for source, destination in self.wm._released_boundary_dependencies
-        ):
+        if self.wm.courier.touches(affected_keys):
             raise RuntimeError(
                 f"cannot rephase suffix for {key} after boundary delivery")
 

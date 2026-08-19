@@ -28,7 +28,7 @@ from decsim.detector_error_model.fault_model_contracts import FaultRepresentatio
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.decoders.mwpm.weights import matching_weights
-from decsim.program.round_policies import FixedRounds
+from decsim.qpu.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
 REPORT = Path("experiments/results/validation/fusion_blossom_mwpm.md")

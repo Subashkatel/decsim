@@ -25,7 +25,7 @@ from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.program.round_policies import FixedRounds
+from decsim.qpu.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
 EXTERNAL = Path("tmp/validation/external")

@@ -205,7 +205,7 @@ def test_rounds_pipeline_on_c2b_instead_of_stop_and_wait():
     from decsim.config import TimingConfig, TICKS_PER_US
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.message import Operation
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
 
     circuit = stim.Circuit.generated(

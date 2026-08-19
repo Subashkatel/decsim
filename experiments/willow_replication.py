@@ -46,8 +46,8 @@ from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.pauli_frame.pauli_frame import PauliFrameConfig
-from decsim.program.round_policies import FixedRounds
+from decsim.orchestrator.pauli_frame import PauliFrameConfig
+from decsim.qpu.round_policies import FixedRounds
 from decsim.run_spec import RunSpec
 
 DATA = Path("tmp/references/data/willow/google_105Q_surface_code_d3_d5_d7")

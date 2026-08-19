@@ -143,7 +143,7 @@ def _switching_pair(low_confidence_probability, weak_tau=0.1, strong_tau=10.0):
 def _switching_spec(*, rounds=27, probability=0.3, seed=1, **switching_kwargs):
     from decsim.decoders.decoders import SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.decoders.weak_strong_switching import Switching
     weak, strong = _switching_pair(probability)
     extra = {}
@@ -162,7 +162,7 @@ def _switching_spec(*, rounds=27, probability=0.3, seed=1, **switching_kwargs):
 def baseline_memory():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(21),
                    round_us=1.0, decoder=PresetLatencyDecoder(2.0), num_units=1,
                    scheme=_sliding(), seed=3)
@@ -174,7 +174,7 @@ def baseline_reference_links():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.links.link_profiles import logical_reference_profile
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     return RunSpec(ops=[_memory_op(0, 0), _memory_op(1, 1)], d=3,
                    rounds_policy=FixedRounds(15), round_us=1.0,
                    decoder=PresetLatencyDecoder(1.5), num_units=2,
@@ -187,7 +187,7 @@ def bandwidth_limited_links():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.links.link_profiles import bandwidth_limited_profile
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     return RunSpec(ops=[_memory_op(0, 0), _memory_op(1, 1)], d=5,
                    rounds_policy=FixedRounds(20), round_us=1.0,
                    decoder=PresetLatencyDecoder(2.0), num_units=2, scheme=_sliding(),
@@ -206,9 +206,9 @@ def stim_pymatching():
     from decsim.links.link_profiles import logical_reference_profile
     from decsim.message import Operation
     from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+    from decsim.orchestrator.pauli_frame import PauliFrameConfig
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     p = 0.003
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z", rounds=15, distance=3,
@@ -282,7 +282,7 @@ def _live_stream_spec(idle_policy, mode="trailing_buffer", decode_us=2.0):
     from decsim.qpu.code_geometry import SurfaceCodeModel
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.qpu.syndrome_devices import TimingOnlyDevice
-    from decsim.program.round_policies import PerOpRounds
+    from decsim.qpu.round_policies import PerOpRounds
     from decsim.run_spec import RunSpec
     from decsim.windows.windowing_schemes import SlidingWindowScheme
     stream, operations = _live_stream_pair()
@@ -310,7 +310,7 @@ def _protected_chain(feedback: bool):
     from decsim.qpu.code_geometry import SurfaceCodeModel
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.message import Operation, ProtectedRegion
-    from decsim.program.round_policies import PerOpRounds
+    from decsim.qpu.round_policies import PerOpRounds
     from decsim.run_spec import RunSpec
     stream = Operation(100, "protected stream", (0,), patches=(0,))
     start = Operation(1, "allocate", (0,), patches=(0,), emits_detector_data=False)
@@ -350,10 +350,10 @@ def protected_chain_feedback():
 def _feedback_chain_spec(mode, idle_policy=None):
     from decsim.qpu.code_geometry import SurfaceCodeModel
     from decsim.decoders.decoders import PresetLatencyDecoder
-    from decsim.program.circuit_frontend import CircuitFrontend
+    from decsim.orchestrator.circuit_frontend import CircuitFrontend
     from decsim.message import Operation
     from decsim.observe.metrics import BacklogTrajectory, ConditionalReactionTime
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
     ops = CircuitFrontend([
         Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
@@ -390,7 +390,7 @@ def feedback_chain_measurement_closed():
 def parallel_ab_scheme():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.windows.windowing_schemes import ParallelWindowScheme
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(30), round_us=1.0,
                    decoder=PresetLatencyDecoder(4.0), num_units=3,
@@ -400,7 +400,7 @@ def parallel_ab_scheme():
 def sandwich_scheme():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.windows.windowing_schemes import TanSandwichScheme
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(30), round_us=1.0,
                    decoder=PresetLatencyDecoder(4.0), num_units=3,
@@ -410,7 +410,7 @@ def sandwich_scheme():
 def naive_online_scheme():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.windows.windowing_schemes import NaiveOnlineScheme
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(20), round_us=1.0,
                    decoder=PresetLatencyDecoder(1.0), num_units=1,
@@ -420,7 +420,7 @@ def naive_online_scheme():
 def _finite_buffer_spec(policy=None, slots=8):
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.syndrome_buffer.syndrome_buffer import SyndromeBufferingConfig
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(24), round_us=1.0,
                    decoder=PresetLatencyDecoder(6.0), num_units=1, scheme=_sliding(),
@@ -448,7 +448,7 @@ def finite_decoder_memory():
     from decsim.decoders.decoder_memory import DecoderMemoryConfig
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(24), round_us=1.0,
                    decoder=PresetLatencyDecoder(3.0), num_units=2, scheme=_sliding(),
                    decoder_memory=DecoderMemoryConfig({"default": 9}), seed=31)
@@ -460,7 +460,7 @@ def dependency_dag_three_ops():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.message import Operation
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import PerOpRounds
+    from decsim.qpu.round_policies import PerOpRounds
     a = Operation(0, "A", (0,), clifford=True, patches=(0,))
     b = Operation(1, "B", (1,), clifford=True, patches=(1,))
     c = Operation(2, "C:T", (0, 1), clifford=False, consumes_magic_state=False,
@@ -475,7 +475,7 @@ def scheduler_and_pools():
     """Two decoders by code router, two pools, priority order under load."""
     from decsim.decoders.decoders import CodeRouter, PresetLatencyDecoder
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.decoders.schedulers import FifoScheduler
     return RunSpec(ops=[_memory_op(0, 0), _memory_op(1, 1), _memory_op(2, 2)], d=3,
                    rounds_policy=FixedRounds(18), round_us=1.0,
@@ -492,9 +492,9 @@ def qlx_multi_fragment():
     from decsim.qpu.stim_device import StimDevice
     from decsim.config import TimingConfig
     from decsim.decoders.decoders import PerRoundDecoder
-    from decsim.program.qlx_frontend import qlx_frontend
+    from decsim.orchestrator.qlx_frontend import qlx_frontend
     from decsim.message import OpKind
-    from decsim.program.round_policies import GateRounds
+    from decsim.qpu.round_policies import GateRounds
     from decsim.run_spec import RunSpec
     data = Path(__file__).resolve().parent.parent / "tests" / "data" / "qlx"
     load = lambda name: _json.loads((data / name).read_text(encoding="utf-8"))
@@ -525,7 +525,7 @@ def two_fragment_stream():
     from decsim.detector_error_model.fault_model_contracts import GRAPHLIKE_FAULT_MODEL_REQUIRED
     from decsim.detector_error_model.window_model_builders import build_window_error_models
     from decsim.message import Operation
-    from decsim.program.round_policies import PerOpRounds
+    from decsim.qpu.round_policies import PerOpRounds
     from decsim.run_spec import RunSpec
     rounds, distance, stream_id = 3, 3, 7
     circuit = stim.Circuit.generated("repetition_code:memory", rounds=rounds,
@@ -609,7 +609,7 @@ class _CorrectingStrongDecoder:
 def _recovery_spec(boundary_policy, *, run_both_at_once=False, rounds=15, seed=47):
     from decsim.decoders.decoders import SAMPLED_CONFIDENCE_SOURCE, SwitchingRouter
     from decsim.run_spec import RunSpec
-    from decsim.program.round_policies import FixedRounds
+    from decsim.qpu.round_policies import FixedRounds
     from decsim.decoders.weak_strong_switching import Switching
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(rounds),
                    scheme=_sliding(),
@@ -643,9 +643,9 @@ def magic_state_factory():
     """T operations that consume magic states from a distillation factory
     whose correction decodes share the decoder manager."""
     from decsim.decoders.decoders import PresetLatencyDecoder
-    from decsim.program.magic_state_factories import DistillationFactory
+    from decsim.qpu.magic_state_factories import DistillationFactory
     from decsim.message import Operation
-    from decsim.program.round_policies import PerOpRounds
+    from decsim.qpu.round_policies import PerOpRounds
     from decsim.run_spec import RunSpec
     ops = [Operation(0, "T0", (0,), clifford=False, consumes_magic_state=True, patches=(0,)),
            Operation(1, "T1", (0,), clifford=False, consumes_magic_state=True, patches=(0,),

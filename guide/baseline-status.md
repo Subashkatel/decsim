@@ -151,6 +151,16 @@ Where the code differs from the plan, and why:
   Baseline, Switching), StrategyServices is EscalationServices; RunSpec's
   `strategy=` is `escalation_policy=`; the window and decoder managers hold
   `.escalation_policy`.
+- 2026-08-19, after reading Khalid Sec. III, Battistel 2303.00054, Triage,
+  Bombin 2303.04846, and the code of PECOS (pauli_frame.rs), XQsim (PFU and
+  LMU) and SWIPER (device_manager): the folder `program/` is `orchestrator/`
+  (Khalid's box: qlx_frontend, circuit_frontend, planner, execution_runtime,
+  pauli_frame, logical_measurement); `orchestrators.py` is
+  `logical_measurement.py` with class LogicalMeasurements (a final result
+  releases the operations conditioned on it; XQsim's LMU role next to the
+  Pauli frame unit; SWIPER has the same release-on-decoded rule and no
+  frame), its unused history/stats/archive removed; magic_state_factories
+  and round_policies moved to `qpu/`.
 - Pre-existing, untouched: experiments/tests/ fail collection
   (FaultRepresentation moved before this work; `python -m pytest -q` at the
   root errors, use `tests`); a live stream with the Ignore or

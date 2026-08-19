@@ -4,8 +4,14 @@ One shot = one rotated memory circuit run through the whole reaction path:
 QPU rounds -> controller (pulses to binary) -> packing -> link C2B -> Buffer 0
 -> window manager -> link CWD -> decoder memory -> decoder engine (fetch,
 PyMatching algorithm, release) -> link WDO -> Pauli frame commit. Nothing is
-skipped and every hop charges its configured cost; the report shows the
-simulated latency at each point and the throughput, per sweep point.
+skipped and every hop charges its configured cost.
+
+The yaml's ``sweep`` block names the axes (physical error probability, round
+period, decoder card) and the shots per point; every shot yields both the
+timing at each point of the path and whether the logical prediction was
+wrong, so one sweep reports latency, throughput and logical error rate per
+point. Few shots for timing, many shots for the error rate, many shots with
+all axes for both.
 
 Usage: python -m experiments.baseline.baseline_closed_loop [config.yaml]
 """
@@ -13,6 +19,7 @@ Usage: python -m experiments.baseline.baseline_closed_loop [config.yaml]
 from __future__ import annotations
 
 import csv
+import math
 import statistics
 import sys
 import time
@@ -70,6 +77,7 @@ COMPONENTS = {
 
 @dataclass(frozen=True)
 class ShotMeasurement:
+    physical_error_probability: float
     round_period_us: float
     algorithm_latency_us: float
     seed: int
@@ -97,10 +105,10 @@ def load_config(path: Path) -> dict:
 
 # ---- one run ---------------------------------------------------------------
 
-def memory_circuit(config: dict) -> stim.Circuit:
+def memory_circuit(config: dict, physical_error_probability: float) -> stim.Circuit:
     """The real data: Stim's generated memory circuit, one physical error
     probability on all four of Stim's noise channels (as Stim's guide does)."""
-    p = config["physical_error_probability"]
+    p = physical_error_probability
     return stim.Circuit.generated(
         config["code_task"], rounds=config["rounds_per_shot"], distance=config["distance"],
         after_clifford_depolarization=p, before_round_data_depolarization=p,
@@ -176,9 +184,10 @@ def decoder_memory(config: dict):
     return DecoderMemoryConfig({"default": memory_rounds})
 
 
-def build_run(config: dict, *, round_period_us: float, algorithm_latency_us, seed: int):
-    operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
-                          circuit=memory_circuit(config))
+def build_run(config: dict, *, physical_error_probability: float, round_period_us: float,
+              algorithm_latency_us, seed: int):
+    circuit = memory_circuit(config, physical_error_probability)
+    operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
     decoder_engine = weak_decoder(config, algorithm_latency_us)
     controller = config["controller"]
     timing = TimingConfig(round_us=round_period_us,
@@ -270,9 +279,10 @@ def percentile(values: list, fraction: float) -> float:
     return ordered[index]
 
 
-def measure_shot(config: dict, *, round_period_us: float, algorithm_latency_us,
-                 seed: int) -> ShotMeasurement:
-    spec, decoder_engine = build_run(config, round_period_us=round_period_us,
+def measure_shot(config: dict, *, physical_error_probability: float, round_period_us: float,
+                 algorithm_latency_us, seed: int) -> ShotMeasurement:
+    spec, decoder_engine = build_run(config, physical_error_probability=physical_error_probability,
+                                     round_period_us=round_period_us,
                                      algorithm_latency_us=algorithm_latency_us, seed=seed)
     wall_start = time.perf_counter()
     completed = spec.build()
@@ -290,6 +300,7 @@ def measure_shot(config: dict, *, round_period_us: float, algorithm_latency_us,
     operation_result = completed.result.operation_results[0]
     queue_depths = [depth for _, depth in completed.decoder_manager.queue_log]
     return ShotMeasurement(
+        physical_error_probability=physical_error_probability,
         round_period_us=round_period_us, algorithm_latency_us=algorithm_latency_us,
         seed=seed, windows=decoded_windows,
         logical_failure=operation_result.logical_observables != operation_result.observable_truth,
@@ -308,30 +319,52 @@ def measure_shot(config: dict, *, round_period_us: float, algorithm_latency_us,
 # ---- the sweep -------------------------------------------------------------
 
 def run_sweep(config: dict) -> list:
+    """Every shot of every point of the yaml's sweep block."""
+    sweep = config["sweep"]
     measurements = []
-    for algorithm_latency_us in config["algorithm_latency_us"]:
-        for round_period_us in config["round_period_us"]:
-            for seed in config["seeds"]:
-                measurements.append(measure_shot(
-                    config, round_period_us=round_period_us,
-                    algorithm_latency_us=algorithm_latency_us, seed=seed))
-            print(f"algorithm {algorithm_latency_us} us, round period {round_period_us} us: done",
-                  file=sys.stderr)
+    for physical_error_probability in sweep["physical_error_probability"]:
+        for algorithm_latency_us in sweep["algorithm_latency_us"]:
+            for round_period_us in sweep["round_period_us"]:
+                for seed in range(sweep["shots"]):
+                    measurements.append(measure_shot(
+                        config, physical_error_probability=physical_error_probability,
+                        round_period_us=round_period_us,
+                        algorithm_latency_us=algorithm_latency_us, seed=seed))
+                print(f"p {physical_error_probability}, algorithm {algorithm_latency_us} us, "
+                      f"round period {round_period_us} us: {sweep['shots']} shots done", file=sys.stderr)
     return measurements
 
 
+def wilson_interval(failures: int, shots: int, z: float = 1.96) -> tuple:
+    """Wilson 95% confidence interval for a failure fraction."""
+    if shots == 0:
+        return (0.0, 0.0)
+    fraction = failures / shots
+    denominator = 1 + z * z / shots
+    center = (fraction + z * z / (2 * shots)) / denominator
+    half_width = z * math.sqrt(fraction * (1 - fraction) / shots + z * z / (4 * shots * shots)) / denominator
+    return (max(0.0, center - half_width), min(1.0, center + half_width))
+
+
 def sweep_point_of(measurement: ShotMeasurement) -> tuple:
-    return (measurement.algorithm_latency_us, measurement.round_period_us)
+    return (measurement.physical_error_probability, measurement.algorithm_latency_us,
+            measurement.round_period_us)
 
 
 def summarize_point(group: list) -> dict:
     """One sweep point: means over seeds of the per-shot means, maxes of maxes."""
-    algorithm_latency_us, round_period_us = sweep_point_of(group[0])
-    row = {"algorithm_latency_us": algorithm_latency_us,
+    physical_error_probability, algorithm_latency_us, round_period_us = sweep_point_of(group[0])
+    failures = sum(m.logical_failure for m in group)
+    ler_low, ler_high = wilson_interval(failures, len(group))
+    row = {"physical_error_probability": physical_error_probability,
+           "algorithm_latency_us": algorithm_latency_us,
            "round_period_us": round_period_us,
            "shots": len(group),
            "windows_per_shot": statistics.fmean(m.windows for m in group),
-           "logical_error_rate": sum(m.logical_failure for m in group) / len(group),
+           "logical_failures": failures,
+           "logical_error_rate": failures / len(group),
+           "ler_wilson_low": ler_low,
+           "ler_wilson_high": ler_high,
            "throughput_windows_per_us": statistics.fmean(m.throughput_windows_per_us for m in group),
            "throughput_rounds_per_us": statistics.fmean(m.throughput_rounds_per_us for m in group),
            "decoder_utilization": statistics.fmean(m.decoder_utilization for m in group),
@@ -374,16 +407,18 @@ def write_csv(rows: list, path: Path) -> None:
 
 
 def table_lines(rows: list) -> list:
-    head = (["algo us", "round us", "rate MHz", "load", "LER", "win/us", "rounds/us", "util", "max q"]
-            + list(POINTS) + ["reaction p99"])
+    head = (["p", "algo us", "round us", "rate MHz", "load", "LER", "fails/shots", "win/us", "rounds/us",
+             "util", "max q"] + list(POINTS) + ["reaction p99"])
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for row in rows:
         algorithm = row["algorithm_latency_us"]
-        cells = [algorithm if isinstance(algorithm, str) else f"{algorithm:g}",
+        cells = [f"{row['physical_error_probability']:g}",
+                 algorithm if isinstance(algorithm, str) else f"{algorithm:g}",
                  f"{row['round_period_us']:g}",
                  f"{1 / row['round_period_us']:g}",
                  f"{row['load']:.2f}",
-                 f"{row['logical_error_rate']:.2f}",
+                 f"{row['logical_error_rate']:.3f}",
+                 f"{row['logical_failures']}/{row['shots']}",
                  f"{row['throughput_windows_per_us']:.4f}",
                  f"{row['throughput_rounds_per_us']:.3f}",
                  f"{row['decoder_utilization']:.3f}",
@@ -404,9 +439,38 @@ def write_report(rows: list, report_dir: Path) -> None:
 # ---- the plots -------------------------------------------------------------
 
 def rows_of_algorithm(rows: list, algorithm) -> list:
-    """This algorithm's rows, slowest input first."""
-    return sorted((row for row in rows if row["algorithm_latency_us"] == algorithm),
-                  key=lambda row: row["round_period_us"], reverse=True)
+    """This algorithm's rows at the lowest physical error probability, slowest input first."""
+    lowest_p = min(row["physical_error_probability"] for row in rows)
+    selected = [row for row in rows
+                if row["algorithm_latency_us"] == algorithm and row["physical_error_probability"] == lowest_p]
+    return sorted(selected, key=lambda row: row["round_period_us"], reverse=True)
+
+
+def ler_plot(rows: list, algorithms: list, path: Path) -> None:
+    """Logical error rate against physical error probability, one curve per
+    (decoder card, round period), Wilson 95% bars."""
+    import matplotlib.pyplot as plt
+    figure, axis = plt.subplots(figsize=(5.2, 3.8))
+    periods = sorted({row["round_period_us"] for row in rows})
+    for algorithm in algorithms:
+        for period in periods:
+            group = sorted((row for row in rows
+                            if row["algorithm_latency_us"] == algorithm and row["round_period_us"] == period),
+                           key=lambda row: row["physical_error_probability"])
+            probabilities = [row["physical_error_probability"] for row in group]
+            rates = [row["logical_error_rate"] for row in group]
+            lower = [row["logical_error_rate"] - row["ler_wilson_low"] for row in group]
+            upper = [row["ler_wilson_high"] - row["logical_error_rate"] for row in group]
+            axis.errorbar(probabilities, rates, yerr=[lower, upper], fmt="o-", capsize=3,
+                          label=f"{algorithm_label(algorithm)} decoder, {period:g} us round")
+    axis.set_xscale("log")
+    axis.set_yscale("log")
+    axis.set_xlabel("physical error probability")
+    axis.set_ylabel("logical error rate per shot")
+    axis.grid(alpha=0.3, which="both")
+    axis.legend(fontsize=6)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
 
 
 def input_rate_mhz(row: dict) -> float:
@@ -503,10 +567,15 @@ def plots(rows: list, report_dir: Path) -> None:
     import matplotlib
     matplotlib.use("Agg")
     algorithms = sorted({row["algorithm_latency_us"] for row in rows}, key=str)
-    reaction_vs_rate_plot(rows, algorithms, report_dir / "reaction_vs_rate.png")
-    components_plot(rows, algorithms, report_dir / "components.png")
-    reaction_vs_load_plot(rows, algorithms, report_dir / "reaction_vs_load.png")
-    throughput_plot(rows, algorithms, report_dir / "throughput.png")
+    periods = {row["round_period_us"] for row in rows}
+    probabilities = {row["physical_error_probability"] for row in rows}
+    if len(periods) > 1:
+        reaction_vs_rate_plot(rows, algorithms, report_dir / "reaction_vs_rate.png")
+        components_plot(rows, algorithms, report_dir / "components.png")
+        reaction_vs_load_plot(rows, algorithms, report_dir / "reaction_vs_load.png")
+        throughput_plot(rows, algorithms, report_dir / "throughput.png")
+    if len(probabilities) > 1:
+        ler_plot(rows, algorithms, report_dir / "ler.png")
 
 
 def main(argv) -> None:

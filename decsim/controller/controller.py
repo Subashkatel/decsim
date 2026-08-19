@@ -68,24 +68,33 @@ class Controller:
         self.streams.begin(operation)
         if idle_rounds:
             self.window_manager.prepend_idle_rounds(operation.id, idle_rounds)
-        kind = "Clifford" if operation.clifford else "non-Clifford"
-        release_note = "" if operation.blocked_by is None \
-            else f" [unblocked by op#{operation.blocked_by}]"
-        self.engine.log("Controller", f"START {operation.name}  ({kind}, qubits "
-                                      f"{operation.qubits}){release_note}")
+        self._log_start(operation)
         binding = self.streams.binding_for(operation.id)
-        effective_operation = operation if binding is None else replace(
-            operation, stream_id=binding.stream_id, stream_offset=binding.stream_offset)
-        source_operation_id = binding.stream_id if binding is not None else operation.id
+        if binding is None:
+            issued_operation = operation
+            source_operation_id = operation.id
+        else:
+            issued_operation = replace(operation, stream_id=binding.stream_id,
+                                       stream_offset=binding.stream_offset)
+            source_operation_id = binding.stream_id
+        source_round_count = self._resolved_operations[source_operation_id].round_count
         self.qpu.issue(RunOperationBody(
-            operation=effective_operation,
+            operation=issued_operation,
             round_ticks=self.round_ticks_for(operation),
             round_count=self.round_count_for(operation),
-            source_round_count=self._resolved_operations[source_operation_id].round_count,
+            source_round_count=source_round_count,
             emits_detector_data=operation.emits_detector_data,
             finalizes_stream_round=operation.finalizes_stream_round,
         ))
         return self.qpu.next_boundary()
+
+    def _log_start(self, operation: Operation) -> None:
+        kind = "Clifford" if operation.clifford else "non-Clifford"
+        release_note = ""
+        if operation.blocked_by is not None:
+            release_note = f" [unblocked by op#{operation.blocked_by}]"
+        self.engine.log("Controller", f"START {operation.name}  ({kind}, qubits "
+                                      f"{operation.qubits}){release_note}")
 
     def stream_binding_for(self, operation_id):
         """(stream_id, stream_offset) an operation was bound to, or None."""
@@ -160,7 +169,7 @@ class Controller:
 
     def relay_instruction(self, decision: Decision,
                           deliver: Callable[[Decision], None]) -> None:
-        """Model OC receipt followed by CQ instruction delivery."""
+        """Carry a Pauli frame decision over OC to the controller, then over CQ to the QPU."""
         if self.links is None:
             deliver(decision)
             return
@@ -169,11 +178,13 @@ class Controller:
             window_id=None, round_lo=None, round_hi=None)
 
         def at_controller():
-            cq = self.links.reserve(
-                LinkPath.CQ, payload_bits=None, now_ticks=self.engine.now,
-                attribution=attribution).total_delay_ticks
-            self.engine.schedule(cq, lambda: deliver(decision), label="controller->qpu")
-        oc = self.links.reserve(
-            LinkPath.OC, payload_bits=None, now_ticks=self.engine.now,
-            attribution=attribution).total_delay_ticks
-        self.engine.schedule(oc, at_controller, label="pauli frame->controller")
+            cq_delay = self._instruction_delay(LinkPath.CQ, attribution)
+            self.engine.schedule(cq_delay, lambda: deliver(decision), label="controller->qpu")
+
+        oc_delay = self._instruction_delay(LinkPath.OC, attribution)
+        self.engine.schedule(oc_delay, at_controller, label="pauli frame->controller")
+
+    def _instruction_delay(self, path: LinkPath, attribution: TrafficAttribution) -> int:
+        reservation = self.links.reserve(path, payload_bits=None, now_ticks=self.engine.now,
+                                         attribution=attribution)
+        return reservation.total_delay_ticks

@@ -1,0 +1,59 @@
+# The walkthrough's small run: every cost a whole number of microseconds,
+# so every timestamp of the run is a whole number you can check in your head.
+#
+#   round period 3, qc 1, c2b 1, cwd 1, fetch 3 (6 rounds x 0.5), algorithm 1,
+#   release 1, dd 1, wdo 1, frame commit 1
+#
+# This is a teaching card, not a hardware claim. The engine runs at 2 MHz
+# only because a 0.5 µs cycle makes fetch (1 cycle per round) and release
+# (2 cycles) come out whole. The reference-card case with real numbers is
+# experiments/validation/analytic_oracle_d3_r12.yaml.
+
+code_task: surface_code:rotated_memory_z
+distance: 3
+rounds_per_shot: 12
+
+windowing:
+  scheme: sliding
+  commit_rounds: 3
+  buffer_rounds: 3
+
+sweep:
+  # p = 0 exactly cannot run: a noiseless circuit has an empty detector error
+  # model and no matching graph. 1.0e-9 samples zero defects; the notebook
+  # raises p to 0.001 so a real defect flows (timing is unchanged either way).
+  - physical_error_probability: [1.0e-9]
+    round_period_us: [3.0]
+    algorithm_latency_us: [1.0]
+    shots: 1
+
+controller:
+  t_binary_availability_us: 0.0
+  t_pack_us: 0.0
+
+links:
+  # null bandwidth means unbounded: propagation latency only.
+  qc:  {latency_us: 1.0, bits_per_us: null}
+  c2b: {latency_us: 1.0, bits_per_us: null}
+  cwd: {latency_us: 1.0, bits_per_us: null}
+  dd:  {latency_us: 1.0, bits_per_us: null}
+  wdo: {latency_us: 1.0, bits_per_us: null}
+
+  # Unused by this weak-only baseline. null keeps the repository reference card.
+  oc:  null
+  cq:  null
+  wsd: null
+  csd: null
+  do:  null
+
+decoder:
+  units: 1
+  engine:
+    frequency_mhz: 2.0            # 0.5 µs cycle, chosen so the stages are whole
+    fetch_cycles_per_round: 1     # 6 rounds x 0.5 µs = 3 µs per window
+    release_cycles_per_job: 2     # 2 x 0.5 µs = 1 µs
+
+decoder_memory_rounds: null
+
+pauli_frame:
+  commit_us: 1.0

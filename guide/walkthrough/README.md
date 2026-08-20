@@ -45,46 +45,49 @@ The case: distance 3, 12 QEC rounds, zero noise, sliding windows that commit
 | 1 | 4 to 9 | 4 to 6 |
 | 2 | 7 to 12 | 7 to 12 (the last window commits everything left) |
 
-The costs, frozen in `experiments/validation/analytic_oracle_d3_r12.yaml`:
-round period 1.0 µs, QC link 0.15 µs, C2B link 0.10 µs, CWD link 2.0 µs,
-DD handoff 0.5 µs, WDO link 1.0 µs, algorithm 0.028 µs, engine 250 MHz
-(one 0.004 µs cycle per fetched round and one for release), frame commit
-0.004 µs. Every link has unbounded bandwidth, so latency is the whole cost.
+The costs, frozen in `guide/walkthrough/small_run.yaml`, are all whole
+microseconds so every timestamp of the run is a whole number: round period
+3, QC link 1, C2B link 1, CWD link 1, DD handoff 1, WDO link 1, algorithm
+1, fetch 3 (6 rounds at 0.5 µs each; the 2 MHz engine clock is chosen only
+so fetch and release come out whole), release 1, frame commit 1. Every
+link has unbounded bandwidth, so latency is the whole cost. The same case
+with the repository's reference-card numbers is
+`experiments/validation/analytic_oracle_d3_r12.yaml`.
 
 Five formulas produce the entire run:
 
 ```
-publication(r) = r x 1.0 + 0.15 + 0.10 = r + 0.25          round r reaches Buffer 0
-ready(w)       = publication(last round w reads)            window is decodable
-queued(w)      = max(ready(w), done(w-1) + 0.5)             wait for the dd handoff
-done(w)        = queued(w) + 2.0 + 6 x 0.004 + 0.028 + 0.004 = queued(w) + 2.056
-commit(w)      = done(w) + 1.0 + 0.004 = done(w) + 1.004    correction is in the frame
+publication(r) = 3r + 1 + 1 = 3r + 2                round r reaches Buffer 0
+ready(w)       = publication(last round w reads)    window is decodable
+queued(w)      = max(ready(w), done(w-1) + 1)       wait for the dd handoff
+done(w)        = queued(w) + 1 + 3 + 1 + 1          cwd + fetch + algorithm + release
+commit(w)      = done(w) + 1 + 1                    wdo + frame commit
 ```
 
-Window 0, fully worked: round 6 is published at 6.25, so ready = 6.25. No
-predecessor, so it dispatches at 6.25. Service is 2.056 (CWD transfer 2.0,
-fetch 6 rounds at 0.004, algorithm 0.028, release 0.004), so done = 8.306.
-Commit = 8.306 + 1.004 = 9.310. Reaction time = 9.310 - 6.25 = 3.060 µs.
+Window 0, fully worked: round 6 is published at 3 x 6 + 2 = 20, so ready =
+20. No predecessor, so it dispatches at 20. Service is 6 (CWD 1, fetch 3,
+algorithm 1, release 1), so done = 26. Commit = 26 + 2 = 28. Reaction time
+= 28 - 20 = 8 µs.
 
-Window 1: ready at 9.25. Its dependency (window 0's dd handoff) arrived at
-8.806, earlier, so it dispatches at 9.25, done 11.306, commit 12.310.
-Window 2: the same pattern, one period later per round: commit 15.310.
+Window 1: ready at 29. Its dependency (window 0's dd handoff) arrived at
+27, earlier, so it dispatches at 29, done 35, commit 37. Window 2: the
+same pattern, one window period (9 µs) later: commit 46.
 
 The full answer key, printed by `analytic_small_run.py`:
 
 | window_id | read_lo | read_hi | commit_lo | commit_hi | buffer0_ready_us | queued_us | dispatch_us | decode_done_us | dd_delivery_us | frame_commit_us | buffer0_ready_to_frame_us |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 0 | 1 | 6 | 1 | 3 | 6.250 | 6.250 | 6.250 | 8.306 | 8.806 | 9.310 | 3.060 |
-| 1 | 4 | 9 | 4 | 6 | 9.250 | 9.250 | 9.250 | 11.306 | 11.806 | 12.310 | 3.060 |
-| 2 | 7 | 12 | 7 | 12 | 12.250 | 12.250 | 12.250 | 14.306 | | 15.310 | 3.060 |
+| 0 | 1 | 6 | 1 | 3 | 20 | 20 | 20 | 26 | 27 | 28 | 8 |
+| 1 | 4 | 9 | 4 | 6 | 29 | 29 | 29 | 35 | 36 | 37 | 8 |
+| 2 | 7 | 12 | 7 | 12 | 38 | 38 | 38 | 44 | | 46 | 8 |
 
 The code (`analytic_small_run.py`):
 
 ```python
 """The small example by hand: 12 rounds, 3 sliding windows, zero noise.
 
-experiments/validation/analytic_oracle_d3_r12.yaml freezes every cost, so
-every timestamp of the run follows from arithmetic:
+guide/walkthrough/small_run.yaml freezes every cost as a whole number of
+microseconds, so every timestamp of the run follows from arithmetic:
 
     publication(r) = r x round_period + qc + binary + pack + c2b
     ready(w)       = publication(last round the window reads)
@@ -103,7 +106,7 @@ from pathlib import Path
 
 from experiments.baseline.baseline_closed_loop import load_config
 
-CONFIG = Path("experiments/validation/analytic_oracle_d3_r12.yaml")
+CONFIG = Path("guide/walkthrough/small_run.yaml")
 
 COLUMNS = ("window_id", "read_lo", "read_hi", "commit_lo", "commit_hi",
            "buffer0_ready_us", "queued_us", "dispatch_us", "decode_done_us",
@@ -192,7 +195,7 @@ def print_table(rows: list, columns: tuple = COLUMNS) -> None:
         if value is None:
             return ""
         if isinstance(value, float):
-            return f"{value:.3f}"
+            return f"{value:g}"
         return str(value)
     print("| " + " | ".join(columns) + " |")
     print("|" + "---|" * len(columns))
@@ -218,7 +221,7 @@ MATCH: all 36 cells agree to the tick.
 ```
 
 The simulator's table is identical to the answer key above, including the
-3.060 µs reaction time of every window. This is the point of the small
+8 µs reaction time of every window. This is the point of the small
 example: nothing inside the simulator is fitted or approximate, every
 timestamp is the yaml's arithmetic, executed by the event loop.
 
@@ -594,8 +597,8 @@ why the sweep centers there.
 
 **Syndrome round frequency at Buffer 0.** Each round's syndrome bits travel
 QPU -> QC link -> controller -> C2B link -> Buffer 0, a constant offset per
-round. In the small example the publications land at 1.25, 2.25, ..., 12.25
-µs: the same frequency as the input rounds, shifted by 0.25 µs. Links do
+round. In the small example the publications land at 5, 8, ..., 38 µs: the
+same frequency as the input rounds (one per 3 µs), shifted by 2 µs. Links do
 not change the rate, only the phase, as long as their bandwidth is not the
 bottleneck.
 

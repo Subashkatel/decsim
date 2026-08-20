@@ -164,7 +164,11 @@ def link_cards(config: dict):
                                           None, source)
         channel = LinkConfig(us_ticks(card["latency_us"]), capacity, source)
         channels[path] = replace(getattr(profile, path), channel=channel)
-    return replace(profile, **channels, profile_name="baseline_closed_loop.yaml")
+    # The yaml prices controller processing on its own line
+    # (controller.t_binary_availability_us), so its qc card is link
+    # propagation only; the attestation lets a nonzero processing cost run.
+    return replace(profile, **channels, profile_name="baseline_closed_loop.yaml",
+                   qc_excludes_controller_processing=True)
 
 
 WINDOWING_SCHEMES = {

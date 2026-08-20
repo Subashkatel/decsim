@@ -36,7 +36,8 @@ BREAKDOWN_STAGES = (
     ("Fetch", ("fetch_mean_us",)),
     ("Algorithm", ("algorithm_mean_us",)),
     ("Release", ("release_mean_us",)),
-    ("Commit (wdo+frame)", ("wdo_per_window_mean_us", "frame_commit_mean_us")),
+    ("Transfer (wdo)", ("wdo_per_window_mean_us",)),
+    ("Frame commit", ("frame_commit_mean_us",)),
 )
 
 

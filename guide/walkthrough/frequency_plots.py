@@ -9,10 +9,14 @@ Style follows the real-time decoding papers (Google 2408.13687, LILLIPUT,
 SWIPER): one quantity per figure, medians with an explicit tail percentile,
 axes labeled with units, the decoder's limit drawn where it applies.
 
-    PYTHONPATH=. python guide/walkthrough/frequency_plots.py
+    PYTHONPATH=. python guide/walkthrough/frequency_plots.py [results_dir]
+
+With no argument it reads this folder's results/ and writes this folder's
+figures/; with a results_dir it writes to <results_dir>/figures.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -20,8 +24,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-RESULTS = Path(__file__).parent / "results"
-FIGURES = Path(__file__).parent / "figures"
+if len(sys.argv) > 1:
+    RESULTS = Path(sys.argv[1])
+    FIGURES = RESULTS / "figures"
+else:
+    RESULTS = Path(__file__).parent / "results"
+    FIGURES = Path(__file__).parent / "figures"
 
 KNEE_COLOR = "tab:red"
 DATA_COLOR = "tab:blue"

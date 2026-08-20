@@ -5,11 +5,14 @@ run every shot of every point, summarize each point into one row. Writes
 the runner's usual report (sweep.csv, sweep.md) plus rows.json, which keeps
 the backlog trajectories so the figures can be redrawn without rerunning:
 
-    PYTHONPATH=. python guide/walkthrough/run_frequency_sweep.py
-    PYTHONPATH=. python guide/walkthrough/frequency_plots.py
+    PYTHONPATH=. python guide/walkthrough/run_frequency_sweep.py [config.yaml]
+    PYTHONPATH=. python guide/walkthrough/frequency_plots.py [results_dir]
+
+With no argument it runs this folder's frequency_sweep.yaml.
 """
 
 import json
+import sys
 from pathlib import Path
 
 from experiments.baseline.baseline_closed_loop import (load_config, run_sweep, summarize,
@@ -19,7 +22,8 @@ CONFIG = Path(__file__).parent / "frequency_sweep.yaml"
 
 
 def main() -> None:
-    config = load_config(CONFIG)
+    config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else CONFIG
+    config = load_config(config_path)
     rows = summarize(run_sweep(config))
 
     report_dir = Path(config["report_dir"])

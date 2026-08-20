@@ -745,11 +745,14 @@ run every shot of every point, summarize each point into one row. Writes
 the runner's usual report (sweep.csv, sweep.md) plus rows.json, which keeps
 the backlog trajectories so the figures can be redrawn without rerunning:
 
-    PYTHONPATH=. python guide/walkthrough/run_frequency_sweep.py
-    PYTHONPATH=. python guide/walkthrough/frequency_plots.py
+    PYTHONPATH=. python guide/walkthrough/run_frequency_sweep.py [config.yaml]
+    PYTHONPATH=. python guide/walkthrough/frequency_plots.py [results_dir]
+
+With no argument it runs this folder's frequency_sweep.yaml.
 """
 
 import json
+import sys
 from pathlib import Path
 
 from experiments.baseline.baseline_closed_loop import (load_config, run_sweep, summarize,
@@ -759,7 +762,8 @@ CONFIG = Path(__file__).parent / "frequency_sweep.yaml"
 
 
 def main() -> None:
-    config = load_config(CONFIG)
+    config_path = Path(sys.argv[1]) if len(sys.argv) > 1 else CONFIG
+    config = load_config(config_path)
     rows = summarize(run_sweep(config))
 
     report_dir = Path(config["report_dir"])
@@ -789,10 +793,14 @@ Style follows the real-time decoding papers (Google 2408.13687, LILLIPUT,
 SWIPER): one quantity per figure, medians with an explicit tail percentile,
 axes labeled with units, the decoder's limit drawn where it applies.
 
-    PYTHONPATH=. python guide/walkthrough/frequency_plots.py
+    PYTHONPATH=. python guide/walkthrough/frequency_plots.py [results_dir]
+
+With no argument it reads this folder's results/ and writes this folder's
+figures/; with a results_dir it writes to <results_dir>/figures.
 """
 
 import json
+import sys
 from pathlib import Path
 
 import matplotlib
@@ -800,8 +808,12 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-RESULTS = Path(__file__).parent / "results"
-FIGURES = Path(__file__).parent / "figures"
+if len(sys.argv) > 1:
+    RESULTS = Path(sys.argv[1])
+    FIGURES = RESULTS / "figures"
+else:
+    RESULTS = Path(__file__).parent / "results"
+    FIGURES = Path(__file__).parent / "figures"
 
 KNEE_COLOR = "tab:red"
 DATA_COLOR = "tab:blue"
@@ -970,7 +982,66 @@ if __name__ == "__main__":
     main()
 ```
 
-## 6. Make it your experiment
+## 6. A realistic run: d=7, 600 rounds, literature numbers
+
+`realistic_run.yaml` runs the same loop at hardware scale, every number
+sourced:
+
+| number | value | source |
+|---|---|---|
+| code distance | 7 | Google's below-threshold processor is d=7 (Nature 638, 920 (2025), arXiv:2408.13687) |
+| round period center | 1.1 µs | the QEC cycle of the same processor (Nature 638, 920 (2025)) |
+| physical error rate | 1e-4 | requested operating point, one order below today's hardware (near 1e-3 in the same paper) |
+| algorithm | 0.81 µs | Riverlane Collision Clustering decoder: 881-qubit (d=21) surface code decoded in 810 ns on FPGA (Barber et al., arXiv:2309.05558) |
+| links qc / cwd / dd / wdo | 0.15 / 2.0 / 0.5 / 1.0 µs | Khalid et al. Table II, the repository's logical_reference card (`decsim/links/link_profiles.py`) |
+| c2b | 0.10 µs | repository choice, controller to Buffer 0 hop; no external source |
+| engine cycle (fetch, release) | 0.004 µs | LILLIPUT 250 MHz FPGA clock (arXiv:2108.06569, Table 4) |
+| frame commit | 0.004 µs | XQsim PFU precedent |
+| controller processing | 0 | readout classification priced inside the round (Google Nature 614, 676 (2023), Methods) |
+
+The decode chain per 14-round window: service = cwd 2.0 + fetch 0.056 +
+algorithm 0.81 + release 0.004 = 2.87 µs, plus the dd handoff 0.5, so the
+knee sits at 3.37 / 7 = 0.481 µs round period (2.08 rounds/µs). At the
+hardware cycle of 1.1 µs the load is 0.44: the loop keeps up with real
+margin, and the reaction time is flat at 3.87 µs (service + wdo + frame).
+
+Run it and draw the same four figures:
+
+```bash
+PYTHONPATH=. python guide/walkthrough/run_frequency_sweep.py guide/walkthrough/realistic_run.yaml
+PYTHONPATH=. python guide/walkthrough/frequency_plots.py guide/walkthrough/results_realistic
+```
+
+![realistic throughput](results_realistic/figures/throughput.png)
+
+![realistic reaction latency](results_realistic/figures/reaction_latency.png)
+
+![realistic backlog](results_realistic/figures/backlog.png)
+
+![realistic latency breakdown](results_realistic/figures/latency_breakdown.png)
+
+Measured (85 windows per shot, 2 seeds per point, `results_realistic/sweep.csv`):
+
+| round period (µs) | input freq (rounds/µs) | load | committed (rounds/µs) | reaction median (µs) | reaction p99 (µs) |
+|---|---|---|---|---|---|
+| 2.20 | 0.45 | 0.22 | 0.454 | 3.874 | 3.874 |
+| 1.10 | 0.91 | 0.44 | 0.905 | 3.874 | 3.874 |
+| 0.55 | 1.82 | 0.87 | 1.797 | 3.874 | 3.874 |
+| 0.48 | 2.08 | 1.00 | 2.046 | 4.294 | 4.704 |
+| 0.45 | 2.22 | 1.07 | 2.049 | 13.114 | 22.134 |
+| 0.40 | 2.50 | 1.20 | 2.054 | 27.814 | 51.184 |
+| 0.35 | 2.86 | 1.37 | 2.058 | 42.514 | 80.234 |
+
+The measurements land on the predictions: reaction flat at 3.874 µs (=
+service 2.87 + wdo 1.0 + frame 0.004) at every point below the knee,
+including the hardware cycle of 1.1 µs; throughput saturates at 2.05
+rounds/µs against the predicted 2.08; past the knee the median and p99
+diverge. At realistic numbers the story is the baseline's story: the links
+(CWD 2.0 + WDO 1.0) own the reaction time, the 0.81 µs algorithm is a
+quarter of it, and a d=7 machine at today's 1.1 µs cycle has a 2.3x
+throughput margin over this single weak decoder.
+
+## 7. Make it your experiment
 
 Copy any yaml, change a knob, rerun the same command. The knobs:
 

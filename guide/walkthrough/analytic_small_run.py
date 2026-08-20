@@ -1,7 +1,7 @@
 """The small example by hand: 12 rounds, 3 sliding windows, zero noise.
 
-experiments/validation/analytic_oracle_d3_r12.yaml freezes every cost, so
-every timestamp of the run follows from arithmetic:
+guide/walkthrough/small_run.yaml freezes every cost as a whole number of
+microseconds, so every timestamp of the run follows from arithmetic:
 
     publication(r) = r x round_period + qc + binary + pack + c2b
     ready(w)       = publication(last round the window reads)
@@ -20,7 +20,7 @@ from pathlib import Path
 
 from experiments.baseline.baseline_closed_loop import load_config
 
-CONFIG = Path("experiments/validation/analytic_oracle_d3_r12.yaml")
+CONFIG = Path("guide/walkthrough/small_run.yaml")
 
 COLUMNS = ("window_id", "read_lo", "read_hi", "commit_lo", "commit_hi",
            "buffer0_ready_us", "queued_us", "dispatch_us", "decode_done_us",
@@ -109,7 +109,7 @@ def print_table(rows: list, columns: tuple = COLUMNS) -> None:
         if value is None:
             return ""
         if isinstance(value, float):
-            return f"{value:.3f}"
+            return f"{value:g}"
         return str(value)
     print("| " + " | ".join(columns) + " |")
     print("|" + "---|" * len(columns))

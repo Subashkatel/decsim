@@ -1,0 +1,25 @@
+# The walkthrough's sweep: how the input round frequency moves the weak
+# decoder's throughput and latency. Everything not named here comes from
+# the baseline yaml (same code, same links, same decoder).
+#
+# With the baseline links and the 0.028 us card, one window costs
+#   service = cwd 1.0 + fetch 6 x 0.004 + algorithm 0.028 + release 0.004 = 1.056 us
+# and consecutive windows are chained by the dd handoff (0.5 us), so the
+# decoder finishes one window every 1.556 us at best. A window arrives every
+# commit_rounds x round_period = 3 x round_period, so the knee sits at
+#   round_period = 1.556 / 3 = 0.519 us  (input frequency 1.93 rounds/us).
+# The periods below cover both sides of that knee densely.
+
+extends: ../../experiments/baseline/baseline_closed_loop.yaml
+
+rounds_per_shot: 600          # long shots: 199 sliding windows each, so the
+                              # tails and the backlog have room to develop
+
+sweep:
+  - physical_error_probability: [0.001]
+    round_period_us: [2.0, 1.5, 1.2, 1.0, 0.9, 0.8, 0.7, 0.6, 0.55, 0.52,
+                      0.5, 0.48, 0.45, 0.4, 0.35, 0.3]
+    algorithm_latency_us: [0.028]
+    shots: 3
+
+report_dir: guide/walkthrough/results

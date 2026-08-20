@@ -9,6 +9,7 @@ printed in its section, so this file doubles as a copy-paste tutorial.
 |---|---|---|
 | 1 | The small example computed by hand | `PYTHONPATH=. python guide/walkthrough/analytic_small_run.py` |
 | 2 | The simulator reproducing it to the tick | `PYTHONPATH=. python guide/walkthrough/simulated_small_run.py` |
+| 1+2 | Both, cell by cell with every input and output | `small_run.ipynb` (a viewing layer; the scripts above run without it) |
 | 3 | The Stim circuit: inputs, outputs, breaking a detector | `PYTHONPATH=. python guide/walkthrough/stim_circuit_tour.py` |
 | 4 | Round frequencies: input rounds and syndrome rounds | (reading, uses step 1 and 2 numbers) |
 | 5 | Throughput and latency vs input round frequency | `PYTHONPATH=. python guide/walkthrough/run_frequency_sweep.py` then `frequency_plots.py` |

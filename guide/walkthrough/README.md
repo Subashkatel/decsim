@@ -349,6 +349,37 @@ if __name__ == "__main__":
     main()
 ```
 
+### The pipelined variant
+
+The small run above never overlaps two windows: at 3 µs rounds, each
+window's whole chain finishes before the next window is ready.
+`pipelined_run.yaml` is the same card with rounds every 1 µs, so a window
+arrives every 3 µs while the serial decode chain (dd 1 + cwd 1 + fetch 3 +
+algorithm 1 + release 1) needs 7 µs. Now the pipeline is really pipelined:
+while the engine decodes window k, window k-1's correction rides the WDO
+link and window k+1 sits queued with its data already in Buffer 0; with
+sliding windows the decodes themselves stay serial (the DD dependency),
+so the cost shows up as a dependency wait growing by 4 µs per window:
+reactions 8, 12, 16 µs instead of a flat 8.
+
+```bash
+PYTHONPATH=. python guide/walkthrough/pipelined_small_run.py
+```
+
+| window | ready | dependency wait | dispatch | done | commit | reaction |
+|---|---|---|---|---|---|---|
+| 0 | 8 | 0 | 8 | 14 | 16 | 8 |
+| 1 | 11 | 4 | 15 | 21 | 23 | 12 |
+| 2 | 14 | 8 | 22 | 28 | 30 | 16 |
+
+![pipelined timeline](figures/pipelined_timeline.png)
+
+To pipeline the *decodes* themselves, the scheme has to change, not the
+speed: `windowing.scheme: parallel` (Skoric A/B windows) plus
+`decoder.units: 2` makes the A windows independent jobs that decode
+simultaneously; sliding windows can never do that, because each window's
+decode consumes its predecessor's boundary.
+
 ## 3. Inside the Stim circuit
 
 The QPU end of the loop replays a Stim circuit. What goes in is the circuit;

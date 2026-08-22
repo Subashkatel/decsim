@@ -27,7 +27,20 @@ from enum import Enum
 
 import stim
 
-MEASUREMENT_GATES = ("M", "MR", "MX", "MY", "MZ", "MRX", "MRY", "MRZ")
+
+def _measurement_count(instruction) -> int:
+    """Records an instruction appends. M, MR, MX.., MXX/MYY/MZZ, MPP, MPAD
+    and the heralded channels all produce records; Stim's own count is the
+    authority, as in measurements_to_detection_events."""
+    return instruction.num_measurements
+
+
+def _record_offsets(instruction) -> list[int]:
+    """rec[-k] lookbacks of a DETECTOR or OBSERVABLE_INCLUDE. Pauli targets
+    (OBSERVABLE_INCLUDE(k) X5 ...) carry no record and are skipped, as Stim
+    skips them."""
+    return [target.value for target in instruction.targets_copy()
+            if target.is_measurement_record_target]
 
 
 class LayerKind(Enum):
@@ -91,9 +104,7 @@ def _round_of_each_measurement(circuit, round_count: int, measurement_rounds):
     post-readout layer), fold into the last round's packet.
     """
     measurement_count = sum(
-        len(instruction.targets_copy())
-        for instruction in _flat_instructions(circuit)
-        if instruction.name in MEASUREMENT_GATES)
+        _measurement_count(instruction) for instruction in _flat_instructions(circuit))
     if measurement_rounds is not None:
         rounds = [int(measurement_rounds[index]) for index in range(measurement_count)]
         if any(not 1 <= r <= round_count for r in rounds):
@@ -108,8 +119,8 @@ def _round_of_each_measurement(circuit, round_count: int, measurement_rounds):
     readout_start = None
     folded_groups = 0           # groups announcing a round past round_count
     for instruction in _flat_instructions(circuit):
-        if instruction.name in MEASUREMENT_GATES:
-            pending += len(instruction.targets_copy())
+        if _measurement_count(instruction):
+            pending += _measurement_count(instruction)
         elif instruction.name == "SHIFT_COORDS":
             arguments = instruction.gate_args_copy()
             coordinate_shift += arguments[-1] if arguments else 0.0
@@ -192,12 +203,9 @@ def build_formation_table(circuit, round_count: int, *,
     measurements_so_far = 0
     detector_index = 0
     for instruction in _flat_instructions(circuit):
-        if instruction.name in MEASUREMENT_GATES:
-            measurements_so_far += len(instruction.targets_copy())
-            continue
         if instruction.name == "DETECTOR":
-            absolute = [measurements_so_far + target.value
-                        for target in instruction.targets_copy()]
+            absolute = [measurements_so_far + offset
+                        for offset in _record_offsets(instruction)]
             records = tuple(packet_of_measurement[index] for index in absolute)
             arrival_round = max(record_round for record_round, _ in records)
             round_index = arrival_round
@@ -219,13 +227,15 @@ def build_formation_table(circuit, round_count: int, *,
             continue
         if instruction.name == "OBSERVABLE_INCLUDE":
             observable_index = int(instruction.gate_args_copy()[0])
-            absolute = [measurements_so_far + target.value
-                        for target in instruction.targets_copy()]
+            absolute = [measurements_so_far + offset
+                        for offset in _record_offsets(instruction)]
             observable_records.setdefault(observable_index, []).extend(
                 packet_of_measurement[index] for index in absolute)
             observable_parity[observable_index] = (
                 observable_parity.get(observable_index, 0)
                 + int(reference[absolute].sum())) % 2
+            continue
+        measurements_so_far += _measurement_count(instruction)
 
     observables = tuple(
         ObservableRecipe(index, tuple(observable_records[index]), observable_parity[index])

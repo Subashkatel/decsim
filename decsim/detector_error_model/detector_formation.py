@@ -1,0 +1,238 @@
+"""Detector formation: the table that turns raw measurement bits into
+detection events, round by round, in the controller.
+
+A detector asks "did this stabilizer reading differ from what it should be".
+Its recipe is the list of raw measurement bits that XOR into it plus the
+noiseless reference parity of those bits; that is Stim's own rule
+(measurements_to_detection_events), and the reference term is what keeps
+circuits whose expected readings are not all zero correct.
+
+Packet coordinates: every measurement bit is addressed as (round, slot),
+where round is the QPU round whose packet carries it and slot is the bit's
+position inside that packet. Rounds are one-based. The final data-qubit
+readout rides in the last round's packet, after that round's own ancilla
+bits, so the readout detectors land on the last round exactly as
+resolve_detector_rounds places them.
+
+Leaf module: it imports nothing from this package.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+
+import stim
+
+MEASUREMENT_GATES = ("M", "MR", "MX", "MY", "MZ", "MRX", "MRY", "MRZ")
+
+
+class LayerKind(Enum):
+    PREP = "prep"          # compared against the prepared state: one record
+    BULK = "bulk"          # this round against the previous round: two records
+    READOUT = "readout"    # rebuilt from the data-qubit readout: three or more records
+
+
+@dataclass(frozen=True)
+class DetectorRecipe:
+    detector_index: int
+    round_index: int
+    kind: LayerKind
+    records: tuple[tuple[int, int], ...]   # ((round, slot), ...)
+    reference_parity: int
+    coordinates: tuple
+
+
+@dataclass(frozen=True)
+class ObservableRecipe:
+    observable_index: int
+    records: tuple[tuple[int, int], ...]
+    reference_parity: int
+
+
+@dataclass(frozen=True)
+class FormationTable:
+    round_count: int
+    packet_width: dict[int, int]           # round -> raw bits in that round's packet
+    detectors: tuple[DetectorRecipe, ...]  # in detector index order
+    observables: tuple[ObservableRecipe, ...]
+    max_record_span: int                   # rounds a recipe reaches back
+
+    def detectors_of_round(self, round_index: int) -> list[DetectorRecipe]:
+        return [recipe for recipe in self.detectors if recipe.round_index == round_index]
+
+    def detector_rounds(self) -> dict[int, int]:
+        """detector index -> round, the same map resolve_detector_rounds yields."""
+        return {recipe.detector_index: recipe.round_index for recipe in self.detectors}
+
+
+def _flat_instructions(circuit):
+    """Instructions in execution order with REPEAT blocks unrolled."""
+    for instruction in circuit:
+        if isinstance(instruction, stim.CircuitRepeatBlock):
+            body = instruction.body_copy()
+            for _ in range(instruction.repeat_count):
+                yield from _flat_instructions(body)
+        else:
+            yield instruction
+
+
+def _measurement_packets(circuit, round_count: int):
+    """Absolute measurement index -> (round, slot), and each packet's width.
+
+    Each measurement instruction is one block. The first round_count blocks
+    are the rounds; any later block (the final data readout) folds into the
+    last round's packet after that round's own bits.
+    """
+    packet_of_measurement: dict[int, tuple[int, int]] = {}
+    packet_width: dict[int, int] = {}
+    absolute = 0
+    block = 0
+    for instruction in _flat_instructions(circuit):
+        if instruction.name not in MEASUREMENT_GATES:
+            continue
+        round_index = min(block + 1, round_count)
+        for _ in instruction.targets_copy():
+            slot = packet_width.get(round_index, 0)
+            packet_of_measurement[absolute] = (round_index, slot)
+            packet_width[round_index] = slot + 1
+            absolute += 1
+        block += 1
+    # a memory circuit has round_count ancilla blocks plus one readout block;
+    # anything else means the declared round count does not fit the circuit
+    if block > round_count + 1 or set(packet_width) != set(range(1, round_count + 1)):
+        raise ValueError(
+            f"circuit has {block} measurement rounds, "
+            f"formation table was asked for {round_count}")
+    return packet_of_measurement, packet_width
+
+
+def _kind_of(record_count: int) -> LayerKind:
+    if record_count == 1:
+        return LayerKind.PREP
+    if record_count == 2:
+        return LayerKind.BULK
+    return LayerKind.READOUT
+
+
+def build_formation_table(circuit, round_count: int) -> FormationTable:
+    """Read the recipe of every detector and observable off the circuit."""
+    if round_count < 1:
+        raise ValueError("round_count must be positive")
+    reference = circuit.reference_sample()
+    packet_of_measurement, packet_width = _measurement_packets(circuit, round_count)
+    coordinates = circuit.get_detector_coordinates()
+
+    detectors: list[DetectorRecipe] = []
+    observable_records: dict[int, list] = {}
+    observable_parity: dict[int, int] = {}
+    measurements_so_far = 0
+    detector_index = 0
+    for instruction in _flat_instructions(circuit):
+        if instruction.name in MEASUREMENT_GATES:
+            measurements_so_far += len(instruction.targets_copy())
+            continue
+        if instruction.name == "DETECTOR":
+            absolute = [measurements_so_far + target.value
+                        for target in instruction.targets_copy()]
+            records = tuple(packet_of_measurement[index] for index in absolute)
+            detectors.append(DetectorRecipe(
+                detector_index=detector_index,
+                round_index=max(record_round for record_round, _ in records),
+                kind=_kind_of(len(records)),
+                records=records,
+                reference_parity=int(reference[absolute].sum() % 2),
+                coordinates=tuple(coordinates.get(detector_index, ())),
+            ))
+            detector_index += 1
+            continue
+        if instruction.name == "OBSERVABLE_INCLUDE":
+            observable_index = int(instruction.gate_args_copy()[0])
+            absolute = [measurements_so_far + target.value
+                        for target in instruction.targets_copy()]
+            observable_records.setdefault(observable_index, []).extend(
+                packet_of_measurement[index] for index in absolute)
+            observable_parity[observable_index] = (
+                observable_parity.get(observable_index, 0)
+                + int(reference[absolute].sum())) % 2
+
+    max_span = max(
+        (recipe.round_index - min(record_round for record_round, _ in recipe.records)
+         for recipe in detectors),
+        default=0)
+    observables = tuple(
+        ObservableRecipe(index, tuple(observable_records[index]), observable_parity[index])
+        for index in sorted(observable_records))
+    return FormationTable(
+        round_count=round_count,
+        packet_width=packet_width,
+        detectors=tuple(detectors),
+        observables=observables,
+        max_record_span=max_span,
+    )
+
+
+class StreamingDetectorFormer:
+    """The controller stage: one raw packet in per round, detection events out.
+
+    A ring buffer keeps the last max_record_span + 1 packets (two for a
+    memory experiment). Every detector of the arriving round starts at its
+    reference parity and XORs in its listed bits. The observables come out
+    with the last round.
+    """
+
+    def __init__(self, table: FormationTable):
+        self.table = table
+        self.depth = table.max_record_span + 1
+        self.packets: dict[int, tuple[int, ...]] = {}
+
+    def feed_packet(self, round_index: int, bits):
+        packet = tuple(int(bit) for bit in bits)
+        expected = self.table.packet_width[round_index]
+        if len(packet) != expected:
+            raise ValueError(
+                f"round {round_index}: packet has {len(packet)} bits, "
+                f"the formation table expects {expected}")
+        self.packets[round_index] = packet
+        for stale_round in [r for r in self.packets if r <= round_index - self.depth]:
+            del self.packets[stale_round]
+
+        events = [(recipe.detector_index, self._form(recipe))
+                  for recipe in self.table.detectors_of_round(round_index)]
+        observables = None
+        if round_index == self.table.round_count:
+            observables = [(recipe.observable_index, self._form(recipe))
+                           for recipe in self.table.observables]
+        return events, observables
+
+    def _form(self, recipe) -> int:
+        value = recipe.reference_parity
+        for record_round, slot in recipe.records:
+            value ^= self.packets[record_round][slot]
+        return value
+
+
+def split_measurements_into_packets(table: FormationTable, measurement_row):
+    """Cut one shot's measurement row into per-round packets (the QPU side)."""
+    packets = {}
+    cursor = 0
+    for round_index in range(1, table.round_count + 1):
+        width = table.packet_width[round_index]
+        packets[round_index] = tuple(int(bit) for bit in measurement_row[cursor:cursor + width])
+        cursor += width
+    return packets
+
+
+def form_shot(table: FormationTable, packets_by_round):
+    """Whole-shot convenience used by the device for truth and by tests."""
+    former = StreamingDetectorFormer(table)
+    detector_bits = [0] * len(table.detectors)
+    observable_bits = [0] * len(table.observables)
+    for round_index in range(1, table.round_count + 1):
+        events, observables = former.feed_packet(round_index, packets_by_round[round_index])
+        for index, value in events:
+            detector_bits[index] = value
+        if observables is not None:
+            for index, value in observables:
+                observable_bits[index] = value
+    return tuple(detector_bits), tuple(observable_bits)

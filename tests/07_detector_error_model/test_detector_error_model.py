@@ -29,6 +29,7 @@ numpy = pytest.importorskip("numpy")
 
 import decsim.detector_error_model as detector_error_model_package
 import decsim.detector_error_model.detector_chronology as detector_chronology
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_identity_validation as fault_identity_validation
 import decsim.detector_error_model.fault_model_contracts as fault_model_contracts
 import decsim.detector_error_model.stim_dem_catalog as stim_dem_catalog
@@ -268,6 +269,7 @@ PACKAGE_LAYERS = {
     "fault_model_contracts": 0,
     "fault_identity_validation": 0,
     "detector_chronology": 0,
+    "detector_formation": 0,
     "stim_dem_catalog": 1,
     "window_placement": 1,
     "window_slicer": 2,
@@ -279,6 +281,7 @@ PACKAGE_MODULES = {
     "fault_model_contracts": fault_model_contracts,
     "fault_identity_validation": fault_identity_validation,
     "detector_chronology": detector_chronology,
+    "detector_formation": detector_formation,
     "stim_dem_catalog": stim_dem_catalog,
     "window_placement": window_placement,
     "window_slicer": window_slicer,

@@ -83,7 +83,13 @@ def _flat_instructions(circuit):
 
 def _round_of_each_measurement(circuit, round_count: int, measurement_rounds):
     """One round per absolute measurement index, plus where the folded readout
-    starts: declared by the frontend, or the Stim-generator convention."""
+    starts: declared by the frontend, or read off the circuit's shape.
+
+    Circuit rule: the measurement blocks between two DETECTOR groups belong
+    to the round the following group announces (its time coordinate plus
+    one). Blocks after the last group, and groups past round_count (Stim's
+    post-readout layer), fold into the last round's packet.
+    """
     measurement_count = sum(
         len(instruction.targets_copy())
         for instruction in _flat_instructions(circuit)
@@ -96,21 +102,42 @@ def _round_of_each_measurement(circuit, round_count: int, measurement_rounds):
             raise ValueError("declared measurement rounds must be non-decreasing")
         return rounds, None
 
-    rounds = []
+    coordinate_shift = 0.0
+    pending = 0                 # measurements waiting for their DETECTOR group
+    rounds: list[int] = []
     readout_start = None
-    block = 0
+    folded_groups = 0           # groups announcing a round past round_count
     for instruction in _flat_instructions(circuit):
-        if instruction.name not in MEASUREMENT_GATES:
-            continue
-        if block == round_count and readout_start is None:
+        if instruction.name in MEASUREMENT_GATES:
+            pending += len(instruction.targets_copy())
+        elif instruction.name == "SHIFT_COORDS":
+            arguments = instruction.gate_args_copy()
+            coordinate_shift += arguments[-1] if arguments else 0.0
+        elif instruction.name == "DETECTOR" and pending:
+            arguments = instruction.gate_args_copy()
+            layer = int(arguments[-1] + coordinate_shift) if arguments else len(set(rounds))
+            announced = layer + 1
+            if announced > round_count:
+                folded_groups += 1
+                # only Stim's single post-readout layer may fold; anything
+                # more means the declared round count does not fit
+                if announced > round_count + 1 or folded_groups > 1:
+                    raise ValueError(
+                        f"circuit announces round {announced}, "
+                        f"formation table was asked for {round_count}")
+                if readout_start is None:
+                    readout_start = len(rounds)
+            rounds.extend([min(announced, round_count)] * pending)
+            pending = 0
+    if pending:
+        if readout_start is None and rounds and rounds[-1] == round_count:
             readout_start = len(rounds)
-        rounds.extend([min(block + 1, round_count)] * len(instruction.targets_copy()))
-        block += 1
-    # the convention is round_count ancilla blocks plus at most one readout
-    # block; anything else means the declared round count does not fit
-    if block > round_count + 1 or set(rounds) != set(range(1, round_count + 1)):
+        rounds.extend([round_count] * pending)
+    if any(later < earlier for earlier, later in zip(rounds, rounds[1:])):
+        raise ValueError("measurement blocks are not in round order; declare measurement_rounds")
+    if set(rounds) != set(range(1, round_count + 1)):
         raise ValueError(
-            f"circuit has {block} measurement rounds, "
+            f"circuit announces rounds {sorted(set(rounds))}, "
             f"formation table was asked for {round_count}")
     return rounds, readout_start
 
@@ -200,13 +227,14 @@ def build_formation_table(circuit, round_count: int, *,
                 observable_parity.get(observable_index, 0)
                 + int(reference[absolute].sum())) % 2
 
-    max_span = max(
-        (recipe.round_index - min(record_round for record_round, _ in recipe.records)
-         for recipe in detectors),
-        default=0)
     observables = tuple(
         ObservableRecipe(index, tuple(observable_records[index]), observable_parity[index])
         for index in sorted(observable_records))
+    # the ring buffer must hold every round a recipe reaches back to,
+    # observables included (a logical readout can span a whole block)
+    detector_spans = [recipe.round_index - min(r for r, _ in recipe.records) for recipe in detectors]
+    observable_spans = [round_count - min(r for r, _ in recipe.records) for recipe in observables if recipe.records]
+    max_span = max(detector_spans + observable_spans, default=0)
     return FormationTable(
         round_count=round_count,
         packet_width=packet_width,

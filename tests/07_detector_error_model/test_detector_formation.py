@@ -164,3 +164,65 @@ def test_lattice_surgery_cnot_circuit_forms_like_stim():
     formed = [form_shot(table, split_measurements_into_packets(table, row)) for row in measurements]
     assert np.array_equal(np.array([f[0] for f in formed], dtype=np.uint8), expected[0].astype(np.uint8))
     assert np.array_equal(np.array([f[1] for f in formed], dtype=np.uint8), expected[1].astype(np.uint8))
+
+
+def _forms_like_stim(circuit, rounds, shots=200, seed=3):
+    table = build_formation_table(circuit, rounds)
+    measurements = circuit.compile_sampler(seed=seed).sample(shots)
+    expected = circuit.compile_m2d_converter().convert(measurements=measurements, separate_observables=True)
+    formed = [form_shot(table, split_measurements_into_packets(table, row)) for row in measurements]
+    assert np.array_equal(np.array([f[0] for f in formed], dtype=np.uint8), expected[0].astype(np.uint8))
+    assert np.array_equal(np.array([f[1] for f in formed], dtype=np.uint8), expected[1].astype(np.uint8))
+
+
+@pytest.mark.parametrize("two_qubit_measurement", ["MZZ 0 1", "MXX 0 1", "MPP Z0*Z1"])
+def test_pair_and_product_measurements_count_one_record(two_qubit_measurement):
+    """MXX/MYY/MZZ and MPP take several targets but append one record each;
+    the record count comes from Stim, not from the target count."""
+    circuit = stim.Circuit(f"""
+        R 0 1 2
+        X_ERROR(0.1) 0 1 2
+        {two_qubit_measurement}
+        DETECTOR(0,0,0) rec[-1]
+        X_ERROR(0.1) 0 1 2
+        {two_qubit_measurement}
+        DETECTOR(0,0,1) rec[-1] rec[-2]
+        M 0 1 2
+        DETECTOR(0,0,2) rec[-3] rec[-2] rec[-4]
+        OBSERVABLE_INCLUDE(0) rec[-1]
+    """)
+    _forms_like_stim(circuit, 2)
+
+
+def test_pauli_targets_in_observable_include_are_skipped():
+    circuit = stim.Circuit("""
+        R 0 1
+        X_ERROR(0.1) 0 1
+        M 0
+        DETECTOR(0,0,0) rec[-1]
+        X_ERROR(0.1) 0 1
+        M 0
+        DETECTOR(0,0,1) rec[-1] rec[-2]
+        M 1
+        OBSERVABLE_INCLUDE(0) Z1 rec[-1]
+    """)
+    _forms_like_stim(circuit, 2)
+
+
+def test_padding_and_heralded_records_shift_later_lookbacks():
+    """MPAD and HERALDED_ERASE append records that no detector reads; the
+    lookbacks of later detectors must still count them."""
+    circuit = stim.Circuit("""
+        R 0 1
+        MPAD 0
+        HERALDED_ERASE(0.1) 0
+        X_ERROR(0.1) 0 1
+        M 0
+        DETECTOR(0,0,0) rec[-1]
+        X_ERROR(0.1) 0 1
+        M 0
+        DETECTOR(0,0,1) rec[-1] rec[-2]
+        M 1
+        OBSERVABLE_INCLUDE(0) rec[-1]
+    """)
+    _forms_like_stim(circuit, 2)

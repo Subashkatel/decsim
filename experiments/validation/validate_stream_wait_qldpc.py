@@ -46,12 +46,12 @@ REPORT = Path("experiments/results/validation/stream_wait_qldpc.md")
 D, SEG, DECODE_US, ROUNDS, STREAM = 3, 3, 4.0, 13, 100
 
 
-def run_decsim_shot(circuit, dets, obs, shot, rounds_of):
+def run_decsim_shot(circuit, measurements, shot, rounds_of):
     owner = Operation(id=STREAM, name="stream", qubits=(0,), patches=(0,), circuit=circuit)
     op1 = Operation(id=1, name="op1", qubits=(0,), patches=(0,), circuit=circuit, stream_id=STREAM)
     op2 = Operation(id=2, name="op2", qubits=(0,), patches=(0,), circuit=circuit, stream_id=STREAM,
                     predecessors=(1,), blocked_by=1)
-    device = RecordedStimDevice(dets, obs, shot, detector_rounds={STREAM: rounds_of})
+    device = RecordedStimDevice(measurements, shot, detector_rounds={STREAM: rounds_of})
     emitted = {}                                    # global round -> bits, as the QPU emitted them
 
     def record(payloads):
@@ -73,6 +73,7 @@ def run_decsim_shot(circuit, dets, obs, shot, rounds_of):
     us = lambda t: t / TICKS_PER_US
     return dict(prediction=np.asarray(stream_result.logical_observables, dtype=np.uint8),
                 idle_rounds=done.controller.idle_rounds_emitted, emitted=emitted, windows=windows,
+                packets={k: np.asarray(v, dtype=np.uint8) for k, v in device._packets[STREAM].items()},
                 op2_start=us(done.execution_runtime.op_start_time[2]))
 
 
@@ -82,7 +83,8 @@ def main(argv) -> None:
     circuit = stim.Circuit.generated("surface_code:rotated_memory_z", distance=D, rounds=ROUNDS,
                                      after_clifford_depolarization=p, before_round_data_depolarization=p,
                                      before_measure_flip_probability=p, after_reset_flip_probability=p)
-    dets, obs = circuit.compile_detector_sampler(seed=23).sample(shots, separate_observables=True)
+    measurements = circuit.compile_sampler(seed=23).sample(shots)
+    dets, obs = circuit.compile_m2d_converter().convert(measurements=measurements, separate_observables=True)
     rounds_of = resolve_detector_rounds(circuit, None, ROUNDS)
     dets_of_round = {}
     for det, r in rounds_of.items():
@@ -95,10 +97,10 @@ def main(argv) -> None:
     bits_ok = rounds_ok = idle_ok = agree_q = agree_pm = 0
     window_detectors = window_commits = None
     for shot in range(shots):
-        r = run_decsim_shot(circuit, dets, obs, shot, rounds_of)
+        r = run_decsim_shot(circuit, measurements, shot, rounds_of)
         rounds_ok += set(r["emitted"]) == set(range(1, ROUNDS + 1))
-        bits_ok += all(np.array_equal(r["emitted"][k], dets[shot][sorted(dets_of_round.get(k, []))].astype(np.uint8))
-                       for k in range(1, ROUNDS + 1))
+        # the QPU emits raw measurement packets; detection events are formed at Buffer 0
+        bits_ok += all(np.array_equal(r["emitted"][k], r["packets"][k]) for k in range(1, ROUNDS + 1))
         idle_ok += r["idle_rounds"] == 7 and r["op2_start"] == 10.0
         agree_q += bool(np.array_equal(r["prediction"], q["predictions"][shot]))
         agree_pm += bool(np.array_equal(r["prediction"], whole[shot]))

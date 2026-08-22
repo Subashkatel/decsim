@@ -189,6 +189,8 @@ Status vocabulary:
   - Sampled detection events are now a public read-only API,
     `StimDevice.sampled_detection_events(operation_id)`; Gate 9 and the
     experiment's direct-PyMatching reference no longer read `_dets`.
+    Since 2026-08-22 the device samples raw measurements and those events are
+    the formation table's whole-shot output (identical to Stim's converter).
 
 ## Core rewrite (2026-08-18, commits 7eda59b to HEAD on audit/evidence-first-rebuild)
 

@@ -38,6 +38,7 @@ def test_table_reads_the_caps_off_a_d3_memory_circuit():
     table = build_formation_table(memory_circuit("surface_code:rotated_memory_z", 3, 12), 12)
 
     assert [table.packet_width[r] for r in range(1, 13)] == [8] * 11 + [17]
+    assert table.readout_slot_start == 8
     assert table.max_record_span == 1
     assert {recipe.kind for recipe in table.detectors_of_round(1)} == {LayerKind.PREP}
     assert {recipe.kind for recipe in table.detectors_of_round(6)} == {LayerKind.BULK}
@@ -104,3 +105,38 @@ def test_former_rejects_a_packet_of_the_wrong_width_and_keeps_only_two_rounds():
     former.feed_packet(2, np.zeros(8, dtype=np.uint8))
     former.feed_packet(3, np.zeros(8, dtype=np.uint8))
     assert set(former.packets) == {2, 3}
+
+
+def test_declared_measurement_rounds_describe_a_two_block_round_layout():
+    """A QLX-style circuit measures Z then X ancillas as two instructions per
+    round, has no round-1 detectors, and ends with a readout that feeds only
+    the observable; the frontend declares the packet schedule."""
+    circuit = stim.Circuit.from_file(
+        __import__("pathlib").Path(__file__).resolve().parents[1] / "data" / "qlx" / "mem_surface.stim")
+    rounds = 8
+    checks_per_round = 8
+    measurement_count = sum(len(i.targets_copy()) for i in circuit.flattened()
+                            if i.name in ("M", "MR"))
+    measurement_rounds = {index: min(index // checks_per_round + 1, rounds)
+                          for index in range(measurement_count)}
+    table = build_formation_table(circuit, rounds, measurement_rounds=measurement_rounds)
+
+    assert [table.packet_width[r] for r in range(1, 9)] == [8] * 7 + [17]
+    assert table.readout_slot_start is None
+    assert table.detectors_of_round(1) == []
+    assert [len(table.detectors_of_round(r)) for r in range(2, 9)] == [8] * 7
+    assert len(table.observables) == 1
+
+    shots = 100
+    measurements = circuit.compile_sampler(seed=3).sample(shots)
+    expected = circuit.compile_m2d_converter().convert(measurements=measurements, separate_observables=True)
+    formed = [form_shot(table, split_measurements_into_packets(table, row)) for row in measurements]
+    assert np.array_equal(np.array([f[0] for f in formed], dtype=np.uint8), expected[0].astype(np.uint8))
+    assert np.array_equal(np.array([f[1] for f in formed], dtype=np.uint8), expected[1].astype(np.uint8))
+
+
+def test_declared_detector_round_may_not_precede_its_bits():
+    circuit = memory_circuit("surface_code:rotated_memory_z", 3, 4)
+    too_early = {index: 1 for index in range(circuit.num_detectors)}
+    with pytest.raises(ValueError, match="arrives in round"):
+        build_formation_table(circuit, 4, detector_rounds=too_early)

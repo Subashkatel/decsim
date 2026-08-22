@@ -9,10 +9,13 @@ circuits whose expected readings are not all zero correct.
 
 Packet coordinates: every measurement bit is addressed as (round, slot),
 where round is the QPU round whose packet carries it and slot is the bit's
-position inside that packet. Rounds are one-based. The final data-qubit
-readout rides in the last round's packet, after that round's own ancilla
-bits, so the readout detectors land on the last round exactly as
-resolve_detector_rounds places them.
+position inside that packet. Rounds are one-based. Which round a measurement
+belongs to is the QPU's schedule, not a property of the circuit text, so a
+frontend may declare it (measurement_rounds); without a declaration the
+Stim-generator convention applies: one measurement instruction per round,
+with one trailing data-readout instruction folded into the last round's
+packet after that round's own bits. Either way the readout detectors land
+on the last round exactly as resolve_detector_rounds places them.
 
 Leaf module: it imports nothing from this package.
 """
@@ -54,6 +57,7 @@ class ObservableRecipe:
 class FormationTable:
     round_count: int
     packet_width: dict[int, int]           # round -> raw bits in that round's packet
+    readout_slot_start: int | None         # slot where folded readout bits begin in the last packet
     detectors: tuple[DetectorRecipe, ...]  # in detector index order
     observables: tuple[ObservableRecipe, ...]
     max_record_span: int                   # rounds a recipe reaches back
@@ -77,34 +81,56 @@ def _flat_instructions(circuit):
             yield instruction
 
 
-def _measurement_packets(circuit, round_count: int):
-    """Absolute measurement index -> (round, slot), and each packet's width.
+def _round_of_each_measurement(circuit, round_count: int, measurement_rounds):
+    """One round per absolute measurement index, plus where the folded readout
+    starts: declared by the frontend, or the Stim-generator convention."""
+    measurement_count = sum(
+        len(instruction.targets_copy())
+        for instruction in _flat_instructions(circuit)
+        if instruction.name in MEASUREMENT_GATES)
+    if measurement_rounds is not None:
+        rounds = [int(measurement_rounds[index]) for index in range(measurement_count)]
+        if any(not 1 <= r <= round_count for r in rounds):
+            raise ValueError("declared measurement rounds must lie in 1..round_count")
+        if any(later < earlier for earlier, later in zip(rounds, rounds[1:])):
+            raise ValueError("declared measurement rounds must be non-decreasing")
+        return rounds, None
 
-    Each measurement instruction is one block. The first round_count blocks
-    are the rounds; any later block (the final data readout) folds into the
-    last round's packet after that round's own bits.
-    """
-    packet_of_measurement: dict[int, tuple[int, int]] = {}
-    packet_width: dict[int, int] = {}
-    absolute = 0
+    rounds = []
+    readout_start = None
     block = 0
     for instruction in _flat_instructions(circuit):
         if instruction.name not in MEASUREMENT_GATES:
             continue
-        round_index = min(block + 1, round_count)
-        for _ in instruction.targets_copy():
-            slot = packet_width.get(round_index, 0)
-            packet_of_measurement[absolute] = (round_index, slot)
-            packet_width[round_index] = slot + 1
-            absolute += 1
+        if block == round_count and readout_start is None:
+            readout_start = len(rounds)
+        rounds.extend([min(block + 1, round_count)] * len(instruction.targets_copy()))
         block += 1
-    # a memory circuit has round_count ancilla blocks plus one readout block;
-    # anything else means the declared round count does not fit the circuit
-    if block > round_count + 1 or set(packet_width) != set(range(1, round_count + 1)):
+    # the convention is round_count ancilla blocks plus at most one readout
+    # block; anything else means the declared round count does not fit
+    if block > round_count + 1 or set(rounds) != set(range(1, round_count + 1)):
         raise ValueError(
             f"circuit has {block} measurement rounds, "
             f"formation table was asked for {round_count}")
-    return packet_of_measurement, packet_width
+    return rounds, readout_start
+
+
+def _measurement_packets(circuit, round_count: int, measurement_rounds):
+    """Absolute measurement index -> (round, slot), each packet's width, and
+    the slot where the folded readout begins in the last packet (or None)."""
+    rounds, readout_start = _round_of_each_measurement(circuit, round_count, measurement_rounds)
+    packet_of_measurement: dict[int, tuple[int, int]] = {}
+    packet_width: dict[int, int] = {}
+    readout_slot_start = None
+    for absolute, round_index in enumerate(rounds):
+        slot = packet_width.get(round_index, 0)
+        if absolute == readout_start:
+            readout_slot_start = slot
+        packet_of_measurement[absolute] = (round_index, slot)
+        packet_width[round_index] = slot + 1
+    for round_index in range(1, round_count + 1):
+        packet_width.setdefault(round_index, 0)
+    return packet_of_measurement, packet_width, readout_slot_start
 
 
 def _kind_of(record_count: int) -> LayerKind:
@@ -115,12 +141,22 @@ def _kind_of(record_count: int) -> LayerKind:
     return LayerKind.READOUT
 
 
-def build_formation_table(circuit, round_count: int) -> FormationTable:
-    """Read the recipe of every detector and observable off the circuit."""
+def build_formation_table(circuit, round_count: int, *,
+                          measurement_rounds=None,
+                          detector_rounds=None) -> FormationTable:
+    """Read the recipe of every detector and observable off the circuit.
+
+    measurement_rounds: optional round per absolute measurement index, the
+    QPU's packet schedule as a frontend declares it.
+    detector_rounds: optional detector index -> round, the same map
+    resolve_detector_rounds yields; a detector can only be formed once every
+    bit it reads has arrived, so a declared round may not precede them.
+    """
     if round_count < 1:
         raise ValueError("round_count must be positive")
     reference = circuit.reference_sample()
-    packet_of_measurement, packet_width = _measurement_packets(circuit, round_count)
+    packet_of_measurement, packet_width, readout_slot_start = _measurement_packets(
+        circuit, round_count, measurement_rounds)
     coordinates = circuit.get_detector_coordinates()
 
     detectors: list[DetectorRecipe] = []
@@ -136,9 +172,17 @@ def build_formation_table(circuit, round_count: int) -> FormationTable:
             absolute = [measurements_so_far + target.value
                         for target in instruction.targets_copy()]
             records = tuple(packet_of_measurement[index] for index in absolute)
+            arrival_round = max(record_round for record_round, _ in records)
+            round_index = arrival_round
+            if detector_rounds is not None:
+                round_index = int(detector_rounds[detector_index])
+                if round_index < arrival_round:
+                    raise ValueError(
+                        f"detector {detector_index} is declared in round {round_index} "
+                        f"but reads a bit that arrives in round {arrival_round}")
             detectors.append(DetectorRecipe(
                 detector_index=detector_index,
-                round_index=max(record_round for record_round, _ in records),
+                round_index=round_index,
                 kind=_kind_of(len(records)),
                 records=records,
                 reference_parity=int(reference[absolute].sum() % 2),
@@ -166,6 +210,7 @@ def build_formation_table(circuit, round_count: int) -> FormationTable:
     return FormationTable(
         round_count=round_count,
         packet_width=packet_width,
+        readout_slot_start=readout_slot_start,
         detectors=tuple(detectors),
         observables=observables,
         max_record_span=max_span,

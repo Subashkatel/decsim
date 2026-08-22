@@ -237,7 +237,8 @@ class RunSpec:
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager,
                 syndrome_buffer=syndrome_buffer,
-                policy=config.syndrome_ingress_policy))
+                policy=config.syndrome_ingress_policy,
+                detector_formation=config.device))
         decoder_memory_transfer = (
             config.make_decoder_memory_transfer(engine, links, config.buffering)
             if config.make_decoder_memory_transfer else None)

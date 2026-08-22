@@ -150,7 +150,9 @@ WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
 class QPUReadout:
     """One QPU-side result awaiting controller availability handling.
 
-    Values are detector events or timing-only markers; decsim does not simulate the preceding analog or measurement-to-detection stages.
+    Values are raw measurement bits (one round's packet, post state
+    discrimination) or timing-only markers; detection events are formed
+    from these packets at the decoder input.
     """
 
     operation_id: Any
@@ -170,7 +172,7 @@ class SyndromePayload:
     operation_id: int                 # op whose stream this round belongs to
     patch_id: int                     # patch that produced the round
     round_index: int                  # 1-based round number within the op
-    bits: Optional[Any] = None        # detector bits (None = timing-only run)
+    bits: Optional[Any] = None        # raw measurement bits (None = timing-only run)
     code: Optional[str] = None        # code name; drives CodeRouter routing
     n_fragments: int = 1              # link-layer fragments the round arrives in
     fragment_index: int = 0           # stable position within the complete round

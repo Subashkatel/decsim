@@ -6,8 +6,8 @@ Status: implementation target under validation. This document distinguishes decs
 
 ```text
 Controller --command--> QPUDevice
-QPUDevice --QPUReadout--> Controller --binary detector fragments--> SyndromeIngress
-SyndromeIngress --assembled retained round--> SyndromeBuffer
+QPUDevice --QPUReadout (raw measurement fragments)--> Controller --raw fragments--> SyndromeIngress
+SyndromeIngress --complete round, formed into detection events--> SyndromeBuffer
 SyndromeBuffer --retained-round availability--> WindowManager
 WindowManager --window input requirement--> DecoderManager
 DecoderManager --transfer request--> DecoderInputTransfer
@@ -37,6 +37,10 @@ The default is weak-only, one weak decoder, FIFO, unbounded upstream capacity, o
 6. Request admission, data readiness, queue readiness, dispatch, and completion are distinct timestamps.
 7. Strong/replay retention is a typed owner token on the same upstream allocation, not a physical SB1.
 8. Mechanism-specific streaming, ring, DMA, and instruction profiles remain replaceable implementations.
+9. Detection events are formed once per complete round at Buffer 0 intake from the
+   raw packet and the circuit's formation table (records, reference parity, layer
+   kind); QC and C2B carry raw measurement bits, everything from Buffer 0 onward
+   carries detection events.
 
 ## Deletions
 

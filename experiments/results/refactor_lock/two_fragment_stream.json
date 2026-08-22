@@ -64,7 +64,7 @@
 },
 {
 "counters": {
-"known_payload_bits": 9,
+"known_payload_bits": 8,
 "propagation_ticks": 2000000,
 "queue_wait_ticks": 0,
 "serialization_ticks": 0,
@@ -205,7 +205,7 @@
 ],
 "physical_alias": "channel-1",
 "physical_counters": {
-"known_payload_bits": 9,
+"known_payload_bits": 8,
 "propagation_ticks": 2000000,
 "queue_wait_ticks": 0,
 "serialization_ticks": 0,
@@ -214,7 +214,7 @@
 },
 "reconciles": true,
 "semantic_counter_sum": {
-"known_payload_bits": 9,
+"known_payload_bits": 8,
 "propagation_ticks": 2000000,
 "queue_wait_ticks": 0,
 "serialization_ticks": 0,
@@ -400,7 +400,7 @@
 },
 {
 "counters": {
-"known_payload_bits": 9,
+"known_payload_bits": 8,
 "propagation_ticks": 2000000,
 "queue_wait_ticks": 0,
 "serialization_ticks": 0,
@@ -664,7 +664,7 @@
 },
 "delivery_ticks": 5250000,
 "path": "cwd",
-"payload_bits": 9,
+"payload_bits": 8,
 "payload_selection": "actual",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
 "physical_alias": "channel-1",

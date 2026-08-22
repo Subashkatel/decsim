@@ -105,12 +105,12 @@ def main(argv) -> None:
         "surface_code:rotated_memory_z", distance=d, rounds=rounds,
         after_clifford_depolarization=p, before_round_data_depolarization=p,
         before_measure_flip_probability=p, after_reset_flip_probability=p)
-    dets, obs = circuit.compile_detector_sampler(seed=5).sample(shots, separate_observables=True)
+    measurements = circuit.compile_sampler(seed=5).sample(shots)
     op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
     decoder = _CapturingDecoder()
     for shot in range(shots):
         RunSpec(ops=[op], d=d, rounds_policy=FixedRounds(rounds),
-                device=RecordedStimDevice(dets, obs, shot), decoder=decoder, seed=shot).build()
+                device=RecordedStimDevice(measurements, shot), decoder=decoder, seed=shot).build()
     calls = decoder.calls
     weight_agree = logical_agree = satisfied = disagree_with_different_weight = 0
     for faults, syndrome, py_weight, selected in calls:

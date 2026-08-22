@@ -312,7 +312,12 @@ class ResourcePool(Protocol):
 
 @runtime_checkable
 class SyndromeDevice(Protocol):
-    """Unclocked physical source used only by ``QPUDevice``."""
+    """Unclocked physical source used only by ``QPUDevice``.
+
+    Payload bits are raw measurement bits per round. A source that carries a
+    detector formation table also offers ``form_round(operation_id, round_index,
+    raw_bits)``, which Buffer 0 intake calls once per complete round.
+    """
 
     operation_circuit_scope: str
     def begin_operation(

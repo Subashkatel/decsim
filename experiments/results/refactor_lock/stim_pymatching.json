@@ -169,7 +169,7 @@
 "physical_channels": [
 {
 "counters": {
-"known_payload_bits": 120,
+"known_payload_bits": 129,
 "propagation_ticks": 2250000,
 "queue_wait_ticks": 0,
 "serialization_ticks": 0,
@@ -301,7 +301,7 @@
 ],
 "physical_alias": "channel-0",
 "physical_counters": {
-"known_payload_bits": 120,
+"known_payload_bits": 129,
 "propagation_ticks": 2250000,
 "queue_wait_ticks": 0,
 "serialization_ticks": 0,
@@ -310,7 +310,7 @@
 },
 "reconciles": true,
 "semantic_counter_sum": {
-"known_payload_bits": 120,
+"known_payload_bits": 129,
 "propagation_ticks": 2250000,
 "queue_wait_ticks": 0,
 "serialization_ticks": 0,
@@ -507,7 +507,7 @@
 "semantic_edges": [
 {
 "counters": {
-"known_payload_bits": 120,
+"known_payload_bits": 129,
 "propagation_ticks": 2250000,
 "queue_wait_ticks": 0,
 "serialization_ticks": 0,
@@ -636,7 +636,7 @@
 },
 "delivery_ticks": 1150000,
 "path": "qc",
-"payload_bits": 4,
+"payload_bits": 8,
 "payload_selection": "actual",
 "payload_source": "SyndromePayload.size_bits",
 "physical_alias": "channel-0",
@@ -1495,7 +1495,7 @@
 },
 "delivery_ticks": 15150000,
 "path": "qc",
-"payload_bits": 12,
+"payload_bits": 17,
 "payload_selection": "actual",
 "payload_source": "SyndromePayload.size_bits",
 "physical_alias": "channel-0",

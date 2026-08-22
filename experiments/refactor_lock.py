@@ -508,7 +508,7 @@ def qlx_multi_fragment():
     program.decoder_operations = (replace(program.decoder_operations[0], kind=OpKind.MEMORY),)
     device = StimDevice(detector_rounds=program.detector_rounds_by_stream,
                         terminal_detector_ids=program.terminal_detector_ids_by_stream,
-                        terminal_data_bits=program.terminal_data_bits_by_stream)
+                        measurement_rounds=program.measurement_rounds_by_stream)
     return RunSpec(frontend=program, decode_ops=program.decoder_operations, device=device,
                    decoder=PerRoundDecoder(tau_us=0.5), rounds_policy=GateRounds(merge_steps=2),
                    d=8, timing=TimingConfig(round_us=1.0, t_pack_us=0.1), seed=28)
@@ -537,8 +537,7 @@ def two_fragment_stream():
     final_rows = sorted(d for d, r in detector_rounds.items() if r == rounds)
     terminal_rows = tuple(final_rows[len(final_rows) // 2:])
     device = StimDevice(detector_rounds={stream_id: detector_rounds},
-                        terminal_detector_ids={stream_id: terminal_rows},
-                        terminal_data_bits={stream_id: distance})
+                        terminal_detector_ids={stream_id: terminal_rows})
     ops = []
     for offset in range(rounds):
         last = offset == rounds - 1

@@ -38,9 +38,10 @@ def problem(d: int, rounds: int, p: float, shots: int, seed: int):
         "surface_code:rotated_memory_z", distance=d, rounds=rounds,
         after_clifford_depolarization=p, before_round_data_depolarization=p,
         before_measure_flip_probability=p, after_reset_flip_probability=p)
-    dets, obs = circuit.compile_detector_sampler(seed=seed).sample(shots, separate_observables=True)
+    measurements = circuit.compile_sampler(seed=seed).sample(shots)
+    dets, obs = circuit.compile_m2d_converter().convert(measurements=measurements, separate_observables=True)
     rounds_of = resolve_detector_rounds(circuit, None, rounds)     # decsim's map, one-based
-    return circuit, dets, obs, rounds_of
+    return circuit, measurements, dets, obs, rounds_of
 
 
 def run_qldpc(circuit, dets, rounds_of, d: int, workdir: Path) -> dict:
@@ -57,12 +58,12 @@ def run_qldpc(circuit, dets, rounds_of, d: int, workdir: Path) -> dict:
                 window_commits=[sorted(w) for w in out["window_commits"]])
 
 
-def run_decsim(circuit, dets, obs, rounds_of, d: int, rounds: int) -> dict:
+def run_decsim(circuit, measurements, rounds_of, d: int, rounds: int) -> dict:
     op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
     predictions, windows = [], None
-    for shot in range(len(dets)):
+    for shot in range(len(measurements)):
         done = RunSpec(ops=[op], d=d, rounds_policy=FixedRounds(rounds),
-                       device=RecordedStimDevice(dets, obs, shot),
+                       device=RecordedStimDevice(measurements, shot),
                        decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)), seed=shot).build()
         predictions.append(done.result.operation_results[0].logical_observables)
         if windows is None:
@@ -81,10 +82,10 @@ def run_decsim(circuit, dets, obs, rounds_of, d: int, rounds: int) -> dict:
 def main(argv) -> None:
     shots = int(argv[1]) if len(argv) > 1 else 300
     d, rounds, p = 3, 60, 0.005
-    circuit, dets, obs, rounds_of = problem(d, rounds, p, shots, seed=11)
+    circuit, measurements, dets, obs, rounds_of = problem(d, rounds, p, shots, seed=11)
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     q = run_qldpc(circuit, dets, rounds_of, d, REPORT.parent)
-    s = run_decsim(circuit, dets, obs, rounds_of, d, rounds)
+    s = run_decsim(circuit, measurements, rounds_of, d, rounds)
     same_windows = q["window_count"] == s["window_count"]
     det_match = sum(a == b for a, b in zip(q["window_detectors"], s["window_detectors"]))
     commit_match = sum(a == b for a, b in zip(q["window_commits"], s["window_commits"]))

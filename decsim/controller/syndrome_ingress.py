@@ -1,13 +1,14 @@
-"""Controller-side arrival of syndrome data: fragments of one round are
-reassembled, the complete round is packed, and packed rounds are arbitrated
-onto their route, C2B to Buffer 0 (window input) or CWD as a feedback-memory
-round. ``SyndromeBuffer`` owns the round slots; a context is PARTIAL while
+"""Controller-side arrival of syndrome data: raw measurement fragments of one
+round are reassembled, the complete round is formed into detection events at
+Buffer 0 intake (the device's formation table) and packed, and packed rounds
+are arbitrated onto their route, C2B to Buffer 0 (window input) or CWD as a
+feedback-memory round. ``SyndromeBuffer`` owns the round slots; a context is PARTIAL while
 fragments are missing, PACKED_WAIT while it waits for its route, and
 DRAINING once transmission has started."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum, auto
 from typing import Optional
 
@@ -116,8 +117,13 @@ class SyndromeIngress:
         window_input_receiver, feedback_memory_receiver,
         syndrome_buffer: Optional[SyndromeBuffer] = None,
         policy: SyndromeIngressPolicy = SyndromeIngressPolicy(),
+        detector_formation=None,
     ):
         self.policy = policy
+        # the source that forms a complete round's detection events from its
+        # raw packet (the device, which holds the formation table); None for
+        # timing-only or synthetic sources
+        self.detector_formation = detector_formation
         self.engine = engine
         self.links = links if links is not None else logical_reference_profile().resolve()
         self.t_pack = t_pack
@@ -236,14 +242,33 @@ class SyndromeIngress:
         Its publication tick is set now unless a C2B hop is priced later."""
         c2b_is_priced = LinkPath.C2B in self.links.paths
         publication_tick = None if c2b_is_priced else self.engine.now
+        def form(raw_fragments):
+            # C2B carries the raw measurement bits; detection events exist
+            # only from the decoder input (Buffer 0) onward
+            context.packet_bits = _fragment_bits(raw_fragments)
+            return self._form_detection_events(raw_fragments)
+
         packet = self.syndrome_buffer.finish_packing(context.round_key,
-                                                     publication_tick=publication_tick)
+                                                     publication_tick=publication_tick,
+                                                     form=form)
         context.packet = packet
-        context.packet_bits = _packet_bits(packet)
         context.state = _IngressSlotState.PACKED_WAIT
         if self.policy.queue_admission is ReassemblyQueueAdmission.ON_COMPLETION:
             self._route_queues[context.route.kind].append(context.identity)
         self._schedule_arbitration()
+
+    def _form_detection_events(self, raw_fragments):
+        """Form the complete round's detection events from its raw packet.
+        Sources without a formation table (timing-only or synthetic bits)
+        are retained as they arrived."""
+        form_round = getattr(getattr(self, "detector_formation", None), "form_round", None)
+        if form_round is None or any(fragment.bits is None for fragment in raw_fragments):
+            return raw_fragments
+        if len(raw_fragments) != 1:
+            raise ValueError("detector formation expects one merged raw fragment per round")
+        (raw,) = raw_fragments
+        formed = tuple(form_round(raw.operation_id, raw.round_index, raw.bits))
+        return (replace(raw, bits=formed, size_bits=len(formed)),)
 
     # ---- arbitration onto the routes
 
@@ -415,9 +440,9 @@ class SyndromeIngress:
             window_id=None, round_lo=round_index, round_hi=round_index)
 
 
-def _packet_bits(packet: SyndromeRoundPacket) -> Optional[int]:
-    """The packed round's size, None when any fragment has no known size."""
-    fragment_sizes = [fragment.size_bits for fragment in packet.fragments]
+def _fragment_bits(fragments) -> Optional[int]:
+    """The fragments' wire size, None when any fragment has no known size."""
+    fragment_sizes = [fragment.size_bits for fragment in fragments]
     if any(size is None for size in fragment_sizes):
         return None
     return sum(fragment_sizes)

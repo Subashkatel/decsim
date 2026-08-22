@@ -323,8 +323,13 @@ class SyndromeBuffer:
 
     def finish_packing(
         self, round_identity, *, publication_tick: Optional[int] = None,
+        form=None,
     ) -> SyndromeRoundPacket:
-        """Finish packing and make the retained round readable."""
+        """Finish packing and make the retained round readable.
+
+        ``form`` turns the merged raw fragments of the complete round into
+        the fragments the buffer retains (detection events, at the decoder
+        input); without it the fragments are retained as they arrived."""
         slot = self._rounds.get(round_identity)
         if slot is None:
             raise RuntimeError(
@@ -334,10 +339,13 @@ class SyndromeBuffer:
             raise RuntimeError(
                 f"round {round_identity!r} is {slot.state.name}, not PACKING"
             )
+        fragments = _merge_fragments_by_patch(slot.fragments)
+        if form is not None:
+            fragments = form(fragments)
         packet = SyndromeRoundPacket(
             operation_id=slot.identity[0],
             round_index=slot.identity[1],
-            fragments=_merge_fragments_by_patch(slot.fragments),
+            fragments=fragments,
         )
         stored_keys = []
         try:

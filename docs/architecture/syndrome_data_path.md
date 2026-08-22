@@ -10,14 +10,23 @@ only in the explicitly historical column; they are not compatibility APIs.
 ## Integrated shape (mechanism-neutral)
 
 ```
-Controller --command--> QPUDevice --QPUReadout--> Controller
-           --binary detector data--> SyndromeIngress -> SyndromeBuffer
+Controller --command--> QPUDevice --QPUReadout (raw measurement packet)--> Controller
+           --raw packet--> SyndromeIngress -> SyndromeBuffer (forms detection events
+           at round completion from the device's formation table)
            -> WindowManager -> DecoderInputTransfer
            -> DecoderInputStoreStager -> DecoderInputStore
            -> DecoderManager ready queue -> decoder
 ```
 
-The controller availability boundary has a configurable fixed cost. The default is
+The QPU emits raw measurement bits, one packet per round, and both QC and C2B
+carry those bits (Khalid et al. Table II prices t_qc at one bit per measured
+qubit; Google's real-time decoder converts measurements into detections on the
+decoder host, arXiv:2408.13687 Sec. V). Detection events exist only from Buffer 0
+onward: when a round's last fragment lands, `SyndromeIngress` asks the device's
+formation table (`detector_formation.py`, Stim's measurements-to-detection-events
+rule including the noiseless reference parity) for the round's detection events,
+and those are what Buffer 0 retains. The controller availability boundary has a
+configurable fixed cost. The default is
 zero additional cost because physical acquisition and classification may already
 be included in the round cadence. The QC transfer reaches the controller-side receive boundary before the optional
 binary-availability delay. This models causal cost without

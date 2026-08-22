@@ -56,7 +56,7 @@ def _physical_device(program):
     return StimDevice(
         detector_rounds=program.detector_rounds_by_stream,
         terminal_detector_ids=program.terminal_detector_ids_by_stream,
-        terminal_data_bits=program.terminal_data_bits_by_stream,
+        measurement_rounds=program.measurement_rounds_by_stream,
     )
 
 
@@ -139,9 +139,11 @@ def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim
     assert program.terminal_detector_ids_by_stream == {
         decode_operation_id: (),
     }
-    assert program.terminal_data_bits_by_stream == {
-        decode_operation_id: 9,
-    }
+    measurement_rounds = program.measurement_rounds_by_stream[decode_operation_id]
+    # eight checks per submission, eight submissions, then the nine data
+    # readouts fold into the last round's packet
+    assert len(measurement_rounds) == 8 * 8 + 9
+    assert [measurement_rounds[index] for index in (0, 7, 8, 63, 64, 72)] == [1, 1, 2, 8, 8, 8]
 
     device = _physical_device(program)
     completed = _run_native_physical_program(program, device)
@@ -166,10 +168,10 @@ def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim
         range(1, 9)
     )
     assert tuple(payload.size_bits for payload in round_payloads) == (
-        0, 8, 8, 8, 8, 8, 8, 8,
+        8, 8, 8, 8, 8, 8, 8, 17,
     )
     assert tuple(len(payload.bits) for payload in round_payloads) == (
-        0, 8, 8, 8, 8, 8, 8, 8,
+        8, 8, 8, 8, 8, 8, 8, 17,
     )
     assert completed.result.terminal_status == "complete"
     assert completed.result.event_queue_empty
@@ -229,4 +231,6 @@ def test_frozen_mem_surface_rejects_a_native_round_order_swap():
 
     with pytest.raises(ValueError) as failure:
         _run_native_physical_program(program, _physical_device(program))
-    assert "canonical decoder-input row layout" in str(failure.value)
+    # the formation table rejects it first: detector 8 would be declared in a
+    # round before the measurement bit it reads has arrived
+    assert "reads a bit that arrives in round" in str(failure.value)

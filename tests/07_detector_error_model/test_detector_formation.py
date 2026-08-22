@@ -55,7 +55,7 @@ def test_table_rounds_agree_with_resolve_detector_rounds():
 
 
 def test_round_count_must_match_the_circuit():
-    with pytest.raises(ValueError, match="measurement rounds"):
+    with pytest.raises(ValueError, match="asked for 11"):
         build_formation_table(memory_circuit("surface_code:rotated_memory_z", 3, 12), 11)
 
 
@@ -140,3 +140,27 @@ def test_declared_detector_round_may_not_precede_its_bits():
     too_early = {index: 1 for index in range(circuit.num_detectors)}
     with pytest.raises(ValueError, match="arrives in round"):
         build_formation_table(circuit, 4, detector_rounds=too_early)
+
+
+def test_lattice_surgery_cnot_circuit_forms_like_stim():
+    """A tqec lattice-surgery CNOT (k=1): twelve rounds, a mid-circuit data
+    readout at the merge, a final readout, two observables, detector counts
+    that change from round to round. The circuit rule assigns every
+    measurement block to the round its DETECTOR group announces."""
+    circuit = stim.Circuit.from_file(
+        __import__("pathlib").Path(__file__).resolve().parents[1] / "data" / "tqec_cnot_k1.stim")
+    rounds = 12
+    table = build_formation_table(circuit, rounds)
+    assert table.readout_slot_start is None
+    assert [table.packet_width[r] for r in range(1, 13)] == [16, 16, 16, 28, 28, 31, 28, 28, 40, 16, 16, 34]
+    assert [len(table.detectors_of_round(r)) for r in range(1, 13)] == [8, 16, 16, 20, 28, 28, 24, 28, 32, 16, 16, 24]
+    assert table.detector_rounds() == resolve_detector_rounds(circuit, None, rounds)
+    assert len(table.observables) == 2
+    assert {recipe.kind for recipe in table.detectors_of_round(9)} >= {LayerKind.BULK, LayerKind.READOUT}
+
+    shots = 150
+    measurements = circuit.compile_sampler(seed=5).sample(shots)
+    expected = circuit.compile_m2d_converter().convert(measurements=measurements, separate_observables=True)
+    formed = [form_shot(table, split_measurements_into_packets(table, row)) for row in measurements]
+    assert np.array_equal(np.array([f[0] for f in formed], dtype=np.uint8), expected[0].astype(np.uint8))
+    assert np.array_equal(np.array([f[1] for f in formed], dtype=np.uint8), expected[1].astype(np.uint8))

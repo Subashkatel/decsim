@@ -34,16 +34,21 @@ def _finite_forward_window_geometries(
     commit_round_count: int,
     buffer_round_count: int,
 ) -> tuple[WindowGeometry, ...]:
-    """Finite QUITS/Tan forward windows with one closed all-core tail."""
+    """Finite forward windows with one closed all-core tail.
+
+    Regular windows commit F rounds and read W = F + B. The tail rule is
+    qLDPC's SlidingWindowDecoder rule (sinter.py, `while start < end -
+    (W + s - 1)`): the last window starts as soon as fewer than W + F rounds
+    remain, so it commits everything left and is never shorter than W. A
+    short tail is never decoded on its own; it is absorbed by the last
+    full-width window instead.
+    """
+    window_width = commit_round_count + buffer_round_count
     windows = []
     commit_lo = 1
     while True:
-        regular_commit_hi = min(
-            commit_lo + commit_round_count - 1,
-            round_count,
-        )
-        regular_buffer_hi = regular_commit_hi + buffer_round_count
-        if regular_buffer_hi >= round_count:
+        remaining_rounds = round_count - commit_lo + 1
+        if remaining_rounds < window_width + commit_round_count:
             windows.append(WindowGeometry(
                 buffer_lo=commit_lo,
                 commit_lo=commit_lo,
@@ -51,11 +56,12 @@ def _finite_forward_window_geometries(
                 buffer_hi=round_count,
             ))
             break
+        regular_commit_hi = commit_lo + commit_round_count - 1
         windows.append(WindowGeometry(
             buffer_lo=commit_lo,
             commit_lo=commit_lo,
             commit_hi=regular_commit_hi,
-            buffer_hi=regular_buffer_hi,
+            buffer_hi=regular_commit_hi + buffer_round_count,
         ))
         commit_lo = regular_commit_hi + 1
     return tuple(windows)
@@ -105,13 +111,14 @@ class SlidingWindowScheme:
         commit_round_count: int,
         buffer_round_count: int,
     ) -> OperationWindowPlan:
-        """Return the finite forward `(W,F)` construction used by QUITS.
+        """Return the finite forward `(W,F)` construction.
 
         Here ``F=commit_round_count`` and
         ``W=commit_round_count+buffer_round_count``. Regular windows commit
-        their first ``F`` rounds. As soon as one window reaches the physical
-        end, it becomes the closed final window and commits every remaining
-        round.
+        their first ``F`` rounds. The last window begins when fewer than
+        ``W+F`` rounds remain and commits every remaining round (qLDPC's
+        SlidingWindowDecoder tail rule; the last window is never shorter
+        than ``W``).
         """
         if self.terminal_policy is SlidingTerminalPolicy.QUITS_TAN_FLUSH:
             windows = _finite_forward_window_geometries(

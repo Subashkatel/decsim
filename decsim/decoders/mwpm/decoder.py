@@ -110,8 +110,10 @@ class PyMatchingDecoder:
                 faults.observables,
                 location="PyMatching window model",
             )
+            # PyMatching normalises the matrix it is given in place; the placed
+            # matrix is frozen, so it gets a copy (one per model, cached)
             matching = pymatching.Matching.from_check_matrix(
-                faults.check, weights=self._weights_for(faults))
+                faults.check.copy(), weights=self._weights_for(faults))
             # PyMatching builds its internal graph lazily and finishes warming
             # only once it has matched real defects; a running software decoder
             # has the window graph prebuilt and warm, so decode a few defects
@@ -122,8 +124,9 @@ class PyMatchingDecoder:
             import numpy
             detectors = faults.check.shape[0]
             warmed = 0
-            for column in range(faults.check.shape[1]):
-                rows = numpy.nonzero(faults.check[:, column])[0]
+            check = faults.check
+            for column in range(check.shape[1]):
+                rows = check.indices[check.indptr[column]:check.indptr[column + 1]]
                 if rows.size == 0:
                     continue
                 syndrome = numpy.zeros(detectors, dtype=numpy.uint8)

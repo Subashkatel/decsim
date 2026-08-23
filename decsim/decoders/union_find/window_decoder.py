@@ -155,11 +155,10 @@ def _graph_from_model(
         validate_graphlike_matrices,
     )
 
-    raw_check = np.asarray(faults.check)
+    check = faults.check
     raw_priors = np.asarray(faults.priors)
-    raw_observables = np.asarray(faults.observables)
-    validate_graphlike_matrices(raw_check, raw_observables, location=location)
-    fault_count = raw_check.shape[1]
+    validate_graphlike_matrices(check, faults.observables, location=location)
+    fault_count = check.shape[1]
     if raw_priors.ndim != 1 or raw_priors.size != fault_count:
         raise ValueError(
             f"{location} priors must have one entry per fault column"
@@ -169,11 +168,12 @@ def _graph_from_model(
     if not np.all((raw_priors >= 0.0) & (raw_priors <= 1.0)):
         raise ValueError(f"{location} priors must lie in [0, 1]")
 
-    check = raw_check.astype(np.uint8, copy=False)
-    observables = raw_observables.astype(np.uint8, copy=False)
+    # observables are few rows; dense per-fault columns are cheap to read
+    observables = faults.observables.toarray().astype(np.uint8, copy=False)
     priors = raw_priors.astype(float, copy=False)
     baseline = (priors > 0.5).astype(np.uint8)
-    baseline_syndrome = (check @ baseline) % 2
+    baseline_syndrome = np.asarray(
+        check.astype(np.int64) @ baseline.astype(np.int64)).ravel() % 2
 
     edges = []
     for fault_index in range(fault_count):
@@ -184,7 +184,8 @@ def _graph_from_model(
         if residual_probability == 0.0:
             continue
         detectors = tuple(
-            int(value) for value in np.nonzero(check[:, fault_index])[0]
+            int(value)
+            for value in check.indices[check.indptr[fault_index]:check.indptr[fault_index + 1]]
         )
         if len(detectors) == 0:
             detector_a = BOUNDARY

@@ -371,11 +371,11 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
     def _validated_model(faults):
         import numpy as np
 
-        check = np.asarray(faults.check)
+        check = faults.check
         priors = np.asarray(faults.priors, dtype=float)
-        if check.ndim != 2:
+        if len(check.shape) != 2:
             raise ValueError("Relay check matrix must be two-dimensional")
-        if not np.all((check == 0) | (check == 1)):
+        if not np.all((check.data == 0) | (check.data == 1)):
             raise ValueError("Relay check matrix must be binary")
         if priors.ndim != 1 or priors.shape[0] != check.shape[1]:
             raise ValueError("Relay priors must align with physical fault columns")
@@ -385,7 +385,7 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
                     "Relay prior at physical column "
                     f"{column_index} must satisfy finite 0 < p <= 0.5"
                 )
-        return np.asarray(check, dtype=np.uint8), priors.astype(np.float64)
+        return check, priors.astype(np.float64)
 
     @staticmethod
     def _validated_syndrome(syndrome, detector_count: int):
@@ -413,10 +413,9 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
     def _reconstruct(check, correction) -> tuple[int, ...]:
         import numpy as np
 
-        reconstructed = (
-            np.asarray(check, dtype=np.uint64)
-            @ np.asarray(correction, dtype=np.uint64)
-        ) % 2
+        reconstructed = np.asarray(
+            check.astype(np.int64) @ np.asarray(correction, dtype=np.int64)
+        ).ravel() % 2
         return tuple(int(bit) for bit in reconstructed)
 
     @staticmethod

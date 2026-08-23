@@ -24,6 +24,11 @@ def _check_round_us(value) -> Optional[float]:
     return float(value)
 
 
+def _check_justification(value) -> None:
+    if value is not None and (not isinstance(value, str) or not value.strip()):
+        raise ValueError("window_floor_justification must be a non-empty string or None")
+
+
 @dataclass(frozen=True)
 class SurfaceCodeModel:
     """Rotated surface-code timing and sizing model."""
@@ -32,10 +37,15 @@ class SurfaceCodeModel:
     round_us: Optional[float] = None             # per-code round period; None = global cadence
     commit_rounds_override: Optional[int] = None  # window commit size; None = d
     buffer_rounds_override: Optional[int] = None  # window look-ahead size; None = d
+    # A buffer below the (d, d) floor degrades windowed accuracy (Skoric
+    # 2209.08552, Tan PRX Quantum 4, 040344); running there deliberately, as a
+    # sweep may, needs a written reason, the way a zero frame commit cost does.
+    window_floor_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
         """Normalize the optional per-code cadence."""
         object.__setattr__(self, "round_us", _check_round_us(self.round_us))
+        _check_justification(self.window_floor_justification)
 
     @property
     def name(self) -> str:
@@ -66,9 +76,6 @@ class SurfaceCodeModel:
         """Return the minimum leading and trailing buffers: ``(d, d)``."""
         return (self.d, self.d)
 
-    def buffer_floor_override_active(self) -> bool:
-        return self.buffer_rounds_override is not None
-
     def spatial_nodes(self, num_patches: int) -> int:
         """Bulk timing proxy with a heuristic d-node multi-patch seam strip."""
         return num_patches * self.d * self.d + (
@@ -96,9 +103,11 @@ class BBCodeModel:
     round_us: Optional[float] = None  # per-code round period; None = global cadence
     commit_rounds_override: Optional[int] = None
     buffer_rounds_override: Optional[int] = None
+    window_floor_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
         """Validate the built-in BB timing and sizing card."""
+        _check_justification(self.window_floor_justification)
         for field_name in ("n", "k", "d"):
             _require_positive_int(getattr(self, field_name), field_name)
         if self.n % 2:
@@ -134,9 +143,6 @@ class BBCodeModel:
 
     def buffering_floor(self) -> tuple[int, int]:
         return (0, 0)
-
-    def buffer_floor_override_active(self) -> bool:
-        return self.buffer_rounds_override is not None
 
     def commit_rounds(self) -> int:
         """Rounds committed per decode window."""

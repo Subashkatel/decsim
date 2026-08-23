@@ -290,7 +290,8 @@ def _live_stream_spec(idle_policy, mode="trailing_buffer", decode_us=2.0):
     return RunSpec(ops=operations, dynamic_streams=[stream], idle_policy=idle_policy,
                    device=TimingOnlyDevice(),
                    code=SurfaceCodeModel(d=3, commit_rounds_override=2,
-                                         buffer_rounds_override=1),
+                                         buffer_rounds_override=1,
+                                         window_floor_justification="lock scenario: a one-round buffer exercises the stream handoff, not accuracy"),
                    rounds_policy=PerOpRounds(rounds), scheme=SlidingWindowScheme(),
                    decoder=PresetLatencyDecoder(decode_us), num_units=1, round_us=1.0,
                    feedback_boundary_mode=mode, links=_links(), seed=7)
@@ -333,7 +334,8 @@ def _protected_chain(feedback: bool):
         rounds.update({101: 40, 4: 1, 5: 1})
     return RunSpec(ops=ops, dynamic_streams=streams, protected_regions=tuple(regions),
                    code=SurfaceCodeModel(d=3, commit_rounds_override=2,
-                                         buffer_rounds_override=1),
+                                         buffer_rounds_override=1,
+                                         window_floor_justification="lock scenario: a one-round buffer exercises the stream handoff, not accuracy"),
                    rounds_policy=PerOpRounds(rounds),
                    decoder=PresetLatencyDecoder(5.0 if feedback else 0),
                    round_us=1.0, seed=9)

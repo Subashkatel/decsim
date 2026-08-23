@@ -67,6 +67,26 @@ def _finite_forward_window_geometries(
     return tuple(windows)
 
 
+def _require_buffer_floor(geometry, floor: int, floor_label: str) -> None:
+    """Refuse a buffer below the literature floor unless the code card says
+    why it runs there; a justification above the floor is a stale one."""
+    below = geometry.buffer_round_count < floor
+    justification = geometry.window_floor_justification
+    if below and not justification:
+        raise ValueError(
+            f"buffer_rounds={geometry.buffer_round_count} is below the "
+            f"{floor_label} {floor} for {geometry.code_name}; windowed "
+            f"accuracy degrades (Skoric 2209.08552, Tan PRX Quantum 4, "
+            f"040344, Bombin 2303.04846). Raise buffer_rounds_override to "
+            f"{floor}, or set window_floor_justification to run below the "
+            "floor deliberately.")
+    if justification and not below:
+        raise ValueError(
+            f"window_floor_justification is set but buffer_rounds="
+            f"{geometry.buffer_round_count} is not below the {floor_label} "
+            f"{floor}; remove the justification.")
+
+
 def sliding_data_complete(window: "Window", readiness: WindowReadiness) -> bool:
     """A window has its data once its commit and buffer rounds are present;
     a buffer that overflows past the operation's end is satisfied by a
@@ -155,20 +175,12 @@ class SlidingWindowScheme:
         )
 
     def validate_buffer(self, geometry) -> None:
-        """Reject buffers below the literature floor (lead, trail) ~ (d, d)."""
-        if geometry.buffer_floor_override_active:
-            return
-        if (
-            geometry.buffer_round_count
-            < geometry.minimum_trailing_buffer_round_count
-        ):
-            raise ValueError(
-                f"buffer_rounds={geometry.buffer_round_count} is below the "
-                f"trailing buffering floor "
-                f"{geometry.minimum_trailing_buffer_round_count} (~d) for "
-                f"{geometry.code_name}; "
-                f"windowed accuracy degrades (Skoric 2209.08552, Bombin "
-                f"2303.04846). Raise buffer_rounds_override or use d.")
+        """Reject buffers below the trailing floor (~d) without a justification."""
+        _require_buffer_floor(
+            geometry,
+            geometry.minimum_trailing_buffer_round_count,
+            "trailing buffering floor",
+        )
 
     def data_complete(self, window: "Window", *, readiness: WindowReadiness,
                       operation) -> bool:
@@ -319,18 +331,15 @@ class ParallelWindowScheme:
 
 
     def validate_buffer(self, geometry) -> None:
-        if geometry.buffer_floor_override_active:
-            return
-        required = max(
-            geometry.minimum_leading_buffer_round_count,
-            geometry.minimum_trailing_buffer_round_count,
+        """Reject buffers below the two-sided floor (~d) without a justification."""
+        _require_buffer_floor(
+            geometry,
+            max(
+                geometry.minimum_leading_buffer_round_count,
+                geometry.minimum_trailing_buffer_round_count,
+            ),
+            "two-sided buffering floor",
         )
-        if geometry.buffer_round_count < required:
-            raise ValueError(
-                f"buffer_rounds={geometry.buffer_round_count} is below the "
-                f"two-sided buffering floor {required} (~d) for "
-                f"{geometry.code_name}"
-            )
 
 
 class TanSandwichScheme:

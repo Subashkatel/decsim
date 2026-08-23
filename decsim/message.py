@@ -322,7 +322,7 @@ class ResolvedCodeGeometry:
     minimum_leading_buffer_round_count: int
     minimum_trailing_buffer_round_count: int
     one_patch_spatial_node_count: int
-    buffer_floor_override_active: bool
+    window_floor_justification: Optional[str]
 
 
 @dataclass(frozen=True)

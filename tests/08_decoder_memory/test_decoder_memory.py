@@ -75,7 +75,6 @@ def make_fragment(
         patch_id=patch_id if patch_id is not None else f"patch-{fragment_index}",
         round_index=round_index,
         bits=bits,
-        code="surface",
         size_bits=None if bits is None else len(bits),
         fragment_index=fragment_index,
     )

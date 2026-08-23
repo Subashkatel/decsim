@@ -194,7 +194,6 @@ class RetainedSyndromeFragment:
     patch_id: Any
     round_index: int
     bits: Optional[tuple[int, ...]]
-    code: Optional[str]
     size_bits: Optional[int]
     fragment_index: int
 
@@ -205,7 +204,6 @@ class RetainedSyndromeFragment:
             patch_id=payload.patch_id,
             round_index=payload.round_index,
             bits=normalize_binary_bits(payload.bits),
-            code=payload.code,
             size_bits=payload.size_bits,
             fragment_index=payload.fragment_index,
         )
@@ -567,7 +565,7 @@ class DecodeResult:
     correction: Optional[Any] = None         # correction operator (None = timing-only)
     logical_observables: Optional[tuple[int, ...]] = None  # full prediction
     soft_output: Optional["SoftOutput"] = None  # source-compatible confidence
-    boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
+    boundary_defects: Optional[dict] = None  # round-keyed seam defects (synthetic decoders, recovery lock scenarios)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
 
 

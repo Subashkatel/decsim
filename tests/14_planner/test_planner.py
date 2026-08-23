@@ -77,7 +77,7 @@ def geometry(name="surface"):
         minimum_leading_buffer_round_count=0,
         minimum_trailing_buffer_round_count=0,
         one_patch_spatial_node_count=10,
-        buffer_floor_override_active=False,
+        window_floor_justification=None,
     )
 
 
@@ -143,8 +143,7 @@ class RecordingCode:
     def buffering_floor(self):
         return (1, 1)
 
-    def buffer_floor_override_active(self):
-        return False
+    window_floor_justification = None
 
     def spatial_nodes(self, patch_count):
         self.spatial_node_calls.append(patch_count)
@@ -505,7 +504,7 @@ def test_execution_planning_resolves_geometry_patches_seams_and_graph():
         minimum_leading_buffer_round_count=1,
         minimum_trailing_buffer_round_count=1,
         one_patch_spatial_node_count=10,
-        buffer_floor_override_active=False,
+        window_floor_justification=None,
     )
     assert [value.operation_id for value in plan.resolved_operations] == [10, 20]
     assert [value.spatial_node_count for value in plan.resolved_operations] == [31, 21]

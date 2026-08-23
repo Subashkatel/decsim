@@ -5,10 +5,9 @@ from __future__ import annotations
 from typing import Optional
 
 from ..window_decode_results import (
-    DecoderAttemptFailed,
     check_syndrome_size,
     payload_syndrome,
-    result_from_selected_faults,
+    result_from_backend_outcome,
     validate_backend_outcome,
 )
 from ...detector_error_model.fault_model_contracts import (
@@ -58,7 +57,7 @@ class TesseractDecoder:
         return self.latency_model.latency(job)
 
     def decode(self, job: DecodeJob) -> DecodeResult:
-        """Commit a same-model correction only after backend validation."""
+        """Commit the backend's correction after validation, best effort or not."""
         model = job.dem
         if model is None:
             return DecodeResult(job.op_id, job.window_id)
@@ -74,11 +73,4 @@ class TesseractDecoder:
             physical_faults,
             syndrome,
         )
-        if not outcome.succeeded:
-            raise DecoderAttemptFailed(job, outcome)
-        return result_from_selected_faults(
-            job,
-            model,
-            physical_faults,
-            outcome.physical_correction,
-        )
+        return result_from_backend_outcome(job, model, physical_faults, outcome)

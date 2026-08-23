@@ -7,6 +7,7 @@ import time
 from typing import TYPE_CHECKING, Optional
 
 from ..window_decode_results import (
+    BackendDecodeStatus,
     check_syndrome_size,
     payload_syndrome,
     result_from_selected_faults,
@@ -24,6 +25,21 @@ from ...detector_error_model.fault_model_contracts import (
 
 if TYPE_CHECKING:
     from ...protocols import Decoder
+
+
+def _match_best_effort(matching, syndrome, faults):
+    """PyMatching raises when a syndrome has odd parity in a boundaryless
+    component; no valid plan produces one, so that case is reported as an
+    empty correction with INVALID_CORRECTION rather than ending the run."""
+    import numpy as np
+
+    try:
+        return matching.decode(syndrome), None
+    except ValueError as error:
+        if "perfect matching" not in str(error):
+            raise
+        return (np.zeros(faults.check.shape[1], dtype=np.uint8),
+                BackendDecodeStatus.INVALID_CORRECTION)
 
 
 class PyMatchingDecoder:
@@ -72,9 +88,10 @@ class PyMatchingDecoder:
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
         started_ns = time.perf_counter_ns()
-        selected = matching.decode(syndrome)
+        selected, decode_status = _match_best_effort(matching, syndrome, faults)
         self.last_decode_ns = time.perf_counter_ns() - started_ns
-        return result_from_selected_faults(job, model, faults, selected)
+        return result_from_selected_faults(job, model, faults, selected,
+                                           decode_status=decode_status)
 
     def _matching_for_model(self, faults):
         """Return a cached matching graph for this window model."""

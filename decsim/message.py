@@ -252,6 +252,7 @@ class Window:
     blocked_logged: bool = False      # log-once flag for the "blocked" trace line
     boundary_in: Any = field(default_factory=dict)  # state owned by the
                                       # configured WindowInteraction
+    decode_status: Optional[str] = None  # best-effort status of the committed decode, None = succeeded
     t_first_round: Optional[int] = None    # tick the first round arrived
     t_data_complete: Optional[int] = None  # tick the last buffered round arrived
     t_queued: Optional[int] = None         # tick the job entered the decode queue
@@ -567,6 +568,11 @@ class DecodeResult:
     soft_output: Optional["SoftOutput"] = None  # source-compatible confidence
     boundary_defects: Optional[dict] = None  # round-keyed seam defects (synthetic decoders, recovery lock scenarios)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
+    # BackendDecodeStatus of a best-effort correction (nonconverged, low
+    # confidence, does not reproduce the syndrome); None when the decode
+    # succeeded. The correction is committed either way and the status travels
+    # with it, as cudaqx's per-window converged flag does.
+    decode_status: Optional[Any] = None
 
 
 @dataclass

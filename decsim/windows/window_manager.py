@@ -367,7 +367,7 @@ class WindowManager:
                 return
 
     def create_dynamic_window(self, stream_id, window_index, commit_lo,
-                              commit_hi, buffer_hi, *, is_last) -> None:
+                              commit_hi, buffer_hi) -> None:
         """Create one window and connect it to the live stream plan.
 
         If the previous boundary already arrived, apply it immediately.
@@ -395,7 +395,7 @@ class WindowManager:
         self.total_windows += 1
         if self.error_model_provider is not None:
             model = self.error_model_provider.window_model_for_stream(
-                stream_id, window, is_last=is_last)
+                stream_id, window)
             if model is not None:
                 self.window_models[(stream_id, window_index)] = model
         self._add_window_read_refs((stream_id, window_index), window)

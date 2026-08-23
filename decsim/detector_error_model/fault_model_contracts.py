@@ -80,9 +80,9 @@ class PlacedFaultModel:
     """One decoder matrix whose columns all describe the same fault domain.
 
     ``owned`` says which selected columns this window may commit.
-    ``future_flips`` is the forward-only handoff used by Sliding decoding.
     ``boundary_flips`` stores each owned column's complete global detector
-    effect for dependency-aware delivery in either time direction.
+    effect; the destination window intersects it with its own rows, so one
+    handoff serves forward and dependency-aware delivery alike.
     ``source_fault_ids`` maps every local column back to the global catalog.
     """
 
@@ -91,7 +91,6 @@ class PlacedFaultModel:
     priors: "object"
     observables: "object"
     owned: "object"
-    future_flips: dict
     source_fault_ids: tuple[int, ...]
     boundary_flips: dict
 
@@ -106,12 +105,11 @@ class PlacedFaultModel:
             ).reshape(source.shape)
             object.__setattr__(self, field_name, frozen)
         object.__setattr__(self, "source_fault_ids", tuple(self.source_fault_ids))
-        for field_name in ("future_flips", "boundary_flips"):
-            frozen_mapping = MappingProxyType({
-                int(column): tuple(int(detector_id) for detector_id in detector_ids)
-                for column, detector_ids in getattr(self, field_name).items()
-            })
-            object.__setattr__(self, field_name, frozen_mapping)
+        frozen_mapping = MappingProxyType({
+            int(column): tuple(int(detector_id) for detector_id in detector_ids)
+            for column, detector_ids in self.boundary_flips.items()
+        })
+        object.__setattr__(self, "boundary_flips", frozen_mapping)
 
 
 @dataclass(frozen=True)

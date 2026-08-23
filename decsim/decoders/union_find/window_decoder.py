@@ -42,7 +42,6 @@ class UnionFindGraph:
     detector_count: int
     fault_count: int
     edges: tuple[UnionFindEdge, ...]
-    adjacency: tuple[tuple[int, tuple[tuple[int, int], ...]], ...]
     baseline_faults: tuple[int, ...]
     baseline_syndrome: tuple[int, ...]
     logical_observables_by_fault: tuple[tuple[int, ...], ...] = ()
@@ -56,7 +55,6 @@ class UnionFindHardEvidence:
     graph: UnionFindGraph
     syndrome: tuple[int, ...]
     residual_syndrome: tuple[int, ...]
-    baseline_faults: tuple[int, ...]
     selected_faults: tuple[int, ...]
     contact_faults: tuple[int, ...]
     edge_intervals: tuple[Open | Closed, ...]
@@ -178,10 +176,6 @@ def _graph_from_model(
     baseline_syndrome = (check @ baseline) % 2
 
     edges = []
-    adjacency: dict[int, list[tuple[int, int]]] = {
-        node: [] for node in range(check.shape[0])
-    }
-    adjacency[BOUNDARY] = []
     for fault_index in range(fault_count):
         probability = float(priors[fault_index])
         residual_probability = (
@@ -213,23 +207,8 @@ def _graph_from_model(
             ),
             length_half_ticks=2 * weight_ticks,
         )
-        edge_index = len(edges)
         edges.append(edge)
-        adjacency[detector_a].append((detector_b, edge_index))
-        adjacency[detector_b].append((detector_a, edge_index))
 
-    frozen_adjacency = tuple(
-        (
-            node,
-            tuple(
-                sorted(
-                    neighbors,
-                    key=lambda item: (edges[item[1]].fault_index, item[0]),
-                )
-            ),
-        )
-        for node, neighbors in sorted(adjacency.items())
-    )
     logical_columns = tuple(
         tuple(int(value) for value in observables[:, fault_index])
         for fault_index in range(fault_count)
@@ -238,7 +217,6 @@ def _graph_from_model(
         detector_count=check.shape[0],
         fault_count=fault_count,
         edges=tuple(edges),
-        adjacency=frozen_adjacency,
         baseline_faults=tuple(int(value) for value in baseline),
         baseline_syndrome=tuple(int(value) for value in baseline_syndrome),
         logical_observables_by_fault=logical_columns,
@@ -579,7 +557,6 @@ def _decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
         graph=graph,
         syndrome=tuple(int(value) for value in syndrome_array),
         residual_syndrome=tuple(int(value) for value in residual_syndrome),
-        baseline_faults=graph.baseline_faults,
         selected_faults=tuple(selected_faults),
         contact_faults=tuple(
             graph.edges[index].fault_index for index in contacts

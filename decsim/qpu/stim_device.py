@@ -394,8 +394,10 @@ class StimDevice(_AtomicRunSeedConsumer):
             window_protocol=window_protocol,
         )
 
-    def window_model_for_stream(self, stream_id, window, *, is_last: bool):
-        """Build the detector error model for one dynamic stream window."""
+    def window_model_for_stream(self, stream_id, window):
+        """Build the detector error model for one dynamic stream window; the
+        window whose commit region reaches the stream's last round is the
+        terminal one."""
         stream_model = self._stream_models.get(stream_id)
         if stream_model is None:
             return None
@@ -403,7 +405,7 @@ class StimDevice(_AtomicRunSeedConsumer):
         buffer_lo = window.start_round
         return stream_model["slicer"].slice_window(
             buffer_lo, window.commit_lo, window.commit_hi, window.buffer_hi,
-            is_last=is_last)
+            is_last=window.commit_hi == stream_model["round_count"])
 
     def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
                                           *, fault_model_requirement,

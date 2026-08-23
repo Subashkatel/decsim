@@ -215,7 +215,7 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
                 status=BackendDecodeStatus.INVALID_CORRECTION,
                 failure_reason=
                     BackendFailureReason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
-                physical_correction=None,
+                physical_correction=correction,
                 component_correction=None,
                 reconstructed_syndrome=decoded_detectors,
                 iterations=iterations,

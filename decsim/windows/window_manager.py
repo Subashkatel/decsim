@@ -934,9 +934,12 @@ class WindowManager:
             window.t_done = self.engine.now
         self.committed_windows.add(key)
         self._committed_per_op[op.id] = self._committed_per_op.get(op.id, 0) + 1
+        status = getattr(res, "decode_status", None)
+        window.decode_status = None if status is None else status.value
         self.engine.log("DecoderCluster",
                         f"DECODE DONE {op.name} W{window.k} "
-                        f"[commit {window.commit_lo}-{window.commit_hi}]")
+                        f"[commit {window.commit_lo}-{window.commit_hi}]"
+                        + ("" if status is None else f" best effort: {status.value}"))
         existing_contribution = self.ledger.get(key)
         if (
             existing_contribution is None

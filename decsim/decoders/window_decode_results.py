@@ -199,22 +199,6 @@ class BackendDecodeOutcome:
         return self.status is BackendDecodeStatus.SUCCEEDED
 
 
-class DecoderAttemptFailed(RuntimeError):
-    """A runtime decoder attempt failed with same-job immutable evidence."""
-
-    def __init__(self, job: DecodeJob, outcome: BackendDecodeOutcome):
-        if not isinstance(outcome, BackendDecodeOutcome):
-            raise TypeError("outcome must be a BackendDecodeOutcome")
-        if outcome.succeeded:
-            raise ValueError("a successful outcome cannot fail a decoder attempt")
-        self.job_identity = (job.op_id, job.window_id, job.attempt)
-        self.outcome = outcome
-        super().__init__(
-            f"decoder attempt {self.job_identity} failed: "
-            f"{outcome.status.value}/{outcome.failure_reason.value}"
-        )
-
-
 def _canonical_bytes(value) -> bytes:
     """Encode supported scientific values without process-local identities."""
     import numpy as np
@@ -418,13 +402,39 @@ def check_syndrome_size(job: DecodeJob, syndrome, placed_faults) -> None:
     )
 
 
+def result_from_backend_outcome(
+    job: DecodeJob,
+    model,
+    placed_faults,
+    outcome: BackendDecodeOutcome,
+) -> DecodeResult:
+    """One policy for every backend: a decode that produced a correction is
+    committed as it stands, best effort or not, with its status on the result
+    (nonconverged, low confidence, does not reproduce the syndrome); only a
+    backend that produced no correction at all (an upstream exception, a
+    malformed vector) is a structural failure and stops the run."""
+    if outcome.physical_correction is None:
+        raise RuntimeError(
+            f"{job.label}: decoder backend produced no correction: "
+            f"{outcome.status.value}/{outcome.failure_reason.value}")
+    return result_from_selected_faults(
+        job,
+        model,
+        placed_faults,
+        outcome.physical_correction,
+        decode_status=None if outcome.succeeded else outcome.status,
+    )
+
+
 def result_from_selected_faults(
     job: DecodeJob,
     model,
     placed_faults,
     selected,
+    decode_status=None,
 ) -> DecodeResult:
-    """Keep owned selected faults and convert them into a DecodeResult."""
+    """Keep owned selected faults and convert them into a DecodeResult;
+    ``decode_status`` marks a best-effort correction (None = succeeded)."""
     import numpy as np
 
     selected = np.asarray(selected, dtype=np.uint8)
@@ -450,6 +460,7 @@ def result_from_selected_faults(
             detector_ids=residual_detector_ids,
             defects=_defects_from_detector_ids(model, residual_detector_ids),
         ),
+        decode_status=decode_status,
     )
 
 

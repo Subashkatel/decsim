@@ -62,18 +62,38 @@ def _dependency_ancestors(
     return tuple(frozenset(nodes) for nodes in ancestors)
 
 
+class _AncestorOwnedFaults:
+    """The faults owned by a window's predecessors, answered by membership:
+    a fault is prior to the window when its owner is one of the window's
+    ancestors. Holding the owner map instead of a materialized set keeps a
+    long chain of windows linear in the catalog size."""
+
+    def __init__(self, owner_of_fault: dict[int, int], ancestor_indices: frozenset[int]):
+        self.owner_of_fault = owner_of_fault
+        self.ancestor_indices = ancestor_indices
+
+    def __contains__(self, fault_index) -> bool:
+        return self.owner_of_fault.get(fault_index) in self.ancestor_indices
+
+
 def _explicit_prior_faults(
     ownership: tuple[dict[FaultRepresentation, set[int]], ...],
     ancestors: tuple[frozenset[int], ...],
-) -> tuple[dict[FaultRepresentation, set[int]], ...]:
+) -> tuple[dict[FaultRepresentation, _AncestorOwnedFaults], ...]:
     """Collect the faults owned by each window's predecessors."""
     representations = tuple(ownership[0])
+    owner_of_fault = {
+        representation: {
+            fault_index: window_index
+            for window_index, owned in enumerate(ownership)
+            for fault_index in owned[representation]
+        }
+        for representation in representations
+    }
     return tuple(
         {
-            representation: set().union(*(
-                ownership[ancestor][representation]
-                for ancestor in ancestor_indices
-            ))
+            representation: _AncestorOwnedFaults(
+                owner_of_fault[representation], ancestor_indices)
             for representation in representations
         }
         for ancestor_indices in ancestors
@@ -99,16 +119,18 @@ def _explicit_fault_ownership(
     covers_full_operation = (
         entries[0][1] == 1 and entries[-1][2] == round_count
     )
+    windows_committing_round: dict[int, list[int]] = {}
+    for window_index, (_, commit_lo, commit_hi, _) in enumerate(entries):
+        for round_index in range(commit_lo, commit_hi + 1):
+            windows_committing_round.setdefault(round_index, []).append(window_index)
     for representation, catalog in slicer.catalogs.items():
-        for fault_index, detector_ids in enumerate(catalog.detector_sets):
-            candidates = [
+        fault_rounds = slicer.fault_rounds[representation]
+        for fault_index in range(len(catalog.detector_sets)):
+            candidates = sorted({
                 window_index
-                for window_index, (_, commit_lo, commit_hi, _) in enumerate(entries)
-                if any(
-                    commit_lo <= slicer.round_of[detector_id] <= commit_hi
-                    for detector_id in detector_ids
-                )
-            ]
+                for round_index in fault_rounds[fault_index]
+                for window_index in windows_committing_round.get(round_index, ())
+            })
             if not candidates:
                 if covers_full_operation:
                     raise ValueError(

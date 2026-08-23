@@ -1476,10 +1476,10 @@ def test_parse_window_entry_lets_a_malformed_length_fail_naturally(entry):
 
 def test_detectors_in_window_selects_rows_by_round():
     """A window takes the detectors of its buffer rounds, and the terminal window takes everything from its start onward."""
-    round_of = {0: 1, 1: 2, 2: 3, 3: 4}
-    assert window_placement._detectors_in_window(round_of, 2, 3, is_last=False) == [1, 2]
-    assert window_placement._detectors_in_window(round_of, 2, 3, is_last=True) == [1, 2, 3]
-    assert window_placement._detectors_in_window(round_of, 5, 6, is_last=False) == []
+    detectors_by_round = {1: [0], 2: [1], 3: [2], 4: [3]}
+    assert window_placement._detectors_in_window(detectors_by_round, 2, 3, is_last=False) == [1, 2]
+    assert window_placement._detectors_in_window(detectors_by_round, 2, 3, is_last=True) == [1, 2, 3]
+    assert window_placement._detectors_in_window(detectors_by_round, 5, 6, is_last=False) == []
 
 
 # --------------------------------------------------------------------------
@@ -2036,11 +2036,12 @@ def test_explicit_prior_faults_union_ancestor_ownership():
     )
     ancestors = (frozenset(), frozenset({0}), frozenset({0, 1}))
     priors = window_ownership_dag._explicit_prior_faults(ownership, ancestors)
-    assert priors == (
-        {GRAPHLIKE: set()},
-        {GRAPHLIKE: {0}},
-        {GRAPHLIKE: {0, 1}},
-    )
+    # answered by membership: a fault is prior when its owner is an ancestor
+    assert [[fault in prior[GRAPHLIKE] for fault in (0, 1, 2)] for prior in priors] == [
+        [False, False, False],
+        [True, False, False],
+        [True, True, False],
+    ]
 
 
 def isolated_round_circuit():

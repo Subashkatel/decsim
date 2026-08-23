@@ -62,30 +62,41 @@ def _parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
     return buffer_lo, commit_lo, commit_hi, buffer_hi
 
 
-def _detectors_in_window(round_of: dict, buffer_lo: int, buffer_hi: int,
-                         *, is_last: bool) -> list:
-    """Choose the detector rows for this window."""
+def _detectors_in_window(detectors_by_round: dict, buffer_lo: int,
+                         buffer_hi: int, *, is_last: bool) -> list:
+    """Choose the detector rows for this window: the detectors of its buffer
+    rounds, or of every round from its start when it is the last window.
+    ``detectors_by_round`` maps a round to its sorted detector ids, so the
+    cost is the window's own size, not the whole operation's."""
     if is_last:
-        return sorted(detector_id
-                      for detector_id, round_index in round_of.items()
-                      if round_index >= buffer_lo)
-
+        rounds = [r for r in detectors_by_round if r >= buffer_lo]
+    else:
+        rounds = [r for r in detectors_by_round if buffer_lo <= r <= buffer_hi]
     return sorted(detector_id
-                  for detector_id, round_index in round_of.items()
-                  if buffer_lo <= round_index <= buffer_hi)
+                  for round_index in rounds
+                  for detector_id in detectors_by_round[round_index])
 
 
 def _fault_columns_for_window(
     det_sets: tuple,
     row_index: dict,
     lead_rows: set,
-    committed_elsewhere: set,
+    committed_elsewhere,
     *,
     include_committed_leading: bool,
+    candidate_faults=None,
 ) -> list:
-    """Choose candidate columns, excluding causally prior committed faults."""
+    """Choose candidate columns, excluding causally prior committed faults.
+
+    ``candidate_faults`` lists the faults that can touch this window (every
+    fault touching one of its rounds); None means every fault of the catalog.
+    ``committed_elsewhere`` only needs membership tests.
+    """
     columns: list = []
-    for fault_index, detectors in enumerate(det_sets):
+    if candidate_faults is None:
+        candidate_faults = range(len(det_sets))
+    for fault_index in candidate_faults:
+        detectors = det_sets[fault_index]
         touches_window = any(detector_id in row_index for detector_id in detectors)
         if not touches_window:
             continue
@@ -204,15 +215,21 @@ def _validate_fault_exclusion_ranges(fault_exclusion_ranges: tuple) -> None:
 def _unowned_faults(
     fault_rounds: tuple[tuple[int, ...], ...],
     fault_exclusion_ranges: tuple,
+    candidate_faults=None,
 ) -> set[int]:
-    """Return source columns prevented from being committed by this slice."""
+    """Return source columns prevented from being committed by this slice;
+    only ``candidate_faults`` (None: all) are examined."""
+    if not fault_exclusion_ranges:
+        return set()
+    if candidate_faults is None:
+        candidate_faults = range(len(fault_rounds))
     return {
         fault_index
-        for fault_index, rounds in enumerate(fault_rounds)
+        for fault_index in candidate_faults
         if any(
             exclude_lo <= round_index <= exclude_hi
             for exclude_lo, exclude_hi in fault_exclusion_ranges
-            for round_index in rounds
+            for round_index in fault_rounds[fault_index]
         )
     }
 
@@ -221,20 +238,23 @@ def _placed_faults_for_window(
     *,
     catalog: _FaultCatalog,
     context: WindowPlacementContext,
+    fault_rounds: tuple,
+    candidate_faults,
     committed_elsewhere: set[int],
     explicitly_owned_faults: Optional[set[int]],
-    explicitly_prior_faults: Optional[set[int]],
+    explicitly_prior_faults,
     fault_exclusion_ranges: tuple,
 ) -> PlacedFaultModel:
-    """Build one window's local matrix from one global fault catalog."""
+    """Build one window's local matrix from one global fault catalog.
+
+    ``fault_rounds`` is the catalog's round tuple per fault (computed once by
+    the slicer) and ``candidate_faults`` the faults touching this window's
+    rounds, so one window costs its own size rather than the catalog's.
+    """
     import numpy as np
 
     detector_sets = catalog.detector_sets
     observable_sets = catalog.observable_sets
-    fault_rounds = tuple(
-        tuple(context.round_of[detector_id] for detector_id in detectors)
-        for detectors in catalog.detector_sets
-    )
     columns = _fault_columns_for_window(
         detector_sets,
         context.row_index,
@@ -245,6 +265,7 @@ def _placed_faults_for_window(
             else explicitly_prior_faults
         ),
         include_committed_leading=(explicitly_prior_faults is None),
+        candidate_faults=candidate_faults,
     )
     check, observables, owned, future_flips, boundary_flips = (
         _build_window_arrays(
@@ -257,6 +278,7 @@ def _placed_faults_for_window(
             unowned_faults=_unowned_faults(
                 fault_rounds,
                 fault_exclusion_ranges,
+                candidate_faults,
             ),
             explicitly_owned_faults=explicitly_owned_faults,
         )

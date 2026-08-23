@@ -107,6 +107,12 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
         )
         if converged_solution_count == 0:
             raise ValueError("converged_solution_count must be positive")
+        pre_iterations = _nonnegative_integer(pre_iterations, "pre_iterations")
+        if pre_iterations == 0:
+            # relay-bp runs its first leg for pre_iter iterations and keeps the
+            # previous call's decoding when that loop never runs
+            # (relay.rs decode_inner), so a zero first leg returns stale state
+            raise ValueError("pre_iterations must be positive")
         self._profile = _RelayProfile(
             alpha=_finite_real(alpha, "alpha", allow_none=True),
             alpha_iteration_scaling_factor=_finite_real(
@@ -114,10 +120,7 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
                 "alpha_iteration_scaling_factor",
             ),
             gamma0=_finite_real(gamma0, "gamma0", allow_none=True),
-            pre_iterations=_nonnegative_integer(
-                pre_iterations,
-                "pre_iterations",
-            ),
+            pre_iterations=pre_iterations,
             relay_set_count=_nonnegative_integer(
                 relay_set_count,
                 "relay_set_count",

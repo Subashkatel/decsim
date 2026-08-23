@@ -12,7 +12,6 @@ def make_fragment(**overrides):
         "patch_id": "patch-a",
         "round_index": 3,
         "bits": (0, 1),
-        "code": "surface_code",
         "size_bits": 2,
         "fragment_index": 0,
     }

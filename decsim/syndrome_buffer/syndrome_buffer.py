@@ -132,7 +132,6 @@ class _RoundSlot:
     state: SyndromeBufferRoundState = SyndromeBufferRoundState.ASSEMBLING
     fragments: list = field(default_factory=list)
     packet: Optional[SyndromeRoundPacket] = None
-    published_tick: Optional[int] = None
 
 
 @dataclass(frozen=True)

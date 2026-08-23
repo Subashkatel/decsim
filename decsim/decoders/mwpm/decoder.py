@@ -97,15 +97,36 @@ class PyMatchingDecoder:
                 faults.check, weights=self._weights_for(faults))
             # PyMatching builds its internal graph lazily and finishes warming
             # only once it has matched real defects; a running software decoder
-            # has the window graph prebuilt and warm, so decode a few defect
-            # pairs before the first timed call.
+            # has the window graph prebuilt and warm, so decode a few defects
+            # before the first timed call. Each warm-up syndrome is the detector
+            # set of one column, which that column alone explains, so it is
+            # satisfiable on any graph (a boundaryless toric component would
+            # reject an arbitrary detector pair).
             import numpy
             detectors = faults.check.shape[0]
-            for first in range(0, min(detectors - 1, 6), 2):
+            warmed = 0
+            for column in range(faults.check.shape[1]):
+                rows = numpy.nonzero(faults.check[:, column])[0]
+                if rows.size == 0:
+                    continue
                 syndrome = numpy.zeros(detectors, dtype=numpy.uint8)
-                syndrome[first] = syndrome[first + 1] = 1
+                syndrome[rows] = 1
                 matching.decode(syndrome)
-            self._matchings[id(faults)] = (weakref.ref(faults), matching)
+                warmed += 1
+                if warmed == 3:
+                    break
+            # the cache entry lives exactly as long as the placed model: id()
+            # values are recycled by CPython, and a dead entry would otherwise
+            # accumulate once per distinct window model of a long run
+            model_identity = id(faults)
+
+            def discard_dead_model(reference) -> None:
+                current = self._matchings.get(model_identity)
+                if current is not None and current[0] is reference:
+                    del self._matchings[model_identity]
+
+            self._matchings[model_identity] = (
+                weakref.ref(faults, discard_dead_model), matching)
         return matching
 
     def _weights_for(self, faults):

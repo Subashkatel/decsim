@@ -347,9 +347,7 @@ class ErrorModelProvider(Protocol):
         fault_model_requirement, fault_exclusion_ranges: tuple,
         window_protocol,
     ) -> list: ...
-    def window_model_for_stream(
-        self, stream_id, window, *, is_last: bool,
-    ): ...
+    def window_model_for_stream(self, stream_id, window): ...
     def strong_window_model_for_operation(
         self, op, window, round_count: int, *,
         fault_model_requirement, exclude_faults_touching=None,

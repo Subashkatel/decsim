@@ -25,7 +25,6 @@ def _placed(check, priors, observables=None):
         priors=np.asarray(priors, dtype=float),
         observables=np.asarray(observables, dtype=np.uint8),
         owned=np.ones(column_count, dtype=bool),
-        future_flips={},
         source_fault_ids=tuple(range(column_count)),
         boundary_flips={},
     )

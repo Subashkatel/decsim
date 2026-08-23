@@ -279,7 +279,6 @@ def fault_model_fingerprint(placed_faults) -> str:
         "priors": placed_faults.priors,
         "observables": placed_faults.observables,
         "owned": placed_faults.owned,
-        "future_flips": placed_faults.future_flips,
         "boundary_flips": placed_faults.boundary_flips,
         "source_fault_ids": placed_faults.source_fault_ids,
     })
@@ -447,11 +446,6 @@ def result_from_selected_faults(
         job.window_id,
         correction=committed.astype(np.uint8),
         logical_observables=tuple(int(bit) for bit in observable_flips),
-        boundary_defects=_defects_from_columns(
-            model,
-            placed_faults.future_flips,
-            committed,
-        ),
         boundary_data=DependencyResidual(
             detector_ids=residual_detector_ids,
             defects=_defects_from_detector_ids(model, residual_detector_ids),
@@ -480,11 +474,3 @@ def _defects_from_detector_ids(model, detector_ids) -> dict | None:
             mask.extend([0] * (position + 1 - len(mask)))
         mask[position] ^= 1
     return defects or None
-
-
-def _defects_from_columns(model, detector_flips, committed) -> dict | None:
-    """Convert selected correction columns into round-indexed detector masks."""
-    return _defects_from_detector_ids(
-        model,
-        _detector_ids_from_columns(detector_flips, committed),
-    )

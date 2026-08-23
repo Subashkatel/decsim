@@ -32,13 +32,12 @@ class WindowPlacementContext:
     """The one window that a fault model is being placed into.
 
     A parameter bundle, not an immutability boundary: frozen=True only prevents
-    rebinding the eight fields, and the list, dict and set members stay exactly
-    as mutable as the objects the caller already owns.
+    rebinding the seven fields, and the list and dict members stay exactly as
+    mutable as the objects the caller already owns.
     """
 
     rows: list[int]
     row_index: dict[int, int]
-    lead_rows: set[int]
     round_of: dict[int, int]
     n_obs: int
     commit_lo: int
@@ -80,36 +79,23 @@ def _detectors_in_window(detectors_by_round: dict, buffer_lo: int,
 def _fault_columns_for_window(
     det_sets: tuple,
     row_index: dict,
-    lead_rows: set,
     committed_elsewhere,
-    *,
-    include_committed_leading: bool,
     candidate_faults=None,
 ) -> list:
-    """Choose candidate columns, excluding causally prior committed faults.
-
-    ``candidate_faults`` lists the faults that can touch this window (every
-    fault touching one of its rounds); None means every fault of the catalog.
-    ``committed_elsewhere`` only needs membership tests.
+    """Choose candidate columns: the faults touching this window's rows that
+    no causally prior window has committed (qLDPC's `d_errors[addressed] =
+    False`). ``candidate_faults`` lists the faults that can touch this window
+    (every fault touching one of its rounds); None means every fault of the
+    catalog. ``committed_elsewhere`` only needs membership tests.
     """
-    columns: list = []
     if candidate_faults is None:
         candidate_faults = range(len(det_sets))
-    for fault_index in candidate_faults:
-        detectors = det_sets[fault_index]
-        touches_window = any(detector_id in row_index for detector_id in detectors)
-        if not touches_window:
-            continue
-
-        if fault_index not in committed_elsewhere:
-            columns.append(fault_index)
-            continue
-
-        touches_leading_buffer = any(detector_id in lead_rows
-                                     for detector_id in detectors)
-        if include_committed_leading and touches_leading_buffer:
-            columns.append(fault_index)
-    return columns
+    return [
+        fault_index
+        for fault_index in candidate_faults
+        if fault_index not in committed_elsewhere
+        and any(detector_id in row_index for detector_id in det_sets[fault_index])
+    ]
 
 
 def _fault_owned_by_window(
@@ -146,16 +132,6 @@ def _fill_detector_and_observable_columns(
         obs[observable_id, column_index] = 1
 
 
-def _future_flips_after_commit(det_sets: tuple, fault_index: int,
-                               context: WindowPlacementContext) -> tuple:
-    """Return detector flips that must be handed to a later window."""
-    if context.is_last:
-        return ()
-    return tuple(detector_id
-                 for detector_id in det_sets[fault_index]
-                 if context.round_of[detector_id] > context.commit_hi)
-
-
 def _build_window_arrays(*, context: WindowPlacementContext, columns: list,
                          det_sets: tuple, obs_sets: tuple,
                          fault_rounds: tuple,
@@ -167,7 +143,6 @@ def _build_window_arrays(*, context: WindowPlacementContext, columns: list,
     check = np.zeros((len(context.rows), len(columns)), dtype=np.uint8)
     obs = np.zeros((context.n_obs, len(columns)), dtype=np.uint8)
     owned = np.zeros(len(columns), dtype=bool)
-    future_flips: dict = {}
     boundary_flips: dict = {}
 
     for column_index, fault_index in enumerate(columns):
@@ -184,17 +159,13 @@ def _build_window_arrays(*, context: WindowPlacementContext, columns: list,
         owned[column_index] = True
         if explicitly_owned_faults is None:
             committed_elsewhere.add(fault_index)
-        beyond_commit = _future_flips_after_commit(
-            det_sets, fault_index, context)
-        if beyond_commit:
-            future_flips[column_index] = beyond_commit
         # Keep the complete global detector effect. The destination intersects
         # it with its own rows, so the same correction can travel left or right.
         detector_effect = tuple(det_sets[fault_index])
         if detector_effect:
             boundary_flips[column_index] = detector_effect
 
-    return check, obs, owned, future_flips, boundary_flips
+    return check, obs, owned, boundary_flips
 
 
 def _validate_fault_exclusion_ranges(fault_exclusion_ranges: tuple) -> None:
@@ -258,16 +229,14 @@ def _placed_faults_for_window(
     columns = _fault_columns_for_window(
         detector_sets,
         context.row_index,
-        context.lead_rows,
         (
             committed_elsewhere
             if explicitly_prior_faults is None
             else explicitly_prior_faults
         ),
-        include_committed_leading=(explicitly_prior_faults is None),
-        candidate_faults=candidate_faults,
+        candidate_faults,
     )
-    check, observables, owned, future_flips, boundary_flips = (
+    check, observables, owned, boundary_flips = (
         _build_window_arrays(
             context=context,
             columns=columns,
@@ -292,7 +261,6 @@ def _placed_faults_for_window(
         ),
         observables=observables,
         owned=owned,
-        future_flips=future_flips,
         source_fault_ids=tuple(columns),
         boundary_flips=boundary_flips,
     )

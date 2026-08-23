@@ -1335,14 +1335,13 @@ def make_placed_model():
         priors=numpy.array([0.1, 0.2]),
         observables=numpy.array([[1, 0]], dtype=numpy.uint8),
         owned=numpy.array([True, False]),
-        future_flips={1: [5]},
         source_fault_ids=[7, 9],
         boundary_flips={0: [0, 1]},
     )
 
 
 def test_placed_fault_model_fields_and_docstring():
-    """A placed fault model carries the representation, matrices, ownership mask, handoff maps and source column ids."""
+    """A placed fault model carries the representation, matrices, ownership mask, handoff map and source column ids."""
     fields = [field.name for field in dataclasses.fields(fault_model_contracts.PlacedFaultModel)]
     assert fields == [
         "representation",
@@ -1350,14 +1349,13 @@ def test_placed_fault_model_fields_and_docstring():
         "priors",
         "observables",
         "owned",
-        "future_flips",
         "source_fault_ids",
         "boundary_flips",
     ]
 
 
 def test_placed_fault_model_freezes_every_field():
-    """A placed fault model freezes its arrays, its column ids and its two flip mappings."""
+    """A placed fault model freezes its arrays, its column ids and its flip mapping."""
     placed = make_placed_model()
     for field_name in ("check", "priors", "observables", "owned"):
         array = getattr(placed, field_name)
@@ -1365,12 +1363,10 @@ def test_placed_fault_model_freezes_every_field():
         with pytest.raises(ValueError):
             array[0] = array[0]
     assert placed.source_fault_ids == (7, 9)
-    assert isinstance(placed.future_flips, MappingProxyType)
     assert isinstance(placed.boundary_flips, MappingProxyType)
-    assert placed.future_flips == {1: (5,)}
     assert placed.boundary_flips == {0: (0, 1)}
     with pytest.raises(TypeError):
-        placed.future_flips[2] = (1,)
+        placed.boundary_flips[2] = (1,)
     with pytest.raises(dataclasses.FrozenInstanceError):
         placed.representation = PHYSICAL
 
@@ -1487,28 +1483,21 @@ def test_detectors_in_window_selects_rows_by_round():
 # --------------------------------------------------------------------------
 
 
-def test_fault_columns_admit_touching_columns_and_leading_re_admissions():
-    """Candidate columns are those touching the window, minus columns committed elsewhere unless they reach the leading buffer."""
+def test_fault_columns_are_touching_columns_not_committed_elsewhere():
+    """Candidate columns are those touching the window minus the columns a prior window committed; a candidate list restricts the search."""
     detector_sets = ((0,), (0, 1), (1, 2), (3,))
     row_index = {0: 0, 1: 1, 2: 2}
-    lead_rows = {0}
-    assert window_placement._fault_columns_for_window(
-        detector_sets, row_index, lead_rows, set(), include_committed_leading=True
-    ) == [0, 1, 2]
-    assert window_placement._fault_columns_for_window(
-        detector_sets, row_index, lead_rows, {1, 2}, include_committed_leading=True
-    ) == [0, 1]
-    assert window_placement._fault_columns_for_window(
-        detector_sets, row_index, lead_rows, {1, 2}, include_committed_leading=False
-    ) == [0]
+    assert window_placement._fault_columns_for_window(detector_sets, row_index, set()) == [0, 1, 2]
+    assert window_placement._fault_columns_for_window(detector_sets, row_index, {1, 2}) == [0]
+    assert window_placement._fault_columns_for_window(detector_sets, row_index, set(), [1, 3]) == [1]
 
 
-def test_leading_buffer_re_admits_committed_columns_only_on_the_incremental_path():
-    """Leading-buffer re-admission happens on the incremental path only, not when predecessors are given explicitly."""
+def test_committed_columns_stay_excluded_on_both_ownership_paths():
+    """A committed column never comes back, whether ownership is incremental or given explicitly (qLDPC: addressed errors are removed from every later window)."""
     plan = [(1, 1, 2, 2), (2, 3, 4, 4)]
     incremental = chain_models(plan)[1].require_faults(GRAPHLIKE)
-    assert incremental.source_fault_ids == (1, 2, 3, 4)
-    assert incremental.owned.tolist() == [False, False, True, True]
+    assert incremental.source_fault_ids == (3, 4)
+    assert incremental.owned.tolist() == [True, True]
     dependency = chain_models(plan, dependency_edges=((0, 1),))[1].require_faults(
         GRAPHLIKE
     )
@@ -1563,27 +1552,11 @@ def test_detector_bits_are_local_but_observable_bits_are_unconditional():
     assert observables.tolist() == [[0], [0], [1]]
 
 
-def test_future_flips_are_strictly_after_the_commit_region():
-    """Future flips are the detectors later than the commit region, and the terminal window hands nothing on."""
-    det_sets = ((0, 1, 2),)
-    round_of = {0: 1, 1: 2, 2: 3}
-    assert window_placement._future_flips_after_commit(
-        det_sets, 0, placement_context(round_of=round_of, commit_hi=2, is_last=False)
-    ) == (2,)
-    assert window_placement._future_flips_after_commit(
-        det_sets, 0, placement_context(round_of=round_of, commit_hi=2, is_last=True)
-    ) == ()
-    assert window_placement._future_flips_after_commit(
-        det_sets, 0, placement_context(round_of=round_of, commit_hi=3, is_last=False)
-    ) == ()
-
-
 def placement_context(**overrides):
     """Build one window placement context for direct calls into the placement helpers."""
     fields = dict(
         rows=[0, 1],
         row_index={0: 0, 1: 1},
-        lead_rows=set(),
         round_of={0: 1, 1: 2, 2: 3},
         n_obs=1,
         commit_lo=1,
@@ -1609,10 +1582,10 @@ def build_window_arrays_case(context_overrides=None, **overrides):
     return arguments
 
 
-def test_build_window_arrays_produces_five_aligned_outputs():
-    """One pass builds the check, observable and ownership arrays plus the future and boundary flip maps."""
+def test_build_window_arrays_produces_four_aligned_outputs():
+    """One pass builds the check, observable and ownership arrays plus the boundary flip map."""
     arguments = build_window_arrays_case()
-    check, observables, owned, future_flips, boundary_flips = (
+    check, observables, owned, boundary_flips = (
         window_placement._build_window_arrays(**arguments)
     )
     assert check.shape == (2, 2)
@@ -1622,7 +1595,6 @@ def test_build_window_arrays_produces_five_aligned_outputs():
     assert observables.tolist() == [[1, 0]]
     assert owned.dtype == bool
     assert owned.tolist() == [True, True]
-    assert future_flips == {1: (2,)}
     assert boundary_flips == {0: (0,), 1: (1, 2)}
     assert arguments["committed_elsewhere"] == {0, 1}
 
@@ -1630,7 +1602,7 @@ def test_build_window_arrays_produces_five_aligned_outputs():
 def test_owned_columns_are_not_recorded_on_the_explicit_path():
     """With an explicit owner set, ownership is membership and no incremental commitment state is recorded."""
     arguments = build_window_arrays_case(explicitly_owned_faults={1})
-    _, _, owned, _, _ = window_placement._build_window_arrays(**arguments)
+    _, _, owned, _ = window_placement._build_window_arrays(**arguments)
     assert owned.tolist() == [False, True]
     assert arguments["committed_elsewhere"] == set()
 
@@ -1644,11 +1616,10 @@ def test_detectorless_owned_column_records_no_boundary_flip():
         obs_sets=((),),
         fault_rounds=((),),
     )
-    _, _, owned, future_flips, boundary_flips = window_placement._build_window_arrays(
+    _, _, owned, boundary_flips = window_placement._build_window_arrays(
         **arguments
     )
     assert owned.tolist() == [True]
-    assert future_flips == {}
     assert boundary_flips == {}
 
 
@@ -1870,16 +1841,14 @@ def test_ownership_state_is_kept_per_representation():
     assert len(slicer.catalogs[PHYSICAL].detector_sets) == 2
 
 
-def test_placement_context_is_a_frozen_eight_field_bundle_without_copies():
-    """The window placement context is a frozen eight-field bundle that normalises, copies and freezes nothing."""
+def test_placement_context_is_a_frozen_seven_field_bundle_without_copies():
+    """The window placement context is a frozen seven-field bundle that normalises, copies and freezes nothing."""
     rows = [1, 2]
     row_index = {1: 0, 2: 1}
-    lead_rows = {1}
     round_of = {1: 1, 2: 2}
     context = window_placement.WindowPlacementContext(
         rows=rows,
         row_index=row_index,
-        lead_rows=lead_rows,
         round_of=round_of,
         n_obs=1,
         commit_lo=1,
@@ -1890,7 +1859,6 @@ def test_placement_context_is_a_frozen_eight_field_bundle_without_copies():
     assert [field.name for field in fields] == [
         "rows",
         "row_index",
-        "lead_rows",
         "round_of",
         "n_obs",
         "commit_lo",
@@ -1901,12 +1869,9 @@ def test_placement_context_is_a_frozen_eight_field_bundle_without_copies():
     assert all(field.default_factory is dataclasses.MISSING for field in fields)
     assert context.rows is rows
     assert context.row_index is row_index
-    assert context.lead_rows is lead_rows
     assert context.round_of is round_of
     rows.append(3)
-    lead_rows.add(2)
     assert context.rows == [1, 2, 3]
-    assert context.lead_rows == {1, 2}
     with pytest.raises(dataclasses.FrozenInstanceError):
         context.is_last = True
     assert "__post_init__" not in vars(window_placement.WindowPlacementContext)
@@ -1957,7 +1922,6 @@ def test_slice_window_builds_one_shared_placement_context(monkeypatch):
     assert shared.row_index == {
         detector_id: row for row, detector_id in enumerate(model.detector_ids)
     }
-    assert shared.lead_rows == set()
     assert shared.round_of is slicer.round_of
     assert shared.n_obs == slicer.n_obs
     assert (shared.commit_lo, shared.commit_hi, shared.is_last) == (1, 2, False)
@@ -1992,14 +1956,12 @@ def test_slice_window_products_are_complete():
     assert first_faults.check.tolist() == [[1, 1, 0], [0, 1, 1]]
     assert first_faults.observables.tolist() == [[1, 0, 0]]
     assert first_faults.owned.tolist() == [True, True, True]
-    assert first_faults.future_flips == {2: (2,)}
     assert first_faults.boundary_flips == {0: (0,), 1: (0, 1), 2: (1, 2)}
     assert first.defect_positions == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
     last_faults = last.require_faults(GRAPHLIKE)
     assert last.detector_ids == (2, 3)
     assert last_faults.source_fault_ids == (3, 4)
     assert last_faults.owned.tolist() == [True, True]
-    assert last_faults.future_flips == {}
     assert last.defect_positions == {2: (3, 0), 3: (4, 0)}
 
 
@@ -2486,8 +2448,8 @@ def test_real_repetition_windows_partition_and_preserve_the_global_faults(
     assert sorted(owned_columns) == list(range(len(detector_sets)))
 
 
-def test_real_repetition_future_flips_hand_on_later_detectors(repetition_circuit):
-    """Owned columns of a real circuit hand their post-commit detectors to the next window."""
+def test_real_repetition_boundary_flips_carry_the_full_detector_effect(repetition_circuit):
+    """Owned columns of a real circuit carry their complete global detector effect, so the next window can take the post-commit part."""
     round_of = detector_chronology.resolve_detector_rounds(
         repetition_circuit, None, REPETITION_ROUNDS
     )
@@ -2504,17 +2466,20 @@ def test_real_repetition_future_flips_hand_on_later_detectors(repetition_circuit
     for local_column, global_column in enumerate(first_faults.source_fault_ids):
         if not first_faults.owned[local_column]:
             continue
-        expected = tuple(
+        assert first_faults.boundary_flips[local_column] == tuple(detector_sets[global_column])
+        beyond_commit = [
             detector_id
             for detector_id in detector_sets[global_column]
             if round_of[detector_id] > 2
-        )
-        assert first_faults.future_flips.get(local_column, ()) == expected
-        handed_on = handed_on or bool(expected)
+        ]
+        handed_on = handed_on or bool(beyond_commit)
         for detector_id in detector_sets[global_column]:
             assert detector_id in first.defect_positions
     assert handed_on
-    assert last.require_faults(GRAPHLIKE).future_flips == {}
+    last_faults = last.require_faults(GRAPHLIKE)
+    assert set(last_faults.boundary_flips) == {
+        column for column, owned in enumerate(last_faults.owned) if owned
+    }
 
 
 def test_real_surface_slicing_preserves_the_global_faults(surface_circuit):

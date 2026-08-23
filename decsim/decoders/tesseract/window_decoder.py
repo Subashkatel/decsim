@@ -349,8 +349,6 @@ class TesseractWindowDecoder(_AtomicRunSeedConsumer):
 
         try:
             compiled = self._compiled_decoder(model, physical_faults)
-        except ImportError:
-            raise
         except _BackendConstructionFailed:
             coordinates = _normalized_coordinates(
                 model,
@@ -528,8 +526,6 @@ class TesseractWindowDecoder(_AtomicRunSeedConsumer):
                 sparsify_reactivate_limit=-1,
             )
             backend_decoder = upstream_configuration.compile_decoder()
-        except ImportError:
-            raise
         except Exception as error:
             raise _BackendConstructionFailed from error
         compiled = _CompiledTesseract(

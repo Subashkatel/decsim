@@ -120,15 +120,9 @@ class WindowSlicer:
             detector_id: row_number
             for row_number, detector_id in enumerate(rows)
         }
-        lead_rows = {
-            detector_id
-            for detector_id in rows
-            if self.round_of[detector_id] < commit_lo
-        }
         context = WindowPlacementContext(
             rows=rows,
             row_index=row_index,
-            lead_rows=lead_rows,
             round_of=self.round_of,
             n_obs=self.n_obs,
             commit_lo=commit_lo,

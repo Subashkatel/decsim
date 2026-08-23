@@ -19,9 +19,9 @@ class RecordingWindowManager:
         self.lifecycle = None
 
     def create_dynamic_window(self, stream_id, window_index, commit_lo,
-                              commit_hi, buffer_hi, *, is_last):
+                              commit_hi, buffer_hi):
         self.events.append(("create", stream_id, window_index, commit_lo,
-                            commit_hi, buffer_hi, is_last))
+                            commit_hi, buffer_hi))
         if self.fail_creation:
             raise RuntimeError("creation failed")
 
@@ -192,9 +192,9 @@ def test_arithmetic_windows_grow_online_with_commit_and_buffer_extents():
     lifecycle.grow("stream")
 
     assert manager.events == [
-        ("create", "stream", 0, 1, 3, 5, False),
-        ("create", "stream", 1, 4, 6, 8, False),
-        ("create", "stream", 2, 7, 9, 11, False),
+        ("create", "stream", 0, 1, 3, 5),
+        ("create", "stream", 1, 4, 6, 8),
+        ("create", "stream", 2, 7, 9, 11),
     ]
 
 
@@ -214,8 +214,8 @@ def test_finite_geometry_growth_trusts_order_and_advances_after_creation():
     lifecycle.grow("stream", rounds_to_plan=4)
 
     assert manager.events[-2:] == [
-        ("create", "stream", 0, 4, 6, 8, False),
-        ("create", "stream", 1, 1, 3, 5, True),
+        ("create", "stream", 0, 4, 6, 8),
+        ("create", "stream", 1, 1, 3, 5),
     ]
 
 
@@ -229,7 +229,7 @@ def test_growth_and_commit_end_deliberately_trust_malformed_geometry_values():
 
     lifecycle.grow("stream", rounds_to_plan=0)
     assert manager.events == [
-        ("create", "stream", 0, -2, -5, -9, True),
+        ("create", "stream", 0, -2, -5, -9),
     ]
     state = {
         "commit_rounds": 3,
@@ -266,8 +266,8 @@ def test_arrival_update_grows_then_auto_seals_at_a_finite_source_limit():
     lifecycle.maybe_update("stream")
 
     assert manager.events == [
-        ("create", "stream", 0, 1, 3, 5, False),
-        ("create", "stream", 1, 4, 5, 5, True),
+        ("create", "stream", 0, 1, 3, 5),
+        ("create", "stream", 1, 4, 5, 5),
         ("validate", "stream", 5),
         ("check", "stream", True),
         ("finish",),
@@ -286,8 +286,8 @@ def test_successful_seal_preserves_geometry_and_repeated_calls_are_noops():
 
     expected = [
         ("validate", "stream", 5),
-        ("create", "stream", 0, 1, 3, 5, False),
-        ("create", "stream", 1, 4, 5, 7, False),
+        ("create", "stream", 0, 1, 3, 5),
+        ("create", "stream", 1, 4, 5, 7),
         ("trim", "stream", 5, 2),
         ("check", "stream", True),
         ("finish",),

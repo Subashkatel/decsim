@@ -98,7 +98,7 @@ class SoftOutputDecoder:
         if model is None:
             return None
         faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
-        obs = np.asarray(faults.observables)
+        obs = faults.observables.toarray()
         if obs.shape[0] != 1 or not obs.any():
             return None
         return self.metric_cls.from_window_model(model)

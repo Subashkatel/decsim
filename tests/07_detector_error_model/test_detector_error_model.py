@@ -989,7 +989,7 @@ def test_linked_catalogs_build_a_verified_link():
     assert physical.detector_sets == ((0, 1), (1, 3))
     assert physical.representation is PHYSICAL
     assert link.shape == (3, 2)
-    assert link.tolist() == [[1, 0], [0, 1], [0, 1]]
+    assert link.toarray().tolist() == [[1, 0], [0, 1], [0, 1]]
 
 
 def test_linked_catalogs_retain_a_maximum_detector_canceled_from_the_aggregate():
@@ -1011,7 +1011,7 @@ def test_linked_catalogs_retain_a_maximum_detector_canceled_from_the_aggregate()
         priors=(0.25,),
     )
     assert link.dtype == numpy.uint8
-    assert link.tolist() == [[1], [1]]
+    assert link.toarray().tolist() == [[1], [1]]
     assert max(detector for detectors in graphlike.detector_sets for detector in detectors) == 4
     assert all(4 not in detectors for detectors in physical.detector_sets)
 
@@ -1026,7 +1026,7 @@ def test_linked_catalogs_keep_distinct_decompositions_of_one_aggregate():
     assert physical.detector_sets == ((1, 3), (1, 3))
     assert physical.priors == (0.2, 0.3)
     assert link.shape[1] == 2
-    assert link.tolist() == [[1, 0], [1, 0], [0, 1], [0, 1]]
+    assert link.toarray().tolist() == [[1, 0], [1, 0], [0, 1], [0, 1]]
 
 
 def test_linked_catalogs_reject_disagreeing_physical_probabilities():
@@ -1104,19 +1104,17 @@ def test_local_projection_is_the_verified_detector_row_slice():
     graphlike = window.require_faults(GRAPHLIKE)
     physical = window.require_faults(PHYSICAL)
     projection = window.physical_to_graphlike_detector_projection
-    expected = numpy.asarray(slicer.catalog_link)[
+    expected = slicer.catalog_link.toarray()[
         numpy.ix_(graphlike.source_fault_ids, physical.source_fault_ids)
     ]
-    assert projection.tolist() == expected.tolist()
+    assert projection.toarray().tolist() == expected.tolist()
     assert projection.shape == (
         graphlike.check.shape[1],
         physical.check.shape[1],
     )
-    derived = (
-        numpy.asarray(graphlike.check, dtype=numpy.uint64)
-        @ projection.astype(numpy.uint64)
-    ) % 2
-    assert numpy.array_equal(derived, physical.check)
+    derived = (graphlike.check.toarray().astype(numpy.uint64)
+               @ projection.toarray().astype(numpy.uint64)) % 2
+    assert numpy.array_equal(derived, physical.check.toarray())
 
 
 # --------------------------------------------------------------------------
@@ -1355,13 +1353,19 @@ def test_placed_fault_model_fields_and_docstring():
 
 
 def test_placed_fault_model_freezes_every_field():
-    """A placed fault model freezes its arrays, its column ids and its flip mapping."""
+    """A placed fault model freezes its arrays, its sparse matrices, its column ids and its flip mapping."""
     placed = make_placed_model()
-    for field_name in ("check", "priors", "observables", "owned"):
+    for field_name in ("priors", "owned"):
         array = getattr(placed, field_name)
         assert array.flags.writeable is False
         with pytest.raises(ValueError):
             array[0] = array[0]
+    for field_name in ("check", "observables"):
+        matrix = getattr(placed, field_name)
+        assert matrix.format == "csc" and matrix.dtype == numpy.uint8
+        assert matrix.data.flags.writeable is False
+        assert matrix.indices.flags.writeable is False
+    assert placed.check.toarray().tolist() == [[1, 0], [1, 1]]
     assert placed.source_fault_ids == (7, 9)
     assert isinstance(placed.boundary_flips, MappingProxyType)
     assert placed.boundary_flips == {0: (0, 1)}
@@ -1388,8 +1392,8 @@ def test_window_error_model_fields_and_deliberate_non_freezing():
     assert window.defect_positions[99] == (9, 9)
 
 
-def test_window_error_model_freezes_projection_without_copying():
-    """A window model retains its projection array and prevents external item assignment."""
+def test_window_error_model_freezes_its_projection_as_sparse():
+    """A window model holds its projection as a read-only csc matrix of the same entries."""
     projection = numpy.array([[True, False], [False, True]])
 
     window = fault_model_contracts.WindowErrorModel(
@@ -1401,10 +1405,12 @@ def test_window_error_model_freezes_projection_without_copying():
         physical_to_graphlike_detector_projection=projection,
     )
 
-    assert window.physical_to_graphlike_detector_projection is projection
-    assert projection.flags.writeable is False
+    frozen = window.physical_to_graphlike_detector_projection
+    assert frozen.format == "csc"
+    assert frozen.toarray().tolist() == [[1, 0], [0, 1]]
+    assert frozen.data.flags.writeable is False
     with pytest.raises(ValueError):
-        projection[0, 0] = False
+        frozen.data[0] = 0
 
 
 def test_window_error_model_accepts_no_projection():
@@ -1537,19 +1543,18 @@ def test_fault_owned_by_window_precedence(
 
 def test_detector_bits_are_local_but_observable_bits_are_unconditional():
     """A column sets detector bits only for rows in this window but sets every observable bit."""
-    check = numpy.zeros((2, 1), dtype=numpy.uint8)
-    observables = numpy.zeros((3, 1), dtype=numpy.uint8)
-    window_placement._fill_detector_and_observable_columns(
-        check,
-        observables,
-        column_index=0,
-        fault_index=0,
+    check, observables, _, _ = window_placement._build_window_arrays(
+        context=placement_context(rows=[9, 0], row_index={0: 1}, n_obs=3),
+        columns=[0],
         det_sets=((0, 5),),
         obs_sets=((2,),),
-        context=placement_context(row_index={0: 1}),
+        fault_rounds=((1, 3),),
+        committed_elsewhere=set(),
+        unowned_faults=set(),
+        explicitly_owned_faults=None,
     )
-    assert check.tolist() == [[0], [1]]
-    assert observables.tolist() == [[0], [0], [1]]
+    assert check.toarray().tolist() == [[0], [1]]
+    assert observables.toarray().tolist() == [[0], [0], [1]]
 
 
 def placement_context(**overrides):
@@ -1590,9 +1595,9 @@ def test_build_window_arrays_produces_four_aligned_outputs():
     )
     assert check.shape == (2, 2)
     assert check.dtype == numpy.uint8
-    assert check.tolist() == [[1, 0], [0, 1]]
+    assert check.toarray().tolist() == [[1, 0], [0, 1]]
     assert observables.shape == (1, 2)
-    assert observables.tolist() == [[1, 0]]
+    assert observables.toarray().tolist() == [[1, 0]]
     assert owned.dtype == bool
     assert owned.tolist() == [True, True]
     assert boundary_flips == {0: (0,), 1: (1, 2)}
@@ -1953,8 +1958,8 @@ def test_slice_window_products_are_complete():
     assert first.detector_ids == (0, 1)
     assert first.detector_coordinates == ((0.0, 0.0), (0.0, 1.0))
     assert first_faults.source_fault_ids == (0, 1, 2)
-    assert first_faults.check.tolist() == [[1, 1, 0], [0, 1, 1]]
-    assert first_faults.observables.tolist() == [[1, 0, 0]]
+    assert first_faults.check.toarray().tolist() == [[1, 1, 0], [0, 1, 1]]
+    assert first_faults.observables.toarray().tolist() == [[1, 0, 0]]
     assert first_faults.owned.tolist() == [True, True, True]
     assert first_faults.boundary_flips == {0: (0,), 1: (0, 1), 2: (1, 2)}
     assert first.defect_positions == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
@@ -2266,7 +2271,7 @@ def test_source_fault_ids_are_the_only_catalog_index_carrier():
         global_detectors = set(catalog_columns[global_column])
         local_detectors = {
             models[1].detector_ids[row]
-            for row in numpy.nonzero(last.check[:, local_column])[0]
+            for row in last.check[:, local_column].nonzero()[0]
         }
         assert local_detectors == global_detectors & set(models[1].detector_ids)
 
@@ -2431,12 +2436,12 @@ def test_real_repetition_windows_partition_and_preserve_the_global_faults(
             global_detectors = set(detector_sets[global_column])
             local_detectors = {
                 rows[row]
-                for row in numpy.nonzero(faults.check[:, local_column])[0]
+                for row in faults.check[:, local_column].nonzero()[0]
             }
             assert local_detectors == global_detectors & set(rows)
             local_observables = set(
                 int(observable)
-                for observable in numpy.nonzero(faults.observables[:, local_column])[0]
+                for observable in faults.observables[:, local_column].nonzero()[0]
             )
             assert local_observables == set(observable_sets[global_column])
             assert faults.priors[local_column] == pytest.approx(priors[global_column])
@@ -2501,12 +2506,12 @@ def test_real_surface_slicing_preserves_the_global_faults(surface_circuit):
         for local_column, global_column in enumerate(faults.source_fault_ids):
             local_detectors = {
                 rows[row]
-                for row in numpy.nonzero(faults.check[:, local_column])[0]
+                for row in faults.check[:, local_column].nonzero()[0]
             }
             assert local_detectors == set(detector_sets[global_column]) & set(rows)
             local_observables = set(
                 int(observable)
-                for observable in numpy.nonzero(faults.observables[:, local_column])[0]
+                for observable in faults.observables[:, local_column].nonzero()[0]
             )
             assert local_observables == set(observable_sets[global_column])
             if faults.owned[local_column]:
@@ -2530,11 +2535,9 @@ def test_real_repetition_linked_views_agree_with_both_stim_models(repetition_cir
         len(graphlike.source_fault_ids),
         len(physical.source_fault_ids),
     )
-    derived = (
-        numpy.asarray(graphlike.check, dtype=numpy.uint64)
-        @ projection.astype(numpy.uint64)
-    ) % 2
-    assert numpy.array_equal(derived, physical.check)
+    derived = (graphlike.check.toarray().astype(numpy.uint64)
+               @ projection.toarray().astype(numpy.uint64)) % 2
+    assert numpy.array_equal(derived, physical.check.toarray())
     fault_identity_validation.validate_belief_matching_matrices(
         graphlike.check,
         graphlike.observables,

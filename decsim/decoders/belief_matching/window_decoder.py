@@ -98,7 +98,7 @@ def belief_matching_window_decoder(max_iter: int = 30, bp_method: str = "product
         bp, edge_from_hyperedge = _cache_entry(model, cache, max_iter, bp_method)
         edge_posteriors = _edge_posteriors(bp, edge_from_hyperedge, syndrome)
         matching = pymatching.Matching.from_check_matrix(
-            graphlike.check,
+            graphlike.check.copy(),
             weights=-np.log(edge_posteriors))
         return np.asarray(matching.decode(syndrome), dtype=np.uint8)
 

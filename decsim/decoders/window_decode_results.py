@@ -202,6 +202,7 @@ class BackendDecodeOutcome:
 def _canonical_bytes(value) -> bytes:
     """Encode supported scientific values without process-local identities."""
     import numpy as np
+    from scipy.sparse import issparse
 
     if value is None:
         return b"n"
@@ -222,6 +223,14 @@ def _canonical_bytes(value) -> bytes:
         return b"s" + str(len(encoded)).encode("ascii") + b":" + encoded
     if isinstance(value, bytes):
         return b"y" + str(len(value)).encode("ascii") + b":" + value
+    if issparse(value):
+        matrix = value.tocsc().copy()
+        matrix.sum_duplicates()
+        matrix.sort_indices()
+        return b"c" + _canonical_bytes(tuple(matrix.shape)) + \
+            _canonical_bytes(np.ascontiguousarray(matrix.indptr)) + \
+            _canonical_bytes(np.ascontiguousarray(matrix.indices)) + \
+            _canonical_bytes(np.ascontiguousarray(matrix.data))
     if isinstance(value, np.ndarray):
         if value.dtype.hasobject:
             raise TypeError("object arrays cannot be fingerprinted")
@@ -299,10 +308,9 @@ def validate_backend_outcome(
         correction = np.asarray(outcome.physical_correction, dtype=np.uint8)
         if correction.shape != (placed_faults.check.shape[1],):
             raise ValueError("backend correction has the wrong fault-model arity")
-        reconstructed = (
-            np.asarray(placed_faults.check, dtype=np.uint64)
-            @ correction.astype(np.uint64)
-        ) % 2
+        reconstructed = np.asarray(
+            placed_faults.check.astype(np.int64) @ correction.astype(np.int64)
+        ).ravel() % 2
         if outcome.reconstructed_syndrome is not None and tuple(
             int(bit) for bit in reconstructed
         ) != outcome.reconstructed_syndrome:
@@ -317,10 +325,9 @@ def validate_backend_outcome(
                 "component correction requires a physical correction and valid "
                 "local projection"
             )
-        component = (
-            np.asarray(projection, dtype=np.uint64)
-            @ correction.astype(np.uint64)
-        ) % 2
+        component = np.asarray(
+            projection.astype(np.int64) @ correction.astype(np.int64)
+        ).ravel() % 2
         if tuple(int(bit) for bit in component) != outcome.component_correction:
             raise ValueError("component correction does not match the local projection")
 
@@ -444,9 +451,9 @@ def result_from_selected_faults(
             f"expected ({placed_faults.check.shape[1]},)"
         )
     committed = selected.astype(bool) & placed_faults.owned
-    observable_flips = (
-        placed_faults.observables @ committed.astype(np.uint8)
-    ) % 2
+    observable_flips = np.asarray(
+        placed_faults.observables.astype(np.int64) @ committed.astype(np.int64)
+    ).ravel() % 2
     residual_detector_ids = _detector_ids_from_columns(
         placed_faults.boundary_flips,
         committed,

@@ -70,15 +70,29 @@ def validate_graphlike_fault(
 
 
 def _binary_matrix(value, *, location: str, name: str):
-    """Return one rank-2 binary matrix without changing its identities."""
+    """Return one rank-2 binary matrix as a csc_matrix with sorted indices,
+    without changing its identities; dense input is converted."""
     import numpy as np
+    from scipy.sparse import csc_matrix, issparse
 
-    matrix = np.asarray(value)
-    if matrix.ndim != 2:
-        raise ValueError(f"{location} {name} must be a rank-2 matrix")
-    if not np.all((matrix == 0) | (matrix == 1)):
+    if issparse(value):
+        matrix = value.tocsc().copy()   # the placed matrices are frozen; normalise a copy
+    else:
+        dense = np.asarray(value)
+        if dense.ndim != 2:
+            raise ValueError(f"{location} {name} must be a rank-2 matrix")
+        matrix = csc_matrix(dense)
+    matrix.sum_duplicates()
+    matrix.sort_indices()
+    if not np.all((matrix.data == 0) | (matrix.data == 1)):
         raise ValueError(f"{location} {name} must contain only binary values")
+    matrix.eliminate_zeros()
     return matrix.astype(np.uint8, copy=False)
+
+
+def _column_rows(matrix, column: int):
+    """Sorted row indices of one column of a csc_matrix."""
+    return matrix.indices[matrix.indptr[column]:matrix.indptr[column + 1]]
 
 
 def _placed_matrix_faults(
@@ -108,10 +122,8 @@ def _placed_matrix_faults(
         )
     faults = []
     for fault_index in range(check_matrix.shape[1]):
-        detector_ids = np.nonzero(check_matrix[:, fault_index])[0]
-        logical_observable_ids = np.nonzero(
-            observable_matrix[:, fault_index]
-        )[0]
+        detector_ids = _column_rows(check_matrix, fault_index)
+        logical_observable_ids = _column_rows(observable_matrix, fault_index)
         faults.append(
             (
                 fault_index,
@@ -228,21 +240,18 @@ def validate_belief_matching_matrices(
         location=f"{location} component graph",
     )
     for physical_index in range(hyperedge_check_matrix.shape[1]):
-        component_indices = np.nonzero(
-            hyperedge_to_edge_matrix[:, physical_index]
-        )[0]
-        derived_detector_bits = (
-            check_matrix[:, component_indices].sum(axis=1) % 2
-        )
-        stored_detector_bits = hyperedge_check_matrix[:, physical_index]
+        component_indices = _column_rows(hyperedge_to_edge_matrix, physical_index)
+        derived_detector_bits = np.asarray(
+            check_matrix[:, component_indices].sum(axis=1)).ravel() % 2
+        stored_detector_bits = np.zeros(check_matrix.shape[0], dtype=np.uint8)
+        stored_detector_bits[_column_rows(hyperedge_check_matrix, physical_index)] = 1
         if not np.array_equal(derived_detector_bits, stored_detector_bits):
             raise ValueError(
                 f"{location} physical column {physical_index} detector "
                 "identity does not equal its component XOR"
             )
-        derived_logical_bits = (
-            observable_matrix[:, component_indices].sum(axis=1) % 2
-        )
+        derived_logical_bits = np.asarray(
+            observable_matrix[:, component_indices].sum(axis=1)).ravel() % 2
         identity = validate_fault_identity(
             np.nonzero(stored_detector_bits)[0],
             np.nonzero(derived_logical_bits)[0],

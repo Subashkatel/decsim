@@ -119,36 +119,32 @@ def _fault_owned_by_window(
                for round_index in fault_rounds[fault_index])
 
 
-def _fill_detector_and_observable_columns(
-    check, obs, *, column_index: int, fault_index: int, det_sets: tuple,
-    obs_sets: tuple, context: WindowPlacementContext,
-) -> None:
-    """Fill the detector and observable entries for one fault column."""
-    for detector_id in det_sets[fault_index]:
-        if detector_id in context.row_index:
-            check[context.row_index[detector_id], column_index] = 1
-
-    for observable_id in obs_sets[fault_index]:
-        obs[observable_id, column_index] = 1
-
-
 def _build_window_arrays(*, context: WindowPlacementContext, columns: list,
                          det_sets: tuple, obs_sets: tuple,
                          fault_rounds: tuple,
                          committed_elsewhere: set, unowned_faults: set,
                          explicitly_owned_faults: Optional[set]) -> tuple:
-    """Build check, observable, ownership, and residual-defect arrays."""
+    """Build the sparse check and observable matrices, the ownership mask and
+    the residual-defect map; entries are collected as (row, column) pairs and
+    assembled once, the way qLDPC builds its DetectorErrorModelArrays."""
     import numpy as np
+    from scipy.sparse import csc_matrix
 
-    check = np.zeros((len(context.rows), len(columns)), dtype=np.uint8)
-    obs = np.zeros((context.n_obs, len(columns)), dtype=np.uint8)
+    check_rows: list = []
+    check_columns: list = []
+    observable_rows: list = []
+    observable_columns: list = []
     owned = np.zeros(len(columns), dtype=bool)
     boundary_flips: dict = {}
 
     for column_index, fault_index in enumerate(columns):
-        _fill_detector_and_observable_columns(
-            check, obs, column_index=column_index, fault_index=fault_index,
-            det_sets=det_sets, obs_sets=obs_sets, context=context)
+        for detector_id in det_sets[fault_index]:
+            if detector_id in context.row_index:
+                check_rows.append(context.row_index[detector_id])
+                check_columns.append(column_index)
+        for observable_id in obs_sets[fault_index]:
+            observable_rows.append(observable_id)
+            observable_columns.append(column_index)
 
         owns_fault = _fault_owned_by_window(
             fault_index, fault_rounds, committed_elsewhere, unowned_faults,
@@ -165,6 +161,15 @@ def _build_window_arrays(*, context: WindowPlacementContext, columns: list,
         if detector_effect:
             boundary_flips[column_index] = detector_effect
 
+    check = csc_matrix(
+        (np.ones(len(check_rows), dtype=np.uint8), (check_rows, check_columns)),
+        shape=(len(context.rows), len(columns)),
+    )
+    obs = csc_matrix(
+        (np.ones(len(observable_rows), dtype=np.uint8),
+         (observable_rows, observable_columns)),
+        shape=(context.n_obs, len(columns)),
+    )
     return check, obs, owned, boundary_flips
 
 
@@ -291,15 +296,14 @@ def _local_physical_to_graphlike_detector_projection(
     """
     import numpy as np
 
-    local_link = np.asarray(catalog_link, dtype=np.uint8)[np.ix_(
-        graphlike.source_fault_ids,
-        physical.source_fault_ids,
-    )]
+    local_link = catalog_link[list(graphlike.source_fault_ids), :][
+        :, list(physical.source_fault_ids)].tocsc()
     detector_identity = (
-        np.asarray(graphlike.check, dtype=np.uint64)
-        @ local_link.astype(np.uint64)
-    ) % 2
-    if not np.array_equal(detector_identity, physical.check):
+        graphlike.check.astype(np.int64) @ local_link.astype(np.int64)
+    )
+    detector_identity.data %= 2
+    detector_identity.eliminate_zeros()
+    if (detector_identity != physical.check.astype(np.int64)).nnz:
         raise ValueError(
             "local physical detector identities do not equal their "
             "graphlike component XOR"

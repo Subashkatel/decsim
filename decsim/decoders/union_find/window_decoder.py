@@ -62,6 +62,9 @@ class UnionFindHardEvidence:
     edge_intervals: tuple[Open | Closed, ...]
     erasure_forest_faults: tuple[int, ...]
     logical_observables: tuple[int, ...]
+    # detectors the best-effort correction leaves unexplained: an odd cluster
+    # that ran out of edges before reaching another defect or the boundary
+    unmatched_detectors: tuple[int, ...] = ()
 
 
 class _DisjointSet:
@@ -361,13 +364,10 @@ def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
                     ((remaining_ticks + rate - 1) // rate, edge_index)
                 )
         if not candidates:
-            active_roots = tuple(
-                sorted(root for root, active in frozen_active.items() if active)
-            )
-            raise RuntimeError(
-                "odd Union-Find cluster has no outward graph edge: "
-                f"roots {active_roots}"
-            )
+            # every remaining odd cluster has no outward edge left: the
+            # syndrome is not satisfiable inside this window; stop growing and
+            # peel what there is (PECOS and ldpc do the same: best effort)
+            break
         elapsed = min(candidate for candidate, _edge_index in candidates)
         if elapsed <= 0:
             raise RuntimeError(
@@ -524,10 +524,8 @@ def _peel_forest(
             parent = parents[node]
             assert parent is not None
             residual[parent] ^= 1
-        if root != boundary_node and residual[root]:
-            raise RuntimeError(
-                f"Union-Find erasure retained odd root detector {root}"
-            )
+        # an odd component without the boundary keeps its root defect
+        # unmatched; the caller reports it through unmatched_detectors
     return tuple(sorted(selected_edges))
 
 
@@ -564,14 +562,9 @@ def _decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
             reproduced[edge.detector_a] ^= 1
         if edge.detector_b != BOUNDARY:
             reproduced[edge.detector_b] ^= 1
-    if not np.array_equal(reproduced, syndrome_array):
-        unmatched = tuple(
-            int(value) for value in np.nonzero(reproduced ^ syndrome_array)[0]
-        )
-        raise RuntimeError(
-            "Union-Find peeling correction does not reproduce the syndrome; "
-            f"unmatched detectors {unmatched}"
-        )
+    unmatched_detectors = tuple(
+        int(value) for value in np.nonzero(reproduced ^ syndrome_array)[0]
+    )
 
     logical_observables = tuple(
         sum(
@@ -596,6 +589,7 @@ def _decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
             graph.edges[index].fault_index for index in forest
         ),
         logical_observables=logical_observables,
+        unmatched_detectors=unmatched_detectors,
     )
 
 

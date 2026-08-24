@@ -63,7 +63,7 @@ class TimingOnlyDevice:
                                     window_protocol) -> list:
         return []
 
-    def window_model_for_stream(self, stream_id, window, *, is_last: bool):
+    def window_model_for_stream(self, stream_id, window):
         return None
 
     def strong_window_model_for_operation(self, op: Operation, window,
@@ -160,7 +160,7 @@ class SyndromeBitDevice(_RandomSeedConsumer):
         """Fake-bit decode jobs carry no detector error model."""
         return []
 
-    def window_model_for_stream(self, stream_id, window, *, is_last: bool):
+    def window_model_for_stream(self, stream_id, window):
         """Fake-bit dynamic stream windows carry no detector error model."""
         return None
 

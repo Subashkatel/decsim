@@ -39,7 +39,7 @@ def matching_window_decoder():
                 location="PyMatching window model",
             )
             matching = pymatching.Matching.from_check_matrix(
-                faults.check, weights=matching_weights(faults.priors))
+                faults.check.copy(), weights=matching_weights(faults.priors))
             cache[id(faults)] = matching
             weakref.finalize(faults, cache.pop, id(faults), None)
         return matching.decode(syndrome)

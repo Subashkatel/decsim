@@ -75,14 +75,33 @@ LINKED_FAULT_MODELS_REQUIRED = DecoderFaultModelRequirement(
 )
 
 
+def frozen_csc(value):
+    """Return ``value`` as an immutable binary ``csc_matrix`` (uint8) with
+    sorted indices; dense input is accepted and converted once."""
+    from scipy.sparse import csc_matrix, issparse
+
+    matrix = value.tocsc().copy() if issparse(value) else csc_matrix(value)
+    matrix = matrix.astype("uint8", copy=False)
+    matrix.sum_duplicates()
+    matrix.sort_indices()
+    for array in (matrix.data, matrix.indices, matrix.indptr):
+        array.flags.writeable = False
+    return matrix
+
+
 @dataclass(frozen=True)
 class PlacedFaultModel:
     """One decoder matrix whose columns all describe the same fault domain.
 
+    ``check`` and ``observables`` are scipy ``csc_matrix`` (uint8), the
+    format qLDPC's DetectorErrorModelArrays and PyMatching's
+    from_check_matrix use: one column per fault, stored entries only, so a
+    window costs its ones and not its zeros (a whole-operation window at
+    d=7 x 1000 rounds is 48k x 1.5M with 3M ones).
     ``owned`` says which selected columns this window may commit.
-    ``future_flips`` is the forward-only handoff used by Sliding decoding.
     ``boundary_flips`` stores each owned column's complete global detector
-    effect for dependency-aware delivery in either time direction.
+    effect; the destination window intersects it with its own rows, so one
+    handoff serves forward and dependency-aware delivery alike.
     ``source_fault_ids`` maps every local column back to the global catalog.
     """
 
@@ -91,27 +110,27 @@ class PlacedFaultModel:
     priors: "object"
     observables: "object"
     owned: "object"
-    future_flips: dict
     source_fault_ids: tuple[int, ...]
     boundary_flips: dict
 
     def __post_init__(self) -> None:
         import numpy as np
 
-        for field_name in ("check", "priors", "observables", "owned"):
+        for field_name in ("priors", "owned"):
             source = np.asarray(getattr(self, field_name))
             frozen = np.frombuffer(
                 source.tobytes(order="C"),
                 dtype=source.dtype,
             ).reshape(source.shape)
             object.__setattr__(self, field_name, frozen)
+        for field_name in ("check", "observables"):
+            object.__setattr__(self, field_name, frozen_csc(getattr(self, field_name)))
         object.__setattr__(self, "source_fault_ids", tuple(self.source_fault_ids))
-        for field_name in ("future_flips", "boundary_flips"):
-            frozen_mapping = MappingProxyType({
-                int(column): tuple(int(detector_id) for detector_id in detector_ids)
-                for column, detector_ids in getattr(self, field_name).items()
-            })
-            object.__setattr__(self, field_name, frozen_mapping)
+        frozen_mapping = MappingProxyType({
+            int(column): tuple(int(detector_id) for detector_id in detector_ids)
+            for column, detector_ids in self.boundary_flips.items()
+        })
+        object.__setattr__(self, "boundary_flips", frozen_mapping)
 
 
 @dataclass(frozen=True)
@@ -138,7 +157,11 @@ class WindowErrorModel:
     def __post_init__(self) -> None:
         projection = self.physical_to_graphlike_detector_projection
         if projection is not None:
-            projection.flags.writeable = False
+            object.__setattr__(
+                self,
+                "physical_to_graphlike_detector_projection",
+                frozen_csc(projection),
+            )
 
     def require_faults(
         self,

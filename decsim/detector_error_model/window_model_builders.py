@@ -92,14 +92,12 @@ def build_window_error_models(
             round_count=round_count,
         )
         prior_faults = _explicit_prior_faults(ownership, ancestors)
-    last_window = len(entries) - 1
+    # the terminal window is the one whose commit region reaches the source's
+    # last round; the contiguity check above makes it the last entry
     models = [
         slicer.slice_window(
             *window_entry,
-            is_last=(
-                window_index == last_window
-                and entries[-1][2] == round_count
-            ),
+            is_last=window_entry[2] == round_count,
             fault_exclusion_ranges=fault_exclusion_ranges,
             explicitly_owned_faults=(
                 None if ownership is None else ownership[window_index]

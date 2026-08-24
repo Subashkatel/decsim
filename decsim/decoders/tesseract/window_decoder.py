@@ -186,11 +186,9 @@ def _build_detector_error_model(model, physical_faults):
         physical_faults.observables,
         location="Tesseract physical window model",
     )
-    check = np.asarray(physical_faults.check, dtype=np.uint8)
-    observables = np.asarray(
-        physical_faults.observables,
-        dtype=np.uint8,
-    )
+    check = physical_faults.check
+    # observables are few rows; dense per-fault columns are cheap to read
+    observables = physical_faults.observables.toarray().astype(np.uint8, copy=False)
     detector_count, fault_count = check.shape
     if observables.shape[1] != fault_count:
         raise ValueError(
@@ -207,7 +205,7 @@ def _build_detector_error_model(model, physical_faults):
     for fault_index, probability in enumerate(priors):
         targets = [
             stim.DemTarget.relative_detector_id(int(detector_index))
-            for detector_index in np.nonzero(check[:, fault_index])[0]
+            for detector_index in check.indices[check.indptr[fault_index]:check.indptr[fault_index + 1]]
         ]
         targets.extend(
             stim.DemTarget.logical_observable_id(int(observable_index))
@@ -349,8 +347,6 @@ class TesseractWindowDecoder(_AtomicRunSeedConsumer):
 
         try:
             compiled = self._compiled_decoder(model, physical_faults)
-        except ImportError:
-            raise
         except _BackendConstructionFailed:
             coordinates = _normalized_coordinates(
                 model,
@@ -397,10 +393,9 @@ class TesseractWindowDecoder(_AtomicRunSeedConsumer):
                     compiled.configuration_fingerprint,
             )
         else:
-            reconstructed = (
-                np.asarray(physical_faults.check, dtype=np.uint64)
-                @ correction.astype(np.uint64)
-            ) % 2
+            reconstructed = np.asarray(
+                physical_faults.check.astype(np.int64) @ correction.astype(np.int64)
+            ).ravel() % 2
             correction_tuple = tuple(int(bit) for bit in correction)
             reconstructed_tuple = tuple(int(bit) for bit in reconstructed)
             if low_confidence:
@@ -528,8 +523,6 @@ class TesseractWindowDecoder(_AtomicRunSeedConsumer):
                 sparsify_reactivate_limit=-1,
             )
             backend_decoder = upstream_configuration.compile_decoder()
-        except ImportError:
-            raise
         except Exception as error:
             raise _BackendConstructionFailed from error
         compiled = _CompiledTesseract(

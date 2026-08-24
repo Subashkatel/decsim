@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from ..window_decode_results import (
+    BackendDecodeStatus,
     check_syndrome_size,
     payload_syndrome,
     result_from_selected_faults,
@@ -60,5 +61,15 @@ class BeliefMatchingDecoder:
             )
         syndrome = payload_syndrome(job)
         check_syndrome_size(job, syndrome, faults)
-        selected = self._inner(model, syndrome)
-        return result_from_selected_faults(job, model, faults, selected)
+        decode_status = None
+        try:
+            selected = self._inner(model, syndrome)
+        except ValueError as error:
+            # PyMatching: odd parity in a boundaryless component, see mwpm
+            if "perfect matching" not in str(error):
+                raise
+            import numpy as np
+            selected = np.zeros(faults.check.shape[1], dtype=np.uint8)
+            decode_status = BackendDecodeStatus.INVALID_CORRECTION
+        return result_from_selected_faults(job, model, faults, selected,
+                                           decode_status=decode_status)

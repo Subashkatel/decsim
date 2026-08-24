@@ -32,13 +32,12 @@ class WindowPlacementContext:
     """The one window that a fault model is being placed into.
 
     A parameter bundle, not an immutability boundary: frozen=True only prevents
-    rebinding the eight fields, and the list, dict and set members stay exactly
-    as mutable as the objects the caller already owns.
+    rebinding the seven fields, and the list and dict members stay exactly as
+    mutable as the objects the caller already owns.
     """
 
     rows: list[int]
     row_index: dict[int, int]
-    lead_rows: set[int]
     round_of: dict[int, int]
     n_obs: int
     commit_lo: int
@@ -62,43 +61,41 @@ def _parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
     return buffer_lo, commit_lo, commit_hi, buffer_hi
 
 
-def _detectors_in_window(round_of: dict, buffer_lo: int, buffer_hi: int,
-                         *, is_last: bool) -> list:
-    """Choose the detector rows for this window."""
+def _detectors_in_window(detectors_by_round: dict, buffer_lo: int,
+                         buffer_hi: int, *, is_last: bool) -> list:
+    """Choose the detector rows for this window: the detectors of its buffer
+    rounds, or of every round from its start when it is the last window.
+    ``detectors_by_round`` maps a round to its sorted detector ids, so the
+    cost is the window's own size, not the whole operation's."""
     if is_last:
-        return sorted(detector_id
-                      for detector_id, round_index in round_of.items()
-                      if round_index >= buffer_lo)
-
+        rounds = [r for r in detectors_by_round if r >= buffer_lo]
+    else:
+        rounds = [r for r in detectors_by_round if buffer_lo <= r <= buffer_hi]
     return sorted(detector_id
-                  for detector_id, round_index in round_of.items()
-                  if buffer_lo <= round_index <= buffer_hi)
+                  for round_index in rounds
+                  for detector_id in detectors_by_round[round_index])
 
 
 def _fault_columns_for_window(
     det_sets: tuple,
     row_index: dict,
-    lead_rows: set,
-    committed_elsewhere: set,
-    *,
-    include_committed_leading: bool,
+    committed_elsewhere,
+    candidate_faults=None,
 ) -> list:
-    """Choose candidate columns, excluding causally prior committed faults."""
-    columns: list = []
-    for fault_index, detectors in enumerate(det_sets):
-        touches_window = any(detector_id in row_index for detector_id in detectors)
-        if not touches_window:
-            continue
-
-        if fault_index not in committed_elsewhere:
-            columns.append(fault_index)
-            continue
-
-        touches_leading_buffer = any(detector_id in lead_rows
-                                     for detector_id in detectors)
-        if include_committed_leading and touches_leading_buffer:
-            columns.append(fault_index)
-    return columns
+    """Choose candidate columns: the faults touching this window's rows that
+    no causally prior window has committed (qLDPC's `d_errors[addressed] =
+    False`). ``candidate_faults`` lists the faults that can touch this window
+    (every fault touching one of its rounds); None means every fault of the
+    catalog. ``committed_elsewhere`` only needs membership tests.
+    """
+    if candidate_faults is None:
+        candidate_faults = range(len(det_sets))
+    return [
+        fault_index
+        for fault_index in candidate_faults
+        if fault_index not in committed_elsewhere
+        and any(detector_id in row_index for detector_id in det_sets[fault_index])
+    ]
 
 
 def _fault_owned_by_window(
@@ -122,47 +119,32 @@ def _fault_owned_by_window(
                for round_index in fault_rounds[fault_index])
 
 
-def _fill_detector_and_observable_columns(
-    check, obs, *, column_index: int, fault_index: int, det_sets: tuple,
-    obs_sets: tuple, context: WindowPlacementContext,
-) -> None:
-    """Fill the detector and observable entries for one fault column."""
-    for detector_id in det_sets[fault_index]:
-        if detector_id in context.row_index:
-            check[context.row_index[detector_id], column_index] = 1
-
-    for observable_id in obs_sets[fault_index]:
-        obs[observable_id, column_index] = 1
-
-
-def _future_flips_after_commit(det_sets: tuple, fault_index: int,
-                               context: WindowPlacementContext) -> tuple:
-    """Return detector flips that must be handed to a later window."""
-    if context.is_last:
-        return ()
-    return tuple(detector_id
-                 for detector_id in det_sets[fault_index]
-                 if context.round_of[detector_id] > context.commit_hi)
-
-
 def _build_window_arrays(*, context: WindowPlacementContext, columns: list,
                          det_sets: tuple, obs_sets: tuple,
                          fault_rounds: tuple,
                          committed_elsewhere: set, unowned_faults: set,
                          explicitly_owned_faults: Optional[set]) -> tuple:
-    """Build check, observable, ownership, and residual-defect arrays."""
+    """Build the sparse check and observable matrices, the ownership mask and
+    the residual-defect map; entries are collected as (row, column) pairs and
+    assembled once, the way qLDPC builds its DetectorErrorModelArrays."""
     import numpy as np
+    from scipy.sparse import csc_matrix
 
-    check = np.zeros((len(context.rows), len(columns)), dtype=np.uint8)
-    obs = np.zeros((context.n_obs, len(columns)), dtype=np.uint8)
+    check_rows: list = []
+    check_columns: list = []
+    observable_rows: list = []
+    observable_columns: list = []
     owned = np.zeros(len(columns), dtype=bool)
-    future_flips: dict = {}
     boundary_flips: dict = {}
 
     for column_index, fault_index in enumerate(columns):
-        _fill_detector_and_observable_columns(
-            check, obs, column_index=column_index, fault_index=fault_index,
-            det_sets=det_sets, obs_sets=obs_sets, context=context)
+        for detector_id in det_sets[fault_index]:
+            if detector_id in context.row_index:
+                check_rows.append(context.row_index[detector_id])
+                check_columns.append(column_index)
+        for observable_id in obs_sets[fault_index]:
+            observable_rows.append(observable_id)
+            observable_columns.append(column_index)
 
         owns_fault = _fault_owned_by_window(
             fault_index, fault_rounds, committed_elsewhere, unowned_faults,
@@ -173,17 +155,22 @@ def _build_window_arrays(*, context: WindowPlacementContext, columns: list,
         owned[column_index] = True
         if explicitly_owned_faults is None:
             committed_elsewhere.add(fault_index)
-        beyond_commit = _future_flips_after_commit(
-            det_sets, fault_index, context)
-        if beyond_commit:
-            future_flips[column_index] = beyond_commit
         # Keep the complete global detector effect. The destination intersects
         # it with its own rows, so the same correction can travel left or right.
         detector_effect = tuple(det_sets[fault_index])
         if detector_effect:
             boundary_flips[column_index] = detector_effect
 
-    return check, obs, owned, future_flips, boundary_flips
+    check = csc_matrix(
+        (np.ones(len(check_rows), dtype=np.uint8), (check_rows, check_columns)),
+        shape=(len(context.rows), len(columns)),
+    )
+    obs = csc_matrix(
+        (np.ones(len(observable_rows), dtype=np.uint8),
+         (observable_rows, observable_columns)),
+        shape=(context.n_obs, len(columns)),
+    )
+    return check, obs, owned, boundary_flips
 
 
 def _validate_fault_exclusion_ranges(fault_exclusion_ranges: tuple) -> None:
@@ -204,15 +191,21 @@ def _validate_fault_exclusion_ranges(fault_exclusion_ranges: tuple) -> None:
 def _unowned_faults(
     fault_rounds: tuple[tuple[int, ...], ...],
     fault_exclusion_ranges: tuple,
+    candidate_faults=None,
 ) -> set[int]:
-    """Return source columns prevented from being committed by this slice."""
+    """Return source columns prevented from being committed by this slice;
+    only ``candidate_faults`` (None: all) are examined."""
+    if not fault_exclusion_ranges:
+        return set()
+    if candidate_faults is None:
+        candidate_faults = range(len(fault_rounds))
     return {
         fault_index
-        for fault_index, rounds in enumerate(fault_rounds)
+        for fault_index in candidate_faults
         if any(
             exclude_lo <= round_index <= exclude_hi
             for exclude_lo, exclude_hi in fault_exclusion_ranges
-            for round_index in rounds
+            for round_index in fault_rounds[fault_index]
         )
     }
 
@@ -221,32 +214,34 @@ def _placed_faults_for_window(
     *,
     catalog: _FaultCatalog,
     context: WindowPlacementContext,
+    fault_rounds: tuple,
+    candidate_faults,
     committed_elsewhere: set[int],
     explicitly_owned_faults: Optional[set[int]],
-    explicitly_prior_faults: Optional[set[int]],
+    explicitly_prior_faults,
     fault_exclusion_ranges: tuple,
 ) -> PlacedFaultModel:
-    """Build one window's local matrix from one global fault catalog."""
+    """Build one window's local matrix from one global fault catalog.
+
+    ``fault_rounds`` is the catalog's round tuple per fault (computed once by
+    the slicer) and ``candidate_faults`` the faults touching this window's
+    rounds, so one window costs its own size rather than the catalog's.
+    """
     import numpy as np
 
     detector_sets = catalog.detector_sets
     observable_sets = catalog.observable_sets
-    fault_rounds = tuple(
-        tuple(context.round_of[detector_id] for detector_id in detectors)
-        for detectors in catalog.detector_sets
-    )
     columns = _fault_columns_for_window(
         detector_sets,
         context.row_index,
-        context.lead_rows,
         (
             committed_elsewhere
             if explicitly_prior_faults is None
             else explicitly_prior_faults
         ),
-        include_committed_leading=(explicitly_prior_faults is None),
+        candidate_faults,
     )
-    check, observables, owned, future_flips, boundary_flips = (
+    check, observables, owned, boundary_flips = (
         _build_window_arrays(
             context=context,
             columns=columns,
@@ -257,6 +252,7 @@ def _placed_faults_for_window(
             unowned_faults=_unowned_faults(
                 fault_rounds,
                 fault_exclusion_ranges,
+                candidate_faults,
             ),
             explicitly_owned_faults=explicitly_owned_faults,
         )
@@ -270,7 +266,6 @@ def _placed_faults_for_window(
         ),
         observables=observables,
         owned=owned,
-        future_flips=future_flips,
         source_fault_ids=tuple(columns),
         boundary_flips=boundary_flips,
     )
@@ -301,15 +296,14 @@ def _local_physical_to_graphlike_detector_projection(
     """
     import numpy as np
 
-    local_link = np.asarray(catalog_link, dtype=np.uint8)[np.ix_(
-        graphlike.source_fault_ids,
-        physical.source_fault_ids,
-    )]
+    local_link = catalog_link[list(graphlike.source_fault_ids), :][
+        :, list(physical.source_fault_ids)].tocsc()
     detector_identity = (
-        np.asarray(graphlike.check, dtype=np.uint64)
-        @ local_link.astype(np.uint64)
-    ) % 2
-    if not np.array_equal(detector_identity, physical.check):
+        graphlike.check.astype(np.int64) @ local_link.astype(np.int64)
+    )
+    detector_identity.data %= 2
+    detector_identity.eliminate_zeros()
+    if (detector_identity != physical.check.astype(np.int64)).nnz:
         raise ValueError(
             "local physical detector identities do not equal their "
             "graphlike component XOR"

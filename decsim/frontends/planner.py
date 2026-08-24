@@ -263,7 +263,7 @@ def _plan_execution(
         minimum_leading_buffer_round_count=leading,
         minimum_trailing_buffer_round_count=trailing,
         one_patch_spatial_node_count=base_nodes[1],
-        buffer_floor_override_active=code.buffer_floor_override_active(),
+        window_floor_justification=code.window_floor_justification,
     )
     scheme.validate_buffer(geometry)
 

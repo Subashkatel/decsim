@@ -59,6 +59,34 @@ class WindowSlicer:
             representation: set()
             for representation in self.catalogs
         }
+        # Indexes built once so that slicing a window costs the window's own
+        # size: detectors by round, each fault's rounds, faults by round.
+        detectors_by_round: dict[int, list[int]] = {}
+        for detector_id in sorted(self.round_of):
+            detectors_by_round.setdefault(self.round_of[detector_id], []).append(detector_id)
+        self.detectors_by_round = detectors_by_round
+        self.fault_rounds = {}
+        self.faults_by_round = {}
+        for representation, catalog in self.catalogs.items():
+            rounds_per_fault = tuple(
+                tuple(self.round_of[detector_id] for detector_id in detectors)
+                for detectors in catalog.detector_sets
+            )
+            by_round: dict[int, list[int]] = {}
+            for fault_index, rounds in enumerate(rounds_per_fault):
+                for round_index in set(rounds):
+                    by_round.setdefault(round_index, []).append(fault_index)
+            self.fault_rounds[representation] = rounds_per_fault
+            self.faults_by_round[representation] = by_round
+
+    def _candidate_faults(self, representation, rows) -> list[int]:
+        """Faults touching any round of ``rows``, in catalog order."""
+        by_round = self.faults_by_round[representation]
+        rounds = sorted({self.round_of[detector_id] for detector_id in rows})
+        seen: set[int] = set()
+        for round_index in rounds:
+            seen.update(by_round.get(round_index, ()))
+        return sorted(seen)
 
     def slice_window(
         self,
@@ -83,7 +111,7 @@ class WindowSlicer:
             )
         _validate_fault_exclusion_ranges(fault_exclusion_ranges)
         rows = _detectors_in_window(
-            self.round_of,
+            self.detectors_by_round,
             buffer_lo,
             buffer_hi,
             is_last=is_last,
@@ -92,15 +120,9 @@ class WindowSlicer:
             detector_id: row_number
             for row_number, detector_id in enumerate(rows)
         }
-        lead_rows = {
-            detector_id
-            for detector_id in rows
-            if self.round_of[detector_id] < commit_lo
-        }
         context = WindowPlacementContext(
             rows=rows,
             row_index=row_index,
-            lead_rows=lead_rows,
             round_of=self.round_of,
             n_obs=self.n_obs,
             commit_lo=commit_lo,
@@ -111,6 +133,8 @@ class WindowSlicer:
             representation: _placed_faults_for_window(
                 catalog=catalog,
                 context=context,
+                fault_rounds=self.fault_rounds[representation],
+                candidate_faults=self._candidate_faults(representation, rows),
                 committed_elsewhere=self.committed_elsewhere[representation],
                 explicitly_owned_faults=(
                     None

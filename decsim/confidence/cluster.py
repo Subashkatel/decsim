@@ -182,7 +182,7 @@ class UnionFindClusterGapDecoder:
         import numpy as np
 
         faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
-        observables = np.asarray(faults.observables)
+        observables = faults.observables.toarray()
         if observables.shape[0] != 1:
             raise ValueError(
                 "Union-Find cluster confidence requires exactly one logical "

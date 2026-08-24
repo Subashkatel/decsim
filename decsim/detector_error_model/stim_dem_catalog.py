@@ -255,10 +255,8 @@ def _prepare_linked_fault_catalogs(decomposed_dem, physical_dem):
     physical_detector_sets = []
     physical_observable_sets = []
     physical_priors = []
-    link = np.zeros(
-        (len(graphlike_catalog.detector_sets), len(mechanisms)),
-        dtype=np.uint8,
-    )
+    link_rows: list = []
+    link_columns: list = []
     for physical_column, ((physical_key, component_keys), prior) in enumerate(
         mechanisms.items()
     ):
@@ -266,8 +264,13 @@ def _prepare_linked_fault_catalogs(decomposed_dem, physical_dem):
         physical_observable_sets.append(physical_key[1])
         physical_priors.append(prior)
         for component_key in component_keys:
-            graphlike_column = graphlike_index[component_key]
-            link[graphlike_column, physical_column] = 1
+            link_rows.append(graphlike_index[component_key])
+            link_columns.append(physical_column)
+    from scipy.sparse import csc_matrix
+    link = csc_matrix(
+        (np.ones(len(link_rows), dtype=np.uint8), (link_rows, link_columns)),
+        shape=(len(graphlike_catalog.detector_sets), len(mechanisms)),
+    )
 
     physical_catalog = _FaultCatalog(
         representation=FaultRepresentation.PHYSICAL,

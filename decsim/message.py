@@ -150,7 +150,9 @@ WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
 class QPUReadout:
     """One QPU-side result awaiting controller availability handling.
 
-    Values are detector events or timing-only markers; decsim does not simulate the preceding analog or measurement-to-detection stages.
+    Values are raw measurement bits (one round's packet, post state
+    discrimination) or timing-only markers; detection events are formed
+    from these packets at the decoder input.
     """
 
     operation_id: Any
@@ -170,7 +172,7 @@ class SyndromePayload:
     operation_id: int                 # op whose stream this round belongs to
     patch_id: int                     # patch that produced the round
     round_index: int                  # 1-based round number within the op
-    bits: Optional[Any] = None        # detector bits (None = timing-only run)
+    bits: Optional[Any] = None        # raw measurement bits (None = timing-only run)
     code: Optional[str] = None        # code name; drives CodeRouter routing
     n_fragments: int = 1              # link-layer fragments the round arrives in
     fragment_index: int = 0           # stable position within the complete round
@@ -192,7 +194,6 @@ class RetainedSyndromeFragment:
     patch_id: Any
     round_index: int
     bits: Optional[tuple[int, ...]]
-    code: Optional[str]
     size_bits: Optional[int]
     fragment_index: int
 
@@ -203,7 +204,6 @@ class RetainedSyndromeFragment:
             patch_id=payload.patch_id,
             round_index=payload.round_index,
             bits=normalize_binary_bits(payload.bits),
-            code=payload.code,
             size_bits=payload.size_bits,
             fragment_index=payload.fragment_index,
         )
@@ -252,6 +252,7 @@ class Window:
     blocked_logged: bool = False      # log-once flag for the "blocked" trace line
     boundary_in: Any = field(default_factory=dict)  # state owned by the
                                       # configured WindowInteraction
+    decode_status: Optional[str] = None  # best-effort status of the committed decode, None = succeeded
     t_first_round: Optional[int] = None    # tick the first round arrived
     t_data_complete: Optional[int] = None  # tick the last buffered round arrived
     t_queued: Optional[int] = None         # tick the job entered the decode queue
@@ -322,7 +323,7 @@ class ResolvedCodeGeometry:
     minimum_leading_buffer_round_count: int
     minimum_trailing_buffer_round_count: int
     one_patch_spatial_node_count: int
-    buffer_floor_override_active: bool
+    window_floor_justification: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -565,8 +566,13 @@ class DecodeResult:
     correction: Optional[Any] = None         # correction operator (None = timing-only)
     logical_observables: Optional[tuple[int, ...]] = None  # full prediction
     soft_output: Optional["SoftOutput"] = None  # source-compatible confidence
-    boundary_defects: Optional[dict] = None  # defects on window seams (cross-window matching)
+    boundary_defects: Optional[dict] = None  # round-keyed seam defects (synthetic decoders, recovery lock scenarios)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
+    # BackendDecodeStatus of a best-effort correction (nonconverged, low
+    # confidence, does not reproduce the syndrome); None when the decode
+    # succeeded. The correction is committed either way and the status travels
+    # with it, as cudaqx's per-window converged flag does.
+    decode_status: Optional[Any] = None
 
 
 @dataclass

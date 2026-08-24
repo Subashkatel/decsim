@@ -367,7 +367,7 @@ class WindowManager:
                 return
 
     def create_dynamic_window(self, stream_id, window_index, commit_lo,
-                              commit_hi, buffer_hi, *, is_last) -> None:
+                              commit_hi, buffer_hi) -> None:
         """Create one window and connect it to the live stream plan.
 
         If the previous boundary already arrived, apply it immediately.
@@ -395,7 +395,7 @@ class WindowManager:
         self.total_windows += 1
         if self.error_model_provider is not None:
             model = self.error_model_provider.window_model_for_stream(
-                stream_id, window, is_last=is_last)
+                stream_id, window)
             if model is not None:
                 self.window_models[(stream_id, window_index)] = model
         self._add_window_read_refs((stream_id, window_index), window)
@@ -934,9 +934,12 @@ class WindowManager:
             window.t_done = self.engine.now
         self.committed_windows.add(key)
         self._committed_per_op[op.id] = self._committed_per_op.get(op.id, 0) + 1
+        status = getattr(res, "decode_status", None)
+        window.decode_status = None if status is None else status.value
         self.engine.log("DecoderCluster",
                         f"DECODE DONE {op.name} W{window.k} "
-                        f"[commit {window.commit_lo}-{window.commit_hi}]")
+                        f"[commit {window.commit_lo}-{window.commit_hi}]"
+                        + ("" if status is None else f" best effort: {status.value}"))
         existing_contribution = self.ledger.get(key)
         if (
             existing_contribution is None

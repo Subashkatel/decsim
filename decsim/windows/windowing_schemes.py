@@ -34,16 +34,21 @@ def _finite_forward_window_geometries(
     commit_round_count: int,
     buffer_round_count: int,
 ) -> tuple[WindowGeometry, ...]:
-    """Finite QUITS/Tan forward windows with one closed all-core tail."""
+    """Finite forward windows with one closed all-core tail.
+
+    Regular windows commit F rounds and read W = F + B. The tail rule is
+    qLDPC's SlidingWindowDecoder rule (sinter.py, `while start < end -
+    (W + s - 1)`): the last window starts as soon as fewer than W + F rounds
+    remain, so it commits everything left and is never shorter than W. A
+    short tail is never decoded on its own; it is absorbed by the last
+    full-width window instead.
+    """
+    window_width = commit_round_count + buffer_round_count
     windows = []
     commit_lo = 1
     while True:
-        regular_commit_hi = min(
-            commit_lo + commit_round_count - 1,
-            round_count,
-        )
-        regular_buffer_hi = regular_commit_hi + buffer_round_count
-        if regular_buffer_hi >= round_count:
+        remaining_rounds = round_count - commit_lo + 1
+        if remaining_rounds < window_width + commit_round_count:
             windows.append(WindowGeometry(
                 buffer_lo=commit_lo,
                 commit_lo=commit_lo,
@@ -51,14 +56,35 @@ def _finite_forward_window_geometries(
                 buffer_hi=round_count,
             ))
             break
+        regular_commit_hi = commit_lo + commit_round_count - 1
         windows.append(WindowGeometry(
             buffer_lo=commit_lo,
             commit_lo=commit_lo,
             commit_hi=regular_commit_hi,
-            buffer_hi=regular_buffer_hi,
+            buffer_hi=regular_commit_hi + buffer_round_count,
         ))
         commit_lo = regular_commit_hi + 1
     return tuple(windows)
+
+
+def _require_buffer_floor(geometry, floor: int, floor_label: str) -> None:
+    """Refuse a buffer below the literature floor unless the code card says
+    why it runs there; a justification above the floor is a stale one."""
+    below = geometry.buffer_round_count < floor
+    justification = geometry.window_floor_justification
+    if below and not justification:
+        raise ValueError(
+            f"buffer_rounds={geometry.buffer_round_count} is below the "
+            f"{floor_label} {floor} for {geometry.code_name}; windowed "
+            f"accuracy degrades (Skoric 2209.08552, Tan PRX Quantum 4, "
+            f"040344, Bombin 2303.04846). Raise buffer_rounds_override to "
+            f"{floor}, or set window_floor_justification to run below the "
+            "floor deliberately.")
+    if justification and not below:
+        raise ValueError(
+            f"window_floor_justification is set but buffer_rounds="
+            f"{geometry.buffer_round_count} is not below the {floor_label} "
+            f"{floor}; remove the justification.")
 
 
 def sliding_data_complete(window: "Window", readiness: WindowReadiness) -> bool:
@@ -105,13 +131,14 @@ class SlidingWindowScheme:
         commit_round_count: int,
         buffer_round_count: int,
     ) -> OperationWindowPlan:
-        """Return the finite forward `(W,F)` construction used by QUITS.
+        """Return the finite forward `(W,F)` construction.
 
         Here ``F=commit_round_count`` and
         ``W=commit_round_count+buffer_round_count``. Regular windows commit
-        their first ``F`` rounds. As soon as one window reaches the physical
-        end, it becomes the closed final window and commits every remaining
-        round.
+        their first ``F`` rounds. The last window begins when fewer than
+        ``W+F`` rounds remain and commits every remaining round (qLDPC's
+        SlidingWindowDecoder tail rule; the last window is never shorter
+        than ``W``).
         """
         if self.terminal_policy is SlidingTerminalPolicy.QUITS_TAN_FLUSH:
             windows = _finite_forward_window_geometries(
@@ -148,20 +175,12 @@ class SlidingWindowScheme:
         )
 
     def validate_buffer(self, geometry) -> None:
-        """Reject buffers below the literature floor (lead, trail) ~ (d, d)."""
-        if geometry.buffer_floor_override_active:
-            return
-        if (
-            geometry.buffer_round_count
-            < geometry.minimum_trailing_buffer_round_count
-        ):
-            raise ValueError(
-                f"buffer_rounds={geometry.buffer_round_count} is below the "
-                f"trailing buffering floor "
-                f"{geometry.minimum_trailing_buffer_round_count} (~d) for "
-                f"{geometry.code_name}; "
-                f"windowed accuracy degrades (Skoric 2209.08552, Bombin "
-                f"2303.04846). Raise buffer_rounds_override or use d.")
+        """Reject buffers below the trailing floor (~d) without a justification."""
+        _require_buffer_floor(
+            geometry,
+            geometry.minimum_trailing_buffer_round_count,
+            "trailing buffering floor",
+        )
 
     def data_complete(self, window: "Window", *, readiness: WindowReadiness,
                       operation) -> bool:
@@ -312,18 +331,15 @@ class ParallelWindowScheme:
 
 
     def validate_buffer(self, geometry) -> None:
-        if geometry.buffer_floor_override_active:
-            return
-        required = max(
-            geometry.minimum_leading_buffer_round_count,
-            geometry.minimum_trailing_buffer_round_count,
+        """Reject buffers below the two-sided floor (~d) without a justification."""
+        _require_buffer_floor(
+            geometry,
+            max(
+                geometry.minimum_leading_buffer_round_count,
+                geometry.minimum_trailing_buffer_round_count,
+            ),
+            "two-sided buffering floor",
         )
-        if geometry.buffer_round_count < required:
-            raise ValueError(
-                f"buffer_rounds={geometry.buffer_round_count} is below the "
-                f"two-sided buffering floor {required} (~d) for "
-                f"{geometry.code_name}"
-            )
 
 
 class TanSandwichScheme:

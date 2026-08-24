@@ -79,8 +79,10 @@ class ComplementaryGapMetric:
             validate_graphlike_matrices,
         )
 
-        self.check = np.asarray(check, dtype=np.uint8)
-        self.obs = np.asarray(obs, dtype=np.uint8)
+        from scipy.sparse import csc_matrix, issparse
+
+        self.check = (check.tocsc() if issparse(check) else csc_matrix(np.asarray(check))).astype(np.uint8)
+        self.obs = (obs.toarray() if issparse(obs) else np.asarray(obs)).astype(np.uint8)
         self.weights = np.asarray(weights, dtype=float)
         validate_graphlike_matrices(
             self.check,
@@ -93,7 +95,8 @@ class ComplementaryGapMetric:
                 f"{self.obs.shape[0]}. Decode each logical operator with its own "
                 "metric.")
         self._base = pymatching.Matching.from_check_matrix(self.check, weights=self.weights)
-        check_aug = np.vstack([self.check, self.obs[0:1, :]])
+        from scipy.sparse import csc_matrix, vstack
+        check_aug = vstack([self.check, csc_matrix(self.obs[0:1, :])]).tocsc()
         self._aug = pymatching.Matching.from_check_matrix(check_aug, weights=self.weights)
 
     @classmethod

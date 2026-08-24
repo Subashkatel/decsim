@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..window_decode_results import (
+    BackendDecodeStatus,
     check_syndrome_size,
     payload_syndrome,
     result_from_selected_faults,
@@ -100,6 +101,10 @@ class UnionFindDecoder:
             model,
             faults,
             hard_evidence.selected_faults,
+            decode_status=(
+                BackendDecodeStatus.INVALID_CORRECTION
+                if hard_evidence.unmatched_detectors else None
+            ),
         )
         return UnionFindDecodedWindow(hard_result, hard_evidence)
 

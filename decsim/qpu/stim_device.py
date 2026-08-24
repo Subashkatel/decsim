@@ -1,4 +1,9 @@
-"""Stim-backed syndrome source for real-decoding runs."""
+"""Stim-backed syndrome source for real-decoding runs.
+
+The device samples raw measurement bits and emits them as one packet per
+round, the way readout electronics do; detection events are formed later,
+at the decoder input, by ``form_round`` from the same formation table.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +11,18 @@ import hashlib
 from numbers import Integral
 from typing import Optional
 
+from ..detector_error_model.detector_formation import (
+    StreamingDetectorFormer,
+    build_formation_table,
+    form_shot,
+    split_measurements_into_packets,
+)
 from ..message import Operation, QPUReadout
 from ..seeding import _AtomicRunSeedConsumer
 
 
 class StimDevice(_AtomicRunSeedConsumer):
-    """Sample Stim circuits and stream detection events by syndrome round.
+    """Sample Stim circuits and stream raw measurement packets by round.
 
     Numeric seeds create stable per-identity substreams; ``None`` lets Stim
     choose entropy.
@@ -24,11 +35,15 @@ class StimDevice(_AtomicRunSeedConsumer):
         seed: Optional[Integral] = None,
         detector_rounds: Optional[dict] = None,
         terminal_detector_ids: Optional[dict] = None,
-        terminal_data_bits: Optional[dict] = None,
+        measurement_rounds: Optional[dict] = None,
     ):
         """Configure sampling and explicit chronology or terminal metadata.
 
-        Detector-round maps use one-based emitted rounds.
+        Detector-round and measurement-round maps use one-based emitted
+        rounds; measurement rounds declare the QPU's packet schedule when the
+        circuit does not follow the Stim-generator layout. A non-empty
+        terminal_detector_ids entry says the stream's final data readout
+        arrives as its own fragment through finalize_stream_round.
         """
         self._initialize_run_seed_binding(seed)
         self._seed = seed
@@ -39,11 +54,15 @@ class StimDevice(_AtomicRunSeedConsumer):
             key: tuple(detector_ids)
             for key, detector_ids in (terminal_detector_ids or {}).items()
         }
-        self._terminal_data_bits = dict(terminal_data_bits or {})
+        self._measurement_rounds_override = {
+            key: dict(rounds_map)
+            for key, rounds_map in (measurement_rounds or {}).items()}
         self._samplers: dict = {}
-        self._dets: dict = {}
+        self._packets: dict = {}      # key -> {round: raw bits}
+        self._tables: dict = {}       # key -> FormationTable
+        self._formers: dict = {}      # key -> StreamingDetectorFormer (decoder-input state)
+        self._dets: dict = {}         # key -> formed detection events of the whole shot
         self._truth: dict = {}
-        self._by_round: dict = {}
         self._stream_models: dict = {}
         self._source_bindings: dict = {}
 
@@ -51,15 +70,17 @@ class StimDevice(_AtomicRunSeedConsumer):
         return self._validated_root_seed()
 
     def _prepare_run_seed_state(self, effective_seed):
-        return (effective_seed, {}, {}, {}, {}, {}, {})
+        return (effective_seed, {}, {}, {}, {}, {}, {}, {}, {})
 
     def _install_run_seed_state(self, prepared_state) -> None:
         (
             self._seed,
             self._samplers,
+            self._packets,
+            self._tables,
+            self._formers,
             self._dets,
             self._truth,
-            self._by_round,
             self._stream_models,
             self._source_bindings,
         ) = prepared_state
@@ -160,32 +181,64 @@ class StimDevice(_AtomicRunSeedConsumer):
         sampler = self._samplers.get(key)
         if sampler is None:
             if self._seed is None:
-                sampler = op.circuit.compile_detector_sampler()
+                sampler = op.circuit.compile_sampler()
             else:
                 sample_seed = self._sample_seed(key)
-                sampler = op.circuit.compile_detector_sampler(seed=sample_seed)
+                sampler = op.circuit.compile_sampler(seed=sample_seed)
             self._samplers[key] = sampler
         self._mark_stochastic_use()
-        dets, obs = sampler.sample(shots=1, separate_observables=True)
-        self._dets[key] = dets[0]
-        self._truth[key] = obs[0]
-        terminal_ids = set(self._terminal_detector_ids.get(key, ()))
-        buckets: dict[int, list[int]] = {}
-        for detector_index, detector_round in detector_rounds.items():
-            if detector_index not in terminal_ids:
-                buckets.setdefault(detector_round, []).append(detector_index)
-        for detector_ids in buckets.values():
-            detector_ids.sort()
-        self._by_round[key] = buckets
-        self._dets[op.id] = self._dets[key]
-        self._truth[op.id] = self._truth[key]
+        measurement_row = self._measurement_row(key, sampler)
+        table = build_formation_table(
+            op.circuit, source_round_count,
+            measurement_rounds=self._measurement_rounds_override.get(key),
+            detector_rounds=detector_rounds)
+        packets = split_measurements_into_packets(table, measurement_row)
+        # the whole-shot formation is the oracle for truth and for
+        # sampled_detection_events; the streaming former below is what the
+        # decoder input actually runs, one packet at a time
+        formed_events, formed_truth = form_shot(table, packets)
+        self._tables[key] = table
+        self._packets[key] = packets
+        self._formers[key] = StreamingDetectorFormer(table)
+        self._dets[key] = formed_events
+        self._truth[key] = formed_truth
+        self._dets[op.id] = formed_events
+        self._truth[op.id] = formed_truth
+
+    def _measurement_row(self, key, sampler) -> tuple[int, ...]:
+        """One shot of raw measurement bits in circuit measurement order."""
+        return tuple(int(bit) for bit in sampler.sample(shots=1)[0])
+
+    def _round_packet_bits(self, key, global_round: int) -> tuple[int, ...]:
+        """The raw bits the QPU emits for this round. When the stream declares
+        a terminal fragment, the folded readout bits stay behind for
+        finalize_stream_round."""
+        packet = self._packets[key][global_round]
+        table = self._tables[key]
+        readout_arrives_separately = (
+            global_round == table.round_count
+            and bool(self._terminal_detector_ids.get(key))
+            and table.readout_slot_start is not None)
+        if readout_arrives_separately:
+            return packet[:table.readout_slot_start]
+        return packet
+
+    def form_round(self, operation_id, round_index: int, raw_bits) -> tuple[int, ...]:
+        """Detection events of one complete round, in detector order, formed
+        at the decoder input from the round's raw packet."""
+        former = self._formers.get(operation_id)
+        if former is None:
+            raise KeyError(
+                f"no detector formation state for identity {operation_id!r}; "
+                "the operation has not begun")
+        events, _ = former.feed_packet(round_index, raw_bits)
+        return tuple(value for _, value in events)
 
     def round_payloads(self, op: Operation, round_index: int) -> list[QPUReadout]:
-        """Emit this operation round as one Stim-backed payload."""
+        """Emit this operation round as one raw measurement packet."""
         key = self._key(op)
         global_round = round_index + (op.stream_offset or 0)
-        detector_indices = self._by_round[key].get(global_round, [])
-        bits = self._dets[key][detector_indices]
+        bits = self._round_packet_bits(key, global_round)
         patch = op.patches[0] if op.patches else (op.qubits[0] if op.qubits else 0)
         target = op.stream_id if op.stream_id is not None else op.id
         return [QPUReadout(target, patch, global_round, bits=bits,
@@ -194,9 +247,9 @@ class StimDevice(_AtomicRunSeedConsumer):
     def finalize_stream_round(
         self, op: Operation, source_round_count: int,
     ) -> list[QPUReadout]:
-        """Emit terminal detector events from the already sampled stream."""
+        """Emit the stream's final data readout as its own raw fragment."""
         key = self._key(op)
-        if key not in self._dets:
+        if key not in self._packets:
             raise RuntimeError("terminal finalizer requires a sampled stream")
         binding = self._source_bindings.get(key)
         if binding is None:
@@ -208,30 +261,30 @@ class StimDevice(_AtomicRunSeedConsumer):
             raise ValueError("finalizer circuit differs from its source binding")
         if op.stream_offset + 1 != source_round_count:
             raise ValueError("finalizer is not at the final source round")
-        detector_ids = self._terminal_detector_ids.get(key)
-        if detector_ids is None:
+        if not self._terminal_detector_ids.get(key):
             raise ValueError("terminal finalizer has no declared detector ids")
-        if key not in self._terminal_data_bits:
-            raise ValueError("terminal finalizer has no raw data-bit size")
+        table = self._tables[key]
+        if table.readout_slot_start is None:
+            raise ValueError("terminal finalizer has no folded readout bits")
+        bits = self._packets[key][table.round_count][table.readout_slot_start:]
         patch = op.patches[0] if op.patches else op.qubits[0]
         return [QPUReadout(
             key,
             patch,
             op.stream_offset + 1,
-            bits=self._dets[key][list(detector_ids)],
-            size_bits=self._terminal_data_bits[key],
+            bits=bits,
+            size_bits=len(bits),
         )]
 
     def idle_round_payloads(self, op: Operation, stream_id, global_round: int,
                             patch) -> list[QPUReadout]:
-        """Emit this feedback-idle stream round as one Stim-backed payload."""
+        """Emit this feedback-idle stream round as one raw measurement packet."""
         binding = self._source_bindings.get(stream_id)
-        if stream_id not in self._dets or binding is None:
+        if stream_id not in self._packets or binding is None:
             raise RuntimeError("idle emission requires a sampled bound stream")
         if type(global_round) is not int or not 1 <= global_round <= binding[1]:
             raise ValueError("idle round is outside the finite source")
-        detector_indices = self._by_round.get(stream_id, {}).get(global_round, [])
-        bits = self._dets[stream_id][detector_indices]
+        bits = self._round_packet_bits(stream_id, global_round)
         return [QPUReadout(stream_id, patch, global_round, bits=bits,
                                 size_bits=len(bits))]
 
@@ -341,8 +394,10 @@ class StimDevice(_AtomicRunSeedConsumer):
             window_protocol=window_protocol,
         )
 
-    def window_model_for_stream(self, stream_id, window, *, is_last: bool):
-        """Build the detector error model for one dynamic stream window."""
+    def window_model_for_stream(self, stream_id, window):
+        """Build the detector error model for one dynamic stream window; the
+        window whose commit region reaches the stream's last round is the
+        terminal one."""
         stream_model = self._stream_models.get(stream_id)
         if stream_model is None:
             return None
@@ -350,7 +405,7 @@ class StimDevice(_AtomicRunSeedConsumer):
         buffer_lo = window.start_round
         return stream_model["slicer"].slice_window(
             buffer_lo, window.commit_lo, window.commit_hi, window.buffer_hi,
-            is_last=is_last)
+            is_last=window.commit_hi == stream_model["round_count"])
 
     def strong_window_model_for_operation(self, op: Operation, window, round_count: int,
                                           *, fault_model_requirement,
@@ -400,18 +455,18 @@ class StimDevice(_AtomicRunSeedConsumer):
 
 
 class RecordedStimDevice(StimDevice):
-    """Replay recorded detection events (hardware data) instead of sampling.
+    """Replay recorded raw measurements (hardware data) instead of sampling.
 
-    ``detection_events`` is a (shots, detectors) bool array in the detector
-    order of ``op.circuit``; ``observable_flips`` is (shots, observables);
-    ``shot`` selects the row. Round chronology and window error models come
-    from the circuit exactly as for sampled data.
+    ``measurements`` is a (shots, measurements) bool array in the measurement
+    order of ``op.circuit`` (the measurements.b8 of a released experiment);
+    ``shot`` selects the row. Detection events, observable truth, round
+    chronology and window error models come from the circuit exactly as for
+    sampled data.
     """
 
-    def __init__(self, detection_events, observable_flips, shot: int, **kwargs):
+    def __init__(self, measurements, shot: int, **kwargs):
         super().__init__(**kwargs)
-        self.detection_events = detection_events
-        self.observable_flips = observable_flips
+        self.measurements = measurements
         self.shot = shot
 
     @staticmethod
@@ -425,10 +480,5 @@ class RecordedStimDevice(StimDevice):
             rounds[detector_id] = round_count if layer >= round_count else layer + 1
         return rounds
 
-    def begin_operation(self, op, segment_round_count, source_round_count):
-        super().begin_operation(op, segment_round_count, source_round_count)
-        key = self._key(op)
-        self._dets[key] = self.detection_events[self.shot]
-        self._truth[key] = self.observable_flips[self.shot]
-        self._dets[op.id] = self._dets[key]
-        self._truth[op.id] = self._truth[key]
+    def _measurement_row(self, key, sampler) -> tuple[int, ...]:
+        return tuple(int(bit) for bit in self.measurements[self.shot])

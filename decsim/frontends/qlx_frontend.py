@@ -86,7 +86,7 @@ class QLXProgram:
     decoder_operations: tuple = ()
     detector_rounds_by_stream: dict = field(default_factory=dict)
     terminal_detector_ids_by_stream: dict = field(default_factory=dict)
-    terminal_data_bits_by_stream: dict = field(default_factory=dict)
+    measurement_rounds_by_stream: dict = field(default_factory=dict)
 
     def build(self) -> list[Operation]:
         """Return the lowered workload for the InputFrontend port."""
@@ -235,7 +235,13 @@ def _prove_detector_routing(circuit, metadata, submission_count: int):
         raise ValueError(
             "detector fragments do not preserve global detector order"
         )
-    return detector_rounds, tuple(terminal_ids), terminal_data_count
+    # the QPU's packet schedule: each submission's check_count syndrome
+    # bits travel in its round, the data readouts fold into the last round
+    measurement_rounds = {
+        index: min(index // check_count + 1, submission_count)
+        for index in range(measurement_count)
+    }
+    return detector_rounds, tuple(terminal_ids), measurement_rounds
 
 
 def _add_physical_stream(program, circuit, metadata, decode_operation_id):
@@ -276,7 +282,7 @@ def _add_physical_stream(program, circuit, metadata, decode_operation_id):
         raise ValueError("physical QLX currently requires one occupied patch")
     patch = next(iter(patch_sets))[0]
 
-    detector_rounds, terminal_ids, terminal_data_count = (
+    detector_rounds, terminal_ids, measurement_rounds = (
         _prove_detector_routing(circuit, metadata, len(measurements))
     )
     terminal_operation = None
@@ -335,8 +341,8 @@ def _add_physical_stream(program, circuit, metadata, decode_operation_id):
     program.terminal_detector_ids_by_stream = {
         decode_operation_id: terminal_ids
     }
-    program.terminal_data_bits_by_stream = {
-        decode_operation_id: terminal_data_count
+    program.measurement_rounds_by_stream = {
+        decode_operation_id: measurement_rounds
     }
 
 

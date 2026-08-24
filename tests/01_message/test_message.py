@@ -12,7 +12,6 @@ def make_fragment(**overrides):
         "patch_id": "patch-a",
         "round_index": 3,
         "bits": (0, 1),
-        "code": "surface_code",
         "size_bits": 2,
         "fragment_index": 0,
     }
@@ -326,7 +325,7 @@ def test_resolved_planning_skips_noncount_type_validation():
         minimum_leading_buffer_round_count=0,
         minimum_trailing_buffer_round_count=0,
         one_patch_spatial_node_count=5,
-        buffer_floor_override_active="unchecked",
+        window_floor_justification="unchecked",
     )
     operation_plan = message.ResolvedOperationPlanning(object(), object(), 0, 1, 1)
     patch_plan = message.ResolvedPatchPlanning(object(), object(), 1, 1)

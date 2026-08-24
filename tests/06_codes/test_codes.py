@@ -41,8 +41,7 @@ class OutsideCodeModel:
     def buffering_floor(self):
         return (0, 0)
 
-    def buffer_floor_override_active(self):
-        return False
+    window_floor_justification = None
 
     def spatial_nodes(self, num_patches):
         return 4 * num_patches
@@ -120,12 +119,25 @@ def test_planning_rejects_deferred_surface_geometry(field_name, value, boundary_
         build_run(card)
 
 
-def test_explicit_zero_surface_buffer_builds_with_sliding_windows():
-    """An explicit zero Surface buffer opts out of the floor and completes a run."""
-    card = SurfaceCodeModel(buffer_rounds_override=0)
-    assert card.buffer_rounds() == 0
-    assert card.buffer_floor_override_active() is True
-    assert build_run(card).result.terminal_status == "complete"
+def test_buffer_below_the_floor_needs_a_written_justification():
+    """A buffer below the (d, d) floor is refused by name unless the card says why it runs there."""
+    with pytest.raises(ValueError, match="below the trailing buffering floor 3"):
+        build_run(SurfaceCodeModel(buffer_rounds_override=0))
+    justified = SurfaceCodeModel(buffer_rounds_override=0,
+                                 window_floor_justification="test: zero buffer on purpose")
+    assert justified.buffer_rounds() == 0
+    assert build_run(justified).result.terminal_status == "complete"
+
+
+def test_justification_above_the_floor_is_refused():
+    """A stale justification on a card at or above the floor is an error, not a silent no-op."""
+    with pytest.raises(ValueError, match="is not below the trailing buffering floor"):
+        build_run(SurfaceCodeModel(window_floor_justification="stale"))
+
+
+def test_empty_justification_is_refused():
+    with pytest.raises(ValueError, match="non-empty string"):
+        SurfaceCodeModel(window_floor_justification="   ")
 
 
 @pytest.mark.parametrize("field_name", ("n", "k", "d", "commit_rounds_override"))
@@ -253,14 +265,10 @@ def test_router_uses_exact_names_and_silently_falls_back_when_unmapped():
 
 
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))
-def test_override_predicates_distinguish_default_zero_and_positive_values(model_type):
-    """Both cards mark explicit zero and positive buffers as active overrides."""
-    default = model_type()
-    zero = model_type(buffer_rounds_override=0)
-    positive = model_type(buffer_rounds_override=2)
-    assert default.buffer_floor_override_active() is False
-    assert zero.buffer_floor_override_active() is True
-    assert positive.buffer_floor_override_active() is True
+def test_cards_carry_no_justification_by_default(model_type):
+    """Both cards start without a floor justification; overrides alone do not opt out of the floor."""
+    assert model_type().window_floor_justification is None
+    assert model_type(buffer_rounds_override=0).window_floor_justification is None
 
 
 def test_round_floors_and_window_defaults_follow_each_card_policy():
@@ -339,6 +347,7 @@ def test_dataclass_fields_defaults_and_constructor_order_are_stable():
         ("round_us", None),
         ("commit_rounds_override", None),
         ("buffer_rounds_override", None),
+        ("window_floor_justification", None),
     )
     expected_bb = (
         ("n", 144),
@@ -347,6 +356,7 @@ def test_dataclass_fields_defaults_and_constructor_order_are_stable():
         ("round_us", None),
         ("commit_rounds_override", None),
         ("buffer_rounds_override", None),
+        ("window_floor_justification", None),
     )
     for model_type, expected in (
         (SurfaceCodeModel, expected_surface),
@@ -408,7 +418,6 @@ def test_models_satisfy_the_structural_protocol_without_inheritance(model_type):
         "commit_rounds": ("self",),
         "buffer_rounds": ("self",),
         "buffering_floor": ("self",),
-        "buffer_floor_override_active": ("self",),
         "spatial_nodes": ("self", "num_patches"),
         "syndrome_bits_per_round": ("self", "num_patches"),
     }
@@ -416,6 +425,7 @@ def test_models_satisfy_the_structural_protocol_without_inheritance(model_type):
         assert callable(getattr(card, member_name))
         signature = inspect.signature(getattr(model_type, member_name))
         assert tuple(signature.parameters) == expected_parameters
+    assert card.window_floor_justification is None
 
 
 def test_outside_structural_code_model_completes_a_full_run():
@@ -435,15 +445,14 @@ def test_default_run_resolves_a_distance_three_surface_card():
     assert geometry.distance == 3
 
 
-def test_outside_annotations_are_declared_but_not_runtime_validated():
-    """Outside name and override flag annotations do not add runtime router validation."""
+def test_outside_name_annotation_is_declared_but_not_runtime_validated():
+    """An outside card's name annotation does not add runtime router validation."""
     card = OutsideCodeModel()
     card.name = 7
-    card.buffer_floor_override_active = lambda: "active"
     completed = build_run(card)
     geometry = completed.controller._code_geometry
     assert geometry.code_name == 7
-    assert geometry.buffer_floor_override_active == "active"
+    assert geometry.window_floor_justification is None
     assert completed.result.terminal_status == "complete"
 
 

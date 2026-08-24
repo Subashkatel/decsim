@@ -42,7 +42,6 @@ class UnionFindGraph:
     detector_count: int
     fault_count: int
     edges: tuple[UnionFindEdge, ...]
-    adjacency: tuple[tuple[int, tuple[tuple[int, int], ...]], ...]
     baseline_faults: tuple[int, ...]
     baseline_syndrome: tuple[int, ...]
     logical_observables_by_fault: tuple[tuple[int, ...], ...] = ()
@@ -56,12 +55,14 @@ class UnionFindHardEvidence:
     graph: UnionFindGraph
     syndrome: tuple[int, ...]
     residual_syndrome: tuple[int, ...]
-    baseline_faults: tuple[int, ...]
     selected_faults: tuple[int, ...]
     contact_faults: tuple[int, ...]
     edge_intervals: tuple[Open | Closed, ...]
     erasure_forest_faults: tuple[int, ...]
     logical_observables: tuple[int, ...]
+    # detectors the best-effort correction leaves unexplained: an odd cluster
+    # that ran out of edges before reaching another defect or the boundary
+    unmatched_detectors: tuple[int, ...] = ()
 
 
 class _DisjointSet:
@@ -154,11 +155,10 @@ def _graph_from_model(
         validate_graphlike_matrices,
     )
 
-    raw_check = np.asarray(faults.check)
+    check = faults.check
     raw_priors = np.asarray(faults.priors)
-    raw_observables = np.asarray(faults.observables)
-    validate_graphlike_matrices(raw_check, raw_observables, location=location)
-    fault_count = raw_check.shape[1]
+    validate_graphlike_matrices(check, faults.observables, location=location)
+    fault_count = check.shape[1]
     if raw_priors.ndim != 1 or raw_priors.size != fault_count:
         raise ValueError(
             f"{location} priors must have one entry per fault column"
@@ -168,17 +168,14 @@ def _graph_from_model(
     if not np.all((raw_priors >= 0.0) & (raw_priors <= 1.0)):
         raise ValueError(f"{location} priors must lie in [0, 1]")
 
-    check = raw_check.astype(np.uint8, copy=False)
-    observables = raw_observables.astype(np.uint8, copy=False)
+    # observables are few rows; dense per-fault columns are cheap to read
+    observables = faults.observables.toarray().astype(np.uint8, copy=False)
     priors = raw_priors.astype(float, copy=False)
     baseline = (priors > 0.5).astype(np.uint8)
-    baseline_syndrome = (check @ baseline) % 2
+    baseline_syndrome = np.asarray(
+        check.astype(np.int64) @ baseline.astype(np.int64)).ravel() % 2
 
     edges = []
-    adjacency: dict[int, list[tuple[int, int]]] = {
-        node: [] for node in range(check.shape[0])
-    }
-    adjacency[BOUNDARY] = []
     for fault_index in range(fault_count):
         probability = float(priors[fault_index])
         residual_probability = (
@@ -187,7 +184,8 @@ def _graph_from_model(
         if residual_probability == 0.0:
             continue
         detectors = tuple(
-            int(value) for value in np.nonzero(check[:, fault_index])[0]
+            int(value)
+            for value in check.indices[check.indptr[fault_index]:check.indptr[fault_index + 1]]
         )
         if len(detectors) == 0:
             detector_a = BOUNDARY
@@ -210,23 +208,8 @@ def _graph_from_model(
             ),
             length_half_ticks=2 * weight_ticks,
         )
-        edge_index = len(edges)
         edges.append(edge)
-        adjacency[detector_a].append((detector_b, edge_index))
-        adjacency[detector_b].append((detector_a, edge_index))
 
-    frozen_adjacency = tuple(
-        (
-            node,
-            tuple(
-                sorted(
-                    neighbors,
-                    key=lambda item: (edges[item[1]].fault_index, item[0]),
-                )
-            ),
-        )
-        for node, neighbors in sorted(adjacency.items())
-    )
     logical_columns = tuple(
         tuple(int(value) for value in observables[:, fault_index])
         for fault_index in range(fault_count)
@@ -235,7 +218,6 @@ def _graph_from_model(
         detector_count=check.shape[0],
         fault_count=fault_count,
         edges=tuple(edges),
-        adjacency=frozen_adjacency,
         baseline_faults=tuple(int(value) for value in baseline),
         baseline_syndrome=tuple(int(value) for value in baseline_syndrome),
         logical_observables_by_fault=logical_columns,
@@ -361,13 +343,10 @@ def _weighted_growth_outcome(graph: UnionFindGraph, syndrome):
                     ((remaining_ticks + rate - 1) // rate, edge_index)
                 )
         if not candidates:
-            active_roots = tuple(
-                sorted(root for root, active in frozen_active.items() if active)
-            )
-            raise RuntimeError(
-                "odd Union-Find cluster has no outward graph edge: "
-                f"roots {active_roots}"
-            )
+            # every remaining odd cluster has no outward edge left: the
+            # syndrome is not satisfiable inside this window; stop growing and
+            # peel what there is (PECOS and ldpc do the same: best effort)
+            break
         elapsed = min(candidate for candidate, _edge_index in candidates)
         if elapsed <= 0:
             raise RuntimeError(
@@ -524,10 +503,8 @@ def _peel_forest(
             parent = parents[node]
             assert parent is not None
             residual[parent] ^= 1
-        if root != boundary_node and residual[root]:
-            raise RuntimeError(
-                f"Union-Find erasure retained odd root detector {root}"
-            )
+        # an odd component without the boundary keeps its root defect
+        # unmatched; the caller reports it through unmatched_detectors
     return tuple(sorted(selected_edges))
 
 
@@ -564,14 +541,9 @@ def _decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
             reproduced[edge.detector_a] ^= 1
         if edge.detector_b != BOUNDARY:
             reproduced[edge.detector_b] ^= 1
-    if not np.array_equal(reproduced, syndrome_array):
-        unmatched = tuple(
-            int(value) for value in np.nonzero(reproduced ^ syndrome_array)[0]
-        )
-        raise RuntimeError(
-            "Union-Find peeling correction does not reproduce the syndrome; "
-            f"unmatched detectors {unmatched}"
-        )
+    unmatched_detectors = tuple(
+        int(value) for value in np.nonzero(reproduced ^ syndrome_array)[0]
+    )
 
     logical_observables = tuple(
         sum(
@@ -586,7 +558,6 @@ def _decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
         graph=graph,
         syndrome=tuple(int(value) for value in syndrome_array),
         residual_syndrome=tuple(int(value) for value in residual_syndrome),
-        baseline_faults=graph.baseline_faults,
         selected_faults=tuple(selected_faults),
         contact_faults=tuple(
             graph.edges[index].fault_index for index in contacts
@@ -596,6 +567,7 @@ def _decode_graph(graph: UnionFindGraph, syndrome) -> UnionFindHardEvidence:
             graph.edges[index].fault_index for index in forest
         ),
         logical_observables=logical_observables,
+        unmatched_detectors=unmatched_detectors,
     )
 
 

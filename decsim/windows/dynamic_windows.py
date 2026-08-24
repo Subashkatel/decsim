@@ -108,7 +108,6 @@ class DynamicWindows:
                     geometry.commit_lo,
                     geometry.commit_hi,
                     geometry.buffer_hi,
-                    is_last=(window_index == len(finite_geometries) - 1),
                 )
                 stream_state["next_window"] += 1
             return
@@ -120,7 +119,7 @@ class DynamicWindows:
                 stream_state, window_index, sealed_round_cap)
             buffer_hi = commit_hi + buffer_rounds
             wm.create_dynamic_window(stream_id, window_index, commit_lo,
-                                     commit_hi, buffer_hi, is_last=False)
+                                     commit_hi, buffer_hi)
             stream_state["next_window"] += 1
 
     @staticmethod

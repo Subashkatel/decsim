@@ -199,25 +199,10 @@ class BackendDecodeOutcome:
         return self.status is BackendDecodeStatus.SUCCEEDED
 
 
-class DecoderAttemptFailed(RuntimeError):
-    """A runtime decoder attempt failed with same-job immutable evidence."""
-
-    def __init__(self, job: DecodeJob, outcome: BackendDecodeOutcome):
-        if not isinstance(outcome, BackendDecodeOutcome):
-            raise TypeError("outcome must be a BackendDecodeOutcome")
-        if outcome.succeeded:
-            raise ValueError("a successful outcome cannot fail a decoder attempt")
-        self.job_identity = (job.op_id, job.window_id, job.attempt)
-        self.outcome = outcome
-        super().__init__(
-            f"decoder attempt {self.job_identity} failed: "
-            f"{outcome.status.value}/{outcome.failure_reason.value}"
-        )
-
-
 def _canonical_bytes(value) -> bytes:
     """Encode supported scientific values without process-local identities."""
     import numpy as np
+    from scipy.sparse import issparse
 
     if value is None:
         return b"n"
@@ -238,6 +223,14 @@ def _canonical_bytes(value) -> bytes:
         return b"s" + str(len(encoded)).encode("ascii") + b":" + encoded
     if isinstance(value, bytes):
         return b"y" + str(len(value)).encode("ascii") + b":" + value
+    if issparse(value):
+        matrix = value.tocsc().copy()
+        matrix.sum_duplicates()
+        matrix.sort_indices()
+        return b"c" + _canonical_bytes(tuple(matrix.shape)) + \
+            _canonical_bytes(np.ascontiguousarray(matrix.indptr)) + \
+            _canonical_bytes(np.ascontiguousarray(matrix.indices)) + \
+            _canonical_bytes(np.ascontiguousarray(matrix.data))
     if isinstance(value, np.ndarray):
         if value.dtype.hasobject:
             raise TypeError("object arrays cannot be fingerprinted")
@@ -279,7 +272,6 @@ def fault_model_fingerprint(placed_faults) -> str:
         "priors": placed_faults.priors,
         "observables": placed_faults.observables,
         "owned": placed_faults.owned,
-        "future_flips": placed_faults.future_flips,
         "boundary_flips": placed_faults.boundary_flips,
         "source_fault_ids": placed_faults.source_fault_ids,
     })
@@ -316,10 +308,9 @@ def validate_backend_outcome(
         correction = np.asarray(outcome.physical_correction, dtype=np.uint8)
         if correction.shape != (placed_faults.check.shape[1],):
             raise ValueError("backend correction has the wrong fault-model arity")
-        reconstructed = (
-            np.asarray(placed_faults.check, dtype=np.uint64)
-            @ correction.astype(np.uint64)
-        ) % 2
+        reconstructed = np.asarray(
+            placed_faults.check.astype(np.int64) @ correction.astype(np.int64)
+        ).ravel() % 2
         if outcome.reconstructed_syndrome is not None and tuple(
             int(bit) for bit in reconstructed
         ) != outcome.reconstructed_syndrome:
@@ -334,10 +325,9 @@ def validate_backend_outcome(
                 "component correction requires a physical correction and valid "
                 "local projection"
             )
-        component = (
-            np.asarray(projection, dtype=np.uint64)
-            @ correction.astype(np.uint64)
-        ) % 2
+        component = np.asarray(
+            projection.astype(np.int64) @ correction.astype(np.int64)
+        ).ravel() % 2
         if tuple(int(bit) for bit in component) != outcome.component_correction:
             raise ValueError("component correction does not match the local projection")
 
@@ -419,13 +409,39 @@ def check_syndrome_size(job: DecodeJob, syndrome, placed_faults) -> None:
     )
 
 
+def result_from_backend_outcome(
+    job: DecodeJob,
+    model,
+    placed_faults,
+    outcome: BackendDecodeOutcome,
+) -> DecodeResult:
+    """One policy for every backend: a decode that produced a correction is
+    committed as it stands, best effort or not, with its status on the result
+    (nonconverged, low confidence, does not reproduce the syndrome); only a
+    backend that produced no correction at all (an upstream exception, a
+    malformed vector) is a structural failure and stops the run."""
+    if outcome.physical_correction is None:
+        raise RuntimeError(
+            f"{job.label}: decoder backend produced no correction: "
+            f"{outcome.status.value}/{outcome.failure_reason.value}")
+    return result_from_selected_faults(
+        job,
+        model,
+        placed_faults,
+        outcome.physical_correction,
+        decode_status=None if outcome.succeeded else outcome.status,
+    )
+
+
 def result_from_selected_faults(
     job: DecodeJob,
     model,
     placed_faults,
     selected,
+    decode_status=None,
 ) -> DecodeResult:
-    """Keep owned selected faults and convert them into a DecodeResult."""
+    """Keep owned selected faults and convert them into a DecodeResult;
+    ``decode_status`` marks a best-effort correction (None = succeeded)."""
     import numpy as np
 
     selected = np.asarray(selected, dtype=np.uint8)
@@ -435,9 +451,9 @@ def result_from_selected_faults(
             f"expected ({placed_faults.check.shape[1]},)"
         )
     committed = selected.astype(bool) & placed_faults.owned
-    observable_flips = (
-        placed_faults.observables @ committed.astype(np.uint8)
-    ) % 2
+    observable_flips = np.asarray(
+        placed_faults.observables.astype(np.int64) @ committed.astype(np.int64)
+    ).ravel() % 2
     residual_detector_ids = _detector_ids_from_columns(
         placed_faults.boundary_flips,
         committed,
@@ -447,15 +463,11 @@ def result_from_selected_faults(
         job.window_id,
         correction=committed.astype(np.uint8),
         logical_observables=tuple(int(bit) for bit in observable_flips),
-        boundary_defects=_defects_from_columns(
-            model,
-            placed_faults.future_flips,
-            committed,
-        ),
         boundary_data=DependencyResidual(
             detector_ids=residual_detector_ids,
             defects=_defects_from_detector_ids(model, residual_detector_ids),
         ),
+        decode_status=decode_status,
     )
 
 
@@ -480,11 +492,3 @@ def _defects_from_detector_ids(model, detector_ids) -> dict | None:
             mask.extend([0] * (position + 1 - len(mask)))
         mask[position] ^= 1
     return defects or None
-
-
-def _defects_from_columns(model, detector_flips, committed) -> dict | None:
-    """Convert selected correction columns into round-indexed detector masks."""
-    return _defects_from_detector_ids(
-        model,
-        _detector_ids_from_columns(detector_flips, committed),
-    )

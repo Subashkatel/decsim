@@ -29,6 +29,7 @@ numpy = pytest.importorskip("numpy")
 
 import decsim.detector_error_model as detector_error_model_package
 import decsim.detector_error_model.detector_chronology as detector_chronology
+import decsim.detector_error_model.detector_formation as detector_formation
 import decsim.detector_error_model.fault_identity_validation as fault_identity_validation
 import decsim.detector_error_model.fault_model_contracts as fault_model_contracts
 import decsim.detector_error_model.stim_dem_catalog as stim_dem_catalog
@@ -268,6 +269,7 @@ PACKAGE_LAYERS = {
     "fault_model_contracts": 0,
     "fault_identity_validation": 0,
     "detector_chronology": 0,
+    "detector_formation": 0,
     "stim_dem_catalog": 1,
     "window_placement": 1,
     "window_slicer": 2,
@@ -279,6 +281,7 @@ PACKAGE_MODULES = {
     "fault_model_contracts": fault_model_contracts,
     "fault_identity_validation": fault_identity_validation,
     "detector_chronology": detector_chronology,
+    "detector_formation": detector_formation,
     "stim_dem_catalog": stim_dem_catalog,
     "window_placement": window_placement,
     "window_slicer": window_slicer,
@@ -986,7 +989,7 @@ def test_linked_catalogs_build_a_verified_link():
     assert physical.detector_sets == ((0, 1), (1, 3))
     assert physical.representation is PHYSICAL
     assert link.shape == (3, 2)
-    assert link.tolist() == [[1, 0], [0, 1], [0, 1]]
+    assert link.toarray().tolist() == [[1, 0], [0, 1], [0, 1]]
 
 
 def test_linked_catalogs_retain_a_maximum_detector_canceled_from_the_aggregate():
@@ -1008,7 +1011,7 @@ def test_linked_catalogs_retain_a_maximum_detector_canceled_from_the_aggregate()
         priors=(0.25,),
     )
     assert link.dtype == numpy.uint8
-    assert link.tolist() == [[1], [1]]
+    assert link.toarray().tolist() == [[1], [1]]
     assert max(detector for detectors in graphlike.detector_sets for detector in detectors) == 4
     assert all(4 not in detectors for detectors in physical.detector_sets)
 
@@ -1023,7 +1026,7 @@ def test_linked_catalogs_keep_distinct_decompositions_of_one_aggregate():
     assert physical.detector_sets == ((1, 3), (1, 3))
     assert physical.priors == (0.2, 0.3)
     assert link.shape[1] == 2
-    assert link.tolist() == [[1, 0], [1, 0], [0, 1], [0, 1]]
+    assert link.toarray().tolist() == [[1, 0], [1, 0], [0, 1], [0, 1]]
 
 
 def test_linked_catalogs_reject_disagreeing_physical_probabilities():
@@ -1101,19 +1104,17 @@ def test_local_projection_is_the_verified_detector_row_slice():
     graphlike = window.require_faults(GRAPHLIKE)
     physical = window.require_faults(PHYSICAL)
     projection = window.physical_to_graphlike_detector_projection
-    expected = numpy.asarray(slicer.catalog_link)[
+    expected = slicer.catalog_link.toarray()[
         numpy.ix_(graphlike.source_fault_ids, physical.source_fault_ids)
     ]
-    assert projection.tolist() == expected.tolist()
+    assert projection.toarray().tolist() == expected.tolist()
     assert projection.shape == (
         graphlike.check.shape[1],
         physical.check.shape[1],
     )
-    derived = (
-        numpy.asarray(graphlike.check, dtype=numpy.uint64)
-        @ projection.astype(numpy.uint64)
-    ) % 2
-    assert numpy.array_equal(derived, physical.check)
+    derived = (graphlike.check.toarray().astype(numpy.uint64)
+               @ projection.toarray().astype(numpy.uint64)) % 2
+    assert numpy.array_equal(derived, physical.check.toarray())
 
 
 # --------------------------------------------------------------------------
@@ -1332,14 +1333,13 @@ def make_placed_model():
         priors=numpy.array([0.1, 0.2]),
         observables=numpy.array([[1, 0]], dtype=numpy.uint8),
         owned=numpy.array([True, False]),
-        future_flips={1: [5]},
         source_fault_ids=[7, 9],
         boundary_flips={0: [0, 1]},
     )
 
 
 def test_placed_fault_model_fields_and_docstring():
-    """A placed fault model carries the representation, matrices, ownership mask, handoff maps and source column ids."""
+    """A placed fault model carries the representation, matrices, ownership mask, handoff map and source column ids."""
     fields = [field.name for field in dataclasses.fields(fault_model_contracts.PlacedFaultModel)]
     assert fields == [
         "representation",
@@ -1347,27 +1347,30 @@ def test_placed_fault_model_fields_and_docstring():
         "priors",
         "observables",
         "owned",
-        "future_flips",
         "source_fault_ids",
         "boundary_flips",
     ]
 
 
 def test_placed_fault_model_freezes_every_field():
-    """A placed fault model freezes its arrays, its column ids and its two flip mappings."""
+    """A placed fault model freezes its arrays, its sparse matrices, its column ids and its flip mapping."""
     placed = make_placed_model()
-    for field_name in ("check", "priors", "observables", "owned"):
+    for field_name in ("priors", "owned"):
         array = getattr(placed, field_name)
         assert array.flags.writeable is False
         with pytest.raises(ValueError):
             array[0] = array[0]
+    for field_name in ("check", "observables"):
+        matrix = getattr(placed, field_name)
+        assert matrix.format == "csc" and matrix.dtype == numpy.uint8
+        assert matrix.data.flags.writeable is False
+        assert matrix.indices.flags.writeable is False
+    assert placed.check.toarray().tolist() == [[1, 0], [1, 1]]
     assert placed.source_fault_ids == (7, 9)
-    assert isinstance(placed.future_flips, MappingProxyType)
     assert isinstance(placed.boundary_flips, MappingProxyType)
-    assert placed.future_flips == {1: (5,)}
     assert placed.boundary_flips == {0: (0, 1)}
     with pytest.raises(TypeError):
-        placed.future_flips[2] = (1,)
+        placed.boundary_flips[2] = (1,)
     with pytest.raises(dataclasses.FrozenInstanceError):
         placed.representation = PHYSICAL
 
@@ -1389,8 +1392,8 @@ def test_window_error_model_fields_and_deliberate_non_freezing():
     assert window.defect_positions[99] == (9, 9)
 
 
-def test_window_error_model_freezes_projection_without_copying():
-    """A window model retains its projection array and prevents external item assignment."""
+def test_window_error_model_freezes_its_projection_as_sparse():
+    """A window model holds its projection as a read-only csc matrix of the same entries."""
     projection = numpy.array([[True, False], [False, True]])
 
     window = fault_model_contracts.WindowErrorModel(
@@ -1402,10 +1405,12 @@ def test_window_error_model_freezes_projection_without_copying():
         physical_to_graphlike_detector_projection=projection,
     )
 
-    assert window.physical_to_graphlike_detector_projection is projection
-    assert projection.flags.writeable is False
+    frozen = window.physical_to_graphlike_detector_projection
+    assert frozen.format == "csc"
+    assert frozen.toarray().tolist() == [[1, 0], [0, 1]]
+    assert frozen.data.flags.writeable is False
     with pytest.raises(ValueError):
-        projection[0, 0] = False
+        frozen.data[0] = 0
 
 
 def test_window_error_model_accepts_no_projection():
@@ -1473,10 +1478,10 @@ def test_parse_window_entry_lets_a_malformed_length_fail_naturally(entry):
 
 def test_detectors_in_window_selects_rows_by_round():
     """A window takes the detectors of its buffer rounds, and the terminal window takes everything from its start onward."""
-    round_of = {0: 1, 1: 2, 2: 3, 3: 4}
-    assert window_placement._detectors_in_window(round_of, 2, 3, is_last=False) == [1, 2]
-    assert window_placement._detectors_in_window(round_of, 2, 3, is_last=True) == [1, 2, 3]
-    assert window_placement._detectors_in_window(round_of, 5, 6, is_last=False) == []
+    detectors_by_round = {1: [0], 2: [1], 3: [2], 4: [3]}
+    assert window_placement._detectors_in_window(detectors_by_round, 2, 3, is_last=False) == [1, 2]
+    assert window_placement._detectors_in_window(detectors_by_round, 2, 3, is_last=True) == [1, 2, 3]
+    assert window_placement._detectors_in_window(detectors_by_round, 5, 6, is_last=False) == []
 
 
 # --------------------------------------------------------------------------
@@ -1484,28 +1489,21 @@ def test_detectors_in_window_selects_rows_by_round():
 # --------------------------------------------------------------------------
 
 
-def test_fault_columns_admit_touching_columns_and_leading_re_admissions():
-    """Candidate columns are those touching the window, minus columns committed elsewhere unless they reach the leading buffer."""
+def test_fault_columns_are_touching_columns_not_committed_elsewhere():
+    """Candidate columns are those touching the window minus the columns a prior window committed; a candidate list restricts the search."""
     detector_sets = ((0,), (0, 1), (1, 2), (3,))
     row_index = {0: 0, 1: 1, 2: 2}
-    lead_rows = {0}
-    assert window_placement._fault_columns_for_window(
-        detector_sets, row_index, lead_rows, set(), include_committed_leading=True
-    ) == [0, 1, 2]
-    assert window_placement._fault_columns_for_window(
-        detector_sets, row_index, lead_rows, {1, 2}, include_committed_leading=True
-    ) == [0, 1]
-    assert window_placement._fault_columns_for_window(
-        detector_sets, row_index, lead_rows, {1, 2}, include_committed_leading=False
-    ) == [0]
+    assert window_placement._fault_columns_for_window(detector_sets, row_index, set()) == [0, 1, 2]
+    assert window_placement._fault_columns_for_window(detector_sets, row_index, {1, 2}) == [0]
+    assert window_placement._fault_columns_for_window(detector_sets, row_index, set(), [1, 3]) == [1]
 
 
-def test_leading_buffer_re_admits_committed_columns_only_on_the_incremental_path():
-    """Leading-buffer re-admission happens on the incremental path only, not when predecessors are given explicitly."""
+def test_committed_columns_stay_excluded_on_both_ownership_paths():
+    """A committed column never comes back, whether ownership is incremental or given explicitly (qLDPC: addressed errors are removed from every later window)."""
     plan = [(1, 1, 2, 2), (2, 3, 4, 4)]
     incremental = chain_models(plan)[1].require_faults(GRAPHLIKE)
-    assert incremental.source_fault_ids == (1, 2, 3, 4)
-    assert incremental.owned.tolist() == [False, False, True, True]
+    assert incremental.source_fault_ids == (3, 4)
+    assert incremental.owned.tolist() == [True, True]
     dependency = chain_models(plan, dependency_edges=((0, 1),))[1].require_faults(
         GRAPHLIKE
     )
@@ -1545,34 +1543,18 @@ def test_fault_owned_by_window_precedence(
 
 def test_detector_bits_are_local_but_observable_bits_are_unconditional():
     """A column sets detector bits only for rows in this window but sets every observable bit."""
-    check = numpy.zeros((2, 1), dtype=numpy.uint8)
-    observables = numpy.zeros((3, 1), dtype=numpy.uint8)
-    window_placement._fill_detector_and_observable_columns(
-        check,
-        observables,
-        column_index=0,
-        fault_index=0,
+    check, observables, _, _ = window_placement._build_window_arrays(
+        context=placement_context(rows=[9, 0], row_index={0: 1}, n_obs=3),
+        columns=[0],
         det_sets=((0, 5),),
         obs_sets=((2,),),
-        context=placement_context(row_index={0: 1}),
+        fault_rounds=((1, 3),),
+        committed_elsewhere=set(),
+        unowned_faults=set(),
+        explicitly_owned_faults=None,
     )
-    assert check.tolist() == [[0], [1]]
-    assert observables.tolist() == [[0], [0], [1]]
-
-
-def test_future_flips_are_strictly_after_the_commit_region():
-    """Future flips are the detectors later than the commit region, and the terminal window hands nothing on."""
-    det_sets = ((0, 1, 2),)
-    round_of = {0: 1, 1: 2, 2: 3}
-    assert window_placement._future_flips_after_commit(
-        det_sets, 0, placement_context(round_of=round_of, commit_hi=2, is_last=False)
-    ) == (2,)
-    assert window_placement._future_flips_after_commit(
-        det_sets, 0, placement_context(round_of=round_of, commit_hi=2, is_last=True)
-    ) == ()
-    assert window_placement._future_flips_after_commit(
-        det_sets, 0, placement_context(round_of=round_of, commit_hi=3, is_last=False)
-    ) == ()
+    assert check.toarray().tolist() == [[0], [1]]
+    assert observables.toarray().tolist() == [[0], [0], [1]]
 
 
 def placement_context(**overrides):
@@ -1580,7 +1562,6 @@ def placement_context(**overrides):
     fields = dict(
         rows=[0, 1],
         row_index={0: 0, 1: 1},
-        lead_rows=set(),
         round_of={0: 1, 1: 2, 2: 3},
         n_obs=1,
         commit_lo=1,
@@ -1606,20 +1587,19 @@ def build_window_arrays_case(context_overrides=None, **overrides):
     return arguments
 
 
-def test_build_window_arrays_produces_five_aligned_outputs():
-    """One pass builds the check, observable and ownership arrays plus the future and boundary flip maps."""
+def test_build_window_arrays_produces_four_aligned_outputs():
+    """One pass builds the check, observable and ownership arrays plus the boundary flip map."""
     arguments = build_window_arrays_case()
-    check, observables, owned, future_flips, boundary_flips = (
+    check, observables, owned, boundary_flips = (
         window_placement._build_window_arrays(**arguments)
     )
     assert check.shape == (2, 2)
     assert check.dtype == numpy.uint8
-    assert check.tolist() == [[1, 0], [0, 1]]
+    assert check.toarray().tolist() == [[1, 0], [0, 1]]
     assert observables.shape == (1, 2)
-    assert observables.tolist() == [[1, 0]]
+    assert observables.toarray().tolist() == [[1, 0]]
     assert owned.dtype == bool
     assert owned.tolist() == [True, True]
-    assert future_flips == {1: (2,)}
     assert boundary_flips == {0: (0,), 1: (1, 2)}
     assert arguments["committed_elsewhere"] == {0, 1}
 
@@ -1627,7 +1607,7 @@ def test_build_window_arrays_produces_five_aligned_outputs():
 def test_owned_columns_are_not_recorded_on_the_explicit_path():
     """With an explicit owner set, ownership is membership and no incremental commitment state is recorded."""
     arguments = build_window_arrays_case(explicitly_owned_faults={1})
-    _, _, owned, _, _ = window_placement._build_window_arrays(**arguments)
+    _, _, owned, _ = window_placement._build_window_arrays(**arguments)
     assert owned.tolist() == [False, True]
     assert arguments["committed_elsewhere"] == set()
 
@@ -1641,11 +1621,10 @@ def test_detectorless_owned_column_records_no_boundary_flip():
         obs_sets=((),),
         fault_rounds=((),),
     )
-    _, _, owned, future_flips, boundary_flips = window_placement._build_window_arrays(
+    _, _, owned, boundary_flips = window_placement._build_window_arrays(
         **arguments
     )
     assert owned.tolist() == [True]
-    assert future_flips == {}
     assert boundary_flips == {}
 
 
@@ -1867,16 +1846,14 @@ def test_ownership_state_is_kept_per_representation():
     assert len(slicer.catalogs[PHYSICAL].detector_sets) == 2
 
 
-def test_placement_context_is_a_frozen_eight_field_bundle_without_copies():
-    """The window placement context is a frozen eight-field bundle that normalises, copies and freezes nothing."""
+def test_placement_context_is_a_frozen_seven_field_bundle_without_copies():
+    """The window placement context is a frozen seven-field bundle that normalises, copies and freezes nothing."""
     rows = [1, 2]
     row_index = {1: 0, 2: 1}
-    lead_rows = {1}
     round_of = {1: 1, 2: 2}
     context = window_placement.WindowPlacementContext(
         rows=rows,
         row_index=row_index,
-        lead_rows=lead_rows,
         round_of=round_of,
         n_obs=1,
         commit_lo=1,
@@ -1887,7 +1864,6 @@ def test_placement_context_is_a_frozen_eight_field_bundle_without_copies():
     assert [field.name for field in fields] == [
         "rows",
         "row_index",
-        "lead_rows",
         "round_of",
         "n_obs",
         "commit_lo",
@@ -1898,12 +1874,9 @@ def test_placement_context_is_a_frozen_eight_field_bundle_without_copies():
     assert all(field.default_factory is dataclasses.MISSING for field in fields)
     assert context.rows is rows
     assert context.row_index is row_index
-    assert context.lead_rows is lead_rows
     assert context.round_of is round_of
     rows.append(3)
-    lead_rows.add(2)
     assert context.rows == [1, 2, 3]
-    assert context.lead_rows == {1, 2}
     with pytest.raises(dataclasses.FrozenInstanceError):
         context.is_last = True
     assert "__post_init__" not in vars(window_placement.WindowPlacementContext)
@@ -1954,7 +1927,6 @@ def test_slice_window_builds_one_shared_placement_context(monkeypatch):
     assert shared.row_index == {
         detector_id: row for row, detector_id in enumerate(model.detector_ids)
     }
-    assert shared.lead_rows == set()
     assert shared.round_of is slicer.round_of
     assert shared.n_obs == slicer.n_obs
     assert (shared.commit_lo, shared.commit_hi, shared.is_last) == (1, 2, False)
@@ -1986,17 +1958,15 @@ def test_slice_window_products_are_complete():
     assert first.detector_ids == (0, 1)
     assert first.detector_coordinates == ((0.0, 0.0), (0.0, 1.0))
     assert first_faults.source_fault_ids == (0, 1, 2)
-    assert first_faults.check.tolist() == [[1, 1, 0], [0, 1, 1]]
-    assert first_faults.observables.tolist() == [[1, 0, 0]]
+    assert first_faults.check.toarray().tolist() == [[1, 1, 0], [0, 1, 1]]
+    assert first_faults.observables.toarray().tolist() == [[1, 0, 0]]
     assert first_faults.owned.tolist() == [True, True, True]
-    assert first_faults.future_flips == {2: (2,)}
     assert first_faults.boundary_flips == {0: (0,), 1: (0, 1), 2: (1, 2)}
     assert first.defect_positions == {0: (1, 0), 1: (2, 0), 2: (3, 0)}
     last_faults = last.require_faults(GRAPHLIKE)
     assert last.detector_ids == (2, 3)
     assert last_faults.source_fault_ids == (3, 4)
     assert last_faults.owned.tolist() == [True, True]
-    assert last_faults.future_flips == {}
     assert last.defect_positions == {2: (3, 0), 3: (4, 0)}
 
 
@@ -2033,11 +2003,12 @@ def test_explicit_prior_faults_union_ancestor_ownership():
     )
     ancestors = (frozenset(), frozenset({0}), frozenset({0, 1}))
     priors = window_ownership_dag._explicit_prior_faults(ownership, ancestors)
-    assert priors == (
-        {GRAPHLIKE: set()},
-        {GRAPHLIKE: {0}},
-        {GRAPHLIKE: {0, 1}},
-    )
+    # answered by membership: a fault is prior when its owner is an ancestor
+    assert [[fault in prior[GRAPHLIKE] for fault in (0, 1, 2)] for prior in priors] == [
+        [False, False, False],
+        [True, False, False],
+        [True, True, False],
+    ]
 
 
 def isolated_round_circuit():
@@ -2300,7 +2271,7 @@ def test_source_fault_ids_are_the_only_catalog_index_carrier():
         global_detectors = set(catalog_columns[global_column])
         local_detectors = {
             models[1].detector_ids[row]
-            for row in numpy.nonzero(last.check[:, local_column])[0]
+            for row in last.check[:, local_column].nonzero()[0]
         }
         assert local_detectors == global_detectors & set(models[1].detector_ids)
 
@@ -2465,12 +2436,12 @@ def test_real_repetition_windows_partition_and_preserve_the_global_faults(
             global_detectors = set(detector_sets[global_column])
             local_detectors = {
                 rows[row]
-                for row in numpy.nonzero(faults.check[:, local_column])[0]
+                for row in faults.check[:, local_column].nonzero()[0]
             }
             assert local_detectors == global_detectors & set(rows)
             local_observables = set(
                 int(observable)
-                for observable in numpy.nonzero(faults.observables[:, local_column])[0]
+                for observable in faults.observables[:, local_column].nonzero()[0]
             )
             assert local_observables == set(observable_sets[global_column])
             assert faults.priors[local_column] == pytest.approx(priors[global_column])
@@ -2482,8 +2453,8 @@ def test_real_repetition_windows_partition_and_preserve_the_global_faults(
     assert sorted(owned_columns) == list(range(len(detector_sets)))
 
 
-def test_real_repetition_future_flips_hand_on_later_detectors(repetition_circuit):
-    """Owned columns of a real circuit hand their post-commit detectors to the next window."""
+def test_real_repetition_boundary_flips_carry_the_full_detector_effect(repetition_circuit):
+    """Owned columns of a real circuit carry their complete global detector effect, so the next window can take the post-commit part."""
     round_of = detector_chronology.resolve_detector_rounds(
         repetition_circuit, None, REPETITION_ROUNDS
     )
@@ -2500,17 +2471,20 @@ def test_real_repetition_future_flips_hand_on_later_detectors(repetition_circuit
     for local_column, global_column in enumerate(first_faults.source_fault_ids):
         if not first_faults.owned[local_column]:
             continue
-        expected = tuple(
+        assert first_faults.boundary_flips[local_column] == tuple(detector_sets[global_column])
+        beyond_commit = [
             detector_id
             for detector_id in detector_sets[global_column]
             if round_of[detector_id] > 2
-        )
-        assert first_faults.future_flips.get(local_column, ()) == expected
-        handed_on = handed_on or bool(expected)
+        ]
+        handed_on = handed_on or bool(beyond_commit)
         for detector_id in detector_sets[global_column]:
             assert detector_id in first.defect_positions
     assert handed_on
-    assert last.require_faults(GRAPHLIKE).future_flips == {}
+    last_faults = last.require_faults(GRAPHLIKE)
+    assert set(last_faults.boundary_flips) == {
+        column for column, owned in enumerate(last_faults.owned) if owned
+    }
 
 
 def test_real_surface_slicing_preserves_the_global_faults(surface_circuit):
@@ -2532,12 +2506,12 @@ def test_real_surface_slicing_preserves_the_global_faults(surface_circuit):
         for local_column, global_column in enumerate(faults.source_fault_ids):
             local_detectors = {
                 rows[row]
-                for row in numpy.nonzero(faults.check[:, local_column])[0]
+                for row in faults.check[:, local_column].nonzero()[0]
             }
             assert local_detectors == set(detector_sets[global_column]) & set(rows)
             local_observables = set(
                 int(observable)
-                for observable in numpy.nonzero(faults.observables[:, local_column])[0]
+                for observable in faults.observables[:, local_column].nonzero()[0]
             )
             assert local_observables == set(observable_sets[global_column])
             if faults.owned[local_column]:
@@ -2561,11 +2535,9 @@ def test_real_repetition_linked_views_agree_with_both_stim_models(repetition_cir
         len(graphlike.source_fault_ids),
         len(physical.source_fault_ids),
     )
-    derived = (
-        numpy.asarray(graphlike.check, dtype=numpy.uint64)
-        @ projection.astype(numpy.uint64)
-    ) % 2
-    assert numpy.array_equal(derived, physical.check)
+    derived = (graphlike.check.toarray().astype(numpy.uint64)
+               @ projection.toarray().astype(numpy.uint64)) % 2
+    assert numpy.array_equal(derived, physical.check.toarray())
     fault_identity_validation.validate_belief_matching_matrices(
         graphlike.check,
         graphlike.observables,

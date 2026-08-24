@@ -423,3 +423,26 @@ def test_run_seed_binding_uses_distinct_policy_paths():
     reserved = {owner: seed for action, owner, seed in events if action == "reserve"}
     assert set(reserved) == {"boundary", "idle"}
     assert reserved["boundary"] != reserved["idle"]
+
+
+def test_sliding_tail_follows_qldpc_rule():
+    """The last window starts when fewer than W + F rounds remain and is
+    never shorter than W (qLDPC SlidingWindowDecoder, sinter.py
+    `while start < end - (W + s - 1)`)."""
+    from decsim.windows.windowing_schemes import _finite_forward_window_geometries
+
+    def qldpc_windows(round_count, width, stride):
+        start, windows = 0, []
+        while start < round_count - (width + stride - 1):
+            windows.append((start + 1, start + stride, start + width))
+            start += stride
+        windows.append((start + 1, round_count, round_count))
+        return windows
+
+    for round_count in (5, 13, 20, 30, 31, 32, 33):
+        for commit, buffer in ((3, 6), (3, 3), (2, 4), (5, 5)):
+            ours = [(g.commit_lo, g.commit_hi, g.buffer_hi)
+                    for g in _finite_forward_window_geometries(round_count, commit, buffer)]
+            assert ours == qldpc_windows(round_count, commit + buffer, commit)
+    last = _finite_forward_window_geometries(31, 3, 6)[-1]
+    assert (last.commit_lo, last.commit_hi) == (22, 31)

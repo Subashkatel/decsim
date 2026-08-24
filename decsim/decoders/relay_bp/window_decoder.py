@@ -107,6 +107,12 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
         )
         if converged_solution_count == 0:
             raise ValueError("converged_solution_count must be positive")
+        pre_iterations = _nonnegative_integer(pre_iterations, "pre_iterations")
+        if pre_iterations == 0:
+            # relay-bp runs its first leg for pre_iter iterations and keeps the
+            # previous call's decoding when that loop never runs
+            # (relay.rs decode_inner), so a zero first leg returns stale state
+            raise ValueError("pre_iterations must be positive")
         self._profile = _RelayProfile(
             alpha=_finite_real(alpha, "alpha", allow_none=True),
             alpha_iteration_scaling_factor=_finite_real(
@@ -114,10 +120,7 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
                 "alpha_iteration_scaling_factor",
             ),
             gamma0=_finite_real(gamma0, "gamma0", allow_none=True),
-            pre_iterations=_nonnegative_integer(
-                pre_iterations,
-                "pre_iterations",
-            ),
+            pre_iterations=pre_iterations,
             relay_set_count=_nonnegative_integer(
                 relay_set_count,
                 "relay_set_count",
@@ -212,7 +215,7 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
                 status=BackendDecodeStatus.INVALID_CORRECTION,
                 failure_reason=
                     BackendFailureReason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
-                physical_correction=None,
+                physical_correction=correction,
                 component_correction=None,
                 reconstructed_syndrome=decoded_detectors,
                 iterations=iterations,
@@ -368,11 +371,11 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
     def _validated_model(faults):
         import numpy as np
 
-        check = np.asarray(faults.check)
+        check = faults.check
         priors = np.asarray(faults.priors, dtype=float)
-        if check.ndim != 2:
+        if len(check.shape) != 2:
             raise ValueError("Relay check matrix must be two-dimensional")
-        if not np.all((check == 0) | (check == 1)):
+        if not np.all((check.data == 0) | (check.data == 1)):
             raise ValueError("Relay check matrix must be binary")
         if priors.ndim != 1 or priors.shape[0] != check.shape[1]:
             raise ValueError("Relay priors must align with physical fault columns")
@@ -382,7 +385,7 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
                     "Relay prior at physical column "
                     f"{column_index} must satisfy finite 0 < p <= 0.5"
                 )
-        return np.asarray(check, dtype=np.uint8), priors.astype(np.float64)
+        return check, priors.astype(np.float64)
 
     @staticmethod
     def _validated_syndrome(syndrome, detector_count: int):
@@ -410,10 +413,9 @@ class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
     def _reconstruct(check, correction) -> tuple[int, ...]:
         import numpy as np
 
-        reconstructed = (
-            np.asarray(check, dtype=np.uint64)
-            @ np.asarray(correction, dtype=np.uint64)
-        ) % 2
+        reconstructed = np.asarray(
+            check.astype(np.int64) @ np.asarray(correction, dtype=np.int64)
+        ).ravel() % 2
         return tuple(int(bit) for bit in reconstructed)
 
     @staticmethod

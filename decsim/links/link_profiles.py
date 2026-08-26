@@ -26,6 +26,7 @@ from .links import (
     LinkModelConfig,
     LinkQuantityBasis,
     PayloadSizeConfig,
+    TransferOverheadConfig,
 )
 
 
@@ -165,6 +166,36 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             "one controller-to-QPU payload per commit region",
         ),
         profile_name="bandwidth_limited",
+    )
+
+
+def with_transfer_overhead(
+    profile: LinkModelConfig,
+    *,
+    overhead_us: float,
+    source: str,
+    paths: tuple = ("cwd", "csd"),
+) -> LinkModelConfig:
+    """Return ``profile`` with a fixed per-transfer setup cost on the listed
+    paths (default: the two decoder-input DMA paths).
+
+    Engine-side: the wire keeps streaming during a setup, but successive
+    setups on one path serialize (gem5-Aladdin's one delayed-DMA event; see
+    ``TransferOverheadConfig`` for the measured numbers). Each listed path
+    must own its channel; ``resolve()`` refuses a shared channel whose
+    edges disagree about the shift.
+    """
+    overhead = TransferOverheadConfig(us(overhead_us), source)
+    replacements = {}
+    for path in paths:
+        edge = getattr(profile, path)
+        if edge is None:
+            raise ValueError(f"{path} is not wired on this card")
+        replacements[path] = replace(edge, transfer_overhead=overhead)
+    return replace(
+        profile,
+        **replacements,
+        profile_name=f"{profile.profile_name}+transfer_overhead",
     )
 
 

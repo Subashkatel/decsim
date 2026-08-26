@@ -39,7 +39,8 @@ from decsim.decoders.decoder_memory import DecoderMemoryConfig
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
-from decsim.links.links import LinkCapacityConfig, LinkConfig, LinkQuantityBasis
+from decsim.links.links import (LinkCapacityConfig, LinkConfig,
+                                LinkQuantityBasis, TransferOverheadConfig)
 from decsim.message import Operation
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.code_geometry import SurfaceCodeModel
@@ -163,7 +164,12 @@ def link_cards(config: dict):
             capacity = LinkCapacityConfig(card["bits_per_us"], LinkQuantityBasis.DIRECT_AGGREGATE,
                                           None, source)
         channel = LinkConfig(us_ticks(card["latency_us"]), capacity, source)
-        channels[path] = replace(getattr(profile, path), channel=channel)
+        overhead = None
+        if card.get("transfer_overhead_us"):
+            overhead = TransferOverheadConfig(
+                us_ticks(card["transfer_overhead_us"]), source)
+        channels[path] = replace(getattr(profile, path), channel=channel,
+                                 transfer_overhead=overhead)
     # The yaml prices controller processing on its own line
     # (controller.t_binary_availability_us), so its qc card is link
     # propagation only; the attestation lets a nonzero processing cost run.

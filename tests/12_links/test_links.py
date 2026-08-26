@@ -1032,3 +1032,88 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
             bandwidth_limited_profile(
                 capacity_scale=invalid_scale
             )
+
+
+# ---- per-transfer setup overhead (gem5-Aladdin engine-side rule) ----------
+
+def _overhead_edge(overhead_ticks, *, channel=None):
+    from decsim.links.links import TransferOverheadConfig
+    return LinkEdgeConfig(
+        channel or make_channel(), None, "measured payload",
+        transfer_overhead=TransferOverheadConfig(overhead_ticks, "test setup"))
+
+
+def test_transfer_overhead_delays_delivery_without_occupying_the_wire():
+    from decsim.links.links import LinkCapacityConfig, LinkQuantityBasis
+    capacity = LinkCapacityConfig(
+        1.0, LinkQuantityBasis.DIRECT_AGGREGATE, None, "test rate")
+    channel = make_channel(capacity=capacity, propagation_ticks=10)
+    model = make_model_config({LinkPath.CSD: _overhead_edge(
+        50, channel=channel)}).resolve()
+    first = model.reserve(LinkPath.CSD, payload_bits=4, now_ticks=100,
+                          attribution=valid_attribution(LinkPath.CSD))
+    # setup 50 ticks (engine-side) + serialization 4 bits / 1 bit-per-us
+    # + propagation 10 ticks
+    assert first.send_ticks == 150            # the wire sees the shifted send
+    assert first.serialization_ticks == us(4.0)
+    assert first.total_delay_ticks == 50 + us(4.0) + 10
+
+
+def test_setups_serialize_like_aladdins_single_dma_event():
+    model = make_model_config(
+        {LinkPath.CSD: _overhead_edge(50)}).resolve()
+    first = model.reserve(LinkPath.CSD, payload_bits=1, now_ticks=100,
+                          attribution=valid_attribution(LinkPath.CSD))
+    second = model.reserve(LinkPath.CSD, payload_bits=1, now_ticks=100,
+                           attribution=valid_attribution(LinkPath.CSD))
+    # one CPU programs the engine: the second setup starts when the first ends
+    assert first.total_delay_ticks == 50 + 7
+    assert second.total_delay_ticks == 100 + 7
+
+
+def test_zero_overhead_edges_reserve_identically_to_plain_edges():
+    plain = make_model_config().resolve()
+    with_field = make_model_config(
+        {LinkPath.CSD: _overhead_edge(0)}).resolve()
+    a = plain.reserve(LinkPath.CSD, payload_bits=4, now_ticks=10,
+                      attribution=valid_attribution(LinkPath.CSD))
+    b = with_field.reserve(LinkPath.CSD, payload_bits=4, now_ticks=10,
+                           attribution=valid_attribution(LinkPath.CSD))
+    assert a == b
+
+
+def test_shared_channel_with_mixed_overhead_is_refused():
+    shared = make_channel()
+    overrides = {LinkPath.CSD: _overhead_edge(50, channel=shared),
+                 LinkPath.CWD: make_actual_edge(channel=shared)}
+    with pytest.raises(ValueError, match="transfer overhead differs"):
+        make_model_config(overrides).resolve()
+
+
+def test_with_transfer_overhead_helper_covers_the_dma_paths():
+    from decsim.links.link_profiles import (logical_reference_profile,
+                                            with_transfer_overhead)
+    card = with_transfer_overhead(
+        logical_reference_profile(), overhead_us=0.4,
+        source="Shao MICRO 2016 measured 400 ns per transaction")
+    assert card.cwd.transfer_overhead is not None
+    assert card.csd.transfer_overhead is not None
+    assert card.qc.transfer_overhead is None
+    assert card.cwd.transfer_overhead.overhead_ticks == us(0.4)
+
+
+def test_yaml_card_key_reaches_the_edge():
+    from experiments.baseline.baseline_closed_loop import link_cards
+    config = {"links": {
+        "qc": {"latency_us": 1.0, "bits_per_us": None},
+        "c2b": {"latency_us": 0.5, "bits_per_us": 100000.0},
+        "cwd": {"latency_us": 1.0, "bits_per_us": None,
+                "transfer_overhead_us": 0.4},
+        "dd": {"latency_us": 0.5, "bits_per_us": None},
+        "wdo": {"latency_us": 1.0, "bits_per_us": None},
+        "oc": None, "cq": None, "wsd": None, "csd": None,
+    }}
+    card = link_cards(config)
+    assert card.cwd.transfer_overhead is not None
+    assert card.cwd.transfer_overhead.overhead_ticks == us(0.4)
+    assert card.dd.transfer_overhead is None

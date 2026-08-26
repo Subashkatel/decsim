@@ -16,11 +16,11 @@ sweep:
   # timing: strong cards are slow; the round periods bracket where one unit stops keeping up
   - physical_error_probability: [0.001]
     round_period_us: [10.0, 5.0, 3.0, 2.0, 1.5, 1.0, 0.5]
-    algorithm_latency_us: [5.0, 1.0, measured]
+    algorithm_latency_us: [5.0, 1.0, belief_matching]
                                              # 5.0 = the repository's strong-tier reference card (accuracy-first
                                              #       decoder, no hardware source; the axis to sweep)
                                              # 1.0 = faster-strong sensitivity card
-                                             # measured = wall clock of each real PyMatching call on this host
+                                             # belief_matching = the strong tier's real algorithm, measured wall clock per window
     shots: 10
   # logical error rate: timing knobs never change the decoded answer (Gate 10)
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]

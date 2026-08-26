@@ -173,3 +173,52 @@ def test_loader_refuses_unknown_names(tmp_path, weak_config):
                    .replace("mode: weak_baseline", "mode: strongest"))
     with pytest.raises(ValueError, match="mode"):
         load_experiment(bad)
+
+
+def test_named_algorithm_loop_ler_matches_direct_decode_of_same_algorithm():
+    """The P2 gate: windowed decoding through the whole machine is an
+    approximation of decoding the shot at once, so for each named algorithm
+    the loop's logical error rate must sit inside the Wilson interval of the
+    same algorithm decoding the same sampled events whole-circuit. Catches
+    wiring errors (wrong windows, wrong error model, wrong observables), not
+    algorithm quality."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parents[2] / ".pydeps"))
+    import numpy as np
+
+    from experiments.build_run import build_run
+    from experiments.sweep_report import wilson_interval
+
+    shots = 20
+    for name, config_name in (("pymatching", "weak_baseline"),
+                              ("belief_matching", "strong_only")):
+        config = load_experiment(f"experiments/configs/{config_name}.yaml")
+        loop_failures = 0
+        direct_failures = 0
+        for seed in range(shots):
+            spec, _engine = build_run(
+                config, physical_error_probability=0.008,
+                round_period_us=1.0, algorithm_latency_us=name, seed=seed)
+            completed = spec.build()
+            operation_result = completed.result.operation_results[0]
+            truth = tuple(operation_result.observable_truth)
+            loop_failures += tuple(operation_result.logical_observables) != truth
+            events = np.asarray(completed.qpu.model.sampled_detection_events(
+                operation_result.operation_id), dtype=bool)
+            circuit = spec.ops[0].circuit
+            if name == "pymatching":
+                import pymatching
+                direct = pymatching.Matching.from_detector_error_model(
+                    circuit.detector_error_model(decompose_errors=True))
+                predicted = direct.decode(events)
+            else:
+                from beliefmatching import BeliefMatching
+                direct = BeliefMatching(
+                    circuit.detector_error_model(decompose_errors=True))
+                predicted = direct.decode(events)
+            direct_failures += tuple(int(bit) for bit in predicted) != truth
+        loop_low, loop_high = wilson_interval(loop_failures, shots)
+        direct_low, direct_high = wilson_interval(direct_failures, shots)
+        assert loop_low <= direct_high and direct_low <= loop_high, (
+            f"{name}: loop {loop_failures}/{shots} vs direct "
+            f"{direct_failures}/{shots} do not overlap")

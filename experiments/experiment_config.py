@@ -14,9 +14,12 @@ from typing import Optional, Union
 
 import yaml
 
-MEASURED = "measured"
-# A decoder algorithm card: a fixed core latency in microseconds, or
-# MEASURED to charge the real PyMatching wall clock of every call.
+# A decoder algorithm card: a named real algorithm, decoded per window and
+# charged its measured wall clock, or a number, a fixed core latency in us
+# (a hypothetical algorithm). The names are the two tiers of the decoder-
+# switching setting (Toshio arXiv 2510.25222: MWPM weak, belief-matching
+# strong).
+ALGORITHMS = ("pymatching", "belief_matching")
 AlgorithmCard = Union[float, str]
 
 MODES = ("weak_baseline", "strong_only")
@@ -227,6 +230,12 @@ def load_experiment(path) -> ExperimentConfig:
     raw_trace = raw.get("trace", "off")
     if raw_trace is False:
         raw_trace = "off"     # yaml 1.1 reads a bare `off` as boolean False
+    for block in raw["sweep"]:
+        for algorithm in block["algorithm_latency_us"]:
+            if isinstance(algorithm, str) and algorithm not in ALGORITHMS:
+                raise ValueError(
+                    f"algorithm_latency_us entries are numbers (fixed core "
+                    f"latency, us) or one of {ALGORITHMS}, got {algorithm!r}")
     sweep = tuple(
         SweepBlock(physical_error_probabilities=tuple(block["physical_error_probability"]),
                    algorithm_latencies_us=tuple(block["algorithm_latency_us"]),

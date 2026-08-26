@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 
 from decsim.decoders.bposd import bposd_window_decoder
-from decsim.detector_error_model import (
+from decsim.detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     PHYSICAL_FAULT_MODEL_REQUIRED,
 )

@@ -15,7 +15,7 @@ import shlex
 import subprocess
 import sys
 
-from decsim.detector_error_model import (
+from decsim.detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )

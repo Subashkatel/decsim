@@ -4,16 +4,14 @@ from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+from typing import Optional
 import hashlib
 import os
 from pathlib import Path
 
-from decsim.detector_error_model import (
-    build_window_error_models,
-    decode_windowed_backend_outcomes,
-    decode_windowed,
-    resolve_detector_rounds,
-)
+from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
+from decsim.detector_error_model.fault_model_contracts import FaultRepresentation
+from decsim.detector_error_model.window_model_builders import build_window_error_models
 from decsim.decoders.window_decode_results import BackendDecodeStatus
 
 from .harness import Batch, offline_batch_seed, sample_batch_sha256
@@ -118,11 +116,13 @@ def load_layered_stim_input(circuit_path, expected_sha256,
 class OfflineBatchDecoder:
     """Reuse window models and a cached decoder while sampling fresh batches."""
 
-    def __init__(self, circuit, window_models, decode_window, fault_representation):
+    def __init__(self, circuit, window_models, decode_window, fault_representation,
+                 forward_handoffs=()):
         self.circuit = circuit
         self.window_models = tuple(window_models)
         self.decode_window = decode_window
         self.fault_representation = fault_representation
+        self.forward_handoffs = tuple(forward_handoffs)
 
     @classmethod
     def prepare(
@@ -135,18 +135,20 @@ class OfflineBatchDecoder:
         fault_model_requirement,
         fault_representation,
         detector_rounds=None,
-        num_observables=None,
     ):
+        _require_forward_sliding(windows)
         models = build_window_error_models(
             circuit,
             windows,
-            num_observables,
             round_count=round_count,
             detector_rounds=detector_rounds,
             fault_model_requirement=fault_model_requirement,
             fault_exclusion_ranges=(),
         )
-        return cls(circuit, models, decode_window, fault_representation)
+        round_of = resolve_detector_rounds(circuit, detector_rounds, round_count)
+        handoffs = forward_handoffs_for(
+            models, windows, round_of, fault_representation)
+        return cls(circuit, models, decode_window, fault_representation, handoffs)
 
     def run(self, batch: Batch, sample_seed: int) -> DecodedBatch:
         sampler = self.circuit.compile_detector_sampler(seed=sample_seed)
@@ -161,6 +163,7 @@ class OfflineBatchDecoder:
                 detectors[index],
                 self.decode_window,
                 selected_fault_representation=self.fault_representation,
+                forward_handoffs=self.forward_handoffs,
             )
             failures += tuple(int(bit) for bit in prediction) != tuple(
                 int(bit) for bit in truth[index]
@@ -201,6 +204,7 @@ class OfflineBatchDecoder:
                 detector_row,
                 self.decode_window,
                 selected_fault_representation=self.fault_representation,
+                forward_handoffs=self.forward_handoffs,
             ))
             records.append({
                 "shot_index": global_shot_index,
@@ -241,7 +245,8 @@ class OfflineBackendBatchDecoder(OfflineBatchDecoder):
         window_attempts = 0
         for index in range(batch.shots):
             decoded = decode_windowed_backend_outcomes(
-                self.window_models, detectors[index], self.decode_window
+                self.window_models, detectors[index], self.decode_window,
+                forward_handoffs=self.forward_handoffs,
             )
             window_attempts += len(decoded.window_outcomes)
             terminal_status = decoded.window_outcomes[-1].status
@@ -461,3 +466,170 @@ def run_offline_parallel(
         )
         for batch in batches
     )
+
+
+# ---- the windowed reference decode -----------------------------------------
+# Moved here from decsim.detector_error_model when the core trimmed it: the
+# simulator decodes through the window manager, so the offline harness is the
+# one owner of this list-ordered reference loop.
+
+def forward_handoffs_for(window_models, window_plan, round_of,
+                         representation: FaultRepresentation) -> tuple:
+    """Per window, {column: detectors handed to a later window}: an owned
+    column's detectors in rounds beyond that window's commit_hi. The last
+    window hands nothing on. This reconstructs the forward-only handoff the
+    core once stored as future_flips, from boundary_flips (each owned
+    column's complete global detector effect) and the detector round map."""
+    handoffs = []
+    last_index = len(window_models) - 1
+    for window_index, (model, entry) in enumerate(zip(window_models, window_plan)):
+        commit_hi = entry[2] if len(entry) == 4 else entry[1]
+        columns = {}
+        if window_index != last_index:
+            faults = model.require_faults(representation)
+            for column, detector_ids in faults.boundary_flips.items():
+                beyond_commit = tuple(detector_id for detector_id in detector_ids
+                                      if round_of[detector_id] > commit_hi)
+                if beyond_commit:
+                    columns[int(column)] = beyond_commit
+        handoffs.append(columns)
+    return tuple(handoffs)
+
+
+def _require_forward_sliding(plan) -> None:
+    """The list-ordered decode loop supports forward sliding windows only:
+    a 4-value entry with buffer_lo < commit_lo is a parallel A/B window and
+    needs dependency-aware seam reconciliation."""
+    for entry in plan:
+        if len(entry) == 4 and entry[0] < entry[1]:
+            raise ValueError(
+                "list-ordered decode_windowed supports only forward sliding "
+                "windows; parallel A/B windows require dependency-aware seam "
+                "reconciliation")
+
+
+@dataclass(frozen=True)
+class WindowedBackendDecode:
+    """Same-shot backend outcomes and a prediction only after full success."""
+
+    window_outcomes: tuple
+    logical_prediction: Optional[tuple]
+
+
+def decode_windowed(
+    window_models: list,
+    detection_events,
+    decode_window,
+    *,
+    selected_fault_representation: FaultRepresentation,
+    forward_handoffs: tuple,
+) -> "object":
+    """Decode one shot through a forward-only sliding-window chain.
+
+    Parallel block A/B decoding needs a dependency-aware seam stage and
+    residual-syndrome handoff. This list-ordered helper intentionally rejects
+    leading-buffer models instead of approximating that different algorithm.
+    """
+    logical_prediction, _ = _walk_windowed(
+        window_models,
+        detection_events,
+        decode_window,
+        selected_fault_representation,
+        forward_handoffs,
+        typed_backend_outcomes=False,
+    )
+    return logical_prediction
+
+
+def decode_windowed_backend_outcomes(
+    window_models: list,
+    detection_events,
+    decode_window,
+    *,
+    forward_handoffs: tuple,
+) -> WindowedBackendDecode:
+    """Walk physical windows once and preserve each exact backend outcome."""
+    logical_prediction, outcomes = _walk_windowed(
+        window_models,
+        detection_events,
+        decode_window,
+        FaultRepresentation.PHYSICAL,
+        forward_handoffs,
+        typed_backend_outcomes=True,
+    )
+    return WindowedBackendDecode(
+        window_outcomes=outcomes,
+        logical_prediction=(
+            None
+            if logical_prediction is None
+            else tuple(int(bit) for bit in logical_prediction)
+        ),
+    )
+
+
+def _walk_windowed(
+    window_models: list,
+    detection_events,
+    decode_window,
+    selected_fault_representation: FaultRepresentation,
+    forward_handoffs: tuple,
+    *,
+    typed_backend_outcomes: bool,
+) -> tuple:
+    """Single owner of detector selection, commitment, and boundary forwarding."""
+    import numpy as np
+
+    if not window_models:
+        raise ValueError("windowed decode requires at least one window model")
+    # Leading-buffer (parallel A/B) plans are refused at plan time by
+    # _require_forward_sliding; the sliced models no longer carry bounds.
+    pending: set = set()
+    last_window_for_detector = {
+        detector_id: window_index
+        for window_index, model in enumerate(window_models)
+        for detector_id in model.detector_ids
+    }
+    first_faults = window_models[0].require_faults(
+        selected_fault_representation
+    )
+    total = np.zeros(first_faults.observables.shape[0], dtype=np.uint8)
+    outcomes = []
+    for window_index, model in enumerate(window_models):
+        faults = model.require_faults(selected_fault_representation)
+        syndrome = detection_events[list(model.detector_ids)].astype(np.uint8).copy()
+        for detector_index, detector_id in enumerate(model.detector_ids):
+            if detector_id in pending:
+                syndrome[detector_index] ^= 1
+                if last_window_for_detector[detector_id] == window_index:
+                    pending.discard(detector_id)
+
+        decoded = decode_window(model, syndrome)
+        if typed_backend_outcomes:
+            from decsim.decoders.window_decode_results import (
+                validate_backend_outcome,
+            )
+
+            validate_backend_outcome(decoded, model, faults, syndrome)
+            outcomes.append(decoded)
+            if not decoded.succeeded:
+                return None, tuple(outcomes)
+            selected = np.asarray(
+                decoded.physical_correction,
+                dtype=np.uint8,
+            )
+        else:
+            selected = np.asarray(decoded, dtype=np.uint8)
+        if selected.shape != (faults.check.shape[1],):
+            raise ValueError(
+                "selected correction arity does not match the placed fault model"
+            )
+        committed = selected.astype(bool) & faults.owned
+        total ^= (faults.observables @ committed.astype(np.uint8)) % 2
+        for column_index in np.nonzero(committed)[0]:
+            handed_on = forward_handoffs[window_index].get(int(column_index), ())
+            for detector_id in handed_on:
+                pending.symmetric_difference_update({detector_id})
+    if pending:
+        raise RuntimeError(f"artificial defects were never consumed: {sorted(pending)}"
+                           ". The plan does not cover the full detector stream.")
+    return total, tuple(outcomes)

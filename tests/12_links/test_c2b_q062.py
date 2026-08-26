@@ -256,3 +256,63 @@ def test_rounds_pipeline_on_c2b_instead_of_stop_and_wait():
     assert len(delivered) == 8
     gaps = [(b - a) / TICKS_PER_US for a, b in zip(delivered, delivered[1:])]
     assert all(gap == pytest.approx(0.02, abs=1e-3) for gap in gaps), gaps   # first gap adds serialization
+
+
+def _packing(*, assembly_slots=None, buffer_capacity=None, overflow=None):
+    from decsim.controller.syndrome_packing import (PackingOverflowPolicy,
+                                                    SyndromePackingPolicy)
+    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
+    policy = SyndromePackingPolicy(
+        overflow=overflow if overflow is not None
+        else PackingOverflowPolicy.FAIL_STOP)
+    return SyndromePacking(
+        _Engine(), t_pack=0,
+        packing_context_capacity=assembly_slots,
+        window_input_receiver=_Receiver([True] * 8),
+        feedback_memory_receiver=None,
+        syndrome_buffer=SyndromeBuffer(capacity=buffer_capacity),
+        policy=policy)
+
+
+def _fragment(round_index, *, fragment_index=0, operation_id=1):
+    from decsim.message import RetainedSyndromeFragment
+    return RetainedSyndromeFragment(
+        operation_id=operation_id, patch_id=0, round_index=round_index,
+        bits=None, size_bits=24, fragment_index=fragment_index)
+
+
+def test_assembly_capacity_bounds_rounds_in_flight_through_the_stage():
+    from decsim.controller.syndrome_packing import SyndromePackingOverflow
+    from decsim.message import WINDOW_INPUT_ROUTE
+    packing = _packing(assembly_slots=1)
+    packing._receive_fragment(_fragment(1, fragment_index=0), 2,
+                              WINDOW_INPUT_ROUTE)   # round 1 mid-assembly
+    with pytest.raises(SyndromePackingOverflow, match="capacity 1 is full"):
+        packing._receive_fragment(_fragment(2), 1, WINDOW_INPUT_ROUTE)
+    packing._receive_fragment(_fragment(1, fragment_index=1), 2,
+                              WINDOW_INPUT_ROUTE)   # round 1 still completes
+    assert packing.syndrome_buffer.retained_fragments((1, 1)) is not None
+
+
+def test_assembly_capacity_drop_round_drops_only_the_new_round():
+    from decsim.controller.syndrome_packing import PackingOverflowPolicy
+    from decsim.message import WINDOW_INPUT_ROUTE
+    packing = _packing(assembly_slots=1,
+                       overflow=PackingOverflowPolicy.DROP_ROUND)
+    packing._receive_fragment(_fragment(1, fragment_index=0), 2,
+                              WINDOW_INPUT_ROUTE)
+    packing._receive_fragment(_fragment(2), 1, WINDOW_INPUT_ROUTE)
+    assert packing.packing_drops == 1
+    packing._receive_fragment(_fragment(1, fragment_index=1), 2,
+                              WINDOW_INPUT_ROUTE)
+    assert packing.syndrome_buffer.retained_fragments((1, 1)) is not None
+    assert packing.syndrome_buffer.retained_fragments((1, 2)) is None
+
+
+def test_retention_refusal_reports_the_stores_capacity():
+    from decsim.controller.syndrome_packing import SyndromePackingOverflow
+    from decsim.message import WINDOW_INPUT_ROUTE
+    packing = _packing(assembly_slots=None, buffer_capacity=1)
+    packing._receive_fragment(_fragment(1), 1, WINDOW_INPUT_ROUTE)
+    with pytest.raises(SyndromePackingOverflow, match="capacity 1 is full"):
+        packing._receive_fragment(_fragment(2), 1, WINDOW_INPUT_ROUTE)

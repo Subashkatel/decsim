@@ -23,15 +23,19 @@ from ..message import (
 
 @dataclass(frozen=True)
 class SyndromeBufferingConfig:
-    """Optional capacities of the syndrome stores, in rounds.
+    """Optional capacities of the syndrome path, in rounds.
 
-    ``upstream_packet_slots`` bounds Buffer 0 and ``sb1_packet_slots`` bounds
-    syndrome buffer 1; ``None`` means unbounded. Decoder-side storage is
-    configured separately and in different units by ``RunSpec.decoder_memory``.
+    ``upstream_packet_slots`` bounds Buffer 0's retention and
+    ``sb1_packet_slots`` bounds syndrome buffer 1's; ``packing_assembly_slots``
+    bounds the packing stage's assembly workspace (rounds in flight through
+    the stage at once), a separate physical memory with a separate sizing
+    law. ``None`` means unbounded. Decoder-side storage is configured
+    separately and in different units by ``RunSpec.decoder_memory``.
     """
 
     upstream_packet_slots: Optional[int] = None
     sb1_packet_slots: Optional[int] = None
+    packing_assembly_slots: Optional[int] = None
 
 
 # ---- consumer hold tokens: who keeps rounds in Buffer 0 and why

@@ -30,6 +30,7 @@ from decsim.qpu.code_geometry import SurfaceCodeModel
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.stim_device import StimDevice
 from decsim.run_spec import RunSpec
+from decsim.syndrome_buffer.syndrome_buffer import SyndromeBufferingConfig
 from decsim.windows.windowing_schemes import (NaiveOnlineScheme,
                                               ParallelWindowScheme,
                                               SlidingWindowScheme,
@@ -120,9 +121,20 @@ def code_model(config: ExperimentConfig) -> SurfaceCodeModel:
 
 
 def decoder_memory(config: ExperimentConfig):
-    if config.decoder_memory_rounds is None:
+    unit_buffer_size = config.decoder.unit_buffer_size
+    if unit_buffer_size is None:
         return None
-    return DecoderMemoryConfig({"default": config.decoder_memory_rounds})
+    return DecoderMemoryConfig({"default": unit_buffer_size})
+
+
+def syndrome_buffering(config: ExperimentConfig) -> SyndromeBufferingConfig:
+    """The syndrome-path store capacities, straight off the buffers card
+    (rounds; None = unbounded)."""
+    buffers = config.buffers
+    return SyndromeBufferingConfig(
+        upstream_packet_slots=buffers.buffer_0_size,
+        sb1_packet_slots=buffers.buffer_1_size,
+        packing_assembly_slots=buffers.packing_workspace_size)
 
 
 def escalation_policy(config: ExperimentConfig):
@@ -152,6 +164,7 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
         device=StimDevice(), decoder=engine, num_units=config.decoder.units,
         timing=timing, links=link_model(config),
         decoder_memory=decoder_memory(config),
+        syndrome_buffering=syndrome_buffering(config),
         escalation_policy=escalation_policy(config),
         pauli_frame=PauliFrameConfig(commit_us=config.pauli_frame_commit_us),
         seed=seed)

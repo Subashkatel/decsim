@@ -48,13 +48,18 @@ links:
   oc:  null
   cq:  null
 
+buffers:                                     # syndrome-path store capacities, in rounds (null = unbounded)
+  buffer_0_size: null                        # Buffer 0 (rounds drop on arrival in this mode)
+  buffer_1_size: null                        # syndrome buffer 1, the store this path reads
+  packing_workspace_size: null               # packing assembly workspace
+
 decoder:
   units: 1                                   # strong units; sweep by editing (stability runs used 1, 2, 4)
+  unit_buffer_size: null                     # input SRAM rounds PER UNIT; null = unbounded
   engine:
     frequency_mhz: 250.0
     fetch_cycles_per_round: 1
     release_cycles_per_job: 1
-decoder_memory_rounds: null
 
 
 pauli_frame:

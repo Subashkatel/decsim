@@ -28,6 +28,24 @@ def test_reference_config_loads_and_runs():
     assert shot.windows >= 1 and not shot.direct_mismatch
 
 
+def test_buffer_size_keys_reach_the_run_spec(tmp_path):
+    from experiments.build_run import build_run
+    raw = yaml.safe_load(REFERENCE_YAML.read_text())
+    raw["buffers"] = {"buffer_0_size": 30, "buffer_1_size": 40,
+                      "packing_workspace_size": 50}
+    raw["decoder"]["unit_buffer_size"] = 24
+    config_path = tmp_path / "finite_buffers.yaml"
+    config_path.write_text(yaml.safe_dump(raw))
+    spec, _ = build_run(load_experiment(config_path),
+                        physical_error_probability=0.001,
+                        round_period_us=1.0, algorithm_latency_us=0.028,
+                        seed=0)
+    assert spec.syndrome_buffering.upstream_packet_slots == 30
+    assert spec.syndrome_buffering.sb1_packet_slots == 40
+    assert spec.syndrome_buffering.packing_assembly_slots == 50
+    assert spec.decoder_memory.capacity_for("default") == 24
+
+
 def test_reference_config_lists_every_key_the_shipped_configs_use():
     reference_keys = set(yaml.safe_load(REFERENCE_YAML.read_text()))
     for name in ("weak_baseline", "strong_only"):

@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+from decsim.message import DecoderTier
+
 import pytest
 
 from decsim.windows.dynamic_windows import DynamicWindows
@@ -127,7 +129,8 @@ def test_real_manager_constructs_with_segment_delivery_state_in_its_owner():
         fault_model_requirement_for=lambda _code_name: None,
         retain_strong_context=False,
         double_window=False,
-        escalation_policy=SimpleNamespace(),
+        escalation_policy=SimpleNamespace(
+            primary_tier=DecoderTier.WEAK),
         submit_fn=lambda job, reserve_transfer=None: None,
         check_strong_route=lambda weak_job, strong_job: None,
         on_workload_complete=lambda: None,

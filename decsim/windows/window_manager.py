@@ -80,6 +80,7 @@ class WindowManager:
         self._selected_request_keys = {} if capture_enabled else None
 
         self.escalation_policy = escalation_policy
+        self.primary_tier = escalation_policy.primary_tier
         self._idle_decode_demand_receiver = None
         self.submit_fn = submit_fn                   # (job, reserve_transfer) -> None
         self.escalation = (StrongEscalation(self, check_strong_route)
@@ -91,9 +92,10 @@ class WindowManager:
             syndrome_buffer_1 = SyndromeBuffer1(engine, links)
         self.syndrome_buffer_1 = syndrome_buffer_1
         if self.syndrome_buffer_1 is not None:
-            # the room-side store signals its arrivals to the strong tier's
-            # terminal-slab listener; Buffer 0 keeps signalling the weak lane
-            self.syndrome_buffer_1.on_round_stored = self.escalation.after_arrival
+            # the room-side store's arrival signal: always the terminal-slab
+            # listener; the readiness authority too when the strong tier is
+            # primary (readiness listens to the store its lane reads)
+            self.syndrome_buffer_1.on_round_stored = self._on_room_round_stored
         self.lifecycle = DynamicWindows(self)
 
         self._ops: dict[int, Operation] = {}
@@ -443,14 +445,16 @@ class WindowManager:
                 f"unknown syndrome operation {packet.operation_id!r}"
             ) from error
         self._store_payload(packet, op)
-        self.lifecycle.maybe_update(op.id)
-        self.escalation.after_arrival(op.id)
-        self.check_windows_for_operation(op.id)
-        for predecessor_id in op.decoder_boundary_predecessors:
-            self.check_windows_for_operation(predecessor_id)
+        if self.primary_tier is not DecoderTier.STRONG:
+            # Buffer 0 publication is the readiness authority for the weak lane
+            self._count_arrival(op, packet.round_index)
+            self.lifecycle.maybe_update(op.id)
+            self.escalation.after_arrival(op.id)
+            self._wake_windows(op)
         # a round whose every consumer already resolved (an absorbed window's
-        # tail) frees its Buffer 0 slot on arrival, the same drop-on-arrival
-        # rule syndrome buffer 1 applies
+        # tail, or every round of a strong-primary plan) frees its Buffer 0
+        # slot on arrival, the same drop-on-arrival rule syndrome buffer 1
+        # applies
         self.syndrome_buffer.release_round_if_unheld(
             (packet.operation_id, packet.round_index))
 
@@ -496,13 +500,33 @@ class WindowManager:
             raise RuntimeError(
                 "syndrome packet was not published from the retained "
                 "syndrome buffer round")
+
+    def _count_arrival(self, op: Operation, round_index: int) -> None:
+        """Advance the readiness arrival counter; the authority calls this."""
         self.rounds_arrived[op.id] = max(
             self.rounds_arrived[op.id],
-            packet.round_index,
+            round_index,
         )
         self.engine.log("DecoderCluster",
-                        f"round {packet.round_index} of {op.name} arrived "
+                        f"round {round_index} of {op.name} arrived "
                         f"(op now has rounds 1..{self.rounds_arrived[op.id]})")
+
+    def _wake_windows(self, op: Operation) -> None:
+        self.check_windows_for_operation(op.id)
+        for predecessor_id in op.decoder_boundary_predecessors:
+            self.check_windows_for_operation(predecessor_id)
+
+    def _on_room_round_stored(self, op_id) -> None:
+        """Syndrome buffer 1 stored a round: wake the strong tier's
+        listeners, and drive readiness when the strong tier is primary."""
+        self.escalation.after_arrival(op_id)
+        if self.primary_tier is not DecoderTier.STRONG:
+            return
+        op = self._ops[op_id]
+        stored_through = self.syndrome_buffer_1.rounds_arrived.get(op_id, 0)
+        self._count_arrival(op, stored_through)
+        self.lifecycle.maybe_update(op_id)
+        self._wake_windows(op)
 
     def on_memory_round(self, op_id: int) -> None:
         """Record an idle/memory round and re-check waiting windows."""

@@ -194,6 +194,20 @@ def chain_load(samples: dict, config: ExperimentConfig,
     return (service_us + handoff_us) / inter_arrival_us
 
 
+def _write_trace(config: ExperimentConfig, completed, *,
+                 physical_error_probability: float, round_period_us: float,
+                 algorithm_latency_us, seed: int) -> None:
+    """One file per shot with the engine narrator's full line record; the
+    same lines that printed live (trace: true prints and keeps them)."""
+    trace_dir = config.results_dir / "trace"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+    name = (f"p{physical_error_probability:g}"
+            f"_algo{algorithm_latency_us}"
+            f"_round{round_period_us:g}us_seed{seed}.log")
+    (trace_dir / name).write_text(
+        "\n".join(completed.engine.log_lines) + "\n")
+
+
 def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                  round_period_us: float, algorithm_latency_us,
                  seed: int) -> ShotMeasurement:
@@ -202,10 +216,15 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                              round_period_us=round_period_us,
                              algorithm_latency_us=algorithm_latency_us, seed=seed)
     wall_start = time.perf_counter()
-    completed = spec.build()
+    completed = spec.build(verbose=config.trace)
     wall_seconds = time.perf_counter() - wall_start
     if completed.result.terminal_status != "complete":
         raise RuntimeError(f"run did not complete: {completed.result.terminal_status}")
+    if config.trace:
+        _write_trace(config, completed,
+                     physical_error_probability=physical_error_probability,
+                     round_period_us=round_period_us,
+                     algorithm_latency_us=algorithm_latency_us, seed=seed)
 
     samples = collect_samples(completed, engine, config.mode)
     decoded_windows = len(samples["service"])

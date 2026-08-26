@@ -84,6 +84,8 @@ class ExperimentConfig:
     links: dict                     # path -> LinkCard | None (None = reference card)
     decoder: DecoderCard
     decoder_memory_rounds: Optional[int]   # per unit; None = unbounded
+    trace: bool                     # print the engine narrator live and keep
+                                    # each shot's lines in results/<name>/trace/
     pauli_frame_commit_us: float
 
     @property
@@ -153,4 +155,5 @@ def load_experiment(path) -> ExperimentConfig:
                 fetch_cycles_per_round=engine["fetch_cycles_per_round"],
                 release_cycles_per_job=engine["release_cycles_per_job"])),
         decoder_memory_rounds=raw["decoder_memory_rounds"],
+        trace=bool(raw.get("trace", False)),
         pauli_frame_commit_us=raw["pauli_frame"]["commit_us"])

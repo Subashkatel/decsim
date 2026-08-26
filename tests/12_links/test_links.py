@@ -1113,7 +1113,7 @@ def test_yaml_card_key_reaches_the_edge(tmp_path):
         "windowing: {scheme: sliding, commit_rounds: null, buffer_rounds: null}\n"
         "sweep: [{physical_error_probability: [0.001], round_period_us: [1.0],\n"
         "         algorithm_latency_us: [0.028], shots: 1}]\n"
-        "controller: {t_binary_availability_us: 0.0, t_pack_us: 0.0}\n"
+        "controller: {clock: fridge, t_binary_availability_cycles: 0, t_pack_cycles: 0}\n"
         "clocks: {fridge: 250.0, room: 250.0}\n"
         "links:\n"
         "  qc:  {latency_cycles: 250, clock: fridge, bits_per_cycle: null}\n"
@@ -1128,7 +1128,7 @@ def test_yaml_card_key_reaches_the_edge(tmp_path):
         "  units: 1\n"
         "  unit_buffer_size: null\n"
         "  engine: {frequency_mhz: 250.0, fetch_cycles_per_round: 1, release_cycles_per_job: 1}\n"
-        "pauli_frame: {commit_us: 0.004}\n")
+        "pauli_frame: {clock: fridge, commit_cycles: 1}\n")
     (tmp_path / "overhead_card.yaml").write_text(yaml_text)
     card = link_model(load_experiment(tmp_path / "overhead_card.yaml"))
     assert card.wbd.transfer_overhead is not None

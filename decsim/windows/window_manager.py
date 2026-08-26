@@ -88,7 +88,9 @@ class WindowManager:
         self.on_workload_complete = on_workload_complete
 
         self.syndrome_buffer = syndrome_buffer if syndrome_buffer is not None else SyndromeBuffer()
-        if syndrome_buffer_1 is None and retain_strong_context:
+        uses_strong_store = (retain_strong_context
+                             or self.primary_tier is DecoderTier.STRONG)
+        if syndrome_buffer_1 is None and uses_strong_store:
             syndrome_buffer_1 = SyndromeBuffer1(engine, links)
         self.syndrome_buffer_1 = syndrome_buffer_1
         if self.syndrome_buffer_1 is not None:
@@ -243,8 +245,9 @@ class WindowManager:
                 buffering_plan.sb1_sufficient_live_rounds,
             ),
         }
+        strong_is_primary = self.primary_tier is DecoderTier.STRONG
         capacity = self.syndrome_buffer.capacity
-        minimum = buffering_plan.minimum_live_rounds
+        minimum = () if strong_is_primary else buffering_plan.minimum_live_rounds
         if capacity is not None and capacity < len(minimum):
             raise ValueError(
                 f"upstream syndrome buffer needs {len(minimum)} packet slots, "
@@ -253,6 +256,9 @@ class WindowManager:
         if self.syndrome_buffer_1 is not None:
             sb1_capacity = self.syndrome_buffer_1.capacity_rounds
             sb1_minimum = buffering_plan.sb1_minimum_live_rounds
+            if strong_is_primary:
+                # the plan's window reads live on the room-side store
+                sb1_minimum = buffering_plan.minimum_live_rounds
             if sb1_capacity is not None and sb1_capacity < len(sb1_minimum):
                 raise ValueError(
                     f"syndrome buffer 1 needs {len(sb1_minimum)} packet "
@@ -260,9 +266,17 @@ class WindowManager:
                 )
         self._register_planned_holds(buffering_plan)
 
+    @property
+    def primary_store(self):
+        """The store the primary tier reads: Buffer 0 for the weak lane,
+        syndrome buffer 1 for a strong-primary plan."""
+        if self.primary_tier is DecoderTier.STRONG:
+            return self.syndrome_buffer_1
+        return self.syndrome_buffer
+
     def _register_planned_holds(self, plan) -> None:
         for owner, identities in plan.weak_holds:
-            self.syndrome_buffer.register_hold(owner, identities)
+            self.primary_store.register_hold(owner, identities)
         for owner, identities in plan.potential_holds:
             self.syndrome_buffer_1.register_hold(owner, identities)
 
@@ -682,10 +696,10 @@ class WindowManager:
     def _submit_window_decode(self, key: tuple, window: Window,
                               op: Operation) -> None:
         """Build the weak job, ask the escalation_policy, and enqueue its submissions."""
-        self._stamp_first_round_tick(window)
+        self._stamp_first_round_tick(window, self.primary_store)
         window.t_queued = self.engine.now
         request_key = self._new_request_key(
-            window.op_id, window.k, DecoderTier.WEAK)
+            window.op_id, window.k, self.primary_tier)
         job = DecodeJob(
                         op_id=window.op_id, window_id=window.k,
                         n_rounds=(
@@ -694,7 +708,8 @@ class WindowManager:
                         ),
                         ready_time=self.engine.now,
                         spatial_nodes=self._resolved_operations[op.id].spatial_node_count,
-                        payloads=self._assemble_payloads(window),
+                        payloads=self._assemble_payloads(
+                            window, self.primary_store),
                         dem=self.window_models.get(key),
                         code=(
                             self._resolved_operations[
@@ -715,17 +730,23 @@ class WindowManager:
                     self.submit_fn(submission.job,
                                    lambda delay=submission.delay_ticks: delay)
                     continue
-                self._bind_decoder_input_hold(submission.job, key)
-                weak_job = submission.job
-                payload_bits = self._job_payload_bits(weak_job)
+                self._bind_decoder_input_hold(
+                    submission.job, key, self.primary_store)
+                primary_job = submission.job
+                payload_bits = self._job_payload_bits(primary_job)
                 extra_delay = submission.delay_ticks
+                # unit assigned: move the window from the primary store into
+                # its memory, over the primary tier's input link
+                input_path = (LinkPath.CWD
+                              if self.primary_tier is DecoderTier.WEAK
+                              else LinkPath.CSD)
 
-                def reserve_transfer(job=weak_job, bits=payload_bits, extra=extra_delay) -> int:
-                    # Unit assigned: move the window from Buffer 0 into its memory (CWD).
-                    return (self._link_arrival(LinkPath.CWD, job, payload_bits=bits)
+                def reserve_transfer(job=primary_job, bits=payload_bits,
+                                     extra=extra_delay, path=input_path) -> int:
+                    return (self._link_arrival(path, job, payload_bits=bits)
                             - self.engine.now + extra)
 
-                self.submit_fn(weak_job, reserve_transfer)
+                self.submit_fn(primary_job, reserve_transfer)
             else:
                 if submission.delay_ticks != 0:
                     raise ValueError(

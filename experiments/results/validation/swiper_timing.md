@@ -9,7 +9,7 @@ Problem: one memory patch, d=7, sliding windows (commit 7, buffer 7), one decode
 | 21 | 3 / 2 | 1/1 | 56 / 42.0 |
 | 35 | 5 / 4 | 3/3 | 84 / 70.0 |
 | 70 | 10 / 9 | 8/8 | 154 / 140.0 |
-| 100 | 15 / 14 | 13/13 | 224 / 210.0 |
+| 100 | 15 / 13 | 12/12 | 224 / 196.0 |
 
 ## Per-window timeline, n = 35 (rounds one-based, times in rounds)
 

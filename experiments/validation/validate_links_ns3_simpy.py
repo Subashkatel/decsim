@@ -237,8 +237,9 @@ def case_real_run_payloads():
     """A whole closed loop (Stim rotated memory d=3, 12 rounds, the bandwidth
     limited card at a quarter of its rates so every channel queues) and, from
     its traffic ledger, three checks per transfer: (a) the payload the link
-    priced is the real one (QC: the detector bits of that round; CWD per
-    window: the sum of its rounds' bits; C2B: the packed round's bits);
+    priced is the real one (QC and C2B: the raw measurement bits of that
+    round, per the formation table; CWD per window: the sum of its rounds'
+    detection-event bits);
     (b) serialization = round(bits / bandwidth) and delivery = send + wait +
     serialization + propagation; (c) the queue waits equal ns-3's FIFO rule
     replayed over that channel's transfers in send order."""
@@ -259,9 +260,23 @@ def case_real_run_payloads():
                    decoder=PresetLatencyDecoder(1.0), num_units=1, links=links, seed=3).build()
     report = done.result.link_traffic
     transfers = report["transfers"]
-    # detectors per emitted round: the circuit's own chronology (the final
-    # data-qubit detectors belong to the last round; Gate 5 checked the bits)
+    # Two wire conventions coexist by design, matching where detection events
+    # come into existence. Google's Willow system is structured the same way:
+    # "measurement signals are classified into bits then transmitted ... via
+    # low-latency Ethernet. Inside the workstation, measurements are converted
+    # into detections" (arXiv:2408.13687, Nature 638, 920); Khalid et al.
+    # price t_qc as one raw outcome bit per physical qubit per round
+    # (arXiv:2511.10633 Table II). So:
+    #   QC / C2B carry RAW MEASUREMENT BITS per QPU round -- the formation
+    #   table's packet widths, with the final data readout folded into the
+    #   last round's packet -- because detection events do not exist until
+    #   Buffer-0 intake forms them (syndrome_packing._finish_packing);
+    #   CWD carries a window's DETECTION-EVENT bits: one detector row per
+    #   emitted round, the final data-qubit detectors belonging to the last
+    #   round (resolve_detector_rounds).
     from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
+    from decsim.detector_error_model.detector_formation import build_formation_table
+    raw_bits_of_round = dict(build_formation_table(circuit, rounds).packet_width)
     bits_of_round = {}
     for round_index in resolve_detector_rounds(circuit, None, rounds).values():
         bits_of_round[round_index] = bits_of_round.get(round_index, 0) + 1
@@ -272,7 +287,7 @@ def case_real_run_payloads():
         bits = row["payload_bits"]
         if row["path"] == "qc":
             round_index = row["attribution"]["round_lo"]
-            expected = bits_of_round[round_index]
+            expected = raw_bits_of_round[round_index]
             if bits != expected:
                 problems.append(("qc bits", round_index, bits, expected))
             checks["payload equals the real bits"] += 1
@@ -285,7 +300,7 @@ def case_real_run_payloads():
             checks["payload equals the real bits"] += 1
         elif row["path"] == "c2b":
             round_index = row["attribution"]["round_lo"]
-            expected = bits_of_round[round_index]
+            expected = raw_bits_of_round[round_index]
             if bits != expected:
                 problems.append(("c2b bits", round_index, bits, expected))
             checks["payload equals the real bits"] += 1

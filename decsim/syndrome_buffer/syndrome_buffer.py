@@ -380,7 +380,8 @@ class SyndromeBuffer:
         """Admit one already-packed round directly into retention.
 
         Syndrome buffer 1's dual-write landing. The round was merged and
-        packed at Buffer 0, so it arrives complete and goes straight into
+        packed by the controller's syndrome packing, so it arrives
+        complete and goes straight into
         a storage slot in PACKED_RETAINED state; the ASSEMBLING and
         PACKING steps never happen here. If no consumer hold points at
         the round any more (every possible reader resolved while it

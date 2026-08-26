@@ -7,7 +7,7 @@ import pytest
 from decsim.config import us
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
 from decsim.links.links import LinkPath, TrafficAttribution
-from decsim.controller.syndrome_ingress import SyndromePacketRouteKind, SyndromeIngress, _IngressSlotState
+from decsim.controller.syndrome_packing import SyndromePacketRouteKind, SyndromePacking, _PackingSlotState
 from decsim.links.link_traffic_report import topology_json_value, traffic_json_value
 
 
@@ -150,7 +150,7 @@ def test_unbounded_c2b_bandwidth_charges_propagation_only():
     assert second.total_delay_ticks == us(0.10)
 
 
-def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry():
+def test_packing_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry():
     engine = _Engine(now=1_000)
     links = _wired_profile(latency_us=0.25, bandwidth=100.0).resolve()
     receiver = _Receiver([False, True])
@@ -169,18 +169,18 @@ def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry
         packet_bits=300,
         c2b_reserved=False,
         c2b_delivered=False,
-        state=_IngressSlotState.PACKED_WAIT,
+        state=_PackingSlotState.PACKED_WAIT,
     )
-    ingress = object.__new__(SyndromeIngress)
-    ingress.engine = engine
-    ingress.links = links
-    ingress.window_input_receiver = receiver
-    ingress.syndrome_buffer = publication
+    packing = object.__new__(SyndromePacking)
+    packing.engine = engine
+    packing.links = links
+    packing.window_input_receiver = receiver
+    packing.syndrome_buffer = publication
     slot.route = SimpleNamespace(kind=SyndromePacketRouteKind.WINDOW_INPUT)
-    ingress._contexts = {"ctx": slot}
-    ingress._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: ["ctx"]}
+    packing._contexts = {"ctx": slot}
+    packing._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: ["ctx"]}
 
-    assert ingress._transmit_window_input_round(slot) is True
+    assert packing._transmit_window_input_round(slot) is True
     assert receiver.received == []
     assert publication.calls == []
     assert len(traffic_json_value(links.snapshot())["transfers"]) == 1
@@ -190,15 +190,15 @@ def test_ingress_reserves_c2b_exactly_once_and_publishes_at_arrival_before_retry
     assert engine.now == arrival_tick
     assert receiver.received == [packet]
     assert publication.calls == [((17, 4), arrival_tick)]
-    assert slot.state is _IngressSlotState.PACKED_WAIT
+    assert slot.state is _PackingSlotState.PACKED_WAIT
 
-    assert ingress._transmit_window_input_round(slot) is True
+    assert packing._transmit_window_input_round(slot) is True
     assert receiver.received == [packet, packet]
     assert publication.calls == [((17, 4), arrival_tick)]
     assert len(traffic_json_value(links.snapshot())["transfers"]) == 1
 
 
-def test_unwired_legacy_ingress_delivery_is_immediate_and_has_no_c2b_publication():
+def test_unwired_legacy_packing_delivery_is_immediate_and_has_no_c2b_publication():
     engine = _Engine(now=321)
     links = logical_reference_profile().resolve()
     receiver = _Receiver([True])
@@ -210,18 +210,18 @@ def test_unwired_legacy_ingress_delivery_is_immediate_and_has_no_c2b_publication
     slot = SimpleNamespace(
         identity="ctx", round_key=(3, 8),
         packet=packet, packet_bits=16, c2b_reserved=False,
-        c2b_delivered=False, state=_IngressSlotState.PACKED_WAIT,
+        c2b_delivered=False, state=_PackingSlotState.PACKED_WAIT,
     )
-    ingress = object.__new__(SyndromeIngress)
-    ingress.engine = engine
-    ingress.links = links
-    ingress.window_input_receiver = receiver
-    ingress.syndrome_buffer = publication
+    packing = object.__new__(SyndromePacking)
+    packing.engine = engine
+    packing.links = links
+    packing.window_input_receiver = receiver
+    packing.syndrome_buffer = publication
     slot.route = SimpleNamespace(kind=SyndromePacketRouteKind.WINDOW_INPUT)
-    ingress._contexts = {"ctx": slot}
-    ingress._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: ["ctx"]}
+    packing._contexts = {"ctx": slot}
+    packing._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: ["ctx"]}
 
-    assert ingress._transmit_window_input_round(slot) is True
+    assert packing._transmit_window_input_round(slot) is True
     assert receiver.received == [packet]
     assert publication.calls == []
     assert "c2b" not in traffic_json_value(links.snapshot())["path_order"]

@@ -32,7 +32,7 @@ class ReassemblyQueueAdmission(Enum):
     ON_COMPLETION = "on_completion"
 
 
-class IngressOverflowPolicy(Enum):
+class PackingOverflowPolicy(Enum):
     """What a full Buffer 0 does with a round that cannot fit."""
 
     FAIL_STOP = "fail_stop"
@@ -40,17 +40,17 @@ class IngressOverflowPolicy(Enum):
 
 
 @dataclass(frozen=True)
-class SyndromeIngressPolicy:
+class SyndromePackingPolicy:
     queue_admission: ReassemblyQueueAdmission = ReassemblyQueueAdmission.ON_COMPLETION
-    overflow: IngressOverflowPolicy = IngressOverflowPolicy.FAIL_STOP
+    overflow: PackingOverflowPolicy = PackingOverflowPolicy.FAIL_STOP
     reassembly_timeout_ticks: Optional[int] = None
 
 
 @dataclass(frozen=True)
-class SyndromeIngressSnapshot:
-    """Live ingress contexts by state."""
-    ingress_context_capacity: Optional[int]
-    ingress_contexts: int
+class SyndromePackingSnapshot:
+    """Live packing contexts by state."""
+    packing_context_capacity: Optional[int]
+    packing_contexts: int
     partial_identities: tuple[tuple, ...]
     packed_wait_identities: tuple[tuple, ...]
     draining_identities: tuple[tuple, ...]
@@ -71,30 +71,30 @@ class SyndromeReassemblyTimeout(RuntimeError):
             f"received {received_fragments}/{expected_fragments} fragments")
 
 
-class SyndromeIngressOverflow(RuntimeError):
+class SyndromePackingOverflow(RuntimeError):
     """A new round found no free slot in Buffer 0."""
 
-    status = "controller_ingress_overflow"
+    status = "controller_packing_overflow"
 
     def __init__(self, *, tick, route, incoming_identity, capacity, snapshot):
         self.tick = tick
         self.route = route
         self.incoming_packet_or_fragment_identity = incoming_identity
-        self.ingress_context_capacity = capacity
-        self.ingress_contexts = snapshot.ingress_contexts
+        self.packing_context_capacity = capacity
+        self.packing_contexts = snapshot.packing_contexts
         self.partial_identities = snapshot.partial_identities
         self.packed_wait_identities = snapshot.packed_wait_identities
-        super().__init__(f"controller ingress capacity {capacity} is full at tick {tick}")
+        super().__init__(f"controller packing capacity {capacity} is full at tick {tick}")
 
 
-class _IngressSlotState(Enum):
+class _PackingSlotState(Enum):
     PARTIAL = auto()
     PACKED_WAIT = auto()
     DRAINING = auto()
 
 
 @dataclass
-class _IngressContext:
+class _PackingContext:
     """One round on its way through the controller: its route, how far its
     assembly has come, and its packed packet once complete."""
 
@@ -103,21 +103,21 @@ class _IngressContext:
     route: SyndromePacketRoute
     fragment_count: int
     received_fragments: int = 0
-    state: _IngressSlotState = _IngressSlotState.PARTIAL
+    state: _PackingSlotState = _PackingSlotState.PARTIAL
     packet: Optional[SyndromeRoundPacket] = None
     packet_bits: Optional[int] = None
     c2b_reserved: bool = False
     c2b_delivered: bool = False
 
 
-class SyndromeIngress:
+class SyndromePacking:
     def __init__(
         self, engine, links: Optional[LinkModel] = None, t_pack: int = 0,
-        log_syndromes: bool = True, *, ingress_context_capacity: Optional[int],
+        log_syndromes: bool = True, *, packing_context_capacity: Optional[int],
         window_input_receiver, feedback_memory_receiver,
         syndrome_buffer: Optional[SyndromeBuffer] = None,
         syndrome_buffer_1=None,
-        policy: SyndromeIngressPolicy = SyndromeIngressPolicy(),
+        policy: SyndromePackingPolicy = SyndromePackingPolicy(),
         detector_formation=None,
     ):
         self.policy = policy
@@ -129,20 +129,20 @@ class SyndromeIngress:
         self.links = links if links is not None else logical_reference_profile().resolve()
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes
-        self.ingress_context_capacity = ingress_context_capacity
+        self.packing_context_capacity = packing_context_capacity
         self.window_input_receiver = window_input_receiver
         self.feedback_memory_receiver = feedback_memory_receiver
         if syndrome_buffer is None:
-            syndrome_buffer = SyndromeBuffer(capacity=ingress_context_capacity)
+            syndrome_buffer = SyndromeBuffer(capacity=packing_context_capacity)
         self.syndrome_buffer = syndrome_buffer
         self.syndrome_buffer_1 = syndrome_buffer_1
-        self._contexts: dict[tuple, _IngressContext] = {}
+        self._contexts: dict[tuple, _PackingContext] = {}
         self._route_queues = {kind: [] for kind in SyndromePacketRouteKind}
         self._next_route_index = 0
         self._arbitration_pending = False
         self._dropped_rounds: set = set()
         self.reassembly_timeouts = 0
-        self.ingress_drops = 0
+        self.packing_drops = 0
         connect_ready = getattr(window_input_receiver, "connect_window_input_ready_receiver", None)
         if callable(connect_ready):
             connect_ready(self.notify_window_input_ready)
@@ -190,7 +190,7 @@ class SyndromeIngress:
         else:
             self._finish_packing(context)
 
-    def _context_for(self, fragment, fragment_count, route) -> _IngressContext:
+    def _context_for(self, fragment, fragment_count, route) -> _PackingContext:
         """The live context of the fragment's round, opened on its first fragment."""
         round_key = (fragment.operation_id, fragment.round_index)
         identity = (route.kind.name, route.source_operation_id,
@@ -204,7 +204,7 @@ class SyndromeIngress:
             raise ValueError("all fragments must share one typed route")
         return self._open_context(identity, round_key, route, fragment_count)
 
-    def _admit_to_buffer(self, fragment, context: _IngressContext):
+    def _admit_to_buffer(self, fragment, context: _PackingContext):
         """Hand the fragment to Buffer 0; None when the round was refused
         (dropped under DROP_ROUND, otherwise the run fails)."""
         if not self.syndrome_buffer.has_operation(fragment.operation_id):
@@ -214,16 +214,16 @@ class SyndromeIngress:
         if not admission.refused:
             return admission
         self._forget_context(context)
-        if self.policy.overflow is IngressOverflowPolicy.DROP_ROUND:
-            self.ingress_drops += 1
+        if self.policy.overflow is PackingOverflowPolicy.DROP_ROUND:
+            self.packing_drops += 1
             self._dropped_rounds.add(context.round_key)
             return None
-        raise SyndromeIngressOverflow(
+        raise SyndromePackingOverflow(
             tick=self.engine.now, route=context.route, incoming_identity=context.identity,
-            capacity=self.ingress_context_capacity, snapshot=self.ingress_snapshot())
+            capacity=self.packing_context_capacity, snapshot=self.packing_snapshot())
 
-    def _open_context(self, identity, round_key, route, fragment_count: int) -> _IngressContext:
-        context = _IngressContext(identity, round_key, route, fragment_count)
+    def _open_context(self, identity, round_key, route, fragment_count: int) -> _PackingContext:
+        context = _PackingContext(identity, round_key, route, fragment_count)
         self._contexts[identity] = context
         if self.policy.queue_admission is ReassemblyQueueAdmission.ON_ALLOCATION:
             self._route_queues[route.kind].append(identity)
@@ -233,13 +233,13 @@ class SyndromeIngress:
                                  label="syndrome reassembly timeout")
         return context
 
-    def _forget_context(self, context: _IngressContext) -> None:
+    def _forget_context(self, context: _PackingContext) -> None:
         self._contexts.pop(context.identity, None)
         route_queue = self._route_queues[context.route.kind]
         if context.identity in route_queue:
             route_queue.remove(context.identity)
 
-    def _finish_packing(self, context: _IngressContext) -> None:
+    def _finish_packing(self, context: _PackingContext) -> None:
         """The round is complete: pack it and let it compete for its route.
         Its publication tick is set now unless a C2B hop is priced later."""
         c2b_is_priced = LinkPath.C2B in self.links.paths
@@ -260,7 +260,7 @@ class SyndromeIngress:
                 packet, packet_bits=context.packet_bits,
                 attribution=self._packet_attribution(packet))
         context.packet = packet
-        context.state = _IngressSlotState.PACKED_WAIT
+        context.state = _PackingSlotState.PACKED_WAIT
         if self.policy.queue_admission is ReassemblyQueueAdmission.ON_COMPLETION:
             self._route_queues[context.route.kind].append(context.identity)
         self._schedule_arbitration()
@@ -284,7 +284,7 @@ class SyndromeIngress:
         if self._arbitration_pending:
             return
         self._arbitration_pending = True
-        self.engine.schedule(0, self._arbitrate, label="syndrome ingress arbitration")
+        self.engine.schedule(0, self._arbitrate, label="syndrome packing arbitration")
 
     def _arbitrate(self) -> None:
         """Try each route once, round robin: the route after the last one that
@@ -309,25 +309,25 @@ class SyndromeIngress:
         progressed = False
         for identity in list(route_queue):
             context = self._contexts[identity]
-            if context.state is not _IngressSlotState.PACKED_WAIT:
+            if context.state is not _PackingSlotState.PACKED_WAIT:
                 continue
             if not self._attempt_head(context):
                 break
             progressed = True
         return progressed
 
-    def _attempt_head(self, context: _IngressContext) -> bool:
-        if context.state is not _IngressSlotState.PACKED_WAIT:
+    def _attempt_head(self, context: _PackingContext) -> bool:
+        if context.state is not _PackingSlotState.PACKED_WAIT:
             return False
         if context.route.kind is SyndromePacketRouteKind.WINDOW_INPUT:
             return self._transmit_window_input_round(context)
-        context.state = _IngressSlotState.DRAINING
+        context.state = _PackingSlotState.DRAINING
         self._transmit_feedback_memory_round(context)
         return True
 
     # ---- window input: C2B to Buffer 0
 
-    def _transmit_window_input_round(self, context: _IngressContext) -> bool:
+    def _transmit_window_input_round(self, context: _PackingContext) -> bool:
         """Reserve C2B once; a packet delivered but backpressured is retried
         without a second reservation, as is every packet on a fabric without C2B."""
         c2b_is_priced = LinkPath.C2B in self.links.paths
@@ -337,32 +337,32 @@ class SyndromeIngress:
         delay_ticks = self._reserve(LinkPath.C2B, payload_bits=context.packet_bits,
                                     attribution=self._packet_attribution(packet))
         context.c2b_reserved = True
-        context.state = _IngressSlotState.DRAINING
+        context.state = _PackingSlotState.DRAINING
         self.engine.schedule(delay_ticks, lambda: self._deliver_window_input_round(context),
                              label="controller->syndrome buffer 0")
         return True
 
-    def _deliver_window_input_round(self, context: _IngressContext) -> bool:
+    def _deliver_window_input_round(self, context: _PackingContext) -> bool:
         c2b_is_priced = LinkPath.C2B in self.links.paths
         if c2b_is_priced and not context.c2b_delivered:
             self.syndrome_buffer.mark_publication_tick(context.round_key, self.engine.now)
             context.c2b_delivered = True
         if self._refused_round_ahead_of(context):
-            context.state = _IngressSlotState.PACKED_WAIT   # keep round order
+            context.state = _PackingSlotState.PACKED_WAIT   # keep round order
             return False
         accepted = self.window_input_receiver.accept_window_input(context.packet)
         if not accepted:
-            context.state = _IngressSlotState.PACKED_WAIT
+            context.state = _PackingSlotState.PACKED_WAIT
             return False
-        context.state = _IngressSlotState.DRAINING
+        context.state = _PackingSlotState.DRAINING
         self.engine.schedule(0, lambda: self._release_context(context),
                              label="window input publication complete")
         return True
 
-    def _refused_round_ahead_of(self, context: _IngressContext) -> bool:
+    def _refused_round_ahead_of(self, context: _PackingContext) -> bool:
         route_queue = self._route_queues[context.route.kind]
         ahead = route_queue[:route_queue.index(context.identity)]
-        return any(self._contexts[identity].state is _IngressSlotState.PACKED_WAIT
+        return any(self._contexts[identity].state is _PackingSlotState.PACKED_WAIT
                    for identity in ahead)
 
     def notify_window_input_ready(self) -> None:
@@ -371,7 +371,7 @@ class SyndromeIngress:
 
     # ---- feedback memory: CWD
 
-    def _transmit_feedback_memory_round(self, context: _IngressContext) -> None:
+    def _transmit_feedback_memory_round(self, context: _PackingContext) -> None:
         packet = context.packet
         source_operation_id = context.route.source_operation_id
         delay_ticks = self._reserve(LinkPath.CWD, payload_bits=context.packet_bits,
@@ -381,7 +381,7 @@ class SyndromeIngress:
             lambda: self._deliver_feedback_memory_round(context, source_operation_id),
             label="controller->feedback memory")
 
-    def _deliver_feedback_memory_round(self, context: _IngressContext,
+    def _deliver_feedback_memory_round(self, context: _PackingContext,
                                        source_operation_id) -> None:
         self.feedback_memory_receiver.accept_feedback_memory_round(source_operation_id)
         self.syndrome_buffer.release_round(context.round_key)
@@ -391,7 +391,7 @@ class SyndromeIngress:
 
     def _expire_reassembly(self, identity) -> None:
         context = self._contexts.get(identity)
-        if context is None or context.state is not _IngressSlotState.PARTIAL:
+        if context is None or context.state is not _PackingSlotState.PARTIAL:
             return
         self.reassembly_timeouts += 1
         self._forget_context(context)
@@ -401,7 +401,7 @@ class SyndromeIngress:
             received_fragments=context.received_fragments,
             expected_fragments=context.fragment_count)
 
-    def _release_context(self, context: _IngressContext) -> None:
+    def _release_context(self, context: _PackingContext) -> None:
         route_queue = self._route_queues[context.route.kind]
         if not route_queue or route_queue.pop(0) != context.identity:
             raise RuntimeError("controller released a non-head route slot")
@@ -410,24 +410,24 @@ class SyndromeIngress:
             self._schedule_arbitration()
 
     def check_work_settled(self) -> None:
-        """Fail if the run ended with a partial or blocked ingress context."""
-        snapshot = self.ingress_snapshot()
-        if snapshot.ingress_contexts:
+        """Fail if the run ended with a partial or blocked packing context."""
+        snapshot = self.packing_snapshot()
+        if snapshot.packing_contexts:
             live = (snapshot.partial_identities + snapshot.packed_wait_identities
                     + snapshot.draining_identities)
-            raise RuntimeError(f"run ended with incomplete syndrome ingress contexts: {live}")
+            raise RuntimeError(f"run ended with incomplete syndrome packing contexts: {live}")
 
-    def ingress_snapshot(self) -> SyndromeIngressSnapshot:
+    def packing_snapshot(self) -> SyndromePackingSnapshot:
         identities_by_state = {
             state: tuple(context.identity for context in self._contexts.values()
                          if context.state is state)
-            for state in _IngressSlotState}
-        return SyndromeIngressSnapshot(
-            ingress_context_capacity=self.ingress_context_capacity,
-            ingress_contexts=len(self._contexts),
-            partial_identities=identities_by_state[_IngressSlotState.PARTIAL],
-            packed_wait_identities=identities_by_state[_IngressSlotState.PACKED_WAIT],
-            draining_identities=identities_by_state[_IngressSlotState.DRAINING])
+            for state in _PackingSlotState}
+        return SyndromePackingSnapshot(
+            packing_context_capacity=self.packing_context_capacity,
+            packing_contexts=len(self._contexts),
+            partial_identities=identities_by_state[_PackingSlotState.PARTIAL],
+            packed_wait_identities=identities_by_state[_PackingSlotState.PACKED_WAIT],
+            draining_identities=identities_by_state[_PackingSlotState.DRAINING])
 
     # ---- links
 

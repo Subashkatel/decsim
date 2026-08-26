@@ -3,7 +3,7 @@
 The controller has three parts and each is checked against an independent
 reference fed the same inputs a decsim run saw:
 
-1. Syndrome ingress (reassembly, packing, route arbitration, C2B / CWD
+1. Syndrome packing (reassembly, packing, route arbitration, C2B / CWD
    transmission). Reference: fragment reassembly completes when the last
    fragment of a round has arrived (RFC 815 hole list, one hole per missing
    fragment), packing is a fixed service time (a SimPy timeout), and each
@@ -79,7 +79,7 @@ def traced(trace: Trace):
     """Wrap the controller seams for one run; restored on exit."""
     from decsim.controller import controller as controller_module
     from decsim.controller import feedback_streams as streams_module
-    from decsim.controller import syndrome_ingress as ingress_module
+    from decsim.controller import syndrome_packing as packing_module
     from decsim.windows import window_manager as window_module
     originals = []
 
@@ -96,12 +96,12 @@ def traced(trace: Trace):
         originals.append((owner, name, original))
         setattr(owner, name, wrapped)
 
-    Ingress = ingress_module.SyndromeIngress
-    wrap(Ingress, "_finish_packing",
+    Packing = packing_module.SyndromePacking
+    wrap(Packing, "_finish_packing",
          before=lambda self, context: trace.packed.__setitem__(context.round_key, self.engine.now))
-    wrap(Ingress, "_deliver_window_input_round",
+    wrap(Packing, "_deliver_window_input_round",
          before=lambda self, context: trace.published.setdefault(context.round_key, self.engine.now))
-    wrap(Ingress, "_deliver_feedback_memory_round",
+    wrap(Packing, "_deliver_feedback_memory_round",
          before=lambda self, context, source: trace.feedback_delivered.append(
              (self.engine.now, context.round_key)))
     Controller = controller_module.Controller
@@ -170,8 +170,8 @@ def run_traced(spec):
 
 # ---- reference models ------------------------------------------------------
 
-def simpy_ingress(fragment_arrivals, *, pack_ticks, processing_ticks):
-    """The reference ingress. ``fragment_arrivals``: round_key -> list of QC
+def simpy_packing(fragment_arrivals, *, pack_ticks, processing_ticks):
+    """The reference packing. ``fragment_arrivals``: round_key -> list of QC
     delivery ticks (one per fragment). Each round: complete when its last
     fragment has arrived plus controller processing (RFC 815: the hole list
     empties on the last fragment), then a pack service of ``pack_ticks`` when
@@ -226,7 +226,7 @@ def ledger_rows(done, path):
 
 def channel_rate(done, path):
     """(bits_per_us or None, propagation_ticks) of the channel carrying path."""
-    fabric = done.syndrome_ingress.links.snapshot()
+    fabric = done.syndrome_packing.links.snapshot()
     edge = next(edge for edge in fabric.edges if edge.path.value == path)
     channel = next(ch for ch in fabric.channels if ch.alias == edge.physical_alias)
     capacity = channel.config.capacity
@@ -234,16 +234,16 @@ def channel_rate(done, path):
     return rate, channel.config.propagation_latency_ticks
 
 
-# ---- part 1: syndrome ingress ----------------------------------------------
+# ---- part 1: syndrome packing ----------------------------------------------
 
-def check_ingress(done, trace, *, pack_ticks, processing_ticks):
+def check_packing(done, trace, *, pack_ticks, processing_ticks):
     """Compare packing and publication ticks of every round with the reference."""
     problems = []
     arrivals = {}
     for row in ledger_rows(done, "qc"):
         round_key = _row_key(row)
         arrivals.setdefault(round_key, []).append(row["delivery_ticks"])
-    packed_reference = simpy_ingress(arrivals, pack_ticks=pack_ticks,
+    packed_reference = simpy_packing(arrivals, pack_ticks=pack_ticks,
                                      processing_ticks=processing_ticks)
     checks = 0
     for round_key, tick in trace.packed.items():
@@ -474,7 +474,7 @@ def stim_memory_with_c2b():
 
 def timing_of(done):
     """(t_pack ticks, binary availability ticks) the run used."""
-    return done.syndrome_ingress.t_pack, done.controller.binary_availability_ticks
+    return done.syndrome_packing.t_pack, done.controller.binary_availability_ticks
 
 
 def main(argv=None) -> None:
@@ -488,7 +488,7 @@ def main(argv=None) -> None:
         state = "agree" if not problems else f"{len(problems)} disagreements"
         lines.append(f"- {title}: {checks} checks, {state}")
 
-    lines.append("## 1. Syndrome ingress")
+    lines.append("## 1. Syndrome packing")
     for title, make in (("QLX mem_surface program", lock.qlx_multi_fragment),
                         ("two-fragment stream", lock.two_fragment_stream),
                         ("Stim memory with a priced C2B hop", stim_memory_with_c2b),
@@ -496,7 +496,7 @@ def main(argv=None) -> None:
                         ("feedback chain, extend-stream idle rounds", lock.feedback_chain_extend_stream_fallback)):
         done, trace = run_traced(make())
         pack_ticks, processing_ticks = timing_of(done)
-        report(title, *check_ingress(done, trace, pack_ticks=pack_ticks,
+        report(title, *check_packing(done, trace, pack_ticks=pack_ticks,
                                      processing_ticks=processing_ticks))
 
     lines.append("")

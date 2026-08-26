@@ -1,5 +1,5 @@
 """The controller: admitted operations become QPU commands, QPU readouts
-become controller-side binary handed to syndrome ingress, and conditional
+become controller-side binary handed to syndrome packing, and conditional
 releases from the Pauli frame travel OC then CQ back to the QPU. The QEC cycle itself is the
 QPU's; execution admission is the ExecutionRuntime's; stream bookkeeping and
 protected regions are FeedbackStreams'."""
@@ -16,14 +16,14 @@ from ..message import (Decision, Operation, QPUReadout, RunOperationBody,
 
 
 class Controller:
-    def __init__(self, engine, *, qpu, window_manager, syndrome_ingress=None,
+    def __init__(self, engine, *, qpu, window_manager, syndrome_packing=None,
                  binary_availability_ticks: int = 0, links=None,
                  round_ticks: int, code_geometry, resolved_operations,
                  resolved_patches, idle_policy, feedback_streams):
         self.engine = engine
         self.qpu = qpu
         self.window_manager = window_manager
-        self.syndrome_ingress = syndrome_ingress
+        self.syndrome_packing = syndrome_packing
         self.binary_availability_ticks = binary_availability_ticks
         self.links = links
         self.runtime = None
@@ -152,7 +152,7 @@ class Controller:
     # ---- readouts and instructions
 
     def accept_qpu_readout(self, readout: QPUReadout, route: SyndromePacketRoute) -> None:
-        """Turn one QPU readout into controller binary and hand it to ingress."""
+        """Turn one QPU readout into controller binary and hand it to packing."""
         payload = SyndromePayload(
             operation_id=readout.operation_id,
             patch_id=readout.patch_id,
@@ -163,7 +163,7 @@ class Controller:
             fragment_index=readout.fragment_index,
             size_bits=readout.size_bits,
         )
-        self.syndrome_ingress.relay_qpu_readout(
+        self.syndrome_packing.relay_qpu_readout(
             payload, route, processing_ticks=self.binary_availability_ticks)
 
     def relay_instruction(self, decision: Decision,

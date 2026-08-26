@@ -7,7 +7,7 @@ components on the reaction path:
 - ``C2B`` controller -> syndrome buffer 0: a completed binary round published
   to the window-input route; optional, a card without it publishes for free.
 - ``CWD`` controller -> weak decoder: syndrome data reaching the weak tier,
-  either as one round (``syndrome_ingress``) or as one weak window
+  either as one round (``syndrome_packing``) or as one weak window
   (``window_manager``) (t_cwd).
 - ``WSD`` weak decoder -> strong decoder: the escalation selection that hands a
   window to the strong tier (t_wsd).

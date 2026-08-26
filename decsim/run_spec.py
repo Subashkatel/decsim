@@ -121,7 +121,7 @@ class CompletedRun:
     conditional_release: Any
     factory: Any
     syndrome_buffer: Any
-    syndrome_ingress: Any
+    syndrome_packing: Any
     pauli_frame: Any = None
     syndrome_buffer_1: Any = None
 
@@ -161,8 +161,8 @@ class RunSpec:
     syndrome_buffering: Optional[Any] = None
     decoder_memory: Optional["DecoderMemoryConfig"] = None
     pauli_frame: Optional[Any] = None
-    syndrome_ingress_policy: Optional[Any] = None
-    make_syndrome_ingress: Optional[Callable] = None
+    syndrome_packing_policy: Optional[Any] = None
+    make_syndrome_packing: Optional[Callable] = None
     make_decoder_memory_transfer: Optional[Callable] = None
     make_factory: Optional[Callable] = None
     make_metrics: Optional[Callable] = None
@@ -192,7 +192,7 @@ class RunSpec:
                                         resolve_run_configuration)
         from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
         from .syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
-        from .controller.syndrome_ingress import SyndromeIngress
+        from .controller.syndrome_packing import SyndromePacking
         from .windows.window_manager import WindowManager
 
         config = resolve_run_configuration(self, root_seed)
@@ -235,20 +235,20 @@ class RunSpec:
             check_strong_route=lambda weak_job, strong_job:
                 decoder_manager.check_strong_route(weak_job, strong_job),
             on_workload_complete=lambda: factory.shutdown())
-        syndrome_ingress = (
-            config.make_syndrome_ingress(engine, links, config.buffering,
+        syndrome_packing = (
+            config.make_syndrome_packing(engine, links, config.buffering,
                                          window_manager, syndrome_buffer)
-            if config.make_syndrome_ingress else SyndromeIngress(
+            if config.make_syndrome_packing else SyndromePacking(
                 engine, links=links, t_pack=timing.ticks("t_pack"),
-                ingress_context_capacity=config.buffering.upstream_packet_slots,
+                packing_context_capacity=config.buffering.upstream_packet_slots,
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager,
                 syndrome_buffer=syndrome_buffer,
                 syndrome_buffer_1=syndrome_buffer_1,
-                policy=config.syndrome_ingress_policy,
+                policy=config.syndrome_packing_policy,
                 detector_formation=config.device))
-        if config.make_syndrome_ingress and syndrome_buffer_1 is not None:
-            syndrome_ingress.syndrome_buffer_1 = syndrome_buffer_1
+        if config.make_syndrome_packing and syndrome_buffer_1 is not None:
+            syndrome_packing.syndrome_buffer_1 = syndrome_buffer_1
         decoder_memory_transfer = (
             config.make_decoder_memory_transfer(engine, links, config.buffering)
             if config.make_decoder_memory_transfer else None)
@@ -281,7 +281,7 @@ class RunSpec:
         ) if uses_streams else NoFeedbackStreams()
         controller = Controller(
             engine, qpu=qpu, window_manager=window_manager,
-            syndrome_ingress=syndrome_ingress,
+            syndrome_packing=syndrome_packing,
             binary_availability_ticks=timing.ticks("t_binary_availability"),
             links=links, round_ticks=plan.round_ticks,
             code_geometry=plan.code_geometry,
@@ -312,7 +312,7 @@ class RunSpec:
             boundary_policy=config.boundary_policy,
             window_interaction=config.window_interaction,
             idle_policy=config.idle_policy,
-            conditional_release=conditional_release, syndrome_ingress=syndrome_ingress,
+            conditional_release=conditional_release, syndrome_packing=syndrome_packing,
             controller=controller, qpu=qpu,
             execution_runtime=execution_runtime,
             pauli_frame=pauli_frame,
@@ -339,9 +339,9 @@ class RunSpec:
                 f"the run ended with pending strong escalations: "
                 f"{window_manager.escalation.pending_escalations}")
         decoder_manager.check_decode_work_settled()
-        check_ingress_settled = getattr(syndrome_ingress, "check_work_settled", None)
-        if callable(check_ingress_settled):
-            check_ingress_settled()
+        check_packing_settled = getattr(syndrome_packing, "check_work_settled", None)
+        if callable(check_packing_settled):
+            check_packing_settled()
         if syndrome_buffer_1 is not None:
             syndrome_buffer_1.check_settled()
         result = capture_primary_result(
@@ -350,7 +350,7 @@ class RunSpec:
         return CompletedRun(
             result, engine, window_manager, decoder_manager, execution_runtime,
             controller, qpu, conditional_release, factory,
-            syndrome_buffer, syndrome_ingress, pauli_frame=pauli_frame,
+            syndrome_buffer, syndrome_packing, pauli_frame=pauli_frame,
             syndrome_buffer_1=syndrome_buffer_1)
 
 

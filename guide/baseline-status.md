@@ -1,5 +1,8 @@
 # Baseline status: target architecture vs decsim
 
+> 2026-08-26: the experiment layer was rewritten as `experiments/run.py` + `experiments/configs/` (see `experiments/README.md`). Paths below naming `experiments/baseline/`, `experiments/validation/`, `guide/walkthrough/` or old result folders are historical; that material now lives at the sandbox root in `archive/2026-08-cleanup/` with the same relative paths.
+
+
 Q-062 part (a), evidence snapshot for 2026-08-17. This document reports the
 simplest owner-approved closed loop first. It does not treat file existence as
 a completed review.

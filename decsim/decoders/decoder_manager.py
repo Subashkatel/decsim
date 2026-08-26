@@ -66,6 +66,7 @@ class DecoderManager:
                  unit_pools: Optional[dict] = None, num_units: int = 1,
                  bulk_strong: bool = False,
                  input_staging_depth: int = 0,
+                 service_gate=None,
                  lane_policy=None, log_name: str = "DecoderCluster",
                  capture_enabled: bool = False,
                  decoder_memory_transfer=None,
@@ -104,6 +105,10 @@ class DecoderManager:
                 "a staged merged batch would need survivor-aware "
                 "cancellation that does not exist yet")
         self.input_staging_depth = input_staging_depth
+        # DECODER boundary application: a landed job whose window still owes
+        # a boundary parks here until the window manager releases it
+        self.service_gate = service_gate
+        self._parked_service: dict = {}  # request_key -> job
         self._staged: dict = {}          # (pool, unit) -> job in the slot
         self._staged_ready: set = set()  # slot's DMA has landed
         self._awaiting_land: set = set() # compute done, slot still in flight
@@ -477,9 +482,15 @@ class DecoderManager:
         for member in members:
             self.staging.stage(member, memory, landed)
 
-    def _begin_service(self, job: DecodeJob) -> None:
+    def _begin_service(self, job: DecodeJob, gated: bool = True) -> None:
         """The unit's memory holds the input: start the decode."""
         if job.cancelled:                        # cancelled while its input was in flight
+            return
+        if (gated and self.service_gate is not None
+                and not self.service_gate(job)):
+            self._parked_service[job.request_key] = job
+            self.engine.log(self.log_name,
+                            f"PARK DECODE {job.label} (boundary pending)")
             return
         decoder = self.router.route(job)
         self.engine.log(self.log_name, f"START DECODE {job.label}")
@@ -502,6 +513,18 @@ class DecoderManager:
 
         self.engine.schedule(decoder.latency(job), decode_now,
                              label=f"decode_done({job.label})")
+
+    def release_parked(self, window_key: tuple) -> None:
+        """The window's last boundary arrived: start its parked decode, if
+        its input has landed (a job still in transfer passes the gate at
+        its own landing instead)."""
+        for request_key, job in list(self._parked_service.items()):
+            if (job.op_id, job.window_id) != window_key:
+                continue
+            if self.service_gate is not None and not self.service_gate(job):
+                continue                     # another dependency still owed
+            del self._parked_service[request_key]
+            self._begin_service(job, gated=False)
 
     def _on_decode_done(self, job: DecodeJob, result) -> None:
         """One decode finished: free the unit, ask the escalation_policy, commit or await strong."""
@@ -672,6 +695,10 @@ class DecoderManager:
         nobody drained. Every stored input is released unconditionally, so a
         leak on either path is a real defect rather than a tolerated one.
         """
+        if self._parked_service:
+            parked = sorted(job.label for job in self._parked_service.values())
+            raise RuntimeError(
+                f"run ended with parked decodes never released: {parked}")
         unsettled = self.strong.unsettled()
         held = [f"{m.pool}#{m.unit}" for m in self.decoder_memories.values()
                 if m.occupied_rounds]

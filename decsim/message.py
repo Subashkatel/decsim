@@ -480,6 +480,21 @@ class SoftOutput:
     w_comp: Optional[float] = None
 
 
+class BoundaryApplication(Enum):
+    """Where a predecessor window's boundary is applied to its dependent's
+    input. ASSEMBLY: folded into the payloads host-side before transfer,
+    and the dependent is not submitted until the boundary arrives (the
+    original model). DECODER: raw rounds ship as soon as data is complete
+    and the boundary mask is XORed into the landed input at the decoder
+    when it arrives, the way every windowed reference does it (qLDPC
+    net_error, cudaq-x syndrome_mods, LILLIPUT's state register, Skoric's
+    artificial defects; see tmp/strong-prototype/pipelined-input-design.md
+    for the extracted mechanics)."""
+
+    ASSEMBLY = "assembly"
+    DECODER = "decoder"
+
+
 class DecoderTier(Enum):
     """Weak (first, fast) or strong (escalated, slow) decode."""
 

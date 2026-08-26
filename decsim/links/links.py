@@ -22,7 +22,7 @@ components on the reaction path:
 - ``OC``  Pauli frame -> controller: the conditional release returning to the
   controller (t_oc).
 - ``CQ``  controller -> QPU: the instruction delivered back to the QPU (t_cq).
-- ``COPY_OUT`` controller -> syndrome buffer 1: the packed round's second
+- ``CSB`` controller -> syndrome buffer 1: the packed round's second
   write, out of the fridge into the room-side store that feeds the strong
   tier; optional, a card without it stores for free.
 
@@ -245,7 +245,7 @@ class LinkPath(str, Enum):
     DO = "do"
     OC = "oc"
     CQ = "cq"
-    COPY_OUT = "copy_out"
+    CSB = "csb"
 
 
 class LinkAttributionScope(str, Enum):
@@ -289,7 +289,7 @@ _PATH_RULES = MappingProxyType({
     LinkPath.DO: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
     LinkPath.OC: LinkPathRule(LinkAttributionScope.OPERATION_ONLY, LinkRelationRule.NONE, True),
     LinkPath.CQ: LinkPathRule(LinkAttributionScope.OPERATION_ONLY, LinkRelationRule.NONE, True),
-    LinkPath.COPY_OUT: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, False),
+    LinkPath.CSB: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, False),
 })
 
 
@@ -473,7 +473,7 @@ class Link:
 @dataclass(frozen=True)
 class LinkModelConfig:
     """A fabric card: one edge per path plus a profile name. The nine original
-    paths are required; ``c2b`` and ``copy_out`` are optional."""
+    paths are required; ``c2b`` and ``csb`` are optional."""
 
     qc: LinkEdgeConfig
     cwd: LinkEdgeConfig
@@ -487,7 +487,7 @@ class LinkModelConfig:
     profile_name: str
     qc_excludes_controller_processing: bool = False
     c2b: Optional[LinkEdgeConfig] = None
-    copy_out: Optional[LinkEdgeConfig] = None
+    csb: Optional[LinkEdgeConfig] = None
 
     def wired_paths(self) -> tuple:
         """The paths this card wires, in vocabulary order; a missing required path refuses."""

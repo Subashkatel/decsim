@@ -199,14 +199,14 @@ def with_transfer_overhead(
     )
 
 
-def with_copy_out_edge(
+def with_csb_edge(
     profile: LinkModelConfig,
     *,
     latency_us: float,
     aggregate_bits_per_us: Optional[float],
     source: str,
 ) -> LinkModelConfig:
-    """Return ``profile`` with the optional priced copy-out edge to syndrome
+    """Return ``profile`` with the optional priced csb edge to syndrome
     buffer 1.
 
     The caller supplies both experiment-card numbers and their provenance;
@@ -230,8 +230,8 @@ def with_copy_out_edge(
     )
     return replace(
         profile,
-        copy_out=edge,
-        profile_name=f"{profile.profile_name}+priced_copy_out",
+        csb=edge,
+        profile_name=f"{profile.profile_name}+priced_csb",
     )
 
 

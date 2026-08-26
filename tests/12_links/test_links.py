@@ -41,10 +41,10 @@ from decsim.links.link_traffic_report import topology_json_value, traffic_json_v
 OPERATION_ID = ("experiment", 7)
 PATCH_IDS = (1, 2)
 PATH_ORDER = ["qc", "c2b", "cwd", "wsd", "csd", "wdo", "dd", "do", "oc", "cq",
-              "copy_out"]
-# A shipped profile wires the nine required paths; C2B and copy-out are
+              "csb"]
+# A shipped profile wires the nine required paths; C2B and csb are
 # optional and unset.
-REQUIRED_PATH_ORDER = [p for p in PATH_ORDER if p not in ("c2b", "copy_out")]
+REQUIRED_PATH_ORDER = [p for p in PATH_ORDER if p not in ("c2b", "csb")]
 
 
 def make_channel(*, capacity=None, propagation_ticks=7, source="test channel"):
@@ -84,7 +84,7 @@ def request_relation(*, tier, operation_id=OPERATION_ID, window_id=3, sequence=0
 
 
 def valid_attribution(path):
-    if path in (LinkPath.QC, LinkPath.C2B, LinkPath.COPY_OUT):
+    if path in (LinkPath.QC, LinkPath.C2B, LinkPath.CSB):
         return TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, 2)
     if path is LinkPath.CWD:
         relation = request_relation(tier=DecoderTier.WEAK)

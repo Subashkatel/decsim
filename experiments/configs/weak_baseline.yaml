@@ -53,7 +53,7 @@ links:                                       # one card per path: propagation la
   dd:  {latency_us: 0.5, bits_per_us: null}     # decoder -> decoder boundary handoff
   wdo: {latency_us: 1.0, bits_per_us: null}     # weak decoder -> Pauli frame
   # not on this path: null = the logical_reference card's numbers
-  copy_out: null                             # packing -> syndrome buffer 1 (strong-side store)
+  csb: null                             # controller -> syndrome buffer 1 (the strong buffer)
   oc:  null                                  # Pauli frame -> controller, a release
   cq:  null                                  # controller -> QPU, an instruction
   wsd: null                                  # weak -> strong escalation

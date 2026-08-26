@@ -21,7 +21,7 @@ from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.decoders.weak_strong_switching import StrongOnly
 from decsim.links.link_profiles import (logical_reference_profile,
                                         with_controller_to_buffer_edge,
-                                        with_copy_out_edge)
+                                        with_csb_edge)
 from decsim.links.links import (LinkCapacityConfig, LinkConfig,
                                 LinkQuantityBasis, TransferOverheadConfig)
 from decsim.message import Operation
@@ -77,7 +77,7 @@ def decoder_engine(config: ExperimentConfig, algorithm_latency_us) -> DecoderEng
 def link_model(config: ExperimentConfig):
     """Every path's numbers from the config, on the reference card's payload
     sizes; a null card keeps the reference card's numbers for that path.
-    C2B and copy_out are the two optional store hops."""
+    C2B and csb are the two optional store hops."""
     source = f"experiments/configs/{config.name}.yaml links"
     cards = dict(config.links)
     profile = logical_reference_profile()
@@ -86,11 +86,11 @@ def link_model(config: ExperimentConfig):
         profile = with_controller_to_buffer_edge(
             profile, latency_us=c2b.latency_us,
             aggregate_bits_per_us=c2b.bits_per_us, source=source)
-    copy_out = cards.pop("copy_out")
-    if copy_out is not None:
-        profile = with_copy_out_edge(
-            profile, latency_us=copy_out.latency_us,
-            aggregate_bits_per_us=copy_out.bits_per_us, source=source)
+    csb = cards.pop("csb")
+    if csb is not None:
+        profile = with_csb_edge(
+            profile, latency_us=csb.latency_us,
+            aggregate_bits_per_us=csb.bits_per_us, source=source)
     channels = {}
     for path, card in cards.items():
         if card is None:

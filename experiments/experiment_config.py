@@ -134,6 +134,9 @@ class ExperimentConfig:
     trace_io: bool                  # add component I/O lines to the trace:
                                     # what each store and unit received,
                                     # holds, and emitted
+    verify_windows: str             # none | tesseract: re-decode every
+                                    # window with the Tesseract referee and
+                                    # count disagreements (never priced)
     idle_policy: str                # separate_decode_jobs | ignore |
                                     # extend_stream: how an idle patch's
                                     # rounds are charged (inert while the
@@ -314,5 +317,7 @@ def load_experiment(path) -> ExperimentConfig:
         trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
         idle_policy=_require(raw.get("idle_policy", "separate_decode_jobs"),
                              IDLE_POLICIES, "idle_policy"),
+        verify_windows=_require(raw.get("verify_windows", "none"),
+                                ("none", "tesseract"), "verify_windows"),
         pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"], clocks),
         config_files=config_files)

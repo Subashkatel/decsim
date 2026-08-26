@@ -109,6 +109,14 @@ idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stre
                                    # active-path latency studies. Inert while the
                                    # workload is a single always-busy operation.
 
+verify_windows: none               # none | tesseract. tesseract re-decodes every
+                                   # window with the official Tesseract backend and
+                                   # counts disagreements in the owned observable
+                                   # contribution; never latency-priced. A window is
+                                   # a d-round problem at any shot length, so this
+                                   # holds at every distance (9.6 ms/window at d=9,
+                                   # 18.1 ms at d=11, measured 2026-08-26).
+
 trace_io: false                    # true adds component I/O lines to the trace:
                                    # what each store and unit received, holds
                                    # (rounds, residents), and emitted

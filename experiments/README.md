@@ -14,6 +14,11 @@ Results land in `experiments/results/<name>/`: `sweep.csv` (every column),
 reproduces the same rows; seeds are 0..shots-1 per sweep point and only
 the wall-clock column varies. To make a new experiment, copy a yaml and
 change numbers; a new yaml key belongs in `experiment_config.py` first.
+`configs/reference.yaml` lists every yaml key in one runnable file, and
+`guide/parameter-reference.md` tables every RunSpec knob, yaml-reachable
+or Python-only; `tests/test_parameter_reference.py` fails when either
+goes stale, so update them in the same change as any config-surface
+edit.
 
 The pipeline is four small modules, one job each, in call order:
 `run.py` (orchestrates) -> `experiment_config.py` (the only yaml reader)

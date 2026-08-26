@@ -19,6 +19,30 @@ from experiments.sweep_report import summarize, terminal_lines, write_report
 CONFIGS_DIR = Path(__file__).parent / "configs"
 
 
+def resolved_description(config: ExperimentConfig) -> list:
+    """What this run will actually do, echoed before the first shot.
+
+    An edit that did not land shows up here immediately: a config that
+    extends another replaces its base's keys whole, so a `sweep` edited in
+    the base never reaches a child that declares its own.
+    """
+    files = " <- ".join(str(path) for path in config.config_files)
+    lines = [f"config: {files}",
+             f"mode: {config.mode}, {config.code_task}, distance "
+             f"{config.distance}, {config.rounds_per_shot} rounds per shot",
+             f"windows: {config.windowing.scheme}"]
+    for index, block in enumerate(config.sweep, start=1):
+        lines.append(
+            f"sweep block {index}: "
+            f"p {list(block.physical_error_probabilities)}, "
+            f"round period {list(block.round_periods_us)} us, "
+            f"algorithm {list(block.algorithm_latencies_us)}, "
+            f"{block.shots} shots")
+    lines.append(f"trace: {config.trace}"
+                 + (" with component I/O" if config.trace_io else ""))
+    return lines
+
+
 def run_sweep(config: ExperimentConfig) -> list:
     """Every shot of every point of the config's sweep blocks; a point and
     seed named by more than one block runs once."""
@@ -48,6 +72,7 @@ def run_experiment(config_path) -> tuple:
     """One full experiment: sweep, summary, report, figures. Returns the
     results folder and the summary rows."""
     config = load_experiment(config_path)
+    print("\n".join(resolved_description(config)) + "\n", file=sys.stderr)
     rows = summarize(run_sweep(config))
     results_dir = config.results_dir
     write_report(rows, results_dir)

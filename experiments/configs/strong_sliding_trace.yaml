@@ -1,6 +1,6 @@
-# Weak baseline, sliding windows, with the engine narrator on: one timing
+# Strong baseline, sliding windows, with the engine narrator on: one timing
 # point so the trace stays readable. Timeline plot comes from seed 0.
-extends: weak_baseline.yaml
+extends: strong_only.yaml
 
 rounds_per_shot: 20
 
@@ -12,4 +12,4 @@ sweep:
 
 trace: file
 trace_io: false                                  # full line record per shot in
-                                             # results/weak_sliding_trace/trace/
+                                             # results/strong_sliding_trace/trace/

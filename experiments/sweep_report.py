@@ -98,17 +98,22 @@ def write_csv(rows: list, path: Path) -> None:
 
 
 def table_lines(rows: list) -> list:
-    head = (["p", "algo us", "round us", "rate MHz", "load", "LER",
-             "fails/shots", "direct fails", "mismatch vs direct", "win/us",
-             "rounds/us", "util", "max q"] + list(POINTS)
-            + ["ready->frame median", "ready->frame p99"])
+    """The sweep.md table: full names, the same vocabulary as the terminal
+    summary; the point columns carry sweep.csv's column stems."""
+    head = (["physical error rate", "algorithm latency us", "round period us",
+             "load", "logical error rate", "logical failures / shots",
+             "direct PyMatching failures", "mismatches vs direct PyMatching",
+             "windows per us", "rounds per us", "decoder utilization",
+             "max queued windows"]
+            + [f"{point} mean us" for point in POINTS]
+            + ["buffer0_ready_to_frame median us",
+               "buffer0_ready_to_frame p99 us"])
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for row in rows:
         algorithm = row["algorithm_latency_us"]
         cells = [f"{row['physical_error_probability']:g}",
                  algorithm if isinstance(algorithm, str) else f"{algorithm:g}",
                  f"{row['round_period_us']:g}",
-                 f"{1 / row['round_period_us']:g}",
                  f"{row['load']:.2f}",
                  f"{row['logical_error_rate']:.3f}",
                  f"{row['logical_failures']}/{row['shots']}",

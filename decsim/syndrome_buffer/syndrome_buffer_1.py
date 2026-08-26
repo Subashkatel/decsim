@@ -41,6 +41,7 @@ class SyndromeBuffer1:
         self.copied_bits_total = 0
         self.on_round_stored = on_round_stored
         self._in_flight_writes = 0
+        self._written: set = set()
 
     # ------------------------------------------------------------- writes
 
@@ -52,6 +53,9 @@ class SyndromeBuffer1:
         still in flight, so a refused write leaves no trace on the
         serializer or the store."""
         operation_id = packet.operation_id
+        identity = (operation_id, packet.round_index)
+        if identity in self._written:
+            raise ValueError(f"round {identity!r} was already written")
         if not self.store.has_operation(operation_id):
             self.store.open_operation(operation_id)
         if self.capacity_rounds is not None:
@@ -61,6 +65,7 @@ class SyndromeBuffer1:
                     f"syndrome buffer 1 over capacity: "
                     f"{occupied + self._in_flight_writes + 1} rounds exceed "
                     f"{self.capacity_rounds}")
+        self._written.add(identity)
         copy_out_is_priced = LinkPath.COPY_OUT in self.links.paths
         if not copy_out_is_priced:
             self.copied_bits_total += packet_bits or 0

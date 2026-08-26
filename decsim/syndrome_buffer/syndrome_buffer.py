@@ -24,13 +24,15 @@ from ..message import (
 
 @dataclass(frozen=True)
 class SyndromeBufferingConfig:
-    """Optional capacity of the upstream syndrome buffer, in rounds.
+    """Optional capacities of the syndrome stores, in rounds.
 
-    ``None`` means unbounded. Decoder-side storage is configured separately and
-    in different units by ``RunSpec.decoder_memory``.
+    ``upstream_packet_slots`` bounds Buffer 0 and ``sb1_packet_slots`` bounds
+    syndrome buffer 1; ``None`` means unbounded. Decoder-side storage is
+    configured separately and in different units by ``RunSpec.decoder_memory``.
     """
 
     upstream_packet_slots: Optional[int] = None
+    sb1_packet_slots: Optional[int] = None
 
 
 class SyndromeBufferRoundState(Enum):

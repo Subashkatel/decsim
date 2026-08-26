@@ -45,6 +45,8 @@ class _SyndromeBufferingPlan:
     potential_holds: tuple
     minimum_live_rounds: tuple
     sufficient_live_rounds: tuple | None
+    sb1_minimum_live_rounds: tuple
+    sb1_sufficient_live_rounds: tuple | None
 
 
 def _plan_syndrome_buffering(execution, *, retain_strong_context, double_window,
@@ -69,6 +71,8 @@ def _plan_syndrome_buffering(execution, *, retain_strong_context, double_window,
     weak_holds, potential_holds = [], []
     minimum = ()
     sufficient = set()
+    sb1_minimum = ()
+    sb1_sufficient = set()
     for operation_id, indices in execution.op_windows.items():
         windows = [execution.windows[(operation_id, index)] for index in indices]
         round_count = execution.rounds_by_operation[operation_id]
@@ -91,16 +95,19 @@ def _plan_syndrome_buffering(execution, *, retain_strong_context, double_window,
                 commit_hi + buffer_rounds)
             owner = PotentialStrong(key)
             potential_holds.append((owner, potential))
-            sufficient.update(potential)
+            sb1_sufficient.update(potential)
             arrived = tuple(identity for identity in potential
                             if identity[0] != operation_id
                             or identity[1] <= window.buffer_hi)
-            if len(arrived) > len(minimum):
-                minimum = arrived
+            if len(arrived) > len(sb1_minimum):
+                sb1_minimum = arrived
     return _SyndromeBufferingPlan(
         tuple(weak_holds), tuple(potential_holds), minimum,
         None if has_open_ended_dynamic_streams else tuple(sorted(
             sufficient, key=stable_identity_bytes)),
+        sb1_minimum,
+        None if has_open_ended_dynamic_streams else tuple(sorted(
+            sb1_sufficient, key=stable_identity_bytes)),
     )
 
 

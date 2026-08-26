@@ -378,10 +378,15 @@ class SpeculativeRecovery:
                     f"window interaction invalidation for {root} selected "
                     f"{key}, which is not a downstream dependency")
             window = self.runtime.windows[key]
-            if window.queued or window.committed:
+            if window.committed or window.t_done is not None:
                 raise RuntimeError(
                     f"window interaction invalidation for {root} selected "
-                    f"window {key} after its decode lifecycle started")
+                    f"window {key} after its decode finished")
+            if window.queued:
+                # decoder-side boundaries ship raw input at data-complete,
+                # so a descendant is often already submitted; withdraw the
+                # unstarted attempt and let the replay resubmit it
+                self.runtime.withdraw_window_decode(key)
             reads = self.runtime._read_keys_for_bounds(
                 window.op_id, window.start_round, window.buffer_hi, window)
             strong_reads = self.runtime._strong_context_read_keys(

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from .config import TimingConfig
-from .message import (BoundaryApplication, DecoderTier, ExecutionProgram,
+from .message import (DecoderTier, ExecutionProgram,
                       RunSeedPathSegment)
 from .links.link_traffic_report import traffic_json_value
 from .seeding import bind_run_seed
@@ -147,8 +147,6 @@ class RunSpec:
     lane_policy: Optional[Any] = None
     unit_pools: Optional[dict] = None
     num_units: Optional[int] = None
-    input_staging_depth: int = 0
-    boundary_application: Optional[Any] = None
     scheme: Optional[Any] = None
     rounds_policy: Optional[Any] = None
     boundary_policy: Optional[Any] = None
@@ -234,7 +232,6 @@ class RunSpec:
             syndrome_buffer_1=syndrome_buffer_1, pauli_frame=pauli_frame,
             retain_strong_context=escalation_policy.requires_strong_context,
             double_window=escalation_policy.double_window,
-            boundary_application=config.boundary_application,
             capture_enabled=config.capture_switching_windows,
             escalation_policy=escalation_policy,
             submit_fn=lambda job, reserve_transfer=None:
@@ -263,19 +260,19 @@ class RunSpec:
             engine, router=config.router, scheduler=config.scheduler,
             unit_pools=config.unit_pools, num_units=config.num_units,
             bulk_strong=escalation_policy.bulk_strong,
-            input_staging_depth=config.input_staging_depth,
             lane_policy=config.lane_policy,
             capture_enabled=config.capture_switching_windows,
             decoder_memory_transfer=decoder_memory_transfer,
             decoder_memory=config.decoder_memory,
             escalation_policy=escalation_policy, services=window_manager.escalation,
-            service_gate=(window_manager.begin_service_gate
-                          if config.boundary_application
-                          is BoundaryApplication.DECODER else None),
+            service_gate=window_manager.begin_service_gate,
+            apply_service_boundary=window_manager.apply_service_boundary,
+            stage_admission=window_manager.stage_admission,
             on_window_decoded=window_manager.on_decode_done,
             on_strong_window_decoded=window_manager.on_strong_decode_done)
         window_manager.connect_idle_decode_demand_receiver(decoder_manager.submit_decode)
         window_manager.release_service = decoder_manager.release_parked
+        window_manager.withdraw_decode = decoder_manager.withdraw_window
         factory = (config.make_factory(engine, decoder_manager)
                    if config.make_factory else _make_infinite(engine))
         if factory.engine is not engine:

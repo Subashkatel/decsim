@@ -6,7 +6,7 @@
 "strong_cancelled": 0,
 "strong_needed": 0
 },
-"final_ticks": 26650000,
+"final_ticks": 23150000,
 "log": [
 "[  0.000 us] Controller: START memory  (Clifford, qubits (0,))",
 "[  0.000 us] Controller: START memory  (Clifford, qubits (1,))",
@@ -51,68 +51,70 @@
 "[  9.000 us] QPU: memory fires round 9/15",
 "[  9.000 us] QPU: memory fires round 9/15",
 "[  9.150 us] DecoderCluster: round 9 of memory arrived (op now has rounds 1..9)",
+"[  9.150 us] DecoderCluster: memory W1 [commit 4-6] READY -> enqueue (ready-queue length = 1)",
+"[  9.150 us] DecoderCluster: ASSIGN UNIT memory W1 [commit 4-6] (staged, waited 0.000 us in queue, units free now 0)",
 "[  9.150 us] DecoderCluster: round 9 of memory arrived (op now has rounds 1..9)",
+"[  9.150 us] DecoderCluster: memory W1 [commit 4-6] READY -> enqueue (ready-queue length = 1)",
+"[  9.150 us] DecoderCluster: ASSIGN UNIT memory W1 [commit 4-6] (staged, waited 0.000 us in queue, units free now 0)",
 "[ 10.000 us] QPU: memory fires round 10/15",
 "[ 10.000 us] QPU: memory fires round 10/15",
-"[ 10.150 us] DecoderCluster: memory W1 [commit 4-6] READY -> enqueue (ready-queue length = 1)",
-"[ 10.150 us] DecoderCluster: ASSIGN UNIT memory W1 [commit 4-6] (waited 0.000 us in queue, units free now 1)",
-"[ 10.150 us] DecoderCluster: memory W1 [commit 4-6] READY -> enqueue (ready-queue length = 1)",
-"[ 10.150 us] DecoderCluster: ASSIGN UNIT memory W1 [commit 4-6] (waited 0.000 us in queue, units free now 0)",
 "[ 10.150 us] DecoderCluster: round 10 of memory arrived (op now has rounds 1..10)",
 "[ 10.150 us] DecoderCluster: round 10 of memory arrived (op now has rounds 1..10)",
 "[ 10.650 us] DecoderCluster: DECODE DONE memory W0 [commit 1-3]",
 "[ 10.650 us] DecoderCluster: DECODE DONE memory W0 [commit 1-3]",
 "[ 11.000 us] QPU: memory fires round 11/15",
 "[ 11.000 us] QPU: memory fires round 11/15",
+"[ 11.150 us] DecoderCluster: START DECODE memory W1 [commit 4-6]",
+"[ 11.150 us] DecoderCluster: START DECODE memory W1 [commit 4-6]",
 "[ 11.150 us] DecoderCluster: round 11 of memory arrived (op now has rounds 1..11)",
 "[ 11.150 us] DecoderCluster: round 11 of memory arrived (op now has rounds 1..11)",
 "[ 12.000 us] QPU: memory fires round 12/15",
 "[ 12.000 us] QPU: memory fires round 12/15",
-"[ 12.150 us] DecoderCluster: START DECODE memory W1 [commit 4-6]",
-"[ 12.150 us] DecoderCluster: START DECODE memory W1 [commit 4-6]",
 "[ 12.150 us] DecoderCluster: round 12 of memory arrived (op now has rounds 1..12)",
+"[ 12.150 us] DecoderCluster: memory W2 [commit 7-9] READY -> enqueue (ready-queue length = 1)",
+"[ 12.150 us] DecoderCluster: ASSIGN UNIT memory W2 [commit 7-9] (staged, waited 0.000 us in queue, units free now 0)",
 "[ 12.150 us] DecoderCluster: round 12 of memory arrived (op now has rounds 1..12)",
+"[ 12.150 us] DecoderCluster: memory W2 [commit 7-9] READY -> enqueue (ready-queue length = 1)",
+"[ 12.150 us] DecoderCluster: ASSIGN UNIT memory W2 [commit 7-9] (staged, waited 0.000 us in queue, units free now 0)",
 "[ 13.000 us] QPU: memory fires round 13/15",
 "[ 13.000 us] QPU: memory fires round 13/15",
 "[ 13.150 us] DecoderCluster: round 13 of memory arrived (op now has rounds 1..13)",
 "[ 13.150 us] DecoderCluster: round 13 of memory arrived (op now has rounds 1..13)",
+"[ 13.650 us] DecoderCluster: DECODE DONE memory W1 [commit 4-6]",
+"[ 13.650 us] DecoderCluster: DECODE DONE memory W1 [commit 4-6]",
 "[ 14.000 us] QPU: memory fires round 14/15",
 "[ 14.000 us] QPU: memory fires round 14/15",
-"[ 14.150 us] DecoderCluster: memory W2 [commit 7-9] READY -> enqueue (ready-queue length = 1)",
-"[ 14.150 us] DecoderCluster: ASSIGN UNIT memory W2 [commit 7-9] (waited 0.000 us in queue, units free now 1)",
-"[ 14.150 us] DecoderCluster: memory W2 [commit 7-9] READY -> enqueue (ready-queue length = 1)",
-"[ 14.150 us] DecoderCluster: ASSIGN UNIT memory W2 [commit 7-9] (waited 0.000 us in queue, units free now 0)",
+"[ 14.150 us] DecoderCluster: START DECODE memory W2 [commit 7-9]",
+"[ 14.150 us] DecoderCluster: START DECODE memory W2 [commit 7-9]",
 "[ 14.150 us] DecoderCluster: round 14 of memory arrived (op now has rounds 1..14)",
 "[ 14.150 us] DecoderCluster: round 14 of memory arrived (op now has rounds 1..14)",
-"[ 14.650 us] DecoderCluster: DECODE DONE memory W1 [commit 4-6]",
-"[ 14.650 us] DecoderCluster: DECODE DONE memory W1 [commit 4-6]",
 "[ 15.000 us] QPU: memory fires round 15/15",
 "[ 15.000 us] ExecutionRuntime: memory body done",
 "[ 15.000 us] QPU: memory fires round 15/15",
 "[ 15.000 us] ExecutionRuntime: memory body done",
 "[ 15.000 us] ExecutionRuntime: QPU finished. All 2 operations are physically complete; decoder may still be draining.",
 "[ 15.150 us] DecoderCluster: round 15 of memory arrived (op now has rounds 1..15)",
+"[ 15.150 us] DecoderCluster: memory W3 [commit 10-12] READY -> enqueue (ready-queue length = 1)",
+"[ 15.150 us] DecoderCluster: ASSIGN UNIT memory W3 [commit 10-12] (staged, waited 0.000 us in queue, units free now 0)",
+"[ 15.150 us] DecoderCluster: memory W4 [commit 13-15] READY -> enqueue (ready-queue length = 1)",
+"[ 15.150 us] DecoderCluster: ASSIGN UNIT memory W4 [commit 13-15] (staged, waited 0.000 us in queue, units free now 0)",
 "[ 15.150 us] DecoderCluster: round 15 of memory arrived (op now has rounds 1..15)",
-"[ 16.150 us] DecoderCluster: START DECODE memory W2 [commit 7-9]",
-"[ 16.150 us] DecoderCluster: START DECODE memory W2 [commit 7-9]",
-"[ 18.150 us] DecoderCluster: memory W3 [commit 10-12] READY -> enqueue (ready-queue length = 1)",
-"[ 18.150 us] DecoderCluster: ASSIGN UNIT memory W3 [commit 10-12] (waited 0.000 us in queue, units free now 1)",
-"[ 18.150 us] DecoderCluster: memory W3 [commit 10-12] READY -> enqueue (ready-queue length = 1)",
-"[ 18.150 us] DecoderCluster: ASSIGN UNIT memory W3 [commit 10-12] (waited 0.000 us in queue, units free now 0)",
-"[ 18.650 us] DecoderCluster: DECODE DONE memory W2 [commit 7-9]",
-"[ 18.650 us] DecoderCluster: DECODE DONE memory W2 [commit 7-9]",
-"[ 20.150 us] DecoderCluster: START DECODE memory W3 [commit 10-12]",
-"[ 20.150 us] DecoderCluster: START DECODE memory W3 [commit 10-12]",
-"[ 22.150 us] DecoderCluster: memory W4 [commit 13-15] READY -> enqueue (ready-queue length = 1)",
-"[ 22.150 us] DecoderCluster: ASSIGN UNIT memory W4 [commit 13-15] (waited 0.000 us in queue, units free now 1)",
-"[ 22.150 us] DecoderCluster: memory W4 [commit 13-15] READY -> enqueue (ready-queue length = 1)",
-"[ 22.150 us] DecoderCluster: ASSIGN UNIT memory W4 [commit 13-15] (waited 0.000 us in queue, units free now 0)",
-"[ 22.650 us] DecoderCluster: DECODE DONE memory W3 [commit 10-12]",
-"[ 22.650 us] DecoderCluster: DECODE DONE memory W3 [commit 10-12]",
-"[ 24.150 us] DecoderCluster: START DECODE memory W4 [commit 13-15]",
-"[ 24.150 us] DecoderCluster: START DECODE memory W4 [commit 13-15]",
-"[ 26.650 us] DecoderCluster: DECODE DONE memory W4 [commit 13-15]",
-"[ 26.650 us] DecoderCluster: DECODE DONE memory W4 [commit 13-15]"
+"[ 15.150 us] DecoderCluster: memory W3 [commit 10-12] READY -> enqueue (ready-queue length = 1)",
+"[ 15.150 us] DecoderCluster: memory W4 [commit 13-15] READY -> enqueue (ready-queue length = 2)",
+"[ 15.650 us] DecoderCluster: ASSIGN UNIT memory W3 [commit 10-12] (staged, waited 0.500 us in queue, units free now 1)",
+"[ 15.650 us] DecoderCluster: ASSIGN UNIT memory W4 [commit 13-15] (staged, waited 0.500 us in queue, units free now 2)",
+"[ 16.650 us] DecoderCluster: DECODE DONE memory W2 [commit 7-9]",
+"[ 16.650 us] DecoderCluster: DECODE DONE memory W2 [commit 7-9]",
+"[ 17.150 us] DecoderCluster: START DECODE memory W3 [commit 10-12]",
+"[ 17.150 us] DecoderCluster: PARK DECODE memory W4 [commit 13-15] (boundary pending)",
+"[ 17.650 us] DecoderCluster: PARK DECODE memory W4 [commit 13-15] (boundary pending)",
+"[ 18.650 us] DecoderCluster: START DECODE memory W3 [commit 10-12]",
+"[ 19.150 us] DecoderCluster: START DECODE memory W4 [commit 13-15]",
+"[ 19.650 us] DecoderCluster: DECODE DONE memory W3 [commit 10-12]",
+"[ 20.650 us] DecoderCluster: START DECODE memory W4 [commit 13-15]",
+"[ 21.150 us] DecoderCluster: DECODE DONE memory W3 [commit 10-12]",
+"[ 21.650 us] DecoderCluster: DECODE DONE memory W4 [commit 13-15]",
+"[ 23.150 us] DecoderCluster: DECODE DONE memory W4 [commit 13-15]"
 ],
 "op_results": {},
 "result": {
@@ -120,7 +122,7 @@
 "event_queue_empty": true,
 "execution_done_ticks": 15000000,
 "execution_workload_complete": true,
-"fully_done_ticks": 26650000,
+"fully_done_ticks": 23150000,
 "link_traffic": {
 "path_order": [
 "qc",
@@ -1299,6 +1301,96 @@
 }
 ],
 "relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 2,
+"tier": "weak",
+"window_id": 1
+}
+},
+"round_hi": 9,
+"round_lo": 4,
+"window_id": 1
+},
+"delivery_ticks": 11150000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 2,
+"propagation_ticks": 2000000,
+"queue_wait_ticks": 0,
+"send_ticks": 9150000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 9150000,
+"serializer_start_ticks": 9150000,
+"total_delay_ticks": 2000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"run_sequence": 3,
+"tier": "weak",
+"window_id": 1
+}
+},
+"round_hi": 9,
+"round_lo": 4,
+"window_id": 1
+},
+"delivery_ticks": 11150000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 3,
+"propagation_ticks": 2000000,
+"queue_wait_ticks": 0,
+"send_ticks": 9150000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 9150000,
+"serializer_start_ticks": 9150000,
+"total_delay_ticks": 2000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
 "delivery_revision": 1,
 "destination_window_key": {
 "items": [
@@ -1614,96 +1706,6 @@
 "value": "0"
 }
 ],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 2,
-"tier": "weak",
-"window_id": 1
-}
-},
-"round_hi": 9,
-"round_lo": 4,
-"window_id": 1
-},
-"delivery_ticks": 12150000,
-"path": "cwd",
-"payload_bits": null,
-"payload_selection": "unresolved",
-"payload_source": "SyndromeRoundPacket.fragment_size_sum",
-"physical_alias": "channel-1",
-"physical_sequence": 2,
-"propagation_ticks": 2000000,
-"queue_wait_ticks": 0,
-"send_ticks": 10150000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 10150000,
-"serializer_start_ticks": 10150000,
-"total_delay_ticks": 2000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"run_sequence": 3,
-"tier": "weak",
-"window_id": 1
-}
-},
-"round_hi": 9,
-"round_lo": 4,
-"window_id": 1
-},
-"delivery_ticks": 12150000,
-"path": "cwd",
-"payload_bits": null,
-"payload_selection": "unresolved",
-"payload_source": "SyndromeRoundPacket.fragment_size_sum",
-"physical_alias": "channel-1",
-"physical_sequence": 3,
-"propagation_ticks": 2000000,
-"queue_wait_ticks": 0,
-"send_ticks": 10150000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 10150000,
-"serializer_start_ticks": 10150000,
-"total_delay_ticks": 2000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
 "relation": null,
 "round_hi": 11,
 "round_lo": 11,
@@ -1840,6 +1842,344 @@
 "value": "0"
 }
 ],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 4,
+"tier": "weak",
+"window_id": 2
+}
+},
+"round_hi": 12,
+"round_lo": 7,
+"window_id": 2
+},
+"delivery_ticks": 14150000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 4,
+"propagation_ticks": 2000000,
+"queue_wait_ticks": 0,
+"send_ticks": 12150000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 12150000,
+"serializer_start_ticks": 12150000,
+"total_delay_ticks": 2000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"run_sequence": 5,
+"tier": "weak",
+"window_id": 2
+}
+},
+"round_hi": 12,
+"round_lo": 7,
+"window_id": 2
+},
+"delivery_ticks": 14150000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 5,
+"propagation_ticks": 2000000,
+"queue_wait_ticks": 0,
+"send_ticks": 12150000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 12150000,
+"serializer_start_ticks": 12150000,
+"total_delay_ticks": 2000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"delivery_revision": 1,
+"destination_window_key": {
+"items": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+{
+"items": null,
+"kind": "integer",
+"value": "2"
+}
+],
+"kind": "tuple",
+"value": null
+},
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 2,
+"tier": "weak",
+"window_id": 1
+},
+"source_revision": 1,
+"source_window_key": {
+"items": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"kind": "tuple",
+"value": null
+}
+},
+"round_hi": 9,
+"round_lo": 4,
+"window_id": 1
+},
+"delivery_ticks": 13150000,
+"path": "dd",
+"payload_bits": 100,
+"payload_selection": "configured_default",
+"payload_source": "Khalid dd representative aggregate transaction",
+"physical_alias": "channel-5",
+"physical_sequence": 2,
+"propagation_ticks": 500000,
+"queue_wait_ticks": 0,
+"send_ticks": 12650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 12650000,
+"serializer_start_ticks": 12650000,
+"total_delay_ticks": 500000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 2,
+"tier": "weak",
+"window_id": 1
+}
+},
+"round_hi": 9,
+"round_lo": 4,
+"window_id": 1
+},
+"delivery_ticks": 13650000,
+"path": "wdo",
+"payload_bits": 5000000,
+"payload_selection": "configured_default",
+"payload_source": "Khalid do mapped to weak output",
+"physical_alias": "channel-4",
+"physical_sequence": 2,
+"propagation_ticks": 1000000,
+"queue_wait_ticks": 0,
+"send_ticks": 12650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 12650000,
+"serializer_start_ticks": 12650000,
+"total_delay_ticks": 1000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"relation": {
+"delivery_revision": 1,
+"destination_window_key": {
+"items": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+{
+"items": null,
+"kind": "integer",
+"value": "2"
+}
+],
+"kind": "tuple",
+"value": null
+},
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"run_sequence": 3,
+"tier": "weak",
+"window_id": 1
+},
+"source_revision": 1,
+"source_window_key": {
+"items": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"kind": "tuple",
+"value": null
+}
+},
+"round_hi": 9,
+"round_lo": 4,
+"window_id": 1
+},
+"delivery_ticks": 13150000,
+"path": "dd",
+"payload_bits": 100,
+"payload_selection": "configured_default",
+"payload_source": "Khalid dd representative aggregate transaction",
+"physical_alias": "channel-5",
+"physical_sequence": 3,
+"propagation_ticks": 500000,
+"queue_wait_ticks": 0,
+"send_ticks": 12650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 12650000,
+"serializer_start_ticks": 12650000,
+"total_delay_ticks": 500000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"run_sequence": 3,
+"tier": "weak",
+"window_id": 1
+}
+},
+"round_hi": 9,
+"round_lo": 4,
+"window_id": 1
+},
+"delivery_ticks": 13650000,
+"path": "wdo",
+"payload_bits": 5000000,
+"payload_selection": "configured_default",
+"payload_source": "Khalid do mapped to weak output",
+"physical_alias": "channel-4",
+"physical_sequence": 3,
+"propagation_ticks": 1000000,
+"queue_wait_ticks": 0,
+"send_ticks": 12650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 12650000,
+"serializer_start_ticks": 12650000,
+"total_delay_ticks": 1000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
 "relation": null,
 "round_hi": 13,
 "round_lo": 13,
@@ -1908,254 +2248,6 @@
 "value": "0"
 }
 ],
-"relation": {
-"delivery_revision": 1,
-"destination_window_key": {
-"items": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-{
-"items": null,
-"kind": "integer",
-"value": "2"
-}
-],
-"kind": "tuple",
-"value": null
-},
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 2,
-"tier": "weak",
-"window_id": 1
-},
-"source_revision": 1,
-"source_window_key": {
-"items": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"kind": "tuple",
-"value": null
-}
-},
-"round_hi": 9,
-"round_lo": 4,
-"window_id": 1
-},
-"delivery_ticks": 14150000,
-"path": "dd",
-"payload_bits": 100,
-"payload_selection": "configured_default",
-"payload_source": "Khalid dd representative aggregate transaction",
-"physical_alias": "channel-5",
-"physical_sequence": 2,
-"propagation_ticks": 500000,
-"queue_wait_ticks": 0,
-"send_ticks": 13650000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 13650000,
-"serializer_start_ticks": 13650000,
-"total_delay_ticks": 500000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 2,
-"tier": "weak",
-"window_id": 1
-}
-},
-"round_hi": 9,
-"round_lo": 4,
-"window_id": 1
-},
-"delivery_ticks": 14650000,
-"path": "wdo",
-"payload_bits": 5000000,
-"payload_selection": "configured_default",
-"payload_source": "Khalid do mapped to weak output",
-"physical_alias": "channel-4",
-"physical_sequence": 2,
-"propagation_ticks": 1000000,
-"queue_wait_ticks": 0,
-"send_ticks": 13650000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 13650000,
-"serializer_start_ticks": 13650000,
-"total_delay_ticks": 1000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"relation": {
-"delivery_revision": 1,
-"destination_window_key": {
-"items": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-{
-"items": null,
-"kind": "integer",
-"value": "2"
-}
-],
-"kind": "tuple",
-"value": null
-},
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"run_sequence": 3,
-"tier": "weak",
-"window_id": 1
-},
-"source_revision": 1,
-"source_window_key": {
-"items": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"kind": "tuple",
-"value": null
-}
-},
-"round_hi": 9,
-"round_lo": 4,
-"window_id": 1
-},
-"delivery_ticks": 14150000,
-"path": "dd",
-"payload_bits": 100,
-"payload_selection": "configured_default",
-"payload_source": "Khalid dd representative aggregate transaction",
-"physical_alias": "channel-5",
-"physical_sequence": 3,
-"propagation_ticks": 500000,
-"queue_wait_ticks": 0,
-"send_ticks": 13650000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 13650000,
-"serializer_start_ticks": 13650000,
-"total_delay_ticks": 500000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"run_sequence": 3,
-"tier": "weak",
-"window_id": 1
-}
-},
-"round_hi": 9,
-"round_lo": 4,
-"window_id": 1
-},
-"delivery_ticks": 14650000,
-"path": "wdo",
-"payload_bits": 5000000,
-"payload_selection": "configured_default",
-"payload_source": "Khalid do mapped to weak output",
-"physical_alias": "channel-4",
-"physical_sequence": 3,
-"propagation_ticks": 1000000,
-"queue_wait_ticks": 0,
-"send_ticks": 13650000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 13650000,
-"serializer_start_ticks": 13650000,
-"total_delay_ticks": 1000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
 "relation": null,
 "round_hi": 14,
 "round_lo": 14,
@@ -2209,96 +2301,6 @@
 "serializer_end_ticks": 14000000,
 "serializer_start_ticks": 14000000,
 "total_delay_ticks": 150000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 4,
-"tier": "weak",
-"window_id": 2
-}
-},
-"round_hi": 12,
-"round_lo": 7,
-"window_id": 2
-},
-"delivery_ticks": 16150000,
-"path": "cwd",
-"payload_bits": null,
-"payload_selection": "unresolved",
-"payload_source": "SyndromeRoundPacket.fragment_size_sum",
-"physical_alias": "channel-1",
-"physical_sequence": 4,
-"propagation_ticks": 2000000,
-"queue_wait_ticks": 0,
-"send_ticks": 14150000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 14150000,
-"serializer_start_ticks": 14150000,
-"total_delay_ticks": 2000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"run_sequence": 5,
-"tier": "weak",
-"window_id": 2
-}
-},
-"round_hi": 12,
-"round_lo": 7,
-"window_id": 2
-},
-"delivery_ticks": 16150000,
-"path": "cwd",
-"payload_bits": null,
-"payload_selection": "unresolved",
-"payload_source": "SyndromeRoundPacket.fragment_size_sum",
-"physical_alias": "channel-1",
-"physical_sequence": 5,
-"propagation_ticks": 2000000,
-"queue_wait_ticks": 0,
-"send_ticks": 14150000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 14150000,
-"serializer_start_ticks": 14150000,
-"total_delay_ticks": 2000000
 },
 {
 "attribution": {
@@ -2383,254 +2385,6 @@
 }
 ],
 "relation": {
-"delivery_revision": 1,
-"destination_window_key": {
-"items": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-{
-"items": null,
-"kind": "integer",
-"value": "3"
-}
-],
-"kind": "tuple",
-"value": null
-},
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 4,
-"tier": "weak",
-"window_id": 2
-},
-"source_revision": 1,
-"source_window_key": {
-"items": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-{
-"items": null,
-"kind": "integer",
-"value": "2"
-}
-],
-"kind": "tuple",
-"value": null
-}
-},
-"round_hi": 12,
-"round_lo": 7,
-"window_id": 2
-},
-"delivery_ticks": 18150000,
-"path": "dd",
-"payload_bits": 100,
-"payload_selection": "configured_default",
-"payload_source": "Khalid dd representative aggregate transaction",
-"physical_alias": "channel-5",
-"physical_sequence": 4,
-"propagation_ticks": 500000,
-"queue_wait_ticks": 0,
-"send_ticks": 17650000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 17650000,
-"serializer_start_ticks": 17650000,
-"total_delay_ticks": 500000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 4,
-"tier": "weak",
-"window_id": 2
-}
-},
-"round_hi": 12,
-"round_lo": 7,
-"window_id": 2
-},
-"delivery_ticks": 18650000,
-"path": "wdo",
-"payload_bits": 5000000,
-"payload_selection": "configured_default",
-"payload_source": "Khalid do mapped to weak output",
-"physical_alias": "channel-4",
-"physical_sequence": 4,
-"propagation_ticks": 1000000,
-"queue_wait_ticks": 0,
-"send_ticks": 17650000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 17650000,
-"serializer_start_ticks": 17650000,
-"total_delay_ticks": 1000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"relation": {
-"delivery_revision": 1,
-"destination_window_key": {
-"items": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-{
-"items": null,
-"kind": "integer",
-"value": "3"
-}
-],
-"kind": "tuple",
-"value": null
-},
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"run_sequence": 5,
-"tier": "weak",
-"window_id": 2
-},
-"source_revision": 1,
-"source_window_key": {
-"items": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-{
-"items": null,
-"kind": "integer",
-"value": "2"
-}
-],
-"kind": "tuple",
-"value": null
-}
-},
-"round_hi": 12,
-"round_lo": 7,
-"window_id": 2
-},
-"delivery_ticks": 18150000,
-"path": "dd",
-"payload_bits": 100,
-"payload_selection": "configured_default",
-"payload_source": "Khalid dd representative aggregate transaction",
-"physical_alias": "channel-5",
-"physical_sequence": 5,
-"propagation_ticks": 500000,
-"queue_wait_ticks": 0,
-"send_ticks": 17650000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 17650000,
-"serializer_start_ticks": 17650000,
-"total_delay_ticks": 500000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"run_sequence": 5,
-"tier": "weak",
-"window_id": 2
-}
-},
-"round_hi": 12,
-"round_lo": 7,
-"window_id": 2
-},
-"delivery_ticks": 18650000,
-"path": "wdo",
-"payload_bits": 5000000,
-"payload_selection": "configured_default",
-"payload_source": "Khalid do mapped to weak output",
-"physical_alias": "channel-4",
-"physical_sequence": 5,
-"propagation_ticks": 1000000,
-"queue_wait_ticks": 0,
-"send_ticks": 17650000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 17650000,
-"serializer_start_ticks": 17650000,
-"total_delay_ticks": 1000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
-"relation": {
 "request_key": {
 "operation_id": {
 "items": null,
@@ -2646,7 +2400,7 @@
 "round_lo": 10,
 "window_id": 3
 },
-"delivery_ticks": 20150000,
+"delivery_ticks": 17150000,
 "path": "cwd",
 "payload_bits": null,
 "payload_selection": "unresolved",
@@ -2655,10 +2409,224 @@
 "physical_sequence": 6,
 "propagation_ticks": 2000000,
 "queue_wait_ticks": 0,
-"send_ticks": 18150000,
+"send_ticks": 15150000,
 "serialization_ticks": 0,
-"serializer_end_ticks": 18150000,
-"serializer_start_ticks": 18150000,
+"serializer_end_ticks": 15150000,
+"serializer_start_ticks": 15150000,
+"total_delay_ticks": 2000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 7,
+"tier": "weak",
+"window_id": 4
+}
+},
+"round_hi": 18,
+"round_lo": 13,
+"window_id": 4
+},
+"delivery_ticks": 17150000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 7,
+"propagation_ticks": 2000000,
+"queue_wait_ticks": 0,
+"send_ticks": 15150000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 15150000,
+"serializer_start_ticks": 15150000,
+"total_delay_ticks": 2000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"delivery_revision": 1,
+"destination_window_key": {
+"items": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+{
+"items": null,
+"kind": "integer",
+"value": "3"
+}
+],
+"kind": "tuple",
+"value": null
+},
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 4,
+"tier": "weak",
+"window_id": 2
+},
+"source_revision": 1,
+"source_window_key": {
+"items": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+{
+"items": null,
+"kind": "integer",
+"value": "2"
+}
+],
+"kind": "tuple",
+"value": null
+}
+},
+"round_hi": 12,
+"round_lo": 7,
+"window_id": 2
+},
+"delivery_ticks": 16150000,
+"path": "dd",
+"payload_bits": 100,
+"payload_selection": "configured_default",
+"payload_source": "Khalid dd representative aggregate transaction",
+"physical_alias": "channel-5",
+"physical_sequence": 4,
+"propagation_ticks": 500000,
+"queue_wait_ticks": 0,
+"send_ticks": 15650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 15650000,
+"serializer_start_ticks": 15650000,
+"total_delay_ticks": 500000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 4,
+"tier": "weak",
+"window_id": 2
+}
+},
+"round_hi": 12,
+"round_lo": 7,
+"window_id": 2
+},
+"delivery_ticks": 16650000,
+"path": "wdo",
+"payload_bits": 5000000,
+"payload_selection": "configured_default",
+"payload_source": "Khalid do mapped to weak output",
+"physical_alias": "channel-4",
+"physical_sequence": 4,
+"propagation_ticks": 1000000,
+"queue_wait_ticks": 0,
+"send_ticks": 15650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 15650000,
+"serializer_start_ticks": 15650000,
+"total_delay_ticks": 1000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"run_sequence": 8,
+"tier": "weak",
+"window_id": 3
+}
+},
+"round_hi": 15,
+"round_lo": 10,
+"window_id": 3
+},
+"delivery_ticks": 17650000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 8,
+"propagation_ticks": 2000000,
+"queue_wait_ticks": 0,
+"send_ticks": 15650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 15650000,
+"serializer_start_ticks": 15650000,
 "total_delay_ticks": 2000000
 },
 {
@@ -2676,34 +2644,158 @@
 }
 ],
 "relation": {
+"delivery_revision": 1,
+"destination_window_key": {
+"items": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+{
+"items": null,
+"kind": "integer",
+"value": "3"
+}
+],
+"kind": "tuple",
+"value": null
+},
 "request_key": {
 "operation_id": {
 "items": null,
 "kind": "integer",
 "value": "1"
 },
-"run_sequence": 7,
+"run_sequence": 5,
 "tier": "weak",
-"window_id": 3
+"window_id": 2
+},
+"source_revision": 1,
+"source_window_key": {
+"items": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+{
+"items": null,
+"kind": "integer",
+"value": "2"
+}
+],
+"kind": "tuple",
+"value": null
 }
 },
-"round_hi": 15,
-"round_lo": 10,
-"window_id": 3
+"round_hi": 12,
+"round_lo": 7,
+"window_id": 2
 },
-"delivery_ticks": 20150000,
+"delivery_ticks": 16150000,
+"path": "dd",
+"payload_bits": 100,
+"payload_selection": "configured_default",
+"payload_source": "Khalid dd representative aggregate transaction",
+"physical_alias": "channel-5",
+"physical_sequence": 5,
+"propagation_ticks": 500000,
+"queue_wait_ticks": 0,
+"send_ticks": 15650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 15650000,
+"serializer_start_ticks": 15650000,
+"total_delay_ticks": 500000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"run_sequence": 5,
+"tier": "weak",
+"window_id": 2
+}
+},
+"round_hi": 12,
+"round_lo": 7,
+"window_id": 2
+},
+"delivery_ticks": 16650000,
+"path": "wdo",
+"payload_bits": 5000000,
+"payload_selection": "configured_default",
+"payload_source": "Khalid do mapped to weak output",
+"physical_alias": "channel-4",
+"physical_sequence": 5,
+"propagation_ticks": 1000000,
+"queue_wait_ticks": 0,
+"send_ticks": 15650000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 15650000,
+"serializer_start_ticks": 15650000,
+"total_delay_ticks": 1000000
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "1"
+}
+],
+"relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "1"
+},
+"run_sequence": 9,
+"tier": "weak",
+"window_id": 4
+}
+},
+"round_hi": 18,
+"round_lo": 13,
+"window_id": 4
+},
+"delivery_ticks": 17650000,
 "path": "cwd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
 "physical_alias": "channel-1",
-"physical_sequence": 7,
+"physical_sequence": 9,
 "propagation_ticks": 2000000,
 "queue_wait_ticks": 0,
-"send_ticks": 18150000,
+"send_ticks": 15650000,
 "serialization_ticks": 0,
-"serializer_end_ticks": 18150000,
-"serializer_start_ticks": 18150000,
+"serializer_end_ticks": 15650000,
+"serializer_start_ticks": 15650000,
 "total_delay_ticks": 2000000
 },
 {
@@ -2770,7 +2862,7 @@
 "round_lo": 10,
 "window_id": 3
 },
-"delivery_ticks": 22150000,
+"delivery_ticks": 19150000,
 "path": "dd",
 "payload_bits": 100,
 "payload_selection": "configured_default",
@@ -2779,10 +2871,10 @@
 "physical_sequence": 6,
 "propagation_ticks": 500000,
 "queue_wait_ticks": 0,
-"send_ticks": 21650000,
+"send_ticks": 18650000,
 "serialization_ticks": 0,
-"serializer_end_ticks": 21650000,
-"serializer_start_ticks": 21650000,
+"serializer_end_ticks": 18650000,
+"serializer_start_ticks": 18650000,
 "total_delay_ticks": 500000
 },
 {
@@ -2815,7 +2907,7 @@
 "round_lo": 10,
 "window_id": 3
 },
-"delivery_ticks": 22650000,
+"delivery_ticks": 19650000,
 "path": "wdo",
 "payload_bits": 5000000,
 "payload_selection": "configured_default",
@@ -2824,10 +2916,10 @@
 "physical_sequence": 6,
 "propagation_ticks": 1000000,
 "queue_wait_ticks": 0,
-"send_ticks": 21650000,
+"send_ticks": 18650000,
 "serialization_ticks": 0,
-"serializer_end_ticks": 21650000,
-"serializer_start_ticks": 21650000,
+"serializer_end_ticks": 18650000,
+"serializer_start_ticks": 18650000,
 "total_delay_ticks": 1000000
 },
 {
@@ -2868,7 +2960,7 @@
 "kind": "integer",
 "value": "1"
 },
-"run_sequence": 7,
+"run_sequence": 8,
 "tier": "weak",
 "window_id": 3
 },
@@ -2894,7 +2986,7 @@
 "round_lo": 10,
 "window_id": 3
 },
-"delivery_ticks": 22150000,
+"delivery_ticks": 20650000,
 "path": "dd",
 "payload_bits": 100,
 "payload_selection": "configured_default",
@@ -2903,10 +2995,10 @@
 "physical_sequence": 7,
 "propagation_ticks": 500000,
 "queue_wait_ticks": 0,
-"send_ticks": 21650000,
+"send_ticks": 20150000,
 "serialization_ticks": 0,
-"serializer_end_ticks": 21650000,
-"serializer_start_ticks": 21650000,
+"serializer_end_ticks": 20150000,
+"serializer_start_ticks": 20150000,
 "total_delay_ticks": 500000
 },
 {
@@ -2930,7 +3022,7 @@
 "kind": "integer",
 "value": "1"
 },
-"run_sequence": 7,
+"run_sequence": 8,
 "tier": "weak",
 "window_id": 3
 }
@@ -2939,7 +3031,7 @@
 "round_lo": 10,
 "window_id": 3
 },
-"delivery_ticks": 22650000,
+"delivery_ticks": 21150000,
 "path": "wdo",
 "payload_bits": 5000000,
 "payload_selection": "configured_default",
@@ -2948,10 +3040,10 @@
 "physical_sequence": 7,
 "propagation_ticks": 1000000,
 "queue_wait_ticks": 0,
-"send_ticks": 21650000,
+"send_ticks": 20150000,
 "serialization_ticks": 0,
-"serializer_end_ticks": 21650000,
-"serializer_start_ticks": 21650000,
+"serializer_end_ticks": 20150000,
+"serializer_start_ticks": 20150000,
 "total_delay_ticks": 1000000
 },
 {
@@ -2975,7 +3067,7 @@
 "kind": "integer",
 "value": "0"
 },
-"run_sequence": 8,
+"run_sequence": 7,
 "tier": "weak",
 "window_id": 4
 }
@@ -2984,97 +3076,7 @@
 "round_lo": 13,
 "window_id": 4
 },
-"delivery_ticks": 24150000,
-"path": "cwd",
-"payload_bits": null,
-"payload_selection": "unresolved",
-"payload_source": "SyndromeRoundPacket.fragment_size_sum",
-"physical_alias": "channel-1",
-"physical_sequence": 8,
-"propagation_ticks": 2000000,
-"queue_wait_ticks": 0,
-"send_ticks": 22150000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 22150000,
-"serializer_start_ticks": 22150000,
-"total_delay_ticks": 2000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "1"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "1"
-},
-"run_sequence": 9,
-"tier": "weak",
-"window_id": 4
-}
-},
-"round_hi": 18,
-"round_lo": 13,
-"window_id": 4
-},
-"delivery_ticks": 24150000,
-"path": "cwd",
-"payload_bits": null,
-"payload_selection": "unresolved",
-"payload_source": "SyndromeRoundPacket.fragment_size_sum",
-"physical_alias": "channel-1",
-"physical_sequence": 9,
-"propagation_ticks": 2000000,
-"queue_wait_ticks": 0,
-"send_ticks": 22150000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 22150000,
-"serializer_start_ticks": 22150000,
-"total_delay_ticks": 2000000
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 8,
-"tier": "weak",
-"window_id": 4
-}
-},
-"round_hi": 18,
-"round_lo": 13,
-"window_id": 4
-},
-"delivery_ticks": 26650000,
+"delivery_ticks": 21650000,
 "path": "wdo",
 "payload_bits": 5000000,
 "payload_selection": "configured_default",
@@ -3083,10 +3085,10 @@
 "physical_sequence": 8,
 "propagation_ticks": 1000000,
 "queue_wait_ticks": 0,
-"send_ticks": 25650000,
+"send_ticks": 20650000,
 "serialization_ticks": 0,
-"serializer_end_ticks": 25650000,
-"serializer_start_ticks": 25650000,
+"serializer_end_ticks": 20650000,
+"serializer_start_ticks": 20650000,
 "total_delay_ticks": 1000000
 },
 {
@@ -3119,7 +3121,7 @@
 "round_lo": 13,
 "window_id": 4
 },
-"delivery_ticks": 26650000,
+"delivery_ticks": 23150000,
 "path": "wdo",
 "payload_bits": 5000000,
 "payload_selection": "configured_default",
@@ -3128,10 +3130,10 @@
 "physical_sequence": 9,
 "propagation_ticks": 1000000,
 "queue_wait_ticks": 0,
-"send_ticks": 25650000,
+"send_ticks": 22150000,
 "serialization_ticks": 0,
-"serializer_end_ticks": 25650000,
-"serializer_start_ticks": 25650000,
+"serializer_end_ticks": 22150000,
+"serializer_start_ticks": 22150000,
 "total_delay_ticks": 1000000
 }
 ]
@@ -3216,7 +3218,7 @@
 "admissions": 5,
 "capacity_rounds": null,
 "occupied_rounds": 0,
-"peak_occupied_rounds": 6,
+"peak_occupied_rounds": 12,
 "pool": "default",
 "unit": 0
 },
@@ -3243,7 +3245,7 @@
 ],
 "decode_release_time": [],
 "execution_done": 15000000,
-"fully_done": 26650000,
+"fully_done": 23150000,
 "ops": [
 {
 "blocked_by": null,
@@ -3311,38 +3313,38 @@
 },
 {
 "buffer_fill": 5000000,
-"dep_block": 1000000,
+"dep_block": 0,
 "op": 0,
 "queue_wait": 0,
 "service": 3500000,
-"total": 9500000,
+"total": 8500000,
 "window": 1
 },
 {
 "buffer_fill": 5000000,
-"dep_block": 2000000,
+"dep_block": 0,
 "op": 0,
 "queue_wait": 0,
 "service": 3500000,
-"total": 10500000,
+"total": 8500000,
 "window": 2
 },
 {
 "buffer_fill": 5000000,
-"dep_block": 3000000,
+"dep_block": 0,
 "op": 0,
 "queue_wait": 0,
 "service": 3500000,
-"total": 11500000,
+"total": 8500000,
 "window": 3
 },
 {
 "buffer_fill": 2000000,
-"dep_block": 7000000,
+"dep_block": 0,
 "op": 0,
 "queue_wait": 0,
-"service": 3500000,
-"total": 12500000,
+"service": 5500000,
+"total": 7500000,
 "window": 4
 },
 {
@@ -3356,38 +3358,38 @@
 },
 {
 "buffer_fill": 5000000,
-"dep_block": 1000000,
+"dep_block": 0,
 "op": 1,
 "queue_wait": 0,
 "service": 3500000,
-"total": 9500000,
+"total": 8500000,
 "window": 1
 },
 {
 "buffer_fill": 5000000,
-"dep_block": 2000000,
+"dep_block": 0,
 "op": 1,
 "queue_wait": 0,
 "service": 3500000,
-"total": 10500000,
+"total": 8500000,
 "window": 2
 },
 {
 "buffer_fill": 5000000,
-"dep_block": 3000000,
+"dep_block": 0,
 "op": 1,
-"queue_wait": 0,
-"service": 3500000,
-"total": 11500000,
+"queue_wait": 500000,
+"service": 4500000,
+"total": 10000000,
 "window": 3
 },
 {
 "buffer_fill": 2000000,
-"dep_block": 7000000,
+"dep_block": 0,
 "op": 1,
-"queue_wait": 0,
-"service": 3500000,
-"total": 12500000,
+"queue_wait": 500000,
+"service": 6500000,
+"total": 9000000,
 "window": 4
 }
 ],
@@ -3449,10 +3451,10 @@
 "op_id": 0,
 "queued": true,
 "t_data_complete": 9150000,
-"t_dispatch": 10150000,
-"t_done": 13650000,
+"t_dispatch": 9150000,
+"t_done": 12650000,
 "t_first_round": 4150000,
-"t_queued": 10150000
+"t_queued": 9150000
 },
 {
 "buffer_hi": 12,
@@ -3478,10 +3480,10 @@
 "op_id": 0,
 "queued": true,
 "t_data_complete": 12150000,
-"t_dispatch": 14150000,
-"t_done": 17650000,
+"t_dispatch": 12150000,
+"t_done": 15650000,
 "t_first_round": 7150000,
-"t_queued": 14150000
+"t_queued": 12150000
 },
 {
 "buffer_hi": 15,
@@ -3507,10 +3509,10 @@
 "op_id": 0,
 "queued": true,
 "t_data_complete": 15150000,
-"t_dispatch": 18150000,
-"t_done": 21650000,
+"t_dispatch": 15150000,
+"t_done": 18650000,
 "t_first_round": 10150000,
-"t_queued": 18150000
+"t_queued": 15150000
 },
 {
 "buffer_hi": 18,
@@ -3531,10 +3533,10 @@
 "op_id": 0,
 "queued": true,
 "t_data_complete": 15150000,
-"t_dispatch": 22150000,
-"t_done": 25650000,
+"t_dispatch": 15150000,
+"t_done": 20650000,
 "t_first_round": 13150000,
-"t_queued": 22150000
+"t_queued": 15150000
 },
 {
 "buffer_hi": 6,
@@ -3584,10 +3586,10 @@
 "op_id": 1,
 "queued": true,
 "t_data_complete": 9150000,
-"t_dispatch": 10150000,
-"t_done": 13650000,
+"t_dispatch": 9150000,
+"t_done": 12650000,
 "t_first_round": 4150000,
-"t_queued": 10150000
+"t_queued": 9150000
 },
 {
 "buffer_hi": 12,
@@ -3613,10 +3615,10 @@
 "op_id": 1,
 "queued": true,
 "t_data_complete": 12150000,
-"t_dispatch": 14150000,
-"t_done": 17650000,
+"t_dispatch": 12150000,
+"t_done": 15650000,
 "t_first_round": 7150000,
-"t_queued": 14150000
+"t_queued": 12150000
 },
 {
 "buffer_hi": 15,
@@ -3642,10 +3644,10 @@
 "op_id": 1,
 "queued": true,
 "t_data_complete": 15150000,
-"t_dispatch": 18150000,
-"t_done": 21650000,
+"t_dispatch": 15650000,
+"t_done": 20150000,
 "t_first_round": 10150000,
-"t_queued": 18150000
+"t_queued": 15150000
 },
 {
 "buffer_hi": 18,
@@ -3666,10 +3668,10 @@
 "op_id": 1,
 "queued": true,
 "t_data_complete": 15150000,
-"t_dispatch": 22150000,
-"t_done": 25650000,
+"t_dispatch": 15650000,
+"t_done": 22150000,
 "t_first_round": 13150000,
-"t_queued": 22150000
+"t_queued": 15150000
 }
 ]
 }

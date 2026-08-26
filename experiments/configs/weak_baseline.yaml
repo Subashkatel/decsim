@@ -68,8 +68,6 @@ decoder:
     release_cycles_per_job: 1                # correction register write-out; one cycle, experiment card
 decoder_memory_rounds: null                  # rounds of input memory PER UNIT; null = unbounded
 
-input_staging_depth: 0                       # 0 = decode from the landing slot; 1 = ping-pong staging slot
-boundary_application: assembly               # assembly (host folds the seam) | decoder (raw ship, XOR at the unit)
 
 pauli_frame:
   commit_us: 0.004                           # one 250 MHz cycle to XOR the correction into the frame (XQsim PFU)

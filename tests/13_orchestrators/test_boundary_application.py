@@ -1,25 +1,23 @@
-"""The boundary application axis: ASSEMBLY folds the predecessor's boundary
-into the payloads host-side (the original model); DECODER ships raw rounds
-at data-complete and XORs the mask into the landed input when the boundary
-arrives (qLDPC net_error, cudaq-x syndrome_mods, LILLIPUT's state register,
-Skoric's artificial defects). Results must be bit-identical across modes;
-only timing may differ."""
+"""Decoder-side boundary application, the machine's one rule: raw rounds
+ship at data-complete, the predecessor's boundary mask is XORed into the
+landed input when the decode starts (qLDPC net_error, cudaq-x
+syndrome_mods, LILLIPUT's state register, Skoric's artificial defects).
+A boundary-blocked job waits in its input slot, never on the unit."""
 
-import pytest
 import stim
 
 from decsim.config import us
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
-from decsim.decoders.weak_strong_switching import StrongOnly, Switching
-from decsim.decoders.decoders import SAMPLED_CONFIDENCE_SOURCE
+from decsim.decoders.weak_strong_switching import StrongOnly
 from decsim.links.link_profiles import logical_reference_profile
-from decsim.message import BoundaryApplication, Operation
+from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.stim_device import StimDevice
 from decsim.run_spec import RunSpec
 from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
-                                              SlidingWindowScheme)
+                                              SlidingWindowScheme,
+                                              TanSandwichScheme)
 
 ROUNDS = 27
 
@@ -29,7 +27,7 @@ def _sliding():
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD)
 
 
-def _stim_run(mode, depth, round_us=1.0):
+def _stim_run(*, round_us=1.0, scheme=None, units=1, policy=None):
     p = 0.003
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z", rounds=ROUNDS, distance=3,
@@ -40,9 +38,9 @@ def _stim_run(mode, depth, round_us=1.0):
                        circuit=circuit)],
         d=3, rounds_policy=FixedRounds(ROUNDS), round_us=round_us,
         device=StimDevice(),
-        decoder=PyMatchingDecoder(PresetLatencyDecoder(5.0)), num_units=1,
-        scheme=_sliding(), escalation_policy=StrongOnly(),
-        input_staging_depth=depth, boundary_application=mode,
+        decoder=PyMatchingDecoder(PresetLatencyDecoder(5.0)), num_units=units,
+        scheme=(scheme if scheme is not None else _sliding()),
+        escalation_policy=(policy if policy is not None else StrongOnly()),
         links=logical_reference_profile(), seed=3).build()
 
 
@@ -52,62 +50,43 @@ def _gaps(completed):
     return sorted({b - a for a, b in zip(dones, dones[1:])})
 
 
-def test_results_are_bit_identical_across_modes():
-    assembly = _stim_run(None, 0)
-    decoder_mode = _stim_run(BoundaryApplication.DECODER, 1)
-    row_a = assembly.result.operation_results[0]
-    row_d = decoder_mode.result.operation_results[0]
-    assert row_a.logical_observables == row_d.logical_observables
-    assert row_a.logical_failure is False and row_d.logical_failure is False
-    ledger_a = {key: contribution.logical_observables for key, contribution
-                in assembly.window_manager.ledger.contributions.items()}
-    ledger_d = {key: contribution.logical_observables for key, contribution
-                in decoder_mode.window_manager.ledger.contributions.items()}
-    assert ledger_a == ledger_d
-
-
-def test_decoder_mode_with_staging_reaches_the_reference_cadence():
-    # dd 0.5 + max(csd 2.0, decode 5.0) = 5.5 per chain link
-    assert _gaps(_stim_run(BoundaryApplication.DECODER, 1)) == [us(5.5)]
-
-
-def test_assembly_mode_pays_the_full_chain():
-    # dd 0.5 + csd 2.0 + decode 5.0 = 7.5 per chain link
-    assert _gaps(_stim_run(None, 0)) == [us(7.5)]
+def test_saturated_chain_is_dd_plus_max_of_transfer_and_decode():
+    """The reference cadence: with the raw input shipped under the previous
+    decode, each window costs dd (0.5) + max(csd 2.0, decode 5.0) = 5.5 us,
+    never the serial dd + csd + decode = 7.5 us."""
+    assert _gaps(_stim_run()) == [us(5.5)]
 
 
 def test_parked_decode_starts_at_the_boundary_arrival():
-    # saturated stream: the landed input always waits for the boundary,
-    # so every service start equals the predecessor's done + dd; that is
-    # exactly the 5.5 cadence asserted above, plus the park lines in the log
-    completed = _stim_run(BoundaryApplication.DECODER, 1)
-    parked_lines = [line for line in completed.engine.log_lines
-                    if "PARK DECODE" in line]
-    assert parked_lines, "no decode ever parked under a saturated chain"
-
+    """The landed input waits parked; the decode begins the tick the last
+    boundary lands (predecessor done + dd 0.5)."""
+    completed = _stim_run()
+    windows = dict(sorted(completed.window_manager.windows.items()))
+    dones = {k: w.t_done for (_, k), w in windows.items()}
+    for (_, k), window in windows.items():
+        if k == 0 or window.t_done is None:
+            continue
+        boundary_arrival = dones[k - 1] + us(0.5)
+        assert window.t_done - us(5.0) >= boundary_arrival
 
 def test_relaxed_stream_parks_only_the_clamped_terminal_window():
-    # rounds every 3 us: the boundary precedes the landing for every
-    # interior window. The terminal window is the one honest exception:
-    # its clamped read range data-completes on the same tick as its
-    # predecessor's (both need the last round), so it waits for that
-    # boundary just like the references' final window does
-    completed = _stim_run(BoundaryApplication.DECODER, 1, round_us=3.0)
-    parked_lines = [line for line in completed.engine.log_lines
-                    if "PARK DECODE" in line]
-    assert all("W8" in line for line in parked_lines), parked_lines
-    row = completed.result.operation_results[0]
-    assert row.logical_failure is False
+    """With rounds every 3.0 us the chain drains between arrivals: no
+    window but the terminal pair's dependent ever waits parked past its
+    data-complete plus the transfer."""
+    completed = _stim_run(round_us=3.0)
+    windows = dict(sorted(completed.window_manager.windows.items()))
+    late = [k for (_, k), w in windows.items()
+            if w.t_done is not None
+            and w.t_done - us(5.0) - us(2.0) > w.t_data_complete + us(0.6)]
+    last = max(k for (_, k) in windows)
+    assert late in ([], [last]), late
 
 
-def test_decoder_mode_with_an_escalating_policy_is_refused():
-    weak = PresetLatencyDecoder(0.1)
-    with pytest.raises(ValueError, match="DECODER"):
-        RunSpec(ops=[Operation(0, "memory", (0,), patches=(0,))], d=3,
-                rounds_policy=FixedRounds(9), round_us=1.0,
-                decoder=weak, num_units=1, scheme=_sliding(),
-                escalation_policy=Switching(
-                    expected_source=SAMPLED_CONFIDENCE_SOURCE,
-                    confidence_threshold=0.5),
-                boundary_application=BoundaryApplication.DECODER,
-                seed=1).build()
+def test_tan_seams_never_deadlock_the_unit():
+    """A Tan seam fills before its neighbor cores and reads both of their
+    boundaries. It must wait in its slot, not on the unit: every window
+    decodes and the answer is right, on a single unit."""
+    completed = _stim_run(scheme=TanSandwichScheme(), units=1)
+    windows = completed.window_manager.windows.values()
+    assert all(w.t_done is not None for w in windows)
+    assert completed.result.operation_results[0].logical_failure is False

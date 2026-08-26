@@ -24,7 +24,7 @@ from decsim.links.link_profiles import (logical_reference_profile,
                                         with_copy_out_edge)
 from decsim.links.links import (LinkCapacityConfig, LinkConfig,
                                 LinkQuantityBasis, TransferOverheadConfig)
-from decsim.message import BoundaryApplication, Operation
+from decsim.message import Operation
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.code_geometry import SurfaceCodeModel
 from decsim.qpu.round_policies import FixedRounds
@@ -133,14 +133,6 @@ def escalation_policy(config: ExperimentConfig):
     return None
 
 
-def boundary_application(config: ExperimentConfig):
-    """assembly: None, the core's default (host folds the seam before the
-    transfer). decoder: ship raw at data-complete, XOR the seam at the unit."""
-    if config.boundary_application == "decoder":
-        return BoundaryApplication.DECODER
-    return None
-
-
 def build_run(config: ExperimentConfig, *, physical_error_probability: float,
               round_period_us: float, algorithm_latency_us, seed: int):
     """The wired RunSpec for one sweep point and seed, plus its engine
@@ -161,8 +153,6 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
         timing=timing, links=link_model(config),
         decoder_memory=decoder_memory(config),
         escalation_policy=escalation_policy(config),
-        input_staging_depth=config.input_staging_depth,
-        boundary_application=boundary_application(config),
         pauli_frame=PauliFrameConfig(commit_us=config.pauli_frame_commit_us),
         seed=seed)
     return spec, engine

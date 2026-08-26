@@ -37,8 +37,9 @@
 "[  7.000 us] DecoderCluster: live-stream W2 [commit 5-6] READY -> enqueue (ready-queue length = 1)",
 "[  7.000 us] DecoderCluster: ASSIGN UNIT live-stream W2 [commit 5-6] (waited 0.000 us in queue, units free now 0)",
 "[  7.000 us] DecoderCluster: START DECODE live-stream W2 [commit 5-6]",
-"[  9.000 us] DecoderCluster: live-stream W3 [commit 7-7] READY -> enqueue (ready-queue length = 1)",
-"[  9.000 us] DecoderCluster: ASSIGN UNIT live-stream W3 [commit 7-7] (waited 0.000 us in queue, units free now 0)",
+"[  7.000 us] DecoderCluster: live-stream W3 [commit 7-7] READY -> enqueue (ready-queue length = 1)",
+"[  7.000 us] DecoderCluster: ASSIGN UNIT live-stream W3 [commit 7-7] (staged, waited 0.000 us in queue, units free now 0)",
+"[  9.000 us] DecoderCluster: PARK DECODE live-stream W3 [commit 7-7] (boundary pending)",
 "[  9.000 us] DecoderCluster: START DECODE live-stream W3 [commit 7-7]",
 "[  9.000 us] DecoderCluster: DECODE DONE live-stream W2 [commit 5-6]",
 "[ 11.000 us] DecoderCluster: DECODE DONE live-stream W3 [commit 7-7]"
@@ -1203,6 +1204,51 @@
 }
 ],
 "relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 3,
+"tier": "weak",
+"window_id": 3
+}
+},
+"round_hi": 8,
+"round_lo": 7,
+"window_id": 3
+},
+"delivery_ticks": 7000000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 3,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 7000000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 7000000,
+"serializer_start_ticks": 7000000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
 "delivery_revision": 1,
 "destination_window_key": {
 "items": [
@@ -1304,51 +1350,6 @@
 "payload_source": "Khalid do mapped to weak output",
 "physical_alias": "channel-4",
 "physical_sequence": 2,
-"propagation_ticks": 0,
-"queue_wait_ticks": 0,
-"send_ticks": 9000000,
-"serialization_ticks": 0,
-"serializer_end_ticks": 9000000,
-"serializer_start_ticks": 9000000,
-"total_delay_ticks": 0
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 3,
-"tier": "weak",
-"window_id": 3
-}
-},
-"round_hi": 8,
-"round_lo": 7,
-"window_id": 3
-},
-"delivery_ticks": 9000000,
-"path": "cwd",
-"payload_bits": null,
-"payload_selection": "unresolved",
-"payload_source": "SyndromeRoundPacket.fragment_size_sum",
-"physical_alias": "channel-1",
-"physical_sequence": 3,
 "propagation_ticks": 0,
 "queue_wait_ticks": 0,
 "send_ticks": 9000000,
@@ -1494,7 +1495,7 @@
 "admissions": 4,
 "capacity_rounds": null,
 "occupied_rounds": 0,
-"peak_occupied_rounds": 3,
+"peak_occupied_rounds": 4,
 "pool": "default",
 "unit": 0
 }
@@ -1604,10 +1605,10 @@
 },
 {
 "buffer_fill": 0,
-"dep_block": 2000000,
+"dep_block": 0,
 "op": 0,
 "queue_wait": 0,
-"service": 2000000,
+"service": 4000000,
 "total": 4000000,
 "window": 3
 }
@@ -1723,10 +1724,10 @@
 "op_id": 0,
 "queued": true,
 "t_data_complete": 7000000,
-"t_dispatch": 9000000,
+"t_dispatch": 7000000,
 "t_done": 11000000,
 "t_first_round": 7000000,
-"t_queued": 9000000
+"t_queued": 7000000
 }
 ]
 }

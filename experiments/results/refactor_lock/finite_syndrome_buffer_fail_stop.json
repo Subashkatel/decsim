@@ -1,8 +1,8 @@
 {
 "failure": {
-"message": "controller packing capacity 8 is full at tick 12150000",
+"message": "controller packing capacity 8 is full at tick 15150000",
 "status": "controller_packing_overflow",
-"tick": 12150000,
+"tick": 15150000,
 "type": "SyndromePackingOverflow"
 },
 "final_ticks": null,

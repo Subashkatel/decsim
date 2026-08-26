@@ -21,7 +21,6 @@ AlgorithmCard = Union[float, str]
 
 MODES = ("weak_baseline", "strong_only")
 SCHEMES = ("sliding", "parallel", "sandwich", "naive_online")
-BOUNDARY_APPLICATIONS = ("assembly", "decoder")
 LINK_PATHS = ("qc", "c2b", "copy_out", "cwd", "wsd", "csd",
               "dd", "wdo", "do", "oc", "cq")
 
@@ -85,8 +84,6 @@ class ExperimentConfig:
     links: dict                     # path -> LinkCard | None (None = reference card)
     decoder: DecoderCard
     decoder_memory_rounds: Optional[int]   # per unit; None = unbounded
-    input_staging_depth: int        # 0 = no staging slot, 1 = ping-pong
-    boundary_application: str       # assembly | decoder
     pauli_frame_commit_us: float
 
     @property
@@ -156,7 +153,4 @@ def load_experiment(path) -> ExperimentConfig:
                 fetch_cycles_per_round=engine["fetch_cycles_per_round"],
                 release_cycles_per_job=engine["release_cycles_per_job"])),
         decoder_memory_rounds=raw["decoder_memory_rounds"],
-        input_staging_depth=raw.get("input_staging_depth", 0),
-        boundary_application=_require(raw.get("boundary_application", "assembly"),
-                                      BOUNDARY_APPLICATIONS, "boundary_application"),
         pauli_frame_commit_us=raw["pauli_frame"]["commit_us"])

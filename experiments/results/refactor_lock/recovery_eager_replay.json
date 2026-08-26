@@ -60,7 +60,8 @@
 "[ 16.500 us] DecoderCluster: ASSIGN UNIT memory W3 [commit 10-12] (waited 0.000 us in queue, units free now 0)",
 "[ 16.500 us] DecoderCluster: START DECODE memory W3 [commit 10-12]",
 "[ 16.500 us] DecoderCluster: memory W4 [commit 13-15] READY -> enqueue (ready-queue length = 1)",
-"[ 16.500 us] DecoderCluster: ASSIGN UNIT memory W4 [commit 13-15] (waited 0.000 us in queue, units free now 0)",
+"[ 16.500 us] DecoderCluster: ASSIGN UNIT memory W4 [commit 13-15] (staged, waited 0.000 us in queue, units free now 0)",
+"[ 16.500 us] DecoderCluster: PARK DECODE memory W4 [commit 13-15] (boundary pending)",
 "[ 16.500 us] DecoderCluster: START DECODE memory W4 [commit 13-15]",
 "[ 16.500 us] DecoderCluster: DECODE DONE memory W3 [commit 10-12]",
 "[ 16.500 us] DecoderCluster: DECODE DONE memory W4 [commit 13-15]",
@@ -1671,6 +1672,51 @@
 }
 ],
 "relation": {
+"request_key": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"run_sequence": 5,
+"tier": "weak",
+"window_id": 4
+}
+},
+"round_hi": 18,
+"round_lo": 13,
+"window_id": 4
+},
+"delivery_ticks": 16500000,
+"path": "cwd",
+"payload_bits": null,
+"payload_selection": "unresolved",
+"payload_source": "SyndromeRoundPacket.fragment_size_sum",
+"physical_alias": "channel-1",
+"physical_sequence": 4,
+"propagation_ticks": 0,
+"queue_wait_ticks": 0,
+"send_ticks": 16500000,
+"serialization_ticks": 0,
+"serializer_end_ticks": 16500000,
+"serializer_start_ticks": 16500000,
+"total_delay_ticks": 0
+},
+{
+"attribution": {
+"operation_id": {
+"items": null,
+"kind": "integer",
+"value": "0"
+},
+"patch_ids": [
+{
+"items": null,
+"kind": "integer",
+"value": "0"
+}
+],
+"relation": {
 "delivery_revision": 1,
 "destination_window_key": {
 "items": [
@@ -1772,51 +1818,6 @@
 "payload_source": "Khalid do mapped to weak output",
 "physical_alias": "channel-4",
 "physical_sequence": 2,
-"propagation_ticks": 0,
-"queue_wait_ticks": 0,
-"send_ticks": 16500001,
-"serialization_ticks": 0,
-"serializer_end_ticks": 16500001,
-"serializer_start_ticks": 16500001,
-"total_delay_ticks": 0
-},
-{
-"attribution": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"patch_ids": [
-{
-"items": null,
-"kind": "integer",
-"value": "0"
-}
-],
-"relation": {
-"request_key": {
-"operation_id": {
-"items": null,
-"kind": "integer",
-"value": "0"
-},
-"run_sequence": 5,
-"tier": "weak",
-"window_id": 4
-}
-},
-"round_hi": 18,
-"round_lo": 13,
-"window_id": 4
-},
-"delivery_ticks": 16500001,
-"path": "cwd",
-"payload_bits": null,
-"payload_selection": "unresolved",
-"payload_source": "SyndromeRoundPacket.fragment_size_sum",
-"physical_alias": "channel-1",
-"physical_sequence": 4,
 "propagation_ticks": 0,
 "queue_wait_ticks": 0,
 "send_ticks": 16500001,
@@ -2599,14 +2600,14 @@
 "terminal_processing_outcome": "weak_forwarded_for_delivery"
 },
 {
-"admitted_ticks": 16500001,
-"created_ticks": 16500001,
+"admitted_ticks": 16500000,
+"created_ticks": 16500000,
 "decode_output_ticks": 16500002,
-"dispatch_ticks": 16500001,
+"dispatch_ticks": 16500000,
 "input_round_count": 6,
 "input_round_hi": 18,
 "input_round_lo": 13,
-"ready_ticks": 16500001,
+"ready_ticks": 16500000,
 "request_key": {
 "operation_id": {
 "items": null,
@@ -2949,7 +2950,7 @@
 "window_id": 4
 }
 ],
-"dispatch_ticks": 16500001,
+"dispatch_ticks": 16500000,
 "input_round_count": 6,
 "original_request_keys": [
 {
@@ -2967,7 +2968,7 @@
 "service_key": {
 "run_sequence": 5
 },
-"service_ticks": 1,
+"service_ticks": 2,
 "terminal_ticks": 16500002
 },
 {
@@ -3304,7 +3305,7 @@
 "admissions": 8,
 "capacity_rounds": null,
 "occupied_rounds": 0,
-"peak_occupied_rounds": 6,
+"peak_occupied_rounds": 9,
 "pool": "default",
 "unit": 0
 },
@@ -3518,14 +3519,14 @@
 "terminal_processing_outcome": "WEAK_FORWARDED_FOR_DELIVERY"
 },
 {
-"admitted_ticks": 16500001,
-"created_ticks": 16500001,
+"admitted_ticks": 16500000,
+"created_ticks": 16500000,
 "decode_output_ticks": 16500002,
-"dispatch_ticks": 16500001,
+"dispatch_ticks": 16500000,
 "input_round_count": 6,
 "input_round_hi": 18,
 "input_round_lo": 13,
-"ready_ticks": 16500001,
+"ready_ticks": 16500000,
 "request_key": {
 "operation_id": 0,
 "run_sequence": 5,
@@ -3812,7 +3813,7 @@
 "window_id": 4
 }
 ],
-"dispatch_ticks": 16500001,
+"dispatch_ticks": 16500000,
 "input_round_count": 6,
 "original_request_keys": [
 {
@@ -3826,7 +3827,7 @@
 "service_key": {
 "run_sequence": 5
 },
-"service_ticks": 1,
+"service_ticks": 2,
 "terminal_ticks": 16500002
 },
 {

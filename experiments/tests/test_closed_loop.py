@@ -118,9 +118,13 @@ def test_strong_only_measures_the_strong_wires(strong_config, strong_shot):
         links["csd"].latency_us)
     assert strong_shot.means["output_link_per_window"] == pytest.approx(
         links["do"].latency_us)
-    assert strong_shot.means["service"] == pytest.approx(
-        strong_shot.means["input_link_per_window"] + strong_shot.means["fetch"]
-        + strong_shot.means["algorithm"] + strong_shot.means["release"])
+    # dispatch -> done covers the transfer and the engine stages; with the
+    # per-unit input slots the next window is dispatched under the current
+    # compute, so slot wait can add on top of the components
+    components = (strong_shot.means["input_link_per_window"]
+                  + strong_shot.means["fetch"] + strong_shot.means["algorithm"]
+                  + strong_shot.means["release"])
+    assert strong_shot.means["service"] >= components - 1e-6
     assert strong_shot.means["algorithm"] == pytest.approx(5.0)
     assert not strong_shot.direct_mismatch
 

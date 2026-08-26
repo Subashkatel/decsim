@@ -48,8 +48,6 @@ class ResolvedRunConfiguration:
     capture_switching_windows: bool
     unit_pools: Optional[dict]
     num_units: int
-    input_staging_depth: int
-    boundary_application: Any
     lane_policy: Any
     memory_model: Any
     decoder_memory: Any
@@ -60,30 +58,6 @@ class ResolvedRunConfiguration:
     make_factory: Optional[Callable]
     make_metrics: Optional[Callable]
     make_conditional_release: Optional[Callable]
-
-
-def _resolve_boundary_application(spec, escalation_policy):
-    """Default ASSEMBLY; DECODER is verified for policies without the
-    escalation machinery and for static plans only (the references it
-    mimics have no analog of a strong context re-read or a live-stream
-    rewrite of a window mid-flight)."""
-    from .message import BoundaryApplication
-
-    mode = spec.boundary_application
-    if mode is None:
-        return BoundaryApplication.ASSEMBLY
-    mode = BoundaryApplication(mode)
-    if mode is BoundaryApplication.DECODER:
-        if escalation_policy.requires_strong_context:
-            raise ValueError(
-                "boundary_application=DECODER is not verified with an "
-                "escalating policy: the strong context assembly reads "
-                "boundary-adjusted payloads host-side")
-        if spec.dynamic_streams:
-            raise ValueError(
-                "boundary_application=DECODER is not verified with "
-                "dynamic streams")
-    return mode
 
 
 def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
@@ -192,9 +166,6 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         timing=spec.timing, feedback_boundary_mode=spec.feedback_boundary_mode,
         capture_switching_windows=spec.record_switching_windows,
         unit_pools=spec.unit_pools,
-        input_staging_depth=spec.input_staging_depth,
-        boundary_application=_resolve_boundary_application(
-            spec, escalation_policy),
         num_units=spec.num_units if spec.num_units is not None else 1,
         lane_policy=spec.lane_policy, memory_model=spec.memory_model,
         decoder_memory=spec.decoder_memory, pauli_frame=spec.pauli_frame,

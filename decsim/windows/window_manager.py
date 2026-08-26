@@ -16,7 +16,7 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Callable, Optional
 
-from ..message import (BoundaryApplication, DecodeJob,
+from ..message import (DecodeJob,
                       DecodeResult, DecoderRequestKey, DecoderTier, LogicalContribution,
                       Operation,
                       SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
@@ -46,8 +46,6 @@ class WindowManager:
                  feedback_boundary_mode: str = "trailing_buffer",
                  error_model_provider=None, retain_strong_context: bool,
                  double_window: bool,
-                 boundary_application: BoundaryApplication = (
-                     BoundaryApplication.ASSEMBLY),
                  syndrome_buffer: Optional[SyndromeBuffer] = None,
                  syndrome_buffer_1: Optional[SyndromeBuffer1] = None,
                  pauli_frame=None,
@@ -78,7 +76,6 @@ class WindowManager:
         self.error_model_provider = error_model_provider
         self.retain_strong_context = retain_strong_context
         self.double_window = double_window
-        self.boundary_application = boundary_application
         # jobs whose windows still owe a boundary at the decoder; the
         # boundary receive path releases them (wired by the run)
         self.release_service: Optional[Callable] = None
@@ -88,6 +85,7 @@ class WindowManager:
         self.escalation_policy = escalation_policy
         self.primary_tier = escalation_policy.primary_tier
         self._idle_decode_demand_receiver = None
+        self.withdraw_decode = None      # wired to the decoder manager
         self.submit_fn = submit_fn                   # (job, reserve_transfer) -> None
         self.escalation = (StrongEscalation(self, check_strong_route)
                            if retain_strong_context else NoStrongTier())
@@ -368,26 +366,65 @@ class WindowManager:
                 potential, weak + strong)
         self.syndrome_buffer.replace_hold(key, weak)
 
+    def withdraw_window_decode(self, key: tuple) -> None:
+        """Withdraw one window's early-shipped, unstarted decode and reset
+        its submission bookkeeping so a replay resubmits it fresh."""
+        window = self.windows[key]
+        self.withdraw_decode(key)
+        window.queued = False
+        window.blocked_logged = False
+        window.t_queued = None
+        window.t_dispatch = None
+        window.service_began = False
+
+    def stage_admission(self, job: DecodeJob) -> bool:
+        """May this boundary-blocked job occupy an input slot yet? Only when
+        every unmet dependency is already resolving without needing a slot
+        of its own: decoded, decoding, or itself dispatched with resolving
+        dependencies all the way down. Admitted earlier, a job like the Tan
+        seam (which reads both neighbors) squats a slot against the very
+        decode that must release it."""
+        window = job.window
+        if window is None or window.deps_remaining <= 0:
+            return True
+        visiting = {(window.op_id, window.k)}
+        return all(self._resolving_without_new_slots(dep, visiting)
+                   for dep in window.deps)
+
+    def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
+        if key in visiting:
+            return False
+        if key in self.absorbed_windows:
+            return True
+        window = self.windows.get(key)
+        if window is None:
+            return True
+        if window.t_done is not None or window.service_began:
+            return True
+        if window.t_dispatch is None:
+            return False
+        return all(self._resolving_without_new_slots(dep, visiting | {key})
+                   for dep in window.deps)
+
     def begin_service_gate(self, job: DecodeJob) -> bool:
-        """DECODER boundary application: may this landed job start its
-        decode? True applies the accumulated boundary mask to the landed
-        input (the references' decode-time XOR overlay); False parks the
-        job until its window's last boundary arrives."""
+        """May this landed job start its decode? False parks the job in its
+        slot until its window's last boundary arrives. Pure check: the mask
+        itself is applied by apply_service_boundary at the actual start, so
+        a re-check can never fold the boundary twice."""
         window = job.window
         if window is None:
             return True
-        if window.deps_remaining > 0:
-            return False
-        self._apply_boundary_to_landed_input(job)
-        return True
+        return window.deps_remaining <= 0
 
-    def _apply_boundary_to_landed_input(self, job: DecodeJob) -> None:
+    def apply_service_boundary(self, job: DecodeJob) -> None:
         """XOR the window's boundary mask into the landed decoder input.
 
         The unit's stored copy stays raw (cudaq-x keeps raw rounds and
         applies syndrome_mods at window assembly); the job's input view is
         replaced with the masked rounds the decode will read."""
         window = job.window
+        if window is None:
+            return
         state = window.boundary_in
         if not state or job.decoder_input is None:
             return
@@ -624,14 +661,11 @@ class WindowManager:
         if window.t_data_complete is None:
             window.t_data_complete = self.engine.now
         op = self._ops[window.op_id]
-        if window.deps_remaining > 0:
-            if not window.blocked_logged:
-                window.blocked_logged = True
-            # DECODER boundary application: raw rounds ship now; the
-            # boundary is XORed into the landed input when it arrives
-            # (qLDPC net_error / cudaq-x syndrome_mods / LILLIPUT)
-            if self.boundary_application is not BoundaryApplication.DECODER:
-                return
+        if window.deps_remaining > 0 and not window.blocked_logged:
+            # raw rounds ship now; the boundary is XORed into the landed
+            # input at the decoder when it arrives (qLDPC net_error /
+            # cudaq-x syndrome_mods / LILLIPUT's state register)
+            window.blocked_logged = True
         self._submit_window_decode(key, window, op)
 
     def _window_data_complete(self, w: Window) -> bool:
@@ -799,15 +833,11 @@ class WindowManager:
                 self.escalation.submit_strong(submission.job)
 
     def _assemble_payloads(self, w: Window, store=None) -> list:
-        """Collect this window's payloads, including successor overflow rounds.
-
-        ASSEMBLY mode folds the boundary in here, host-side; DECODER mode
-        ships the raw rounds and the mask is applied at the decoder."""
+        """Collect this window's raw payloads, including successor overflow
+        rounds. The boundary is never folded here: the mask is XORed into
+        the landed input at the decoder when the decode starts."""
         store = self.syndrome_buffer if store is None else store
-        boundary_state = (
-            None
-            if self.boundary_application is BoundaryApplication.DECODER
-            else w.boundary_in)
+        boundary_state = None
         operation_rounds = self._effective_round_count_for_window(w.op_id, w)
         end_round = min(w.buffer_hi, operation_rounds)
         payloads = []

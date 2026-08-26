@@ -56,8 +56,6 @@ decoder:
     release_cycles_per_job: 1
 decoder_memory_rounds: null
 
-input_staging_depth: 0                       # 1 overlaps the next window's transfer under the current decode
-boundary_application: assembly               # decoder ships raw and XORs the seam at the unit (sliding chain shrinks)
 
 pauli_frame:
   commit_us: 0.004

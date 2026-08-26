@@ -673,7 +673,6 @@ def input_staging_ping_pong():
                    rounds_policy=FixedRounds(27), round_us=1.0,
                    decoder=PresetLatencyDecoder(5.0), num_units=1,
                    scheme=TanSandwichScheme(), escalation_policy=StrongOnly(),
-                   input_staging_depth=1,
                    links=logical_reference_profile(), seed=3)
 
 
@@ -684,7 +683,7 @@ def sliding_boundary_at_decoder():
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.decoders.weak_strong_switching import StrongOnly
     from decsim.links.link_profiles import logical_reference_profile
-    from decsim.message import BoundaryApplication, Operation
+    from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
     from decsim.run_spec import RunSpec
     from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
@@ -695,8 +694,6 @@ def sliding_boundary_at_decoder():
                    scheme=SlidingWindowScheme(
                        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
                    escalation_policy=StrongOnly(),
-                   input_staging_depth=1,
-                   boundary_application=BoundaryApplication.DECODER,
                    links=logical_reference_profile(), seed=3)
 
 
@@ -720,7 +717,6 @@ def dma_setup_overhead():
                    rounds_policy=FixedRounds(27), round_us=1.0,
                    decoder=PresetLatencyDecoder(1.0), num_units=1,
                    scheme=TanSandwichScheme(), escalation_policy=StrongOnly(),
-                   input_staging_depth=1,
                    links=links, seed=3)
 
 

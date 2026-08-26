@@ -17,11 +17,11 @@ from decsim.decoders.window_decode_results import (
     BackendFailureReason,
 )
 from decsim.decoders.bposd import bposd_window_decoder
-from decsim.detector_error_model import (
+from decsim.detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     PHYSICAL_FAULT_MODEL_REQUIRED,
-    decode_windowed,
 )
+from experiments.offline.decoding import decode_windowed
 from experiments.offline.decoding import (
     OfflineBackendBatchDecoder, OfflineBatchDecoder, _chunk_row,
 )
@@ -148,7 +148,7 @@ def test_backend_batch_maps_each_terminal_status_exactly(
     )
     calls = 0
 
-    def failed_walk(models, detectors, decode_window):
+    def failed_walk(models, detectors, decode_window, **kwargs):
         nonlocal calls
         calls += 1
         return type("Walk", (), {
@@ -491,6 +491,7 @@ def test_bb_matched_windows_agree_with_quits_on_the_same_400_shots():
             row,
             decoder.decode_window,
             selected_fault_representation=FaultRepresentation.PHYSICAL,
+            forward_handoffs=decoder.forward_handoffs,
         )
         for row in detectors
     ])

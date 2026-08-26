@@ -10,7 +10,8 @@ import sys
 
 import pytest
 
-from decsim.detector_error_model import FaultRepresentation, decode_windowed
+from decsim.detector_error_model.fault_model_contracts import FaultRepresentation
+from experiments.offline.decoding import decode_windowed
 import experiments.offline.run_surface as surface_runner
 
 from experiments.offline.results import (
@@ -387,11 +388,11 @@ def test_experiment_bytes_and_hash_are_canonical_and_seed_sensitive():
 def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
     stim = pytest.importorskip("stim")
     pytest.importorskip("pymatching")
-    from decsim.detector_error_model import (
+    from decsim.detector_error_model.fault_model_contracts import (
         FaultRepresentation,
         GRAPHLIKE_FAULT_MODEL_REQUIRED,
-        decode_windowed,
     )
+    from experiments.offline.decoding import decode_windowed
     from decsim.decoders.mwpm import matching_window_decoder
     from decsim.windows.windowing_schemes import SlidingWindowScheme
 
@@ -452,6 +453,7 @@ def test_offline_decoder_reuses_models_and_compiles_one_sampler_per_batch():
             detectors[index],
             reference_decode,
             selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+            forward_handoffs=decoder.forward_handoffs,
         ))
         != tuple(int(bit) for bit in truth[index])
         for index in range(first.shots)
@@ -1017,6 +1019,7 @@ def test_detector_records_match_full_and_short_stored_batches_after_resume(tmp_p
             detectors[local_index],
             decoder.decode_window,
             selected_fault_representation=FaultRepresentation.GRAPHLIKE,
+            forward_handoffs=decoder.forward_handoffs,
         )
         assert record["sample_batch_sha256"] == sample_batch_sha256(detectors, truth)
         assert record["fired_detector_indices"] == [

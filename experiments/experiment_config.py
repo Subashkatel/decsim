@@ -22,7 +22,7 @@ AlgorithmCard = Union[float, str]
 MODES = ("weak_baseline", "strong_only")
 TRACE_MODES = ("off", "print", "file", "both")
 SCHEMES = ("sliding", "parallel", "sandwich", "naive_online")
-LINK_PATHS = ("qc", "cwb", "csb", "cwd", "wsd", "csd",
+LINK_PATHS = ("qc", "cwb", "csb", "wbd", "wsd", "csd",
               "dd", "wdo", "do", "oc", "cq")
 
 

@@ -36,7 +36,7 @@ _PATCH_IDS = (1, 2)
 _ENDPOINTS = {
     "qc": ("qpu", "controller"),
     "cwb": ("controller", "syndrome buffer 0"),
-    "cwd": ("controller", "weak decoder"),
+    "wbd": ("weak buffer", "weak decoder"),
     "wsd": ("weak decoder", "strong decoder"),
     "csd": ("controller", "strong decoder"),
     "wdo": ("weak decoder", "pauli frame"),
@@ -61,7 +61,7 @@ def _request_relation(tier, *, operation_id=_OPERATION_ID, window_id=3, sequence
 def _valid_attribution(path):
     if path in (LinkPath.QC, LinkPath.CSB):
         return TrafficAttribution(_OPERATION_ID, _PATCH_IDS, None, 1, 2)
-    if path is LinkPath.CWD:
+    if path is LinkPath.WBD:
         return TrafficAttribution(
             _OPERATION_ID,
             _PATCH_IDS,
@@ -276,7 +276,7 @@ def test_round_only_controller_to_weak_transfer_rejects_a_relation():
     )
     with pytest.raises(ValueError, match="does not accept a relation"):
         logical_reference_profile().resolve().reserve(
-            LinkPath.CWD,
+            LinkPath.WBD,
             payload_bits=8,
             now_ticks=0,
             attribution=attribution,
@@ -299,7 +299,7 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
     bandwidth = _topology(bandwidth_limited_profile())
     expected_latency = {
         "qc": us(0.15),
-        "cwd": us(2.0),
+        "wbd": us(2.0),
         "wsd": us(0.5),
         "csd": us(2.0),
         "wdo": us(1.0),
@@ -328,7 +328,7 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
     }
     assert capacities == {
         "qc": 24.0,
-        "cwd": 48.0,
+        "wbd": 48.0,
         "wsd": 24.0,
         "csd": 72.0,
         "wdo": 1_000_000.0,

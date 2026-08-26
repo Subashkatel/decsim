@@ -41,7 +41,7 @@ Status vocabulary:
   reproduces PyMatching v2's published microseconds per shot on this host and
   checks the windowed loop's logical error rate against whole-circuit PyMatching
   (`anchor.md`). The controller-to-Buffer-0 hop is a priced optional link (CWB).
-  Finding: with the reference link cards the serial sliding-window chain (CWD
+  Finding: with the reference link cards the serial sliding-window chain (WBD
   2 us + decode + DD 0.5 us per window), not the ASIC decoder, bounds throughput:
   1.16 rounds/us sustained at d=3, knee near a 0.86 us round period (after Q-063).
 - Decoder-side shape after the owner rulings of 2026-08-18 (commits `cd43fdb`,
@@ -74,7 +74,7 @@ Status vocabulary:
   (`validate_timing_swiper.py`, commit `adfb522`); Gate 3 Fusion Blossom exact
   MWPM vs decsim's PyMatching on the same window graphs, 2700/2700 same weight
   and logical class (`validate_mwpm_fusion_blossom.py`). Gate 2 also restored
-  the reference links one at a time: CWD and DD accumulate on the serial window
+  the reference links one at a time: WBD and DD accumulate on the serial window
   chain, nothing else does.
 - Q-063 (owner GO 2026-08-18, commits `2e4f068`, `b0d4ff2`): the boundary a
   window hands to its successor (residual defects at the commit edge, decoder
@@ -114,7 +114,7 @@ Status vocabulary:
   three parts against outside models fed the same inputs a decsim run saw,
   read from outside the core (the seams wrapped, no core change). Syndrome
   ingress: reassembly completes on the last fragment (RFC 815 hole list),
-  packing is a fixed SimPy service, CWB and CWD are ns-3 FIFO channels;
+  packing is a fixed SimPy service, CWB and WBD are ns-3 FIFO channels;
   every round's packing and Buffer 0 publication tick and every
   feedback-memory delivery agree on the QLX program, a two-fragment stream
   with t_pack, Stim memory with a priced CWB hop, and feedback chains that
@@ -156,7 +156,7 @@ Status vocabulary:
   shots. The no-window loop (naive_online) predicts exactly what PyMatching
   predicts on every shot (0 disagreements, identical LER 0.26); the sliding
   loop differs only on equal-weight tie-breaks. The no-window decode obeys
-  its timing rule (dispatch at the last round, done after CWD + fetch +
+  its timing rule (dispatch at the last round, done after WBD + fetch +
   algorithm + release, commit after WDO + frame) on 200/200 shots. PASS.
 - Gate 10 (2026-08-19, `experiments/validation/validate_timing_invariance.py`,
   `experiments/results/validation/timing_invariance.md`): timing knobs must

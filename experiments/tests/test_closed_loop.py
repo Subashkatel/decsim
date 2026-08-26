@@ -84,7 +84,7 @@ def test_configured_costs_appear_at_the_right_points(weak_config, weak_shot):
     links = weak_config.links
     assert weak_shot.means["cwb_per_round"] >= links["cwb"].latency_us
     assert weak_shot.means["input_link_per_window"] == pytest.approx(
-        links["cwd"].latency_us)
+        links["wbd"].latency_us)
     assert weak_shot.means["output_link_per_window"] == pytest.approx(
         links["wdo"].latency_us)
 

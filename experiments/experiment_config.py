@@ -33,10 +33,19 @@ LINK_PATHS = ("qc", "cwb", "csb", "wbd", "wsd", "sbd",
 
 @dataclass(frozen=True)
 class LinkCard:
-    """One path's numbers: propagation latency, capacity (None = unbounded),
-    and an optional fixed per-transfer DMA setup cost."""
-    latency_us: float
-    bits_per_us: Optional[float]
+    """One path's numbers, in cycles of a named clock domain: propagation
+    latency, per-channel capacity (None = unbounded) times a channel count,
+    and an optional fixed per-transfer DMA setup cost. The loader resolves
+    the microsecond fields from the clocks card once, so everything
+    downstream keeps reading microseconds while the yaml speaks cycles
+    (XQsim's shape: domain labels with frequencies over one tick core)."""
+    latency_cycles: float
+    clock: str
+    bits_per_cycle: Optional[float]
+    channels: int
+    transfer_overhead_cycles: Optional[float]
+    latency_us: float                     # latency_cycles / clock MHz
+    bits_per_us: Optional[float]          # aggregate: bits_per_cycle x channels x MHz
     transfer_overhead_us: Optional[float]
 
 
@@ -106,6 +115,8 @@ class ExperimentConfig:
     windowing: WindowingCard
     sweep: tuple                    # of SweepBlock
     controller: ControllerCard
+    clocks: dict                    # clock domain name -> MHz; links price
+                                    # their cycles on the domain they name
     links: dict                     # path -> LinkCard | None (None = reference card)
     buffers: BuffersCard
     decoder: DecoderCard
@@ -128,12 +139,46 @@ class ExperimentConfig:
         return Path("experiments/results") / self.name
 
 
-def _link_card(card: Optional[dict]) -> Optional[LinkCard]:
+def _link_card(card: Optional[dict], clocks: dict, path: str) -> Optional[LinkCard]:
     if card is None:
         return None
-    return LinkCard(latency_us=card["latency_us"],
-                    bits_per_us=card["bits_per_us"],
-                    transfer_overhead_us=card.get("transfer_overhead_us"))
+    clock = card["clock"]
+    if clock not in clocks:
+        raise ValueError(f"links.{path} names clock {clock!r}; "
+                         f"clocks defines {sorted(clocks)}")
+    megahertz = clocks[clock]
+    latency_cycles = card["latency_cycles"]
+    if not isinstance(latency_cycles, (int, float)) or latency_cycles < 0:
+        raise ValueError(f"links.{path}.latency_cycles must be >= 0")
+    bits_per_cycle = card["bits_per_cycle"]
+    if bits_per_cycle is not None and bits_per_cycle <= 0:
+        raise ValueError(f"links.{path}.bits_per_cycle must be positive or null")
+    channels = card.get("channels", 1)
+    if isinstance(channels, bool) or not isinstance(channels, int) or channels < 1:
+        raise ValueError(f"links.{path}.channels must be a positive count")
+    overhead_cycles = card.get("transfer_overhead_cycles")
+    if overhead_cycles is not None and overhead_cycles < 0:
+        raise ValueError(f"links.{path}.transfer_overhead_cycles must be >= 0")
+    return LinkCard(
+        latency_cycles=latency_cycles, clock=clock,
+        bits_per_cycle=bits_per_cycle, channels=channels,
+        transfer_overhead_cycles=overhead_cycles,
+        latency_us=latency_cycles / megahertz,
+        bits_per_us=(None if bits_per_cycle is None
+                     else bits_per_cycle * channels * megahertz),
+        transfer_overhead_us=(None if overhead_cycles is None
+                              else overhead_cycles / megahertz))
+
+
+def _clocks(raw_clocks) -> dict:
+    """The clock domains: name -> MHz. More domains are one more entry."""
+    if not isinstance(raw_clocks, dict) or not raw_clocks:
+        raise ValueError("clocks must map at least one domain name to MHz")
+    for name, megahertz in raw_clocks.items():
+        if isinstance(megahertz, bool) or not isinstance(megahertz, (int, float)) \
+                or megahertz <= 0:
+            raise ValueError(f"clocks.{name} must be a positive MHz value")
+    return dict(raw_clocks)
 
 
 def _buffer_size(value, key: str) -> Optional[int]:
@@ -176,7 +221,8 @@ def load_experiment(path) -> ExperimentConfig:
     buffers = raw["buffers"]
     decoder = raw["decoder"]
     engine = decoder["engine"]
-    links = {link_path: _link_card(raw["links"].get(link_path))
+    clocks = _clocks(raw["clocks"])
+    links = {link_path: _link_card(raw["links"].get(link_path), clocks, link_path)
              for link_path in LINK_PATHS}
     raw_trace = raw.get("trace", "off")
     if raw_trace is False:
@@ -201,6 +247,7 @@ def load_experiment(path) -> ExperimentConfig:
         controller=ControllerCard(
             t_binary_availability_us=controller["t_binary_availability_us"],
             t_pack_us=controller["t_pack_us"]),
+        clocks=clocks,
         links=links,
         buffers=BuffersCard(
             buffer_0_size=_buffer_size(

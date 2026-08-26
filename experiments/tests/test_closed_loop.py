@@ -92,9 +92,11 @@ def test_configured_costs_appear_at_the_right_points(weak_config, weak_shot):
 def test_reaction_time_orders_the_points(weak_shot):
     assert (weak_shot.means["buffer0_ready_to_frame"]
             <= weak_shot.means["buffer0_first_round_to_frame"])
+    # the sum accumulates float error at cycle-scale link values; the law
+    # holds in exact ticks, so compare with a sub-tick epsilon
     assert weak_shot.means["buffer0_ready_to_frame"] >= (
         weak_shot.means["service"] + weak_shot.means["output_link_per_window"]
-        + weak_shot.means["frame_commit"])
+        + weak_shot.means["frame_commit"]) - 1e-9
 
 
 def test_sweep_summary_and_report(weak_config, tmp_path):

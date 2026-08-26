@@ -35,20 +35,34 @@ controller:
   t_binary_availability_us: 0.0    # pulses -> binary classification cost
   t_pack_us: 0.0                   # packet assembly cost per round
 
+clocks:                            # clock domain name -> MHz; a link prices its
+                                   # cycles on the domain it names. More domains
+                                   # (an mK stage, a 4K SFQ decoder) are one more
+                                   # entry here. Both start at LILLIPUT's 250 MHz
+                                   # ([d=3,m=2] FPGA clock, 2108.06569 Table 4).
+  fridge: 250.0
+  room: 250.0
+
 links:                             # one card per path; null = the logical_reference
-                                   # card's numbers for that path. Each card:
-                                   #   latency_us: propagation latency
-                                   #   bits_per_us: capacity (null = unbounded)
-                                   #   transfer_overhead_us: optional fixed per-transfer
-                                   #     DMA setup (engine-side, setups serialize)
-  qc:  {latency_us: 1.0, bits_per_us: null}      # QPU -> controller, one readout
-  cwb: {latency_us: 0.5, bits_per_us: 100000.0}  # controller -> Buffer 0 (the weak buffer), one round
+                                   # card's numbers for that path. Each card, in
+                                   # cycles of its named clock domain:
+                                   #   latency_cycles: propagation latency
+                                   #   clock: the domain (a clocks: key)
+                                   #   bits_per_cycle: per-channel capacity
+                                   #     (null = unbounded)
+                                   #   channels: parallel one-bit lanes (default 1);
+                                   #     aggregate bandwidth = bits_per_cycle x
+                                   #     channels x clock MHz
+                                   #   transfer_overhead_cycles: optional fixed
+                                   #     per-transfer DMA setup (setups serialize)
+  qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # QPU -> controller, one readout
+  cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}  # controller -> Buffer 0 (the weak buffer), one round
   csb: null                   # controller -> syndrome buffer 1 (the strong buffer), one round
-  wbd: {latency_us: 1.0, bits_per_us: null}      # Buffer 0 -> weak decoder, one window
+  wbd: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # Buffer 0 -> weak decoder, one window
   wsd: null                        # weak -> strong escalation decision
   sbd: null                        # syndrome buffer 1 -> strong decoder, one window
-  dd:  {latency_us: 0.5, bits_per_us: null}      # decoder -> decoder boundary handoff
-  wdo: {latency_us: 1.0, bits_per_us: null}      # weak decoder -> Pauli frame
+  dd:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # decoder -> decoder boundary handoff
+  wdo: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # weak decoder -> Pauli frame
   do:  null                        # strong decoder -> Pauli frame
   oc:  null                        # Pauli frame -> controller, a release
   cq:  null                        # controller -> QPU, an instruction

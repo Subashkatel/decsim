@@ -141,3 +141,46 @@ def test_reference_doc_names_every_yaml_key():
     assert not unmentioned, (
         f"guide/parameter-reference.md never mentions yaml keys: "
         f"{unmentioned}")
+
+
+def test_cycles_and_clock_express_the_same_delay_identically(tmp_path):
+    """The clocks card is unit conversion, nothing else: one physical delay
+    written as 1 cycle at 250 MHz or 2 cycles at 500 MHz produces the same
+    measured run, field for field (XQsim's shape: domain labels with
+    frequencies over one tick core)."""
+    import dataclasses
+
+    measurements = {}
+    for label, megahertz, cycles in (("slow", 250.0, 1), ("fast", 500.0, 2)):
+        raw = yaml.safe_load(REFERENCE_YAML.read_text())
+        raw["clocks"] = {"fridge": megahertz, "room": megahertz}
+        for path, card in raw["links"].items():
+            if card is not None:
+                # the same physical wire at a faster clock: more cycles of
+                # latency, fewer bits per cycle, identical us and bits/us
+                card["latency_cycles"] = card["latency_cycles"] * cycles
+                if card.get("bits_per_cycle") is not None:
+                    card["bits_per_cycle"] = card["bits_per_cycle"] / cycles
+        config_path = tmp_path / f"{label}.yaml"
+        config_path.write_text(yaml.safe_dump(raw))
+        measurements[label] = measure_shot(
+            load_experiment(config_path), physical_error_probability=0.001,
+            round_period_us=1.0, algorithm_latency_us=0.028, seed=0)
+    for field in dataclasses.fields(measurements["slow"]):
+        if field.name == "sim_wall_seconds":
+            continue
+        assert (getattr(measurements["slow"], field.name)
+                == getattr(measurements["fast"], field.name)), field.name
+
+
+def test_channels_multiply_into_aggregate_bandwidth(tmp_path):
+    """8 one-bit lanes at 250 MHz resolve to 2000 aggregate bits per us on
+    the loaded card, and the resolved latency is cycles over MHz."""
+    raw = yaml.safe_load(REFERENCE_YAML.read_text())
+    raw["links"]["cwb"] = {"latency_cycles": 1, "clock": "fridge",
+                           "bits_per_cycle": 1.0, "channels": 8}
+    config_path = tmp_path / "channels.yaml"
+    config_path.write_text(yaml.safe_dump(raw))
+    card = load_experiment(config_path).links["cwb"]
+    assert card.bits_per_us == 1.0 * 8 * 250.0
+    assert card.latency_us == 1 / 250.0

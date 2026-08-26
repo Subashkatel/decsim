@@ -168,6 +168,42 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
     )
 
 
+def with_copy_out_edge(
+    profile: LinkModelConfig,
+    *,
+    latency_us: float,
+    aggregate_bits_per_us: Optional[float],
+    source: str,
+) -> LinkModelConfig:
+    """Return ``profile`` with the optional priced copy-out edge to syndrome
+    buffer 1.
+
+    The caller supplies both experiment-card numbers and their provenance;
+    ``aggregate_bits_per_us`` of ``None`` means unbounded bandwidth (the edge
+    charges propagation latency only); a profile without this edge stores
+    rounds in syndrome buffer 1 for free.
+    """
+    capacity = None
+    if aggregate_bits_per_us is not None:
+        capacity = LinkCapacityConfig(
+            aggregate_bits_per_us,
+            LinkQuantityBasis.DIRECT_AGGREGATE,
+            None,
+            source,
+        )
+    channel = LinkConfig(us(latency_us), capacity, source)
+    edge = LinkEdgeConfig(
+        channel,
+        None,
+        "SyndromeRoundPacket.fragment_size_sum",
+    )
+    return replace(
+        profile,
+        copy_out=edge,
+        profile_name=f"{profile.profile_name}+priced_copy_out",
+    )
+
+
 def with_controller_to_buffer_edge(
     profile: LinkModelConfig,
     *,

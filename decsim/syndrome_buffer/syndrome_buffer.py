@@ -371,6 +371,57 @@ class SyndromeBuffer:
             self._free_round(slot)
         return packet
 
+    def accept_packed_round(
+        self, packet: SyndromeRoundPacket, *,
+        publication_tick: Optional[int],
+    ) -> FragmentAdmission:
+        """Admit one already-packed round directly into retention.
+
+        This is syndrome buffer 1's dual-write landing: the round arrives
+        complete, so it allocates its slot in PACKED_RETAINED state with no
+        reassembly phase. A round nobody holds is dropped on arrival (its
+        readers resolved while it was in flight); a full buffer refuses
+        before touching any state."""
+        identity = (packet.operation_id, packet.round_index)
+        if packet.operation_id not in self._open_operations:
+            raise RuntimeError(
+                f"operation {packet.operation_id!r} is not open"
+            )
+        if identity in self._tombstones:
+            raise ValueError(
+                f"late write: round {identity!r} was already released"
+            )
+        if identity in self._rounds:
+            raise ValueError(f"round {identity!r} was already written")
+        if identity not in self._holders_by_round:
+            self._tombstones.add(identity)
+            self._released_rounds += 1
+            return FragmentAdmission(identity, 1, 1, True)
+        if self.capacity is not None and not self._free_slot_indices:
+            return FragmentAdmission(identity, 0, 1, False, refused=True)
+        slot = self._allocate(identity, 1)
+        stored_keys = []
+        try:
+            if self.memory_model is not None:
+                for fragment in packet.fragments:
+                    key = (
+                        packet.operation_id, packet.round_index,
+                        fragment.patch_id,
+                    )
+                    self.memory_model.store(key, fragment)
+                    stored_keys.append(key)
+        except BaseException:
+            for key in reversed(stored_keys):
+                self.memory_model.evict(key)
+            raise
+        slot.packet = packet
+        slot.fragments = []
+        slot.state = SyndromeBufferRoundState.PACKED_RETAINED
+        self._publication_ticks[identity] = publication_tick
+        self.payloads_held += len(packet.fragments)
+        self.peak_payloads = max(self.peak_payloads, self.payloads_held)
+        return FragmentAdmission(identity, 1, 1, True)
+
     def read_retained_round(self, round_identity) -> SyndromeRoundPacket:
         """The packed packet of a retained round."""
         slot = self._rounds.get(round_identity)

@@ -66,7 +66,7 @@ class SpeculativeRecovery:
         generation = self._next_generation.get(key, 0)
         replay_owner = Replay(key, generation)
         self.runtime.syndrome_buffer.register_hold(replay_owner, weak_rounds)
-        if strong_rounds:
+        if strong_rounds and self.runtime.syndrome_buffer_1 is not None:
             self.runtime.syndrome_buffer_1.register_hold(
                 replay_owner, strong_rounds)
         blocked_ops = frozenset(item[0] for item in descendants)
@@ -187,7 +187,7 @@ class SpeculativeRecovery:
         generation = self._next_generation[key]
         replacement_owner = Replay(key, generation)
         runtime.syndrome_buffer.register_hold(replacement_owner, weak_ids)
-        if strong_ids:
+        if strong_ids and runtime.syndrome_buffer_1 is not None:
             runtime.syndrome_buffer_1.register_hold(
                 replacement_owner, strong_ids)
         self._next_generation[key] = generation + 1
@@ -389,9 +389,10 @@ class SpeculativeRecovery:
             purpose = (
                 f"window interaction invalidation for {root}, window {key}")
             self.runtime._require_retained_payloads(reads, purpose)
-            if strong_reads:
+            if self.runtime.syndrome_buffer_1 is not None:
                 self.runtime._require_retained_payloads(
-                    strong_reads, purpose, self.runtime.syndrome_buffer_1)
+                    reads + strong_reads, purpose,
+                    self.runtime.syndrome_buffer_1)
 
     def _blocked_stream_starts(self, descendants: list[tuple]) -> dict:
         """Earliest invalidated commit round for each descendant decode stream."""
@@ -403,8 +404,10 @@ class SpeculativeRecovery:
         return starts
 
     def _replay_packet_identities(self, descendants) -> tuple:
-        """Rounds the replay cone must keep: weak reads live in Buffer 0,
-        strong-context extras live in syndrome buffer 1."""
+        """Rounds the replay cone must keep: weak reads live in Buffer 0;
+        syndrome buffer 1 keeps each descendant's FULL strong context (weak
+        range included), because a replayed parallel strong sibling
+        assembles its input from there."""
         weak_retained = set()
         strong_retained = set()
         for key in descendants:
@@ -412,6 +415,7 @@ class SpeculativeRecovery:
             weak = self.runtime._read_keys_for_bounds(
                 window.op_id, window.start_round, window.buffer_hi, window)
             weak_retained.update(weak)
+            strong_retained.update(weak)
             strong_retained.update(
                 self.runtime._strong_context_read_keys(window, weak))
         return tuple(sorted(weak_retained)), tuple(sorted(strong_retained))

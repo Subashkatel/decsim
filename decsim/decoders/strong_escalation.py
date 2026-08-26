@@ -463,7 +463,7 @@ class StrongEscalation:
 
     def submit_strong(self, strong_job) -> None:
         """An escalation policy submitted a strong job alongside the weak one (run both at once)."""
-        self._submit_strong_with_csd(strong_job)
+        self._submit_strong_with_sbd(strong_job)
 
     def after_weak_commit(self, key) -> None:
         """A weak commit at a slab's far boundary releases the deferred strong job."""
@@ -471,16 +471,16 @@ class StrongEscalation:
         if pending is not None:
             self._submit_far_strong(key, pending)
 
-    def _submit_strong_with_csd(
+    def _submit_strong_with_sbd(
         self,
         strong_job: DecodeJob,
         *,
         wsd_arrival_ticks: Optional[int] = None,
     ) -> None:
-        """Queue a strong job now; its CSD input transfer is reserved at dispatch.
+        """Queue a strong job now; its SBD input transfer is reserved at dispatch.
 
         The unit is assigned first, then the input moves into that unit's memory
-        (CSD link); a serial job also waits for its WSD selection to arrive.
+        (SBD link); a serial job also waits for its WSD selection to arrive.
         """
         request_key = strong_job.request_key
         window_key = strong_job.strong_decode_for
@@ -503,7 +503,7 @@ class StrongEscalation:
             for fragment in strong_job.payloads))
 
         def reserve_transfer() -> int:
-            arrival = self.wm._link_arrival(LinkPath.CSD, strong_job, payload_bits=payload_bits)
+            arrival = self.wm._link_arrival(LinkPath.SBD, strong_job, payload_bits=payload_bits)
             if wsd_arrival_ticks is not None:
                 arrival = max(arrival, wsd_arrival_ticks)
             # the DMA cannot start before its last context round landed in
@@ -547,7 +547,7 @@ class StrongEscalation:
                 payload_bits=None,
                 request_key=strong_request_key,
             )
-            self._submit_strong_with_csd(
+            self._submit_strong_with_sbd(
                 serial_strong_job,
                 wsd_arrival_ticks=wsd_arrival_ticks,
             )
@@ -1398,7 +1398,7 @@ class StrongEscalation:
         strong_job = self._build_pending_strong_job(pending)
         self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_far(far_boundary_key, pending)
-        self._submit_strong_with_csd(
+        self._submit_strong_with_sbd(
             strong_job,
             wsd_arrival_ticks=pending.wsd_arrival_ticks,
         )
@@ -1417,7 +1417,7 @@ class StrongEscalation:
         strong_job = self._build_pending_strong_job(pending)
         self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_terminal(operation_id, pending)
-        self._submit_strong_with_csd(
+        self._submit_strong_with_sbd(
             strong_job,
             wsd_arrival_ticks=pending.wsd_arrival_ticks,
         )

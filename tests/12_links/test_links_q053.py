@@ -38,7 +38,7 @@ _ENDPOINTS = {
     "cwb": ("controller", "syndrome buffer 0"),
     "wbd": ("weak buffer", "weak decoder"),
     "wsd": ("weak decoder", "strong decoder"),
-    "csd": ("controller", "strong decoder"),
+    "sbd": ("strong buffer", "strong decoder"),
     "wdo": ("weak decoder", "pauli frame"),
     "dd": ("decoder", "decoder"),
     "do": ("strong decoder", "pauli frame"),
@@ -70,7 +70,7 @@ def _valid_attribution(path):
             2,
             _request_relation(DecoderTier.WEAK),
         )
-    if path in (LinkPath.WSD, LinkPath.CSD, LinkPath.DO):
+    if path in (LinkPath.WSD, LinkPath.SBD, LinkPath.DO):
         relation = _request_relation(DecoderTier.STRONG)
         return TrafficAttribution(_OPERATION_ID, _PATCH_IDS, 3, 1, 2, relation)
     if path is LinkPath.WDO:
@@ -301,7 +301,7 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
         "qc": us(0.15),
         "wbd": us(2.0),
         "wsd": us(0.5),
-        "csd": us(2.0),
+        "sbd": us(2.0),
         "wdo": us(1.0),
         "dd": us(0.5),
         "do": us(1.0),
@@ -330,7 +330,7 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
         "qc": 24.0,
         "wbd": 48.0,
         "wsd": 24.0,
-        "csd": 72.0,
+        "sbd": 72.0,
         "wdo": 1_000_000.0,
         "dd": 24.0,
         "do": 1_000_000.0,

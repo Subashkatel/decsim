@@ -5,7 +5,7 @@ it and reads every latency point in POINTS off the run's own records: the
 link ledger, the window stamps, the engine's stage records and the Pauli
 frame. The input and output transfers are named by role, not by wire,
 because the mode picks the wire: weak_baseline moves windows on wbd and
-results on wdo, strong_only on csd and do.
+results on wdo, strong_only on sbd and do.
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ POINTS = (
     "buffer_fill",          # first round in window arrives -> last round arrives (waiting on the QPU)
     "dep_block",            # window complete -> job queued (window dependencies)
     "queue_wait",           # queued -> unit assigned (ready-queue wait only)
-    "input_link_per_window",   # unit assigned -> input in its decoder memory (wbd weak, csd strong)
+    "input_link_per_window",   # unit assigned -> input in its decoder memory (wbd weak, sbd strong)
     "fetch",                # decoder engine: read the window out of decoder memory
     "algorithm",            # decoder engine: the decoding algorithm
     "release",              # decoder engine: correction write-out
@@ -46,7 +46,7 @@ POINTS = (
     "qpu_first_round_to_frame",      # window's first required round leaves the QPU -> correction in the frame
 )
 
-INPUT_LINK = {"weak_baseline": "wbd", "strong_only": "csd"}
+INPUT_LINK = {"weak_baseline": "wbd", "strong_only": "sbd"}
 OUTPUT_LINK = {"weak_baseline": "wdo", "strong_only": "do"}
 
 

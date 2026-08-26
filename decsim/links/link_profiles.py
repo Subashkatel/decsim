@@ -56,7 +56,7 @@ def logical_reference_profile() -> LinkModelConfig:
         wbd=actual_edge(2.0, "Khalid cd latency; logical_reference integrated weak-input transfer",
                         "SyndromeRoundPacket.fragment_size_sum"),
         wsd=actual_edge(0.5, "repository weak-to-strong model choice", "switching decision payload_bits"),
-        csd=actual_edge(2.0, "Khalid cd mapped to controller-to-strong", "DecodeJob.retained_payload_size_bits"),
+        sbd=actual_edge(2.0, "Khalid cd mapped to the strong input", "DecodeJob.retained_payload_size_bits"),
         wdo=default_edge(1.0, _per_channel_payload(50_000, 100, "Khalid do mapped to weak output")),
         dd=default_edge(0.5, _aggregate_payload(100, "Khalid dd representative aggregate transaction")),
         do=default_edge(1.0, _per_channel_payload(50_000, 100, "Khalid do")),
@@ -132,7 +132,7 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             "24 Mbps syndrome anchor",
             "switching decision payload_bits",
         ),
-        csd=aggregate_edge(
+        sbd=aggregate_edge(
             2.0,
             strong_window_bits,
             strong_window_bits / commit_region_us,
@@ -174,7 +174,7 @@ def with_transfer_overhead(
     *,
     overhead_us: float,
     source: str,
-    paths: tuple = ("wbd", "csd"),
+    paths: tuple = ("wbd", "sbd"),
 ) -> LinkModelConfig:
     """Return ``profile`` with a fixed per-transfer setup cost on the listed
     paths (default: the two decoder-input DMA paths).

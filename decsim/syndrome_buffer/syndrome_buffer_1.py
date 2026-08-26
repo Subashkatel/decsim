@@ -3,7 +3,7 @@
 Every packed round is written out of the fridge exactly once over the
 csb hop (priced when the card wires ``LinkPath.CSB``, free
 otherwise) and stored here in parallel with its Buffer 0 publication.
-Strong jobs point into this store and their CSD input is assembled from it,
+Strong jobs point into this store and their SBD input is assembled from it,
 so the two-sided strong context lives at room temperature and Buffer 0
 keeps only what the weak lane reads.
 

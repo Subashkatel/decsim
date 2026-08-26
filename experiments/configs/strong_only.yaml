@@ -1,0 +1,63 @@
+# Strong only closed loop: every window decoded once, on the strong tier.
+# Rounds dual-write at packing; syndrome buffer 1 is the store the strong
+# path reads (Buffer 0 drops on arrival), csd carries the input, do the result.
+
+mode: strong_only
+
+code_task: surface_code:rotated_memory_z
+distance: 3
+rounds_per_shot: 60
+windowing:
+  scheme: sliding                            # sliding | parallel | sandwich | naive_online
+  commit_rounds: null                        # null = d
+  buffer_rounds: null                        # null = d
+
+sweep:
+  # timing: strong cards are slow; the round periods bracket where one unit stops keeping up
+  - physical_error_probability: [0.001]
+    round_period_us: [10.0, 5.0, 3.0, 2.0, 1.5, 1.0, 0.5]
+    algorithm_latency_us: [5.0, 1.0, measured]
+                                             # 5.0 = the repository's strong-tier reference card (accuracy-first
+                                             #       decoder, no hardware source; the axis to sweep)
+                                             # 1.0 = faster-strong sensitivity card
+                                             # measured = wall clock of each real PyMatching call on this host
+    shots: 10
+  # logical error rate: timing knobs never change the decoded answer (Gate 10)
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
+    round_period_us: [1.0]
+    algorithm_latency_us: [5.0]
+    shots: 200
+
+controller:
+  t_binary_availability_us: 0.0
+  t_pack_us: 0.0
+
+links:
+  # on the strong-only path
+  qc:  {latency_us: 1.0, bits_per_us: null}     # QPU -> controller, one readout
+  c2b: {latency_us: 0.5, bits_per_us: 100000.0} # controller -> Buffer 0, one round (dropped on arrival)
+  copy_out: {latency_us: 0.5, bits_per_us: null} # packing -> syndrome buffer 1, one round; the store that wakes windows
+  csd: {latency_us: 2.0, bits_per_us: null}     # syndrome buffer 1 -> strong decoder memory, one window
+                                                # (Khalid cd latency mapped to the strong input, as the reference card)
+  dd:  {latency_us: 0.5, bits_per_us: null}     # decoder -> decoder boundary handoff
+  do:  {latency_us: 1.0, bits_per_us: null}     # strong decoder -> Pauli frame
+  # not on this path: null = the logical_reference card's numbers
+  cwd: null
+  wdo: null
+  wsd: null
+  oc:  null
+  cq:  null
+
+decoder:
+  units: 1                                   # strong units; sweep by editing (stability runs used 1, 2, 4)
+  engine:
+    frequency_mhz: 250.0
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 1
+decoder_memory_rounds: null
+
+input_staging_depth: 0                       # 1 overlaps the next window's transfer under the current decode
+boundary_application: assembly               # decoder ships raw and XORs the seam at the unit (sliding chain shrinks)
+
+pauli_frame:
+  commit_us: 0.004

@@ -240,7 +240,7 @@ class RunSpec:
                                          window_manager, syndrome_buffer)
             if config.make_syndrome_packing else SyndromePacking(
                 engine, links=links, t_pack=timing.ticks("t_pack"),
-                packing_context_capacity=config.buffering.upstream_packet_slots,
+                packing_context_capacity=config.buffering.packing_assembly_slots,
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager,
                 syndrome_buffer=syndrome_buffer,

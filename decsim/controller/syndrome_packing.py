@@ -74,7 +74,8 @@ class SyndromeReassemblyTimeout(RuntimeError):
 
 
 class SyndromePackingOverflow(RuntimeError):
-    """A new round found no free slot in Buffer 0."""
+    """A new round found no free assembly context, or no free slot in
+    Buffer 0."""
 
     status = "controller_packing_overflow"
 
@@ -132,6 +133,8 @@ class SyndromePacking:
         self.links = links if links is not None else logical_reference_profile().resolve()
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes
+        # assembly workspace: how many rounds may be in flight through this
+        # stage at once; retention capacity is the stores' own knob
         self.packing_context_capacity = packing_context_capacity
         self.window_input_receiver = window_input_receiver
         self.feedback_memory_receiver = feedback_memory_receiver
@@ -181,6 +184,8 @@ class SyndromePacking:
         if round_key in self._dropped_rounds:
             return
         context = self._context_for(fragment, fragment_count, route)
+        if context is None:
+            return
         self._assemble_fragment(fragment, context)
         if context.received_fragments != context.fragment_count:
             return
@@ -208,6 +213,15 @@ class SyndromePacking:
                                      for live in self._contexts.values())
         if same_round_other_route:
             raise ValueError("all fragments must share one typed route")
+        capacity = self.packing_context_capacity
+        if capacity is not None and len(self._contexts) >= capacity:
+            if self.policy.overflow is PackingOverflowPolicy.DROP_ROUND:
+                self.packing_drops += 1
+                self._dropped_rounds.add(round_key)
+                return None
+            raise SyndromePackingOverflow(
+                tick=self.engine.now, route=route, incoming_identity=identity,
+                capacity=capacity, snapshot=self.packing_snapshot())
         return self._open_context(identity, round_key, route, fragment_count)
 
     def _assemble_fragment(self, fragment, context: _PackingContext) -> None:
@@ -264,7 +278,7 @@ class SyndromePacking:
             raise SyndromePackingOverflow(
                 tick=self.engine.now, route=context.route,
                 incoming_identity=context.identity,
-                capacity=self.packing_context_capacity,
+                capacity=self.syndrome_buffer.capacity,
                 snapshot=self.packing_snapshot())
         self._packed_rounds.add(context.round_key)
         context.fragments = []

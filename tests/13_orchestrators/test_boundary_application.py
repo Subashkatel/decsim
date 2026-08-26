@@ -52,8 +52,8 @@ def _gaps(completed):
 
 def test_saturated_chain_is_dd_plus_max_of_transfer_and_decode():
     """The reference cadence: with the raw input shipped under the previous
-    decode, each window costs dd (0.5) + max(csd 2.0, decode 5.0) = 5.5 us,
-    never the serial dd + csd + decode = 7.5 us."""
+    decode, each window costs dd (0.5) + max(sbd 2.0, decode 5.0) = 5.5 us,
+    never the serial dd + sbd + decode = 7.5 us."""
     assert _gaps(_stim_run()) == [us(5.5)]
 
 

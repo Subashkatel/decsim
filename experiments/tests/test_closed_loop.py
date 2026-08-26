@@ -116,11 +116,11 @@ def test_sweep_summary_and_report(weak_config, tmp_path):
 
 
 def test_strong_only_measures_the_strong_wires(strong_config, strong_shot):
-    """The same points, on the strong path: csd carries the input, do the
+    """The same points, on the strong path: sbd carries the input, do the
     result, and the service identity holds unchanged."""
     links = strong_config.links
     assert strong_shot.means["input_link_per_window"] == pytest.approx(
-        links["csd"].latency_us)
+        links["sbd"].latency_us)
     assert strong_shot.means["output_link_per_window"] == pytest.approx(
         links["do"].latency_us)
     # dispatch -> done covers the transfer and the engine stages; with the
@@ -142,7 +142,7 @@ def test_strong_only_commits_every_window_on_the_strong_tier(strong_config):
     tiers = {record.tier for record in completed.pauli_frame.snapshot().records}
     assert tiers == {"strong"}
     paths = {t["path"] for t in completed.result.link_traffic["transfers"]}
-    assert "csd" in paths and "do" in paths and "wsd" not in paths
+    assert "sbd" in paths and "do" in paths and "wsd" not in paths
 
 
 def test_trace_writes_one_log_file_per_shot(tmp_path, monkeypatch):

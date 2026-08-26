@@ -56,7 +56,7 @@ class PendingStrong:
 
 @dataclass(frozen=True)
 class CsdInput:
-    """Buffer 0 hold: rounds in flight to a strong decoder over CSD."""
+    """Buffer 0 hold: rounds in flight to a strong decoder over SBD."""
 
     request_key: DecoderRequestKey
 

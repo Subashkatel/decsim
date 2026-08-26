@@ -11,8 +11,8 @@ components on the reaction path:
   feedback-memory round straight off packing (``syndrome_packing``) (t_wbd).
 - ``WSD`` weak decoder -> strong decoder: the escalation selection that hands a
   window to the strong tier (t_wsd).
-- ``CSD`` controller -> strong decoder: the strong window's syndrome input
-  (t_csd).
+- ``SBD`` strong buffer -> strong decoder: the strong window's syndrome
+  input, assembled from syndrome buffer 1 (t_sbd).
 - ``WDO`` weak decoder -> Pauli frame: the weak correction leaving the weak
   tier for the frame and the conditional release; the weak counterpart of ``DO``.
 - ``DD``  decoder -> decoder: a committed window boundary handed to a dependent
@@ -239,7 +239,7 @@ class LinkPath(str, Enum):
     CWB = "cwb"
     WBD = "wbd"
     WSD = "wsd"
-    CSD = "csd"
+    SBD = "sbd"
     WDO = "wdo"
     DD = "dd"
     DO = "do"
@@ -283,7 +283,7 @@ _PATH_RULES = MappingProxyType({
     LinkPath.WBD: LinkPathRule(LinkAttributionScope.ROUND_OR_WINDOW,
                                LinkRelationRule.REQUEST_WHEN_WINDOWED, True),
     LinkPath.WSD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
-    LinkPath.CSD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
+    LinkPath.SBD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
     LinkPath.WDO: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
     LinkPath.DD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.BOUNDARY, True),
     LinkPath.DO: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
@@ -478,7 +478,7 @@ class LinkModelConfig:
     qc: LinkEdgeConfig
     wbd: LinkEdgeConfig
     wsd: LinkEdgeConfig
-    csd: LinkEdgeConfig
+    sbd: LinkEdgeConfig
     wdo: LinkEdgeConfig
     dd: LinkEdgeConfig
     do: LinkEdgeConfig

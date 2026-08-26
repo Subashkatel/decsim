@@ -57,7 +57,7 @@ links:                                       # one card per path: propagation la
   oc:  null                                  # Pauli frame -> controller, a release
   cq:  null                                  # controller -> QPU, an instruction
   wsd: null                                  # weak -> strong escalation
-  csd: null                                  # controller -> strong decoder
+  sbd: null                                  # syndrome buffer 1 -> strong decoder memory, one window
   do:  null                                  # strong decoder -> Pauli frame
 
 buffers:                                     # syndrome-path store capacities, in rounds (null = unbounded)

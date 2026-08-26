@@ -817,7 +817,7 @@ class WindowManager:
                 # its memory, over the primary tier's input link
                 input_path = (LinkPath.WBD
                               if self.primary_tier is DecoderTier.WEAK
-                              else LinkPath.CSD)
+                              else LinkPath.SBD)
 
                 def reserve_transfer(job=primary_job, bits=payload_bits,
                                      extra=extra_delay, path=input_path) -> int:

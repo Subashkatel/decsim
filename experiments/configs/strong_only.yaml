@@ -1,6 +1,6 @@
 # Strong only closed loop: every window decoded once, on the strong tier.
 # Rounds dual-write at packing; syndrome buffer 1 is the store the strong
-# path reads (Buffer 0 drops on arrival), csd carries the input, do the result.
+# path reads (Buffer 0 drops on arrival), sbd carries the input, do the result.
 
 mode: strong_only
 
@@ -37,7 +37,7 @@ links:
   qc:  {latency_us: 1.0, bits_per_us: null}     # QPU -> controller, one readout
   cwb: {latency_us: 0.5, bits_per_us: 100000.0} # controller -> Buffer 0 (the weak buffer), one round (dropped on arrival)
   csb: {latency_us: 2.0, bits_per_us: null} # controller -> syndrome buffer 1 (the strong buffer), one round; the store that wakes windows
-  csd: {latency_us: 0.5, bits_per_us: null}     # syndrome buffer 1 -> strong decoder memory, one window
+  sbd: {latency_us: 0.5, bits_per_us: null}     # syndrome buffer 1 -> strong decoder memory, one window
                                                 # (Khalid cd latency mapped to the strong input, as the reference card)
   dd:  {latency_us: 0.5, bits_per_us: null}     # decoder -> decoder boundary handoff
   do:  {latency_us: 1.0, bits_per_us: null}     # strong decoder -> Pauli frame

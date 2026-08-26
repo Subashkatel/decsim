@@ -109,7 +109,7 @@ class StrongOnly:
     stores a round and its signal drives window readiness, the shape of
     LILLIPUT's FIFO-fed decoder and Google's streaming decoder. Every window
     job carries tier STRONG, reads its rounds from syndrome buffer 1 over
-    CSD, and rides DO home; the escalation machinery (WSD, ledger, context
+    SBD, and rides DO home; the escalation machinery (WSD, ledger, context
     windows, slabs) is never engaged."""
 
     requires_strong_context = False
@@ -141,7 +141,7 @@ class StrongOnly:
     def on_window_ready(self, window, weak_job, services) -> list:
         # the pre-built job IS the window's job; the submit path already
         # stamped it with the primary tier, the primary store's payloads,
-        # and the CSD transfer
+        # and the SBD transfer
         return [Submission(weak_job)]
 
     def on_decode_outcome(self, outcome, services) -> OutcomeDirective:

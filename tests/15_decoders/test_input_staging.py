@@ -1,5 +1,5 @@
 """Every unit is a depth-1 decoupled access-execute machine: two input
-slots, so the next window's CSD transfer overlaps the current compute
+slots, so the next window's SBD transfer overlaps the current compute
 (Smith 1982 DAE; TI EDMA ping-pong SPRAAN4A; gem5-Aladdin ready bits,
 Shao MICRO 2016). Compute is claimed separately from the slots: a job
 whose boundary has not arrived waits in its slot, never on the unit
@@ -44,10 +44,10 @@ def _run(*, units=1, decode_us=5.0, capacity=None):
 
 
 def _events(completed):
-    """(csd send tick, delivery tick) per window plus per-window stamps."""
+    """(sbd send tick, delivery tick) per window plus per-window stamps."""
     sends = {}
     for row in completed.result.link_traffic["transfers"]:
-        if row["path"] == "csd":
+        if row["path"] == "sbd":
             sends[row["attribution"]["window_id"]] = (
                 row["send_ticks"], row["delivery_ticks"])
     stamps = {k: (w.t_dispatch, w.t_done)
@@ -78,13 +78,13 @@ def test_saturated_cadence_is_max_of_transfer_and_compute():
     dones = sorted(done for _, done in stamps.values())
     gaps = [b - a for a, b in zip(dones, dones[1:])]
     saturated = [gap for gap in gaps if gap > 0]
-    # csd 2.0, decode 5.0: back-to-back completions tick at 5.0 us
+    # sbd 2.0, decode 5.0: back-to-back completions tick at 5.0 us
     assert us(5.0) in saturated, sorted(set(saturated))
     assert us(7.0) not in saturated, sorted(set(saturated))
 
 
 def test_unit_idles_until_a_late_landing():
-    # decode 0.5 us against csd 2.0: compute ends before the next DMA
+    # decode 0.5 us against sbd 2.0: compute ends before the next DMA
     # lands, so the unit idles and service starts at the landing tick
     completed = _run(decode_us=0.5)
     sends, stamps = _events(completed)

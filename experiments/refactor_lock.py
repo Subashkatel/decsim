@@ -661,7 +661,7 @@ def magic_state_factory():
 
 def input_staging_ping_pong():
     """Strong-only Tan windows on one unit with the depth-1 input staging
-    slot: the next window's CSD transfer overlaps the current compute."""
+    slot: the next window's SBD transfer overlaps the current compute."""
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.decoders.weak_strong_switching import StrongOnly
     from decsim.links.link_profiles import logical_reference_profile
@@ -679,7 +679,7 @@ def input_staging_ping_pong():
 def sliding_boundary_at_decoder():
     """Strong-only sliding windows with DECODER boundary application and
     the depth-1 staging slot: raw rounds ship at data-complete, the mask
-    lands at the decoder, and the chain runs at dd + max(csd, decode)."""
+    lands at the decoder, and the chain runs at dd + max(sbd, decode)."""
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.decoders.weak_strong_switching import StrongOnly
     from decsim.links.link_profiles import logical_reference_profile

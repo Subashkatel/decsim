@@ -40,7 +40,7 @@ from decsim.links.link_traffic_report import topology_json_value, traffic_json_v
 
 OPERATION_ID = ("experiment", 7)
 PATCH_IDS = (1, 2)
-PATH_ORDER = ["qc", "cwb", "wbd", "wsd", "csd", "wdo", "dd", "do", "oc", "cq",
+PATH_ORDER = ["qc", "cwb", "wbd", "wsd", "sbd", "wdo", "dd", "do", "oc", "cq",
               "csb"]
 # A shipped profile wires the nine required paths; CWB and csb are
 # optional and unset.
@@ -89,7 +89,7 @@ def valid_attribution(path):
     if path is LinkPath.WBD:
         relation = request_relation(tier=DecoderTier.WEAK)
         return TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2, relation)
-    if path in (LinkPath.WSD, LinkPath.CSD, LinkPath.DO):
+    if path in (LinkPath.WSD, LinkPath.SBD, LinkPath.DO):
         relation = request_relation(tier=DecoderTier.STRONG)
         return TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2, relation)
     if path is LinkPath.WDO:
@@ -383,7 +383,7 @@ def test_every_semantic_path_accepts_its_real_attribution_shape(path):
         (LinkPath.QC, TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2)),
         (LinkPath.WBD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
         (LinkPath.WSD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
-        (LinkPath.CSD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.SBD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
         (LinkPath.WDO, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
         (LinkPath.DD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
         (LinkPath.DO, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
@@ -697,7 +697,7 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
         "qc": us(0.15),
         "wbd": us(2.0),
         "wsd": us(0.5),
-        "csd": us(2.0),
+        "sbd": us(2.0),
         "wdo": us(1.0),
         "dd": us(0.5),
         "do": us(1.0),
@@ -715,7 +715,7 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
         "qc": "SyndromePayload.size_bits",
         "wbd": "SyndromeRoundPacket.fragment_size_sum",
         "wsd": "switching decision payload_bits",
-        "csd": "DecodeJob.retained_payload_size_bits",
+        "sbd": "DecodeJob.retained_payload_size_bits",
     }
 
     assert config.profile_name == "logical_reference"
@@ -748,7 +748,7 @@ def test_config_and_record_validation_nonchecks_remain_at_their_boundaries():
         qc=None,
         wbd=None,
         wsd=None,
-        csd=None,
+        sbd=None,
         wdo=None,
         dd=None,
         do=None,
@@ -815,7 +815,7 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
         "qc": (24.0, "direct_aggregate", None, 24.0),
         "wbd": (48.0, "direct_aggregate", None, 48.0),
         "wsd": (24.0, "direct_aggregate", None, 24.0),
-        "csd": (72.0, "direct_aggregate", None, 72.0),
+        "sbd": (72.0, "direct_aggregate", None, 72.0),
         "wdo": (10_000.0, "per_channel", 100, 1_000_000.0),
         "dd": (24.0, "direct_aggregate", None, 24.0),
         "do": (10_000.0, "per_channel", 100, 1_000_000.0),
@@ -826,7 +826,7 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
         "qc": (24, "direct_aggregate", None, 24),
         "wbd": (240, "direct_aggregate", None, 240),
         "wsd": (1, "direct_aggregate", None, 1),
-        "csd": (360, "direct_aggregate", None, 360),
+        "sbd": (360, "direct_aggregate", None, 360),
         "wdo": (50_000, "per_channel", 100, 5_000_000),
         "dd": (100, "direct_aggregate", None, 100),
         "do": (50_000, "per_channel", 100, 5_000_000),
@@ -878,7 +878,7 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
     reference_edges = {edge["path"]: edge for edge in reference_topology["edges"]}
     bandwidth_edges = {edge["path"]: edge for edge in bandwidth_topology["edges"]}
     configured_default_paths = ("wdo", "dd", "do", "oc", "cq")
-    actual_payload_paths = ("qc", "wbd", "wsd", "csd")
+    actual_payload_paths = ("qc", "wbd", "wsd", "sbd")
 
     assert reference.profile_name == "logical_reference"
     assert reference.qc_excludes_controller_processing is False
@@ -982,7 +982,7 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
         "qc": 24.0,
         "wbd": 48.0,
         "wsd": 24.0,
-        "csd": 72.0,
+        "sbd": 72.0,
         "wdo": 1_000_000.0,
         "dd": 24.0,
         "do": 1_000_000.0,
@@ -1048,10 +1048,10 @@ def test_transfer_overhead_delays_delivery_without_occupying_the_wire():
     capacity = LinkCapacityConfig(
         1.0, LinkQuantityBasis.DIRECT_AGGREGATE, None, "test rate")
     channel = make_channel(capacity=capacity, propagation_ticks=10)
-    model = make_model_config({LinkPath.CSD: _overhead_edge(
+    model = make_model_config({LinkPath.SBD: _overhead_edge(
         50, channel=channel)}).resolve()
-    first = model.reserve(LinkPath.CSD, payload_bits=4, now_ticks=100,
-                          attribution=valid_attribution(LinkPath.CSD))
+    first = model.reserve(LinkPath.SBD, payload_bits=4, now_ticks=100,
+                          attribution=valid_attribution(LinkPath.SBD))
     # setup 50 ticks (engine-side) + serialization 4 bits / 1 bit-per-us
     # + propagation 10 ticks
     assert first.send_ticks == 150            # the wire sees the shifted send
@@ -1061,11 +1061,11 @@ def test_transfer_overhead_delays_delivery_without_occupying_the_wire():
 
 def test_setups_serialize_like_aladdins_single_dma_event():
     model = make_model_config(
-        {LinkPath.CSD: _overhead_edge(50)}).resolve()
-    first = model.reserve(LinkPath.CSD, payload_bits=1, now_ticks=100,
-                          attribution=valid_attribution(LinkPath.CSD))
-    second = model.reserve(LinkPath.CSD, payload_bits=1, now_ticks=100,
-                           attribution=valid_attribution(LinkPath.CSD))
+        {LinkPath.SBD: _overhead_edge(50)}).resolve()
+    first = model.reserve(LinkPath.SBD, payload_bits=1, now_ticks=100,
+                          attribution=valid_attribution(LinkPath.SBD))
+    second = model.reserve(LinkPath.SBD, payload_bits=1, now_ticks=100,
+                           attribution=valid_attribution(LinkPath.SBD))
     # one CPU programs the engine: the second setup starts when the first ends
     assert first.total_delay_ticks == 50 + 7
     assert second.total_delay_ticks == 100 + 7
@@ -1074,17 +1074,17 @@ def test_setups_serialize_like_aladdins_single_dma_event():
 def test_zero_overhead_edges_reserve_identically_to_plain_edges():
     plain = make_model_config().resolve()
     with_field = make_model_config(
-        {LinkPath.CSD: _overhead_edge(0)}).resolve()
-    a = plain.reserve(LinkPath.CSD, payload_bits=4, now_ticks=10,
-                      attribution=valid_attribution(LinkPath.CSD))
-    b = with_field.reserve(LinkPath.CSD, payload_bits=4, now_ticks=10,
-                           attribution=valid_attribution(LinkPath.CSD))
+        {LinkPath.SBD: _overhead_edge(0)}).resolve()
+    a = plain.reserve(LinkPath.SBD, payload_bits=4, now_ticks=10,
+                      attribution=valid_attribution(LinkPath.SBD))
+    b = with_field.reserve(LinkPath.SBD, payload_bits=4, now_ticks=10,
+                           attribution=valid_attribution(LinkPath.SBD))
     assert a == b
 
 
 def test_shared_channel_with_mixed_overhead_is_refused():
     shared = make_channel()
-    overrides = {LinkPath.CSD: _overhead_edge(50, channel=shared),
+    overrides = {LinkPath.SBD: _overhead_edge(50, channel=shared),
                  LinkPath.WBD: make_actual_edge(channel=shared)}
     with pytest.raises(ValueError, match="transfer overhead differs"):
         make_model_config(overrides).resolve()
@@ -1097,7 +1097,7 @@ def test_with_transfer_overhead_helper_covers_the_dma_paths():
         logical_reference_profile(), overhead_us=0.4,
         source="Shao MICRO 2016 measured 400 ns per transaction")
     assert card.wbd.transfer_overhead is not None
-    assert card.csd.transfer_overhead is not None
+    assert card.sbd.transfer_overhead is not None
     assert card.qc.transfer_overhead is None
     assert card.wbd.transfer_overhead.overhead_ticks == us(0.4)
 

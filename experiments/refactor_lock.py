@@ -427,7 +427,7 @@ def _finite_buffer_spec(policy=None, slots=8):
     return RunSpec(ops=[_memory_op()], d=3, rounds_policy=FixedRounds(24), round_us=1.0,
                    decoder=PresetLatencyDecoder(6.0), num_units=1, scheme=_sliding(),
                    syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=slots),
-                   syndrome_ingress_policy=policy, seed=29)
+                   syndrome_packing_policy=policy, seed=29)
 
 
 def finite_syndrome_buffer_fail_stop():
@@ -437,8 +437,8 @@ def finite_syndrome_buffer_fail_stop():
 
 
 def finite_syndrome_buffer_drop_round():
-    from decsim.controller.syndrome_ingress import IngressOverflowPolicy, SyndromeIngressPolicy
-    return _finite_buffer_spec(SyndromeIngressPolicy(overflow=IngressOverflowPolicy.DROP_ROUND))
+    from decsim.controller.syndrome_packing import PackingOverflowPolicy, SyndromePackingPolicy
+    return _finite_buffer_spec(SyndromePackingPolicy(overflow=PackingOverflowPolicy.DROP_ROUND))
 
 
 def finite_syndrome_buffer_holds():

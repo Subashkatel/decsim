@@ -188,7 +188,7 @@ def normalize_binary_bits(bits: Any) -> Optional[tuple[int, ...]]:
 
 @dataclass(frozen=True)
 class RetainedSyndromeFragment:
-    """One validated immutable fragment retained after controller ingress."""
+    """One validated immutable fragment retained after controller packing."""
 
     operation_id: Any
     patch_id: Any

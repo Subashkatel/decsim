@@ -597,8 +597,8 @@ class DecoderManager:
             job.input_landed = True
             self.engine.log_io(
                 f"unit {pool}#{unit} SRAM",
-                lambda: f"{job.label} input landed; holds "
-                        f"{self._sram_description(slot)}")
+                lambda: f"{job.label} input landed; {_job_defects_text(job)}; "
+                        f"holds {self._sram_description(slot)}")
             if self._computing.get(slot) is job:
                 # this job holds or was reserved the unit's compute
                 self._begin_service(job)
@@ -922,3 +922,23 @@ class DecoderManager:
             raise RuntimeError(
                 f"the run ended with decode work unsettled ({detail}): every "
                 f"window is final once the simulation is quiescent")
+
+
+def _job_defects_text(job: DecodeJob) -> str:
+    """The landed window input's cargo: set detection-event indices of the
+    rounds now in this unit's memory (the algorithm stage reads the same
+    fragments), sparse for the I/O trace."""
+    import numpy as np
+    if job.decoder_input is not None:
+        fragments = [fragment for round_input in job.decoder_input.rounds
+                     for fragment in round_input.fragments]
+    else:
+        fragments = list(job.payloads or [])
+    bit_arrays = [np.asarray(fragment.bits, dtype=np.uint8)
+                  for fragment in fragments if fragment.bits is not None]
+    if not bit_arrays:
+        return "no payload bits"
+    defects = np.flatnonzero(np.concatenate(bit_arrays))
+    if defects.size == 0:
+        return "no defects"
+    return f"defects {{{', '.join(map(str, defects.tolist()))}}}"

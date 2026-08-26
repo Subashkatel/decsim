@@ -284,7 +284,8 @@ class SyndromePacking:
         self.engine.log_io(
             "Buffer 0",
             lambda: f"received round {packet.round_index} of "
-                    f"op {packet.operation_id} from packing; holds "
+                    f"op {packet.operation_id} from packing; "
+                    f"{packet.defects_text()}; holds "
                     f"{self.syndrome_buffer.held_rounds_description()}")
         context.fragments = []
         if self.syndrome_buffer_1 is not None:

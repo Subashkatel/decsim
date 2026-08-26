@@ -217,6 +217,21 @@ class SyndromeRoundPacket:
     round_index: int
     fragments: tuple[RetainedSyndromeFragment, ...]
 
+    def defects_text(self) -> str:
+        """The round's cargo for the I/O trace: set detection-event indices
+        across the fragments in order, sparse so d=11 lines stay readable."""
+        position = 0
+        defects = []
+        for fragment in self.fragments:
+            bits = fragment.bits
+            if bits is None:
+                return "timing-only"
+            for bit in bits:
+                if bit:
+                    defects.append(position)
+                position += 1
+        return f"defects {{{', '.join(map(str, defects))}}}" if defects else "no defects"
+
 # ------------------------------------------------------------------ windows
 
 

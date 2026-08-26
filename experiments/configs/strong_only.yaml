@@ -32,21 +32,29 @@ controller:
   t_binary_availability_us: 0.0
   t_pack_us: 0.0
 
+clocks:                            # clock domain name -> MHz; a link prices its
+                                   # cycles on the domain it names. More domains
+                                   # (an mK stage, a 4K SFQ decoder) are one more
+                                   # entry here. Both start at LILLIPUT's 250 MHz
+                                   # ([d=3,m=2] FPGA clock, 2108.06569 Table 4).
+  fridge: 250.0
+  room: 250.0
+
 links:
-  # on the strong-only path
-  qc:  {latency_us: 1.0, bits_per_us: null}     # QPU -> controller, one readout
-  cwb: {latency_us: 0.5, bits_per_us: 100000.0} # controller -> Buffer 0 (the weak buffer), one round (dropped on arrival)
-  csb: {latency_us: 2.0, bits_per_us: null} # controller -> syndrome buffer 1 (the strong buffer), one round; the store that wakes windows
-  sbd: {latency_us: 0.5, bits_per_us: null}     # syndrome buffer 1 -> strong decoder memory, one window
-                                                # (Khalid cd latency mapped to the strong input, as the reference card)
-  dd:  {latency_us: 0.5, bits_per_us: null}     # decoder -> decoder boundary handoff
-  do:  {latency_us: 1.0, bits_per_us: null}     # strong decoder -> Pauli frame
+  # on the strong-only path; the crossing and the strong side price on the
+  # room clock, the fridge side on the fridge clock; every interconnect
+  # starts at 1 cycle, unbounded bandwidth (2026-08-26 directive)
+  qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # QPU -> controller, one readout
+  cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # controller -> Buffer 0 (the weak buffer), one round (dropped on arrival)
+  csb: {latency_cycles: 1, clock: room, bits_per_cycle: null}    # controller -> syndrome buffer 1 (the strong buffer), one round; the store that wakes windows
+  sbd: {latency_cycles: 1, clock: room, bits_per_cycle: null}    # syndrome buffer 1 -> strong decoder memory, one window
+  dd:  {latency_cycles: 1, clock: room, bits_per_cycle: null}    # decoder -> decoder boundary handoff
+  do:  {latency_cycles: 1, clock: room, bits_per_cycle: null}    # strong decoder -> Pauli frame
   # not on this path: null = the logical_reference card's numbers
   wbd: null
   wdo: null
   wsd: null
   oc:  null
-  cq:  null
 
 buffers:                                     # syndrome-path store capacities, in rounds (null = unbounded)
   buffer_0_size: null                        # Buffer 0 (rounds drop on arrival in this mode)

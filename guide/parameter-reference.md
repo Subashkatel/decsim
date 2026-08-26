@@ -16,7 +16,7 @@ every yaml key with its meaning and defaults; the loader is
 `experiments/experiment_config.py` and is the only yaml reader. Run any
 config with `python -m experiments.run experiments/configs/<name>.yaml`.
 Top-level keys: `mode`, `code_task`, `distance`, `rounds_per_shot`,
-`windowing`, `sweep`, `controller`, `links`, `buffers`, `decoder`,
+`windowing`, `sweep`, `controller`, `clocks`, `links`, `buffers`, `decoder`,
 `pauli_frame`, `trace`, `trace_io`, `idle_policy` (plus `extends`, which
 starts from another config in the same folder and overrides the keys it
 names). `trace` is `off`, `print`, `file` or `both`: the engine narrator
@@ -58,7 +58,7 @@ each).
 | `feedback_boundary_mode` | no | feedback stream boundary handling (`trailing_buffer`) |
 | `timing` | yes | `TimingConfig`: `round_us`, `t_binary_availability_us`, `t_pack_us` (`controller:` block) |
 | `round_us` | yes | round period shorthand when `timing` is not given (`round_period_us` axis) |
-| `links` | yes | the link fabric card: latency, capacity, transfer overhead per path (`links:` block) |
+| `links` | yes | the link fabric card, in cycles of a named clock domain: `latency_cycles`, `clock` (a `clocks:` key), `bits_per_cycle` (per channel, null = unbounded), `channels` (default 1), `transfer_overhead_cycles` (`links:` block). `clocks:` maps domain name to MHz (fridge and room to start; more domains are one more entry) |
 | `device` | partly | syndrome source (yaml: `StimDevice`; Python: timing-only or syndrome-bit devices) |
 | `error_model_provider` | no | per-window decoder model source when not derived from the circuit |
 | `memory_model` | no | Buffer 0 memory technology model |

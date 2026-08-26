@@ -42,23 +42,29 @@ controller:
                                              # (Google 2023 Nature 614 sec. Methods)
   t_pack_us: 0.0                             # one fragment per round makes packing a no-op (StimDevice)
 
-links:                                       # one card per path: propagation latency and capacity
-                                             # (bits_per_us null = unbounded, propagation only); optional per card:
-                                             # transfer_overhead_us, a fixed per-transfer DMA setup cost
-                                             # (engine-side, setups serialize; Shao MICRO 2016 measured 0.4 us)
-  # on the baseline path
-  qc:  {latency_us: 1.0, bits_per_us: null}     # QPU -> controller, one readout
-  cwb: {latency_us: 2.0, bits_per_us: 100000.0} # controller -> Buffer 0 (the weak buffer), one round
-  wbd: {latency_us: 1.0, bits_per_us: null}     # Buffer 0 -> weak decoder memory, one window
-  dd:  {latency_us: 0.5, bits_per_us: null}     # decoder -> decoder boundary handoff
-  wdo: {latency_us: 1.0, bits_per_us: null}     # weak decoder -> Pauli frame
+clocks:                            # clock domain name -> MHz; a link prices its
+                                   # cycles on the domain it names. More domains
+                                   # (an mK stage, a 4K SFQ decoder) are one more
+                                   # entry here. Both start at LILLIPUT's 250 MHz
+                                   # ([d=3,m=2] FPGA clock, 2108.06569 Table 4).
+  fridge: 250.0
+  room: 250.0
+
+links:                                       # one card per path, in cycles of its named clock
+                                             # domain (see clocks:); every interconnect starts at
+                                             # 1 cycle, unbounded bandwidth (2026-08-26 directive)
+  # on the baseline path (all fridge-side)
+  qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # QPU -> controller, one readout
+  cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # controller -> Buffer 0 (the weak buffer), one round
+  wbd: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # Buffer 0 -> weak decoder memory, one window
+  dd:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # decoder -> decoder boundary handoff
+  wdo: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # weak decoder -> Pauli frame
   # not on this path: null = the logical_reference card's numbers
   csb: null                             # controller -> syndrome buffer 1 (the strong buffer)
   oc:  null                                  # Pauli frame -> controller, a release
   cq:  null                                  # controller -> QPU, an instruction
   wsd: null                                  # weak -> strong escalation
   sbd: null                                  # syndrome buffer 1 -> strong decoder memory, one window
-  do:  null                                  # strong decoder -> Pauli frame
 
 buffers:                                     # syndrome-path store capacities, in rounds (null = unbounded)
   buffer_0_size: null                        # Buffer 0, the upstream round store

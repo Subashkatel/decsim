@@ -108,6 +108,7 @@ class WindowManager:
         self.rounds_arrived: dict[int, int] = {}
         self.memory_rounds: dict[int, int] = {}
         self.memory_rounds_total = 0
+        self.memory_filled_buffer_windows = 0
 
         self.windows: dict[tuple, Window] = {}
         self.op_windows: dict[int, list] = {}
@@ -629,6 +630,20 @@ class WindowManager:
         for k in range(self.window_count[op_id]):
             self.check_window((op_id, k))
 
+    def _note_memory_filled_buffer(self, window: Window, op) -> None:
+        """A trailing buffer satisfied by memory rounds alone releases on
+        time with no syndrome content behind it; the flag keeps that
+        approximation visible wherever the window's result is read."""
+        from .windowing_schemes import buffer_filled_by_memory_only
+        if not buffer_filled_by_memory_only(window, self._window_readiness(window)):
+            return
+        window.buffer_filled_by_memory = True
+        self.memory_filled_buffer_windows += 1
+        self.engine.log(
+            "DecoderCluster",
+            f"{op.name} W{window.k} buffer filled by memory rounds "
+            f"(time-only, no syndrome content)")
+
     def prepend_idle_rounds(self, op_id: int, round_count: int) -> None:
         """Fold pre-gate idle rounds into a batch-style op when the scheme asks."""
         if (
@@ -658,9 +673,10 @@ class WindowManager:
             )
         if not self._window_data_complete(window):
             return
+        op = self._ops[window.op_id]
         if window.t_data_complete is None:
             window.t_data_complete = self.engine.now
-        op = self._ops[window.op_id]
+            self._note_memory_filled_buffer(window, op)
         if window.deps_remaining > 0 and not window.blocked_logged:
             # raw rounds ship now; the boundary is XORed into the landed
             # input at the decoder when it arrives (qLDPC net_error /

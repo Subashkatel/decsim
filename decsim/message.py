@@ -244,6 +244,11 @@ class Window:
     buffer_lo: Optional[int] = None   # leading-buffer start (for two-sided A windows)
     closed_temporal_boundaries: bool = False
     batched_preceding_idle_round_count: int = 0
+    buffer_filled_by_memory: bool = False  # trailing buffer satisfied by
+                                      # memory rounds alone: released on time,
+                                      # no syndrome content behind those
+                                      # rounds (references decode buffer
+                                      # content: LATTE, SWIPER, Skoric/Tan)
     deps: list = field(default_factory=list)        # window keys this one waits on
     dependents: list = field(default_factory=list)  # window keys waiting on this one
     deps_remaining: int = 0           # unfinished deps countdown; 0 = unblocked

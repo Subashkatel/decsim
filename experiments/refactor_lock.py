@@ -55,7 +55,8 @@ def canonical(value, depth=0):
 
 WINDOW_FIELDS = ("op_id", "k", "commit_lo", "commit_hi", "buffer_hi", "n_rounds",
                  "buffer_lo", "closed_temporal_boundaries", "deps", "dependents",
-                 "committed", "queued", "t_first_round", "t_data_complete",
+                 "committed", "queued", "buffer_filled_by_memory",
+                 "t_first_round", "t_data_complete",
                  "t_queued", "t_dispatch", "t_done")
 
 

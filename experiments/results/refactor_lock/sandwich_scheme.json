@@ -4375,6 +4375,7 @@
 },
 "windows": [
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 9,
 "buffer_lo": 1,
 "closed_temporal_boundaries": false,
@@ -4399,6 +4400,7 @@
 "t_queued": 9000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 6,
 "buffer_lo": 6,
 "closed_temporal_boundaries": true,
@@ -4427,6 +4429,7 @@
 "t_queued": 6000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 12,
 "buffer_lo": 4,
 "closed_temporal_boundaries": false,
@@ -4455,6 +4458,7 @@
 "t_queued": 12000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 9,
 "buffer_lo": 9,
 "closed_temporal_boundaries": true,
@@ -4483,6 +4487,7 @@
 "t_queued": 9000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 15,
 "buffer_lo": 7,
 "closed_temporal_boundaries": false,
@@ -4511,6 +4516,7 @@
 "t_queued": 15000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 12,
 "buffer_lo": 12,
 "closed_temporal_boundaries": true,
@@ -4539,6 +4545,7 @@
 "t_queued": 12000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 18,
 "buffer_lo": 10,
 "closed_temporal_boundaries": false,
@@ -4567,6 +4574,7 @@
 "t_queued": 18000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 15,
 "buffer_lo": 15,
 "closed_temporal_boundaries": true,
@@ -4595,6 +4603,7 @@
 "t_queued": 15000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 21,
 "buffer_lo": 13,
 "closed_temporal_boundaries": false,
@@ -4623,6 +4632,7 @@
 "t_queued": 21000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 18,
 "buffer_lo": 18,
 "closed_temporal_boundaries": true,
@@ -4651,6 +4661,7 @@
 "t_queued": 18000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 24,
 "buffer_lo": 16,
 "closed_temporal_boundaries": false,
@@ -4679,6 +4690,7 @@
 "t_queued": 24000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 21,
 "buffer_lo": 21,
 "closed_temporal_boundaries": true,
@@ -4707,6 +4719,7 @@
 "t_queued": 21000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 27,
 "buffer_lo": 19,
 "closed_temporal_boundaries": false,
@@ -4735,6 +4748,7 @@
 "t_queued": 27000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 24,
 "buffer_lo": 24,
 "closed_temporal_boundaries": true,
@@ -4763,6 +4777,7 @@
 "t_queued": 24000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 30,
 "buffer_lo": 22,
 "closed_temporal_boundaries": false,

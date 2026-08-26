@@ -2550,6 +2550,7 @@
 },
 "windows": [
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 9,
 "buffer_lo": 1,
 "closed_temporal_boundaries": false,
@@ -2574,6 +2575,7 @@
 "t_queued": 9000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 15,
 "buffer_lo": 7,
 "closed_temporal_boundaries": true,
@@ -2602,6 +2604,7 @@
 "t_queued": 15000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 21,
 "buffer_lo": 13,
 "closed_temporal_boundaries": false,
@@ -2630,6 +2633,7 @@
 "t_queued": 21000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 27,
 "buffer_lo": 19,
 "closed_temporal_boundaries": true,
@@ -2658,6 +2662,7 @@
 "t_queued": 27000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 30,
 "buffer_lo": 25,
 "closed_temporal_boundaries": false,

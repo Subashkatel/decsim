@@ -16,7 +16,7 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Callable, Optional
 
-from ..message import (DecodeJob,
+from ..message import (BoundaryApplication, DecodeJob,
                       DecodeResult, DecoderRequestKey, DecoderTier, LogicalContribution,
                       Operation,
                       SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
@@ -46,6 +46,8 @@ class WindowManager:
                  feedback_boundary_mode: str = "trailing_buffer",
                  error_model_provider=None, retain_strong_context: bool,
                  double_window: bool,
+                 boundary_application: BoundaryApplication = (
+                     BoundaryApplication.ASSEMBLY),
                  syndrome_buffer: Optional[SyndromeBuffer] = None,
                  syndrome_buffer_1: Optional[SyndromeBuffer1] = None,
                  pauli_frame=None,
@@ -76,6 +78,10 @@ class WindowManager:
         self.error_model_provider = error_model_provider
         self.retain_strong_context = retain_strong_context
         self.double_window = double_window
+        self.boundary_application = boundary_application
+        # jobs whose windows still owe a boundary at the decoder; the
+        # boundary receive path releases them (wired by the run)
+        self.release_service: Optional[Callable] = None
         self._next_decoder_request_sequence = 0
         self._selected_request_keys = {} if capture_enabled else None
 
@@ -362,6 +368,40 @@ class WindowManager:
                 potential, weak + strong)
         self.syndrome_buffer.replace_hold(key, weak)
 
+    def begin_service_gate(self, job: DecodeJob) -> bool:
+        """DECODER boundary application: may this landed job start its
+        decode? True applies the accumulated boundary mask to the landed
+        input (the references' decode-time XOR overlay); False parks the
+        job until its window's last boundary arrives."""
+        window = job.window
+        if window is None:
+            return True
+        if window.deps_remaining > 0:
+            return False
+        self._apply_boundary_to_landed_input(job)
+        return True
+
+    def _apply_boundary_to_landed_input(self, job: DecodeJob) -> None:
+        """XOR the window's boundary mask into the landed decoder input.
+
+        The unit's stored copy stays raw (cudaq-x keeps raw rounds and
+        applies syndrome_mods at window assembly); the job's input view is
+        replaced with the masked rounds the decode will read."""
+        window = job.window
+        state = window.boundary_in
+        if not state or job.decoder_input is None:
+            return
+        window_info = WindowInfo.from_window(window)
+        masked_rounds = []
+        for round_input in job.decoder_input.rounds:
+            fragments = tuple(
+                self.window_interaction.apply_boundary(
+                    state, window_info, fragment, round_input.round_index)
+                for fragment in round_input.fragments)
+            masked_rounds.append(replace(round_input, fragments=fragments))
+        job.decoder_input = replace(
+            job.decoder_input, rounds=tuple(masked_rounds))
+
     def _require_retained_payloads(
         self, round_keys: list, purpose: str, store=None,
     ) -> None:
@@ -587,7 +627,11 @@ class WindowManager:
         if window.deps_remaining > 0:
             if not window.blocked_logged:
                 window.blocked_logged = True
-            return
+            # DECODER boundary application: raw rounds ship now; the
+            # boundary is XORed into the landed input when it arrives
+            # (qLDPC net_error / cudaq-x syndrome_mods / LILLIPUT)
+            if self.boundary_application is not BoundaryApplication.DECODER:
+                return
         self._submit_window_decode(key, window, op)
 
     def _window_data_complete(self, w: Window) -> bool:
@@ -755,8 +799,15 @@ class WindowManager:
                 self.escalation.submit_strong(submission.job)
 
     def _assemble_payloads(self, w: Window, store=None) -> list:
-        """Collect this window's payloads, including successor overflow rounds."""
+        """Collect this window's payloads, including successor overflow rounds.
+
+        ASSEMBLY mode folds the boundary in here, host-side; DECODER mode
+        ships the raw rounds and the mask is applied at the decoder."""
         store = self.syndrome_buffer if store is None else store
+        boundary_state = (
+            None
+            if self.boundary_application is BoundaryApplication.DECODER
+            else w.boundary_in)
         operation_rounds = self._effective_round_count_for_window(w.op_id, w)
         end_round = min(w.buffer_hi, operation_rounds)
         payloads = []
@@ -766,7 +817,7 @@ class WindowManager:
             if frags is not None:
                 payloads += [
                     self.window_interaction.apply_boundary(
-                        w.boundary_in, window_info, fragment,
+                        boundary_state, window_info, fragment,
                         round_index)
                     for fragment in sorted(
                         frags,
@@ -783,7 +834,7 @@ class WindowManager:
                     if frags is not None:
                         payloads += [
                             self.window_interaction.apply_boundary(
-                                w.boundary_in, window_info, fragment,
+                                boundary_state, window_info, fragment,
                                 operation_rounds + round_index)
                             for fragment in sorted(
                                 frags,

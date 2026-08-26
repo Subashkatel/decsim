@@ -15,6 +15,7 @@ from types import MappingProxyType
 from typing import Optional
 
 from ..links.links import BoundaryTransferRelation, LinkPath
+from ..message import BoundaryApplication
 from ..message import (BoundaryDelivery, BoundaryUpdate, DecoderRequestKey, Operation,
                        Window, WindowInfo)
 
@@ -114,7 +115,9 @@ class BoundaryCourier:
                     f"window interaction selected boundary target {dep_key} "
                     f"for source {source_key}, but it is not a live "
                     f"dependency declared by the window scheme")
-            if target.queued or target.committed:
+            decoder_applied = (self.wm.boundary_application
+                               is BoundaryApplication.DECODER)
+            if target.committed or (target.queued and not decoder_applied):
                 raise RuntimeError(
                     f"window interaction selected boundary target {dep_key} "
                     f"for source {source_key} after its decode lifecycle "
@@ -198,7 +201,10 @@ class BoundaryCourier:
             payload=defects,
         )
         update = self._propose_boundary_update(delivery, w)
-        if update.accepted and (w.queued or w.committed):
+        decoder_applied = (self.wm.boundary_application
+                           is BoundaryApplication.DECODER)
+        if update.accepted and (
+                w.committed or (w.queued and not decoder_applied)):
             raise RuntimeError(
                 f"accepted boundary delivery {delivery_key} reached window "
                 f"{key} after its decode lifecycle started")
@@ -216,6 +222,12 @@ class BoundaryCourier:
             if update.release_dependency:
                 self._released_boundary_dependencies.add(delivery_key)
                 w.deps_remaining -= 1
+        if (decoder_applied and w.queued and not w.committed
+                and w.deps_remaining == 0
+                and self.wm.release_service is not None):
+            # the last boundary arrived for an already-shipped window:
+            # wake its parked decode
+            self.wm.release_service(key)
         self.wm.check_window(key)
     def _propose_boundary_update(
         self, delivery: BoundaryDelivery, destination: Window,

@@ -15,7 +15,7 @@ from ..message import (
     RunSeedPathSegment,
     SoftOutputSource,
 )
-from ..message import Directive, OutcomeDirective, Submission
+from ..message import DecoderTier, Directive, OutcomeDirective, Submission
 
 
 class ThresholdRegister:
@@ -75,6 +75,7 @@ class Baseline:
     requires_strong_context = False
     bulk_strong = False
     double_window = False
+    primary_tier = DecoderTier.WEAK
 
     def validate_declared_run(
         self,
@@ -133,6 +134,7 @@ class Switching:
     extra context still belongs to the strong-data-path backlog item."""
 
     requires_strong_context = True
+    primary_tier = DecoderTier.WEAK
 
     def __init__(self, confidence_threshold: float,
                  expected_source: SoftOutputSource,

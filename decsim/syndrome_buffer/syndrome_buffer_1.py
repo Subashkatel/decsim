@@ -119,10 +119,19 @@ class SyndromeBuffer1:
     # -------------------------------------------------------------- holds
 
     def register_hold(self, holder, round_identities) -> None:
+        self._open_referenced_operations(round_identities)
         self.store.register_hold(holder, round_identities)
 
     def replace_hold(self, holder, round_identities) -> None:
+        self._open_referenced_operations(round_identities)
         self.store.replace_hold(holder, round_identities)
+
+    def _open_referenced_operations(self, round_identities) -> None:
+        # holds pre-register future rounds at plan load, before any write
+        # has opened their operation on this store
+        for operation_id in {identity[0] for identity in round_identities}:
+            if not self.store.has_operation(operation_id):
+                self.store.open_operation(operation_id)
 
     def transfer_hold(self, old_holder, new_holder) -> None:
         self.store.transfer_hold(old_holder, new_holder)
@@ -138,6 +147,9 @@ class SyndromeBuffer1:
 
     def has_operation(self, operation_id) -> bool:
         return self.store.has_operation(operation_id)
+
+    def has_live_operation_reference(self, operation_id) -> bool:
+        return self.store.has_live_operation_reference(operation_id)
 
     def open_operation(self, operation_id) -> None:
         self.store.open_operation(operation_id)

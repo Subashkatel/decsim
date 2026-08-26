@@ -123,6 +123,7 @@ class CompletedRun:
     syndrome_buffer: Any
     syndrome_ingress: Any
     pauli_frame: Any = None
+    syndrome_buffer_1: Any = None
 
 
 @dataclass
@@ -190,6 +191,7 @@ class RunSpec:
         from .run_configuration import (check_factory_decode_service,
                                         resolve_run_configuration)
         from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
+        from .syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
         from .controller.syndrome_ingress import SyndromeIngress
         from .windows.window_manager import WindowManager
 
@@ -202,6 +204,10 @@ class RunSpec:
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,
             memory_model=config.memory_model)
+        syndrome_buffer_1 = (SyndromeBuffer1(
+            engine, links,
+            capacity_rounds=config.buffering.sb1_packet_slots)
+            if escalation_policy.requires_strong_context else None)
         pauli_frame = (None if config.pauli_frame is None
                        else config.pauli_frame.resolve(engine))
 
@@ -218,7 +224,8 @@ class RunSpec:
             fault_model_requirement_for=config.router.fault_model_requirement_for,
             feedback_boundary_mode=config.feedback_boundary_mode,
             error_model_provider=config.error_model_provider,
-            syndrome_buffer=syndrome_buffer, pauli_frame=pauli_frame,
+            syndrome_buffer=syndrome_buffer,
+            syndrome_buffer_1=syndrome_buffer_1, pauli_frame=pauli_frame,
             retain_strong_context=escalation_policy.requires_strong_context,
             double_window=escalation_policy.double_window,
             capture_enabled=config.capture_switching_windows,
@@ -237,8 +244,11 @@ class RunSpec:
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager,
                 syndrome_buffer=syndrome_buffer,
+                syndrome_buffer_1=syndrome_buffer_1,
                 policy=config.syndrome_ingress_policy,
                 detector_formation=config.device))
+        if config.make_syndrome_ingress and syndrome_buffer_1 is not None:
+            syndrome_ingress.syndrome_buffer_1 = syndrome_buffer_1
         decoder_memory_transfer = (
             config.make_decoder_memory_transfer(engine, links, config.buffering)
             if config.make_decoder_memory_transfer else None)
@@ -332,13 +342,16 @@ class RunSpec:
         check_ingress_settled = getattr(syndrome_ingress, "check_work_settled", None)
         if callable(check_ingress_settled):
             check_ingress_settled()
+        if syndrome_buffer_1 is not None:
+            syndrome_buffer_1.check_settled()
         result = capture_primary_result(
             engine, execution_runtime, window_manager, config.all_operations,
             metric_bindings, links, config.device)
         return CompletedRun(
             result, engine, window_manager, decoder_manager, execution_runtime,
             controller, qpu, conditional_release, factory,
-            syndrome_buffer, syndrome_ingress, pauli_frame=pauli_frame)
+            syndrome_buffer, syndrome_ingress, pauli_frame=pauli_frame,
+            syndrome_buffer_1=syndrome_buffer_1)
 
 
 def _metric_bindings(metrics):

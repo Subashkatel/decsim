@@ -116,6 +116,7 @@ class SyndromeIngress:
         log_syndromes: bool = True, *, ingress_context_capacity: Optional[int],
         window_input_receiver, feedback_memory_receiver,
         syndrome_buffer: Optional[SyndromeBuffer] = None,
+        syndrome_buffer_1=None,
         policy: SyndromeIngressPolicy = SyndromeIngressPolicy(),
         detector_formation=None,
     ):
@@ -134,6 +135,7 @@ class SyndromeIngress:
         if syndrome_buffer is None:
             syndrome_buffer = SyndromeBuffer(capacity=ingress_context_capacity)
         self.syndrome_buffer = syndrome_buffer
+        self.syndrome_buffer_1 = syndrome_buffer_1
         self._contexts: dict[tuple, _IngressContext] = {}
         self._route_queues = {kind: [] for kind in SyndromePacketRouteKind}
         self._next_route_index = 0
@@ -251,6 +253,12 @@ class SyndromeIngress:
         packet = self.syndrome_buffer.finish_packing(context.round_key,
                                                      publication_tick=publication_tick,
                                                      form=form)
+        if self.syndrome_buffer_1 is not None:
+            # the dual write: the same packed round leaves for the room-side
+            # store in parallel with its Buffer 0 publication
+            self.syndrome_buffer_1.write(
+                packet, packet_bits=context.packet_bits,
+                attribution=self._packet_attribution(packet))
         context.packet = packet
         context.state = _IngressSlotState.PACKED_WAIT
         if self.policy.queue_admission is ReassemblyQueueAdmission.ON_COMPLETION:

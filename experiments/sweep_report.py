@@ -11,6 +11,7 @@ import csv
 import math
 import statistics
 from pathlib import Path
+from typing import Optional
 
 from experiments.measure_shot import POINTS, ShotMeasurement
 
@@ -156,8 +157,50 @@ def terminal_lines(rows: list) -> list:
     return "\n\n".join(blocks).split("\n")
 
 
-def write_report(rows: list, report_dir: Path) -> None:
-    """sweep.csv (every column) and sweep.md (the table)."""
+def link_rows(measurements: list) -> list:
+    """One row per sweep point per link: the ledger counters averaged over
+    the point's shots, plus bits per round. Totals come straight off each
+    run's TrafficCounters; nothing here re-counts transfers."""
+    rows = []
+    sweep_points = sorted({sweep_point_of(m) for m in measurements},
+                          key=lambda point: (point[0], str(point[1]), -point[2]))
+    for sweep_point in sweep_points:
+        group = [m for m in measurements if sweep_point_of(m) == sweep_point]
+        physical_error_probability, algorithm_latency_us, round_period_us = sweep_point
+        for path in sorted(group[0].link_totals):
+            per_shot = [m.link_totals[path] for m in group]
+            transfers = statistics.fmean(shot["transfers"] for shot in per_shot)
+            payload_bits = statistics.fmean(shot["payload_bits"] for shot in per_shot)
+            rows.append({
+                "physical_error_probability": physical_error_probability,
+                "algorithm_latency_us": algorithm_latency_us,
+                "round_period_us": round_period_us,
+                "link": path,
+                "transfers_per_shot": transfers,
+                "payload_bits_per_shot": payload_bits,
+                "bits_per_transfer": (payload_bits / transfers) if transfers else 0.0,
+                "unknown_payload_transfers_per_shot": statistics.fmean(
+                    shot["unknown_payload_transfers"] for shot in per_shot),
+                "queue_wait_us_per_shot": statistics.fmean(
+                    shot["queue_wait_us"] for shot in per_shot),
+                "serialization_us_per_shot": statistics.fmean(
+                    shot["serialization_us"] for shot in per_shot),
+                "propagation_us_per_shot": statistics.fmean(
+                    shot["propagation_us"] for shot in per_shot),
+            })
+    return rows
+
+
+def write_report(rows: list, report_dir: Path,
+                 measurements: Optional[list] = None) -> None:
+    """sweep.csv (every column), sweep.md (the table), and links.csv (the
+    per-link ledger totals) when the measurements are given."""
     report_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, report_dir / "sweep.csv")
     (report_dir / "sweep.md").write_text("\n".join(table_lines(rows)) + "\n")
+    if measurements:
+        per_link = link_rows(measurements)
+        with open(report_dir / "links.csv", "w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(per_link[0]))
+            writer.writeheader()
+            writer.writerows(per_link)

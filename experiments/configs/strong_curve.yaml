@@ -1,0 +1,11 @@
+# The strong tier's curves: real belief-matching on every window across the
+# same physical-error sweep as weak_curve, for side-by-side LER and latency.
+extends: strong_only.yaml
+
+sweep:
+  - physical_error_probability: [0.001, 0.002, 0.004, 0.006, 0.008, 0.01]
+    round_period_us: [1.0]
+    algorithm_latency_us: [belief_matching]
+    shots: 50
+
+trace: off

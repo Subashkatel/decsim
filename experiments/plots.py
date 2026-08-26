@@ -237,10 +237,50 @@ def ler_plot(rows: list, path: Path) -> None:
     plt.close(figure)
 
 
+# ---- the latency curve -----------------------------------------------------
+
+def latency_plot(rows: list, path: Path) -> None:
+    """Reaction latency against physical error rate, one line per card and
+    round time that swept more than one p: the ready-to-frame-commit median
+    solid with its p99 dashed, and the algorithm-stage median dotted. Every
+    plotted value is a sweep.csv column, nothing is recomputed."""
+    import matplotlib.pyplot as plt
+    figure, axis = plt.subplots(figsize=(4.8, 3.6))
+    groups = ler_groups(rows)
+    plotted_periods = {period for _, period, _ in groups}
+    for algorithm, period, group in groups:
+        probabilities = [row["physical_error_probability"] for row in group]
+        label = (card_label(algorithm) if len(plotted_periods) == 1
+                 else f"{card_label(algorithm)}, {period:g} µs")
+        line, = axis.plot(
+            probabilities,
+            [row["buffer0_ready_to_frame_median_us"] for row in group],
+            "o-", label=f"{label} ready→frame median")
+    for algorithm, period, group in groups:
+        probabilities = [row["physical_error_probability"] for row in group]
+        axis.plot(probabilities,
+                  [row["buffer0_ready_to_frame_p99_us"] for row in group],
+                  "--", alpha=0.6)
+        axis.plot(probabilities,
+                  [row["algorithm_median_us"] for row in group],
+                  ":", alpha=0.6)
+    axis.set_xscale("log")
+    axis.set_xlabel("Physical error rate")
+    axis.set_ylabel("Latency (µs)")
+    axis.set_title("Reaction latency (median solid, p99 dashed, algorithm dotted)")
+    axis.grid(alpha=0.3, which="both")
+    axis.legend(fontsize=8)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+    plt.close(figure)
+
+
 def plots(config: ExperimentConfig, rows: list, report_dir: Path) -> None:
-    """timeline.png always; ler.png when more than one p was swept."""
+    """timeline.png always; ler.png and latency.png when more than one p
+    was swept."""
     import matplotlib
     matplotlib.use("Agg")
     timeline_plot(config, report_dir / "timeline.png")
     if len({row["physical_error_probability"] for row in rows}) > 1:
         ler_plot(rows, report_dir / "ler.png")
+        latency_plot(rows, report_dir / "latency.png")

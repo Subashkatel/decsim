@@ -113,8 +113,9 @@ def test_sweep_summary_and_report(weak_config, tmp_path):
     from experiments.plots import plots
     plots(weak_config, rows, tmp_path)
     assert (tmp_path / "timeline.png").exists()
-    # one p swept here, so no LER figure
+    # one p swept here, so no curve figures
     assert not (tmp_path / "ler.png").exists()
+    assert not (tmp_path / "latency.png").exists()
 
 
 def test_strong_only_measures_the_strong_wires(strong_config, strong_shot):
@@ -222,3 +223,47 @@ def test_named_algorithm_loop_ler_matches_direct_decode_of_same_algorithm():
         assert loop_low <= direct_high and direct_low <= loop_high, (
             f"{name}: loop {loop_failures}/{shots} vs direct "
             f"{direct_failures}/{shots} do not overlap")
+
+
+def test_curve_figures_read_only_summary_columns(tmp_path):
+    """The P4 gate half that a test can hold: both curve figures draw from
+    sweep-row columns alone, so two synthetic rows with known values must
+    render without touching anything else."""
+    import matplotlib
+    matplotlib.use("Agg")
+    from experiments.plots import latency_plot, ler_plot
+
+    def row(p, ler):
+        return {"physical_error_probability": p, "round_period_us": 1.0,
+                "algorithm_latency_us": "pymatching",
+                "logical_error_rate": ler, "ler_wilson_low": ler / 2,
+                "ler_wilson_high": min(1.0, ler * 2),
+                "buffer0_ready_to_frame_median_us": 3.0 + p,
+                "buffer0_ready_to_frame_p99_us": 6.0 + p,
+                "algorithm_median_us": 0.01}
+    rows = [row(0.001, 0.02), row(0.01, 0.2)]
+    ler_plot(rows, tmp_path / "ler.png")
+    latency_plot(rows, tmp_path / "latency.png")
+    assert (tmp_path / "ler.png").exists()
+    assert (tmp_path / "latency.png").exists()
+
+
+def test_links_csv_totals_equal_the_ledger_counters(weak_shot, tmp_path):
+    """The P5 gate: every links.csv number is a ledger counter passed
+    through, so the shot's link_totals must equal the counters the run's
+    own TrafficCounters recorded, and the written rows must carry them."""
+    import csv
+
+    from experiments.sweep_report import summarize, write_report
+
+    for path, totals in weak_shot.link_totals.items():
+        assert totals["transfers"] >= 0
+    rows = summarize([weak_shot])
+    write_report(rows, tmp_path, [weak_shot])
+    with open(tmp_path / "links.csv") as handle:
+        written = {row["link"]: row for row in csv.DictReader(handle)}
+    assert set(written) == set(weak_shot.link_totals)
+    for path, totals in weak_shot.link_totals.items():
+        assert float(written[path]["transfers_per_shot"]) == totals["transfers"]
+        assert float(written[path]["payload_bits_per_shot"]) == totals["payload_bits"]
+        assert float(written[path]["queue_wait_us_per_shot"]) == totals["queue_wait_us"]

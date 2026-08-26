@@ -56,15 +56,15 @@ each).
 | `window_interaction` | no | boundary targeting, merging and invalidation between windows |
 | `idle_policy` | yes | how an idle patch's rounds are charged: `separate_decode_jobs` (default; idle volume costs load-only decode jobs, the SWIPER/XQsim shape), `ignore` (optimistic, latency studies only), `extend_stream` |
 | `feedback_boundary_mode` | no | feedback stream boundary handling (`trailing_buffer`) |
-| `timing` | yes | `TimingConfig`: `round_us`, `t_binary_availability_us`, `t_pack_us` (`controller:` block) |
-| `round_us` | yes | round period shorthand when `timing` is not given (`round_period_us` axis) |
+| `timing` | yes | `TimingConfig`: `round_us`, `t_binary_availability_us`, `t_pack_us`; the yaml `controller:` block speaks cycles of a named clock (`t_binary_availability_cycles`, `t_pack_cycles`, `clock`) and the loader resolves them |
+| `round_us` | yes | round period shorthand when `timing` is not given (`round_period_us` axis; deliberately physical microseconds, the QPU's cadence, not a classical clock's cycles) |
 | `links` | yes | the link fabric card, in cycles of a named clock domain: `latency_cycles`, `clock` (a `clocks:` key), `bits_per_cycle` (per channel, null = unbounded), `channels` (default 1), `transfer_overhead_cycles` (`links:` block). `clocks:` maps domain name to MHz (fridge and room to start; more domains are one more entry) |
 | `device` | partly | syndrome source (yaml: `StimDevice`; Python: timing-only or syndrome-bit devices) |
 | `error_model_provider` | no | per-window decoder model source when not derived from the circuit |
 | `memory_model` | no | Buffer 0 memory technology model |
 | `syndrome_buffering` | yes | syndrome-path store capacities in rounds (`buffers.buffer_0_size`, `buffers.buffer_1_size`, `buffers.packing_workspace_size`); a full Buffer 0 refuses the next round (packing overflow policy decides, fail-stop by default), a full syndrome buffer 1 is a hard error |
 | `decoder_memory` | yes | per-unit input SRAM in rounds (`decoder.unit_buffer_size`); a unit overlaps transfer with compute only when two windows fit |
-| `pauli_frame` | yes | `PauliFrameConfig`: frame commit cost (`pauli_frame.commit_us`) |
+| `pauli_frame` | yes | `PauliFrameConfig`: frame commit cost; the yaml speaks cycles (`pauli_frame.commit_cycles`, `clock`) |
 | `syndrome_packing_policy` | no | packing overflow and queue admission policy |
 | `make_syndrome_packing` | no | factory hook replacing the packing stage |
 | `make_decoder_memory_transfer` | no | factory hook replacing the input transport |

@@ -95,6 +95,11 @@ class WindowingCard:
 
 @dataclass(frozen=True)
 class ControllerCard:
+    """Controller work per round, in cycles of a named clock domain; the
+    loader resolves the microsecond fields once, like the link cards."""
+    t_binary_availability_cycles: float
+    t_pack_cycles: float
+    clock: str
     t_binary_availability_us: float
     t_pack_us: float
 
@@ -133,7 +138,8 @@ class ExperimentConfig:
                                     # extend_stream: how an idle patch's
                                     # rounds are charged (inert while the
                                     # workload is a single always-busy op)
-    pauli_frame_commit_us: float
+    pauli_frame_commit_us: float    # resolved from pauli_frame.commit_cycles
+                                    # on its named clock
     config_files: tuple             # the yaml files this config was read
                                     # from, nearest first (an extends chain)
 
@@ -171,6 +177,38 @@ def _link_card(card: Optional[dict], clocks: dict, path: str) -> Optional[LinkCa
                      else bits_per_cycle * channels * megahertz),
         transfer_overhead_us=(None if overhead_cycles is None
                               else overhead_cycles / megahertz))
+
+
+def _controller_card(card: dict, clocks: dict) -> ControllerCard:
+    clock = card["clock"]
+    if clock not in clocks:
+        raise ValueError(f"controller.clock names {clock!r}; "
+                         f"clocks defines {sorted(clocks)}")
+    megahertz = clocks[clock]
+    binary_cycles = card["t_binary_availability_cycles"]
+    pack_cycles = card["t_pack_cycles"]
+    for name, value in (("t_binary_availability_cycles", binary_cycles),
+                        ("t_pack_cycles", pack_cycles)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or value < 0:
+            raise ValueError(f"controller.{name} must be >= 0")
+    return ControllerCard(
+        t_binary_availability_cycles=binary_cycles,
+        t_pack_cycles=pack_cycles, clock=clock,
+        t_binary_availability_us=binary_cycles / megahertz,
+        t_pack_us=pack_cycles / megahertz)
+
+
+def _pauli_frame_commit_us(card: dict, clocks: dict) -> float:
+    clock = card["clock"]
+    if clock not in clocks:
+        raise ValueError(f"pauli_frame.clock names {clock!r}; "
+                         f"clocks defines {sorted(clocks)}")
+    commit_cycles = card["commit_cycles"]
+    if isinstance(commit_cycles, bool) \
+            or not isinstance(commit_cycles, (int, float)) or commit_cycles < 0:
+        raise ValueError("pauli_frame.commit_cycles must be >= 0")
+    return commit_cycles / clocks[clock]
 
 
 def _clocks(raw_clocks) -> dict:
@@ -253,9 +291,7 @@ def load_experiment(path) -> ExperimentConfig:
             commit_rounds=windowing["commit_rounds"],
             buffer_rounds=windowing["buffer_rounds"]),
         sweep=sweep,
-        controller=ControllerCard(
-            t_binary_availability_us=controller["t_binary_availability_us"],
-            t_pack_us=controller["t_pack_us"]),
+        controller=_controller_card(controller, clocks),
         clocks=clocks,
         links=links,
         buffers=BuffersCard(
@@ -278,5 +314,5 @@ def load_experiment(path) -> ExperimentConfig:
         trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
         idle_policy=_require(raw.get("idle_policy", "separate_decode_jobs"),
                              IDLE_POLICIES, "idle_policy"),
-        pauli_frame_commit_us=raw["pauli_frame"]["commit_us"],
+        pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"], clocks),
         config_files=config_files)

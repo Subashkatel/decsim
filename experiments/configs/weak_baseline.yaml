@@ -37,10 +37,11 @@ sweep:
     algorithm_latency_us: [0.028]
     shots: 200
 
-controller:
-  t_binary_availability_us: 0.0              # pulses to binary; zero: classification is inside the priced round
+controller:                                  # controller work per round, in fridge cycles
+  clock: fridge
+  t_binary_availability_cycles: 0            # pulses to binary; zero: classification is inside the priced round
                                              # (Google 2023 Nature 614 sec. Methods)
-  t_pack_us: 0.0                             # one fragment per round makes packing a no-op (StimDevice)
+  t_pack_cycles: 0                           # one fragment per round makes packing a no-op (StimDevice)
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains
@@ -81,4 +82,5 @@ decoder:
 
 
 pauli_frame:
-  commit_us: 0.004                           # one 250 MHz cycle to XOR the correction into the frame (XQsim PFU)
+  clock: fridge
+  commit_cycles: 1                           # one cycle to XOR the correction into the frame (XQsim PFU)

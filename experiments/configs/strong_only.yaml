@@ -29,8 +29,9 @@ sweep:
     shots: 200
 
 controller:
-  t_binary_availability_us: 0.0
-  t_pack_us: 0.0
+  clock: fridge
+  t_binary_availability_cycles: 0
+  t_pack_cycles: 0
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains
@@ -71,4 +72,5 @@ decoder:
 
 
 pauli_frame:
-  commit_us: 0.004
+  clock: fridge
+  commit_cycles: 1

@@ -26,16 +26,20 @@ windowing:
 # axes, `shots` seeds per point (0..shots-1); a point+seed named twice runs once.
 sweep:
   - physical_error_probability: [0.001]    # p on all four Stim noise channels
-    round_period_us: [1.0]                 # input round period (QEC cycle time)
+    round_period_us: [1.0]                 # the QPU's physical round period, in us:
+                                           # a quantum-device cadence, deliberately
+                                           # not a classical clock's cycles                 # input round period (QEC cycle time)
     algorithm_latency_us: [0.028]          # a number: fixed core latency in us; or a
                                            # named real algorithm, measured wall clock
                                            # per window: pymatching | belief_matching
                                            # (wall clock of each real PyMatching call)
     shots: 2
 
-controller:
-  t_binary_availability_us: 0.0    # pulses -> binary classification cost
-  t_pack_us: 0.0                   # packet assembly cost per round
+controller:                        # controller work per round, in cycles of its
+                                   # named clock domain
+  clock: fridge
+  t_binary_availability_cycles: 0  # pulses -> binary classification cost
+  t_pack_cycles: 0                 # packet assembly cost per round
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains
@@ -92,7 +96,9 @@ decoder:
     release_cycles_per_job: 1      # correction write-out per job
 
 pauli_frame:
-  commit_us: 0.004                 # XOR of a correction into the frame register
+  clock: fridge
+  commit_cycles: 1                 # XOR of a correction into the frame register
+                                   # (one cycle, XQsim PFU)
 
 idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stream.
                                    # How an idle patch's rounds are charged; idle

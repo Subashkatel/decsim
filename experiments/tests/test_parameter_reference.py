@@ -154,6 +154,9 @@ def test_cycles_and_clock_express_the_same_delay_identically(tmp_path):
     for label, megahertz, cycles in (("slow", 250.0, 1), ("fast", 500.0, 2)):
         raw = yaml.safe_load(REFERENCE_YAML.read_text())
         raw["clocks"] = {"fridge": megahertz, "room": megahertz}
+        raw["controller"]["t_binary_availability_cycles"] *= cycles
+        raw["controller"]["t_pack_cycles"] *= cycles
+        raw["pauli_frame"]["commit_cycles"] *= cycles
         for path, card in raw["links"].items():
             if card is not None:
                 # the same physical wire at a faster clock: more cycles of

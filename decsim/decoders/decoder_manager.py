@@ -64,6 +64,7 @@ class DecoderManager:
     def __init__(self, engine, *, router, scheduler,
                  unit_pools: Optional[dict] = None, num_units: int = 1,
                  bulk_strong: bool = False,
+                 input_staging_depth: int = 0,
                  lane_policy=None, log_name: str = "DecoderCluster",
                  capture_enabled: bool = False,
                  decoder_memory_transfer=None,
@@ -83,6 +84,19 @@ class DecoderManager:
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
+        # decoupled access-execute queue depth per unit (Smith 1982; the
+        # gem5-Aladdin pipelinedDma rule set): 0 = the input transfer runs
+        # under the unit's own hold, 1 = one ping-pong staging slot whose
+        # DMA overlaps the previous compute. The hardware price of depth 1
+        # is visible: both inputs are resident in the unit's DecoderMemory.
+        if input_staging_depth not in (0, 1):
+            raise ValueError(
+                f"input_staging_depth must be 0 or 1 "
+                f"(got {input_staging_depth})")
+        self.input_staging_depth = input_staging_depth
+        self._staged: dict = {}          # (pool, unit) -> job in the slot
+        self._staged_ready: set = set()  # slot's DMA has landed
+        self._awaiting_land: set = set() # compute done, slot still in flight
         self.log_name = log_name
         self._terminal_request_records = [] if capture_enabled else None
         self._terminal_service_records = [] if capture_enabled else None
@@ -246,7 +260,24 @@ class DecoderManager:
                 self.strong.strong_cancelled += 1
             return
         job = live.service_job
-        if job.pool is None:
+        slot = None if job.unit is None else (job.pool, job.unit)
+        if slot is not None and self._staged.get(slot) is job:
+            self._staged.pop(slot)
+            self._staged_ready.discard(slot)
+            job.cancelled = True
+            self.staging.cancel(job)
+            self.staging.release(live.request_job)
+            if slot in self._awaiting_land:
+                # the compute this slot was staged behind already finished
+                self._awaiting_land.discard(slot)
+                self.pool_free[job.pool] += 1
+                self._free_units[job.pool].append(slot[1])
+            job.unit = None
+            self._record_request(
+                live.request_job, None,
+                RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
+                None)
+        elif job.pool is None:
             self.staging.cancel(job)
             for pool in self.unit_totals:
                 queue = self.queue_for(pool)
@@ -299,16 +330,46 @@ class DecoderManager:
             self._dispatching = False
 
     def _free_unit(self, job: DecodeJob) -> None:
-        """Return the job's unit to its pool."""
-        self.pool_free[job.pool] += 1
-        self._free_units[job.pool].append(job.unit)
+        """Return the job's unit to its pool, or hand it to its staged
+        successor (the ping-pong swap at compute end)."""
+        pool, unit = job.pool, job.unit
         job.unit = None
+        slot = (pool, unit)
+        staged = self._staged.get(slot)
+        if staged is None:
+            self.pool_free[pool] += 1
+            self._free_units[pool].append(unit)
+            return
+        if slot in self._staged_ready:
+            self._staged_ready.discard(slot)
+            self._staged.pop(slot)
+            self._begin_service(staged)
+        else:
+            self._awaiting_land.add(slot)     # begins at its DMA landing
 
     def _dispatch_pool(self, pool: str) -> None:
         queue = self.queue_for(pool)
-        while self.pool_free[pool] > 0 and queue:
+        while queue:
+            if self.pool_free[pool] > 0:
+                job = self._next_job(pool, queue)
+                self._start_job(pool, job)
+                continue
+            unit = self._unit_with_free_staging(pool)
+            if unit is None:
+                return
             job = self._next_job(pool, queue)
-            self._start_job(pool, job)
+            self._start_job(pool, job, staging_unit=unit)
+
+    def _unit_with_free_staging(self, pool: str) -> Optional[int]:
+        """The lowest-numbered busy unit whose staging slot is empty."""
+        if self.input_staging_depth == 0:
+            return None
+        free = set(self._free_units[pool])
+        for unit in range(self.unit_totals[pool]):
+            if unit in free or (pool, unit) in self._staged:
+                continue
+            return unit
+        return None
 
     def _next_job(self, pool: str, queue: list) -> DecodeJob:
         if self.bulk_strong and pool != "default":
@@ -348,7 +409,8 @@ class DecoderManager:
         self.strong.register_batch(window_keys, jobs, batch)
         return batch
 
-    def _start_job(self, pool: str, job: DecodeJob) -> None:
+    def _start_job(self, pool: str, job: DecodeJob,
+                   staging_unit: Optional[int] = None) -> None:
         job.pool = pool
         members = job.service_original_request_keys
         if not members and job.request_key is not None:
@@ -361,14 +423,21 @@ class DecoderManager:
             for member in self.strong.members_of(job):
                 member.service_key = job.service_key
                 member.service_dispatch_ticks = self.engine.now
-        self.pool_free[pool] -= 1
-        job.unit = self._free_units[pool].pop(0)
+        if staging_unit is None:
+            self.pool_free[pool] -= 1
+            job.unit = self._free_units[pool].pop(0)
+        else:
+            # ping-pong: the unit is assigned at DMA start; its compute
+            # slot stays on the previous job while this input crosses
+            job.unit = staging_unit
+            self._staged[(pool, staging_unit)] = job
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
         waited_ticks = self.engine.now - job.ready_time
+        slot_note = "" if staging_unit is None else "staged, "
         self.engine.log(self.log_name,
                         f"ASSIGN UNIT {job.label} "
-                        f"(waited {fmt(waited_ticks).strip()} in queue, "
+                        f"({slot_note}waited {fmt(waited_ticks).strip()} in queue, "
                         f"{self.pool_tag(pool)}units free now "
                         f"{self.pool_free[pool]})")
         self.queue_log.append((self.engine.now, self.queued_total()))
@@ -379,11 +448,21 @@ class DecoderManager:
         members = members or [job]
         pending = {"count": len(members)}
         memory = self.decoder_memories[(pool, job.unit)]
+        slot = None if staging_unit is None else (pool, staging_unit)
 
         def landed(_member: DecodeJob) -> None:
             pending["count"] -= 1
-            if pending["count"] == 0:
+            if pending["count"] > 0:
+                return
+            if slot is None or self._staged.get(slot) is not job:
                 self._begin_service(job)
+            elif slot in self._awaiting_land:
+                # the previous compute already finished; promote now
+                self._awaiting_land.discard(slot)
+                self._staged.pop(slot)
+                self._begin_service(job)
+            else:
+                self._staged_ready.add(slot)
 
         for member in members:
             self.staging.stage(member, memory, landed)

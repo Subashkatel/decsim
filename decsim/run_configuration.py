@@ -48,6 +48,7 @@ class ResolvedRunConfiguration:
     capture_switching_windows: bool
     unit_pools: Optional[dict]
     num_units: int
+    input_staging_depth: int
     lane_policy: Any
     memory_model: Any
     decoder_memory: Any
@@ -166,6 +167,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         timing=spec.timing, feedback_boundary_mode=spec.feedback_boundary_mode,
         capture_switching_windows=spec.record_switching_windows,
         unit_pools=spec.unit_pools,
+        input_staging_depth=spec.input_staging_depth,
         num_units=spec.num_units if spec.num_units is not None else 1,
         lane_policy=spec.lane_policy, memory_model=spec.memory_model,
         decoder_memory=spec.decoder_memory, pauli_frame=spec.pauli_frame,

@@ -1102,18 +1102,31 @@ def test_with_transfer_overhead_helper_covers_the_dma_paths():
     assert card.cwd.transfer_overhead.overhead_ticks == us(0.4)
 
 
-def test_yaml_card_key_reaches_the_edge():
-    from experiments.baseline.baseline_closed_loop import link_cards
-    config = {"links": {
-        "qc": {"latency_us": 1.0, "bits_per_us": None},
-        "c2b": {"latency_us": 0.5, "bits_per_us": 100000.0},
-        "cwd": {"latency_us": 1.0, "bits_per_us": None,
-                "transfer_overhead_us": 0.4},
-        "dd": {"latency_us": 0.5, "bits_per_us": None},
-        "wdo": {"latency_us": 1.0, "bits_per_us": None},
-        "oc": None, "cq": None, "wsd": None, "csd": None,
-    }}
-    card = link_cards(config)
+def test_yaml_card_key_reaches_the_edge(tmp_path):
+    from experiments.build_run import link_model
+    from experiments.experiment_config import load_experiment
+    yaml_text = (
+        "mode: weak_baseline\n"
+        "code_task: surface_code:rotated_memory_z\n"
+        "distance: 3\n"
+        "rounds_per_shot: 15\n"
+        "windowing: {scheme: sliding, commit_rounds: null, buffer_rounds: null}\n"
+        "sweep: [{physical_error_probability: [0.001], round_period_us: [1.0],\n"
+        "         algorithm_latency_us: [0.028], shots: 1}]\n"
+        "controller: {t_binary_availability_us: 0.0, t_pack_us: 0.0}\n"
+        "links:\n"
+        "  qc:  {latency_us: 1.0, bits_per_us: null}\n"
+        "  c2b: {latency_us: 0.5, bits_per_us: 100000.0}\n"
+        "  cwd: {latency_us: 1.0, bits_per_us: null, transfer_overhead_us: 0.4}\n"
+        "  dd:  {latency_us: 0.5, bits_per_us: null}\n"
+        "  wdo: {latency_us: 1.0, bits_per_us: null}\n"
+        "decoder:\n"
+        "  units: 1\n"
+        "  engine: {frequency_mhz: 250.0, fetch_cycles_per_round: 1, release_cycles_per_job: 1}\n"
+        "decoder_memory_rounds: null\n"
+        "pauli_frame: {commit_us: 0.004}\n")
+    (tmp_path / "overhead_card.yaml").write_text(yaml_text)
+    card = link_model(load_experiment(tmp_path / "overhead_card.yaml"))
     assert card.cwd.transfer_overhead is not None
     assert card.cwd.transfer_overhead.overhead_ticks == us(0.4)
     assert card.dd.transfer_overhead is None

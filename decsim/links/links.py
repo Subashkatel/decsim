@@ -4,7 +4,7 @@
 components on the reaction path:
 
 - ``QC``  QPU -> controller: syndrome readout leaving the QPU (t_qc).
-- ``C2B`` controller -> syndrome buffer 0: a completed binary round published
+- ``CWB`` controller -> syndrome buffer 0: a completed binary round published
   to the window-input route; optional, a card without it publishes for free.
 - ``CWD`` controller -> weak decoder: syndrome data reaching the weak tier,
   either as one round (``syndrome_packing``) or as one weak window
@@ -236,7 +236,7 @@ class LinkPath(str, Enum):
     """The measured reaction-path segments; see the module docstring."""
 
     QC = "qc"
-    C2B = "c2b"
+    CWB = "cwb"
     CWD = "cwd"
     WSD = "wsd"
     CSD = "csd"
@@ -279,7 +279,7 @@ class LinkPathRule:
 
 _PATH_RULES = MappingProxyType({
     LinkPath.QC: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, True),
-    LinkPath.C2B: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, False),
+    LinkPath.CWB: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, False),
     LinkPath.CWD: LinkPathRule(LinkAttributionScope.ROUND_OR_WINDOW,
                                LinkRelationRule.REQUEST_WHEN_WINDOWED, True),
     LinkPath.WSD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
@@ -473,7 +473,7 @@ class Link:
 @dataclass(frozen=True)
 class LinkModelConfig:
     """A fabric card: one edge per path plus a profile name. The nine original
-    paths are required; ``c2b`` and ``csb`` are optional."""
+    paths are required; ``cwb`` and ``csb`` are optional."""
 
     qc: LinkEdgeConfig
     cwd: LinkEdgeConfig
@@ -486,7 +486,7 @@ class LinkModelConfig:
     cq: LinkEdgeConfig
     profile_name: str
     qc_excludes_controller_processing: bool = False
-    c2b: Optional[LinkEdgeConfig] = None
+    cwb: Optional[LinkEdgeConfig] = None
     csb: Optional[LinkEdgeConfig] = None
 
     def wired_paths(self) -> tuple:

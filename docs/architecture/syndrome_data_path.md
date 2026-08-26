@@ -18,7 +18,7 @@ Controller --command--> QPUDevice --QPUReadout (raw measurement packet)--> Contr
            -> DecoderManager ready queue -> decoder
 ```
 
-The QPU emits raw measurement bits, one packet per round, and both QC and C2B
+The QPU emits raw measurement bits, one packet per round, and both QC and CWB
 carry those bits (Khalid et al. Table II prices t_qc at one bit per measured
 qubit; Google's real-time decoder converts measurements into detections on the
 decoder host, arXiv:2408.13687 Sec. V). Detection events exist only from Buffer 0

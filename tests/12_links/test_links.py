@@ -40,11 +40,11 @@ from decsim.links.link_traffic_report import topology_json_value, traffic_json_v
 
 OPERATION_ID = ("experiment", 7)
 PATCH_IDS = (1, 2)
-PATH_ORDER = ["qc", "c2b", "cwd", "wsd", "csd", "wdo", "dd", "do", "oc", "cq",
+PATH_ORDER = ["qc", "cwb", "cwd", "wsd", "csd", "wdo", "dd", "do", "oc", "cq",
               "csb"]
-# A shipped profile wires the nine required paths; C2B and csb are
+# A shipped profile wires the nine required paths; CWB and csb are
 # optional and unset.
-REQUIRED_PATH_ORDER = [p for p in PATH_ORDER if p not in ("c2b", "csb")]
+REQUIRED_PATH_ORDER = [p for p in PATH_ORDER if p not in ("cwb", "csb")]
 
 
 def make_channel(*, capacity=None, propagation_ticks=7, source="test channel"):
@@ -84,7 +84,7 @@ def request_relation(*, tier, operation_id=OPERATION_ID, window_id=3, sequence=0
 
 
 def valid_attribution(path):
-    if path in (LinkPath.QC, LinkPath.C2B, LinkPath.CSB):
+    if path in (LinkPath.QC, LinkPath.CWB, LinkPath.CSB):
         return TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, 2)
     if path is LinkPath.CWD:
         relation = request_relation(tier=DecoderTier.WEAK)
@@ -1116,7 +1116,7 @@ def test_yaml_card_key_reaches_the_edge(tmp_path):
         "controller: {t_binary_availability_us: 0.0, t_pack_us: 0.0}\n"
         "links:\n"
         "  qc:  {latency_us: 1.0, bits_per_us: null}\n"
-        "  c2b: {latency_us: 0.5, bits_per_us: 100000.0}\n"
+        "  cwb: {latency_us: 0.5, bits_per_us: 100000.0}\n"
         "  cwd: {latency_us: 1.0, bits_per_us: null, transfer_overhead_us: 0.4}\n"
         "  dd:  {latency_us: 0.5, bits_per_us: null}\n"
         "  wdo: {latency_us: 1.0, bits_per_us: null}\n"

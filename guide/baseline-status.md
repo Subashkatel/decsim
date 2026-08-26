@@ -40,7 +40,7 @@ Status vocabulary:
   (`experiments/results/baseline_closed_loop/sweep.md`); `experiments/baseline/baseline_anchor.py`
   reproduces PyMatching v2's published microseconds per shot on this host and
   checks the windowed loop's logical error rate against whole-circuit PyMatching
-  (`anchor.md`). The controller-to-Buffer-0 hop is a priced optional link (C2B).
+  (`anchor.md`). The controller-to-Buffer-0 hop is a priced optional link (CWB).
   Finding: with the reference link cards the serial sliding-window chain (CWD
   2 us + decode + DD 0.5 us per window), not the ASIC decoder, bounds throughput:
   1.16 rounds/us sustained at d=3, knee near a 0.86 us round period (after Q-063).
@@ -114,10 +114,10 @@ Status vocabulary:
   three parts against outside models fed the same inputs a decsim run saw,
   read from outside the core (the seams wrapped, no core change). Syndrome
   ingress: reassembly completes on the last fragment (RFC 815 hole list),
-  packing is a fixed SimPy service, C2B and CWD are ns-3 FIFO channels;
+  packing is a fixed SimPy service, CWB and CWD are ns-3 FIFO channels;
   every round's packing and Buffer 0 publication tick and every
   feedback-memory delivery agree on the QLX program, a two-fragment stream
-  with t_pack, Stim memory with a priced C2B hop, and feedback chains that
+  with t_pack, Stim memory with a priced CWB hop, and feedback chains that
   carry both routes. Feedback streams: a SimPy periodic process per
   protected region (boundaries at start + k cadence, one round each, seal
   on the end operation's boundary, held operations start on boundaries)
@@ -182,11 +182,11 @@ Status vocabulary:
     `buffer0_ready_to_frame` and `buffer0_first_round_to_frame`; new
     QPU-origin points `qpu_last_round_to_frame` and `qpu_first_round_to_frame`
     start at the round's QC send, so they add QC + controller processing +
-    packing + C2B (0.258 us at the reference cards).
-  - `c2b.bits_per_us: null` now honors the yaml contract (unbounded
+    packing + CWB (0.258 us at the reference cards).
+  - `cwb.bits_per_us: null` now honors the yaml contract (unbounded
     bandwidth, propagation only): `with_controller_to_buffer_edge` builds no
     capacity when the rate is null; two contract tests added in
-    `tests/12_links/test_c2b_q062.py` (finite serialization, unbounded).
+    `tests/12_links/test_cwb_q062.py` (finite serialization, unbounded).
   - Sweep knee points 0.9, 0.85, 0.8 us added between 1.0 and 0.5 us
     (the 0.028 card's load = 1 sits near a 0.85 us round period).
   - Sampled detection events are now a public read-only API,
@@ -347,7 +347,7 @@ These are existence checks only. They do not promote pending modules to DONE.
 | `decsim/decoder_manager.py` | `45954f75197e1f1939a055cb116c9f605883276b73d99272c24f326070808dea` |
 | `decsim/schedulers.py` | `1f44978718a8c7303f7089035c2fd1a728c491cfd181a940dc290c147f1acb81` |
 | `decsim/decoder_memory_transfer.py` | `171760e1c268b23ffe6e8f6e45e8c33bc091d34d6671f5e4bb4cdacbc1ad2f2c` |
-| `decsim/decoders.py` | `63c2b7522aa65d977c5baac90d60450fcbb7e6ee38bb670a428cb56d71931cf8` |
+| `decsim/decoders.py` | `63cwb7522aa65d977c5baac90d60450fcbb7e6ee38bb670a428cb56d71931cf8` |
 | `decsim/decoder_engine.py` | `f465f213274503c9df4e5a19eb6d5800ad112161bf3e1518d393225d5aa10e15` |
 | `decsim/views.py` | `09d776107fd0681e38ea49cd3fb6364ba2fc41c7108799793fc7aec890f6fe85` |
 | `decsim/metrics.py` | `181ecb1a6e3d8e5fce1f583d60bd6963d78d7d17b408e3a0a63c5934728d9b03` |

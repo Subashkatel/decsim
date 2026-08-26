@@ -1247,13 +1247,17 @@ class StrongEscalation:
                 )
                 restart_exclusions = left_exclusions
 
-        required_reads = [
+        context_reads = [
             (weak_window.op_id, round_index)
             for round_index in range(plan.context_lo, plan.context_hi + 1)
         ]
-        required_reads.extend(restart_reads)
+        # the slab context lives in syndrome buffer 1; the restart window's
+        # weak reads stay retained in Buffer 0 by its own window hold
         self.wm._require_retained_payloads(
-            required_reads, f"strong-region plan for {key}")
+            context_reads, f"strong-region plan for {key}",
+            self.wm.syndrome_buffer_1)
+        self.wm._require_retained_payloads(
+            list(restart_reads), f"strong-region plan for {key}")
         return _ResolvedStrongRegion(
             plan=plan,
             absorbed_window_keys=absorbed,

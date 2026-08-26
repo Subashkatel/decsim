@@ -1,0 +1,68 @@
+# The reference config: every key the yaml layer reads, in one runnable file.
+# Copy it, delete the comments you don't need, and you have a new experiment.
+# Values here are the defaults the two shipped configs share; the tiny sweep
+# makes this file cheap to run, so the test suite runs it as a smoke check.
+#
+# Kept honest by experiments/tests/test_parameter_reference.py: the test
+# fails if this file and the loader (experiment_config.py) drift apart.
+# Knobs the yaml cannot reach (Python objects: multi-op workloads, dynamic
+# streams, routers, escalation families, schedulers, devices, policies) are
+# tabled in guide/parameter-reference.md.
+
+mode: weak_baseline                # decode path: weak_baseline | strong_only.
+                                   # strong_only wakes windows from syndrome
+                                   # buffer 1, moves inputs on csd, results on do
+
+code_task: surface_code:rotated_memory_z   # stim generator task (real detector data)
+distance: 3                        # code distance d
+rounds_per_shot: 15                # QEC rounds per shot
+
+windowing:
+  scheme: sliding                  # sliding | parallel | sandwich | naive_online
+  commit_rounds: null              # rounds committed per window; null = d
+  buffer_rounds: null              # look-ahead rounds per window; null = d
+
+# The sweep: a list of blocks; each block is the cross product of its three
+# axes, `shots` seeds per point (0..shots-1); a point+seed named twice runs once.
+sweep:
+  - physical_error_probability: [0.001]    # p on all four Stim noise channels
+    round_period_us: [1.0]                 # input round period (QEC cycle time)
+    algorithm_latency_us: [0.028]          # fixed core latency in us, or "measured"
+                                           # (wall clock of each real PyMatching call)
+    shots: 2
+
+controller:
+  t_binary_availability_us: 0.0    # pulses -> binary classification cost
+  t_pack_us: 0.0                   # packet assembly cost per round
+
+links:                             # one card per path; null = the logical_reference
+                                   # card's numbers for that path. Each card:
+                                   #   latency_us: propagation latency
+                                   #   bits_per_us: capacity (null = unbounded)
+                                   #   transfer_overhead_us: optional fixed per-transfer
+                                   #     DMA setup (engine-side, setups serialize)
+  qc:  {latency_us: 1.0, bits_per_us: null}      # QPU -> controller, one readout
+  c2b: {latency_us: 0.5, bits_per_us: 100000.0}  # controller -> Buffer 0, one round
+  copy_out: null                   # packing -> syndrome buffer 1, one round
+  cwd: {latency_us: 1.0, bits_per_us: null}      # Buffer 0 -> weak decoder, one window
+  wsd: null                        # weak -> strong escalation decision
+  csd: null                        # syndrome buffer 1 -> strong decoder, one window
+  dd:  {latency_us: 0.5, bits_per_us: null}      # decoder -> decoder boundary handoff
+  wdo: {latency_us: 1.0, bits_per_us: null}      # weak decoder -> Pauli frame
+  do:  null                        # strong decoder -> Pauli frame
+  oc:  null                        # Pauli frame -> controller, a release
+  cq:  null                        # controller -> QPU, an instruction
+
+decoder:
+  units: 1                         # decoder units in the default pool
+  engine:
+    frequency_mhz: 250.0           # engine clock for the cycle-priced stages
+    fetch_cycles_per_round: 1      # read one round out of decoder memory
+    release_cycles_per_job: 1      # correction write-out per job
+decoder_memory_rounds: null        # input SRAM rounds PER UNIT; null = unbounded.
+                                   # Each unit holds two windows when they fit
+                                   # (transfer overlaps compute); a unit sized
+                                   # for one window falls back to serial residency
+
+pauli_frame:
+  commit_us: 0.004                 # XOR of a correction into the frame register

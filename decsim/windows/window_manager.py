@@ -448,6 +448,11 @@ class WindowManager:
         self.check_windows_for_operation(op.id)
         for predecessor_id in op.decoder_boundary_predecessors:
             self.check_windows_for_operation(predecessor_id)
+        # a round whose every consumer already resolved (an absorbed window's
+        # tail) frees its Buffer 0 slot on arrival, the same drop-on-arrival
+        # rule syndrome buffer 1 applies
+        self.syndrome_buffer.release_round_if_unheld(
+            (packet.operation_id, packet.round_index))
 
     def accept_window_input(self, packet: SyndromeRoundPacket) -> bool:
         """Publish one already-retained upstream round to window readiness.

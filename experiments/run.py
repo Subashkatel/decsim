@@ -14,7 +14,7 @@ from pathlib import Path
 
 from experiments.experiment_config import ExperimentConfig, load_experiment
 from experiments.measure_shot import measure_shot
-from experiments.sweep_report import summarize, write_report
+from experiments.sweep_report import summarize, terminal_lines, write_report
 
 CONFIGS_DIR = Path(__file__).parent / "configs"
 
@@ -44,16 +44,16 @@ def run_sweep(config: ExperimentConfig) -> list:
     return list(measurements.values())
 
 
-def run_experiment(config_path) -> Path:
+def run_experiment(config_path) -> tuple:
     """One full experiment: sweep, summary, report, figures. Returns the
-    results folder."""
+    results folder and the summary rows."""
     config = load_experiment(config_path)
     rows = summarize(run_sweep(config))
     results_dir = config.results_dir
     write_report(rows, results_dir)
     from experiments.plots import plots
     plots(config, rows, results_dir)
-    return results_dir
+    return results_dir, rows
 
 
 def main(argv) -> None:
@@ -62,8 +62,9 @@ def main(argv) -> None:
         print("usage: python -m experiments.run configs/<name>.yaml\n"
               f"configs: {', '.join(names)}", file=sys.stderr)
         raise SystemExit(2)
-    results_dir = run_experiment(argv[1])
-    print((results_dir / "sweep.md").read_text())
+    results_dir, rows = run_experiment(argv[1])
+    print("\n".join(terminal_lines(rows)))
+    print(f"\nfull table: {results_dir}/sweep.md   every column: sweep.csv")
 
 
 if __name__ == "__main__":

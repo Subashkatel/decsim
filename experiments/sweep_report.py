@@ -125,6 +125,40 @@ def table_lines(rows: list) -> list:
     return lines
 
 
+def terminal_lines(rows: list) -> list:
+    """The at-a-glance table for the terminal: the health and headline
+    columns only, aligned. The full record is sweep.csv and sweep.md."""
+    head = ["p", "algo us", "round us", "load", "fails/shots", "mismatch",
+            "rounds/us", "util", "queue us", "service us", "ready->frame us",
+            "p99 us"]
+    body = []
+    for row in rows:
+        algorithm = row["algorithm_latency_us"]
+        body.append([
+            f"{row['physical_error_probability']:g}",
+            algorithm if isinstance(algorithm, str) else f"{algorithm:g}",
+            f"{row['round_period_us']:g}",
+            f"{row['load']:.2f}",
+            f"{row['logical_failures']}/{row['shots']}",
+            f"{row['prediction_mismatches_vs_direct']}",
+            f"{row['throughput_rounds_per_us']:.3f}",
+            f"{row['decoder_utilization']:.3f}",
+            f"{row['queue_wait_mean_us']:.3f}",
+            f"{row['service_mean_us']:.3f}",
+            f"{row['buffer0_ready_to_frame_median_us']:.3f}",
+            f"{row['buffer0_ready_to_frame_p99_us']:.3f}"])
+    widths = []
+    for column_index, title in enumerate(head):
+        cell_widths = [len(cells[column_index]) for cells in body]
+        widths.append(max([len(title)] + cell_widths))
+
+    def aligned(cells):
+        return "  ".join(cell.rjust(width) for cell, width in zip(cells, widths))
+
+    rule = "  ".join("-" * width for width in widths)
+    return [aligned(head), rule] + [aligned(cells) for cells in body]
+
+
 def write_report(rows: list, report_dir: Path) -> None:
     """sweep.csv (every column) and sweep.md (the table)."""
     report_dir.mkdir(parents=True, exist_ok=True)

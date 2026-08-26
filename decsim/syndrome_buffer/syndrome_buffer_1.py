@@ -1,7 +1,7 @@
 """Syndrome buffer 1: the room-side round store that feeds the strong tier.
 
 Every packed round is written out of the fridge exactly once over the
-copy-out hop (priced when the card wires ``LinkPath.COPY_OUT``, free
+csb hop (priced when the card wires ``LinkPath.CSB``, free
 otherwise) and stored here in parallel with its Buffer 0 publication.
 Strong jobs point into this store and their CSD input is assembled from it,
 so the two-sided strong context lives at room temperature and Buffer 0
@@ -23,7 +23,7 @@ from .syndrome_buffer import SyndromeBuffer
 
 
 class SyndromeBuffer1:
-    """Own the copy-out crossing and the room-side retention of every round."""
+    """Own the csb crossing and the room-side retention of every round."""
 
     def __init__(
         self, engine, links, *, capacity_rounds: Optional[int] = None,
@@ -47,7 +47,7 @@ class SyndromeBuffer1:
 
     def write(self, packet: SyndromeRoundPacket, *, packet_bits: Optional[int],
               attribution: TrafficAttribution) -> None:
-        """The dual write: one copy-out crossing, then the round is stored.
+        """The dual write: one csb crossing, then the round is stored.
 
         Capacity is checked before the link reservation, counting writes
         still in flight, so a refused write leaves no trace on the
@@ -66,13 +66,13 @@ class SyndromeBuffer1:
                     f"{occupied + self._in_flight_writes + 1} rounds exceed "
                     f"{self.capacity_rounds}")
         self._written.add(identity)
-        copy_out_is_priced = LinkPath.COPY_OUT in self.links.paths
-        if not copy_out_is_priced:
+        csb_is_priced = LinkPath.CSB in self.links.paths
+        if not csb_is_priced:
             self.copied_bits_total += packet_bits or 0
             self._store(packet)
             return
         reservation = self.links.reserve(
-            LinkPath.COPY_OUT, payload_bits=packet_bits,
+            LinkPath.CSB, payload_bits=packet_bits,
             now_ticks=self.engine.now, attribution=attribution)
         self.copied_bits_total += reservation.payload_bits or 0
         delay_ticks = reservation.total_delay_ticks
@@ -86,7 +86,7 @@ class SyndromeBuffer1:
             self._store(packet)
 
         self.engine.schedule(delay_ticks, land,
-                             label="copy-out -> syndrome buffer 1")
+                             label="csb -> syndrome buffer 1")
 
     def _store(self, packet: SyndromeRoundPacket) -> None:
         admission = self.store.accept_packed_round(
@@ -95,7 +95,7 @@ class SyndromeBuffer1:
             raise RuntimeError(
                 f"syndrome buffer 1 refused round "
                 f"{(packet.operation_id, packet.round_index)!r} at landing")
-        # a round whose every reader resolved while it crossed the copy-out
+        # a round whose every reader resolved while it crossed the csb
         # is dropped at the door: nobody can ever read it
         self.store.release_round_if_unheld(admission.round_identity)
         operation_id = packet.operation_id
@@ -104,7 +104,7 @@ class SyndromeBuffer1:
         self.engine.log_io(
             "SyndromeBuffer1",
             lambda: f"received round {packet.round_index} of op {operation_id} "
-                    f"from copy-out; holds "
+                    f"from csb; holds "
                     f"{self.store.held_rounds_description()}")
         if self.on_round_stored is not None:
             self.on_round_stored(operation_id)
@@ -180,7 +180,7 @@ class SyndromeBuffer1:
         if self._in_flight_writes:
             raise RuntimeError(
                 f"syndrome buffer 1 ended with {self._in_flight_writes} "
-                f"copy-out writes in flight")
+                f"csb writes in flight")
         snapshot = self.store.snapshot()
         if snapshot.occupancy:
             raise RuntimeError(

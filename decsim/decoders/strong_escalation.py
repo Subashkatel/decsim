@@ -507,7 +507,7 @@ class StrongEscalation:
             if wsd_arrival_ticks is not None:
                 arrival = max(arrival, wsd_arrival_ticks)
             # the DMA cannot start before its last context round landed in
-            # syndrome buffer 1 (a no-op whenever the copy-out margin holds)
+            # syndrome buffer 1 (a no-op whenever the csb margin holds)
             arrival = max(arrival, sb1.ready_tick(context_identities))
             return arrival - self.wm.engine.now
 
@@ -601,7 +601,7 @@ class StrongEscalation:
         if missing:
             raise RuntimeError(
                 f"strong context for {key} arrived at Buffer 0 but is not "
-                f"stored in syndrome buffer 1: {missing} (copy-out lag "
+                f"stored in syndrome buffer 1: {missing} (csb lag "
                 f"beyond the escalation margin, or an early release)")
         self.wm._stamp_first_round_tick(
             strong_window, self.wm.syndrome_buffer_1)

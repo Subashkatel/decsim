@@ -1,4 +1,4 @@
-"""Syndrome buffer 1: the copy-out crossing, the arrival gate, and the
+"""Syndrome buffer 1: the csb crossing, the arrival gate, and the
 refcounted room-side lifetime (ports of the prototype's verified suite;
 the shared slot/hold semantics are SyndromeBuffer's and are pinned by the
 recorded scenarios)."""
@@ -8,7 +8,7 @@ import pytest
 from decsim.config import us
 from decsim.engine import Engine
 from decsim.links.link_profiles import (logical_reference_profile,
-                                        with_copy_out_edge)
+                                        with_csb_edge)
 from decsim.links.links import TrafficAttribution
 from decsim.message import RetainedSyndromeFragment, SyndromeRoundPacket
 from decsim.syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
@@ -34,14 +34,14 @@ def _free_fabric():
 
 
 def _priced_fabric(latency_us=0.5):
-    return with_copy_out_edge(
+    return with_csb_edge(
         logical_reference_profile(), latency_us=latency_us,
-        aggregate_bits_per_us=None, source="test copy-out").resolve()
+        aggregate_bits_per_us=None, source="test csb").resolve()
 
 
-def _copy_out_transfer_count(links):
+def _csb_transfer_count(links):
     return sum(1 for record in links.snapshot().transfers
-               if record.path.value == "copy_out")
+               if record.path.value == "csb")
 
 
 def test_every_round_crosses_once_and_bits_are_counted():
@@ -55,20 +55,20 @@ def test_every_round_crosses_once_and_bits_are_counted():
     assert sb1.copied_bits_total == 6
 
 
-def test_priced_copy_out_gates_arrival():
+def test_priced_csb_gates_arrival():
     engine = Engine()
     links = _priced_fabric(0.5)
     sb1 = SyndromeBuffer1(engine, links)
     sb1.register_hold("reader", [(1, 1)])
     _write(sb1, _packet(1))
-    # still in flight over the copy-out: reads refuse loudly
+    # still in flight over the csb: reads refuse loudly
     assert sb1.retained_fragments((1, 1)) is None
     with pytest.raises(RuntimeError, match="not stored in syndrome buffer 1"):
         sb1.ready_tick([(1, 1)])
     engine.run()
     assert sb1.publication_tick((1, 1)) == us(0.5)
     assert sb1.ready_tick([(1, 1)]) == us(0.5)
-    assert _copy_out_transfer_count(links) == 1
+    assert _csb_transfer_count(links) == 1
 
 
 def test_refused_write_leaves_no_trace():
@@ -80,7 +80,7 @@ def test_refused_write_leaves_no_trace():
     with pytest.raises(RuntimeError, match="over capacity"):
         _write(sb1, _packet(2))
     # the refusal happened before the link reservation and before any store
-    assert _copy_out_transfer_count(links) == 1
+    assert _csb_transfer_count(links) == 1
     assert sb1.copied_bits_total == 3
     engine.run()
     assert sb1.retained_fragments((1, 1)) is not None

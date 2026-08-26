@@ -53,16 +53,27 @@ links:                             # one card per path; null = the logical_refer
   oc:  null                        # Pauli frame -> controller, a release
   cq:  null                        # controller -> QPU, an instruction
 
+buffers:                           # syndrome-path store capacities, in rounds
+  buffer_0_size: null              # Buffer 0, the upstream round store; a full
+                                   # buffer refuses the next round and the packing
+                                   # overflow policy decides (fail-stop by default).
+                                   # null = unbounded
+  buffer_1_size: null              # syndrome buffer 1, the strong-side store
+                                   # (exists only when the mode uses it); overflow
+                                   # is a hard error. null = unbounded
+  packing_workspace_size: null     # packing assembly workspace: rounds in flight
+                                   # through the packing stage. null = unbounded
+
 decoder:
   units: 1                         # decoder units in the default pool
+  unit_buffer_size: null           # input SRAM rounds PER UNIT; null = unbounded.
+                                   # Each unit holds two windows when they fit
+                                   # (transfer overlaps compute); a unit sized
+                                   # for one window falls back to serial residency
   engine:
     frequency_mhz: 250.0           # engine clock for the cycle-priced stages
     fetch_cycles_per_round: 1      # read one round out of decoder memory
     release_cycles_per_job: 1      # correction write-out per job
-decoder_memory_rounds: null        # input SRAM rounds PER UNIT; null = unbounded.
-                                   # Each unit holds two windows when they fit
-                                   # (transfer overlaps compute); a unit sized
-                                   # for one window falls back to serial residency
 
 pauli_frame:
   commit_us: 0.004                 # XOR of a correction into the frame register

@@ -16,8 +16,8 @@ every yaml key with its meaning and defaults; the loader is
 `experiments/experiment_config.py` and is the only yaml reader. Run any
 config with `python -m experiments.run experiments/configs/<name>.yaml`.
 Top-level keys: `mode`, `code_task`, `distance`, `rounds_per_shot`,
-`windowing`, `sweep`, `controller`, `links`, `decoder`,
-`decoder_memory_rounds`, `pauli_frame`, `trace` (plus `extends`, which
+`windowing`, `sweep`, `controller`, `links`, `buffers`, `decoder`,
+`pauli_frame`, `trace` (plus `extends`, which
 starts from another config in the same folder and overrides the keys it
 names). `trace` is `off`, `print`, `file` or `both`: the engine narrator
 shown live on screen, written one log file per shot to
@@ -60,8 +60,8 @@ each).
 | `device` | partly | syndrome source (yaml: `StimDevice`; Python: timing-only or syndrome-bit devices) |
 | `error_model_provider` | no | per-window decoder model source when not derived from the circuit |
 | `memory_model` | no | Buffer 0 memory technology model |
-| `syndrome_buffering` | no | `SyndromeBufferingConfig`: Buffer 0 slots, syndrome buffer 1 slots, packing assembly slots |
-| `decoder_memory` | yes | per-unit input SRAM in rounds (`decoder_memory_rounds`); a unit overlaps transfer with compute only when two windows fit |
+| `syndrome_buffering` | yes | syndrome-path store capacities in rounds (`buffers.buffer_0_size`, `buffers.buffer_1_size`, `buffers.packing_workspace_size`); a full Buffer 0 refuses the next round (packing overflow policy decides, fail-stop by default), a full syndrome buffer 1 is a hard error |
+| `decoder_memory` | yes | per-unit input SRAM in rounds (`decoder.unit_buffer_size`); a unit overlaps transfer with compute only when two windows fit |
 | `pauli_frame` | yes | `PauliFrameConfig`: frame commit cost (`pauli_frame.commit_us`) |
 | `syndrome_packing_policy` | no | packing overflow and queue admission policy |
 | `make_syndrome_packing` | no | factory hook replacing the packing stage |

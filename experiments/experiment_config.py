@@ -45,8 +45,27 @@ class EngineCard:
 
 @dataclass(frozen=True)
 class DecoderCard:
+    """The unit pool: how many units and, per unit, the input SRAM size in
+    rounds (None = unbounded). A unit overlaps input transfer with compute
+    only when two windows fit in its SRAM."""
     units: int
+    unit_buffer_size: Optional[int]
     engine: EngineCard
+
+
+@dataclass(frozen=True)
+class BuffersCard:
+    """Syndrome-path store capacities, in rounds (None = unbounded).
+
+    ``buffer_0_size`` bounds Buffer 0, the upstream round store; a full
+    Buffer 0 refuses the next round and the packing overflow policy decides
+    what happens (fail-stop by default). ``buffer_1_size`` bounds syndrome
+    buffer 1, the strong-side store; overflowing it is a hard error.
+    ``packing_workspace_size`` bounds the packing stage's assembly
+    workspace, the rounds in flight through the stage at once."""
+    buffer_0_size: Optional[int]
+    buffer_1_size: Optional[int]
+    packing_workspace_size: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -83,8 +102,8 @@ class ExperimentConfig:
     sweep: tuple                    # of SweepBlock
     controller: ControllerCard
     links: dict                     # path -> LinkCard | None (None = reference card)
+    buffers: BuffersCard
     decoder: DecoderCard
-    decoder_memory_rounds: Optional[int]   # per unit; None = unbounded
     trace: str                      # off | print | file | both: the engine
                                     # narrator, live on screen and/or one log
                                     # file per shot in results/<name>/trace/
@@ -101,6 +120,15 @@ def _link_card(card: Optional[dict]) -> Optional[LinkCard]:
     return LinkCard(latency_us=card["latency_us"],
                     bits_per_us=card["bits_per_us"],
                     transfer_overhead_us=card.get("transfer_overhead_us"))
+
+
+def _buffer_size(value, key: str) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(
+            f"{key} must be a positive round count or null, got {value!r}")
+    return value
 
 
 def _require(value, allowed: tuple, key: str):
@@ -125,6 +153,7 @@ def load_experiment(path) -> ExperimentConfig:
     raw = _raw_yaml(path)
     windowing = raw["windowing"]
     controller = raw["controller"]
+    buffers = raw["buffers"]
     decoder = raw["decoder"]
     engine = decoder["engine"]
     links = {link_path: _link_card(raw["links"].get(link_path))
@@ -153,12 +182,21 @@ def load_experiment(path) -> ExperimentConfig:
             t_binary_availability_us=controller["t_binary_availability_us"],
             t_pack_us=controller["t_pack_us"]),
         links=links,
+        buffers=BuffersCard(
+            buffer_0_size=_buffer_size(
+                buffers["buffer_0_size"], "buffers.buffer_0_size"),
+            buffer_1_size=_buffer_size(
+                buffers["buffer_1_size"], "buffers.buffer_1_size"),
+            packing_workspace_size=_buffer_size(
+                buffers["packing_workspace_size"],
+                "buffers.packing_workspace_size")),
         decoder=DecoderCard(
             units=decoder["units"],
+            unit_buffer_size=_buffer_size(
+                decoder["unit_buffer_size"], "decoder.unit_buffer_size"),
             engine=EngineCard(
                 frequency_mhz=engine["frequency_mhz"],
                 fetch_cycles_per_round=engine["fetch_cycles_per_round"],
                 release_cycles_per_job=engine["release_cycles_per_job"])),
-        decoder_memory_rounds=raw["decoder_memory_rounds"],
         trace=_require(raw_trace, TRACE_MODES, "trace"),
         pauli_frame_commit_us=raw["pauli_frame"]["commit_us"])

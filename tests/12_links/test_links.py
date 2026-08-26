@@ -1120,10 +1120,12 @@ def test_yaml_card_key_reaches_the_edge(tmp_path):
         "  cwd: {latency_us: 1.0, bits_per_us: null, transfer_overhead_us: 0.4}\n"
         "  dd:  {latency_us: 0.5, bits_per_us: null}\n"
         "  wdo: {latency_us: 1.0, bits_per_us: null}\n"
+        "buffers: {buffer_0_size: null, buffer_1_size: null,\n"
+        "          packing_workspace_size: null}\n"
         "decoder:\n"
         "  units: 1\n"
+        "  unit_buffer_size: null\n"
         "  engine: {frequency_mhz: 250.0, fetch_cycles_per_round: 1, release_cycles_per_job: 1}\n"
-        "decoder_memory_rounds: null\n"
         "pauli_frame: {commit_us: 0.004}\n")
     (tmp_path / "overhead_card.yaml").write_text(yaml_text)
     card = link_model(load_experiment(tmp_path / "overhead_card.yaml"))

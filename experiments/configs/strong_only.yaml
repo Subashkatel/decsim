@@ -36,8 +36,8 @@ links:
   # on the strong-only path
   qc:  {latency_us: 1.0, bits_per_us: null}     # QPU -> controller, one readout
   c2b: {latency_us: 0.5, bits_per_us: 100000.0} # controller -> Buffer 0, one round (dropped on arrival)
-  copy_out: {latency_us: 0.5, bits_per_us: null} # packing -> syndrome buffer 1, one round; the store that wakes windows
-  csd: {latency_us: 2.0, bits_per_us: null}     # syndrome buffer 1 -> strong decoder memory, one window
+  copy_out: {latency_us: 2.0, bits_per_us: null} # packing -> syndrome buffer 1, one round; the store that wakes windows
+  csd: {latency_us: 0.5, bits_per_us: null}     # syndrome buffer 1 -> strong decoder memory, one window
                                                 # (Khalid cd latency mapped to the strong input, as the reference card)
   dd:  {latency_us: 0.5, bits_per_us: null}     # decoder -> decoder boundary handoff
   do:  {latency_us: 1.0, bits_per_us: null}     # strong decoder -> Pauli frame
@@ -59,7 +59,7 @@ decoder:
   engine:
     frequency_mhz: 250.0
     fetch_cycles_per_round: 1
-    release_cycles_per_job: 1
+    release_cycles_per_job: 10
 
 
 pauli_frame:

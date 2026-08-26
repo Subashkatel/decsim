@@ -73,9 +73,10 @@ def run_experiment(config_path) -> tuple:
     results folder and the summary rows."""
     config = load_experiment(config_path)
     print("\n".join(resolved_description(config)) + "\n", file=sys.stderr)
-    rows = summarize(run_sweep(config))
+    measurements = run_sweep(config)
+    rows = summarize(measurements)
     results_dir = config.results_dir
-    write_report(rows, results_dir)
+    write_report(rows, results_dir, measurements)
     from experiments.plots import plots
     plots(config, rows, results_dir)
     return results_dir, rows

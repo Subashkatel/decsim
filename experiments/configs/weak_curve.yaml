@@ -1,0 +1,12 @@
+# The weak tier's curves: real MWPM on every window across a physical-error
+# sweep. ler.png and latency.png come from this run; every plotted point is
+# a sweep.csv cell.
+extends: weak_baseline.yaml
+
+sweep:
+  - physical_error_probability: [0.001, 0.002, 0.004, 0.006, 0.008, 0.01]
+    round_period_us: [1.0]
+    algorithm_latency_us: [pymatching]
+    shots: 50
+
+trace: off

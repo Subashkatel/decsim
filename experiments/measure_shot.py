@@ -69,11 +69,32 @@ class ShotMeasurement:
     throughput_rounds_per_us: float
     decoder_utilization: float
     max_queued_windows: int
+    link_totals: dict      # path -> the run's own ledger counters plus
+                           # rounds/windows context, for links.csv; totals
+                           # come straight off TrafficCounters, no manual
+                           # counting (the ledger refuses counts that do
+                           # not reconcile per channel)
     sim_wall_seconds: float
 
 
 def us(ticks: int) -> float:
     return ticks / TICKS_PER_US
+
+
+def link_totals(traffic: dict) -> dict:
+    """path -> the ledger's own counters for this shot, in microseconds."""
+    totals = {}
+    for edge in traffic["semantic_edges"]:
+        counters = edge["counters"]
+        totals[edge["path"]] = {
+            "transfers": counters["transfer_count"],
+            "payload_bits": counters["known_payload_bits"],
+            "unknown_payload_transfers": counters["unknown_payload_transfer_count"],
+            "queue_wait_us": us(counters["queue_wait_ticks"]),
+            "serialization_us": us(counters["serialization_ticks"]),
+            "propagation_us": us(counters["propagation_ticks"]),
+        }
+    return totals
 
 
 def link_delay_by_window(transfers: list) -> dict:
@@ -260,4 +281,5 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
         throughput_rounds_per_us=config.rounds_per_shot / span_us,
         decoder_utilization=sum(samples["service"]) / span_us,
         max_queued_windows=max(queue_depths, default=0),
+        link_totals=link_totals(completed.result.link_traffic),
         sim_wall_seconds=wall_seconds)

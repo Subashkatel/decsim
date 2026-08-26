@@ -379,11 +379,15 @@ class SyndromeBuffer:
     ) -> FragmentAdmission:
         """Admit one already-packed round directly into retention.
 
-        This is syndrome buffer 1's dual-write landing: the round arrives
-        complete, so it allocates its slot in PACKED_RETAINED state with no
-        reassembly phase. A round nobody holds is dropped on arrival (its
-        readers resolved while it was in flight); a full buffer refuses
-        before touching any state."""
+        Syndrome buffer 1's dual-write landing. The round was merged and
+        packed at Buffer 0, so it arrives complete and goes straight into
+        a storage slot in PACKED_RETAINED state; the ASSEMBLING and
+        PACKING steps never happen here. If no consumer hold points at
+        the round any more (every possible reader resolved while it
+        crossed the copy-out), storing it would waste a slot on data
+        nobody can read, so it is discarded at the door. If the buffer is
+        full, the write is refused before anything is modified, so a
+        refusal leaves no trace."""
         identity = (packet.operation_id, packet.round_index)
         if packet.operation_id not in self._open_operations:
             raise RuntimeError(

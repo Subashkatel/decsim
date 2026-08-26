@@ -2914,6 +2914,7 @@
 },
 "windows": [
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 3,
 "buffer_lo": 1,
 "closed_temporal_boundaries": false,
@@ -2938,6 +2939,7 @@
 "t_queued": 3150000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 5,
 "buffer_lo": 3,
 "closed_temporal_boundaries": false,
@@ -2967,6 +2969,7 @@
 "t_queued": 5150000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 7,
 "buffer_lo": 5,
 "closed_temporal_boundaries": false,
@@ -2996,6 +2999,7 @@
 "t_queued": 7150000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 9,
 "buffer_lo": 7,
 "closed_temporal_boundaries": false,
@@ -3025,6 +3029,7 @@
 "t_queued": 9150000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 11,
 "buffer_lo": 9,
 "closed_temporal_boundaries": false,
@@ -3054,6 +3059,7 @@
 "t_queued": 11150000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 13,
 "buffer_lo": 11,
 "closed_temporal_boundaries": false,
@@ -3083,6 +3089,7 @@
 "t_queued": 13150000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 15,
 "buffer_lo": 13,
 "closed_temporal_boundaries": false,
@@ -3112,6 +3119,7 @@
 "t_queued": 15150000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 17,
 "buffer_lo": 15,
 "closed_temporal_boundaries": false,
@@ -3141,6 +3149,7 @@
 "t_queued": 17150000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 18,
 "buffer_lo": 17,
 "closed_temporal_boundaries": false,

@@ -112,6 +112,27 @@ def sliding_data_complete(window: "Window", readiness: WindowReadiness) -> bool:
     return successor_has_data or memory_has_data or all_successors_exhausted
 
 
+def buffer_filled_by_memory_only(window: "Window",
+                                 readiness: WindowReadiness) -> bool:
+    """True when the trailing buffer past the operation's end is satisfied by
+    memory rounds with no successor content standing behind it. Such a
+    release is time-only: the reference systems decode the buffer region's
+    content (Skoric/Tan windows, LATTE d^3+buffer blocks, SWIPER idle
+    windows), so a window released this way carries an approximate result.
+    The terminal no-successor release is the Tan flush and is not flagged."""
+    overflow_rounds = window.buffer_hi - readiness.local_round_count
+    if overflow_rounds <= 0 or readiness.tail_closed:
+        return False
+    if not readiness.successors:
+        return False
+    successor_has_data = any(
+        successor.rounds_arrived >= overflow_rounds
+        for successor in readiness.successors
+    )
+    memory_has_data = readiness.memory_rounds_arrived >= overflow_rounds
+    return memory_has_data and not successor_has_data
+
+
 class SlidingWindowScheme:
     """Serial commit and look-ahead buffer windows."""
 

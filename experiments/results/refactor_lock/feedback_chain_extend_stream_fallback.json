@@ -19,6 +19,7 @@
 "[  4.000 us] DecoderCluster: memory round for T0 (idle buffer rounds: 1)",
 "[  5.000 us] DecoderCluster: memory round for T0 (idle buffer rounds: 2)",
 "[  6.000 us] DecoderCluster: memory round for T0 (idle buffer rounds: 3)",
+"[  6.000 us] DecoderCluster: T0 W0 buffer filled by memory rounds (time-only, no syndrome content)",
 "[  6.000 us] DecoderCluster: T0 W0 [commit 1-3] READY -> enqueue (ready-queue length = 1)",
 "[  6.000 us] DecoderCluster: ASSIGN UNIT T0 W0 [commit 1-3] (waited 0.000 us in queue, units free now 0)",
 "[  6.000 us] DecoderCluster: START DECODE T0 W0 [commit 1-3]",
@@ -1789,6 +1790,7 @@
 },
 "windows": [
 {
+"buffer_filled_by_memory": true,
 "buffer_hi": 6,
 "buffer_lo": 1,
 "closed_temporal_boundaries": false,
@@ -1813,6 +1815,7 @@
 "t_queued": 6000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 6,
 "buffer_lo": 1,
 "closed_temporal_boundaries": false,

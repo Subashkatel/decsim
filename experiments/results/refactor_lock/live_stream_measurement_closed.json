@@ -1075,6 +1075,7 @@
 },
 "windows": [
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 3,
 "buffer_lo": 1,
 "closed_temporal_boundaries": false,
@@ -1094,6 +1095,7 @@
 "t_queued": 2000000
 },
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 5,
 "buffer_lo": 3,
 "closed_temporal_boundaries": false,

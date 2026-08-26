@@ -1444,6 +1444,7 @@
 },
 "windows": [
 {
+"buffer_filled_by_memory": false,
 "buffer_hi": 20,
 "buffer_lo": 1,
 "closed_temporal_boundaries": false,

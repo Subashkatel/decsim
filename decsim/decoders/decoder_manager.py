@@ -24,6 +24,7 @@ class RequestProcessingOutcome(Enum):
     STRONG_FORWARDED_FOR_DELIVERY = "strong_forwarded_for_delivery"
     STRONG_COMPLETED_DISCARDED = "strong_completed_discarded"
     STRONG_CANCELLED_BEFORE_DISPATCH = "strong_cancelled_before_dispatch"
+    STRONG_CANCELLED_WHILE_STAGED = "strong_cancelled_while_staged"
     STRONG_CANCELLED_DURING_SERVICE = "strong_cancelled_during_service"
     STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED = (
         "strong_cancelled_member_service_continued")
@@ -84,15 +85,24 @@ class DecoderManager:
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
-        # decoupled access-execute queue depth per unit (Smith 1982; the
-        # gem5-Aladdin pipelinedDma rule set): 0 = the input transfer runs
-        # under the unit's own hold, 1 = one ping-pong staging slot whose
-        # DMA overlaps the previous compute. The hardware price of depth 1
-        # is visible: both inputs are resident in the unit's DecoderMemory.
+        # decoupled access-execute queue depth per unit (Smith 1982,
+        # depth-1 DAE; TI EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin
+        # expresses the same point as ready bits at whole-buffer
+        # granularity, Shao et al. MICRO 2016 Sec IV-B-2): 0 = the input
+        # transfer runs under the unit's own hold, 1 = one ping-pong
+        # staging slot whose DMA overlaps the previous compute. The
+        # hardware price of depth 1 is visible, not hidden: both inputs
+        # are resident in the unit's DecoderMemory, so depth 1 needs
+        # per-unit capacity for two windows or the run stops loudly.
         if input_staging_depth not in (0, 1):
             raise ValueError(
                 f"input_staging_depth must be 0 or 1 "
                 f"(got {input_staging_depth})")
+        if bulk_strong and input_staging_depth > 0:
+            raise ValueError(
+                "bulk_strong with input_staging_depth > 0 is not supported: "
+                "a staged merged batch would need survivor-aware "
+                "cancellation that does not exist yet")
         self.input_staging_depth = input_staging_depth
         self._staged: dict = {}          # (pool, unit) -> job in the slot
         self._staged_ready: set = set()  # slot's DMA has landed
@@ -275,7 +285,7 @@ class DecoderManager:
             job.unit = None
             self._record_request(
                 live.request_job, None,
-                RequestProcessingOutcome.STRONG_CANCELLED_BEFORE_DISPATCH,
+                RequestProcessingOutcome.STRONG_CANCELLED_WHILE_STAGED,
                 None)
         elif job.pool is None:
             self.staging.cancel(job)

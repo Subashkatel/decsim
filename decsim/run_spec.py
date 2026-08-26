@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from .config import TimingConfig
-from .message import ExecutionProgram, RunSeedPathSegment
+from .message import DecoderTier, ExecutionProgram, RunSeedPathSegment
 from .links.link_traffic_report import traffic_json_value
 from .seeding import bind_run_seed
 
@@ -204,10 +204,13 @@ class RunSpec:
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,
             memory_model=config.memory_model)
+        uses_strong_store = (
+            escalation_policy.requires_strong_context
+            or escalation_policy.primary_tier is DecoderTier.STRONG)
         syndrome_buffer_1 = (SyndromeBuffer1(
             engine, links,
             capacity_rounds=config.buffering.sb1_packet_slots)
-            if escalation_policy.requires_strong_context else None)
+            if uses_strong_store else None)
         pauli_frame = (None if config.pauli_frame is None
                        else config.pauli_frame.resolve(engine))
 

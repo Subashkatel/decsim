@@ -145,6 +145,26 @@ def test_strong_only_commits_every_window_on_the_strong_tier(strong_config):
     assert "csd" in paths and "do" in paths and "wsd" not in paths
 
 
+def test_trace_writes_one_log_file_per_shot(tmp_path, monkeypatch):
+    folder = tmp_path / "configs"
+    folder.mkdir()
+    folder.joinpath("weak_baseline.yaml").write_text(
+        (CONFIGS / "weak_baseline.yaml").read_text())
+    folder.joinpath("traced.yaml").write_text(
+        SMALL_SWEEP.format(base="weak_baseline", algorithm=0.028)
+        + "trace: true\n")
+    config = load_experiment(folder / "traced.yaml")
+    monkeypatch.chdir(tmp_path)   # results_dir is cwd-relative
+    measure_shot(config, physical_error_probability=0.001,
+                 round_period_us=1.0, algorithm_latency_us=0.028, seed=0)
+    trace_file = (tmp_path / "experiments/results/traced/trace"
+                  / "p0.001_algo0.028_round1us_seed0.log")
+    assert trace_file.exists()
+    lines = trace_file.read_text().splitlines()
+    assert any("START DECODE" in line for line in lines)
+    assert any("QPU" in line for line in lines)
+
+
 def test_loader_refuses_unknown_names(tmp_path, weak_config):
     bad = tmp_path / "bad.yaml"
     bad.write_text((CONFIGS / "weak_baseline.yaml").read_text()

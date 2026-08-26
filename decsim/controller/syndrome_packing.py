@@ -1,14 +1,15 @@
-"""Controller-side arrival of syndrome data: raw measurement fragments of one
-round are reassembled, the complete round is formed into detection events at
-Buffer 0 intake (the device's formation table) and packed, and packed rounds
-are arbitrated onto their route, C2B to Buffer 0 (window input) or CWD as a
-feedback-memory round. ``SyndromeBuffer`` owns the round slots; a context is PARTIAL while
-fragments are missing, PACKED_WAIT while it waits for its route, and
-DRAINING once transmission has started."""
+"""The controller's syndrome packing stage: raw measurement fragments of one
+round are assembled in this stage's own workspace, merged, formed into
+detection events (the device's formation table), and the finished round is
+written into the stores (Buffer 0, and syndrome buffer 1 when wired) before
+being arbitrated onto its route, C2B to the window input or CWD as a
+feedback-memory round. The stores hold finished rounds only; a context is
+PARTIAL while fragments are missing, PACKED_WAIT while it waits for its
+route, and DRAINING once transmission has started."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from typing import Optional
 
@@ -20,6 +21,7 @@ from ..message import (
     SyndromePacketRoute,
     SyndromePacketRouteKind,
     SyndromeRoundPacket,
+    same_stable_identity,
     stable_identity_order_key,
 )
 
@@ -102,6 +104,7 @@ class _PackingContext:
     round_key: tuple
     route: SyndromePacketRoute
     fragment_count: int
+    fragments: list = field(default_factory=list)
     received_fragments: int = 0
     state: _PackingSlotState = _PackingSlotState.PARTIAL
     packet: Optional[SyndromeRoundPacket] = None
@@ -137,6 +140,7 @@ class SyndromePacking:
         self.syndrome_buffer = syndrome_buffer
         self.syndrome_buffer_1 = syndrome_buffer_1
         self._contexts: dict[tuple, _PackingContext] = {}
+        self._packed_rounds: set = set()
         self._route_queues = {kind: [] for kind in SyndromePacketRouteKind}
         self._next_route_index = 0
         self._arbitration_pending = False
@@ -177,11 +181,8 @@ class SyndromePacking:
         if round_key in self._dropped_rounds:
             return
         context = self._context_for(fragment, fragment_count, route)
-        admission = self._admit_to_buffer(fragment, context)
-        if admission is None:
-            return
-        context.received_fragments = admission.received_fragments
-        if not admission.round_complete:
+        self._assemble_fragment(fragment, context)
+        if context.received_fragments != context.fragment_count:
             return
         packing_takes_time = context.fragment_count > 1 and self.t_pack
         if packing_takes_time:
@@ -197,30 +198,27 @@ class SyndromePacking:
                     fragment.operation_id, fragment.round_index)
         context = self._contexts.get(identity)
         if context is not None:
+            if fragment_count != context.fragment_count:
+                raise ValueError("all fragments must declare the same count")
             return context
+        if round_key in self._packed_rounds:
+            raise ValueError(
+                f"late fragment: round {round_key!r} was already packed")
         same_round_other_route = any(live.round_key == round_key
                                      for live in self._contexts.values())
         if same_round_other_route:
             raise ValueError("all fragments must share one typed route")
         return self._open_context(identity, round_key, route, fragment_count)
 
-    def _admit_to_buffer(self, fragment, context: _PackingContext):
-        """Hand the fragment to Buffer 0; None when the round was refused
-        (dropped under DROP_ROUND, otherwise the run fails)."""
-        if not self.syndrome_buffer.has_operation(fragment.operation_id):
-            self.syndrome_buffer.open_operation(fragment.operation_id)
-        admission = self.syndrome_buffer.accept_fragment(
-            fragment, expected_fragments=context.fragment_count)
-        if not admission.refused:
-            return admission
-        self._forget_context(context)
-        if self.policy.overflow is PackingOverflowPolicy.DROP_ROUND:
-            self.packing_drops += 1
-            self._dropped_rounds.add(context.round_key)
-            return None
-        raise SyndromePackingOverflow(
-            tick=self.engine.now, route=context.route, incoming_identity=context.identity,
-            capacity=self.packing_context_capacity, snapshot=self.packing_snapshot())
+    def _assemble_fragment(self, fragment, context: _PackingContext) -> None:
+        """Add one fragment to the round's assembly workspace."""
+        if fragment.fragment_index >= context.fragment_count:
+            raise ValueError("fragment index exceeds the declared count")
+        if any(fragment.fragment_index == held.fragment_index
+               for held in context.fragments):
+            raise ValueError("duplicate syndrome fragment index")
+        context.fragments.append(fragment)
+        context.received_fragments = len(context.fragments)
 
     def _open_context(self, identity, round_key, route, fragment_count: int) -> _PackingContext:
         context = _PackingContext(identity, round_key, route, fragment_count)
@@ -240,19 +238,36 @@ class SyndromePacking:
             route_queue.remove(context.identity)
 
     def _finish_packing(self, context: _PackingContext) -> None:
-        """The round is complete: pack it and let it compete for its route.
-        Its publication tick is set now unless a C2B hop is priced later."""
+        """The round is complete: merge, form, store, and let it compete for
+        its route. Its publication tick is set now unless a C2B hop is
+        priced later."""
         c2b_is_priced = LinkPath.C2B in self.links.paths
         publication_tick = None if c2b_is_priced else self.engine.now
-        def form(raw_fragments):
-            # C2B carries the raw measurement bits; detection events exist
-            # only from the decoder input (Buffer 0) onward
-            context.packet_bits = _fragment_bits(raw_fragments)
-            return self._form_detection_events(raw_fragments)
-
-        packet = self.syndrome_buffer.finish_packing(context.round_key,
-                                                     publication_tick=publication_tick,
-                                                     form=form)
+        raw_fragments = _merge_fragments_by_patch(context.fragments)
+        # C2B carries the raw measurement bits; detection events exist
+        # only from the decoder input (Buffer 0) onward
+        context.packet_bits = _fragment_bits(raw_fragments)
+        packet = SyndromeRoundPacket(
+            operation_id=context.round_key[0],
+            round_index=context.round_key[1],
+            fragments=self._form_detection_events(raw_fragments))
+        if not self.syndrome_buffer.has_operation(packet.operation_id):
+            self.syndrome_buffer.open_operation(packet.operation_id)
+        admission = self.syndrome_buffer.accept_packed_round(
+            packet, publication_tick=publication_tick)
+        if admission.refused:
+            self._forget_context(context)
+            if self.policy.overflow is PackingOverflowPolicy.DROP_ROUND:
+                self.packing_drops += 1
+                self._dropped_rounds.add(context.round_key)
+                return
+            raise SyndromePackingOverflow(
+                tick=self.engine.now, route=context.route,
+                incoming_identity=context.identity,
+                capacity=self.packing_context_capacity,
+                snapshot=self.packing_snapshot())
+        self._packed_rounds.add(context.round_key)
+        context.fragments = []
         if self.syndrome_buffer_1 is not None:
             # the dual write: the same packed round leaves for the room-side
             # store in parallel with its Buffer 0 publication
@@ -395,7 +410,6 @@ class SyndromePacking:
             return
         self.reassembly_timeouts += 1
         self._forget_context(context)
-        self.syndrome_buffer.release_round(context.round_key)
         raise SyndromeReassemblyTimeout(
             tick=self.engine.now, identity=identity,
             received_fragments=context.received_fragments,
@@ -454,3 +468,38 @@ def _fragment_bits(fragments) -> Optional[int]:
     if any(size is None for size in fragment_sizes):
         return None
     return sum(fragment_sizes)
+
+
+def _merge_fragments_by_patch(fragments) -> tuple:
+    """Order fragments by index, merging parts from the same patch.
+
+    ``SyndromeRoundPacket`` requires distinct patch identities, so parts of
+    one patch concatenate bits and sizes in fragment-index order. Distinct
+    patches keep their own immutable fragments untouched.
+    """
+    merged: list = []
+    for fragment in sorted(fragments, key=lambda item: item.fragment_index):
+        prior_index = next(
+            (
+                index
+                for index, prior in enumerate(merged)
+                if same_stable_identity(prior.patch_id, fragment.patch_id)
+            ),
+            None,
+        )
+        if prior_index is None:
+            merged.append(fragment)
+            continue
+        prior = merged[prior_index]
+        bits = (
+            prior.bits + fragment.bits
+            if prior.bits is not None and fragment.bits is not None
+            else None
+        )
+        size_bits = (
+            prior.size_bits + fragment.size_bits
+            if prior.size_bits is not None and fragment.size_bits is not None
+            else None
+        )
+        merged[prior_index] = replace(prior, bits=bits, size_bits=size_bits)
+    return tuple(merged)

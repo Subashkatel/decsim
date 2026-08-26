@@ -281,6 +281,11 @@ class SyndromePacking:
                 capacity=self.syndrome_buffer.capacity,
                 snapshot=self.packing_snapshot())
         self._packed_rounds.add(context.round_key)
+        self.engine.log_io(
+            "Buffer 0",
+            lambda: f"received round {packet.round_index} of "
+                    f"op {packet.operation_id} from packing; holds "
+                    f"{self.syndrome_buffer.held_rounds_description()}")
         context.fragments = []
         if self.syndrome_buffer_1 is not None:
             # the dual write: the same packed round leaves for the room-side

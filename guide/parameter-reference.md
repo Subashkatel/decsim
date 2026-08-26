@@ -17,11 +17,13 @@ every yaml key with its meaning and defaults; the loader is
 config with `python -m experiments.run experiments/configs/<name>.yaml`.
 Top-level keys: `mode`, `code_task`, `distance`, `rounds_per_shot`,
 `windowing`, `sweep`, `controller`, `links`, `buffers`, `decoder`,
-`pauli_frame`, `trace` (plus `extends`, which
+`pauli_frame`, `trace`, `trace_io` (plus `extends`, which
 starts from another config in the same folder and overrides the keys it
 names). `trace` is `off`, `print`, `file` or `both`: the engine narrator
 shown live on screen, written one log file per shot to
-`results/<name>/trace/`, or both; the lines are always kept in memory on
+`results/<name>/trace/`, or both; `trace_io: true` adds component I/O
+lines (what each store and unit received, holds, and emitted); the lines
+are always kept in memory on
 `completed.engine.log_lines`.
 
 ## Every RunSpec field

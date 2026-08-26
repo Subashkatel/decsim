@@ -107,6 +107,9 @@ class ExperimentConfig:
     trace: str                      # off | print | file | both: the engine
                                     # narrator, live on screen and/or one log
                                     # file per shot in results/<name>/trace/
+    trace_io: bool                  # add component I/O lines to the trace:
+                                    # what each store and unit received,
+                                    # holds, and emitted
     pauli_frame_commit_us: float
 
     @property
@@ -199,4 +202,5 @@ def load_experiment(path) -> ExperimentConfig:
                 fetch_cycles_per_round=engine["fetch_cycles_per_round"],
                 release_cycles_per_job=engine["release_cycles_per_job"])),
         trace=_require(raw_trace, TRACE_MODES, "trace"),
+        trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
         pauli_frame_commit_us=raw["pauli_frame"]["commit_us"])

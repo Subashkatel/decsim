@@ -101,6 +101,11 @@ class SyndromeBuffer1:
         operation_id = packet.operation_id
         arrived = self.rounds_arrived.get(operation_id, 0)
         self.rounds_arrived[operation_id] = max(arrived, packet.round_index)
+        self.engine.log_io(
+            "SyndromeBuffer1",
+            lambda: f"received round {packet.round_index} of op {operation_id} "
+                    f"from copy-out; holds "
+                    f"{self.store.held_rounds_description()}")
         if self.on_round_stored is not None:
             self.on_round_stored(operation_id)
 

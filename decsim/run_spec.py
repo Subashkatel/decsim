@@ -172,13 +172,14 @@ class RunSpec:
     seed: Optional[int] = 0
     _built: bool = field(default=False, init=False, repr=False)
 
-    def build(self, verbose: bool = False) -> CompletedRun:
+    def build(self, verbose: bool = False, io_trace: bool = False) -> CompletedRun:
         """Wire and run this configuration once; a RunSpec is one run."""
         if self._built:
             raise RuntimeError("RunSpec was already built; make a new one per run")
         self._built = True
         from .engine import Engine
-        return self._build_once(Engine(verbose=verbose), _root_seed(self.seed))
+        return self._build_once(Engine(verbose=verbose, io_trace=io_trace),
+                                _root_seed(self.seed))
 
     def _build_once(self, engine, root_seed) -> CompletedRun:
         """Wire the run from its resolved configuration, in dependency order,
@@ -399,5 +400,6 @@ def _make_infinite(engine):
     return InfiniteFactory(engine)
 
 
-def simulate(run: RunSpec, verbose: bool = False) -> CompletedRun:
-    return run.build(verbose=verbose)
+def simulate(run: RunSpec, verbose: bool = False,
+             io_trace: bool = False) -> CompletedRun:
+    return run.build(verbose=verbose, io_trace=io_trace)

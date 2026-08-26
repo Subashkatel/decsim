@@ -68,3 +68,7 @@ experiments/scratch*/
 
 # core dumps
 core.[0-9]*
+
+# generated sweep outputs; only the refactor lock recordings are tracked
+experiments/results/*
+!experiments/results/refactor_lock/

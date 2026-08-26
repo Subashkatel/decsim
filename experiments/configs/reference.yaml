@@ -78,6 +78,10 @@ decoder:
 pauli_frame:
   commit_us: 0.004                 # XOR of a correction into the frame register
 
+trace_io: false                    # true adds component I/O lines to the trace:
+                                   # what each store and unit received, holds
+                                   # (rounds, residents), and emitted
+
 trace: off                         # off | print | file | both. The engine narrator:
                                    # print shows it live on screen; file writes each
                                    # shot's full line record to

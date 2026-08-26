@@ -8,5 +8,6 @@ sweep:
     algorithm_latency_us: [0.028]            # LILLIPUT-class card
     shots: 2
 
-trace: file                                  # full line record per shot in
+trace: file
+trace_io: true                                  # full line record per shot in
                                              # results/weak_sliding_trace/trace/

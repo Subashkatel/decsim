@@ -677,6 +677,29 @@ def input_staging_ping_pong():
                    links=logical_reference_profile(), seed=3)
 
 
+def sliding_boundary_at_decoder():
+    """Strong-only sliding windows with DECODER boundary application and
+    the depth-1 staging slot: raw rounds ship at data-complete, the mask
+    lands at the decoder, and the chain runs at dd + max(csd, decode)."""
+    from decsim.decoders.decoders import PresetLatencyDecoder
+    from decsim.decoders.weak_strong_switching import StrongOnly
+    from decsim.links.link_profiles import logical_reference_profile
+    from decsim.message import BoundaryApplication, Operation
+    from decsim.qpu.round_policies import FixedRounds
+    from decsim.run_spec import RunSpec
+    from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
+                                                  SlidingWindowScheme)
+    return RunSpec(ops=[Operation(0, "memory", (0,), patches=(0,))], d=3,
+                   rounds_policy=FixedRounds(27), round_us=1.0,
+                   decoder=PresetLatencyDecoder(5.0), num_units=1,
+                   scheme=SlidingWindowScheme(
+                       terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
+                   escalation_policy=StrongOnly(),
+                   input_staging_depth=1,
+                   boundary_application=BoundaryApplication.DECODER,
+                   links=logical_reference_profile(), seed=3)
+
+
 SCENARIOS = {
     name: fn for name, fn in globals().items()
     if callable(fn) and not name.startswith("_")

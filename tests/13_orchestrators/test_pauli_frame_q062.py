@@ -24,6 +24,9 @@ class ManualEngine:
     def schedule(self, delay_ticks, callback, label=""):
         self.scheduled.append((self.now + delay_ticks, callback, label))
 
+    def log_io(self, who, message):
+        """The I/O trace is off in these tests; the frame still narrates."""
+
     def run_next(self):
         event_ticks, callback, _ = self.scheduled.pop(0)
         self.now = event_ticks

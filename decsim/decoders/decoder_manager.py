@@ -367,7 +367,30 @@ class DecoderManager:
             residents.remove(job)
         if self._computing.get(slot) is job:
             self._computing[slot] = None
+        self.engine.log_io(
+            f"unit {pool}#{unit} SRAM",
+            lambda: f"emitted {job.label} result; holds "
+                    f"{self._sram_description(slot)}")
         self._offer_compute(slot)
+
+    def _sram_description(self, slot: tuple) -> str:
+        """One compact line of a unit's residents and their phase, for the
+        I/O trace."""
+        residents = self._residents(slot)
+        if not residents:
+            return "empty"
+        parts = []
+        for resident in residents:
+            if self._computing.get(slot) is resident and resident.service_started:
+                phase = "computing"
+            elif self._is_parked(resident):
+                phase = "parked"
+            elif resident.input_landed:
+                phase = "ready"
+            else:
+                phase = "capturing"
+            parts.append(f"{resident.label} {phase}, {resident.n_rounds} rounds")
+        return "; ".join(parts)
 
     def _offer_compute(self, slot: tuple) -> None:
         """Free compute goes to the oldest startable resident, stays
@@ -572,6 +595,10 @@ class DecoderManager:
             if pending["count"] > 0:
                 return
             job.input_landed = True
+            self.engine.log_io(
+                f"unit {pool}#{unit} SRAM",
+                lambda: f"{job.label} input landed; holds "
+                        f"{self._sram_description(slot)}")
             if self._computing.get(slot) is job:
                 # this job holds or was reserved the unit's compute
                 self._begin_service(job)
@@ -585,6 +612,11 @@ class DecoderManager:
             # job up at the next compute end
 
         for member in members:
+            self.engine.log_io(
+                f"unit {pool}#{unit} SRAM",
+                lambda staged=member: f"receiving {staged.label} input "
+                                      f"({staged.n_rounds} rounds from the "
+                                      f"round store)")
             self.staging.stage(member, memory, landed)
 
     def _begin_service(self, job: DecodeJob, gated: bool = True) -> None:

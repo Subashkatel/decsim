@@ -445,6 +445,21 @@ class SyndromeBuffer:
 
     # -------------------------------------------------------- observability
 
+    def held_rounds_description(self) -> str:
+        """One compact line of the store's contents, for the I/O trace."""
+        round_indices_by_operation: dict = {}
+        for operation_id, round_index in self._rounds:
+            round_indices_by_operation.setdefault(operation_id, []).append(round_index)
+        if not round_indices_by_operation:
+            return "empty"
+        parts = []
+        for operation_id in sorted(round_indices_by_operation, key=str):
+            round_indices = round_indices_by_operation[operation_id]
+            ranges = _round_ranges_text(sorted(round_indices))
+            parts.append(f"op {operation_id} rounds {ranges} "
+                         f"({len(round_indices)})")
+        return "; ".join(parts)
+
     def snapshot(self) -> SyndromeBufferSnapshot:
         """Frozen view of every slot, hold and tombstone."""
         ordered = sorted(
@@ -486,3 +501,17 @@ class SyndromeBuffer:
             peak_live_allocations=self._peak_live_allocations,
             released_rounds=self._released_rounds,
         )
+
+
+def _round_ranges_text(sorted_round_indices: list) -> str:
+    """[1, 2, 3, 7, 8] -> "1..3, 7..8"."""
+    ranges = []
+    range_start = previous = sorted_round_indices[0]
+    for round_index in sorted_round_indices[1:]:
+        if round_index != previous + 1:
+            ranges.append((range_start, previous))
+            range_start = round_index
+        previous = round_index
+    ranges.append((range_start, previous))
+    return ", ".join(f"{low}" if low == high else f"{low}..{high}"
+                     for low, high in ranges)

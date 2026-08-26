@@ -6,7 +6,7 @@ mode: strong_only
 
 code_task: surface_code:rotated_memory_z
 distance: 3
-rounds_per_shot: 60
+rounds_per_shot: 20
 windowing:
   scheme: sliding                            # sliding | parallel | sandwich | naive_online
   commit_rounds: null                        # null = d

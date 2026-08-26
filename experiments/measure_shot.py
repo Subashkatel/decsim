@@ -216,7 +216,8 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                              round_period_us=round_period_us,
                              algorithm_latency_us=algorithm_latency_us, seed=seed)
     wall_start = time.perf_counter()
-    completed = spec.build(verbose=config.trace in ("print", "both"))
+    completed = spec.build(verbose=config.trace in ("print", "both"),
+                           io_trace=config.trace_io)
     wall_seconds = time.perf_counter() - wall_start
     if completed.result.terminal_status != "complete":
         raise RuntimeError(f"run did not complete: {completed.result.terminal_status}")

@@ -19,6 +19,9 @@ class _Engine:
     def schedule(self, delay, callback, *, label):
         self.events.append((self.now + delay, callback, label))
 
+    def log_io(self, who, message):
+        """The I/O trace is off in these tests; packing still narrates."""
+
     def run_next(self):
         tick, callback, _label = min(self.events, key=lambda event: event[0])
         self.events.remove((tick, callback, _label))

@@ -659,6 +659,24 @@ def magic_state_factory():
                    seed=53)
 
 
+def input_staging_ping_pong():
+    """Strong-only Tan windows on one unit with the depth-1 input staging
+    slot: the next window's CSD transfer overlaps the current compute."""
+    from decsim.decoders.decoders import PresetLatencyDecoder
+    from decsim.decoders.weak_strong_switching import StrongOnly
+    from decsim.links.link_profiles import logical_reference_profile
+    from decsim.message import Operation
+    from decsim.qpu.round_policies import FixedRounds
+    from decsim.run_spec import RunSpec
+    from decsim.windows.windowing_schemes import TanSandwichScheme
+    return RunSpec(ops=[Operation(0, "memory", (0,), patches=(0,))], d=3,
+                   rounds_policy=FixedRounds(27), round_us=1.0,
+                   decoder=PresetLatencyDecoder(5.0), num_units=1,
+                   scheme=TanSandwichScheme(), escalation_policy=StrongOnly(),
+                   input_staging_depth=1,
+                   links=logical_reference_profile(), seed=3)
+
+
 SCENARIOS = {
     name: fn for name, fn in globals().items()
     if callable(fn) and not name.startswith("_")

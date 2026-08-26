@@ -187,6 +187,27 @@ class LinkConfig:
 
 
 @dataclass(frozen=True, eq=False)
+class TransferOverheadConfig:
+    """Fixed per-transfer setup cost on one path: the descriptor programming
+    and doorbell work a CPU does before the data mover starts (gem5-Aladdin
+    charges this engine-side while issued transfers keep streaming, and the
+    setups of successive transfers SERIALIZE on the one CPU doing them;
+    Shao et al. MICRO 2016 measured 400 ns per transaction, the Aladdin
+    parameter default is 234 ns, and NIC doorbell writes measure ~230 ns).
+    The size-proportional cache-flush component of Aladdin's setup is not
+    modeled separately at this altitude."""
+
+    overhead_ticks: int
+    source: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "overhead_ticks",
+                           _whole(self.overhead_ticks, "overhead_ticks"))
+        if self.overhead_ticks < 0:
+            raise ValueError("overhead_ticks must be nonnegative")
+
+
+@dataclass(frozen=True, eq=False)
 class LinkEdgeConfig:
     """One path on a card: its channel, its default payload, and the name of the
     runtime quantity that supplies the actual payload (at least one of the two)."""
@@ -194,6 +215,7 @@ class LinkEdgeConfig:
     channel: LinkConfig
     default_payload: Optional[PayloadSizeConfig]
     actual_payload_source: Optional[str]
+    transfer_overhead: Optional[TransferOverheadConfig] = None
 
     def __post_init__(self) -> None:
         if self.default_payload is None and self.actual_payload_source is None:
@@ -481,12 +503,23 @@ class LinkModelConfig:
         """Build the run-owned fabric: one Link per distinct channel object."""
         channel_by_config_id = {}
         bindings = {}
+        overhead_by_channel = {}
         for path in self.wired_paths():
             edge = getattr(self, path.value)
             channel = channel_by_config_id.get(id(edge.channel))
             if channel is None:
                 channel = Link(edge.channel)
                 channel_by_config_id[id(edge.channel)] = channel
+            # a channel's in-order send guard cannot hold if edges sharing
+            # it disagree about the setup shift, so refuse the mix
+            overhead_ticks = (0 if edge.transfer_overhead is None
+                              else edge.transfer_overhead.overhead_ticks)
+            seen = overhead_by_channel.setdefault(id(edge.channel),
+                                                  overhead_ticks)
+            if seen != overhead_ticks:
+                raise ValueError(
+                    f"{path.value} shares a channel with an edge whose "
+                    f"transfer overhead differs; give each its own channel")
             bindings[path] = (edge, channel)
         return LinkModel(self, bindings)
 
@@ -526,6 +559,10 @@ class LinkModel:
         self._bindings = dict(bindings)                # path -> (edge, channel)
         self._paths = tuple(self._bindings)
         self._semantic_counters = {path: TrafficCounters() for path in self._paths}
+        # the one-server setup queue per path: successive transfers' setups
+        # serialize (one CPU programs the engine), while the wire itself
+        # keeps streaming during a setup
+        self._setup_free_ticks = {path: 0 for path in self._paths}
         self._transfers = []
         self._alias_by_channel = {}
         for path in self._paths:
@@ -547,7 +584,19 @@ class LinkModel:
         _check_attribution(path, attribution)
         edge, channel = self._bindings[path]
         selected_bits, selection, payload_source = _select_payload(path, edge, payload_bits)
+        setup_ticks = 0
+        if edge.transfer_overhead is not None:
+            setup_start = max(now_ticks, self._setup_free_ticks[path])
+            wire_ticks = setup_start + edge.transfer_overhead.overhead_ticks
+            self._setup_free_ticks[path] = wire_ticks
+            setup_ticks = wire_ticks - now_ticks
+            now_ticks = wire_ticks
         reservation = channel.reserve(payload_bits=selected_bits, now_ticks=now_ticks)
+        if setup_ticks:
+            from dataclasses import replace as _replace
+            reservation = _replace(
+                reservation,
+                total_delay_ticks=reservation.total_delay_ticks + setup_ticks)
         self._semantic_counters[path] = self._semantic_counters[path].plus_reservation(reservation)
         self._transfers.append(SemanticTransferRecord(
             path=path,

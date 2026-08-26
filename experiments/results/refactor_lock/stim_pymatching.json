@@ -157,9 +157,9 @@
 "link_traffic": {
 "path_order": [
 "qc",
-"cwd",
+"wbd",
 "wsd",
-"csd",
+"sbd",
 "wdo",
 "dd",
 "do",
@@ -191,7 +191,7 @@
 "unknown_payload_transfer_count": 0
 },
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1"
 },
@@ -219,7 +219,7 @@
 "unknown_payload_transfer_count": 0
 },
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3"
 },
@@ -320,7 +320,7 @@
 },
 {
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1",
 "physical_counters": {
@@ -366,7 +366,7 @@
 },
 {
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3",
 "physical_counters": {
@@ -526,7 +526,7 @@
 "transfer_count": 4,
 "unknown_payload_transfer_count": 0
 },
-"path": "cwd",
+"path": "wbd",
 "physical_alias": "channel-1"
 },
 {
@@ -550,7 +550,7 @@
 "transfer_count": 0,
 "unknown_payload_transfer_count": 0
 },
-"path": "csd",
+"path": "sbd",
 "physical_alias": "channel-3"
 },
 {
@@ -850,7 +850,7 @@
 "window_id": 0
 },
 "delivery_ticks": 8150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 44,
 "payload_selection": "actual",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -997,7 +997,7 @@
 "window_id": 1
 },
 "delivery_ticks": 11150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 48,
 "payload_selection": "actual",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1268,7 +1268,7 @@
 "window_id": 2
 },
 "delivery_ticks": 14150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 48,
 "payload_selection": "actual",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1539,7 +1539,7 @@
 "window_id": 3
 },
 "delivery_ticks": 17150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 52,
 "payload_selection": "actual",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",

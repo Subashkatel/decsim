@@ -85,6 +85,33 @@ def test_trace_io_narrates_every_component_without_changing_the_run(tmp_path):
     assert not any("SRAM" in line for line in quiet_lines)
 
 
+def test_a_child_config_reports_the_base_it_overrode(tmp_path):
+    """`extends` replaces a key whole, so a sweep edited in the base never
+    reaches a child that declares its own. The run header must show both
+    files and the sweep that won, or the child looks like it ignored the
+    edit."""
+    from experiments.run import resolved_description
+
+    base = yaml.safe_load(REFERENCE_YAML.read_text())
+    base["sweep"] = [{"physical_error_probability": [0.005],
+                      "round_period_us": [1.0],
+                      "algorithm_latency_us": [0.028], "shots": 1}]
+    (tmp_path / "base.yaml").write_text(yaml.safe_dump(base))
+    (tmp_path / "child.yaml").write_text(yaml.safe_dump({
+        "extends": "base.yaml",
+        "sweep": [{"physical_error_probability": [0.001],
+                   "round_period_us": [1.0],
+                   "algorithm_latency_us": [0.028], "shots": 1}]}))
+
+    config = load_experiment(tmp_path / "child.yaml")
+    assert config.sweep[0].physical_error_probabilities == (0.001,)
+    assert [path.name for path in config.config_files] == ["child.yaml",
+                                                           "base.yaml"]
+    header = "\n".join(resolved_description(config))
+    assert "child.yaml" in header and "base.yaml" in header
+    assert "p [0.001]" in header
+
+
 def test_reference_config_lists_every_key_the_shipped_configs_use():
     reference_keys = set(yaml.safe_load(REFERENCE_YAML.read_text()))
     for name in ("weak_baseline", "strong_only"):

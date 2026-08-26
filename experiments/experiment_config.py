@@ -111,6 +111,8 @@ class ExperimentConfig:
                                     # what each store and unit received,
                                     # holds, and emitted
     pauli_frame_commit_us: float
+    config_files: tuple             # the yaml files this config was read
+                                    # from, nearest first (an extends chain)
 
     @property
     def results_dir(self) -> Path:
@@ -140,20 +142,26 @@ def _require(value, allowed: tuple, key: str):
     return value
 
 
-def _raw_yaml(path: Path) -> dict:
+def _raw_yaml(path: Path) -> tuple:
+    """The file's keys with its `extends` chain applied, and the files that
+    produced them (this file first, then the base it extends, and so on).
+
+    A key this file names replaces the base's key whole: a child that
+    declares `sweep` ignores the base's sweep entirely.
+    """
     with open(path) as handle:
         raw = yaml.safe_load(handle)
     base_name = raw.pop("extends", None)
     if base_name is None:
-        return raw
-    base = _raw_yaml(path.parent / base_name)
+        return raw, (path,)
+    base, base_paths = _raw_yaml(path.parent / base_name)
     base.update(raw)
-    return base
+    return base, (path,) + base_paths
 
 
 def load_experiment(path) -> ExperimentConfig:
     path = Path(path)
-    raw = _raw_yaml(path)
+    raw, config_files = _raw_yaml(path)
     windowing = raw["windowing"]
     controller = raw["controller"]
     buffers = raw["buffers"]
@@ -203,4 +211,5 @@ def load_experiment(path) -> ExperimentConfig:
                 release_cycles_per_job=engine["release_cycles_per_job"])),
         trace=_require(raw_trace, TRACE_MODES, "trace"),
         trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
-        pauli_frame_commit_us=raw["pauli_frame"]["commit_us"])
+        pauli_frame_commit_us=raw["pauli_frame"]["commit_us"],
+        config_files=config_files)

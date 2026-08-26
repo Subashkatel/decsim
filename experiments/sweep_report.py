@@ -126,37 +126,29 @@ def table_lines(rows: list) -> list:
 
 
 def terminal_lines(rows: list) -> list:
-    """The at-a-glance table for the terminal: the health and headline
-    columns only, aligned. The full record is sweep.csv and sweep.md."""
-    head = ["p", "algo us", "round us", "load", "fails/shots", "mismatch",
-            "rounds/us", "util", "queue us", "service us", "ready->frame us",
-            "p99 us"]
-    body = []
+    """The terminal summary: one labeled block per sweep point, full names,
+    no abbreviations. The full record is sweep.csv and sweep.md."""
+    blocks = []
     for row in rows:
         algorithm = row["algorithm_latency_us"]
-        body.append([
-            f"{row['physical_error_probability']:g}",
-            algorithm if isinstance(algorithm, str) else f"{algorithm:g}",
-            f"{row['round_period_us']:g}",
-            f"{row['load']:.2f}",
-            f"{row['logical_failures']}/{row['shots']}",
-            f"{row['prediction_mismatches_vs_direct']}",
-            f"{row['throughput_rounds_per_us']:.3f}",
+        algorithm_text = (algorithm if isinstance(algorithm, str)
+                          else f"{algorithm:g} us")
+        blocks.append("\n".join([
+            f"physical error rate: {row['physical_error_probability']:g}",
+            f"algorithm latency: {algorithm_text}",
+            f"round period: {row['round_period_us']:g} us",
+            f"load (service per window / window inter-arrival): {row['load']:.2f}",
+            f"logical failures: {row['logical_failures']} of {row['shots']} shots",
+            f"mismatches vs direct PyMatching: {row['prediction_mismatches_vs_direct']}",
+            f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
+            f"decoder utilization (fraction of the run a unit computes): "
             f"{row['decoder_utilization']:.3f}",
-            f"{row['queue_wait_mean_us']:.3f}",
-            f"{row['service_mean_us']:.3f}",
-            f"{row['buffer0_ready_to_frame_median_us']:.3f}",
-            f"{row['buffer0_ready_to_frame_p99_us']:.3f}"])
-    widths = []
-    for column_index, title in enumerate(head):
-        cell_widths = [len(cells[column_index]) for cells in body]
-        widths.append(max([len(title)] + cell_widths))
-
-    def aligned(cells):
-        return "  ".join(cell.rjust(width) for cell, width in zip(cells, widths))
-
-    rule = "  ".join("-" * width for width in widths)
-    return [aligned(head), rule] + [aligned(cells) for cells in body]
+            f"queue wait, mean: {row['queue_wait_mean_us']:.3f} us",
+            f"service time per window, mean: {row['service_mean_us']:.3f} us",
+            f"ready to frame commit: median "
+            f"{row['buffer0_ready_to_frame_median_us']:.3f} us, "
+            f"p99 {row['buffer0_ready_to_frame_p99_us']:.3f} us"]))
+    return "\n\n".join(blocks).split("\n")
 
 
 def write_report(rows: list, report_dir: Path) -> None:

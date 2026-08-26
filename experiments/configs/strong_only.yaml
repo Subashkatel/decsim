@@ -42,7 +42,7 @@ links:
   dd:  {latency_us: 0.5, bits_per_us: null}     # decoder -> decoder boundary handoff
   do:  {latency_us: 1.0, bits_per_us: null}     # strong decoder -> Pauli frame
   # not on this path: null = the logical_reference card's numbers
-  cwd: null
+  wbd: null
   wdo: null
   wsd: null
   oc:  null

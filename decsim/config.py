@@ -27,7 +27,7 @@ class TimingConfig:
 
     round_us: float = 1.1          # QEC round period (one syndrome-extraction cycle)
     t_binary_availability_us: float = 0.0 # optional post-QC detector-data availability
-    t_pack_us: float = 0.0         # controller packet assembly before CWD send
+    t_pack_us: float = 0.0         # controller packet assembly before WBD send
 
     def __post_init__(self) -> None:
         import math

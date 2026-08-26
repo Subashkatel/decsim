@@ -561,7 +561,7 @@ class WindowManager:
         return True
 
     def accept_feedback_memory_round(self, source_operation_id) -> None:
-        """Accept one standalone feedback-memory notification after CWD."""
+        """Accept one standalone feedback-memory notification after WBD."""
         self.on_memory_round(source_operation_id)
 
     def _store_payload(
@@ -815,7 +815,7 @@ class WindowManager:
                 extra_delay = submission.delay_ticks
                 # unit assigned: move the window from the primary store into
                 # its memory, over the primary tier's input link
-                input_path = (LinkPath.CWD
+                input_path = (LinkPath.WBD
                               if self.primary_tier is DecoderTier.WEAK
                               else LinkPath.CSD)
 

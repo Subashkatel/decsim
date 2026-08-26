@@ -2,7 +2,7 @@
 round are assembled in this stage's own workspace, merged, formed into
 detection events (the device's formation table), and the finished round is
 written into the stores (Buffer 0, and syndrome buffer 1 when wired) before
-being arbitrated onto its route, CWB to the window input or CWD as a
+being arbitrated onto its route, CWB to the window input or WBD as a
 feedback-memory round. The stores hold finished rounds only; a context is
 PARTIAL while fragments are missing, PACKED_WAIT while it waits for its
 route, and DRAINING once transmission has started."""
@@ -403,12 +403,12 @@ class SyndromePacking:
         """Buffer 0 has room again: retry backpressured packets."""
         self._schedule_arbitration()
 
-    # ---- feedback memory: CWD
+    # ---- feedback memory: WBD
 
     def _transmit_feedback_memory_round(self, context: _PackingContext) -> None:
         packet = context.packet
         source_operation_id = context.route.source_operation_id
-        delay_ticks = self._reserve(LinkPath.CWD, payload_bits=context.packet_bits,
+        delay_ticks = self._reserve(LinkPath.WBD, payload_bits=context.packet_bits,
                                     attribution=self._packet_attribution(packet))
         self.engine.schedule(
             delay_ticks,

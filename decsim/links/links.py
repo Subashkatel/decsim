@@ -6,9 +6,9 @@ components on the reaction path:
 - ``QC``  QPU -> controller: syndrome readout leaving the QPU (t_qc).
 - ``CWB`` controller -> syndrome buffer 0: a completed binary round published
   to the window-input route; optional, a card without it publishes for free.
-- ``CWD`` controller -> weak decoder: syndrome data reaching the weak tier,
-  either as one round (``syndrome_packing``) or as one weak window
-  (``window_manager``) (t_cwd).
+- ``WBD`` weak buffer -> weak decoder: syndrome data reaching the weak tier,
+  as one window assembled from Buffer 0 (``window_manager``) or as one
+  feedback-memory round straight off packing (``syndrome_packing``) (t_wbd).
 - ``WSD`` weak decoder -> strong decoder: the escalation selection that hands a
   window to the strong tier (t_wsd).
 - ``CSD`` controller -> strong decoder: the strong window's syndrome input
@@ -237,7 +237,7 @@ class LinkPath(str, Enum):
 
     QC = "qc"
     CWB = "cwb"
-    CWD = "cwd"
+    WBD = "wbd"
     WSD = "wsd"
     CSD = "csd"
     WDO = "wdo"
@@ -280,7 +280,7 @@ class LinkPathRule:
 _PATH_RULES = MappingProxyType({
     LinkPath.QC: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, True),
     LinkPath.CWB: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, False),
-    LinkPath.CWD: LinkPathRule(LinkAttributionScope.ROUND_OR_WINDOW,
+    LinkPath.WBD: LinkPathRule(LinkAttributionScope.ROUND_OR_WINDOW,
                                LinkRelationRule.REQUEST_WHEN_WINDOWED, True),
     LinkPath.WSD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
     LinkPath.CSD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
@@ -476,7 +476,7 @@ class LinkModelConfig:
     paths are required; ``cwb`` and ``csb`` are optional."""
 
     qc: LinkEdgeConfig
-    cwd: LinkEdgeConfig
+    wbd: LinkEdgeConfig
     wsd: LinkEdgeConfig
     csd: LinkEdgeConfig
     wdo: LinkEdgeConfig

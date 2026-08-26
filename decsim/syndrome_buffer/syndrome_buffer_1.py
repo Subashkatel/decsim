@@ -95,6 +95,9 @@ class SyndromeBuffer1:
             raise RuntimeError(
                 f"syndrome buffer 1 refused round "
                 f"{(packet.operation_id, packet.round_index)!r} at landing")
+        # a round whose every reader resolved while it crossed the copy-out
+        # is dropped at the door: nobody can ever read it
+        self.store.release_round_if_unheld(admission.round_identity)
         operation_id = packet.operation_id
         arrived = self.rounds_arrived.get(operation_id, 0)
         self.rounds_arrived[operation_id] = max(arrived, packet.round_index)

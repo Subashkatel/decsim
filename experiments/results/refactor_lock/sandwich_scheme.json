@@ -149,9 +149,9 @@
 "link_traffic": {
 "path_order": [
 "qc",
-"cwd",
+"wbd",
 "wsd",
-"csd",
+"sbd",
 "wdo",
 "dd",
 "do",
@@ -183,7 +183,7 @@
 "unknown_payload_transfer_count": 15
 },
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1"
 },
@@ -211,7 +211,7 @@
 "unknown_payload_transfer_count": 0
 },
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3"
 },
@@ -312,7 +312,7 @@
 },
 {
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1",
 "physical_counters": {
@@ -358,7 +358,7 @@
 },
 {
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3",
 "physical_counters": {
@@ -518,7 +518,7 @@
 "transfer_count": 15,
 "unknown_payload_transfer_count": 15
 },
-"path": "cwd",
+"path": "wbd",
 "physical_alias": "channel-1"
 },
 {
@@ -542,7 +542,7 @@
 "transfer_count": 0,
 "unknown_payload_transfer_count": 0
 },
-"path": "csd",
+"path": "sbd",
 "physical_alias": "channel-3"
 },
 {
@@ -944,7 +944,7 @@
 "window_id": 0
 },
 "delivery_ticks": 9000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1091,7 +1091,7 @@
 "window_id": 2
 },
 "delivery_ticks": 12000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1136,7 +1136,7 @@
 "window_id": 1
 },
 "delivery_ticks": 12000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1407,7 +1407,7 @@
 "window_id": 4
 },
 "delivery_ticks": 15000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1452,7 +1452,7 @@
 "window_id": 3
 },
 "delivery_ticks": 15000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1802,7 +1802,7 @@
 "window_id": 6
 },
 "delivery_ticks": 18000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1847,7 +1847,7 @@
 "window_id": 5
 },
 "delivery_ticks": 18000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2197,7 +2197,7 @@
 "window_id": 8
 },
 "delivery_ticks": 21000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2242,7 +2242,7 @@
 "window_id": 7
 },
 "delivery_ticks": 21000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2637,7 +2637,7 @@
 "window_id": 10
 },
 "delivery_ticks": 24000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2682,7 +2682,7 @@
 "window_id": 9
 },
 "delivery_ticks": 24000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -3077,7 +3077,7 @@
 "window_id": 12
 },
 "delivery_ticks": 27000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -3122,7 +3122,7 @@
 "window_id": 11
 },
 "delivery_ticks": 27000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -3517,7 +3517,7 @@
 "window_id": 14
 },
 "delivery_ticks": 30000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -3562,7 +3562,7 @@
 "window_id": 13
 },
 "delivery_ticks": 30000000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",

@@ -136,9 +136,9 @@
 "link_traffic": {
 "path_order": [
 "qc",
-"cwd",
+"wbd",
 "wsd",
-"csd",
+"sbd",
 "wdo",
 "dd",
 "do",
@@ -170,7 +170,7 @@
 "unknown_payload_transfer_count": 0
 },
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1"
 },
@@ -198,7 +198,7 @@
 "unknown_payload_transfer_count": 0
 },
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3"
 },
@@ -299,7 +299,7 @@
 },
 {
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1",
 "physical_counters": {
@@ -345,7 +345,7 @@
 },
 {
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3",
 "physical_counters": {
@@ -505,7 +505,7 @@
 "transfer_count": 8,
 "unknown_payload_transfer_count": 0
 },
-"path": "cwd",
+"path": "wbd",
 "physical_alias": "channel-1"
 },
 {
@@ -529,7 +529,7 @@
 "transfer_count": 0,
 "unknown_payload_transfer_count": 0
 },
-"path": "csd",
+"path": "sbd",
 "physical_alias": "channel-3"
 },
 {
@@ -1985,7 +1985,7 @@
 "window_id": 0
 },
 "delivery_ticks": 99150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 240,
 "payload_selection": "configured_default",
 "payload_source": "one weak window of rcom+rbuf rounds per commit region (tmp/references/papers/2510.25222v1.txt:1150-1152, \"rcom = rbuf = d\")",
@@ -2030,7 +2030,7 @@
 "window_id": 0
 },
 "delivery_ticks": 119150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 240,
 "payload_selection": "configured_default",
 "payload_source": "one weak window of rcom+rbuf rounds per commit region (tmp/references/papers/2510.25222v1.txt:1150-1152, \"rcom = rbuf = d\")",
@@ -2199,7 +2199,7 @@
 "window_id": 1
 },
 "delivery_ticks": 139150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 240,
 "payload_selection": "configured_default",
 "payload_source": "one weak window of rcom+rbuf rounds per commit region (tmp/references/papers/2510.25222v1.txt:1150-1152, \"rcom = rbuf = d\")",
@@ -2368,7 +2368,7 @@
 "window_id": 1
 },
 "delivery_ticks": 159150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 240,
 "payload_selection": "configured_default",
 "payload_source": "one weak window of rcom+rbuf rounds per commit region (tmp/references/papers/2510.25222v1.txt:1150-1152, \"rcom = rbuf = d\")",
@@ -2537,7 +2537,7 @@
 "window_id": 2
 },
 "delivery_ticks": 179150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 240,
 "payload_selection": "configured_default",
 "payload_source": "one weak window of rcom+rbuf rounds per commit region (tmp/references/papers/2510.25222v1.txt:1150-1152, \"rcom = rbuf = d\")",
@@ -2582,7 +2582,7 @@
 "window_id": 3
 },
 "delivery_ticks": 199150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 240,
 "payload_selection": "configured_default",
 "payload_source": "one weak window of rcom+rbuf rounds per commit region (tmp/references/papers/2510.25222v1.txt:1150-1152, \"rcom = rbuf = d\")",
@@ -2751,7 +2751,7 @@
 "window_id": 2
 },
 "delivery_ticks": 219150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 240,
 "payload_selection": "configured_default",
 "payload_source": "one weak window of rcom+rbuf rounds per commit region (tmp/references/papers/2510.25222v1.txt:1150-1152, \"rcom = rbuf = d\")",
@@ -2796,7 +2796,7 @@
 "window_id": 3
 },
 "delivery_ticks": 239150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": 240,
 "payload_selection": "configured_default",
 "payload_source": "one weak window of rcom+rbuf rounds per commit region (tmp/references/papers/2510.25222v1.txt:1150-1152, \"rcom = rbuf = d\")",

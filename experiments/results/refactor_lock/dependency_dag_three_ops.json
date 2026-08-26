@@ -146,9 +146,9 @@
 "link_traffic": {
 "path_order": [
 "qc",
-"cwd",
+"wbd",
 "wsd",
-"csd",
+"sbd",
 "wdo",
 "dd",
 "do",
@@ -180,7 +180,7 @@
 "unknown_payload_transfer_count": 32
 },
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1"
 },
@@ -208,7 +208,7 @@
 "unknown_payload_transfer_count": 0
 },
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3"
 },
@@ -309,7 +309,7 @@
 },
 {
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1",
 "physical_counters": {
@@ -355,7 +355,7 @@
 },
 {
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3",
 "physical_counters": {
@@ -515,7 +515,7 @@
 "transfer_count": 32,
 "unknown_payload_transfer_count": 32
 },
-"path": "cwd",
+"path": "wbd",
 "physical_alias": "channel-1"
 },
 {
@@ -539,7 +539,7 @@
 "transfer_count": 0,
 "unknown_payload_transfer_count": 0
 },
-"path": "csd",
+"path": "sbd",
 "physical_alias": "channel-3"
 },
 {
@@ -1043,7 +1043,7 @@
 "window_id": 0
 },
 "delivery_ticks": 8150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1088,7 +1088,7 @@
 "window_id": 0
 },
 "delivery_ticks": 8150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1337,7 +1337,7 @@
 "window_id": 1
 },
 "delivery_ticks": 11150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1382,7 +1382,7 @@
 "window_id": 2
 },
 "delivery_ticks": 11150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1516,7 +1516,7 @@
 "window_id": null
 },
 "delivery_ticks": 12150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1685,7 +1685,7 @@
 "window_id": 1
 },
 "delivery_ticks": 12650000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2027,7 +2027,7 @@
 "window_id": null
 },
 "delivery_ticks": 14150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2072,7 +2072,7 @@
 "window_id": 2
 },
 "delivery_ticks": 14150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2341,7 +2341,7 @@
 "window_id": 3
 },
 "delivery_ticks": 15650000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2491,7 +2491,7 @@
 "window_id": null
 },
 "delivery_ticks": 16150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2865,7 +2865,7 @@
 "window_id": null
 },
 "delivery_ticks": 18150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -3188,7 +3188,7 @@
 "window_id": null
 },
 "delivery_ticks": 20150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -3562,7 +3562,7 @@
 "window_id": null
 },
 "delivery_ticks": 22150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -3885,7 +3885,7 @@
 "window_id": null
 },
 "delivery_ticks": 24150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4003,7 +4003,7 @@
 "window_id": null
 },
 "delivery_ticks": 26150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4121,7 +4121,7 @@
 "window_id": null
 },
 "delivery_ticks": 28150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4239,7 +4239,7 @@
 "window_id": null
 },
 "delivery_ticks": 30150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4284,7 +4284,7 @@
 "window_id": 0
 },
 "delivery_ticks": 30150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4329,7 +4329,7 @@
 "window_id": 1
 },
 "delivery_ticks": 30150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4379,7 +4379,7 @@
 "window_id": null
 },
 "delivery_ticks": 32150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4429,7 +4429,7 @@
 "window_id": null
 },
 "delivery_ticks": 34150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4613,7 +4613,7 @@
 "window_id": null
 },
 "delivery_ticks": 36150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4713,7 +4713,7 @@
 "window_id": null
 },
 "delivery_ticks": 38150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4763,7 +4763,7 @@
 "window_id": null
 },
 "delivery_ticks": 40150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4813,7 +4813,7 @@
 "window_id": null
 },
 "delivery_ticks": 42150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4863,7 +4863,7 @@
 "window_id": null
 },
 "delivery_ticks": 44150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4913,7 +4913,7 @@
 "window_id": null
 },
 "delivery_ticks": 46150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -4963,7 +4963,7 @@
 "window_id": null
 },
 "delivery_ticks": 48150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -5013,7 +5013,7 @@
 "window_id": null
 },
 "delivery_ticks": 50150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -5063,7 +5063,7 @@
 "window_id": null
 },
 "delivery_ticks": 52150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -5113,7 +5113,7 @@
 "window_id": null
 },
 "delivery_ticks": 54150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -5163,7 +5163,7 @@
 "window_id": null
 },
 "delivery_ticks": 56150000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",

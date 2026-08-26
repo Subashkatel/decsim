@@ -110,9 +110,9 @@
 "link_traffic": {
 "path_order": [
 "qc",
-"cwd",
+"wbd",
 "wsd",
-"csd",
+"sbd",
 "wdo",
 "dd",
 "do",
@@ -144,7 +144,7 @@
 "unknown_payload_transfer_count": 8
 },
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1"
 },
@@ -172,7 +172,7 @@
 "unknown_payload_transfer_count": 8
 },
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3"
 },
@@ -273,7 +273,7 @@
 },
 {
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1",
 "physical_counters": {
@@ -319,7 +319,7 @@
 },
 {
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3",
 "physical_counters": {
@@ -479,7 +479,7 @@
 "transfer_count": 8,
 "unknown_payload_transfer_count": 8
 },
-"path": "cwd",
+"path": "wbd",
 "physical_alias": "channel-1"
 },
 {
@@ -503,7 +503,7 @@
 "transfer_count": 8,
 "unknown_payload_transfer_count": 8
 },
-"path": "csd",
+"path": "sbd",
 "physical_alias": "channel-3"
 },
 {
@@ -803,7 +803,7 @@
 "window_id": 0
 },
 "delivery_ticks": 6600000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -848,7 +848,7 @@
 "window_id": 0
 },
 "delivery_ticks": 6600000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -1119,7 +1119,7 @@
 "window_id": 1
 },
 "delivery_ticks": 9900000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1164,7 +1164,7 @@
 "window_id": 1
 },
 "delivery_ticks": 9900000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -1435,7 +1435,7 @@
 "window_id": 2
 },
 "delivery_ticks": 13200000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1480,7 +1480,7 @@
 "window_id": 2
 },
 "delivery_ticks": 13200000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -1751,7 +1751,7 @@
 "window_id": 3
 },
 "delivery_ticks": 16500000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1796,7 +1796,7 @@
 "window_id": 3
 },
 "delivery_ticks": 16500000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -1841,7 +1841,7 @@
 "window_id": 4
 },
 "delivery_ticks": 16500000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -1886,7 +1886,7 @@
 "window_id": 4
 },
 "delivery_ticks": 16500001,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -2224,7 +2224,7 @@
 "window_id": 2
 },
 "delivery_ticks": 19900000,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2269,7 +2269,7 @@
 "window_id": 2
 },
 "delivery_ticks": 19900000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -2438,7 +2438,7 @@
 "window_id": 3
 },
 "delivery_ticks": 19900001,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2483,7 +2483,7 @@
 "window_id": 3
 },
 "delivery_ticks": 19900001,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -2652,7 +2652,7 @@
 "window_id": 4
 },
 "delivery_ticks": 19900002,
-"path": "cwd",
+"path": "wbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "SyndromeRoundPacket.fragment_size_sum",
@@ -2697,7 +2697,7 @@
 "window_id": 4
 },
 "delivery_ticks": 19900002,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",

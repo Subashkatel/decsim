@@ -129,9 +129,9 @@
 "link_traffic": {
 "path_order": [
 "qc",
-"cwd",
+"wbd",
 "wsd",
-"csd",
+"sbd",
 "wdo",
 "dd",
 "do",
@@ -163,7 +163,7 @@
 "unknown_payload_transfer_count": 0
 },
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1"
 },
@@ -191,7 +191,7 @@
 "unknown_payload_transfer_count": 13
 },
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3"
 },
@@ -292,7 +292,7 @@
 },
 {
 "member_paths": [
-"cwd"
+"wbd"
 ],
 "physical_alias": "channel-1",
 "physical_counters": {
@@ -338,7 +338,7 @@
 },
 {
 "member_paths": [
-"csd"
+"sbd"
 ],
 "physical_alias": "channel-3",
 "physical_counters": {
@@ -498,7 +498,7 @@
 "transfer_count": 0,
 "unknown_payload_transfer_count": 0
 },
-"path": "cwd",
+"path": "wbd",
 "physical_alias": "channel-1"
 },
 {
@@ -522,7 +522,7 @@
 "transfer_count": 13,
 "unknown_payload_transfer_count": 13
 },
-"path": "csd",
+"path": "sbd",
 "physical_alias": "channel-3"
 },
 {
@@ -924,7 +924,7 @@
 "window_id": 0
 },
 "delivery_ticks": 11950000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -1071,7 +1071,7 @@
 "window_id": 2
 },
 "delivery_ticks": 14950000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -1240,7 +1240,7 @@
 "window_id": 1
 },
 "delivery_ticks": 15350000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -1387,7 +1387,7 @@
 "window_id": 4
 },
 "delivery_ticks": 18350000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -1748,7 +1748,7 @@
 "window_id": 3
 },
 "delivery_ticks": 19850000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -2030,7 +2030,7 @@
 "window_id": 6
 },
 "delivery_ticks": 21750000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -2414,7 +2414,7 @@
 "window_id": 8
 },
 "delivery_ticks": 25150000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -2538,7 +2538,7 @@
 "window_id": 5
 },
 "delivery_ticks": 26150000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -2854,7 +2854,7 @@
 "window_id": 10
 },
 "delivery_ticks": 28550000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -2978,7 +2978,7 @@
 "window_id": 7
 },
 "delivery_ticks": 29550000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -3260,7 +3260,7 @@
 "window_id": 12
 },
 "delivery_ticks": 31950000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -3350,7 +3350,7 @@
 "window_id": 9
 },
 "delivery_ticks": 32950000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",
@@ -3519,7 +3519,7 @@
 "window_id": 11
 },
 "delivery_ticks": 35350000,
-"path": "csd",
+"path": "sbd",
 "payload_bits": null,
 "payload_selection": "unresolved",
 "payload_source": "DecodeJob.retained_payload_size_bits",

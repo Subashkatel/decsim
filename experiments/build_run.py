@@ -120,6 +120,15 @@ def code_model(config: ExperimentConfig) -> SurfaceCodeModel:
                             buffer_rounds_override=config.windowing.buffer_rounds)
 
 
+def idle_policy(config: ExperimentConfig):
+    """The named idle-round card resolved to its policy object."""
+    from decsim.controller.policies import (ExtendStream, Ignore,
+                                            SeparateDecodeJobs)
+    return {"separate_decode_jobs": SeparateDecodeJobs,
+            "ignore": Ignore,
+            "extend_stream": ExtendStream}[config.idle_policy]()
+
+
 def decoder_memory(config: ExperimentConfig):
     unit_buffer_size = config.decoder.unit_buffer_size
     if unit_buffer_size is None:
@@ -166,6 +175,7 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
         decoder_memory=decoder_memory(config),
         syndrome_buffering=syndrome_buffering(config),
         escalation_policy=escalation_policy(config),
+        idle_policy=idle_policy(config),
         pauli_frame=PauliFrameConfig(commit_us=config.pauli_frame_commit_us),
         seed=seed)
     return spec, engine

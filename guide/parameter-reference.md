@@ -17,7 +17,7 @@ every yaml key with its meaning and defaults; the loader is
 config with `python -m experiments.run experiments/configs/<name>.yaml`.
 Top-level keys: `mode`, `code_task`, `distance`, `rounds_per_shot`,
 `windowing`, `sweep`, `controller`, `links`, `buffers`, `decoder`,
-`pauli_frame`, `trace`, `trace_io` (plus `extends`, which
+`pauli_frame`, `trace`, `trace_io`, `idle_policy` (plus `extends`, which
 starts from another config in the same folder and overrides the keys it
 names). `trace` is `off`, `print`, `file` or `both`: the engine narrator
 shown live on screen, written one log file per shot to
@@ -54,7 +54,7 @@ each).
 | `rounds_policy` | partly | rounds per operation (yaml: `FixedRounds(rounds_per_shot)`) |
 | `boundary_policy` | no | commit/release policy at window boundaries (e.g. speculative) |
 | `window_interaction` | no | boundary targeting, merging and invalidation between windows |
-| `idle_policy` | no | what idle rounds decode |
+| `idle_policy` | yes | how an idle patch's rounds are charged: `separate_decode_jobs` (default; idle volume costs load-only decode jobs, the SWIPER/XQsim shape), `ignore` (optimistic, latency studies only), `extend_stream` |
 | `feedback_boundary_mode` | no | feedback stream boundary handling (`trailing_buffer`) |
 | `timing` | yes | `TimingConfig`: `round_us`, `t_binary_availability_us`, `t_pack_us` (`controller:` block) |
 | `round_us` | yes | round period shorthand when `timing` is not given (`round_period_us` axis) |

@@ -78,6 +78,15 @@ decoder:
 pauli_frame:
   commit_us: 0.004                 # XOR of a correction into the frame register
 
+idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stream.
+                                   # How an idle patch's rounds are charged; idle
+                                   # rounds are decoder workload in every reference
+                                   # system (SWIPER, XQsim, Terhal backlog), so the
+                                   # default costs one load-only decode job per idle
+                                   # commit region. ignore is the optimistic card for
+                                   # active-path latency studies. Inert while the
+                                   # workload is a single always-busy operation.
+
 trace_io: false                    # true adds component I/O lines to the trace:
                                    # what each store and unit received, holds
                                    # (rounds, residents), and emitted

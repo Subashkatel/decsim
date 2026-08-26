@@ -67,6 +67,8 @@ decoder_memory_rounds: null        # input SRAM rounds PER UNIT; null = unbounde
 pauli_frame:
   commit_us: 0.004                 # XOR of a correction into the frame register
 
-trace: false                       # true: print the engine narrator live AND write
-                                   # each shot's full line record to
-                                   # results/<name>/trace/p<p>_algo<card>_round<T>us_seed<n>.log
+trace: off                         # off | print | file | both. The engine narrator:
+                                   # print shows it live on screen; file writes each
+                                   # shot's full line record to
+                                   # results/<name>/trace/p<p>_algo<card>_round<T>us_seed<n>.log;
+                                   # both does both

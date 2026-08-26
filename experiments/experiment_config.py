@@ -20,6 +20,7 @@ MEASURED = "measured"
 AlgorithmCard = Union[float, str]
 
 MODES = ("weak_baseline", "strong_only")
+TRACE_MODES = ("off", "print", "file", "both")
 SCHEMES = ("sliding", "parallel", "sandwich", "naive_online")
 LINK_PATHS = ("qc", "c2b", "copy_out", "cwd", "wsd", "csd",
               "dd", "wdo", "do", "oc", "cq")
@@ -84,8 +85,9 @@ class ExperimentConfig:
     links: dict                     # path -> LinkCard | None (None = reference card)
     decoder: DecoderCard
     decoder_memory_rounds: Optional[int]   # per unit; None = unbounded
-    trace: bool                     # print the engine narrator live and keep
-                                    # each shot's lines in results/<name>/trace/
+    trace: str                      # off | print | file | both: the engine
+                                    # narrator, live on screen and/or one log
+                                    # file per shot in results/<name>/trace/
     pauli_frame_commit_us: float
 
     @property
@@ -127,6 +129,9 @@ def load_experiment(path) -> ExperimentConfig:
     engine = decoder["engine"]
     links = {link_path: _link_card(raw["links"].get(link_path))
              for link_path in LINK_PATHS}
+    raw_trace = raw.get("trace", "off")
+    if raw_trace is False:
+        raw_trace = "off"     # yaml 1.1 reads a bare `off` as boolean False
     sweep = tuple(
         SweepBlock(physical_error_probabilities=tuple(block["physical_error_probability"]),
                    algorithm_latencies_us=tuple(block["algorithm_latency_us"]),
@@ -155,5 +160,5 @@ def load_experiment(path) -> ExperimentConfig:
                 fetch_cycles_per_round=engine["fetch_cycles_per_round"],
                 release_cycles_per_job=engine["release_cycles_per_job"])),
         decoder_memory_rounds=raw["decoder_memory_rounds"],
-        trace=bool(raw.get("trace", False)),
+        trace=_require(raw_trace, TRACE_MODES, "trace"),
         pauli_frame_commit_us=raw["pauli_frame"]["commit_us"])

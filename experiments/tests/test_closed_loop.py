@@ -152,7 +152,7 @@ def test_trace_writes_one_log_file_per_shot(tmp_path, monkeypatch):
         (CONFIGS / "weak_baseline.yaml").read_text())
     folder.joinpath("traced.yaml").write_text(
         SMALL_SWEEP.format(base="weak_baseline", algorithm=0.028)
-        + "trace: true\n")
+        + "trace: file\n")
     config = load_experiment(folder / "traced.yaml")
     monkeypatch.chdir(tmp_path)   # results_dir is cwd-relative
     measure_shot(config, physical_error_probability=0.001,

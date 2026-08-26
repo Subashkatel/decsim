@@ -19,9 +19,10 @@ Top-level keys: `mode`, `code_task`, `distance`, `rounds_per_shot`,
 `windowing`, `sweep`, `controller`, `links`, `decoder`,
 `decoder_memory_rounds`, `pauli_frame`, `trace` (plus `extends`, which
 starts from another config in the same folder and overrides the keys it
-names). `trace: true` prints the engine narrator live and writes each
-shot's full line record to `results/<name>/trace/`; the same lines are
-always kept in memory on `completed.engine.log_lines`.
+names). `trace` is `off`, `print`, `file` or `both`: the engine narrator
+shown live on screen, written one log file per shot to
+`results/<name>/trace/`, or both; the lines are always kept in memory on
+`completed.engine.log_lines`.
 
 ## Every RunSpec field
 

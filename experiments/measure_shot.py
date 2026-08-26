@@ -69,6 +69,9 @@ class ShotMeasurement:
     throughput_rounds_per_us: float
     decoder_utilization: float
     max_queued_windows: int
+    tesseract_windows_checked: int       # referee re-decodes (0 = referee off)
+    tesseract_window_disagreements: int  # referee reached a different owned
+                                         # observable contribution
     link_totals: dict      # path -> the run's own ledger counters plus
                            # rounds/windows context, for links.csv; totals
                            # come straight off TrafficCounters, no manual
@@ -281,5 +284,9 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
         throughput_rounds_per_us=config.rounds_per_shot / span_us,
         decoder_utilization=sum(samples["service"]) / span_us,
         max_queued_windows=max(queue_depths, default=0),
+        tesseract_windows_checked=getattr(
+            engine.decoder, "windows_checked", 0),
+        tesseract_window_disagreements=getattr(
+            engine.decoder, "window_disagreements", 0),
         link_totals=link_totals(completed.result.link_traffic),
         sim_wall_seconds=wall_seconds)

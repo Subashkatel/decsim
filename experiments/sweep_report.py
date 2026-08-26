@@ -64,6 +64,9 @@ def summarize_point(group: list) -> dict:
            "throughput_rounds_per_us": statistics.fmean(m.throughput_rounds_per_us for m in group),
            "decoder_utilization": statistics.fmean(m.decoder_utilization for m in group),
            "max_queued_windows": max(m.max_queued_windows for m in group),
+           "tesseract_windows_checked": sum(m.tesseract_windows_checked for m in group),
+           "tesseract_window_disagreements": sum(
+               m.tesseract_window_disagreements for m in group),
            "load": statistics.fmean(m.load for m in group),
            "sim_wall_seconds_per_shot": statistics.fmean(m.sim_wall_seconds for m in group)}
     for point in POINTS:

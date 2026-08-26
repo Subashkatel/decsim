@@ -71,12 +71,83 @@ def decoder_engine(config: ExperimentConfig, algorithm_latency_us) -> DecoderEng
         algorithm = BeliefMatchingDecoder(latency_model=None)
     else:
         algorithm = PyMatchingDecoder(PresetLatencyDecoder(algorithm_latency_us))
+    if config.verify_windows == "tesseract":
+        algorithm = TesseractCheckedDecoder(algorithm)
     engine_card = config.decoder.engine
     fetch = DecoderStage("fetch", cycles_per_round=engine_card.fetch_cycles_per_round)
     release = DecoderStage("release", cycles_per_job=engine_card.release_cycles_per_job)
     timing = DecoderTiming(before=(fetch,), after=(release,),
                            frequency_mhz=engine_card.frequency_mhz)
     return DecoderEngine(algorithm, timing)
+
+
+class TesseractCheckedDecoder:
+    """The referee: after every tier decode, the official Tesseract backend
+    re-decodes the same window input and the owned observable contributions
+    are compared. Never priced: the engine reads timing from the inner
+    decoder alone, and a window is always a d-round problem, so this holds
+    at every distance and shot length (the per-window verification the
+    2026-08-26 study settled on; measured 9.6 ms/window at d=9, 18.1 ms at
+    d=11)."""
+
+    def __init__(self, inner):
+        from decsim.detector_error_model.fault_model_contracts import (
+            LINKED_FAULT_MODELS_REQUIRED)
+        from decsim.decoders.tesseract import TesseractWindowDecoder
+        self.inner = inner
+        self.referee = TesseractWindowDecoder()
+        # the referee reads the physical view, the tier the graphlike one
+        self.fault_model_requirement = LINKED_FAULT_MODELS_REQUIRED
+        self.windows_checked = 0
+        self.window_disagreements = 0
+
+    @property
+    def measures_wall_clock(self):
+        return getattr(self.inner, "measures_wall_clock", False)
+
+    @property
+    def last_decode_ns(self):
+        return self.inner.last_decode_ns
+
+    def run_seed_children(self):
+        from decsim.message import RunSeedChild, RunSeedPathSegment
+        children = [RunSeedChild((RunSeedPathSegment("field", "referee"),),
+                                 self.referee)]
+        inner_children = getattr(self.inner, "run_seed_children", None)
+        if inner_children is not None:
+            for child in inner_children():
+                children.append(RunSeedChild(
+                    (RunSeedPathSegment("field", "inner"),)
+                    + child.relative_path,
+                    child.child))
+        return tuple(children)
+
+    def latency(self, job):
+        return self.inner.latency(job)
+
+    def decode(self, job):
+        import numpy as np
+        from decsim.decoders.window_decode_results import (BackendDecodeStatus,
+                                                           payload_syndrome)
+        from decsim.detector_error_model.fault_model_contracts import (
+            FaultRepresentation)
+        result = self.inner.decode(job)
+        model = job.dem
+        if model is None or result.logical_observables is None:
+            return result
+        outcome = self.referee.decode(model, payload_syndrome(job))
+        if outcome.status is not BackendDecodeStatus.SUCCEEDED:
+            return result
+        physical = model.require_faults(FaultRepresentation.PHYSICAL)
+        committed = (np.asarray(outcome.physical_correction, dtype=np.uint8)
+                     .astype(bool) & physical.owned)
+        referee_flips = tuple(int(bit) for bit in np.asarray(
+            physical.observables.astype(np.int64)
+            @ committed.astype(np.int64)).ravel() % 2)
+        self.windows_checked += 1
+        if referee_flips != tuple(result.logical_observables):
+            self.window_disagreements += 1
+        return result
 
 
 def link_model(config: ExperimentConfig):

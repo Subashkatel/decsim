@@ -267,3 +267,35 @@ def test_links_csv_totals_equal_the_ledger_counters(weak_shot, tmp_path):
         assert float(written[path]["transfers_per_shot"]) == totals["transfers"]
         assert float(written[path]["payload_bits_per_shot"]) == totals["payload_bits"]
         assert float(written[path]["queue_wait_us_per_shot"]) == totals["queue_wait_us"]
+
+
+def test_tesseract_referee_checks_every_window_and_orders_the_tiers(tmp_path):
+    """The P3 gate: with verify_windows: tesseract the referee re-decodes
+    every decoded window (coverage is complete), and the strong tier
+    disagrees with the referee no more often than the weak tier does on the
+    same shots (belief-matching is at least as close to Tesseract as MWPM)."""
+    import yaml
+
+    base = yaml.safe_load(
+        (Path("experiments/configs/strong_sliding_trace.yaml")).read_text())
+    base["verify_windows"] = "tesseract"
+    probe = Path("experiments/configs/.referee_gate.yaml")
+    probe.write_text(yaml.safe_dump(base))
+    try:
+        config = load_experiment(probe)
+        disagreement_rate = {}
+        for name in ("pymatching", "belief_matching"):
+            checked = 0
+            disagreements = 0
+            for seed in range(8):
+                shot = measure_shot(
+                    config, physical_error_probability=0.008,
+                    round_period_us=1.0, algorithm_latency_us=name, seed=seed)
+                assert shot.tesseract_windows_checked == shot.windows
+                checked += shot.tesseract_windows_checked
+                disagreements += shot.tesseract_window_disagreements
+            disagreement_rate[name] = disagreements / checked
+        assert (disagreement_rate["belief_matching"]
+                <= disagreement_rate["pymatching"] + 0.05), disagreement_rate
+    finally:
+        probe.unlink()

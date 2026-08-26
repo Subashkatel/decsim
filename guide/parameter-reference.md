@@ -17,7 +17,7 @@ every yaml key with its meaning and defaults; the loader is
 config with `python -m experiments.run experiments/configs/<name>.yaml`.
 Top-level keys: `mode`, `code_task`, `distance`, `rounds_per_shot`,
 `windowing`, `sweep`, `controller`, `clocks`, `links`, `buffers`, `decoder`,
-`pauli_frame`, `trace`, `trace_io`, `idle_policy` (plus `extends`, which
+`pauli_frame`, `trace`, `trace_io`, `idle_policy`, `verify_windows` (plus `extends`, which
 starts from another config in the same folder and overrides the keys it
 names). `trace` is `off`, `print`, `file` or `both`: the engine narrator
 shown live on screen, written one log file per shot to

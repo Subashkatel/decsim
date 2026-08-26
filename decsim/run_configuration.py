@@ -66,7 +66,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .links.link_profiles import logical_reference_profile
     from .frontends.planner import (_plan_execution, _validate_operation_graph,
                           _validate_workload_identity)
-    from .controller.policies import Eager, Ignore
+    from .controller.policies import Eager, SeparateDecodeJobs
     from .qpu.round_policies import GateRounds
     from .decoders.schedulers import FifoScheduler
     from .windows.windowing_schemes import SlidingWindowScheme
@@ -156,7 +156,10 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         view_by_id=view_by_id, code=code, layout=layout, scheme=scheme,
         rounds_policy=rounds_policy, boundary_policy=boundary_policy,
         window_interaction=window_interaction,
-        idle_policy=spec.idle_policy or Ignore(),
+        # idle rounds are decoder workload in every reference system, so the
+        # default charges them (SWIPER 2412.05115, XQsim, Terhal backlog);
+        # pass Ignore() explicitly for an active-path latency study
+        idle_policy=spec.idle_policy or SeparateDecodeJobs(),
         plan=plan, resource_claims=resource_claims,
         device=device, error_model_provider=error_model_provider,
         router=router,

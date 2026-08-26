@@ -227,14 +227,16 @@ def test_builtin_and_external_policies_satisfy_runtime_protocols():
 
 
 def test_runspec_builds_fresh_policy_defaults():
-    """Each run with omitted policies receives fresh eager and ignore defaults."""
+    """Each run with omitted policies receives fresh eager and charged-idle
+    defaults: idle rounds are decoder workload in every reference system
+    (SWIPER, XQsim, Terhal backlog), so the default costs them."""
     first = RunSpec(ops=[]).build()
     second = RunSpec(ops=[]).build()
 
     assert isinstance(first.window_manager.boundary_policy, Eager)
-    assert isinstance(first.controller.idle_policy, Ignore)
+    assert isinstance(first.controller.idle_policy, SeparateDecodeJobs)
     assert isinstance(second.window_manager.boundary_policy, Eager)
-    assert isinstance(second.controller.idle_policy, Ignore)
+    assert isinstance(second.controller.idle_policy, SeparateDecodeJobs)
     assert first.window_manager.boundary_policy is not second.window_manager.boundary_policy
     assert first.controller.idle_policy is not second.controller.idle_policy
 
@@ -247,7 +249,7 @@ def test_runspec_preserves_truthy_custom_policies_on_independent_axes():
     idle_run = RunSpec(ops=[], idle_policy=idle_policy).build()
 
     assert boundary_run.window_manager.boundary_policy is boundary_policy
-    assert isinstance(boundary_run.controller.idle_policy, Ignore)
+    assert isinstance(boundary_run.controller.idle_policy, SeparateDecodeJobs)
     assert idle_run.controller.idle_policy is idle_policy
     assert isinstance(idle_run.window_manager.boundary_policy, Eager)
 

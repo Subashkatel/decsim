@@ -22,6 +22,11 @@ AlgorithmCard = Union[float, str]
 MODES = ("weak_baseline", "strong_only")
 TRACE_MODES = ("off", "print", "file", "both")
 SCHEMES = ("sliding", "parallel", "sandwich", "naive_online")
+# How an idle patch's rounds are charged. Idle rounds are decoder workload
+# in every reference system (SWIPER ISCA 2025, XQsim, Terhal backlog), so
+# separate_decode_jobs is the default; ignore is the optimistic card for
+# active-path latency studies; extend_stream folds them into a live stream.
+IDLE_POLICIES = ("separate_decode_jobs", "ignore", "extend_stream")
 LINK_PATHS = ("qc", "cwb", "csb", "wbd", "wsd", "sbd",
               "dd", "wdo", "do", "oc", "cq")
 
@@ -110,6 +115,10 @@ class ExperimentConfig:
     trace_io: bool                  # add component I/O lines to the trace:
                                     # what each store and unit received,
                                     # holds, and emitted
+    idle_policy: str                # separate_decode_jobs | ignore |
+                                    # extend_stream: how an idle patch's
+                                    # rounds are charged (inert while the
+                                    # workload is a single always-busy op)
     pauli_frame_commit_us: float
     config_files: tuple             # the yaml files this config was read
                                     # from, nearest first (an extends chain)
@@ -211,5 +220,7 @@ def load_experiment(path) -> ExperimentConfig:
                 release_cycles_per_job=engine["release_cycles_per_job"])),
         trace=_require(raw_trace, TRACE_MODES, "trace"),
         trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
+        idle_policy=_require(raw.get("idle_policy", "separate_decode_jobs"),
+                             IDLE_POLICIES, "idle_policy"),
         pauli_frame_commit_us=raw["pauli_frame"]["commit_us"],
         config_files=config_files)

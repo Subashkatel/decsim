@@ -9,6 +9,10 @@ components on the reaction path:
 - ``WBD`` weak buffer -> weak decoder: syndrome data reaching the weak tier,
   as one window assembled from Buffer 0 (``window_manager``) or as one
   feedback-memory round straight off packing (``syndrome_packing``) (t_wbd).
+  The feedback-memory sends are controller-sourced traffic on the shared
+  channel: real-time stacks run one syndrome stream and classify downstream
+  rather than wiring idle or feedback data separately (Battistel 2303.00054
+  Fig. 3; Google 2408.13687; RT system stack 2605.30765).
 - ``WSD`` weak decoder -> strong decoder: the escalation selection that hands a
   window to the strong tier (t_wsd).
 - ``SBD`` strong buffer -> strong decoder: the strong window's syndrome

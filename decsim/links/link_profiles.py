@@ -5,7 +5,7 @@ every channel unbounded, so it prices propagation only and no transfer ever
 queues; latencies from Khalid et al. Table II. ``bandwidth_limited_profile``
 is the same fabric with finite calibrated rates so contention becomes
 measurable; ``capacity_scale`` sweeps the whole fabric.
-``with_controller_to_buffer_edge`` adds the priced C2B hop to either.
+``with_controller_to_buffer_edge`` adds the priced CWB hop to either.
 
 Every number carries a ``source`` string that travels into the topology and
 traffic reports; paper locators are line numbers in tmp/references/papers/.
@@ -242,7 +242,7 @@ def with_controller_to_buffer_edge(
     aggregate_bits_per_us: Optional[float],
     source: str,
 ) -> LinkModelConfig:
-    """Return ``profile`` with the optional priced C2B round-transfer edge.
+    """Return ``profile`` with the optional priced CWB round-transfer edge.
 
     The caller supplies both experiment-card numbers and their provenance;
     ``aggregate_bits_per_us`` of ``None`` means unbounded bandwidth (the edge
@@ -265,6 +265,6 @@ def with_controller_to_buffer_edge(
     )
     return replace(
         profile,
-        c2b=edge,
-        profile_name=f"{profile.profile_name}+priced_c2b",
+        cwb=edge,
+        profile_name=f"{profile.profile_name}+priced_cwb",
     )

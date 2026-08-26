@@ -170,7 +170,7 @@ def baseline_memory():
 
 def baseline_reference_links():
     """Two patches, two units, the reference link cards, so every card is
-    priced and the C2B arbitration sees two sources."""
+    priced and the CWB arbitration sees two sources."""
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.links.link_profiles import logical_reference_profile
     from decsim.run_spec import RunSpec
@@ -183,7 +183,7 @@ def baseline_reference_links():
 
 def bandwidth_limited_links():
     """The bandwidth-limited profile: link FIFO capacity and reserve paths,
-    two patches contending on C2B."""
+    two patches contending on CWB."""
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.links.link_profiles import bandwidth_limited_profile
     from decsim.run_spec import RunSpec

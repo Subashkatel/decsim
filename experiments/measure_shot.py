@@ -25,7 +25,7 @@ from experiments.experiment_config import ExperimentConfig
 
 # Latency points, in path order, in microseconds per window unless noted.
 POINTS = (
-    "c2b_per_round",        # controller -> Buffer 0, one round (latency + serialization + queue)
+    "cwb_per_round",        # controller -> Buffer 0, one round (latency + serialization + queue)
     "buffer_fill",          # first round in window arrives -> last round arrives (waiting on the QPU)
     "dep_block",            # window complete -> job queued (window dependencies)
     "queue_wait",           # queued -> unit assigned (ready-queue wait only)
@@ -39,7 +39,7 @@ POINTS = (
     "frame_commit",         # Pauli frame accepted -> committed
     # Totals. The buffer0 pair starts the clock at Buffer 0 publication; the
     # qpu pair starts it when the round leaves the QPU (the QC send), so it
-    # includes QC, controller processing, packing and C2B.
+    # includes QC, controller processing, packing and CWB.
     "buffer0_ready_to_frame",        # window complete in Buffer 0 -> its correction is in the frame
     "buffer0_first_round_to_frame",  # window's first round published in Buffer 0 -> correction in the frame
     "qpu_last_round_to_frame",       # window's last required round leaves the QPU -> correction in the frame
@@ -58,7 +58,7 @@ class ShotMeasurement:
     seed: int
     windows: int
     logical_failure: bool
-    samples: dict          # point -> list of us, one per decoded window (per round for c2b)
+    samples: dict          # point -> list of us, one per decoded window (per round for cwb)
     means: dict            # point -> mean us over this shot's windows
     maxes: dict            # point -> max us
     load: float            # chain service per window / window inter-arrival (rho)
@@ -85,10 +85,10 @@ def link_delay_by_window(transfers: list) -> dict:
     return delay
 
 
-def c2b_delays_us(transfers: list) -> list:
+def cwb_delays_us(transfers: list) -> list:
     """Every round's controller-to-Buffer-0 delay, in microseconds."""
     return [us(row["delivery_ticks"] - row["send_ticks"])
-            for row in transfers if row["path"] == "c2b"]
+            for row in transfers if row["path"] == "cwb"]
 
 
 def qc_send_ticks(transfers: list) -> dict:
@@ -137,7 +137,7 @@ def collect_samples(completed, engine, mode: str) -> dict:
     frame_by_window = {record.window_key[1]: record
                        for record in completed.pauli_frame.snapshot().records}
     samples = {point: [] for point in POINTS}
-    samples["c2b_per_round"] = c2b_delays_us(transfers)
+    samples["cwb_per_round"] = cwb_delays_us(transfers)
     for (op_id, window_id), window in sorted(completed.window_manager.windows.items()):
         frame_record = frame_by_window.get(window_id)
         decoded = frame_record is not None and window.t_done is not None

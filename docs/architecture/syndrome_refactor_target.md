@@ -39,7 +39,7 @@ The default is weak-only, one weak decoder, FIFO, unbounded upstream capacity, o
 8. Mechanism-specific streaming, ring, DMA, and instruction profiles remain replaceable implementations.
 9. Detection events are formed once per complete round at Buffer 0 intake from the
    raw packet and the circuit's formation table (records, reference parity, layer
-   kind); QC and C2B carry raw measurement bits, everything from Buffer 0 onward
+   kind); QC and CWB carry raw measurement bits, everything from Buffer 0 onward
    carries detection events.
 
 ## Deletions

@@ -77,15 +77,15 @@ def decoder_engine(config: ExperimentConfig, algorithm_latency_us) -> DecoderEng
 def link_model(config: ExperimentConfig):
     """Every path's numbers from the config, on the reference card's payload
     sizes; a null card keeps the reference card's numbers for that path.
-    C2B and csb are the two optional store hops."""
+    CWB and csb are the two optional store hops."""
     source = f"experiments/configs/{config.name}.yaml links"
     cards = dict(config.links)
     profile = logical_reference_profile()
-    c2b = cards.pop("c2b")
-    if c2b is not None:
+    cwb = cards.pop("cwb")
+    if cwb is not None:
         profile = with_controller_to_buffer_edge(
-            profile, latency_us=c2b.latency_us,
-            aggregate_bits_per_us=c2b.bits_per_us, source=source)
+            profile, latency_us=cwb.latency_us,
+            aggregate_bits_per_us=cwb.bits_per_us, source=source)
     csb = cards.pop("csb")
     if csb is not None:
         profile = with_csb_edge(

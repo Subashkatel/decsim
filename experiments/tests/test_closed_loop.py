@@ -59,7 +59,7 @@ def test_every_point_is_measured_and_positive_where_it_must_be(weak_shot):
     assert weak_shot.windows >= 3
     for point in POINTS:
         assert point in weak_shot.means and point in weak_shot.maxes
-    for charged in ("c2b_per_round", "fetch", "algorithm", "release",
+    for charged in ("cwb_per_round", "fetch", "algorithm", "release",
                     "input_link_per_window", "output_link_per_window",
                     "frame_commit"):
         assert weak_shot.means[charged] > 0, charged
@@ -82,7 +82,7 @@ def test_configured_costs_appear_at_the_right_points(weak_config, weak_shot):
     assert weak_shot.means["frame_commit"] == pytest.approx(
         weak_config.pauli_frame_commit_us)
     links = weak_config.links
-    assert weak_shot.means["c2b_per_round"] >= links["c2b"].latency_us
+    assert weak_shot.means["cwb_per_round"] >= links["cwb"].latency_us
     assert weak_shot.means["input_link_per_window"] == pytest.approx(
         links["cwd"].latency_us)
     assert weak_shot.means["output_link_per_window"] == pytest.approx(

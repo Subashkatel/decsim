@@ -51,7 +51,7 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
 
     input_path = INPUT_LINK[config.mode]
     output_path = OUTPUT_LINK[config.mode]
-    store_path = "csb" if config.mode == "strong_only" else "c2b"
+    store_path = "csb" if config.mode == "strong_only" else "cwb"
     store_name = ("syndrome buffer 1" if config.mode == "strong_only"
                   else "buffer 0")
 

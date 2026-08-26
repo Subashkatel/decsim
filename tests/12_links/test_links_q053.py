@@ -35,7 +35,7 @@ _OPERATION_ID = ("experiment", 7)
 _PATCH_IDS = (1, 2)
 _ENDPOINTS = {
     "qc": ("qpu", "controller"),
-    "c2b": ("controller", "syndrome buffer 0"),
+    "cwb": ("controller", "syndrome buffer 0"),
     "cwd": ("controller", "weak decoder"),
     "wsd": ("weak decoder", "strong decoder"),
     "csd": ("controller", "strong decoder"),
@@ -93,7 +93,7 @@ def test_link_module_documents_every_segment_endpoint_and_extension_step():
     """The module explains every fixed segment, endpoint pair, and extension step."""
     doc = links_module.__doc__ or ""
     assert len(LinkPath) == 11
-    assert LinkPath.C2B in LinkPath          # optional controller-to-buffer hop
+    assert LinkPath.CWB in LinkPath          # optional controller-to-buffer hop
     assert LinkPath.CSB in LinkPath     # optional room-side dual write
     for path in LinkPath:
         lines = [line.lower() for line in doc.splitlines() if f"``{path.name}``" in line]
@@ -116,10 +116,10 @@ def test_link_module_documents_every_segment_endpoint_and_extension_step():
 def test_rule_table_and_reference_cards_cover_the_closed_vocabulary():
     """One complete rule table; both cards wire the nine required paths."""
     assert tuple(links_module._PATH_RULES) == tuple(LinkPath)
-    assert not links_module._PATH_RULES[LinkPath.C2B].required
+    assert not links_module._PATH_RULES[LinkPath.CWB].required
     assert not links_module._PATH_RULES[LinkPath.CSB].required
     paths = tuple(p for p in LinkPath
-                  if p is not LinkPath.C2B and p is not LinkPath.CSB)
+                  if p is not LinkPath.CWB and p is not LinkPath.CSB)
     assert all(links_module._PATH_RULES[path].required for path in paths)
     for profile in (logical_reference_profile, bandwidth_limited_profile):
         config = profile()

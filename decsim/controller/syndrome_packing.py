@@ -2,7 +2,7 @@
 round are assembled in this stage's own workspace, merged, formed into
 detection events (the device's formation table), and the finished round is
 written into the stores (Buffer 0, and syndrome buffer 1 when wired) before
-being arbitrated onto its route, C2B to the window input or CWD as a
+being arbitrated onto its route, CWB to the window input or CWD as a
 feedback-memory round. The stores hold finished rounds only; a context is
 PARTIAL while fragments are missing, PACKED_WAIT while it waits for its
 route, and DRAINING once transmission has started."""
@@ -110,8 +110,8 @@ class _PackingContext:
     state: _PackingSlotState = _PackingSlotState.PARTIAL
     packet: Optional[SyndromeRoundPacket] = None
     packet_bits: Optional[int] = None
-    c2b_reserved: bool = False
-    c2b_delivered: bool = False
+    cwb_reserved: bool = False
+    cwb_delivered: bool = False
 
 
 class SyndromePacking:
@@ -253,12 +253,12 @@ class SyndromePacking:
 
     def _finish_packing(self, context: _PackingContext) -> None:
         """The round is complete: merge, form, store, and let it compete for
-        its route. Its publication tick is set now unless a C2B hop is
+        its route. Its publication tick is set now unless a CWB hop is
         priced later."""
-        c2b_is_priced = LinkPath.C2B in self.links.paths
-        publication_tick = None if c2b_is_priced else self.engine.now
+        cwb_is_priced = LinkPath.CWB in self.links.paths
+        publication_tick = None if cwb_is_priced else self.engine.now
         raw_fragments = _merge_fragments_by_patch(context.fragments)
-        # C2B carries the raw measurement bits; detection events exist
+        # CWB carries the raw measurement bits; detection events exist
         # only from the decoder input (Buffer 0) onward
         context.packet_bits = _fragment_bits(raw_fragments)
         packet = SyndromeRoundPacket(
@@ -338,7 +338,7 @@ class SyndromePacking:
                 self._next_route_index = (kinds.index(kind) + 1) % len(kinds)
 
     def _drain_window_input_queue(self, route_queue) -> bool:
-        """Rounds pipeline onto C2B: every waiting round behind in-flight ones
+        """Rounds pipeline onto CWB: every waiting round behind in-flight ones
         is sent in order; a refused round stops the walk."""
         progressed = False
         for identity in list(route_queue):
@@ -359,28 +359,28 @@ class SyndromePacking:
         self._transmit_feedback_memory_round(context)
         return True
 
-    # ---- window input: C2B to Buffer 0
+    # ---- window input: CWB to Buffer 0
 
     def _transmit_window_input_round(self, context: _PackingContext) -> bool:
-        """Reserve C2B once; a packet delivered but backpressured is retried
-        without a second reservation, as is every packet on a fabric without C2B."""
-        c2b_is_priced = LinkPath.C2B in self.links.paths
-        if context.c2b_reserved or not c2b_is_priced:
+        """Reserve CWB once; a packet delivered but backpressured is retried
+        without a second reservation, as is every packet on a fabric without CWB."""
+        cwb_is_priced = LinkPath.CWB in self.links.paths
+        if context.cwb_reserved or not cwb_is_priced:
             return self._deliver_window_input_round(context)
         packet = context.packet
-        delay_ticks = self._reserve(LinkPath.C2B, payload_bits=context.packet_bits,
+        delay_ticks = self._reserve(LinkPath.CWB, payload_bits=context.packet_bits,
                                     attribution=self._packet_attribution(packet))
-        context.c2b_reserved = True
+        context.cwb_reserved = True
         context.state = _PackingSlotState.DRAINING
         self.engine.schedule(delay_ticks, lambda: self._deliver_window_input_round(context),
                              label="controller->syndrome buffer 0")
         return True
 
     def _deliver_window_input_round(self, context: _PackingContext) -> bool:
-        c2b_is_priced = LinkPath.C2B in self.links.paths
-        if c2b_is_priced and not context.c2b_delivered:
+        cwb_is_priced = LinkPath.CWB in self.links.paths
+        if cwb_is_priced and not context.cwb_delivered:
             self.syndrome_buffer.mark_publication_tick(context.round_key, self.engine.now)
-            context.c2b_delivered = True
+            context.cwb_delivered = True
         if self._refused_round_ahead_of(context):
             context.state = _PackingSlotState.PACKED_WAIT   # keep round order
             return False

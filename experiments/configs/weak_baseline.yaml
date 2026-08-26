@@ -48,7 +48,7 @@ links:                                       # one card per path: propagation la
                                              # (engine-side, setups serialize; Shao MICRO 2016 measured 0.4 us)
   # on the baseline path
   qc:  {latency_us: 1.0, bits_per_us: null}     # QPU -> controller, one readout
-  c2b: {latency_us: 2.0, bits_per_us: 100000.0} # controller -> Buffer 0, one round
+  cwb: {latency_us: 2.0, bits_per_us: 100000.0} # controller -> Buffer 0 (the weak buffer), one round
   cwd: {latency_us: 1.0, bits_per_us: null}     # Buffer 0 -> weak decoder memory, one window
   dd:  {latency_us: 0.5, bits_per_us: null}     # decoder -> decoder boundary handoff
   wdo: {latency_us: 1.0, bits_per_us: null}     # weak decoder -> Pauli frame

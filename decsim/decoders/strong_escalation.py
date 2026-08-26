@@ -590,6 +590,19 @@ class StrongEscalation:
         )
         request_key = self.wm._new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
+        context_reads = self.wm._read_keys_for_bounds(
+            weak_job.op_id, strong_window.buffer_lo, strong_window.buffer_hi,
+            strong_window)
+        missing = [round_key for round_key in context_reads
+                   if round_key[1] <= self.wm.rounds_arrived.get(
+                       round_key[0], 0)
+                   and self.wm.syndrome_buffer_1.retained_fragments(round_key)
+                   is None]
+        if missing:
+            raise RuntimeError(
+                f"strong context for {key} arrived at Buffer 0 but is not "
+                f"stored in syndrome buffer 1: {missing} (copy-out lag "
+                f"beyond the escalation margin, or an early release)")
         self.wm._stamp_first_round_tick(
             strong_window, self.wm.syndrome_buffer_1)
         return DecodeJob(

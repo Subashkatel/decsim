@@ -893,8 +893,13 @@ class WindowManager:
             return
         op = self._ops[job.op_id]
         self._hand_on_boundary(job, res, window, op)
+        # the result rides its tier's output link home: WDO for the weak
+        # tier, DO for a strong-primary decode
+        output_path = (LinkPath.WDO
+                       if job.request_key.tier is DecoderTier.WEAK
+                       else LinkPath.DO)
         delivery_ticks = self._window_link_arrival(
-            LinkPath.WDO,
+            output_path,
             window,
             op,
             job.request_key,
@@ -902,11 +907,12 @@ class WindowManager:
         self.engine.schedule(
             delivery_ticks - self.engine.now,
             lambda: self._sink_weak_correction(job, res),
-            label=f"weak result {op.name}W{window.k}->pauli frame",
+            label=f"{job.request_key.tier.value} result "
+                  f"{op.name}W{window.k}->pauli frame",
         )
 
     def _sink_weak_correction(self, job: DecodeJob, res: DecodeResult) -> None:
-        """Charge and install one final weak correction before committing it."""
+        """Charge and install one final correction before committing it."""
         if self.pauli_frame is None:
             self._commit_decode_done(job, res)
             return
@@ -1065,6 +1071,23 @@ class WindowManager:
             self._selected_request_keys[key] = completion.request_key
         if self.speculative_recovery.complete(completion):
             return
+        if self.pauli_frame is None:
+            self._finish_strong_commit(completion, key, result, window, op)
+            return
+        # the strong result is this window's FINAL correction: it folds into
+        # the frame like any final result (the provisional weak bypassed it),
+        # and the priced frame write gates the rest of the commit
+        self.pauli_frame.commit_weak_correction(
+            window_key=key,
+            logical_observables=result.logical_observables,
+            request_key=completion.request_key,
+            on_committed=lambda: self._finish_strong_commit(
+                completion, key, result, window, op),
+        )
+
+    def _finish_strong_commit(self, completion: StrongDecodeCompletion,
+                              key: tuple, result: DecodeResult,
+                              window: Window, op: Operation) -> None:
         if result.logical_observables is not None:
             self.ledger.replace_prediction(
                 key,

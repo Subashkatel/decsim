@@ -104,7 +104,7 @@ class SyndromeBuffer1:
         self.engine.log_io(
             "SyndromeBuffer1",
             lambda: f"received round {packet.round_index} of op {operation_id} "
-                    f"from csb; holds "
+                    f"from csb; {packet.defects_text()}; holds "
                     f"{self.store.held_rounds_description()}")
         if self.on_round_stored is not None:
             self.on_round_stored(operation_id)

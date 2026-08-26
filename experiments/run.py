@@ -52,7 +52,7 @@ def run_experiment(config_path) -> Path:
     results_dir = config.results_dir
     write_report(rows, results_dir)
     from experiments.plots import plots
-    plots(rows, results_dir)
+    plots(config, rows, results_dir)
     return results_dir
 
 

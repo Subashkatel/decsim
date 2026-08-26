@@ -108,6 +108,11 @@ def test_sweep_summary_and_report(weak_config, tmp_path):
     assert (tmp_path / "sweep.csv").exists()
     text = (tmp_path / "sweep.md").read_text()
     assert "algorithm" in text and "frame_commit" in text
+    from experiments.plots import plots
+    plots(weak_config, rows, tmp_path)
+    assert (tmp_path / "timeline.png").exists()
+    # one p swept here, so no LER figure
+    assert not (tmp_path / "ler.png").exists()
 
 
 def test_strong_only_measures_the_strong_wires(strong_config, strong_shot):

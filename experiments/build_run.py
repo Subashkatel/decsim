@@ -36,7 +36,7 @@ from decsim.windows.windowing_schemes import (NaiveOnlineScheme,
                                               SlidingWindowScheme,
                                               TanSandwichScheme)
 
-from experiments.experiment_config import MEASURED, ExperimentConfig
+from experiments.experiment_config import ExperimentConfig
 
 WINDOWING_SCHEMES = {
     "sliding": SlidingWindowScheme,
@@ -58,12 +58,17 @@ def memory_circuit(config: ExperimentConfig,
 
 
 def decoder_engine(config: ExperimentConfig, algorithm_latency_us) -> DecoderEngine:
-    """PyMatching inside the decoder engine: fetch cycles before it, release
-    cycles after it, at the engine clock. The algorithm charges either its
-    real wall clock (MEASURED) or the card's fixed core latency; a card
-    prices the algorithm stage only, never a total decoder latency."""
-    if algorithm_latency_us == MEASURED:
+    """The named algorithm inside the decoder engine: fetch cycles before it,
+    release cycles after it, at the engine clock. A name decodes every window
+    with the real algorithm and charges its measured wall clock (pymatching =
+    MWPM, the weak tier; belief_matching = the strong tier, Toshio arXiv
+    2510.25222); a number is a fixed core latency in us on the MWPM path. A
+    card prices the algorithm stage only, never a total decoder latency."""
+    if algorithm_latency_us == "pymatching":
         algorithm = PyMatchingDecoder(latency_model=None)
+    elif algorithm_latency_us == "belief_matching":
+        from decsim.decoders.belief_matching.decoder import BeliefMatchingDecoder
+        algorithm = BeliefMatchingDecoder(latency_model=None)
     else:
         algorithm = PyMatchingDecoder(PresetLatencyDecoder(algorithm_latency_us))
     engine_card = config.decoder.engine

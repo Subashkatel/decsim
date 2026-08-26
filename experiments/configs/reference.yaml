@@ -27,7 +27,9 @@ windowing:
 sweep:
   - physical_error_probability: [0.001]    # p on all four Stim noise channels
     round_period_us: [1.0]                 # input round period (QEC cycle time)
-    algorithm_latency_us: [0.028]          # fixed core latency in us, or "measured"
+    algorithm_latency_us: [0.028]          # a number: fixed core latency in us; or a
+                                           # named real algorithm, measured wall clock
+                                           # per window: pymatching | belief_matching
                                            # (wall clock of each real PyMatching call)
     shots: 2
 

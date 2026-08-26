@@ -22,14 +22,14 @@ sweep:
     round_period_us: [10.0, 5.0, 2.0, 1.0, 0.9, 0.85, 0.8, 0.5, 0.2, 0.1, 0.05, 0.02]
                                              # input round period, slow to fast; 0.9/0.85/0.8 bracket
                                              # the load = 1 knee of the 0.028 card
-    algorithm_latency_us: [0.028, 0.28, measured]
-                                             # per-window latency of the PyMatching algorithm core, or "measured".
+    algorithm_latency_us: [0.028, 0.28, pymatching]
+                                             # a number: fixed core latency in us; a name: the real algorithm
                                              # A card prices the algorithm stage ONLY; fetch and release cycles
                                              # are charged separately below.
                                              # 0.028 = LILLIPUT-class core: [d=3, m=2] 7 cycles at 250 MHz,
                                              #         2108.06569 sec. 6.3 and Table 4
                                              # 0.28  = 10x sensitivity card (no separate hardware source)
-                                             # measured = wall clock of each real PyMatching call on this host
+                                             # pymatching = real MWPM per window, measured wall clock on this host
     shots: 10
   # logical error rate: several probabilities, one timing point, many shots (Wilson 95% on the plot)
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]

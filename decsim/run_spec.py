@@ -146,6 +146,7 @@ class RunSpec:
     lane_policy: Optional[Any] = None
     unit_pools: Optional[dict] = None
     num_units: Optional[int] = None
+    input_staging_depth: int = 0
     scheme: Optional[Any] = None
     rounds_policy: Optional[Any] = None
     boundary_policy: Optional[Any] = None
@@ -258,7 +259,9 @@ class RunSpec:
         decoder_manager = DecoderManager(
             engine, router=config.router, scheduler=config.scheduler,
             unit_pools=config.unit_pools, num_units=config.num_units,
-            bulk_strong=escalation_policy.bulk_strong, lane_policy=config.lane_policy,
+            bulk_strong=escalation_policy.bulk_strong,
+            input_staging_depth=config.input_staging_depth,
+            lane_policy=config.lane_policy,
             capture_enabled=config.capture_switching_windows,
             decoder_memory_transfer=decoder_memory_transfer,
             decoder_memory=config.decoder_memory,

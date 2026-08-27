@@ -64,6 +64,7 @@ def test_plan_shard_merge_pipeline(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     run_dir = plan(config_path, seeds_per_shard=3)
 
+    assert (run_dir / "slurm_offline.sh").exists()
     shard_lines = (run_dir / "shards.tsv").read_text().splitlines()
     assert shard_lines == ["3\t0.003\t0\t3", "3\t0.003\t3\t2",
                            "3\t0.005\t0\t3", "3\t0.005\t3\t2"]

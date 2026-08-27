@@ -45,8 +45,12 @@ instead of once per shot. 14-22x faster per shot; parallelism comes
 from a slurm array, one shards.tsv line per task:
 
     python -m experiments.offline_run plan configs/weak_ler.yaml
-    sbatch --array=1-<N> experiments/slurm_offline.sh <run_dir>
+    sbatch --array=1-<N> <run_dir>/slurm_offline.sh <run_dir>
     python -m experiments.offline_run merge <run_dir>
+
+plan copies slurm_offline.sh into the run dir and you submit that
+copy, so every run folder records exactly how it ran. Worst-case
+shard memory measured 0.46 GB (strong d=9); the script books 8G.
 
 ## Next runs
 

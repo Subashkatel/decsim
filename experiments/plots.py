@@ -41,11 +41,12 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
 
     block = config.sweep[0]
     physical_error_probability = block.physical_error_probabilities[0]
+    distance = block.distances[0]
     round_period_us = block.round_periods_us[0]
     algorithm = config.active_decoder.algorithm
     spec, engine = build_run(
         config, physical_error_probability=physical_error_probability,
-        round_period_us=round_period_us, seed=0)
+        distance=distance, round_period_us=round_period_us, seed=0)
     completed = spec.build()
 
     input_path = INPUT_LINK[config.mode]
@@ -156,10 +157,10 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     axis.set_xlabel("time from shot start (µs)")
     axis.set_title(f"{config.name}: one shot, every stage at its real time",
                    pad=22)
-    commit_rounds = config.windowing.commit_rounds or config.distance
-    buffer_rounds = config.windowing.buffer_rounds or config.distance
+    commit_rounds = config.windowing.commit_rounds or distance
+    buffer_rounds = config.windowing.buffer_rounds or distance
     axis.text(0.5, 1.005,
-              f"d={config.distance} {config.code_task.split(':')[0]}"
+              f"d={distance} {config.code_task.split(':')[0]}"
               f" · {config.windowing.scheme} windows: commit {commit_rounds},"
               f" buffer {buffer_rounds} rounds"
               f" · rounds every {round_period_us:g} µs"
@@ -188,21 +189,22 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
 # ---- the logical error rate ------------------------------------------------
 
 def ler_groups(rows: list) -> list:
-    """(card, round time, rows sorted by p) for every card and round time
-    that swept more than one physical error rate."""
-    algorithms = sorted({row["algorithm"] for row in rows}, key=str)
+    """(distance, round time, rows sorted by p) for every distance and
+    round time that swept more than one physical error rate: the papers'
+    convention, one LER curve per code distance."""
+    distances = sorted({row["distance"] for row in rows})
     periods = sorted({row["round_period_us"] for row in rows})
     groups = []
-    for algorithm in algorithms:
+    for distance in distances:
         for period in periods:
             group = [row for row in rows
-                     if row["algorithm"] == algorithm
+                     if row["distance"] == distance
                      and row["round_period_us"] == period]
             probabilities = {row["physical_error_probability"] for row in group}
             if len(probabilities) < 2:
                 continue
             group.sort(key=lambda row: row["physical_error_probability"])
-            groups.append((algorithm, period, group))
+            groups.append((distance, period, group))
     return groups
 
 
@@ -213,15 +215,15 @@ def ler_plot(rows: list, path: Path) -> None:
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     groups = ler_groups(rows)
     plotted_periods = {period for _, period, _ in groups}
-    for algorithm, period, group in groups:
+    for distance, period, group in groups:
         probabilities = [row["physical_error_probability"] for row in group]
         rates = [row["logical_error_rate"] for row in group]
         lower = [row["logical_error_rate"] - row["ler_wilson_low"]
                  for row in group]
         upper = [row["ler_wilson_high"] - row["logical_error_rate"]
                  for row in group]
-        label = (card_label(algorithm) if len(plotted_periods) == 1
-                 else f"{card_label(algorithm)}, {period:g} µs")
+        label = (f"d={distance}" if len(plotted_periods) == 1
+                 else f"d={distance}, {period:g} µs")
         axis.errorbar(probabilities, rates, yerr=[lower, upper], fmt="o-",
                       capsize=3, label=label)
     axis.set_xscale("log")
@@ -247,15 +249,15 @@ def latency_plot(rows: list, path: Path) -> None:
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     groups = ler_groups(rows)
     plotted_periods = {period for _, period, _ in groups}
-    for algorithm, period, group in groups:
+    for distance, period, group in groups:
         probabilities = [row["physical_error_probability"] for row in group]
-        label = (card_label(algorithm) if len(plotted_periods) == 1
-                 else f"{card_label(algorithm)}, {period:g} µs")
+        label = (f"d={distance}" if len(plotted_periods) == 1
+                 else f"d={distance}, {period:g} µs")
         line, = axis.plot(
             probabilities,
             [row["buffer0_ready_to_frame_median_us"] for row in group],
             "o-", label=f"{label} ready→frame median")
-    for algorithm, period, group in groups:
+    for distance, period, group in groups:
         probabilities = [row["physical_error_probability"] for row in group]
         axis.plot(probabilities,
                   [row["buffer0_ready_to_frame_p99_us"] for row in group],

@@ -53,6 +53,7 @@ OUTPUT_LINK = {"weak_baseline": "wdo", "strong_only": "do"}
 @dataclass(frozen=True)
 class ShotMeasurement:
     physical_error_probability: float
+    distance: int
     round_period_us: float
     algorithm: object       # the active unit's card: a name or a latency in us
     seed: int
@@ -206,26 +207,26 @@ def backlog_trajectory(completed) -> list:
     return trajectory
 
 
-def chain_load(samples: dict, config: ExperimentConfig,
+def chain_load(samples: dict, config: ExperimentConfig, distance: int,
                round_period_us: float) -> float:
     """rho: the serial chain's service per window (unit assigned -> decode
     done, plus the DD boundary handoff) over the window inter-arrival time
     (commit rounds x round period). Above 1 the chain cannot keep up."""
     service_us = statistics.fmean(samples["service"]) if samples["service"] else 0.0
     handoff_us = statistics.fmean(samples["dd_per_window"]) if samples["dd_per_window"] else 0.0
-    commit_rounds = config.windowing.commit_rounds or config.distance
+    commit_rounds = config.windowing.commit_rounds or distance
     inter_arrival_us = commit_rounds * round_period_us
     return (service_us + handoff_us) / inter_arrival_us
 
 
 def _write_trace(config: ExperimentConfig, completed, *,
-                 physical_error_probability: float, round_period_us: float,
-                 seed: int) -> None:
+                 physical_error_probability: float, distance: int,
+                 round_period_us: float, seed: int) -> None:
     """One file per shot with the engine narrator's full line record: the
     same lines trace: print shows live."""
     trace_dir = config.results_dir / "trace"
     trace_dir.mkdir(parents=True, exist_ok=True)
-    name = (f"p{physical_error_probability:g}"
+    name = (f"p{physical_error_probability:g}_d{distance}"
             f"_algo{config.active_decoder.algorithm}"
             f"_round{round_period_us:g}us_seed{seed}.log")
     (trace_dir / name).write_text(
@@ -233,9 +234,11 @@ def _write_trace(config: ExperimentConfig, completed, *,
 
 
 def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
-                 round_period_us: float, seed: int) -> ShotMeasurement:
+                 distance: int, round_period_us: float,
+                 seed: int) -> ShotMeasurement:
     spec, engine = build_run(config,
                              physical_error_probability=physical_error_probability,
+                             distance=distance,
                              round_period_us=round_period_us, seed=seed)
     wall_start = time.perf_counter()
     completed = spec.build(verbose=config.trace in ("print", "both"),
@@ -246,11 +249,12 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
     if config.trace in ("file", "both"):
         _write_trace(config, completed,
                      physical_error_probability=physical_error_probability,
+                     distance=distance,
                      round_period_us=round_period_us, seed=seed)
 
     samples = collect_samples(completed, engine, config.mode)
     decoded_windows = len(samples["service"])
-    load = chain_load(samples, config, round_period_us)
+    load = chain_load(samples, config, distance, round_period_us)
     operation_result = completed.result.operation_results[0]
     truth = tuple(operation_result.observable_truth)
     loop_prediction = tuple(operation_result.logical_observables)
@@ -264,6 +268,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
     queue_depths = [depth for _, depth in completed.decoder_manager.queue_log]
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,
+        distance=distance,
         round_period_us=round_period_us,
         algorithm=config.active_decoder.algorithm,
         seed=seed, windows=decoded_windows,
@@ -278,7 +283,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
         direct_mismatch=loop_prediction != reference_prediction,
         backlog=backlog_trajectory(completed),
         throughput_windows_per_us=decoded_windows / span_us,
-        throughput_rounds_per_us=config.rounds_per_shot / span_us,
+        throughput_rounds_per_us=config.rounds_per_shot.rounds_for(distance) / span_us,
         decoder_utilization=sum(samples["service"]) / span_us,
         max_queued_windows=max(queue_depths, default=0),
         tesseract_windows_checked=getattr(

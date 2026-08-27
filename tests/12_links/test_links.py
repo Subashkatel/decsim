@@ -1108,11 +1108,10 @@ def test_yaml_card_key_reaches_the_edge(tmp_path):
     yaml_text = (
         "mode: weak_baseline\n"
         "code_task: surface_code:rotated_memory_z\n"
-        "distance: 3\n"
         "rounds_per_shot: 15\n"
         "windowing: {scheme: sliding, commit_rounds: null, buffer_rounds: null}\n"
-        "sweep: [{physical_error_probability: [0.001], round_period_us: [1.0],\n"
-        "         shots: 1}]\n"
+        "sweep: [{physical_error_probability: [0.001], distance: [3],\n"
+        "         round_period_us: [1.0], shots: 1}]\n"
         "controller: {clock: fridge, t_binary_availability_cycles: 0, t_pack_cycles: 0}\n"
         "clocks: {fridge: 250.0, room: 250.0}\n"
         "links:\n"

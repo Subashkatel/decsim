@@ -46,13 +46,14 @@ WINDOWING_SCHEMES = {
 }
 
 
-def memory_circuit(config: ExperimentConfig,
-                   physical_error_probability: float) -> stim.Circuit:
+def memory_circuit(config: ExperimentConfig, physical_error_probability: float,
+                   distance: int) -> stim.Circuit:
     """The real data: Stim's generated memory circuit, one physical error
     probability on all four of Stim's noise channels (as Stim's guide does)."""
     p = physical_error_probability
     return stim.Circuit.generated(
-        config.code_task, rounds=config.rounds_per_shot, distance=config.distance,
+        config.code_task, rounds=config.rounds_per_shot.rounds_for(distance),
+        distance=distance,
         after_clifford_depolarization=p, before_round_data_depolarization=p,
         before_measure_flip_probability=p, after_reset_flip_probability=p)
 
@@ -191,8 +192,8 @@ def link_model(config: ExperimentConfig):
                    qc_excludes_controller_processing=True)
 
 
-def code_model(config: ExperimentConfig) -> SurfaceCodeModel:
-    return SurfaceCodeModel(d=config.distance,
+def code_model(config: ExperimentConfig, distance: int) -> SurfaceCodeModel:
+    return SurfaceCodeModel(d=distance,
                             commit_rounds_override=config.windowing.commit_rounds,
                             buffer_rounds_override=config.windowing.buffer_rounds)
 
@@ -232,10 +233,10 @@ def escalation_policy(config: ExperimentConfig):
 
 
 def build_run(config: ExperimentConfig, *, physical_error_probability: float,
-              round_period_us: float, seed: int):
+              distance: int, round_period_us: float, seed: int):
     """The wired RunSpec for one sweep point and seed, plus its engine
     (the engine is returned so the measurement can read its stage records)."""
-    circuit = memory_circuit(config, physical_error_probability)
+    circuit = memory_circuit(config, physical_error_probability, distance)
     operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
                           circuit=circuit)
     engine = decoder_engine(config)
@@ -244,9 +245,9 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
         t_binary_availability_us=config.controller.t_binary_availability_us,
         t_pack_us=config.controller.t_pack_us)
     spec = RunSpec(
-        ops=[operation], code=code_model(config),
+        ops=[operation], code=code_model(config, distance),
         scheme=WINDOWING_SCHEMES[config.windowing.scheme](),
-        rounds_policy=FixedRounds(config.rounds_per_shot),
+        rounds_policy=FixedRounds(config.rounds_per_shot.rounds_for(distance)),
         device=StimDevice(), decoder=engine, num_units=config.active_decoder.units,
         timing=timing, links=link_model(config),
         decoder_memory=decoder_memory(config),

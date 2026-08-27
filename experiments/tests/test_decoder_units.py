@@ -25,11 +25,10 @@ CONFIGS_DIR = Path(__file__).parent.parent / "configs"
 MINIMAL_CONFIG = {
     "mode": "weak_baseline",
     "code_task": "surface_code:rotated_memory_z",
-    "distance": 3,
     "rounds_per_shot": 15,
     "windowing": {"scheme": "sliding", "commit_rounds": None,
                   "buffer_rounds": None},
-    "sweep": [{"physical_error_probability": [0.001],
+    "sweep": [{"physical_error_probability": [0.001], "distance": [3],
                "round_period_us": [1.0], "shots": 1}],
     "controller": {"clock": "fridge", "t_binary_availability_cycles": 0,
                    "t_pack_cycles": 0},
@@ -102,11 +101,17 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         load_experiment(old_flat_decoder)
 
     old_sweep_axis = write_config(tmp_path, {
-        "sweep": [{"physical_error_probability": [0.001],
+        "sweep": [{"physical_error_probability": [0.001], "distance": [3],
                    "round_period_us": [1.0],
                    "algorithm_latency_us": [0.028], "shots": 1}]})
     with pytest.raises(ValueError, match="decoder card"):
         load_experiment(old_sweep_axis)
+
+    fixed_distance_key = write_config(tmp_path, {
+        "sweep": [{"physical_error_probability": [0.001],
+                   "round_period_us": [1.0], "shots": 1}]})
+    with pytest.raises(KeyError):
+        load_experiment(fixed_distance_key)
 
 
 def test_engine_clock_must_name_a_clock_domain(tmp_path):
@@ -128,7 +133,7 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
     config = load_experiment(config_path)
     for seed in range(3):
         measurement = measure_shot(config, physical_error_probability=0.005,
-                                   round_period_us=1.0, seed=seed)
+                                   distance=3, round_period_us=1.0, seed=seed)
         assert measurement.algorithm == "pymatching"
         assert measurement.windows > 0
         assert not measurement.direct_mismatch
@@ -140,7 +145,7 @@ def test_strong_unit_runs_belief_matching(tmp_path):
         "decoder": strong_unit("belief_matching")})
     config = load_experiment(config_path)
     measurement = measure_shot(config, physical_error_probability=0.001,
-                               round_period_us=1.0, seed=0)
+                               distance=3, round_period_us=1.0, seed=0)
     assert measurement.algorithm == "belief_matching"
     assert measurement.windows > 0
     assert not measurement.logical_failure
@@ -151,10 +156,27 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
     config_path = write_config(tmp_path, {})
     config = load_experiment(config_path)
     measurements = [measure_shot(config, physical_error_probability=0.001,
-                                 round_period_us=1.0, seed=seed)
+                                 distance=3, round_period_us=1.0, seed=seed)
                     for seed in range(2)]
     rows = summarize(measurements)
     assert len(rows) == 1
     assert rows[0]["algorithm"] == 0.028
     per_link = link_rows(measurements)
     assert per_link and all(row["algorithm"] == 0.028 for row in per_link)
+
+
+def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
+    """"10d" is Toshio 2510.25222's memory-experiment convention: the shot
+    length follows the swept code distance."""
+    config_path = write_config(tmp_path, {
+        "rounds_per_shot": "10d",
+        "sweep": [{"physical_error_probability": [0.001], "distance": [3, 5],
+                   "round_period_us": [1.0], "shots": 1}]})
+    config = load_experiment(config_path)
+    assert config.rounds_per_shot.rounds_for(3) == 30
+    assert config.rounds_per_shot.rounds_for(5) == 50
+    assert str(config.rounds_per_shot) == "10d"
+    measurement = measure_shot(config, physical_error_probability=0.001,
+                               distance=5, round_period_us=1.0, seed=0)
+    assert measurement.distance == 5
+    assert measurement.windows > 5

@@ -9,10 +9,15 @@ Run one:
 
     PYTHONPATH=. python -m experiments.run experiments/configs/strong_decoder_baseline.yaml
 
-Results land in `experiments/results/<name>/`: `sweep.csv` (every column),
-`links.csv` (the per-link ledger totals), and the figures. Rerunning the
-same config reproduces the same rows; seeds are 0..shots-1 per sweep
-point, and only wall-clock derived columns vary (a named real algorithm
+Results land in `experiments/results/<name>/<UTC timestamp>/`, never
+overwritten; `latest` links to the newest run. Every run writes
+`manifest.json` (resolved config, git commit, package versions, host,
+times: sampling is deterministic from stim version + task + d + rounds +
+p + seed, so manifest plus seeds are the raw data), `shots.csv` (one row
+per shot), `sweep.csv` (one row per point), `links.csv`, and the figures;
+the `records:` card adds per-window json lines and failed shots'
+detection events. Seeds are 0..shots-1 per sweep point, and only
+wall-clock derived columns vary between reruns (a named real algorithm
 is timed on this host). To make a new experiment, copy a yaml and change
 numbers; a new yaml key belongs in `experiment_config.py` first.
 `configs/reference.yaml` lists every yaml key in one runnable file;

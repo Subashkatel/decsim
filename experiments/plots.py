@@ -122,7 +122,8 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
         read_hi = min(window.buffer_hi, rounds)
         stored_tick = us(stored_row[read_hi]["delivery_ticks"])
         window_ranges.append(
-            f"window {window_id}: commits {window.commit_lo}-{window.commit_hi}, "
+            f"window {window_id}: "
+            f"commits {window.commit_lo}-{window.commit_hi}, "
             f"reads {window.start_round}-{read_hi}")
         # commit rounds land solid; the trailing buffer reads land lighter
         commit_stored = us(
@@ -164,7 +165,8 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
               f" · {config.windowing.scheme} windows: commit {commit_rounds},"
               f" buffer {buffer_rounds} rounds"
               f" · rounds every {round_period_us:g} µs"
-              f" · algorithm {card_label(algorithm)} · p={physical_error_probability:g}",
+              f" · algorithm {card_label(algorithm)}"
+              f" · p={physical_error_probability:g}",
               transform=axis.transAxes, ha="center", va="bottom",
               fontsize=8.5, color="0.35")
     handles = [plt.Rectangle((0, 0), 1, 1, color="0.6")]
@@ -173,7 +175,8 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
         handles.append(plt.Rectangle(
             (0, 0), 1, 1, color=WINDOW_COLORS[window_id % len(WINDOW_COLORS)]))
         labels.append(window_ranges[window_id]
-                      if window_id < len(window_ranges) else f"window {window_id}")
+                      if window_id < len(window_ranges)
+                      else f"window {window_id}")
     if len(windows) > MAX_LEGEND_WINDOWS:
         labels[-1] += "  (…)"
     handles.append(plt.Rectangle((0, 0), 1, 1, color="0.4", alpha=0.45))

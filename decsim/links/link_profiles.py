@@ -5,7 +5,7 @@ every channel unbounded, so it prices propagation only and no transfer ever
 queues; latencies from Khalid et al. Table II. ``bandwidth_limited_profile``
 is the same fabric with finite calibrated rates so contention becomes
 measurable; ``capacity_scale`` sweeps the whole fabric.
-``with_controller_to_buffer_edge`` adds the priced C2B hop to either.
+``with_controller_to_buffer_edge`` adds the priced CWB hop to either.
 
 Every number carries a ``source`` string that travels into the topology and
 traffic reports; paper locators are line numbers in tmp/references/papers/.
@@ -26,6 +26,7 @@ from .links import (
     LinkModelConfig,
     LinkQuantityBasis,
     PayloadSizeConfig,
+    TransferOverheadConfig,
 )
 
 
@@ -52,10 +53,10 @@ def logical_reference_profile() -> LinkModelConfig:
 
     return LinkModelConfig(
         qc=actual_edge(0.15, "Khalid qc effective time", "SyndromePayload.size_bits"),
-        cwd=actual_edge(2.0, "Khalid cd latency; logical_reference integrated weak-input transfer",
+        wbd=actual_edge(2.0, "Khalid cd latency; logical_reference integrated weak-input transfer",
                         "SyndromeRoundPacket.fragment_size_sum"),
         wsd=actual_edge(0.5, "repository weak-to-strong model choice", "switching decision payload_bits"),
-        csd=actual_edge(2.0, "Khalid cd mapped to controller-to-strong", "DecodeJob.retained_payload_size_bits"),
+        sbd=actual_edge(2.0, "Khalid cd mapped to the strong input", "DecodeJob.retained_payload_size_bits"),
         wdo=default_edge(1.0, _per_channel_payload(50_000, 100, "Khalid do mapped to weak output")),
         dd=default_edge(0.5, _aggregate_payload(100, "Khalid dd representative aggregate transaction")),
         do=default_edge(1.0, _per_channel_payload(50_000, 100, "Khalid do")),
@@ -114,7 +115,7 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             "\"QEC rounds were performed every ∼1 µs\", \"a few tens of Mbps of syndrome data\" per logical qubit",
             "SyndromePayload.size_bits",
         ),
-        cwd=aggregate_edge(
+        wbd=aggregate_edge(
             2.0,
             weak_window_bits,
             weak_window_bits / commit_region_us,
@@ -131,7 +132,7 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             "24 Mbps syndrome anchor",
             "switching decision payload_bits",
         ),
-        csd=aggregate_edge(
+        sbd=aggregate_edge(
             2.0,
             strong_window_bits,
             strong_window_bits / commit_region_us,
@@ -168,6 +169,72 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
     )
 
 
+def with_transfer_overhead(
+    profile: LinkModelConfig,
+    *,
+    overhead_us: float,
+    source: str,
+    paths: tuple = ("wbd", "sbd"),
+) -> LinkModelConfig:
+    """Return ``profile`` with a fixed per-transfer setup cost on the listed
+    paths (default: the two decoder-input DMA paths).
+
+    Engine-side: the wire keeps streaming during a setup, but successive
+    setups on one path serialize (gem5-Aladdin's one delayed-DMA event; see
+    ``TransferOverheadConfig`` for the measured numbers). Each listed path
+    must own its channel; ``resolve()`` refuses a shared channel whose
+    edges disagree about the shift.
+    """
+    overhead = TransferOverheadConfig(us(overhead_us), source)
+    replacements = {}
+    for path in paths:
+        edge = getattr(profile, path)
+        if edge is None:
+            raise ValueError(f"{path} is not wired on this card")
+        replacements[path] = replace(edge, transfer_overhead=overhead)
+    return replace(
+        profile,
+        **replacements,
+        profile_name=f"{profile.profile_name}+transfer_overhead",
+    )
+
+
+def with_csb_edge(
+    profile: LinkModelConfig,
+    *,
+    latency_us: float,
+    aggregate_bits_per_us: Optional[float],
+    source: str,
+) -> LinkModelConfig:
+    """Return ``profile`` with the optional priced csb edge to syndrome
+    buffer 1.
+
+    The caller supplies both experiment-card numbers and their provenance;
+    ``aggregate_bits_per_us`` of ``None`` means unbounded bandwidth (the edge
+    charges propagation latency only); a profile without this edge stores
+    rounds in syndrome buffer 1 for free.
+    """
+    capacity = None
+    if aggregate_bits_per_us is not None:
+        capacity = LinkCapacityConfig(
+            aggregate_bits_per_us,
+            LinkQuantityBasis.DIRECT_AGGREGATE,
+            None,
+            source,
+        )
+    channel = LinkConfig(us(latency_us), capacity, source)
+    edge = LinkEdgeConfig(
+        channel,
+        None,
+        "SyndromeRoundPacket.fragment_size_sum",
+    )
+    return replace(
+        profile,
+        csb=edge,
+        profile_name=f"{profile.profile_name}+priced_csb",
+    )
+
+
 def with_controller_to_buffer_edge(
     profile: LinkModelConfig,
     *,
@@ -175,7 +242,7 @@ def with_controller_to_buffer_edge(
     aggregate_bits_per_us: Optional[float],
     source: str,
 ) -> LinkModelConfig:
-    """Return ``profile`` with the optional priced C2B round-transfer edge.
+    """Return ``profile`` with the optional priced CWB round-transfer edge.
 
     The caller supplies both experiment-card numbers and their provenance;
     ``aggregate_bits_per_us`` of ``None`` means unbounded bandwidth (the edge
@@ -198,6 +265,6 @@ def with_controller_to_buffer_edge(
     )
     return replace(
         profile,
-        c2b=edge,
-        profile_name=f"{profile.profile_name}+priced_c2b",
+        cwb=edge,
+        profile_name=f"{profile.profile_name}+priced_cwb",
     )

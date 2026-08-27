@@ -1,0 +1,10 @@
+# The strong tier's offline LER sweep (plot 1). Runs through
+# experiments.offline_run; every key is documented in reference.yaml.
+
+extends: strong_decoder_baseline.yaml
+
+sweep:
+  - physical_error_probability: [0.0005, 0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
+    distance: [3, 5, 7, 9, 11]
+    round_period_us: [1.0]
+    shots: 100          # pilot scale; sized from the pilot's cost table

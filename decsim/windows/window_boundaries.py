@@ -114,7 +114,7 @@ class BoundaryCourier:
                     f"window interaction selected boundary target {dep_key} "
                     f"for source {source_key}, but it is not a live "
                     f"dependency declared by the window scheme")
-            if target.queued or target.committed:
+            if target.committed:
                 raise RuntimeError(
                     f"window interaction selected boundary target {dep_key} "
                     f"for source {source_key} after its decode lifecycle "
@@ -198,7 +198,7 @@ class BoundaryCourier:
             payload=defects,
         )
         update = self._propose_boundary_update(delivery, w)
-        if update.accepted and (w.queued or w.committed):
+        if update.accepted and w.committed:
             raise RuntimeError(
                 f"accepted boundary delivery {delivery_key} reached window "
                 f"{key} after its decode lifecycle started")
@@ -216,6 +216,12 @@ class BoundaryCourier:
             if update.release_dependency:
                 self._released_boundary_dependencies.add(delivery_key)
                 w.deps_remaining -= 1
+        if (w.queued and not w.committed
+                and w.deps_remaining == 0
+                and self.wm.release_service is not None):
+            # the last boundary arrived for an already-shipped window:
+            # wake its parked decode
+            self.wm.release_service(key)
         self.wm.check_window(key)
     def _propose_boundary_update(
         self, delivery: BoundaryDelivery, destination: Window,

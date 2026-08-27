@@ -35,15 +35,16 @@ _OPERATION_ID = ("experiment", 7)
 _PATCH_IDS = (1, 2)
 _ENDPOINTS = {
     "qc": ("qpu", "controller"),
-    "c2b": ("controller", "syndrome buffer 0"),
-    "cwd": ("controller", "weak decoder"),
+    "cwb": ("controller", "syndrome buffer 0"),
+    "wbd": ("weak buffer", "weak decoder"),
     "wsd": ("weak decoder", "strong decoder"),
-    "csd": ("controller", "strong decoder"),
+    "sbd": ("strong buffer", "strong decoder"),
     "wdo": ("weak decoder", "pauli frame"),
     "dd": ("decoder", "decoder"),
     "do": ("strong decoder", "pauli frame"),
     "oc": ("pauli frame", "controller"),
     "cq": ("controller", "qpu"),
+    "csb": ("controller", "syndrome buffer 1"),
 }
 
 
@@ -58,9 +59,9 @@ def _request_relation(tier, *, operation_id=_OPERATION_ID, window_id=3, sequence
 
 
 def _valid_attribution(path):
-    if path is LinkPath.QC:
+    if path in (LinkPath.QC, LinkPath.CSB):
         return TrafficAttribution(_OPERATION_ID, _PATCH_IDS, None, 1, 2)
-    if path is LinkPath.CWD:
+    if path is LinkPath.WBD:
         return TrafficAttribution(
             _OPERATION_ID,
             _PATCH_IDS,
@@ -69,7 +70,7 @@ def _valid_attribution(path):
             2,
             _request_relation(DecoderTier.WEAK),
         )
-    if path in (LinkPath.WSD, LinkPath.CSD, LinkPath.DO):
+    if path in (LinkPath.WSD, LinkPath.SBD, LinkPath.DO):
         relation = _request_relation(DecoderTier.STRONG)
         return TrafficAttribution(_OPERATION_ID, _PATCH_IDS, 3, 1, 2, relation)
     if path is LinkPath.WDO:
@@ -91,8 +92,9 @@ def _topology(config):
 def test_link_module_documents_every_segment_endpoint_and_extension_step():
     """The module explains every fixed segment, endpoint pair, and extension step."""
     doc = links_module.__doc__ or ""
-    assert len(LinkPath) == 10
-    assert LinkPath.C2B in LinkPath          # optional controller-to-buffer hop
+    assert len(LinkPath) == 11
+    assert LinkPath.CWB in LinkPath          # optional controller-to-buffer hop
+    assert LinkPath.CSB in LinkPath     # optional room-side dual write
     for path in LinkPath:
         lines = [line.lower() for line in doc.splitlines() if f"``{path.name}``" in line]
         assert lines, f"missing documentation for {path.name}"
@@ -114,8 +116,10 @@ def test_link_module_documents_every_segment_endpoint_and_extension_step():
 def test_rule_table_and_reference_cards_cover_the_closed_vocabulary():
     """One complete rule table; both cards wire the nine required paths."""
     assert tuple(links_module._PATH_RULES) == tuple(LinkPath)
-    assert not links_module._PATH_RULES[LinkPath.C2B].required
-    paths = tuple(p for p in LinkPath if p is not LinkPath.C2B)
+    assert not links_module._PATH_RULES[LinkPath.CWB].required
+    assert not links_module._PATH_RULES[LinkPath.CSB].required
+    paths = tuple(p for p in LinkPath
+                  if p is not LinkPath.CWB and p is not LinkPath.CSB)
     assert all(links_module._PATH_RULES[path].required for path in paths)
     for profile in (logical_reference_profile, bandwidth_limited_profile):
         config = profile()
@@ -272,7 +276,7 @@ def test_round_only_controller_to_weak_transfer_rejects_a_relation():
     )
     with pytest.raises(ValueError, match="does not accept a relation"):
         logical_reference_profile().resolve().reserve(
-            LinkPath.CWD,
+            LinkPath.WBD,
             payload_bits=8,
             now_ticks=0,
             attribution=attribution,
@@ -295,9 +299,9 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
     bandwidth = _topology(bandwidth_limited_profile())
     expected_latency = {
         "qc": us(0.15),
-        "cwd": us(2.0),
+        "wbd": us(2.0),
         "wsd": us(0.5),
-        "csd": us(2.0),
+        "sbd": us(2.0),
         "wdo": us(1.0),
         "dd": us(0.5),
         "do": us(1.0),
@@ -324,9 +328,9 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
     }
     assert capacities == {
         "qc": 24.0,
-        "cwd": 48.0,
+        "wbd": 48.0,
         "wsd": 24.0,
-        "csd": 72.0,
+        "sbd": 72.0,
         "wdo": 1_000_000.0,
         "dd": 24.0,
         "do": 1_000_000.0,

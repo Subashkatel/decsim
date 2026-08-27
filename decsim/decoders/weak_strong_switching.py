@@ -15,7 +15,7 @@ from ..message import (
     RunSeedPathSegment,
     SoftOutputSource,
 )
-from ..message import Directive, OutcomeDirective, Submission
+from ..message import DecoderTier, Directive, OutcomeDirective, Submission
 
 
 class ThresholdRegister:
@@ -75,6 +75,7 @@ class Baseline:
     requires_strong_context = False
     bulk_strong = False
     double_window = False
+    primary_tier = DecoderTier.WEAK
 
     def validate_declared_run(
         self,
@@ -99,6 +100,51 @@ class Baseline:
     def on_decode_outcome(self, outcome, services) -> OutcomeDirective:
         if outcome.job.strong_decode_for is not None:
             return OutcomeDirective(Directive.FINALIZE_STRONG)
+        return OutcomeDirective(Directive.FINALIZE)
+
+
+class StrongOnly:
+    """The strong tier decodes the plan's windows directly: no weak decode,
+    no verdict, no escalation. The machine is data-woken: syndrome buffer 1
+    stores a round and its signal drives window readiness, the shape of
+    LILLIPUT's FIFO-fed decoder and Google's streaming decoder. Every window
+    job carries tier STRONG, reads its rounds from syndrome buffer 1 over
+    SBD, and rides DO home; the escalation machinery (WSD, ledger, context
+    windows, slabs) is never engaged."""
+
+    requires_strong_context = False
+    bulk_strong = False
+    double_window = False
+    primary_tier = DecoderTier.STRONG
+
+    def validate_declared_run(
+        self,
+        *,
+        scheme,
+        boundary_policy,
+        has_dynamic_streams,
+        static_decode_plan_selected,
+        has_frontend,
+    ) -> None:
+        if has_dynamic_streams:
+            raise ValueError(
+                "strong-only runs support static plans; dynamic streams "
+                "re-point live window reads and are not wired to the "
+                "room-side store yet")
+
+    def validate_operations(self, operations) -> None:
+        pass
+
+    def validate_code_geometry(self, geometry) -> None:
+        pass
+
+    def on_window_ready(self, window, weak_job, services) -> list:
+        # the pre-built job IS the window's job; the submit path already
+        # stamped it with the primary tier, the primary store's payloads,
+        # and the SBD transfer
+        return [Submission(weak_job)]
+
+    def on_decode_outcome(self, outcome, services) -> OutcomeDirective:
         return OutcomeDirective(Directive.FINALIZE)
 
 
@@ -133,6 +179,7 @@ class Switching:
     extra context still belongs to the strong-data-path backlog item."""
 
     requires_strong_context = True
+    primary_tier = DecoderTier.WEAK
 
     def __init__(self, confidence_threshold: float,
                  expected_source: SoftOutputSource,

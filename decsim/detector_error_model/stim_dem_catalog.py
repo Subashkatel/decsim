@@ -307,37 +307,60 @@ def _prepare_linked_fault_catalogs(decomposed_dem, physical_dem):
             "decomposed and undecomposed Stim models disagree on physical faults"
         )
 
-    derived_check = np.zeros(
-        (max((detector_id for detectors in graphlike_catalog.detector_sets
-              for detector_id in detectors), default=-1) + 1,
-         len(physical_catalog.detector_sets)),
-        dtype=np.uint8,
-    )
-    graph_check = np.zeros(
-        (derived_check.shape[0], len(graphlike_catalog.detector_sets)),
-        dtype=np.uint8,
-    )
-    for column, detectors in enumerate(graphlike_catalog.detector_sets):
-        graph_check[list(detectors), column] = 1
-    for column, detectors in enumerate(physical_catalog.detector_sets):
-        derived_check[list(detectors), column] = 1
-    if not np.array_equal((graph_check @ link) % 2, derived_check):
+    # The link audit works on sparse incidence matrices; a dense
+    # target-by-fault matrix is quadratic in circuit length and cannot
+    # exist at stress size (12 TiB at d=9, 10000 rounds), while the sparse
+    # form is the reference decoders' own shape for this structure
+    # (beliefmatching's check/hyperedge_to_edge matrices are csc_matrix).
+    detector_row_count = max(
+        (detector_id for detectors in graphlike_catalog.detector_sets
+         for detector_id in detectors), default=-1) + 1
+    graph_check = _incidence_matrix(
+        graphlike_catalog.detector_sets, detector_row_count)
+    derived_check = _incidence_matrix(
+        physical_catalog.detector_sets, detector_row_count)
+    if _parity_differs(graph_check @ link, derived_check):
         raise ValueError(
             "physical detector effects do not equal their graphlike components"
         )
-    for physical_column, observable_ids in enumerate(
-        physical_catalog.observable_sets
-    ):
-        derived_observables = _xor_target_ids(
-            observable_id
-            for graphlike_column in np.nonzero(link[:, physical_column])[0]
-            for observable_id in graphlike_catalog.observable_sets[graphlike_column]
+    observable_row_count = max(
+        (observable_id
+         for observable_sets in (graphlike_catalog.observable_sets,
+                                 physical_catalog.observable_sets)
+         for observables in observable_sets
+         for observable_id in observables), default=-1) + 1
+    graph_observables = _incidence_matrix(
+        graphlike_catalog.observable_sets, observable_row_count)
+    physical_observables = _incidence_matrix(
+        physical_catalog.observable_sets, observable_row_count)
+    if _parity_differs(graph_observables @ link, physical_observables):
+        raise ValueError(
+            "physical logical effects do not equal their graphlike components"
         )
-        if derived_observables != observable_ids:
-            raise ValueError(
-                "physical logical effects do not equal their graphlike components"
-            )
     return graphlike_catalog, physical_catalog, link
+
+
+def _incidence_matrix(target_sets: tuple, row_count: int) -> csc_matrix:
+    """Sparse target-by-fault incidence: entry (t, f) = 1 when fault f
+    touches target t (a detector or an observable)."""
+    import numpy as np
+    from scipy.sparse import csc_matrix
+    rows = [target_id for targets in target_sets for target_id in targets]
+    columns = [column for column, targets in enumerate(target_sets)
+               for _ in targets]
+    return csc_matrix(
+        (np.ones(len(rows), dtype=np.int64), (rows, columns)),
+        shape=(row_count, len(target_sets)))
+
+
+def _parity_differs(component_counts: csc_matrix, expected: csc_matrix) -> bool:
+    """Whether the mod-2 reduction of a component-count matrix differs
+    anywhere from the expected 0/1 incidence."""
+    import numpy as np
+    parity = component_counts.astype(np.int64)
+    parity.data %= 2
+    parity.eliminate_zeros()
+    return (parity != expected).nnz != 0
 
 
 def _prepare_fault_catalogs(

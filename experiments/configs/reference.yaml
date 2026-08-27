@@ -1,0 +1,164 @@
+# The reference config: every key the yaml layer reads, in one runnable file,
+# and the one home of the yaml surface's documentation: the shipped baselines
+# stay comment-light and point here.
+# Values here are the defaults the two shipped baselines
+# (weak_decoder_baseline.yaml, strong_decoder_baseline.yaml) share; the tiny
+# sweep makes this file cheap to run, so the test suite runs it as a smoke check.
+#
+# Kept honest by experiments/tests/test_decoder_units.py: the test fails
+# if this file and the loader (experiment_config.py) drift apart. Knobs the
+# yaml cannot reach are Python objects: multi-op workloads, dynamic
+# streams, routers, escalation families, schedulers, devices, policies.
+
+mode: weak_baseline                # decode path: weak_baseline | strong_only.
+                                   # strong_only wakes windows from syndrome
+                                   # buffer 1, moves inputs on sbd, results on do
+
+code_task: surface_code:rotated_memory_z   # stim generator task (real detector data)
+rounds_per_shot: 15                # QEC rounds per shot: a fixed count, or
+                                   # "<n>d" to scale with the swept distance
+                                   # ("10d" = the 10 d-round memory experiment,
+                                   # Toshio 2510.25222 Fig. 4)
+
+windowing:
+  scheme: sliding                  # sliding | parallel | sandwich | naive_online
+  commit_rounds: null              # rounds committed per window; null = d
+  buffer_rounds: null              # look-ahead rounds per window; null = d
+
+# The sweep: a list of blocks; each block is the cross product of its two
+# axes, `shots` seeds per point (0..shots-1); a point+seed named twice runs
+# once. The algorithm is NOT a sweep axis: it is structure, fixed per unit
+# on the decoder card below; comparing algorithms is comparing configs.
+# The baselines put shots where they matter: a timing block sweeps many
+# round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
+# the load = 1 knee of its 0.028 card), and an LER block sweeps several
+# probabilities with many shots at one timing point, since timing knobs
+# never change the decoded answer (Gate 10).
+sweep:
+  - physical_error_probability: [0.001]    # p on all four Stim noise channels
+    distance: [3]                          # code distance d; one LER curve per d
+    round_period_us: [1.0]                 # the QPU's physical round period, in us:
+                                           # a quantum-device cadence, deliberately
+                                           # not a classical clock's cycles
+    shots: 2
+
+controller:                        # controller work per round, in cycles of its
+                                   # named clock domain
+  clock: fridge
+  t_binary_availability_cycles: 0  # pulses -> binary classification cost; zero:
+                                   # classification is inside the priced round
+                                   # (Google 2023 Nature 614, Methods)
+  t_pack_cycles: 0                 # packet assembly cost per round; zero: one
+                                   # fragment per round makes packing a no-op
+
+clocks:                            # clock domain name -> MHz; a link prices its
+                                   # cycles on the domain it names. More domains
+                                   # (an mK stage, a 4K SFQ decoder) are one more
+                                   # entry here. Both start at LILLIPUT's 250 MHz
+                                   # ([d=3,m=2] FPGA clock, 2108.06569 Table 4).
+  fridge: 250.0
+  room: 250.0
+
+links:                             # one card per path; null = the logical_reference
+                                   # card's numbers for that path. Each card, in
+                                   # cycles of its named clock domain:
+                                   #   latency_cycles: propagation latency
+                                   #   clock: the domain (a clocks: key)
+                                   #   bits_per_cycle: per-channel capacity
+                                   #     (null = unbounded)
+                                   #   channels: parallel one-bit lanes (default 1);
+                                   #     aggregate bandwidth = bits_per_cycle x
+                                   #     channels x clock MHz
+                                   #   transfer_overhead_cycles: optional fixed
+                                   #     per-transfer DMA setup (setups serialize)
+  qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # QPU -> controller, one readout
+  cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}  # controller -> Buffer 0 (the weak buffer), one round
+  csb: null                   # controller -> syndrome buffer 1 (the strong buffer), one round
+  wbd: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # Buffer 0 -> weak decoder, one window
+  wsd: null                        # weak -> strong escalation decision
+  sbd: null                        # syndrome buffer 1 -> strong decoder, one window
+  dd:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # decoder -> decoder boundary handoff
+  wdo: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # weak decoder -> Pauli frame
+  do:  null                        # strong decoder -> Pauli frame
+  oc:  null                        # Pauli frame -> controller, a release
+  cq:  null                        # controller -> QPU, an instruction
+
+buffers:                           # syndrome-path store capacities, in rounds
+  buffer_0_size: null              # Buffer 0, the upstream round store; a full
+                                   # buffer refuses the next round and the packing
+                                   # overflow policy decides (fail-stop by default).
+                                   # null = unbounded
+  buffer_1_size: null              # syndrome buffer 1, the strong-side store
+                                   # (exists only when the mode uses it); overflow
+                                   # is a hard error. null = unbounded
+  packing_workspace_size: null     # packing assembly workspace: rounds in flight
+                                   # through the packing stage. null = unbounded
+
+decoder:                           # the two tiers as two distinct units
+                                   # (Toshio 2510.25222: lightweight decoders
+                                   # decode constantly, a separate accurate
+                                   # decoder is invoked on demand). The mode
+                                   # picks the active unit: weak_baseline
+                                   # decodes on weak, strong_only on strong;
+                                   # the unused tier's card may be omitted.
+  weak:                            # the lightweight tier: fast, higher LER
+    algorithm: pymatching          # pymatching | belief_matching: the real
+                                   # algorithm, measured wall clock per window;
+                                   # or a number: fixed core latency in us.
+                                   # Known number cards: 0.028 = LILLIPUT-class
+                                   # core, [d=3, m=2] 7 cycles at 250 MHz
+                                   # (2108.06569 sec. 6.3, Table 4); 5.0 = the
+                                   # old accuracy-first strong reference card.
+                                   # A card prices the algorithm stage ONLY;
+                                   # fetch and release cycles are separate
+    units: 1                       # decoder units in this tier's pool
+    unit_buffer_size: null         # input SRAM rounds PER UNIT; null = unbounded.
+                                   # Each unit holds two windows when they fit
+                                   # (transfer overlaps compute); a unit sized
+                                   # for one window falls back to serial residency
+    engine:
+      clock: fridge                # cycle-priced stages on this clock domain
+      fetch_cycles_per_round: 1    # read one round out of decoder memory per
+                                   # cycle (LILLIPUT FIFO, sec. 4)
+      release_cycles_per_job: 1    # correction write-out per job (the
+                                   # baselines use 10, an experiment card)
+  strong:                          # the accurate tier: slow, lower LER
+    algorithm: belief_matching
+    units: 1
+    unit_buffer_size: null
+    engine:
+      clock: room                  # the strong unit lives room-side
+      fetch_cycles_per_round: 1
+      release_cycles_per_job: 1
+
+pauli_frame:
+  clock: fridge
+  commit_cycles: 1                 # XOR of a correction into the frame register
+                                   # (one cycle, XQsim PFU)
+
+idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stream.
+                                   # How an idle patch's rounds are charged; idle
+                                   # rounds are decoder workload in every reference
+                                   # system (SWIPER, XQsim, Terhal backlog), so the
+                                   # default costs one load-only decode job per idle
+                                   # commit region. ignore is the optimistic card for
+                                   # active-path latency studies. Inert while the
+                                   # workload is a single always-busy operation.
+
+verify_windows: none               # none | tesseract. tesseract re-decodes every
+                                   # window with the official Tesseract backend and
+                                   # counts disagreements in the owned observable
+                                   # contribution; never latency-priced. A window is
+                                   # a d-round problem at any shot length, so this
+                                   # holds at every distance (9.6 ms/window at d=9,
+                                   # 18.1 ms at d=11, measured 2026-08-26).
+
+trace_io: false                    # true adds component I/O lines to the trace:
+                                   # what each store and unit received, holds
+                                   # (rounds, residents), and emitted
+
+trace: off                         # off | print | file | both. The engine narrator:
+                                   # print shows it live on screen; file writes each
+                                   # shot's full line record to
+                                   # results/<name>/trace/p<p>_algo<card>_round<T>us_seed<n>.log;
+                                   # both does both

@@ -154,7 +154,7 @@ class RoundsCard:
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    name: str                       # the yaml file's stem; names the results folder
+    name: str                       # the yaml file's stem; suffixes the run folder
     mode: str                       # weak_baseline | strong_only
     code_task: str                  # stim generator task
     rounds_per_shot: RoundsCard     # fixed count or per-distance ("10d")
@@ -184,7 +184,6 @@ class ExperimentConfig:
     config_files: tuple             # the yaml files this config was read
                                     # from, nearest first (an extends chain)
 
-
     @property
     def active_decoder(self) -> DecoderUnitCard:
         """The unit the mode decodes on: weak_baseline reads decoder.weak,
@@ -192,18 +191,20 @@ class ExperimentConfig:
         return getattr(self.decoder, MODE_TIER[self.mode])
 
 
-def _link_card(card: Optional[dict], clocks: dict, path: str) -> Optional[LinkCard]:
+def _link_card(card: Optional[dict], clocks: dict) -> Optional[LinkCard]:
     if card is None:
         return None
-    megahertz = clocks[card["clock"]]
+    clock = card["clock"]
+    megahertz = clocks[clock]
+    latency_cycles = card["latency_cycles"]
     bits_per_cycle = card["bits_per_cycle"]
     channels = card.get("channels", 1)
     overhead_cycles = card.get("transfer_overhead_cycles")
     return LinkCard(
-        latency_cycles=card["latency_cycles"], clock=card["clock"],
+        latency_cycles=latency_cycles, clock=clock,
         bits_per_cycle=bits_per_cycle, channels=channels,
         transfer_overhead_cycles=overhead_cycles,
-        latency_us=card["latency_cycles"] / megahertz,
+        latency_us=latency_cycles / megahertz,
         bits_per_us=(None if bits_per_cycle is None
                      else bits_per_cycle * channels * megahertz),
         transfer_overhead_us=(None if overhead_cycles is None
@@ -211,12 +212,15 @@ def _link_card(card: Optional[dict], clocks: dict, path: str) -> Optional[LinkCa
 
 
 def _controller_card(card: dict, clocks: dict) -> ControllerCard:
-    megahertz = clocks[card["clock"]]
+    clock = card["clock"]
+    megahertz = clocks[clock]
+    binary_cycles = card["t_binary_availability_cycles"]
+    pack_cycles = card["t_pack_cycles"]
     return ControllerCard(
-        t_binary_availability_cycles=card["t_binary_availability_cycles"],
-        t_pack_cycles=card["t_pack_cycles"], clock=card["clock"],
-        t_binary_availability_us=card["t_binary_availability_cycles"] / megahertz,
-        t_pack_us=card["t_pack_cycles"] / megahertz)
+        t_binary_availability_cycles=binary_cycles,
+        t_pack_cycles=pack_cycles, clock=clock,
+        t_binary_availability_us=binary_cycles / megahertz,
+        t_pack_us=pack_cycles / megahertz)
 
 
 def _decoder_unit(card: Optional[dict], clocks: dict,
@@ -229,14 +233,15 @@ def _decoder_unit(card: Optional[dict], clocks: dict,
             f"decoder.{tier}.algorithm is a number (fixed core latency, us) "
             f"or one of {ALGORITHMS}, got {algorithm!r}")
     engine = card["engine"]
+    engine_clock = engine["clock"]
     return DecoderUnitCard(
         algorithm=algorithm, units=card["units"],
         unit_buffer_size=card["unit_buffer_size"],
         engine=EngineCard(
-            clock=engine["clock"],
+            clock=engine_clock,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
             release_cycles_per_job=engine["release_cycles_per_job"],
-            frequency_mhz=clocks[engine["clock"]]))
+            frequency_mhz=clocks[engine_clock]))
 
 
 def _decoder_card(raw_decoder, clocks: dict, mode: str) -> DecoderCard:
@@ -315,7 +320,7 @@ def load_experiment(path) -> ExperimentConfig:
     buffers = raw["buffers"]
     mode = _require(raw["mode"], MODES, "mode")
     clocks = dict(raw["clocks"])
-    links = {link_path: _link_card(raw["links"].get(link_path), clocks, link_path)
+    links = {link_path: _link_card(raw["links"].get(link_path), clocks)
              for link_path in LINK_PATHS}
     raw_trace = raw.get("trace", "off")
     if raw_trace is False:
@@ -348,3 +353,4 @@ def load_experiment(path) -> ExperimentConfig:
                                 ("none", "tesseract"), "verify_windows"),
         pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"], clocks),
         config_files=config_files)
+

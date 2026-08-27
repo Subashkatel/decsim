@@ -5,7 +5,8 @@ SWIPER 2412.05115, Skoric 2209.08552, Toshio 2510.25222.
 
 ## Currently running
 
-Nothing. The next approved run gets listed here with its results stamp.
+Nothing. Two pilot runs are planned and awaiting sbatch (see below).
+The next approved run gets listed here with its results stamp.
 
 ## The plots
 
@@ -33,14 +34,31 @@ Nothing. The next approved run gets listed here with its results stamp.
 
 Retired: latency vs p (no paper draws it).
 
-## Next runs, awaiting go
+## The offline LER lane
 
-- Latency vs d: both tiers, d {3, 5, 7, 9, 11}, p = 1e-3, rounds 10d,
-  100 shots per d. Cheap: latency needs windows, not failures. One
-  slurm job per tier; strong d = 11 last, its own job if slow.
-- LER sweep: the two baseline configs, sharded one slurm job per
-  (d, p) point. Shot counts sized for >= 100 failures at the small-p
-  points before launch.
+LER never depends on timing, so plot 1 runs through
+experiments/offline_run.py: the exact windowed decode of the
+closed-loop runner (same window models, boundary XOR, owned-fault
+ledger, per-seed sampling; equivalence pinned shot for shot in
+tests/test_offline_run.py) with window models built once per point
+instead of once per shot. 14-22x faster per shot; parallelism comes
+from a slurm array, one shards.tsv line per task:
+
+    python -m experiments.offline_run plan configs/weak_ler.yaml
+    sbatch --array=1-<N> experiments/slurm_offline.sh <run_dir>
+    python -m experiments.offline_run merge <run_dir>
+
+## Next runs
+
+- LER pilot (awaiting sbatch): weak_ler + strong_ler at 100 shots per
+  point, d {3, 5, 7, 9}, p {0.5, 1, 2, 3, 5, 7, 10} x 1e-3. Purpose:
+  smoke the array pipeline and measure per-shot cost per point.
+- LER production: same configs with shots raised per point, sized from
+  the pilot's cost table toward >= 100 failures per point under an
+  approved core-hour budget; cap-limited points plot as bounds.
+- Latency vs d (closed loop): both tiers, d {3, 5, 7, 9, 11},
+  p = 1e-3, rounds 10d, 100 shots per d; needs two small latency
+  configs (weak on algorithm: pymatching).
 
 Methodology guards for every run: slurm node, never the login node;
 check the first window for a warm-up spike; seeds 0..shots-1 so reruns

@@ -10,6 +10,7 @@ point; only the wall-clock column varies).
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import json
 import platform
 import subprocess
@@ -151,23 +152,21 @@ def run_sweep(config: ExperimentConfig, run_dir: Path = None) -> list:
     seed named by more than one block runs once."""
     measurements = {}
     for block in config.sweep:
-        for physical_error_probability in block.physical_error_probabilities:
-            for distance in block.distances:
-                for round_period_us in block.round_periods_us:
-                    for seed in range(block.shots):
-                        shot_key = (physical_error_probability, distance,
-                                    round_period_us, seed)
-                        if shot_key in measurements:
-                            continue
-                        measurements[shot_key] = measure_shot(
-                            config,
-                            physical_error_probability=physical_error_probability,
-                            distance=distance,
-                            round_period_us=round_period_us, seed=seed,
-                            run_dir=run_dir)
-                    print(f"p {physical_error_probability}, d {distance}, "
-                          f"round period {round_period_us} us: "
-                          f"{block.shots} shots done", file=sys.stderr)
+        points = itertools.product(block.physical_error_probabilities,
+                                   block.distances, block.round_periods_us)
+        for physical_error_probability, distance, round_period_us in points:
+            for seed in range(block.shots):
+                shot_key = (physical_error_probability, distance,
+                            round_period_us, seed)
+                if shot_key in measurements:
+                    continue
+                measurements[shot_key] = measure_shot(
+                    config, distance=distance, seed=seed,
+                    physical_error_probability=physical_error_probability,
+                    round_period_us=round_period_us, run_dir=run_dir)
+            print(f"p {physical_error_probability}, d {distance}, "
+                  f"round period {round_period_us} us: "
+                  f"{block.shots} shots done", file=sys.stderr)
     return list(measurements.values())
 
 

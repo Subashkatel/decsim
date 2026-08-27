@@ -187,7 +187,7 @@ def run_experiment(config_path) -> tuple:
     rows = summarize(measurements)
     write_report(rows, run_dir, measurements)
     from experiments.plots import plots
-    plots(config, rows, run_dir)
+    plots(config, rows, run_dir, measurements)
     write_manifest(config, run_dir, started_utc,
                    finished_utc=datetime.now(timezone.utc).isoformat())
     return run_dir, rows

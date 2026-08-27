@@ -241,10 +241,74 @@ def ler_plot(rows: list, path: Path) -> None:
     plt.close(figure)
 
 
-def plots(config: ExperimentConfig, rows: list, report_dir: Path) -> None:
-    """timeline.png always; ler.png when more than one p was swept."""
+# ---- the decode latency ----------------------------------------------------
+
+def latency_samples_by_distance(measurements: list) -> dict:
+    """distance -> every window's algorithm-stage wall clock in us, pooled
+    over shots. The algorithm stage alone, because that is the only
+    measured quantity and the papers' comparable number (Helios Fig. 6,
+    SWIPER Fig. 3); fetch, release and the links are priced from the
+    config and belong to the stage-breakdown figure."""
+    pooled = {}
+    for measurement in measurements:
+        pooled.setdefault(measurement.distance, []).extend(
+            measurement.samples["algorithm"])
+    return {distance: samples for distance, samples in sorted(pooled.items())
+            if samples}
+
+
+def latency_plot(config: ExperimentConfig, measurements: list,
+                 path: Path) -> None:
+    """Decode wall clock per window against code distance: one box per d
+    (whiskers at the 5th and 95th percentile, median line, max marked),
+    log time axis, with the window-generation deadline (commit rounds x
+    round period) drawn as the throughput boundary."""
+    import matplotlib.pyplot as plt
+    pooled = latency_samples_by_distance(measurements)
+    distances = list(pooled)
+    round_period_us = measurements[0].round_period_us
+    probability = measurements[0].physical_error_probability
+
+    figure, axis = plt.subplots(figsize=(4.8, 3.6))
+    axis.boxplot([pooled[distance] for distance in distances],
+                 positions=distances, whis=(5, 95), showfliers=False,
+                 widths=0.9, medianprops={"color": "C0"})
+    maxima = [max(pooled[distance]) for distance in distances]
+    axis.plot(distances, maxima, "v", color="C3", markersize=4,
+              label="worst window")
+    # the deadline: a new window arrives every commit_rounds rounds
+    # (the code's default commit region is d rounds when the card is null)
+    commit_rounds_override = config.windowing.commit_rounds
+    deadline_us = [(commit_rounds_override or distance) * round_period_us
+                   for distance in distances]
+    axis.plot(distances, deadline_us, "--", color="grey",
+              label=f"window generation ({round_period_us:g} µs rounds)")
+    axis.set_yscale("log")
+    axis.set_xlabel("Code distance")
+    axis.set_ylabel("Decode wall clock per window (µs)")
+    algorithm = config.active_decoder.algorithm
+    axis.set_title(f"{algorithm} decode latency, p={probability:g}")
+    axis.grid(alpha=0.3, which="both", axis="y")
+    axis.legend(fontsize=8)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+    plt.close(figure)
+
+
+def plots(config: ExperimentConfig, rows: list, report_dir: Path,
+          measurements: list = None) -> None:
+    """timeline.png always; ler.png when more than one p was swept;
+    latency.png when more than one distance was swept with a wall-clock
+    algorithm."""
     import matplotlib
     matplotlib.use("Agg")
     timeline_plot(config, report_dir / "timeline.png")
     if len({row["physical_error_probability"] for row in rows}) > 1:
         ler_plot(rows, report_dir / "ler.png")
+    # a named algorithm charges measured wall clock; a numeric card is a
+    # fixed latency, flat in d, so its figure would be a horizontal line
+    measured_wall_clock = isinstance(config.active_decoder.algorithm, str)
+    swept_distances = {measurement.distance
+                       for measurement in measurements or ()}
+    if measured_wall_clock and len(swept_distances) > 1:
+        latency_plot(config, measurements, report_dir / "latency.png")

@@ -43,53 +43,62 @@ def sweep_point_of(measurement: ShotMeasurement) -> tuple:
             measurement.round_period_us)
 
 
+def grouped_by_sweep_point(measurements: list) -> list:
+    """(sweep point, that point's shots) pairs, in a stable order."""
+    sweep_points = sorted({sweep_point_of(shot) for shot in measurements},
+                          key=lambda point: (point[0], point[1],
+                                             str(point[2]), -point[3]))
+    return [(sweep_point,
+             [shot for shot in measurements
+              if sweep_point_of(shot) == sweep_point])
+            for sweep_point in sweep_points]
+
+
 def summarize_point(group: list) -> dict:
     """One sweep point: means over seeds of the per-shot means, maxes of maxes."""
     distance, physical_error_probability, algorithm, round_period_us = \
         sweep_point_of(group[0])
-    failures = sum(m.logical_failure for m in group)
+    failures = sum(shot.logical_failure for shot in group)
     ler_low, ler_high = wilson_interval(failures, len(group))
     row = {"distance": distance,
            "physical_error_probability": physical_error_probability,
            "algorithm": algorithm,
            "round_period_us": round_period_us,
            "shots": len(group),
-           "windows_per_shot": statistics.fmean(m.windows for m in group),
+           "windows_per_shot": statistics.fmean(shot.windows for shot in group),
            "logical_failures": failures,
            "logical_error_rate": failures / len(group),
            "ler_wilson_low": ler_low,
            "ler_wilson_high": ler_high,
-           "direct_pymatching_failures": sum(m.direct_failure for m in group),
-           "prediction_mismatches_vs_direct": sum(m.direct_mismatch for m in group),
-           "throughput_windows_per_us": statistics.fmean(m.throughput_windows_per_us for m in group),
-           "throughput_rounds_per_us": statistics.fmean(m.throughput_rounds_per_us for m in group),
-           "max_queued_windows": max(m.max_queued_windows for m in group),
-           "tesseract_windows_checked": sum(m.tesseract_windows_checked for m in group),
+           "direct_pymatching_failures": sum(shot.direct_failure for shot in group),
+           "prediction_mismatches_vs_direct": sum(shot.direct_mismatch for shot in group),
+           "throughput_windows_per_us": statistics.fmean(
+               shot.throughput_windows_per_us for shot in group),
+           "throughput_rounds_per_us": statistics.fmean(
+               shot.throughput_rounds_per_us for shot in group),
+           "max_queued_windows": max(shot.max_queued_windows for shot in group),
+           "tesseract_windows_checked": sum(
+               shot.tesseract_windows_checked for shot in group),
            "tesseract_window_disagreements": sum(
-               m.tesseract_window_disagreements for m in group),
-           "load": statistics.fmean(m.load for m in group),
-           "sim_wall_seconds_per_shot": statistics.fmean(m.sim_wall_seconds for m in group)}
+               shot.tesseract_window_disagreements for shot in group),
+           "load": statistics.fmean(shot.load for shot in group),
+           "sim_wall_seconds_per_shot": statistics.fmean(
+               shot.sim_wall_seconds for shot in group)}
     for point in POINTS:
         pooled = []
-        for measurement in group:
-            pooled.extend(measurement.samples[point])
-        row[f"{point}_mean_us"] = statistics.fmean(m.means[point] for m in group)
+        for shot in group:
+            pooled.extend(shot.samples[point])
+        row[f"{point}_mean_us"] = statistics.fmean(shot.means[point] for shot in group)
         row[f"{point}_median_us"] = percentile(pooled, 0.50)
         row[f"{point}_p99_us"] = percentile(pooled, 0.99)
-        row[f"{point}_max_us"] = max(m.maxes[point] for m in group)
+        row[f"{point}_max_us"] = max(shot.maxes[point] for shot in group)
     return row
 
 
 def summarize(measurements: list) -> list:
     """One row per sweep point, in a stable order."""
-    sweep_points = sorted({sweep_point_of(m) for m in measurements},
-                          key=lambda point: (point[0], point[1],
-                                             str(point[2]), -point[3]))
-    rows = []
-    for sweep_point in sweep_points:
-        group = [m for m in measurements if sweep_point_of(m) == sweep_point]
-        rows.append(summarize_point(group))
-    return rows
+    return [summarize_point(group)
+            for _, group in grouped_by_sweep_point(measurements)]
 
 
 def write_csv(rows: list, path: Path) -> None:
@@ -126,17 +135,13 @@ def terminal_lines(rows: list) -> list:
 
 def link_rows(measurements: list) -> list:
     """One row per sweep point per link: the ledger counters averaged over
-    the point's shots, plus bits per round. Totals come straight off each
-    run's TrafficCounters; nothing here re-counts transfers."""
+    the point's shots, plus bits per transfer. Totals come straight off
+    each run's TrafficCounters; nothing here re-counts transfers."""
     rows = []
-    sweep_points = sorted({sweep_point_of(m) for m in measurements},
-                          key=lambda point: (point[0], point[1],
-                                             str(point[2]), -point[3]))
-    for sweep_point in sweep_points:
-        group = [m for m in measurements if sweep_point_of(m) == sweep_point]
+    for sweep_point, group in grouped_by_sweep_point(measurements):
         distance, physical_error_probability, algorithm, round_period_us = sweep_point
         for path in sorted(group[0].link_totals):
-            per_shot = [m.link_totals[path] for m in group]
+            per_shot = [shot.link_totals[path] for shot in group]
             transfers = statistics.fmean(shot["transfers"] for shot in per_shot)
             payload_bits = statistics.fmean(shot["payload_bits"] for shot in per_shot)
             rows.append({
@@ -182,13 +187,5 @@ def write_report(rows: list, report_dir: Path,
     report_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, report_dir / "sweep.csv")
     if measurements:
-        per_shot = shot_rows(measurements)
-        with open(report_dir / "shots.csv", "w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(per_shot[0]))
-            writer.writeheader()
-            writer.writerows(per_shot)
-        per_link = link_rows(measurements)
-        with open(report_dir / "links.csv", "w", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(per_link[0]))
-            writer.writeheader()
-            writer.writerows(per_link)
+        write_csv(shot_rows(measurements), report_dir / "shots.csv")
+        write_csv(link_rows(measurements), report_dir / "links.csv")

@@ -1,5 +1,6 @@
-# The reference config: every key the yaml layer reads, in one runnable file.
-# Copy it, delete the comments you don't need, and you have a new experiment.
+# The reference config: every key the yaml layer reads, in one runnable file,
+# and the one home of the yaml surface's documentation: the shipped baselines
+# stay comment-light and point here.
 # Values here are the defaults the two shipped baselines
 # (weak_decoder_baseline.yaml, strong_decoder_baseline.yaml) share; the tiny
 # sweep makes this file cheap to run, so the test suite runs it as a smoke check.
@@ -26,6 +27,11 @@ windowing:
 # axes, `shots` seeds per point (0..shots-1); a point+seed named twice runs
 # once. The algorithm is NOT a sweep axis: it is structure, fixed per unit
 # on the decoder card below; comparing algorithms is comparing configs.
+# The baselines put shots where they matter: a timing block sweeps many
+# round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
+# the load = 1 knee of its 0.028 card), and an LER block sweeps several
+# probabilities with many shots at one timing point, since timing knobs
+# never change the decoded answer (Gate 10).
 sweep:
   - physical_error_probability: [0.001]    # p on all four Stim noise channels
     round_period_us: [1.0]                 # the QPU's physical round period, in us:
@@ -36,8 +42,11 @@ sweep:
 controller:                        # controller work per round, in cycles of its
                                    # named clock domain
   clock: fridge
-  t_binary_availability_cycles: 0  # pulses -> binary classification cost
-  t_pack_cycles: 0                 # packet assembly cost per round
+  t_binary_availability_cycles: 0  # pulses -> binary classification cost; zero:
+                                   # classification is inside the priced round
+                                   # (Google 2023 Nature 614, Methods)
+  t_pack_cycles: 0                 # packet assembly cost per round; zero: one
+                                   # fragment per round makes packing a no-op
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains
@@ -92,7 +101,13 @@ decoder:                           # the two tiers as two distinct units
   weak:                            # the lightweight tier: fast, higher LER
     algorithm: pymatching          # pymatching | belief_matching: the real
                                    # algorithm, measured wall clock per window;
-                                   # or a number: fixed core latency in us
+                                   # or a number: fixed core latency in us.
+                                   # Known number cards: 0.028 = LILLIPUT-class
+                                   # core, [d=3, m=2] 7 cycles at 250 MHz
+                                   # (2108.06569 sec. 6.3, Table 4); 5.0 = the
+                                   # old accuracy-first strong reference card.
+                                   # A card prices the algorithm stage ONLY;
+                                   # fetch and release cycles are separate
     units: 1                       # decoder units in this tier's pool
     unit_buffer_size: null         # input SRAM rounds PER UNIT; null = unbounded.
                                    # Each unit holds two windows when they fit
@@ -100,8 +115,10 @@ decoder:                           # the two tiers as two distinct units
                                    # for one window falls back to serial residency
     engine:
       clock: fridge                # cycle-priced stages on this clock domain
-      fetch_cycles_per_round: 1    # read one round out of decoder memory
-      release_cycles_per_job: 1    # correction write-out per job
+      fetch_cycles_per_round: 1    # read one round out of decoder memory per
+                                   # cycle (LILLIPUT FIFO, sec. 4)
+      release_cycles_per_job: 1    # correction write-out per job (the
+                                   # baselines use 10, an experiment card)
   strong:                          # the accurate tier: slow, lower LER
     algorithm: belief_matching
     units: 1

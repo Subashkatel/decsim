@@ -54,7 +54,7 @@ OUTPUT_LINK = {"weak_baseline": "wdo", "strong_only": "do"}
 class ShotMeasurement:
     physical_error_probability: float
     round_period_us: float
-    algorithm_latency_us: float
+    algorithm: object       # the active unit's card: a name or a latency in us
     seed: int
     windows: int
     logical_failure: bool
@@ -220,25 +220,23 @@ def chain_load(samples: dict, config: ExperimentConfig,
 
 def _write_trace(config: ExperimentConfig, completed, *,
                  physical_error_probability: float, round_period_us: float,
-                 algorithm_latency_us, seed: int) -> None:
+                 seed: int) -> None:
     """One file per shot with the engine narrator's full line record: the
     same lines trace: print shows live."""
     trace_dir = config.results_dir / "trace"
     trace_dir.mkdir(parents=True, exist_ok=True)
     name = (f"p{physical_error_probability:g}"
-            f"_algo{algorithm_latency_us}"
+            f"_algo{config.active_decoder.algorithm}"
             f"_round{round_period_us:g}us_seed{seed}.log")
     (trace_dir / name).write_text(
         "\n".join(completed.engine.log_lines) + "\n")
 
 
 def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
-                 round_period_us: float, algorithm_latency_us,
-                 seed: int) -> ShotMeasurement:
+                 round_period_us: float, seed: int) -> ShotMeasurement:
     spec, engine = build_run(config,
                              physical_error_probability=physical_error_probability,
-                             round_period_us=round_period_us,
-                             algorithm_latency_us=algorithm_latency_us, seed=seed)
+                             round_period_us=round_period_us, seed=seed)
     wall_start = time.perf_counter()
     completed = spec.build(verbose=config.trace in ("print", "both"),
                            io_trace=config.trace_io)
@@ -248,8 +246,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
     if config.trace in ("file", "both"):
         _write_trace(config, completed,
                      physical_error_probability=physical_error_probability,
-                     round_period_us=round_period_us,
-                     algorithm_latency_us=algorithm_latency_us, seed=seed)
+                     round_period_us=round_period_us, seed=seed)
 
     samples = collect_samples(completed, engine, config.mode)
     decoded_windows = len(samples["service"])
@@ -268,7 +265,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,
         round_period_us=round_period_us,
-        algorithm_latency_us=algorithm_latency_us,
+        algorithm=config.active_decoder.algorithm,
         seed=seed, windows=decoded_windows,
         logical_failure=loop_prediction != truth,
         samples=samples,

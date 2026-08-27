@@ -14,15 +14,18 @@ from typing import Optional, Union
 
 import yaml
 
-# A decoder algorithm card: a named real algorithm, decoded per window and
-# charged its measured wall clock, or a number, a fixed core latency in us
-# (a hypothetical algorithm). The names are the two tiers of the decoder-
+# A decoder unit's algorithm: a named real algorithm, decoded per window
+# and charged its measured wall clock, or a number, a fixed core latency in
+# us (a hypothetical core). The names are the two tiers of the decoder-
 # switching setting (Toshio arXiv 2510.25222: MWPM weak, belief-matching
 # strong).
 ALGORITHMS = ("pymatching", "belief_matching")
 AlgorithmCard = Union[float, str]
 
 MODES = ("weak_baseline", "strong_only")
+# The decoder unit each mode decodes on. A mode's unit must be defined;
+# the other tier's card may be omitted.
+MODE_TIER = {"weak_baseline": "weak", "strong_only": "strong"}
 TRACE_MODES = ("off", "print", "file", "both")
 SCHEMES = ("sliding", "parallel", "sandwich", "naive_online")
 # How an idle patch's rounds are charged. Idle rounds are decoder workload
@@ -54,20 +57,33 @@ class LinkCard:
 
 @dataclass(frozen=True)
 class EngineCard:
-    """The decoder engine's clock and its fetch/release stage costs."""
-    frequency_mhz: float
+    """The decoder engine's fetch/release stage costs, in cycles of a named
+    clock domain; the loader resolves the frequency once, like the links."""
+    clock: str
     fetch_cycles_per_round: int
     release_cycles_per_job: int
+    frequency_mhz: float
+
+
+@dataclass(frozen=True)
+class DecoderUnitCard:
+    """One decoder tier: its algorithm, its unit pool, and per unit the
+    input SRAM size in rounds (None = unbounded). A unit overlaps input
+    transfer with compute only when two windows fit in its SRAM."""
+    algorithm: AlgorithmCard
+    units: int
+    unit_buffer_size: Optional[int]
+    engine: EngineCard
 
 
 @dataclass(frozen=True)
 class DecoderCard:
-    """The unit pool: how many units and, per unit, the input SRAM size in
-    rounds (None = unbounded). A unit overlaps input transfer with compute
-    only when two windows fit in its SRAM."""
-    units: int
-    unit_buffer_size: Optional[int]
-    engine: EngineCard
+    """The two tiers of the decoder-switching architecture, as two distinct
+    units (Toshio arXiv 2510.25222: lightweight decoders decode constantly,
+    a separate accurate decoder is invoked on demand). A config defines the
+    units its mode uses; the mode picks the active one."""
+    weak: Optional[DecoderUnitCard]
+    strong: Optional[DecoderUnitCard]
 
 
 @dataclass(frozen=True)
@@ -106,9 +122,10 @@ class ControllerCard:
 
 @dataclass(frozen=True)
 class SweepBlock:
-    """One cross product of the three axes, `shots` seeds per point."""
+    """One cross product of the two axes, `shots` seeds per point. The
+    algorithm is not a sweep axis: it is structure, fixed per unit on the
+    decoder card; comparing algorithms is comparing configs."""
     physical_error_probabilities: tuple
-    algorithm_latencies_us: tuple
     round_periods_us: tuple
     shots: int
 
@@ -149,6 +166,12 @@ class ExperimentConfig:
     @property
     def results_dir(self) -> Path:
         return Path("experiments/results") / self.name
+
+    @property
+    def active_decoder(self) -> DecoderUnitCard:
+        """The unit the mode decodes on: weak_baseline reads decoder.weak,
+        strong_only reads decoder.strong (present, enforced at load)."""
+        return getattr(self.decoder, MODE_TIER[self.mode])
 
 
 def _link_card(card: Optional[dict], clocks: dict, path: str) -> Optional[LinkCard]:
@@ -200,6 +223,76 @@ def _controller_card(card: dict, clocks: dict) -> ControllerCard:
         t_pack_cycles=pack_cycles, clock=clock,
         t_binary_availability_us=binary_cycles / megahertz,
         t_pack_us=pack_cycles / megahertz)
+
+
+def _decoder_unit(card: Optional[dict], clocks: dict,
+                  tier: str) -> Optional[DecoderUnitCard]:
+    if card is None:
+        return None
+    unknown = set(card) - {"algorithm", "units", "unit_buffer_size", "engine"}
+    if unknown:
+        raise ValueError(f"decoder.{tier} does not know {sorted(unknown)}; "
+                         f"it takes algorithm, units, unit_buffer_size, engine")
+    algorithm = card["algorithm"]
+    if isinstance(algorithm, str):
+        if algorithm not in ALGORITHMS:
+            raise ValueError(
+                f"decoder.{tier}.algorithm is a number (fixed core latency, "
+                f"us) or one of {ALGORITHMS}, got {algorithm!r}")
+    elif isinstance(algorithm, bool) or not isinstance(algorithm, (int, float)) \
+            or algorithm < 0:
+        raise ValueError(
+            f"decoder.{tier}.algorithm is a number (fixed core latency, us) "
+            f"or one of {ALGORITHMS}, got {algorithm!r}")
+    units = card["units"]
+    if isinstance(units, bool) or not isinstance(units, int) or units < 1:
+        raise ValueError(f"decoder.{tier}.units must be a positive count")
+    engine = card["engine"]
+    clock = engine["clock"]
+    if clock not in clocks:
+        raise ValueError(f"decoder.{tier}.engine.clock names {clock!r}; "
+                         f"clocks defines {sorted(clocks)}")
+    return DecoderUnitCard(
+        algorithm=algorithm, units=units,
+        unit_buffer_size=_buffer_size(
+            card["unit_buffer_size"], f"decoder.{tier}.unit_buffer_size"),
+        engine=EngineCard(
+            clock=clock,
+            fetch_cycles_per_round=engine["fetch_cycles_per_round"],
+            release_cycles_per_job=engine["release_cycles_per_job"],
+            frequency_mhz=clocks[clock]))
+
+
+def _decoder_card(raw_decoder, clocks: dict, mode: str) -> DecoderCard:
+    """The decoder card: one unit card per tier, the mode's tier required."""
+    if not isinstance(raw_decoder, dict):
+        raise ValueError("decoder maps tier names (weak, strong) to unit cards")
+    unknown = set(raw_decoder) - {"weak", "strong"}
+    if unknown:
+        raise ValueError(f"decoder does not know {sorted(unknown)}; its keys "
+                         f"are the tiers: weak, strong")
+    card = DecoderCard(
+        weak=_decoder_unit(raw_decoder.get("weak"), clocks, "weak"),
+        strong=_decoder_unit(raw_decoder.get("strong"), clocks, "strong"))
+    tier = MODE_TIER[mode]
+    if getattr(card, tier) is None:
+        raise ValueError(f"mode {mode} decodes on decoder.{tier}, "
+                         f"which this config does not define")
+    return card
+
+
+def _sweep_block(block: dict, index: int) -> SweepBlock:
+    unknown = set(block) - {"physical_error_probability", "round_period_us",
+                            "shots"}
+    if unknown:
+        raise ValueError(
+            f"sweep block {index} does not know {sorted(unknown)}; its axes "
+            f"are physical_error_probability and round_period_us, plus shots "
+            f"(the algorithm lives on the decoder card, not in the sweep)")
+    return SweepBlock(
+        physical_error_probabilities=tuple(block["physical_error_probability"]),
+        round_periods_us=tuple(block["round_period_us"]),
+        shots=block["shots"])
 
 
 def _pauli_frame_commit_us(card: dict, clocks: dict) -> float:
@@ -263,29 +356,18 @@ def load_experiment(path) -> ExperimentConfig:
     windowing = raw["windowing"]
     controller = raw["controller"]
     buffers = raw["buffers"]
-    decoder = raw["decoder"]
-    engine = decoder["engine"]
+    mode = _require(raw["mode"], MODES, "mode")
     clocks = _clocks(raw["clocks"])
     links = {link_path: _link_card(raw["links"].get(link_path), clocks, link_path)
              for link_path in LINK_PATHS}
     raw_trace = raw.get("trace", "off")
     if raw_trace is False:
         raw_trace = "off"     # yaml 1.1 reads a bare `off` as boolean False
-    for block in raw["sweep"]:
-        for algorithm in block["algorithm_latency_us"]:
-            if isinstance(algorithm, str) and algorithm not in ALGORITHMS:
-                raise ValueError(
-                    f"algorithm_latency_us entries are numbers (fixed core "
-                    f"latency, us) or one of {ALGORITHMS}, got {algorithm!r}")
-    sweep = tuple(
-        SweepBlock(physical_error_probabilities=tuple(block["physical_error_probability"]),
-                   algorithm_latencies_us=tuple(block["algorithm_latency_us"]),
-                   round_periods_us=tuple(block["round_period_us"]),
-                   shots=block["shots"])
-        for block in raw["sweep"])
+    sweep = tuple(_sweep_block(block, index)
+                  for index, block in enumerate(raw["sweep"], start=1))
     return ExperimentConfig(
         name=path.stem,
-        mode=_require(raw["mode"], MODES, "mode"),
+        mode=mode,
         code_task=raw["code_task"],
         distance=raw["distance"],
         rounds_per_shot=raw["rounds_per_shot"],
@@ -305,14 +387,7 @@ def load_experiment(path) -> ExperimentConfig:
             packing_workspace_size=_buffer_size(
                 buffers["packing_workspace_size"],
                 "buffers.packing_workspace_size")),
-        decoder=DecoderCard(
-            units=decoder["units"],
-            unit_buffer_size=_buffer_size(
-                decoder["unit_buffer_size"], "decoder.unit_buffer_size"),
-            engine=EngineCard(
-                frequency_mhz=engine["frequency_mhz"],
-                fetch_cycles_per_round=engine["fetch_cycles_per_round"],
-                release_cycles_per_job=engine["release_cycles_per_job"])),
+        decoder=_decoder_card(raw["decoder"], clocks, mode),
         trace=_require(raw_trace, TRACE_MODES, "trace"),
         trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
         idle_policy=_require(raw.get("idle_policy", "separate_decode_jobs"),

@@ -57,27 +57,28 @@ def memory_circuit(config: ExperimentConfig,
         before_measure_flip_probability=p, after_reset_flip_probability=p)
 
 
-def decoder_engine(config: ExperimentConfig, algorithm_latency_us) -> DecoderEngine:
-    """The named algorithm inside the decoder engine: fetch cycles before it,
-    release cycles after it, at the engine clock. A name decodes every window
-    with the real algorithm and charges its measured wall clock (pymatching =
-    MWPM, the weak tier; belief_matching = the strong tier, Toshio arXiv
-    2510.25222); a number is a fixed core latency in us on the MWPM path. A
-    card prices the algorithm stage only, never a total decoder latency."""
-    if algorithm_latency_us == "pymatching":
+def decoder_engine(config: ExperimentConfig) -> DecoderEngine:
+    """The mode's decoder unit built from its card: the algorithm between
+    fetch cycles before it and release cycles after it, on the engine's
+    named clock. A named algorithm decodes every window for real and charges
+    its measured wall clock (pymatching = MWPM, the weak tier;
+    belief_matching = the strong tier, Toshio arXiv 2510.25222); a number is
+    a fixed core latency in us on the MWPM path. The algorithm card prices
+    the algorithm stage only, never a total decoder latency."""
+    unit = config.active_decoder
+    if unit.algorithm == "pymatching":
         algorithm = PyMatchingDecoder(latency_model=None)
-    elif algorithm_latency_us == "belief_matching":
+    elif unit.algorithm == "belief_matching":
         from decsim.decoders.belief_matching.decoder import BeliefMatchingDecoder
         algorithm = BeliefMatchingDecoder(latency_model=None)
     else:
-        algorithm = PyMatchingDecoder(PresetLatencyDecoder(algorithm_latency_us))
+        algorithm = PyMatchingDecoder(PresetLatencyDecoder(unit.algorithm))
     if config.verify_windows == "tesseract":
         algorithm = TesseractCheckedDecoder(algorithm)
-    engine_card = config.decoder.engine
-    fetch = DecoderStage("fetch", cycles_per_round=engine_card.fetch_cycles_per_round)
-    release = DecoderStage("release", cycles_per_job=engine_card.release_cycles_per_job)
+    fetch = DecoderStage("fetch", cycles_per_round=unit.engine.fetch_cycles_per_round)
+    release = DecoderStage("release", cycles_per_job=unit.engine.release_cycles_per_job)
     timing = DecoderTiming(before=(fetch,), after=(release,),
-                           frequency_mhz=engine_card.frequency_mhz)
+                           frequency_mhz=unit.engine.frequency_mhz)
     return DecoderEngine(algorithm, timing)
 
 
@@ -206,7 +207,7 @@ def idle_policy(config: ExperimentConfig):
 
 
 def decoder_memory(config: ExperimentConfig):
-    unit_buffer_size = config.decoder.unit_buffer_size
+    unit_buffer_size = config.active_decoder.unit_buffer_size
     if unit_buffer_size is None:
         return None
     return DecoderMemoryConfig({"default": unit_buffer_size})
@@ -231,13 +232,13 @@ def escalation_policy(config: ExperimentConfig):
 
 
 def build_run(config: ExperimentConfig, *, physical_error_probability: float,
-              round_period_us: float, algorithm_latency_us, seed: int):
+              round_period_us: float, seed: int):
     """The wired RunSpec for one sweep point and seed, plus its engine
     (the engine is returned so the measurement can read its stage records)."""
     circuit = memory_circuit(config, physical_error_probability)
     operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
                           circuit=circuit)
-    engine = decoder_engine(config, algorithm_latency_us)
+    engine = decoder_engine(config)
     timing = TimingConfig(
         round_us=round_period_us,
         t_binary_availability_us=config.controller.t_binary_availability_us,
@@ -246,7 +247,7 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
         ops=[operation], code=code_model(config),
         scheme=WINDOWING_SCHEMES[config.windowing.scheme](),
         rounds_policy=FixedRounds(config.rounds_per_shot),
-        device=StimDevice(), decoder=engine, num_units=config.decoder.units,
+        device=StimDevice(), decoder=engine, num_units=config.active_decoder.units,
         timing=timing, links=link_model(config),
         decoder_memory=decoder_memory(config),
         syndrome_buffering=syndrome_buffering(config),

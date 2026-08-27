@@ -25,25 +25,29 @@ from experiments.experiment_config import ExperimentConfig
 
 # Latency points, in path order, in microseconds per window unless noted.
 POINTS = (
-    "cwb_per_round",        # controller -> Buffer 0, one round (latency + serialization + queue)
-    "buffer_fill",          # first round in window arrives -> last round arrives (waiting on the QPU)
-    "dep_block",            # window complete -> job queued (window dependencies)
-    "queue_wait",           # queued -> unit assigned (ready-queue wait only)
-    "input_link_per_window",   # unit assigned -> input in its decoder memory (wbd weak, sbd strong)
-    "fetch",                # decoder engine: read the window out of decoder memory
-    "algorithm",            # decoder engine: the decoding algorithm
-    "release",              # decoder engine: correction write-out
-    "service",              # unit assigned -> decode done (input transfer + fetch + algorithm + release)
-    "dd_per_window",        # decoder -> next window's decoder, the boundary handoff
+    # controller -> Buffer 0, one round (latency + serialization + queue)
+    "cwb_per_round",
+    # first round in window arrives -> last arrives (waiting on the QPU)
+    "buffer_fill",
+    "dep_block",            # window complete -> job queued (dependencies)
+    "queue_wait",           # queued -> unit assigned (ready-queue wait)
+    # unit assigned -> input in decoder memory (wbd weak, sbd strong)
+    "input_link_per_window",
+    "fetch",                # engine: read the window out of decoder memory
+    "algorithm",            # engine: the decoding algorithm
+    "release",              # engine: correction write-out
+    # unit assigned -> decode done (transfer + fetch + algorithm + release)
+    "service",
+    "dd_per_window",        # decoder -> next decoder, the boundary handoff
     "output_link_per_window",  # decoder -> Pauli frame (wdo weak, do strong)
     "frame_commit",         # Pauli frame accepted -> committed
-    # Totals. The buffer0 pair starts the clock at Buffer 0 publication; the
-    # qpu pair starts it when the round leaves the QPU (the QC send), so it
-    # includes QC, controller processing, packing and CWB.
-    "buffer0_ready_to_frame",        # window complete in Buffer 0 -> its correction is in the frame
-    "buffer0_first_round_to_frame",  # window's first round published in Buffer 0 -> correction in the frame
-    "qpu_last_round_to_frame",       # window's last required round leaves the QPU -> correction in the frame
-    "qpu_first_round_to_frame",      # window's first required round leaves the QPU -> correction in the frame
+    # Totals. The buffer0 pair starts the clock at Buffer 0 publication;
+    # the qpu pair starts it when the round leaves the QPU (the QC send),
+    # so it includes QC, controller processing, packing and CWB.
+    "buffer0_ready_to_frame",        # window complete in Buffer 0 -> frame
+    "buffer0_first_round_to_frame",  # first round in Buffer 0 -> frame
+    "qpu_last_round_to_frame",       # last required round off QPU -> frame
+    "qpu_first_round_to_frame",      # first required round off QPU -> frame
 )
 
 INPUT_LINK = {"weak_baseline": "wbd", "strong_only": "sbd"}
@@ -59,12 +63,14 @@ class ShotMeasurement:
     seed: int
     windows: int
     logical_failure: bool
-    samples: dict          # point -> list of us, one per decoded window (per round for cwb)
+    samples: dict          # point -> us list, one per window (per round
+                           # for cwb)
     means: dict            # point -> mean us over this shot's windows
     maxes: dict            # point -> max us
-    load: float            # chain service per window / window inter-arrival (rho)
-    direct_failure: bool   # whole-circuit PyMatching on the same sampled events failed
-    direct_mismatch: bool  # the loop's prediction differs from direct PyMatching's
+    load: float            # service per window / window inter-arrival
+    direct_failure: bool   # whole-circuit PyMatching on the same events
+                           # failed
+    direct_mismatch: bool  # loop prediction differs from direct PyMatching
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     max_queued_windows: int
@@ -91,7 +97,8 @@ def link_totals(traffic: dict) -> dict:
         totals[edge["path"]] = {
             "transfers": counters["transfer_count"],
             "payload_bits": counters["known_payload_bits"],
-            "unknown_payload_transfers": counters["unknown_payload_transfer_count"],
+            "unknown_payload_transfers":
+                counters["unknown_payload_transfer_count"],
             "queue_wait_us": us(counters["queue_wait_ticks"]),
             "serialization_us": us(counters["serialization_ticks"]),
             "propagation_us": us(counters["propagation_ticks"]),
@@ -104,7 +111,8 @@ def link_delay_by_window(transfers: list) -> dict:
     delay = {}
     for row in transfers:
         key = (row["path"], row["attribution"]["window_id"])
-        delay[key] = delay.get(key, 0) + row["delivery_ticks"] - row["send_ticks"]
+        transfer_ticks = row["delivery_ticks"] - row["send_ticks"]
+        delay[key] = delay.get(key, 0) + transfer_ticks
     return delay
 
 
@@ -129,7 +137,7 @@ def qc_send_ticks(transfers: list) -> dict:
 
 def window_points_us(window, frame_record, stage_us: dict, link_delay: dict,
                      qc_send: dict, input_path: str, output_path: str) -> dict:
-    """The per-window latency points, in microseconds, for one decoded window."""
+    """The per-window latency points, in us, for one decoded window."""
     window_id = window.key[1]
     last_emitted_round = max(qc_send)
     last_required_round = min(window.buffer_hi, last_emitted_round)
@@ -143,12 +151,18 @@ def window_points_us(window, frame_record, stage_us: dict, link_delay: dict,
         "release": stage_us["release"],
         "service": us(window.t_done - window.t_dispatch),
         "dd_per_window": us(link_delay.get(("dd", window_id), 0)),
-        "output_link_per_window": us(link_delay.get((output_path, window_id), 0)),
-        "frame_commit": us(frame_record.committed_ticks - frame_record.accepted_ticks),
-        "buffer0_ready_to_frame": us(frame_record.committed_ticks - window.t_data_complete),
-        "buffer0_first_round_to_frame": us(frame_record.committed_ticks - window.t_first_round),
-        "qpu_last_round_to_frame": us(frame_record.committed_ticks - qc_send[last_required_round]),
-        "qpu_first_round_to_frame": us(frame_record.committed_ticks - qc_send[window.start_round]),
+        "output_link_per_window":
+            us(link_delay.get((output_path, window_id), 0)),
+        "frame_commit":
+            us(frame_record.committed_ticks - frame_record.accepted_ticks),
+        "buffer0_ready_to_frame":
+            us(frame_record.committed_ticks - window.t_data_complete),
+        "buffer0_first_round_to_frame":
+            us(frame_record.committed_ticks - window.t_first_round),
+        "qpu_last_round_to_frame":
+            us(frame_record.committed_ticks - qc_send[last_required_round]),
+        "qpu_first_round_to_frame":
+            us(frame_record.committed_ticks - qc_send[window.start_round]),
     }
 
 
@@ -161,7 +175,8 @@ def collect_samples(completed, engine, mode: str) -> dict:
                        for record in completed.pauli_frame.snapshot().records}
     samples = {point: [] for point in POINTS}
     samples["cwb_per_round"] = cwb_delays_us(transfers)
-    for (op_id, window_id), window in sorted(completed.window_manager.windows.items()):
+    all_windows = sorted(completed.window_manager.windows.items())
+    for (op_id, window_id), window in all_windows:
         frame_record = frame_by_window.get(window_id)
         decoded = frame_record is not None and window.t_done is not None
         if not decoded:
@@ -181,8 +196,8 @@ def direct_prediction(completed, circuit: stim.Circuit) -> tuple:
     matching = pymatching.Matching.from_detector_error_model(
         circuit.detector_error_model(decompose_errors=True))
     operation_id = completed.result.operation_results[0].operation_id
-    events = np.asarray(completed.qpu.model.sampled_detection_events(operation_id),
-                        dtype=bool)
+    events = np.asarray(
+        completed.qpu.model.sampled_detection_events(operation_id), dtype=bool)
     predicted = matching.decode(events)
     return tuple(int(bit) for bit in predicted)
 
@@ -192,8 +207,10 @@ def chain_load(samples: dict, config: ExperimentConfig, distance: int,
     """rho: the serial chain's service per window (unit assigned -> decode
     done, plus the DD boundary handoff) over the window inter-arrival time
     (commit rounds x round period). Above 1 the chain cannot keep up."""
-    service_us = statistics.fmean(samples["service"]) if samples["service"] else 0.0
-    handoff_us = statistics.fmean(samples["dd_per_window"]) if samples["dd_per_window"] else 0.0
+    service_samples = samples["service"]
+    handoff_samples = samples["dd_per_window"]
+    service_us = statistics.fmean(service_samples) if service_samples else 0.0
+    handoff_us = statistics.fmean(handoff_samples) if handoff_samples else 0.0
     commit_rounds = config.windowing.commit_rounds or distance
     inter_arrival_us = commit_rounds * round_period_us
     return (service_us + handoff_us) / inter_arrival_us
@@ -221,16 +238,16 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                  run_dir=None) -> ShotMeasurement:
     """run_dir receives the trace file when trace: file|both is on;
     None writes nothing beyond the returned measurement."""
-    spec, engine = build_run(config,
-                             physical_error_probability=physical_error_probability,
-                             distance=distance,
-                             round_period_us=round_period_us, seed=seed)
+    spec, engine = build_run(
+        config, physical_error_probability=physical_error_probability,
+        distance=distance, round_period_us=round_period_us, seed=seed)
     wall_start = time.perf_counter()
     completed = spec.build(verbose=config.trace in ("print", "both"),
                            io_trace=config.trace_io)
     wall_seconds = time.perf_counter() - wall_start
     if completed.result.terminal_status != "complete":
-        raise RuntimeError(f"run did not complete: {completed.result.terminal_status}")
+        raise RuntimeError(
+            f"run did not complete: {completed.result.terminal_status}")
     if run_dir is not None and config.trace in ("file", "both"):
         _write_trace(completed, run_dir,
                      _shot_label(config, physical_error_probability, distance,
@@ -238,6 +255,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
 
     samples = collect_samples(completed, engine, config.mode)
     decoded_windows = len(samples["service"])
+    rounds_this_shot = config.rounds_per_shot.rounds_for(distance)
     load = chain_load(samples, config, distance, round_period_us)
     operation_result = completed.result.operation_results[0]
     truth = tuple(operation_result.observable_truth)
@@ -246,8 +264,8 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
     windows = completed.window_manager.windows.values()
     first_round_tick = min(window.t_first_round for window in windows
                            if window.t_first_round is not None)
-    last_commit_tick = max(record.committed_ticks
-                           for record in completed.pauli_frame.snapshot().records)
+    frame_records = completed.pauli_frame.snapshot().records
+    last_commit_tick = max(record.committed_ticks for record in frame_records)
     span_us = us(last_commit_tick - first_round_tick)
     queue_depths = [depth for _, depth in completed.decoder_manager.queue_log]
     return ShotMeasurement(
@@ -266,7 +284,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
         direct_failure=reference_prediction != truth,
         direct_mismatch=loop_prediction != reference_prediction,
         throughput_windows_per_us=decoded_windows / span_us,
-        throughput_rounds_per_us=config.rounds_per_shot.rounds_for(distance) / span_us,
+        throughput_rounds_per_us=rounds_this_shot / span_us,
         max_queued_windows=max(queue_depths, default=0),
         tesseract_windows_checked=getattr(
             engine.decoder, "windows_checked", 0),

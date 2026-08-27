@@ -463,7 +463,7 @@ class StrongEscalation:
 
     def submit_strong(self, strong_job) -> None:
         """An escalation policy submitted a strong job alongside the weak one (run both at once)."""
-        self._submit_strong_with_csd(strong_job)
+        self._submit_strong_with_sbd(strong_job)
 
     def after_weak_commit(self, key) -> None:
         """A weak commit at a slab's far boundary releases the deferred strong job."""
@@ -471,37 +471,44 @@ class StrongEscalation:
         if pending is not None:
             self._submit_far_strong(key, pending)
 
-    def _submit_strong_with_csd(
+    def _submit_strong_with_sbd(
         self,
         strong_job: DecodeJob,
         *,
         wsd_arrival_ticks: Optional[int] = None,
     ) -> None:
-        """Queue a strong job now; its CSD input transfer is reserved at dispatch.
+        """Queue a strong job now; its SBD input transfer is reserved at dispatch.
 
         The unit is assigned first, then the input moves into that unit's memory
-        (CSD link); a serial job also waits for its WSD selection to arrive.
+        (SBD link); a serial job also waits for its WSD selection to arrive.
         """
         request_key = strong_job.request_key
         window_key = strong_job.strong_decode_for
-        if self.wm.syndrome_buffer.has_hold(PotentialStrong(window_key)):
+        sb1 = self.wm.syndrome_buffer_1
+        if sb1.has_hold(PotentialStrong(window_key)):
             self.wm._transfer_retention_hold(
-                PotentialStrong(window_key), CsdInput(request_key))
-        elif self.wm.syndrome_buffer.has_hold(PendingStrong(request_key)):
+                PotentialStrong(window_key), CsdInput(request_key), sb1)
+        elif sb1.has_hold(PendingStrong(request_key)):
             self.wm._transfer_retention_hold(
-                PendingStrong(request_key), CsdInput(request_key))
+                PendingStrong(request_key), CsdInput(request_key), sb1)
         else:
             packet_ids = tuple(dict.fromkeys(
                 (fragment.operation_id, fragment.round_index)
                 for fragment in strong_job.payloads))
-            self.wm.syndrome_buffer.register_hold(CsdInput(request_key), packet_ids)
-        self.wm._bind_decoder_input_hold(strong_job, CsdInput(request_key))
+            sb1.register_hold(CsdInput(request_key), packet_ids)
+        self.wm._bind_decoder_input_hold(strong_job, CsdInput(request_key), sb1)
         payload_bits = self.wm._job_payload_bits(strong_job)
+        context_identities = tuple(dict.fromkeys(
+            (fragment.operation_id, fragment.round_index)
+            for fragment in strong_job.payloads))
 
         def reserve_transfer() -> int:
-            arrival = self.wm._link_arrival(LinkPath.CSD, strong_job, payload_bits=payload_bits)
+            arrival = self.wm._link_arrival(LinkPath.SBD, strong_job, payload_bits=payload_bits)
             if wsd_arrival_ticks is not None:
                 arrival = max(arrival, wsd_arrival_ticks)
+            # the DMA cannot start before its last context round landed in
+            # syndrome buffer 1 (a no-op whenever the csb margin holds)
+            arrival = max(arrival, sb1.ready_tick(context_identities))
             return arrival - self.wm.engine.now
 
         self.wm.submit_fn(strong_job, reserve_transfer)
@@ -528,7 +535,8 @@ class StrongEscalation:
             selection_delay = max(
                 0, pending.wsd_arrival_ticks - self.wm.engine.now)
             if (pending.phase is _EscalationPhase.WAITING_TERMINAL_DATA
-                    and self.wm.rounds_arrived[pending.key[0]] >=
+                    and self.wm.syndrome_buffer_1.rounds_arrived.get(
+                        pending.key[0], 0) >=
                     pending.resolved_region.plan.context_hi):
                 self._submit_terminal_strong(pending.key[0], pending)
             return selection_delay
@@ -539,7 +547,7 @@ class StrongEscalation:
                 payload_bits=None,
                 request_key=strong_request_key,
             )
-            self._submit_strong_with_csd(
+            self._submit_strong_with_sbd(
                 serial_strong_job,
                 wsd_arrival_ticks=wsd_arrival_ticks,
             )
@@ -582,13 +590,29 @@ class StrongEscalation:
         )
         request_key = self.wm._new_request_key(
             weak_job.op_id, weak_job.window_id, DecoderTier.STRONG)
-        self.wm._stamp_first_round_tick(strong_window)
+        context_reads = self.wm._read_keys_for_bounds(
+            weak_job.op_id, strong_window.buffer_lo, strong_window.buffer_hi,
+            strong_window)
+        missing = [round_key for round_key in context_reads
+                   if round_key[1] <= self.wm.rounds_arrived.get(
+                       round_key[0], 0)
+                   and self.wm.syndrome_buffer_1.retained_fragments(round_key)
+                   is None]
+        if missing:
+            raise RuntimeError(
+                f"strong context for {key} arrived at Buffer 0 but is not "
+                f"stored in syndrome buffer 1: {missing} (csb lag "
+                f"beyond the escalation margin, or an early release)")
+        self.wm._stamp_first_round_tick(
+            strong_window, self.wm.syndrome_buffer_1)
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
             n_rounds=round_count, ready_time=self.wm.engine.now,
             label=label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
-            dem=dem, payloads=self.wm._assemble_payloads(strong_window),
+            dem=dem,
+            payloads=self.wm._assemble_payloads(
+                strong_window, self.wm.syndrome_buffer_1),
             attempt=1, window=strong_window, strong_decode_for=key,
             request_key=request_key, request_created_ticks=self.wm.engine.now)
     def _strong_context_window(self, weak_window: Window) -> Window:
@@ -686,15 +710,17 @@ class StrongEscalation:
         guard = None
         if restart_key is not None:
             guard = RephaseGuard(strong_request_key)
-            guarded = list(self.wm.syndrome_buffer.hold_round_identities(restart_key))
-            guarded += list(resolved_region.restart_read_keys)
-            guarded += list(self.wm.syndrome_buffer.hold_round_identities(PotentialStrong(key)))
-            guarded += list(self.wm.syndrome_buffer.hold_round_identities(PotentialStrong(restart_key)))
-            guarded += [(op_id, round_index) for round_index in
-                        range(plan.context_lo, plan.context_hi + 1)]
-            guarded += self.wm._strong_context_read_keys(
+            sb1 = self.wm.syndrome_buffer_1
+            guarded_weak = list(self.wm.syndrome_buffer.hold_round_identities(restart_key))
+            guarded_weak += list(resolved_region.restart_read_keys)
+            guarded_strong = list(sb1.hold_round_identities(PotentialStrong(key)))
+            guarded_strong += list(sb1.hold_round_identities(PotentialStrong(restart_key)))
+            guarded_strong += [(op_id, round_index) for round_index in
+                               range(plan.context_lo, plan.context_hi + 1)]
+            guarded_strong += self.wm._strong_context_read_keys(
                 proposed_restart, list(resolved_region.restart_read_keys))
-            self.wm.syndrome_buffer.register_hold(guard, guarded)
+            self.wm.syndrome_buffer.register_hold(guard, guarded_weak)
+            sb1.register_hold(guard, guarded_strong)
         try:
             self.wm.ledger.contributions = logical_candidate
             phase = (
@@ -719,7 +745,7 @@ class StrongEscalation:
             else:
                 self._escalations.register_far(pending, restart_key)
             self.wm._transfer_potential_to_pending(key, strong_request_key)
-            self.wm.syndrome_buffer.replace_hold(
+            self.wm.syndrome_buffer_1.replace_hold(
                 PendingStrong(strong_request_key),
                 [(op_id, round_index) for round_index in
                  range(plan.context_lo, plan.context_hi + 1)])
@@ -752,12 +778,19 @@ class StrongEscalation:
         finally:
             if guard is not None:
                 self.wm._release_hold_if_live(guard)
+                self.wm._release_hold_if_live(
+                    guard, self.wm.syndrome_buffer_1)
     def _defer_crossing_strong_escalation(
         self, weak_job: DecodeJob, weak_window: Window, later_windows: list,
         round_count: int, plan: StrongRegionPlan, crossing_window: Window,
         strong_request_key: DecoderRequestKey,
         strong_request_created_ticks: int,
     ) -> None:
+        raise NotImplementedError(
+            "the crossing-slab rephase is not wired to syndrome buffer 1; "
+            "no test or scenario exercises this path (architecture trace "
+            "F4.1), so it refuses loudly instead of mutating two stores "
+            "unverified")
         """Atomically replace a non-aligned post-slab suffix before deferral."""
         key = weak_window.key
         op_id = key[0]
@@ -1227,13 +1260,17 @@ class StrongEscalation:
                 )
                 restart_exclusions = left_exclusions
 
-        required_reads = [
+        context_reads = [
             (weak_window.op_id, round_index)
             for round_index in range(plan.context_lo, plan.context_hi + 1)
         ]
-        required_reads.extend(restart_reads)
+        # the slab context lives in syndrome buffer 1; the restart window's
+        # weak reads stay retained in Buffer 0 by its own window hold
         self.wm._require_retained_payloads(
-            required_reads, f"strong-region plan for {key}")
+            context_reads, f"strong-region plan for {key}",
+            self.wm.syndrome_buffer_1)
+        self.wm._require_retained_payloads(
+            list(restart_reads), f"strong-region plan for {key}")
         return _ResolvedStrongRegion(
             plan=plan,
             absorbed_window_keys=absorbed,
@@ -1304,14 +1341,14 @@ class StrongEscalation:
                 window.dependents.remove(restart_key)
         self.wm._release_hold_if_live(key)
         absorbed = PotentialStrong(key)
-        needed = set(self.wm.syndrome_buffer.hold_round_identities(absorbed))
-        replacements = set(self.wm.syndrome_buffer.hold_round_identities(replacement))
+        needed = set(self.wm.syndrome_buffer_1.hold_round_identities(absorbed))
+        replacements = set(self.wm.syndrome_buffer_1.hold_round_identities(replacement))
         if restart_key is not None:
-            replacements.update(self.wm.syndrome_buffer.hold_round_identities(
+            replacements.update(self.wm.syndrome_buffer_1.hold_round_identities(
                 PotentialStrong(restart_key)))
         if not needed <= replacements:
             raise RuntimeError("absorption replacement does not cover packets")
-        self.wm.syndrome_buffer.release_hold(absorbed)
+        self.wm.syndrome_buffer_1.release_hold(absorbed)
         self.wm.engine.log("DecoderCluster",
                         f"window {key} absorbed into the strong slab "
                         f"(weak chain skips it)")
@@ -1329,7 +1366,8 @@ class StrongEscalation:
         weak_job = pending.weak_job
         slab = pending.strong_window
         dem = pending.strong_model
-        payloads = self.wm._assemble_payloads(slab)
+        payloads = self.wm._assemble_payloads(
+            slab, self.wm.syndrome_buffer_1)
         covered = {payload.round_index for payload in payloads}
         plan = pending.resolved_region.plan
         needed = set(range(plan.context_lo, plan.context_hi + 1))
@@ -1339,7 +1377,7 @@ class StrongEscalation:
                 f"{sorted(covered)} but it needs "
                 f"{plan.context_lo}-{plan.context_hi}; a slab may "
                 "only start once every required round is retained")
-        self.wm._stamp_first_round_tick(slab)
+        self.wm._stamp_first_round_tick(slab, self.wm.syndrome_buffer_1)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
             n_rounds=slab.n_rounds,
@@ -1360,7 +1398,7 @@ class StrongEscalation:
         strong_job = self._build_pending_strong_job(pending)
         self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_far(far_boundary_key, pending)
-        self._submit_strong_with_csd(
+        self._submit_strong_with_sbd(
             strong_job,
             wsd_arrival_ticks=pending.wsd_arrival_ticks,
         )
@@ -1379,7 +1417,7 @@ class StrongEscalation:
         strong_job = self._build_pending_strong_job(pending)
         self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_terminal(operation_id, pending)
-        self._submit_strong_with_csd(
+        self._submit_strong_with_sbd(
             strong_job,
             wsd_arrival_ticks=pending.wsd_arrival_ticks,
         )
@@ -1393,7 +1431,7 @@ class StrongEscalation:
         if pending is None:
             return
         if (
-            self.wm.rounds_arrived[op_id]
+            self.wm.syndrome_buffer_1.rounds_arrived.get(op_id, 0)
             >= pending.resolved_region.plan.context_hi
         ):
             self._submit_terminal_strong(op_id, pending)

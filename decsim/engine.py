@@ -23,12 +23,13 @@ class Event:
 
 
 class Engine:
-    def __init__(self, verbose: bool = True):
+    def __init__(self, verbose: bool = True, io_trace: bool = False):
         """Create an empty simulator with the clock at zero."""
         self.now: int = 0
         self._event_queue: list[Event] = []
         self._seq = itertools.count()
         self.verbose = verbose
+        self.io_trace = io_trace
         self.log_lines: list[str] = []
         self.metrics: list = []
 
@@ -56,6 +57,13 @@ class Engine:
         self.log_lines.append(line)
         if self.verbose:
             print(line)
+
+    def log_io(self, who: str, describe: Callable[[], str]) -> None:
+        """Component I/O narration: what a component received, holds, or
+        emitted. `describe` is called only when io_trace is on, so a store
+        never walks its contents for a line nobody records."""
+        if self.io_trace:
+            self.log(who, describe())
 
     def add_metric(self, metric):
         """Register one observer under a unique name, sampling it first."""

@@ -62,10 +62,13 @@ class SpeculativeRecovery:
 
         if key in self._records:
             raise RuntimeError(f"recovery for {key} is already live")
-        retained_rounds = self._replay_packet_identities(descendants)
+        weak_rounds, strong_rounds = self._replay_packet_identities(descendants)
         generation = self._next_generation.get(key, 0)
         replay_owner = Replay(key, generation)
-        self.runtime.syndrome_buffer.register_hold(replay_owner, retained_rounds)
+        self.runtime.syndrome_buffer.register_hold(replay_owner, weak_rounds)
+        if strong_rounds and self.runtime.syndrome_buffer_1 is not None:
+            self.runtime.syndrome_buffer_1.register_hold(
+                replay_owner, strong_rounds)
         blocked_ops = frozenset(item[0] for item in descendants)
         for op_id in blocked_ops:
             self._finality_blockers[op_id] = (
@@ -167,22 +170,28 @@ class SpeculativeRecovery:
         runtime.courier.set_committed(key, corrected_boundary)
 
         superseded = [item for item in descendants if item in self._records]
-        replacement_ids = self._replay_packet_identities(descendants)
+        weak_ids, strong_ids = self._replay_packet_identities(descendants)
         covered_owners = [record.replay_owner]
         covered_owners.extend(
             self._records[item].replay_owner for item in superseded)
-        replacement_set = set(replacement_ids)
+        replacement_set = set(weak_ids) | set(strong_ids)
         for owner in covered_owners:
-            if not set(runtime.syndrome_buffer.hold_round_identities(
-                    owner)) <= replacement_set:
+            held = set(runtime.syndrome_buffer.hold_round_identities(owner))
+            if (runtime.syndrome_buffer_1 is not None
+                    and runtime.syndrome_buffer_1.has_hold(owner)):
+                held |= set(
+                    runtime.syndrome_buffer_1.hold_round_identities(owner))
+            if not held <= replacement_set:
                 raise RuntimeError(
                     f"replacement Replay for {key} does not cover {owner!r}")
         generation = self._next_generation[key]
         replacement_owner = Replay(key, generation)
-        runtime.syndrome_buffer.register_hold(
-            replacement_owner, replacement_ids)
+        runtime.syndrome_buffer.register_hold(replacement_owner, weak_ids)
+        if strong_ids and runtime.syndrome_buffer_1 is not None:
+            runtime.syndrome_buffer_1.register_hold(
+                replacement_owner, strong_ids)
         self._next_generation[key] = generation + 1
-        runtime.syndrome_buffer.release_hold(record.replay_owner)
+        self._release_replay_hold(record.replay_owner)
         record.replay_owner = replacement_owner
         for item in superseded:
             self._release_record(item, source_will_replay=True)
@@ -235,11 +244,17 @@ class SpeculativeRecovery:
                 if source != key
             )
         record = self._records.pop(key)
-        self.runtime.syndrome_buffer.release_hold(record.replay_owner)
+        self._release_replay_hold(record.replay_owner)
         if not source_will_replay:
             self._next_generation.pop(key)
         self._drop_finality_blockers(record.blocked_ops)
         return record
+
+    def _release_replay_hold(self, owner) -> None:
+        self.runtime.syndrome_buffer.release_hold(owner)
+        room_store = self.runtime.syndrome_buffer_1
+        if room_store is not None and room_store.has_hold(owner):
+            room_store.release_hold(owner)
 
     def _drop_finality_blockers(self, operation_ids) -> None:
         for op_id in operation_ids:
@@ -363,18 +378,26 @@ class SpeculativeRecovery:
                     f"window interaction invalidation for {root} selected "
                     f"{key}, which is not a downstream dependency")
             window = self.runtime.windows[key]
-            if window.queued or window.committed:
+            if window.committed or window.t_done is not None:
                 raise RuntimeError(
                     f"window interaction invalidation for {root} selected "
-                    f"window {key} after its decode lifecycle started")
+                    f"window {key} after its decode finished")
+            if window.queued:
+                # decoder-side boundaries ship raw input at data-complete,
+                # so a descendant is often already submitted; withdraw the
+                # unstarted attempt and let the replay resubmit it
+                self.runtime.withdraw_window_decode(key)
             reads = self.runtime._read_keys_for_bounds(
                 window.op_id, window.start_round, window.buffer_hi, window)
-            reads.extend(
-                self.runtime._strong_context_read_keys(window, reads))
-            self.runtime._require_retained_payloads(
-                reads,
-                f"window interaction invalidation for {root}, window {key}",
-            )
+            strong_reads = self.runtime._strong_context_read_keys(
+                window, reads)
+            purpose = (
+                f"window interaction invalidation for {root}, window {key}")
+            self.runtime._require_retained_payloads(reads, purpose)
+            if self.runtime.syndrome_buffer_1 is not None:
+                self.runtime._require_retained_payloads(
+                    reads + strong_reads, purpose,
+                    self.runtime.syndrome_buffer_1)
 
     def _blocked_stream_starts(self, descendants: list[tuple]) -> dict:
         """Earliest invalidated commit round for each descendant decode stream."""
@@ -386,12 +409,18 @@ class SpeculativeRecovery:
         return starts
 
     def _replay_packet_identities(self, descendants) -> tuple:
-        retained = set()
+        """Rounds the replay cone must keep: weak reads live in Buffer 0;
+        syndrome buffer 1 keeps each descendant's FULL strong context (weak
+        range included), because a replayed parallel strong sibling
+        assembles its input from there."""
+        weak_retained = set()
+        strong_retained = set()
         for key in descendants:
             window = self.runtime.windows[key]
             weak = self.runtime._read_keys_for_bounds(
                 window.op_id, window.start_round, window.buffer_hi, window)
-            retained.update(weak)
-            retained.update(
+            weak_retained.update(weak)
+            strong_retained.update(weak)
+            strong_retained.update(
                 self.runtime._strong_context_read_keys(window, weak))
-        return tuple(sorted(retained))
+        return tuple(sorted(weak_retained)), tuple(sorted(strong_retained))

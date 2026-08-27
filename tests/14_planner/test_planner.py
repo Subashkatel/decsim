@@ -234,7 +234,7 @@ def compile_plan(
 def test_plan_records_are_frozen_without_recursively_freezing_execution():
     """Top-level plan records are immutable while their runtime window graph stays mutable."""
     execution = WindowPlan({}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {})
-    buffering = _SyndromeBufferingPlan((), (), (), ())
+    buffering = _SyndromeBufferingPlan((), (), (), (), (), None)
     run_plan = _RunPlan(geometry(), (), (), 1, execution, buffering)
 
     with pytest.raises(FrozenInstanceError):
@@ -244,7 +244,7 @@ def test_plan_records_are_frozen_without_recursively_freezing_execution():
 
     execution.total_windows = 3
     assert run_plan.execution.total_windows == 3
-    assert _SyndromeBufferingPlan("unchecked", (), (), None).weak_holds == "unchecked"
+    assert _SyndromeBufferingPlan("unchecked", (), (), None, (), None).weak_holds == "unchecked"
 
 
 def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
@@ -328,10 +328,11 @@ def test_strong_buffering_extends_context_and_unions_shared_rounds():
         (2, 1),
         (2, 2),
     )
-    union = set(doubled.weak_holds[0][1]) | set(doubled.potential_holds[0][1])
-    assert len(doubled.sufficient_live_rounds) == len(union)
-    assert set(doubled.sufficient_live_rounds) == union
-    assert doubled.minimum_live_rounds == (
+    assert set(doubled.sufficient_live_rounds) == set(doubled.weak_holds[0][1])
+    assert set(doubled.sb1_sufficient_live_rounds) == set(
+        doubled.potential_holds[0][1])
+    assert doubled.minimum_live_rounds == doubled.weak_holds[0][1]
+    assert doubled.sb1_minimum_live_rounds == (
         (1, 1),
         (1, 2),
         (1, 3),

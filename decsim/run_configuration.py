@@ -52,8 +52,8 @@ class ResolvedRunConfiguration:
     memory_model: Any
     decoder_memory: Any
     pauli_frame: Any
-    syndrome_ingress_policy: Any
-    make_syndrome_ingress: Optional[Callable]
+    syndrome_packing_policy: Any
+    make_syndrome_packing: Optional[Callable]
     make_decoder_memory_transfer: Optional[Callable]
     make_factory: Optional[Callable]
     make_metrics: Optional[Callable]
@@ -66,13 +66,13 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .links.link_profiles import logical_reference_profile
     from .frontends.planner import (_plan_execution, _validate_operation_graph,
                           _validate_workload_identity)
-    from .controller.policies import Eager, Ignore
+    from .controller.policies import Eager, SeparateDecodeJobs
     from .qpu.round_policies import GateRounds
     from .decoders.schedulers import FifoScheduler
     from .windows.windowing_schemes import SlidingWindowScheme
     from .decoders.weak_strong_switching import Baseline
     from .syndrome_buffer.syndrome_buffer import SyndromeBufferingConfig
-    from .controller.syndrome_ingress import SyndromeIngressPolicy
+    from .controller.syndrome_packing import SyndromePackingPolicy
     from .windows.window_interactions import DefaultWindowInteraction
 
     escalation_policy = spec.escalation_policy if spec.escalation_policy is not None else Baseline()
@@ -144,8 +144,8 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
             and not link_config.qc_excludes_controller_processing):
         raise ValueError("a separate controller readout cost requires a link "
                          "profile whose QC latency excludes that cost")
-    if spec.make_syndrome_ingress is not None and spec.syndrome_ingress_policy is not None:
-        raise ValueError("syndrome_ingress_policy cannot be combined with make_syndrome_ingress")
+    if spec.make_syndrome_packing is not None and spec.syndrome_packing_policy is not None:
+        raise ValueError("syndrome_packing_policy cannot be combined with make_syndrome_packing")
 
     return ResolvedRunConfiguration(
         root_seed=root_seed, escalation_policy=escalation_policy,
@@ -156,7 +156,10 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         view_by_id=view_by_id, code=code, layout=layout, scheme=scheme,
         rounds_policy=rounds_policy, boundary_policy=boundary_policy,
         window_interaction=window_interaction,
-        idle_policy=spec.idle_policy or Ignore(),
+        # idle rounds are decoder workload in every reference system, so the
+        # default charges them (SWIPER 2412.05115, XQsim, Terhal backlog);
+        # pass Ignore() explicitly for an active-path latency study
+        idle_policy=spec.idle_policy or SeparateDecodeJobs(),
         plan=plan, resource_claims=resource_claims,
         device=device, error_model_provider=error_model_provider,
         router=router,
@@ -169,10 +172,10 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         num_units=spec.num_units if spec.num_units is not None else 1,
         lane_policy=spec.lane_policy, memory_model=spec.memory_model,
         decoder_memory=spec.decoder_memory, pauli_frame=spec.pauli_frame,
-        syndrome_ingress_policy=(spec.syndrome_ingress_policy
-                                 if spec.syndrome_ingress_policy is not None
-                                 else SyndromeIngressPolicy()),
-        make_syndrome_ingress=spec.make_syndrome_ingress,
+        syndrome_packing_policy=(spec.syndrome_packing_policy
+                                 if spec.syndrome_packing_policy is not None
+                                 else SyndromePackingPolicy()),
+        make_syndrome_packing=spec.make_syndrome_packing,
         make_decoder_memory_transfer=spec.make_decoder_memory_transfer,
         make_factory=spec.make_factory, make_metrics=spec.make_metrics,
         make_conditional_release=spec.make_conditional_release)

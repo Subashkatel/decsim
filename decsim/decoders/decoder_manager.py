@@ -24,9 +24,11 @@ class RequestProcessingOutcome(Enum):
     STRONG_FORWARDED_FOR_DELIVERY = "strong_forwarded_for_delivery"
     STRONG_COMPLETED_DISCARDED = "strong_completed_discarded"
     STRONG_CANCELLED_BEFORE_DISPATCH = "strong_cancelled_before_dispatch"
+    STRONG_CANCELLED_WHILE_STAGED = "strong_cancelled_while_staged"
     STRONG_CANCELLED_DURING_SERVICE = "strong_cancelled_during_service"
     STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED = (
         "strong_cancelled_member_service_continued")
+    WEAK_WITHDRAWN_FOR_REPLAY = "weak_withdrawn_for_replay"
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,8 @@ class DecoderManager:
     def __init__(self, engine, *, router, scheduler,
                  unit_pools: Optional[dict] = None, num_units: int = 1,
                  bulk_strong: bool = False,
+                 service_gate=None, apply_service_boundary=None,
+                 stage_admission=None,
                  lane_policy=None, log_name: str = "DecoderCluster",
                  capture_enabled: bool = False,
                  decoder_memory_transfer=None,
@@ -83,6 +87,30 @@ class DecoderManager:
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
+        # Every unit is a depth-1 decoupled access-execute machine (Smith
+        # 1982; TI EDMA ping-pong, SPRAAN4A Example D; gem5-Aladdin ready
+        # bits at whole-buffer granularity, Shao et al. MICRO 2016 Sec
+        # IV-B-2): two input slots, so the next window's DMA overlaps the
+        # current compute. The hardware price is visible, not hidden: both
+        # inputs are resident in the unit's DecoderMemory, so a unit needs
+        # capacity for two windows or the run stops loudly.
+        #
+        # Compute is claimed separately from the slots (Tomasulo's rule:
+        # an instruction whose operands are not ready waits in its
+        # reservation station, never on the functional unit). A landed job
+        # whose window still owes a boundary parks in its slot and
+        # releases its compute claim, so a dependent that fills early can
+        # never deadlock the unit against its own predecessor.
+        self.service_gate = service_gate
+        self.apply_service_boundary = apply_service_boundary
+        self.stage_admission = stage_admission
+        self._parked_service: dict = {}  # request_key -> job in its slot, boundary owed
+        # (pool, unit) -> jobs whose input occupies or reserves a slot
+        # (in transfer or landed), in dispatch order; at most two
+        self._unit_residents: dict = {}
+        # (pool, unit) -> the job holding or reserving the unit's compute
+        # (from assignment through decode end), None when compute is free
+        self._computing: dict = {}
         self.log_name = log_name
         self._terminal_request_records = [] if capture_enabled else None
         self._terminal_service_records = [] if capture_enabled else None
@@ -246,7 +274,27 @@ class DecoderManager:
                 self.strong.strong_cancelled += 1
             return
         job = live.service_job
-        if job.pool is None:
+        slot = None if job.unit is None else (job.pool, job.unit)
+        if slot is not None and not job.service_started:
+            # cancelled in its slot before its decode started: drop the
+            # resident and pass any compute claim onward
+            residents = self._residents(slot)
+            if job in residents:
+                residents.remove(job)
+            if job.request_key is not None:
+                self._parked_service.pop(job.request_key, None)
+            job.cancelled = True
+            self.staging.cancel(job)
+            self.staging.release(live.request_job)
+            if self._computing.get(slot) is job:
+                self._computing[slot] = None
+                self._offer_compute(slot)
+            job.unit = None
+            self._record_request(
+                live.request_job, None,
+                RequestProcessingOutcome.STRONG_CANCELLED_WHILE_STAGED,
+                None)
+        elif job.pool is None:
             self.staging.cancel(job)
             for pool in self.unit_totals:
                 queue = self.queue_for(pool)
@@ -298,17 +346,171 @@ class DecoderManager:
         finally:
             self._dispatching = False
 
+    def _claim_compute(self, slot: tuple, job: DecodeJob) -> None:
+        pool, unit = slot
+        self.pool_free[pool] -= 1
+        self._free_units[pool].remove(unit)
+        self._computing[slot] = job
+
+    def _is_parked(self, job: DecodeJob) -> bool:
+        return (job.request_key is not None
+                and self._parked_service.get(job.request_key) is job)
+
     def _free_unit(self, job: DecodeJob) -> None:
-        """Return the job's unit to its pool."""
-        self.pool_free[job.pool] += 1
-        self._free_units[job.pool].append(job.unit)
+        """Compute finished: drop the job from its slot and offer the
+        compute onward (the ping-pong swap at compute end)."""
+        pool, unit = job.pool, job.unit
         job.unit = None
+        slot = (pool, unit)
+        residents = self._residents(slot)
+        if job in residents:
+            residents.remove(job)
+        if self._computing.get(slot) is job:
+            self._computing[slot] = None
+        self.engine.log_io(
+            f"unit {pool}#{unit} SRAM",
+            lambda: f"emitted {job.label} result; holds "
+                    f"{self._sram_description(slot)}")
+        self._offer_compute(slot)
+
+    def _sram_description(self, slot: tuple) -> str:
+        """One compact line of a unit's residents and their phase, for the
+        I/O trace."""
+        residents = self._residents(slot)
+        if not residents:
+            return "empty"
+        parts = []
+        for resident in residents:
+            if self._computing.get(slot) is resident and resident.service_started:
+                phase = "computing"
+            elif self._is_parked(resident):
+                phase = "parked"
+            elif resident.input_landed:
+                phase = "ready"
+            else:
+                phase = "capturing"
+            parts.append(f"{resident.label} {phase}, {resident.n_rounds} rounds")
+        return "; ".join(parts)
+
+    def _offer_compute(self, slot: tuple) -> None:
+        """Free compute goes to the oldest startable resident, stays
+        reserved for the oldest one still in flight, or returns to the
+        pool. gem5 O3's scheduleReadyInsts is the reference rule: only a
+        ready instruction acquires a functional unit (fu_pool->getUnit at
+        issue), and blocked work waits in the queue, never on the unit."""
+        pool, unit = slot
+        if self._computing.get(slot) is not None:
+            return
+        for resident in self._residents(slot):
+            if resident.cancelled or resident.completed:
+                continue
+            if resident.input_landed and not self._is_parked(resident):
+                self._computing[slot] = resident
+                self._begin_service(resident)
+                return
+        for resident in self._residents(slot):
+            if resident.cancelled or resident.completed:
+                continue
+            if not resident.input_landed and self._startable(resident):
+                self._computing[slot] = resident   # starts at its landing
+                return
+        self.pool_free[pool] += 1
+        self._free_units[pool].append(unit)
+
+    def _release_compute_claim(self, job: DecodeJob) -> None:
+        """Tomasulo's rule at the boundary hazard: a parked job keeps its
+        input slot but never the unit's compute."""
+        slot = (job.pool, job.unit)
+        if self._computing.get(slot) is job:
+            self._computing[slot] = None
+            self._offer_compute(slot)
+            self.try_dispatch()
 
     def _dispatch_pool(self, pool: str) -> None:
+        """Dispatch startable work first, in scheduler order, scanning past
+        jobs with no eligible unit; boundary-blocked work is placed only
+        when no startable job can be (gem5 O3 issues from its ready set
+        oldest-first: non-ready work never displaces ready work)."""
         queue = self.queue_for(pool)
-        while self.pool_free[pool] > 0 and queue:
-            job = self._next_job(pool, queue)
-            self._start_job(pool, job)
+        while queue:
+            ordered = []
+            while queue:
+                ordered.append(self._next_job(pool, queue))
+            selection = None
+            for prefer_startable in (True, False):
+                for index, job in enumerate(ordered):
+                    if self._startable(job) is not prefer_startable:
+                        continue
+                    placement = self._eligible_unit(pool, job)
+                    if placement is not None:
+                        selection = (index, job, placement)
+                        break
+                if selection is not None:
+                    break
+            if selection is None:
+                queue.extend(ordered)
+                return
+            index, job, (unit, claim_compute) = selection
+            queue.extend(other for position, other in enumerate(ordered)
+                         if position != index)
+            self._start_job(pool, job, unit=unit, claim_compute=claim_compute)
+
+    def _residents(self, slot: tuple) -> list:
+        return self._unit_residents.setdefault(slot, [])
+
+    @staticmethod
+    def _startable(job: DecodeJob) -> bool:
+        """A job whose window owes no boundary may hold compute; anything
+        windowless (external, strong context, merged batch) always may."""
+        window = job.window
+        return window is None or window.deps_remaining <= 0
+
+    def _eligible_unit(self, pool: str, job: DecodeJob):
+        """(unit, claim_compute) for this job, or None.
+
+        A startable job takes any unit with a free input slot and claims
+        compute when that unit's compute is free. A boundary-blocked job
+        takes an input slot only (its DMA overlaps other work, Tomasulo's
+        reservation station), and only once the window manager's
+        stage_admission says its release is already resolving, so parked
+        work can never squat a slot against the decode that must free it."""
+        startable = self._startable(job)
+        if not startable and (self.stage_admission is not None
+                              and not self.stage_admission(job)):
+            return None
+        free = set(self._free_units[pool])
+        for unit in self._free_units[pool]:
+            slot = (pool, unit)
+            if len(self._residents(slot)) < 2 and self._slot_memory_ok(slot, job):
+                return unit, startable
+        for unit in range(self.unit_totals[pool]):
+            slot = (pool, unit)
+            if unit in free or len(self._residents(slot)) >= 2:
+                continue
+            if self._slot_memory_ok(slot, job):
+                return unit, False
+        return None
+
+    def _slot_memory_ok(self, slot: tuple, job: DecodeJob) -> bool:
+        """A second resident joins only if the unit's memory holds both
+        inputs; a unit sized for one window keeps serial residency (the
+        doubled-SRAM price of overlap is paid explicitly, never assumed).
+        A first resident is always admitted, so a genuinely oversized
+        window still stops loudly at its deposit."""
+        live = [resident for resident in self._residents(slot)
+                if not resident.cancelled and not resident.completed]
+        if not live:
+            return True
+        capacity = self.decoder_memories[slot].capacity_rounds
+        if capacity is None:
+            return True
+        demand = sum(self._memory_demand(resident) for resident in live)
+        return demand + self._memory_demand(job) <= capacity
+
+    @staticmethod
+    def _memory_demand(job: DecodeJob) -> int:
+        # an external job carries no syndrome data and stores nothing
+        return 0 if job.on_done is not None else job.n_rounds
 
     def _next_job(self, pool: str, queue: list) -> DecodeJob:
         if self.bulk_strong and pool != "default":
@@ -348,7 +550,8 @@ class DecoderManager:
         self.strong.register_batch(window_keys, jobs, batch)
         return batch
 
-    def _start_job(self, pool: str, job: DecodeJob) -> None:
+    def _start_job(self, pool: str, job: DecodeJob, *,
+                   unit: int, claim_compute: bool) -> None:
         job.pool = pool
         members = job.service_original_request_keys
         if not members and job.request_key is not None:
@@ -361,14 +564,21 @@ class DecoderManager:
             for member in self.strong.members_of(job):
                 member.service_key = job.service_key
                 member.service_dispatch_ticks = self.engine.now
-        self.pool_free[pool] -= 1
-        job.unit = self._free_units[pool].pop(0)
+        # the unit is assigned at DMA start (gem5-Aladdin's invocation
+        # model: invoke the unit, then DMA its input); compute is claimed
+        # only when this unit's compute is actually free
+        job.unit = unit
+        slot = (pool, unit)
+        self._residents(slot).append(job)
+        if claim_compute:
+            self._claim_compute(slot, job)
         if job.window is not None:
             job.window.t_dispatch = self.engine.now
         waited_ticks = self.engine.now - job.ready_time
+        slot_note = "" if claim_compute else "staged, "
         self.engine.log(self.log_name,
                         f"ASSIGN UNIT {job.label} "
-                        f"(waited {fmt(waited_ticks).strip()} in queue, "
+                        f"({slot_note}waited {fmt(waited_ticks).strip()} in queue, "
                         f"{self.pool_tag(pool)}units free now "
                         f"{self.pool_free[pool]})")
         self.queue_log.append((self.engine.now, self.queued_total()))
@@ -382,16 +592,51 @@ class DecoderManager:
 
         def landed(_member: DecodeJob) -> None:
             pending["count"] -= 1
-            if pending["count"] == 0:
+            if pending["count"] > 0:
+                return
+            job.input_landed = True
+            self.engine.log_io(
+                f"unit {pool}#{unit} SRAM",
+                lambda: f"{job.label} input landed; {_job_defects_text(job)}; "
+                        f"holds {self._sram_description(slot)}")
+            if self._computing.get(slot) is job:
+                # this job holds or was reserved the unit's compute
                 self._begin_service(job)
+            elif (self._computing.get(slot) is None
+                    and unit in self._free_units[pool]):
+                # compute went back to the pool (a resident parked and
+                # released its claim); take it now
+                self._claim_compute(slot, job)
+                self._begin_service(job)
+            # otherwise the compute is busy: _offer_compute picks this
+            # job up at the next compute end
 
         for member in members:
+            self.engine.log_io(
+                f"unit {pool}#{unit} SRAM",
+                lambda staged=member: f"receiving {staged.label} input "
+                                      f"({staged.n_rounds} rounds from the "
+                                      f"round store)")
             self.staging.stage(member, memory, landed)
 
-    def _begin_service(self, job: DecodeJob) -> None:
+    def _begin_service(self, job: DecodeJob, gated: bool = True) -> None:
         """The unit's memory holds the input: start the decode."""
         if job.cancelled:                        # cancelled while its input was in flight
             return
+        if (gated and self.service_gate is not None
+                and not self.service_gate(job)):
+            self._parked_service[job.request_key] = job
+            self.engine.log(self.log_name,
+                            f"PARK DECODE {job.label} (boundary pending)")
+            self._release_compute_claim(job)
+            return
+        if self.apply_service_boundary is not None:
+            # the seam mask is XORed into the landed input exactly once,
+            # at the moment the decode actually starts
+            self.apply_service_boundary(job)
+        job.service_started = True
+        if job.window is not None:
+            job.window.service_began = True
         decoder = self.router.route(job)
         self.engine.log(self.log_name, f"START DECODE {job.label}")
         run = getattr(decoder, "run", None)
@@ -413,6 +658,85 @@ class DecoderManager:
 
         self.engine.schedule(decoder.latency(job), decode_now,
                              label=f"decode_done({job.label})")
+
+    def withdraw_window(self, window_key: tuple) -> None:
+        """Take back one window's submitted, not-yet-started weak decode:
+        speculative invalidation is rewriting the window, so its raw input
+        is superseded. The attempt closes in the ledger and the caller
+        resubmits a fresh job when the replay rebuilds the window."""
+        job = self._find_window_job(window_key)
+        if job is None:
+            raise RuntimeError(
+                f"no withdrawable decode for window {window_key}")
+        if job.service_started or job.completed:
+            raise RuntimeError(
+                f"{job.label} cannot be withdrawn: its decode already started")
+        job.cancelled = True
+        pool = self.pool_for(job)
+        queue = self.queue_for(pool)
+        if job in queue:
+            queue.remove(job)
+            self.staging.release(job)
+        elif job.unit is not None:
+            slot = (job.pool, job.unit)
+            residents = self._residents(slot)
+            if job in residents:
+                residents.remove(job)
+            if job.request_key is not None:
+                self._parked_service.pop(job.request_key, None)
+            self.staging.cancel(job)
+            if self._computing.get(slot) is job:
+                self._computing[slot] = None
+                self._offer_compute(slot)
+            job.unit = None
+        else:
+            raise RuntimeError(
+                f"{job.label} is neither queued nor resident; nothing to withdraw")
+        self.strong.resolve_weak(window_key)
+        self._record_request(
+            job, None, RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_REPLAY, None)
+        self.engine.log(self.log_name,
+                        f"WITHDRAW {job.label} (invalidated before start)")
+        self.try_dispatch()
+
+    def _find_window_job(self, window_key: tuple):
+        candidates = []
+        for pool in self.unit_totals:
+            candidates.extend(self.queue_for(pool))
+        for residents in self._unit_residents.values():
+            candidates.extend(residents)
+        for job in candidates:
+            if ((job.op_id, job.window_id) == window_key
+                    and job.strong_decode_for is None
+                    and job.on_done is None and not job.cancelled):
+                return job
+        return None
+
+    def release_parked(self, window_key: tuple) -> None:
+        """The window's last boundary arrived: start its parked decode, if
+        its input has landed (a job still in transfer passes the gate at
+        its own landing instead)."""
+        for request_key, job in list(self._parked_service.items()):
+            if (job.op_id, job.window_id) != window_key:
+                continue
+            if self.service_gate is not None and not self.service_gate(job):
+                continue                     # another dependency still owed
+            del self._parked_service[request_key]
+            slot = (job.pool, job.unit)
+            holder = self._computing.get(slot)
+            if holder is None and job.unit in self._free_units[job.pool]:
+                self._claim_compute(slot, job)
+                self._begin_service(job, gated=False)
+            elif (holder is not None and not holder.service_started
+                    and not holder.input_landed):
+                # steal a reservation held for an input still in flight:
+                # ready work issues first; the in-flight job re-competes
+                # at its own landing
+                self._computing[slot] = job
+                self._begin_service(job, gated=False)
+            # else the unit is decoding: no longer parked, so
+            # _offer_compute starts this job at the next compute end
+        self.try_dispatch()   # a started decode may admit blocked stages
 
     def _on_decode_done(self, job: DecodeJob, result) -> None:
         """One decode finished: free the unit, ask the escalation_policy, commit or await strong."""
@@ -583,6 +907,10 @@ class DecoderManager:
         nobody drained. Every stored input is released unconditionally, so a
         leak on either path is a real defect rather than a tolerated one.
         """
+        if self._parked_service:
+            parked = sorted(job.label for job in self._parked_service.values())
+            raise RuntimeError(
+                f"run ended with parked decodes never released: {parked}")
         unsettled = self.strong.unsettled()
         held = [f"{m.pool}#{m.unit}" for m in self.decoder_memories.values()
                 if m.occupied_rounds]
@@ -594,3 +922,23 @@ class DecoderManager:
             raise RuntimeError(
                 f"the run ended with decode work unsettled ({detail}): every "
                 f"window is final once the simulation is quiescent")
+
+
+def _job_defects_text(job: DecodeJob) -> str:
+    """The landed window input's cargo: set detection-event indices of the
+    rounds now in this unit's memory (the algorithm stage reads the same
+    fragments), sparse for the I/O trace."""
+    import numpy as np
+    if job.decoder_input is not None:
+        fragments = [fragment for round_input in job.decoder_input.rounds
+                     for fragment in round_input.fragments]
+    else:
+        fragments = list(job.payloads or [])
+    bit_arrays = [np.asarray(fragment.bits, dtype=np.uint8)
+                  for fragment in fragments if fragment.bits is not None]
+    if not bit_arrays:
+        return "no payload bits"
+    defects = np.flatnonzero(np.concatenate(bit_arrays))
+    if defects.size == 0:
+        return "no defects"
+    return f"defects {{{', '.join(map(str, defects.tolist()))}}}"

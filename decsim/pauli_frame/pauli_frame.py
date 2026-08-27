@@ -149,6 +149,11 @@ class PauliFrame:
             return
 
         self._accepted_window_keys.add(window_key)
+        self.engine.log_io(
+            "PauliFrame",
+            lambda: f"received {request_key.tier.value} correction for "
+                    f"window {window_key}; logical observables "
+                    f"{None if logical_observables is None else tuple(logical_observables)}")
         accepted_ticks = self.engine.now
         record = PauliFrameCommitRecord(
             window_key=window_key,
@@ -181,6 +186,11 @@ class PauliFrame:
         self._entry_by_window_key[window_key] = record
         stream_id = window_key[0]
         self._window_keys_by_stream.setdefault(stream_id, []).append(window_key)
+        self.engine.log_io(
+            "PauliFrame",
+            lambda: f"committed window {window_key}; logical observables "
+                    f"{record.logical_observables}; holds "
+                    f"{len(self._entry_by_window_key)} window corrections")
         accepted_write.on_committed()
 
     # Adapted data core: non-destructive, zero-seeded, width-independent XOR.

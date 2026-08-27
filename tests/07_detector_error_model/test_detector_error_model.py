@@ -291,7 +291,7 @@ PACKAGE_MODULES = {
 }
 PACKAGE_DIRECTORY = pathlib.Path(detector_error_model_package.__file__).parent
 REPOSITORY_ROOT = PACKAGE_DIRECTORY.parent.parent
-EXPECTED_LOCAL_NUMPY_IMPORTS = 8
+EXPECTED_LOCAL_NUMPY_IMPORTS = 10
 
 
 def package_syntax_trees():
@@ -362,8 +362,8 @@ def test_package_modules_form_a_one_way_acyclic_layer_graph():
     }
 
 
-def test_numpy_is_imported_only_inside_functions_and_exactly_eight_times():
-    """All eight numpy imports of the package sit inside functions, and none at module scope."""
+def test_numpy_is_imported_only_inside_functions_and_exactly_ten_times():
+    """All ten numpy imports of the package sit inside functions, and none at module scope."""
     local_numpy_imports = []
     for module_name, tree in package_syntax_trees().items():
         parents = parents_of(tree)

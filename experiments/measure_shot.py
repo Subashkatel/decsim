@@ -67,7 +67,6 @@ class ShotMeasurement:
     direct_mismatch: bool  # the loop's prediction differs from direct PyMatching's
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
-    decoder_utilization: float
     max_queued_windows: int
     tesseract_windows_checked: int       # referee re-decodes (0 = referee off)
     tesseract_window_disagreements: int  # referee reached a different owned
@@ -217,60 +216,11 @@ def _write_trace(completed, run_dir, label: str) -> None:
         "\n".join(completed.engine.log_lines) + "\n")
 
 
-def _write_window_records(completed, run_dir, shot_identity: dict) -> None:
-    """records.windows: one json line per window with its bounds, its
-    lifecycle timestamps in microseconds, and the observable contribution
-    the frame committed, appended to the run's windows.jsonl."""
-    import json
-    frame_by_window = {record.window_key[1]: record
-                       for record in completed.pauli_frame.snapshot().records}
-    with open(run_dir / "windows.jsonl", "a") as sink:
-        for (op_id, window_id), window in sorted(
-                completed.window_manager.windows.items()):
-            frame_record = frame_by_window.get(window_id)
-            record = dict(shot_identity)
-            record.update({
-                "op_id": op_id, "window_id": window_id,
-                "start_round": window.start_round,
-                "commit_lo": window.commit_lo, "commit_hi": window.commit_hi,
-                "buffer_hi": window.buffer_hi,
-                "buffer_filled_by_memory": window.buffer_filled_by_memory,
-                "t_first_round_us": _stamp_us(window.t_first_round),
-                "t_data_complete_us": _stamp_us(window.t_data_complete),
-                "t_queued_us": _stamp_us(window.t_queued),
-                "t_dispatch_us": _stamp_us(window.t_dispatch),
-                "t_done_us": _stamp_us(window.t_done),
-                "frame_accepted_us": (None if frame_record is None
-                                      else us(frame_record.accepted_ticks)),
-                "frame_committed_us": (None if frame_record is None
-                                       else us(frame_record.committed_ticks)),
-                "logical_observables": (None if frame_record is None
-                                        else frame_record.logical_observables),
-            })
-            sink.write(json.dumps(record) + "\n")
-
-
-def _stamp_us(ticks):
-    return None if ticks is None else us(ticks)
-
-
-def _write_failure_events(completed, run_dir, label: str) -> None:
-    """records.failure_events: the failed shot's sampled detection events,
-    so the shot is reanalyzable without resampling."""
-    events_dir = run_dir / "failure_events"
-    events_dir.mkdir(parents=True, exist_ok=True)
-    operation_id = completed.result.operation_results[0].operation_id
-    events = np.asarray(
-        completed.qpu.model.sampled_detection_events(operation_id), dtype=bool)
-    np.save(events_dir / f"{label}.npy", events)
-
-
 def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                  distance: int, round_period_us: float, seed: int,
                  run_dir=None) -> ShotMeasurement:
-    """run_dir is where this run persists per-shot artifacts (trace,
-    windows.jsonl, failure events); None records nothing beyond the
-    returned measurement."""
+    """run_dir receives the trace file when trace: file|both is on;
+    None writes nothing beyond the returned measurement."""
     spec, engine = build_run(config,
                              physical_error_probability=physical_error_probability,
                              distance=distance,
@@ -281,15 +231,10 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
     wall_seconds = time.perf_counter() - wall_start
     if completed.result.terminal_status != "complete":
         raise RuntimeError(f"run did not complete: {completed.result.terminal_status}")
-    label = _shot_label(config, physical_error_probability, distance,
-                        round_period_us, seed)
     if run_dir is not None and config.trace in ("file", "both"):
-        _write_trace(completed, run_dir, label)
-    if run_dir is not None and config.records.windows:
-        _write_window_records(completed, run_dir, {
-            "physical_error_probability": physical_error_probability,
-            "distance": distance, "round_period_us": round_period_us,
-            "seed": seed})
+        _write_trace(completed, run_dir,
+                     _shot_label(config, physical_error_probability, distance,
+                                 round_period_us, seed))
 
     samples = collect_samples(completed, engine, config.mode)
     decoded_windows = len(samples["service"])
@@ -305,16 +250,13 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                            for record in completed.pauli_frame.snapshot().records)
     span_us = us(last_commit_tick - first_round_tick)
     queue_depths = [depth for _, depth in completed.decoder_manager.queue_log]
-    logical_failure = loop_prediction != truth
-    if run_dir is not None and config.records.failure_events and logical_failure:
-        _write_failure_events(completed, run_dir, label)
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,
         distance=distance,
         round_period_us=round_period_us,
         algorithm=config.active_decoder.algorithm,
         seed=seed, windows=decoded_windows,
-        logical_failure=logical_failure,
+        logical_failure=loop_prediction != truth,
         samples=samples,
         means={point: (statistics.fmean(values) if values else 0.0)
                for point, values in samples.items()},
@@ -325,7 +267,6 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
         direct_mismatch=loop_prediction != reference_prediction,
         throughput_windows_per_us=decoded_windows / span_us,
         throughput_rounds_per_us=config.rounds_per_shot.rounds_for(distance) / span_us,
-        decoder_utilization=sum(samples["service"]) / span_us,
         max_queued_windows=max(queue_depths, default=0),
         tesseract_windows_checked=getattr(
             engine.decoder, "windows_checked", 0),

@@ -136,17 +136,6 @@ pauli_frame:
   commit_cycles: 1                 # XOR of a correction into the frame register
                                    # (one cycle, XQsim PFU)
 
-records:                           # per-shot artifacts beyond the reports; every
-                                   # run also writes manifest.json (identity),
-                                   # shots.csv (one row per shot), sweep.csv,
-                                   # links.csv, into results/<name>/<timestamp>/
-                                   # (never overwritten; `latest` points there)
-  windows: false                   # one json line per window: bounds, lifecycle
-                                   # timestamps, committed observables. Bulky at
-                                   # long shots
-  failure_events: true             # save a failed shot's sampled detection
-                                   # events (.npy); failures are rare, so cheap
-
 idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stream.
                                    # How an idle patch's rounds are charged; idle
                                    # rounds are decoder workload in every reference

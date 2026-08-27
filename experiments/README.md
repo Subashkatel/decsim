@@ -15,8 +15,7 @@ it: `manifest.json` (resolved config, git commit, slurm job id, package
 versions, host, times), `config/` (the yaml chain, copied verbatim),
 `code_state.patch` (uncommitted code, when any), `shots.csv` (one row
 per shot), `sweep.csv` (one row per point), `links.csv`, and the
-figures; the `records:` card adds per-window json lines and failed
-shots' detection events. Sampling is deterministic from stim version +
+figures. Sampling is deterministic from stim version +
 task + d + rounds + p + seed, so manifest plus seeds are the raw data.
 Seeds are 0..shots-1 per sweep point; only wall-clock derived columns
 vary between reruns (a named real algorithm is timed on this host).

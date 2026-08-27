@@ -3,11 +3,10 @@
 # Values here are the defaults the two shipped configs share; the tiny sweep
 # makes this file cheap to run, so the test suite runs it as a smoke check.
 #
-# Kept honest by experiments/tests/test_parameter_reference.py: the test
-# fails if this file and the loader (experiment_config.py) drift apart.
-# Knobs the yaml cannot reach (Python objects: multi-op workloads, dynamic
-# streams, routers, escalation families, schedulers, devices, policies) are
-# tabled in guide/parameter-reference.md.
+# Kept honest by experiments/tests/test_decoder_units.py: the test fails
+# if this file and the loader (experiment_config.py) drift apart. Knobs the
+# yaml cannot reach are Python objects: multi-op workloads, dynamic
+# streams, routers, escalation families, schedulers, devices, policies.
 
 mode: weak_baseline                # decode path: weak_baseline | strong_only.
                                    # strong_only wakes windows from syndrome
@@ -22,17 +21,15 @@ windowing:
   commit_rounds: null              # rounds committed per window; null = d
   buffer_rounds: null              # look-ahead rounds per window; null = d
 
-# The sweep: a list of blocks; each block is the cross product of its three
-# axes, `shots` seeds per point (0..shots-1); a point+seed named twice runs once.
+# The sweep: a list of blocks; each block is the cross product of its two
+# axes, `shots` seeds per point (0..shots-1); a point+seed named twice runs
+# once. The algorithm is NOT a sweep axis: it is structure, fixed per unit
+# on the decoder card below; comparing algorithms is comparing configs.
 sweep:
   - physical_error_probability: [0.001]    # p on all four Stim noise channels
     round_period_us: [1.0]                 # the QPU's physical round period, in us:
                                            # a quantum-device cadence, deliberately
-                                           # not a classical clock's cycles                 # input round period (QEC cycle time)
-    algorithm_latency_us: [0.028]          # a number: fixed core latency in us; or a
-                                           # named real algorithm, measured wall clock
-                                           # per window: pymatching | belief_matching
-                                           # (wall clock of each real PyMatching call)
+                                           # not a classical clock's cycles
     shots: 2
 
 controller:                        # controller work per round, in cycles of its
@@ -84,16 +81,34 @@ buffers:                           # syndrome-path store capacities, in rounds
   packing_workspace_size: null     # packing assembly workspace: rounds in flight
                                    # through the packing stage. null = unbounded
 
-decoder:
-  units: 1                         # decoder units in the default pool
-  unit_buffer_size: null           # input SRAM rounds PER UNIT; null = unbounded.
+decoder:                           # the two tiers as two distinct units
+                                   # (Toshio 2510.25222: lightweight decoders
+                                   # decode constantly, a separate accurate
+                                   # decoder is invoked on demand). The mode
+                                   # picks the active unit: weak_baseline
+                                   # decodes on weak, strong_only on strong;
+                                   # the unused tier's card may be omitted.
+  weak:                            # the lightweight tier: fast, higher LER
+    algorithm: pymatching          # pymatching | belief_matching: the real
+                                   # algorithm, measured wall clock per window;
+                                   # or a number: fixed core latency in us
+    units: 1                       # decoder units in this tier's pool
+    unit_buffer_size: null         # input SRAM rounds PER UNIT; null = unbounded.
                                    # Each unit holds two windows when they fit
                                    # (transfer overlaps compute); a unit sized
                                    # for one window falls back to serial residency
-  engine:
-    frequency_mhz: 250.0           # engine clock for the cycle-priced stages
-    fetch_cycles_per_round: 1      # read one round out of decoder memory
-    release_cycles_per_job: 1      # correction write-out per job
+    engine:
+      clock: fridge                # cycle-priced stages on this clock domain
+      fetch_cycles_per_round: 1    # read one round out of decoder memory
+      release_cycles_per_job: 1    # correction write-out per job
+  strong:                          # the accurate tier: slow, lower LER
+    algorithm: belief_matching
+    units: 1
+    unit_buffer_size: null
+    engine:
+      clock: room                  # the strong unit lives room-side
+      fetch_cycles_per_round: 1
+      release_cycles_per_job: 1
 
 pauli_frame:
   clock: fridge

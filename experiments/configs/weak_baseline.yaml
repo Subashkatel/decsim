@@ -11,30 +11,23 @@ windowing:
   commit_rounds: null                        # rounds committed per window; null = d
   buffer_rounds: null                        # look-ahead rounds per window; null = d
 
-# The sweep: a list of blocks. Each block is the cross product of its three axes, `shots` runs
-# per point (seeds 0..shots-1); a point and seed named by two blocks runs once. Blocks put
+# The sweep: a list of blocks. Each block is the cross product of its two axes, `shots` runs
+# per point (seeds 0..shots-1); a point and seed named by two blocks runs once. The decoder
+# algorithm is structure, not a sweep axis: it lives on the decoder card below, and comparing
+# algorithms is comparing configs (copy this file, change decoder.weak.algorithm). Blocks put
 # shots where they matter: the timing block sweeps many timing points with few shots, the LER
 # block sweeps several probabilities with many shots at one timing point (timing knobs never
 # change the decoded answer, Gate 10, so LER needs only one timing point).
 sweep:
-  # timing: every round period and decoder card, few shots
+  # timing: every round period, few shots
   - physical_error_probability: [0.001]      # p on every physical operation, as Stim's guide and sinter do
     round_period_us: [10.0, 5.0, 2.0, 1.0, 0.9, 0.85, 0.8, 0.5, 0.2, 0.1, 0.05, 0.02]
                                              # input round period, slow to fast; 0.9/0.85/0.8 bracket
                                              # the load = 1 knee of the 0.028 card
-    algorithm_latency_us: [0.028, 0.28, pymatching]
-                                             # a number: fixed core latency in us; a name: the real algorithm
-                                             # A card prices the algorithm stage ONLY; fetch and release cycles
-                                             # are charged separately below.
-                                             # 0.028 = LILLIPUT-class core: [d=3, m=2] 7 cycles at 250 MHz,
-                                             #         2108.06569 sec. 6.3 and Table 4
-                                             # 0.28  = 10x sensitivity card (no separate hardware source)
-                                             # pymatching = real MWPM per window, measured wall clock on this host
     shots: 10
   # logical error rate: several probabilities, one timing point, many shots (Wilson 95% on the plot)
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
     round_period_us: [1.0]
-    algorithm_latency_us: [0.028]
     shots: 200
 
 controller:                                  # controller work per round, in fridge cycles
@@ -72,13 +65,20 @@ buffers:                                     # syndrome-path store capacities, i
   buffer_1_size: null                        # syndrome buffer 1 (unused on this path)
   packing_workspace_size: null               # packing assembly workspace
 
-decoder:
-  units: 1                                   # one weak ASIC
-  unit_buffer_size: null                     # input SRAM rounds PER UNIT; null = unbounded
-  engine:
-    frequency_mhz: 250.0                     # LILLIPUT [d=3,m=2] FPGA clock, 2108.06569 Table 4
-    fetch_cycles_per_round: 1                # read one round out of decoder memory per cycle (LILLIPUT FIFO, sec. 4)
-    release_cycles_per_job: 10               # correction register write-out, experiment card
+decoder:                                     # this mode decodes on the weak tier only
+  weak:
+    algorithm: 0.028                         # the algorithm stage's cost. A number: fixed core latency in us;
+                                             # a name (pymatching | belief_matching): the real algorithm,
+                                             # measured wall clock per window. The card prices the algorithm
+                                             # stage ONLY; fetch and release cycles are charged below.
+                                             # 0.028 = LILLIPUT-class core: [d=3, m=2] 7 cycles at 250 MHz,
+                                             #         2108.06569 sec. 6.3 and Table 4
+    units: 1                                 # one weak ASIC
+    unit_buffer_size: null                   # input SRAM rounds PER UNIT; null = unbounded
+    engine:
+      clock: fridge                          # LILLIPUT [d=3,m=2] FPGA clock, 2108.06569 Table 4 (clocks: 250 MHz)
+      fetch_cycles_per_round: 1              # read one round out of decoder memory per cycle (LILLIPUT FIFO, sec. 4)
+      release_cycles_per_job: 10             # correction register write-out, experiment card
 
 
 pauli_frame:

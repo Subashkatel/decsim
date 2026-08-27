@@ -12,20 +12,17 @@ windowing:
   commit_rounds: null                        # null = d
   buffer_rounds: null                        # null = d
 
+# The algorithm is structure, not a sweep axis: it lives on the decoder card
+# below; comparing algorithms is comparing configs (copy this file, change
+# decoder.strong.algorithm).
 sweep:
   # timing: strong cards are slow; the round periods bracket where one unit stops keeping up
   - physical_error_probability: [0.001]
     round_period_us: [10.0, 5.0, 3.0, 2.0, 1.5, 1.0, 0.5]
-    algorithm_latency_us: [5.0, 1.0, belief_matching]
-                                             # 5.0 = the repository's strong-tier reference card (accuracy-first
-                                             #       decoder, no hardware source; the axis to sweep)
-                                             # 1.0 = faster-strong sensitivity card
-                                             # belief_matching = the strong tier's real algorithm, measured wall clock per window
     shots: 10
   # logical error rate: timing knobs never change the decoded answer (Gate 10)
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
     round_period_us: [1.0]
-    algorithm_latency_us: [5.0]
     shots: 200
 
 controller:
@@ -62,13 +59,18 @@ buffers:                                     # syndrome-path store capacities, i
   buffer_1_size: null                        # syndrome buffer 1, the store this path reads
   packing_workspace_size: null               # packing assembly workspace
 
-decoder:
-  units: 1                                   # strong units; sweep by editing (stability runs used 1, 2, 4)
-  unit_buffer_size: null                     # input SRAM rounds PER UNIT; null = unbounded
-  engine:
-    frequency_mhz: 250.0
-    fetch_cycles_per_round: 1
-    release_cycles_per_job: 10
+decoder:                                     # this mode decodes on the strong tier only
+  strong:
+    algorithm: belief_matching               # the strong tier's real algorithm, measured wall clock
+                                             # per window (Toshio 2510.25222); a number swaps in a
+                                             # hypothetical fixed-latency core (5.0 was the old
+                                             # accuracy-first reference card)
+    units: 1                                 # strong units; sweep by editing (stability runs used 1, 2, 4)
+    unit_buffer_size: null                   # input SRAM rounds PER UNIT; null = unbounded
+    engine:
+      clock: room                            # the strong unit lives room-side
+      fetch_cycles_per_round: 1
+      release_cycles_per_job: 10
 
 
 pauli_frame:

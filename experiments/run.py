@@ -12,7 +12,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from experiments.experiment_config import ExperimentConfig, load_experiment
+from experiments.experiment_config import (MODE_TIER, ExperimentConfig,
+                                           load_experiment)
 from experiments.measure_shot import measure_shot
 from experiments.sweep_report import summarize, terminal_lines, write_report
 
@@ -27,16 +28,19 @@ def resolved_description(config: ExperimentConfig) -> list:
     the base never reaches a child that declares its own.
     """
     files = " <- ".join(str(path) for path in config.config_files)
+    unit = config.active_decoder
     lines = [f"config: {files}",
              f"mode: {config.mode}, {config.code_task}, distance "
              f"{config.distance}, {config.rounds_per_shot} rounds per shot",
-             f"windows: {config.windowing.scheme}"]
+             f"windows: {config.windowing.scheme}",
+             f"decoder: the {MODE_TIER[config.mode]} tier, algorithm "
+             f"{unit.algorithm}, {unit.units} unit(s), "
+             f"engine clock {unit.engine.clock}"]
     for index, block in enumerate(config.sweep, start=1):
         lines.append(
             f"sweep block {index}: "
             f"p {list(block.physical_error_probabilities)}, "
             f"round period {list(block.round_periods_us)} us, "
-            f"algorithm {list(block.algorithm_latencies_us)}, "
             f"{block.shots} shots")
     lines.append(f"trace: {config.trace}"
                  + (" with component I/O" if config.trace_io else ""))
@@ -49,22 +53,19 @@ def run_sweep(config: ExperimentConfig) -> list:
     measurements = {}
     for block in config.sweep:
         for physical_error_probability in block.physical_error_probabilities:
-            for algorithm_latency_us in block.algorithm_latencies_us:
-                for round_period_us in block.round_periods_us:
-                    for seed in range(block.shots):
-                        shot_key = (physical_error_probability, algorithm_latency_us,
-                                    round_period_us, seed)
-                        if shot_key in measurements:
-                            continue
-                        measurements[shot_key] = measure_shot(
-                            config,
-                            physical_error_probability=physical_error_probability,
-                            round_period_us=round_period_us,
-                            algorithm_latency_us=algorithm_latency_us, seed=seed)
-                    print(f"p {physical_error_probability}, "
-                          f"algorithm {algorithm_latency_us} us, "
-                          f"round period {round_period_us} us: "
-                          f"{block.shots} shots done", file=sys.stderr)
+            for round_period_us in block.round_periods_us:
+                for seed in range(block.shots):
+                    shot_key = (physical_error_probability,
+                                round_period_us, seed)
+                    if shot_key in measurements:
+                        continue
+                    measurements[shot_key] = measure_shot(
+                        config,
+                        physical_error_probability=physical_error_probability,
+                        round_period_us=round_period_us, seed=seed)
+                print(f"p {physical_error_probability}, "
+                      f"round period {round_period_us} us: "
+                      f"{block.shots} shots done", file=sys.stderr)
     return list(measurements.values())
 
 

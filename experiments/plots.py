@@ -42,11 +42,10 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     block = config.sweep[0]
     physical_error_probability = block.physical_error_probabilities[0]
     round_period_us = block.round_periods_us[0]
-    algorithm = block.algorithm_latencies_us[0]
+    algorithm = config.active_decoder.algorithm
     spec, engine = build_run(
         config, physical_error_probability=physical_error_probability,
-        round_period_us=round_period_us, algorithm_latency_us=algorithm,
-        seed=0)
+        round_period_us=round_period_us, seed=0)
     completed = spec.build()
 
     input_path = INPUT_LINK[config.mode]
@@ -191,13 +190,13 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
 def ler_groups(rows: list) -> list:
     """(card, round time, rows sorted by p) for every card and round time
     that swept more than one physical error rate."""
-    algorithms = sorted({row["algorithm_latency_us"] for row in rows}, key=str)
+    algorithms = sorted({row["algorithm"] for row in rows}, key=str)
     periods = sorted({row["round_period_us"] for row in rows})
     groups = []
     for algorithm in algorithms:
         for period in periods:
             group = [row for row in rows
-                     if row["algorithm_latency_us"] == algorithm
+                     if row["algorithm"] == algorithm
                      and row["round_period_us"] == period]
             probabilities = {row["physical_error_probability"] for row in group}
             if len(probabilities) < 2:

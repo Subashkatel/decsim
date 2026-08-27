@@ -38,18 +38,18 @@ def percentile(values: list, fraction: float) -> float:
 
 def sweep_point_of(measurement: ShotMeasurement) -> tuple:
     return (measurement.physical_error_probability,
-            measurement.algorithm_latency_us,
+            measurement.algorithm,
             measurement.round_period_us)
 
 
 def summarize_point(group: list) -> dict:
     """One sweep point: means over seeds of the per-shot means, maxes of maxes."""
-    physical_error_probability, algorithm_latency_us, round_period_us = \
+    physical_error_probability, algorithm, round_period_us = \
         sweep_point_of(group[0])
     failures = sum(m.logical_failure for m in group)
     ler_low, ler_high = wilson_interval(failures, len(group))
     row = {"physical_error_probability": physical_error_probability,
-           "algorithm_latency_us": algorithm_latency_us,
+           "algorithm": algorithm,
            "round_period_us": round_period_us,
            "shots": len(group),
            "windows_per_shot": statistics.fmean(m.windows for m in group),
@@ -104,7 +104,7 @@ def write_csv(rows: list, path: Path) -> None:
 def table_lines(rows: list) -> list:
     """The sweep.md table: full names, the same vocabulary as the terminal
     summary; the point columns carry sweep.csv's column stems."""
-    head = (["physical error rate", "algorithm latency us", "round period us",
+    head = (["physical error rate", "algorithm", "round period us",
              "load", "logical error rate", "logical failures / shots",
              "direct PyMatching failures", "mismatches vs direct PyMatching",
              "windows per us", "rounds per us", "decoder utilization",
@@ -114,7 +114,7 @@ def table_lines(rows: list) -> list:
                "buffer0_ready_to_frame p99 us"])
     lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
     for row in rows:
-        algorithm = row["algorithm_latency_us"]
+        algorithm = row["algorithm"]
         cells = [f"{row['physical_error_probability']:g}",
                  algorithm if isinstance(algorithm, str) else f"{algorithm:g}",
                  f"{row['round_period_us']:g}",
@@ -139,12 +139,12 @@ def terminal_lines(rows: list) -> list:
     no abbreviations. The full record is sweep.csv and sweep.md."""
     blocks = []
     for row in rows:
-        algorithm = row["algorithm_latency_us"]
+        algorithm = row["algorithm"]
         algorithm_text = (algorithm if isinstance(algorithm, str)
                           else f"{algorithm:g} us")
         blocks.append("\n".join([
             f"physical error rate: {row['physical_error_probability']:g}",
-            f"algorithm latency: {algorithm_text}",
+            f"algorithm: {algorithm_text}",
             f"round period: {row['round_period_us']:g} us",
             f"load (service per window / window inter-arrival): {row['load']:.2f}",
             f"logical failures: {row['logical_failures']} of {row['shots']} shots",
@@ -169,14 +169,14 @@ def link_rows(measurements: list) -> list:
                           key=lambda point: (point[0], str(point[1]), -point[2]))
     for sweep_point in sweep_points:
         group = [m for m in measurements if sweep_point_of(m) == sweep_point]
-        physical_error_probability, algorithm_latency_us, round_period_us = sweep_point
+        physical_error_probability, algorithm, round_period_us = sweep_point
         for path in sorted(group[0].link_totals):
             per_shot = [m.link_totals[path] for m in group]
             transfers = statistics.fmean(shot["transfers"] for shot in per_shot)
             payload_bits = statistics.fmean(shot["payload_bits"] for shot in per_shot)
             rows.append({
                 "physical_error_probability": physical_error_probability,
-                "algorithm_latency_us": algorithm_latency_us,
+                "algorithm": algorithm,
                 "round_period_us": round_period_us,
                 "link": path,
                 "transfers_per_shot": transfers,

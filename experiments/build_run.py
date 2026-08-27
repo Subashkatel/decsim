@@ -87,10 +87,9 @@ class TesseractCheckedDecoder:
     """The referee: after every tier decode, the official Tesseract backend
     re-decodes the same window input and the owned observable contributions
     are compared. Never priced: the engine reads timing from the inner
-    decoder alone, and a window is always a d-round problem, so this holds
-    at every distance and shot length (the per-window verification the
-    2026-08-26 study settled on; measured 9.6 ms/window at d=9, 18.1 ms at
-    d=11)."""
+    decoder alone. Its linked fault models are built whole-circuit, with
+    memory linear in circuit length since the sparse audit (bee219c);
+    verified through d=9 x 1000 rounds."""
 
     def __init__(self, inner):
         from decsim.detector_error_model.fault_model_contracts import (

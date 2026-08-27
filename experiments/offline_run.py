@@ -232,10 +232,15 @@ def plan(config_path: str, seeds_per_shard: int = None) -> Path:
     shards.tsv: distance, p, seed_start, seed_count; seeds 0..shots-1
     per point, split into seeds_per_shard chunks (default: one shard
     per point)."""
+    import shutil
     config = load_experiment(config_path)
     points = sweep_points(config)   # refuse bad sweeps before writing
     run_dir = new_run_dir(config)
     snapshot_code_state(config, run_dir)
+    # the run submits its own copy, so the run dir records exactly how
+    # it ran even after the script in experiments/ moves on
+    shutil.copy2(Path(__file__).parent / "slurm_offline.sh",
+                 run_dir / "slurm_offline.sh")
     write_manifest(config, run_dir, started_utc=_now_utc())
     (run_dir / "shards").mkdir()
     lines = []
@@ -248,7 +253,7 @@ def plan(config_path: str, seeds_per_shard: int = None) -> Path:
     (run_dir / "shards.tsv").write_text("\n".join(lines) + "\n")
     print(f"{run_dir}: {len(lines)} shards\n"
           f"submit: sbatch --array=1-{len(lines)} "
-          f"experiments/slurm_offline.sh {run_dir}\n"
+          f"{run_dir}/slurm_offline.sh {run_dir}\n"
           f"then:   python -m experiments.offline_run merge {run_dir}")
     return run_dir
 

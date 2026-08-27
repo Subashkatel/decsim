@@ -9,7 +9,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=1
 #SBATCH --mem=8G
-#SBATCH --time=4:00:00
+#SBATCH --time=8:00:00
 
 cd "$SLURM_SUBMIT_DIR"
 # one shard, one core; parallelism comes from the array, not from BLAS

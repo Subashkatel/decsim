@@ -306,12 +306,18 @@ def merge(run_dir: str) -> list:
     for (distance, probability), group in sorted(by_point.items()):
         failures = sum(row["logical_failure"] == "True" for row in group)
         low, high = wilson_interval(failures, len(group))
+        shot_rate = failures / len(group)
+        # a 10d-round shot is ten d-round chunks; papers report LER per
+        # d rounds (Toshio 2510.25222 Fig. 7), the production figure's
+        # convention
+        per_d_rounds = 1.0 - (1.0 - shot_rate) ** 0.1
         ler_rows.append({
             "distance": distance,
             "physical_error_probability": probability,
             "algorithm": group[0]["algorithm"],
             "shots": len(group), "failures": failures,
-            "logical_error_rate": failures / len(group),
+            "logical_error_rate": shot_rate,
+            "ler_per_d_rounds": per_d_rounds,
             "ler_wilson_low": low, "ler_wilson_high": high,
             "wall_seconds_per_shot": round(
                 sum(float(row["wall_seconds"]) for row in group)

@@ -5,8 +5,17 @@ SWIPER 2412.05115, Skoric 2209.08552, Toshio 2510.25222.
 
 ## Currently running
 
-Nothing. Two pilot runs are planned and awaiting sbatch (see below).
-The next approved run gets listed here with its results stamp.
+Production LER sweeps (plot 1), submitted 2026-08-27, owner-approved
+sizing (>= 100 failures where reachable; per-p shot schedule in the
+configs):
+
+- results/2026-08-27T15-23-12Z-weak_ler, slurm 13044146, 535 shards,
+  ~350 core-hours
+- results/2026-08-27T15-23-13Z-strong_ler, slurm 13044173, 285 shards,
+  ~400 core-hours
+
+Pilot runs (100 shots/point, complete, validated): results/
+2026-08-27T13-58-01Z-weak_ler and 2026-08-27T13-58-02Z-strong_ler.
 
 ## The plots
 

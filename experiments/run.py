@@ -91,7 +91,7 @@ def main(argv) -> None:
         raise SystemExit(2)
     results_dir, rows = run_experiment(argv[1])
     print("\n".join(terminal_lines(rows)))
-    print(f"\nfull table: {results_dir}/sweep.md   every column: sweep.csv")
+    print(f"\nevery column: {results_dir}/sweep.csv")
 
 
 if __name__ == "__main__":

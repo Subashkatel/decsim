@@ -194,9 +194,6 @@ class ExperimentConfig:
     config_files: tuple             # the yaml files this config was read
                                     # from, nearest first (an extends chain)
 
-    @property
-    def results_dir(self) -> Path:
-        return Path("experiments/results") / self.name
 
     @property
     def active_decoder(self) -> DecoderUnitCard:

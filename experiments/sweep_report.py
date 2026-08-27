@@ -55,7 +55,7 @@ def grouped_by_sweep_point(measurements: list) -> list:
 
 
 def summarize_point(group: list) -> dict:
-    """One sweep point: means over seeds of the per-shot means, maxes of maxes."""
+    """One sweep point: means over seeds of per-shot means, max of maxes."""
     distance, physical_error_probability, algorithm, round_period_us = \
         sweep_point_of(group[0])
     failures = sum(shot.logical_failure for shot in group)
@@ -70,8 +70,10 @@ def summarize_point(group: list) -> dict:
            "logical_error_rate": failures / len(group),
            "ler_wilson_low": ler_low,
            "ler_wilson_high": ler_high,
-           "direct_pymatching_failures": sum(shot.direct_failure for shot in group),
-           "prediction_mismatches_vs_direct": sum(shot.direct_mismatch for shot in group),
+           "direct_pymatching_failures": sum(
+               shot.direct_failure for shot in group),
+           "prediction_mismatches_vs_direct": sum(
+               shot.direct_mismatch for shot in group),
            "throughput_windows_per_us": statistics.fmean(
                shot.throughput_windows_per_us for shot in group),
            "throughput_rounds_per_us": statistics.fmean(
@@ -88,7 +90,8 @@ def summarize_point(group: list) -> dict:
         pooled = []
         for shot in group:
             pooled.extend(shot.samples[point])
-        row[f"{point}_mean_us"] = statistics.fmean(shot.means[point] for shot in group)
+        row[f"{point}_mean_us"] = statistics.fmean(
+            shot.means[point] for shot in group)
         row[f"{point}_median_us"] = percentile(pooled, 0.50)
         row[f"{point}_p99_us"] = percentile(pooled, 0.99)
         row[f"{point}_max_us"] = max(shot.maxes[point] for shot in group)
@@ -121,9 +124,12 @@ def terminal_lines(rows: list) -> list:
             f"physical error rate: {row['physical_error_probability']:g}",
             f"algorithm: {algorithm_text}",
             f"round period: {row['round_period_us']:g} us",
-            f"load (service per window / window inter-arrival): {row['load']:.2f}",
-            f"logical failures: {row['logical_failures']} of {row['shots']} shots",
-            f"mismatches vs direct PyMatching: {row['prediction_mismatches_vs_direct']}",
+            f"load (service per window / window inter-arrival): "
+            f"{row['load']:.2f}",
+            f"logical failures: {row['logical_failures']} "
+            f"of {row['shots']} shots",
+            f"mismatches vs direct PyMatching: "
+            f"{row['prediction_mismatches_vs_direct']}",
             f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
             f"queue wait, mean: {row['queue_wait_mean_us']:.3f} us",
             f"service time per window, mean: {row['service_mean_us']:.3f} us",
@@ -139,11 +145,13 @@ def link_rows(measurements: list) -> list:
     each run's TrafficCounters; nothing here re-counts transfers."""
     rows = []
     for sweep_point, group in grouped_by_sweep_point(measurements):
-        distance, physical_error_probability, algorithm, round_period_us = sweep_point
+        distance, physical_error_probability, algorithm, round_period_us = \
+            sweep_point
         for path in sorted(group[0].link_totals):
             per_shot = [shot.link_totals[path] for shot in group]
             transfers = statistics.fmean(shot["transfers"] for shot in per_shot)
-            payload_bits = statistics.fmean(shot["payload_bits"] for shot in per_shot)
+            payload_bits = statistics.fmean(
+                shot["payload_bits"] for shot in per_shot)
             rows.append({
                 "distance": distance,
                 "physical_error_probability": physical_error_probability,
@@ -152,7 +160,8 @@ def link_rows(measurements: list) -> list:
                 "link": path,
                 "transfers_per_shot": transfers,
                 "payload_bits_per_shot": payload_bits,
-                "bits_per_transfer": (payload_bits / transfers) if transfers else 0.0,
+                "bits_per_transfer":
+                    (payload_bits / transfers) if transfers else 0.0,
                 "unknown_payload_transfers_per_shot": statistics.fmean(
                     shot["unknown_payload_transfers"] for shot in per_shot),
                 "queue_wait_us_per_shot": statistics.fmean(

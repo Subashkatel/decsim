@@ -244,8 +244,8 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
     loop_prediction = tuple(operation_result.logical_observables)
     reference_prediction = direct_prediction(completed, spec.ops[0].circuit)
     windows = completed.window_manager.windows.values()
-    first_round_tick = min(w.t_first_round for w in windows
-                           if w.t_first_round is not None)
+    first_round_tick = min(window.t_first_round for window in windows
+                           if window.t_first_round is not None)
     last_commit_tick = max(record.committed_ticks
                            for record in completed.pauli_frame.snapshot().records)
     span_us = us(last_commit_tick - first_round_tick)

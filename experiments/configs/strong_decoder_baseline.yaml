@@ -22,6 +22,14 @@ sweep:
     distance: [5]
     round_period_us: [1.0]
     shots: 300
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=7
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 200
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=9
+    distance: [9]
+    round_period_us: [1.0]
+    shots: 100
 
 controller:
   clock: fridge

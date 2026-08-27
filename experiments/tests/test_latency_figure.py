@@ -10,7 +10,7 @@ from experiments.experiment_config import load_experiment
 from experiments.measure_shot import measure_shot
 from experiments.plots import latency_samples_by_distance, plots
 
-from test_decoder_units import MINIMAL_CONFIG, write_config
+from test_decoder_units import MINIMAL_CONFIG, strong_unit, write_config
 
 
 def wall_clock_config(tmp_path, distances):
@@ -54,11 +54,35 @@ def test_latency_figure_written_only_for_wall_clock_multi_distance(
     config_path = wall_clock_config(tmp_path, [3, 5])
     run_dir, rows = run_experiment(config_path)
     assert (run_dir / "latency.png").exists()
+    assert (run_dir / "latency_samples.csv").exists()
 
-    # the fixed-latency card is flat in d by construction: no figure
+    # the fixed-latency card is flat in d by construction: no figure,
+    # no raw samples
     card_path = write_config(tmp_path, {
         "sweep": [{"physical_error_probability": [0.001],
                    "distance": [3, 5], "round_period_us": [1.0],
                    "shots": 1}]})
     card_run_dir, rows = run_experiment(card_path)
     assert not (card_run_dir / "latency.png").exists()
+    assert not (card_run_dir / "latency_samples.csv").exists()
+
+
+def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
+    """The cross-tier figure: two runs' latency_samples.csv on one axes."""
+    from experiments.plots import combined_latency_plot
+    from experiments.run import run_experiment
+    monkeypatch.chdir(tmp_path)
+
+    weak_run_dir, rows = run_experiment(wall_clock_config(tmp_path, [3, 5]))
+    strong_path = write_config(tmp_path, {
+        "mode": "strong_only",
+        "decoder": strong_unit("belief_matching"),
+        "sweep": [{"physical_error_probability": [0.001],
+                   "distance": [3, 5], "round_period_us": [1.0],
+                   "shots": 1}]})
+    strong_run_dir, rows = run_experiment(strong_path)
+
+    combined = tmp_path / "latency_combined.png"
+    combined_latency_plot([weak_run_dir / "latency_samples.csv",
+                           strong_run_dir / "latency_samples.csv"], combined)
+    assert combined.exists()

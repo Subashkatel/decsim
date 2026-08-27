@@ -9,16 +9,19 @@ Run one:
 
     PYTHONPATH=. python -m experiments.run experiments/configs/strong_decoder_baseline.yaml
 
-Results land in `experiments/results/<name>/<UTC timestamp>/`, never
-overwritten; `latest` links to the newest run. Every run writes
-`manifest.json` (resolved config, git commit, package versions, host,
-times: sampling is deterministic from stim version + task + d + rounds +
-p + seed, so manifest plus seeds are the raw data), `shots.csv` (one row
-per shot), `sweep.csv` (one row per point), `links.csv`, and the figures;
-the `records:` card adds per-window json lines and failed shots'
-detection events. Seeds are 0..shots-1 per sweep point, and only
-wall-clock derived columns vary between reruns (a named real algorithm
-is timed on this host). To make a new experiment, copy a yaml and change
+Each run is one folder, `experiments/results/<UTC timestamp>-<name>/`,
+never overwritten, holding everything needed to interpret or reproduce
+it: `manifest.json` (resolved config, git commit, slurm job id, package
+versions, host, times), `config/` (the yaml chain, copied verbatim),
+`code_state.patch` (uncommitted code, when any), `shots.csv` (one row
+per shot), `sweep.csv` (one row per point), `links.csv`, and the
+figures; the `records:` card adds per-window json lines and failed
+shots' detection events. Sampling is deterministic from stim version +
+task + d + rounds + p + seed, so manifest plus seeds are the raw data.
+Seeds are 0..shots-1 per sweep point; only wall-clock derived columns
+vary between reruns (a named real algorithm is timed on this host).
+Long runs go through slurm: `sbatch experiments/slurm_run.sh
+configs/<name>.yaml`. To make a new experiment, copy a yaml and change
 numbers; a new yaml key belongs in `experiment_config.py` first.
 `configs/reference.yaml` lists every yaml key in one runnable file;
 `tests/test_decoder_units.py` fails when it and the loader drift apart,
@@ -32,9 +35,11 @@ The pipeline is four small modules, one job each, in call order:
 
 Also here:
 
-- `offline/`: the sampled offline accuracy harness (surface + BB codes,
-  slurm array); it owns the list-ordered windowed reference decode.
+- `slurm_run.sh`: one experiment as a cluster job.
 - `tests/`: the experiment layer's own tests.
+
+The offline decode-only harness (bulk statistics without the timing
+simulator) was removed 2026-08-27 while unused; git history has it.
 
 Everything this layout replaced (the baseline_closed_loop program, the
 external validation gates, guide/walkthrough, prior result folders) is

@@ -54,28 +54,63 @@ def resolved_description(config: ExperimentConfig) -> list:
 
 
 def new_run_dir(config: ExperimentConfig) -> Path:
-    """results/<name>/<UTC stamp>/, never reused; `latest` points at it."""
+    """results/<UTC stamp>-<config name>/, never reused; sorted by time."""
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    run_dir = config.results_dir / stamp
+    run_dir = Path("experiments/results") / f"{stamp}-{config.name}"
     run_dir.mkdir(parents=True, exist_ok=False)
-    latest = config.results_dir / "latest"
-    latest.unlink(missing_ok=True)
-    latest.symlink_to(stamp)
     return run_dir
 
 
+def snapshot_code_state(config: ExperimentConfig, run_dir: Path) -> None:
+    """The run's exact inputs: the config chain copied verbatim into
+    config/, and any uncommitted code as code_state.patch, so manifest
+    commit + patch + config = the whole experiment."""
+    import shutil
+    config_dir = run_dir / "config"
+    config_dir.mkdir()
+    for config_file in config.config_files:
+        shutil.copy2(config_file, config_dir / Path(config_file).name)
+    try:
+        diff = subprocess.run(["git", "diff", "HEAD"], capture_output=True,
+                              text=True).stdout
+    except FileNotFoundError:
+        diff = ""
+    if diff:
+        (run_dir / "code_state.patch").write_text(diff)
+
+
 def _git_state() -> dict:
-    # the container image has no git; the manifest records what it can
+    # the container image has no git binary; the commit falls back to
+    # reading .git directly, dirty/patch stay host-side best effort
     def output(*arguments):
         try:
             return subprocess.run(arguments, capture_output=True,
                                   text=True).stdout.strip()
         except FileNotFoundError:
             return None
-    commit = output("git", "rev-parse", "HEAD")
+    commit = output("git", "rev-parse", "HEAD") or _commit_from_git_files()
     porcelain = output("git", "status", "--porcelain")
     return {"commit": commit,
             "dirty": None if porcelain is None else bool(porcelain)}
+
+
+def _commit_from_git_files() -> str:
+    head_path = Path(".git/HEAD")
+    if not head_path.exists():
+        return None
+    head = head_path.read_text().strip()
+    if not head.startswith("ref: "):
+        return head
+    reference = head[len("ref: "):]
+    reference_path = Path(".git") / reference
+    if reference_path.exists():
+        return reference_path.read_text().strip()
+    packed = Path(".git/packed-refs")
+    if packed.exists():
+        for line in packed.read_text().splitlines():
+            if line.endswith(reference):
+                return line.split()[0]
+    return None
 
 
 def _versions() -> dict:
@@ -103,6 +138,7 @@ def write_manifest(config: ExperimentConfig, run_dir: Path,
                      or os.environ.get("SINGULARITY_CONTAINER"),
         "versions": _versions(),
         "host": platform.node(),
+        "slurm_job_id": os.environ.get("SLURM_JOB_ID"),
         "argv": sys.argv,
         "started_utc": started_utc,
         "finished_utc": finished_utc,
@@ -140,6 +176,7 @@ def run_experiment(config_path) -> tuple:
     results folder and the summary rows."""
     config = load_experiment(config_path)
     run_dir = new_run_dir(config)
+    snapshot_code_state(config, run_dir)
     started_utc = datetime.now(timezone.utc).isoformat()
     write_manifest(config, run_dir, started_utc)
     print("\n".join(resolved_description(config))
@@ -160,9 +197,9 @@ def main(argv) -> None:
         print("usage: python -m experiments.run configs/<name>.yaml\n"
               f"configs: {', '.join(names)}", file=sys.stderr)
         raise SystemExit(2)
-    results_dir, rows = run_experiment(argv[1])
+    run_dir, rows = run_experiment(argv[1])
     print("\n".join(terminal_lines(rows)))
-    print(f"\nevery column: {results_dir}/sweep.csv")
+    print(f"\nevery column: {run_dir}/sweep.csv")
 
 
 if __name__ == "__main__":

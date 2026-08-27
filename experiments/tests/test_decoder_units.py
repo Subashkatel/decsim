@@ -209,6 +209,6 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
     assert first_window["commit_lo"] >= 1
     assert first_window["frame_committed_us"] is not None
 
-    latest = run_dir.parent / "latest"
-    assert latest.is_symlink() and latest.resolve() == run_dir.resolve()
+    assert run_dir.name.endswith("-unit_test_config")
+    assert (run_dir / "config" / "unit_test_config.yaml").exists()
     assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()

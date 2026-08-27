@@ -140,11 +140,14 @@ class TesseractCheckedDecoder:
         if outcome.status is not BackendDecodeStatus.SUCCEEDED:
             return result
         physical = model.require_faults(FaultRepresentation.PHYSICAL)
-        committed = (np.asarray(outcome.physical_correction, dtype=np.uint8)
-                     .astype(bool) & physical.owned)
-        referee_flips = tuple(int(bit) for bit in np.asarray(
-            physical.observables.astype(np.int64)
-            @ committed.astype(np.int64)).ravel() % 2)
+        referee_correction = np.asarray(outcome.physical_correction,
+                                        dtype=bool)
+        # only this window's owned faults count toward its contribution
+        owned_correction = referee_correction & physical.owned
+        observable_flip_counts = (physical.observables.astype(np.int64)
+                                  @ owned_correction.astype(np.int64))
+        referee_flips = tuple(
+            int(count) % 2 for count in np.asarray(observable_flip_counts).ravel())
         self.windows_checked += 1
         if referee_flips != tuple(result.logical_observables):
             self.window_disagreements += 1
@@ -168,7 +171,7 @@ def link_model(config: ExperimentConfig):
         profile = with_csb_edge(
             profile, latency_us=csb.latency_us,
             aggregate_bits_per_us=csb.bits_per_us, source=source)
-    channels = {}
+    edge_overrides = {}
     for path, card in cards.items():
         if card is None:
             continue
@@ -182,12 +185,13 @@ def link_model(config: ExperimentConfig):
         if card.transfer_overhead_us:
             overhead = TransferOverheadConfig(
                 us_ticks(card.transfer_overhead_us), source)
-        channels[path] = replace(getattr(profile, path), channel=channel,
-                                 transfer_overhead=overhead)
+        edge_overrides[path] = replace(getattr(profile, path), channel=channel,
+                                       transfer_overhead=overhead)
     # The config prices controller processing on its own line
     # (controller.t_binary_availability_us), so its qc card is link
     # propagation only; the attestation lets a nonzero processing cost run.
-    return replace(profile, **channels, profile_name=f"{config.name}.yaml",
+    return replace(profile, **edge_overrides,
+                   profile_name=f"{config.name}.yaml",
                    qc_excludes_controller_processing=True)
 
 

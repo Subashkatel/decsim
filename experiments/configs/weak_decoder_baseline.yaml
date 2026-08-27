@@ -17,6 +17,10 @@ sweep:
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER
     distance: [3, 5]
     round_period_us: [1.0]
+    shots: 2000
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=7
+    distance: [7]
+    round_period_us: [1.0]
     shots: 500
 
 controller:

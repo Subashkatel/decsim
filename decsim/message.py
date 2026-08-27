@@ -188,7 +188,7 @@ def normalize_binary_bits(bits: Any) -> Optional[tuple[int, ...]]:
 
 @dataclass(frozen=True)
 class RetainedSyndromeFragment:
-    """One validated immutable fragment retained after controller ingress."""
+    """One validated immutable fragment retained after controller packing."""
 
     operation_id: Any
     patch_id: Any
@@ -217,6 +217,21 @@ class SyndromeRoundPacket:
     round_index: int
     fragments: tuple[RetainedSyndromeFragment, ...]
 
+    def defects_text(self) -> str:
+        """The round's cargo for the I/O trace: set detection-event indices
+        across the fragments in order, sparse so d=11 lines stay readable."""
+        position = 0
+        defects = []
+        for fragment in self.fragments:
+            bits = fragment.bits
+            if bits is None:
+                return "timing-only"
+            for bit in bits:
+                if bit:
+                    defects.append(position)
+                position += 1
+        return f"defects {{{', '.join(map(str, defects))}}}" if defects else "no defects"
+
 # ------------------------------------------------------------------ windows
 
 
@@ -244,9 +259,15 @@ class Window:
     buffer_lo: Optional[int] = None   # leading-buffer start (for two-sided A windows)
     closed_temporal_boundaries: bool = False
     batched_preceding_idle_round_count: int = 0
+    buffer_filled_by_memory: bool = False  # trailing buffer satisfied by
+                                      # memory rounds alone: released on time,
+                                      # no syndrome content behind those
+                                      # rounds (references decode buffer
+                                      # content: LATTE, SWIPER, Skoric/Tan)
     deps: list = field(default_factory=list)        # window keys this one waits on
     dependents: list = field(default_factory=list)  # window keys waiting on this one
     deps_remaining: int = 0           # unfinished deps countdown; 0 = unblocked
+    service_began: bool = False       # its decode is past the boundary gate
     committed: bool = False           # result folded into the op's accumulator
     queued: bool = False              # job handed to the decoder cluster
     blocked_logged: bool = False      # log-once flag for the "blocked" trace line
@@ -537,6 +558,8 @@ class DecodeJob:
     cancelled: bool = False                  # cancelled siblings discard completion
     completed: bool = False                  # terminal flag; admission refuses reuse of a completed job
     submitted: bool = False                  # admitted once to one queue slot and unit
+    input_landed: bool = False               # the input transfer deposited into unit memory
+    service_started: bool = False            # the decode itself began (past the boundary gate)
     request_key: Optional[DecoderRequestKey] = None
     request_created_ticks: Optional[int] = None
     request_admitted_ticks: Optional[int] = None

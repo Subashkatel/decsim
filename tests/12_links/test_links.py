@@ -40,9 +40,11 @@ from decsim.links.link_traffic_report import topology_json_value, traffic_json_v
 
 OPERATION_ID = ("experiment", 7)
 PATCH_IDS = (1, 2)
-PATH_ORDER = ["qc", "c2b", "cwd", "wsd", "csd", "wdo", "dd", "do", "oc", "cq"]
-# A shipped profile wires the nine required paths; C2B is optional and unset.
-REQUIRED_PATH_ORDER = [p for p in PATH_ORDER if p != "c2b"]
+PATH_ORDER = ["qc", "cwb", "wbd", "wsd", "sbd", "wdo", "dd", "do", "oc", "cq",
+              "csb"]
+# A shipped profile wires the nine required paths; CWB and csb are
+# optional and unset.
+REQUIRED_PATH_ORDER = [p for p in PATH_ORDER if p not in ("cwb", "csb")]
 
 
 def make_channel(*, capacity=None, propagation_ticks=7, source="test channel"):
@@ -82,12 +84,12 @@ def request_relation(*, tier, operation_id=OPERATION_ID, window_id=3, sequence=0
 
 
 def valid_attribution(path):
-    if path in (LinkPath.QC, LinkPath.C2B):
+    if path in (LinkPath.QC, LinkPath.CWB, LinkPath.CSB):
         return TrafficAttribution(OPERATION_ID, PATCH_IDS, None, 1, 2)
-    if path is LinkPath.CWD:
+    if path is LinkPath.WBD:
         relation = request_relation(tier=DecoderTier.WEAK)
         return TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2, relation)
-    if path in (LinkPath.WSD, LinkPath.CSD, LinkPath.DO):
+    if path in (LinkPath.WSD, LinkPath.SBD, LinkPath.DO):
         relation = request_relation(tier=DecoderTier.STRONG)
         return TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2, relation)
     if path is LinkPath.WDO:
@@ -379,9 +381,9 @@ def test_every_semantic_path_accepts_its_real_attribution_shape(path):
     ("path", "attribution"),
     [
         (LinkPath.QC, TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2)),
-        (LinkPath.CWD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.WBD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
         (LinkPath.WSD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
-        (LinkPath.CSD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
+        (LinkPath.SBD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
         (LinkPath.WDO, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
         (LinkPath.DD, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
         (LinkPath.DO, TrafficAttribution(OPERATION_ID, PATCH_IDS, None, None, None)),
@@ -431,7 +433,7 @@ def test_payload_selection_records_actual_default_and_unresolved_sources():
     )
     edges = {
         LinkPath.QC: LinkEdgeConfig(actual_channel, actual_default, "measured"),
-        LinkPath.CWD: make_default_edge(bits=12, source="default"),
+        LinkPath.WBD: make_default_edge(bits=12, source="default"),
         LinkPath.OC: make_actual_edge(source="optional measurement"),
     }
     model = make_model_config(edges).resolve()
@@ -442,10 +444,10 @@ def test_payload_selection_records_actual_default_and_unresolved_sources():
         attribution=valid_attribution(LinkPath.QC),
     )
     model.reserve(
-        LinkPath.CWD,
+        LinkPath.WBD,
         payload_bits=None,
         now_ticks=0,
-        attribution=valid_attribution(LinkPath.CWD),
+        attribution=valid_attribution(LinkPath.WBD),
     )
     model.reserve(
         LinkPath.OC,
@@ -524,7 +526,7 @@ def test_config_identity_controls_sharing_and_each_resolve_is_run_owned():
     config = make_model_config(
         {
             LinkPath.QC: make_actual_edge(channel=shared),
-            LinkPath.CWD: make_actual_edge(channel=shared),
+            LinkPath.WBD: make_actual_edge(channel=shared),
             LinkPath.OC: make_actual_edge(channel=equal_but_distinct),
         }
     )
@@ -537,11 +539,11 @@ def test_config_identity_controls_sharing_and_each_resolve_is_run_owned():
         now_ticks=0,
         attribution=valid_attribution(LinkPath.QC),
     )
-    cwd = first_run.reserve(
-        LinkPath.CWD,
+    wbd = first_run.reserve(
+        LinkPath.WBD,
         payload_bits=10,
         now_ticks=0,
-        attribution=valid_attribution(LinkPath.CWD),
+        attribution=valid_attribution(LinkPath.WBD),
     )
     oc = first_run.reserve(
         LinkPath.OC,
@@ -557,13 +559,13 @@ def test_config_identity_controls_sharing_and_each_resolve_is_run_owned():
     )
 
     assert qc.physical_sequence == 0
-    assert cwd.physical_sequence == 1
-    assert cwd.queue_wait_ticks == qc.serialization_ticks
+    assert wbd.physical_sequence == 1
+    assert wbd.queue_wait_ticks == qc.serialization_ticks
     assert oc.physical_sequence == 0
     assert fresh.physical_sequence == 0
     topology = topology_json_value(first_run.snapshot())
     aliases = {edge["path"]: edge["physical_alias"] for edge in topology["edges"]}
-    assert aliases["qc"] == aliases["cwd"]
+    assert aliases["qc"] == aliases["wbd"]
     assert aliases["qc"] != aliases["oc"]
 
 
@@ -573,7 +575,7 @@ def test_shared_fifo_counters_reconcile_across_member_paths():
     model = make_model_config(
         {
             LinkPath.QC: make_actual_edge(channel=shared),
-            LinkPath.CWD: make_actual_edge(channel=shared),
+            LinkPath.WBD: make_actual_edge(channel=shared),
         }
     ).resolve()
     model.reserve(
@@ -583,16 +585,16 @@ def test_shared_fifo_counters_reconcile_across_member_paths():
         attribution=valid_attribution(LinkPath.QC),
     )
     model.reserve(
-        LinkPath.CWD,
+        LinkPath.WBD,
         payload_bits=5,
         now_ticks=1,
-        attribution=valid_attribution(LinkPath.CWD),
+        attribution=valid_attribution(LinkPath.WBD),
     )
 
     report = traffic_json_value(model.snapshot())
     shared_row = next(
         row for row in report["reconciliation"]
-        if row["member_paths"] == ["qc", "cwd"]
+        if row["member_paths"] == ["qc", "wbd"]
     )
     assert shared_row["reconciles"] is True
     assert shared_row["semantic_counter_sum"] == shared_row["physical_counters"]
@@ -624,7 +626,7 @@ def test_topology_json_reports_stable_fabric():
     )
     shared = make_channel(capacity=capacity, propagation_ticks=11, source="wire")
     edge = LinkEdgeConfig(shared, payload, "actual source")
-    model = make_model_config({LinkPath.QC: edge, LinkPath.CWD: edge}).resolve()
+    model = make_model_config({LinkPath.QC: edge, LinkPath.WBD: edge}).resolve()
 
     topology = topology_json_value(model.snapshot())
     assert topology["schema_version"] == 1
@@ -635,7 +637,7 @@ def test_topology_json_reports_stable_fabric():
     assert qc_edge["actual_payload_source"] == "actual source"
     assert qc_edge["default_payload"]["aggregate_bits"] == 12
     channel = topology["physical_channels"][0]
-    assert channel["member_paths"] == ["qc", "cwd"]
+    assert channel["member_paths"] == ["qc", "wbd"]
     assert channel["propagation_latency_ticks"] == 11
     assert channel["capacity"]["aggregate_bits_per_us"] == 8.0
     assert channel["configuration_source"] == "wire"
@@ -693,9 +695,9 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
     topology = topology_json_value(model.snapshot())
     expected_propagation = {
         "qc": us(0.15),
-        "cwd": us(2.0),
+        "wbd": us(2.0),
         "wsd": us(0.5),
-        "csd": us(2.0),
+        "sbd": us(2.0),
         "wdo": us(1.0),
         "dd": us(0.5),
         "do": us(1.0),
@@ -711,9 +713,9 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
     }
     actual_sources = {
         "qc": "SyndromePayload.size_bits",
-        "cwd": "SyndromeRoundPacket.fragment_size_sum",
+        "wbd": "SyndromeRoundPacket.fragment_size_sum",
         "wsd": "switching decision payload_bits",
-        "csd": "DecodeJob.retained_payload_size_bits",
+        "sbd": "DecodeJob.retained_payload_size_bits",
     }
 
     assert config.profile_name == "logical_reference"
@@ -744,9 +746,9 @@ def test_config_and_record_validation_nonchecks_remain_at_their_boundaries():
     """Fabric and ledger records retain deliberate constructor nonchecks."""
     loose_config = LinkModelConfig(
         qc=None,
-        cwd=None,
+        wbd=None,
         wsd=None,
-        csd=None,
+        sbd=None,
         wdo=None,
         dd=None,
         do=None,
@@ -811,9 +813,9 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
     topology = topology_json_value(config.resolve().snapshot())
     expected_capacities = {
         "qc": (24.0, "direct_aggregate", None, 24.0),
-        "cwd": (48.0, "direct_aggregate", None, 48.0),
+        "wbd": (48.0, "direct_aggregate", None, 48.0),
         "wsd": (24.0, "direct_aggregate", None, 24.0),
-        "csd": (72.0, "direct_aggregate", None, 72.0),
+        "sbd": (72.0, "direct_aggregate", None, 72.0),
         "wdo": (10_000.0, "per_channel", 100, 1_000_000.0),
         "dd": (24.0, "direct_aggregate", None, 24.0),
         "do": (10_000.0, "per_channel", 100, 1_000_000.0),
@@ -822,9 +824,9 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
     }
     expected_fallbacks = {
         "qc": (24, "direct_aggregate", None, 24),
-        "cwd": (240, "direct_aggregate", None, 240),
+        "wbd": (240, "direct_aggregate", None, 240),
         "wsd": (1, "direct_aggregate", None, 1),
-        "csd": (360, "direct_aggregate", None, 360),
+        "sbd": (360, "direct_aggregate", None, 360),
         "wdo": (50_000, "per_channel", 100, 5_000_000),
         "dd": (100, "direct_aggregate", None, 100),
         "do": (50_000, "per_channel", 100, 5_000_000),
@@ -876,7 +878,7 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
     reference_edges = {edge["path"]: edge for edge in reference_topology["edges"]}
     bandwidth_edges = {edge["path"]: edge for edge in bandwidth_topology["edges"]}
     configured_default_paths = ("wdo", "dd", "do", "oc", "cq")
-    actual_payload_paths = ("qc", "cwd", "wsd", "csd")
+    actual_payload_paths = ("qc", "wbd", "wsd", "sbd")
 
     assert reference.profile_name == "logical_reference"
     assert reference.qc_excludes_controller_processing is False
@@ -978,9 +980,9 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
     """Capacity scaling changes service time and rejects invalid scale values."""
     base_capacities = {
         "qc": 24.0,
-        "cwd": 48.0,
+        "wbd": 48.0,
         "wsd": 24.0,
-        "csd": 72.0,
+        "sbd": 72.0,
         "wdo": 1_000_000.0,
         "dd": 24.0,
         "do": 1_000_000.0,
@@ -1030,3 +1032,106 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
             bandwidth_limited_profile(
                 capacity_scale=invalid_scale
             )
+
+
+# ---- per-transfer setup overhead (gem5-Aladdin engine-side rule) ----------
+
+def _overhead_edge(overhead_ticks, *, channel=None):
+    from decsim.links.links import TransferOverheadConfig
+    return LinkEdgeConfig(
+        channel or make_channel(), None, "measured payload",
+        transfer_overhead=TransferOverheadConfig(overhead_ticks, "test setup"))
+
+
+def test_transfer_overhead_delays_delivery_without_occupying_the_wire():
+    from decsim.links.links import LinkCapacityConfig, LinkQuantityBasis
+    capacity = LinkCapacityConfig(
+        1.0, LinkQuantityBasis.DIRECT_AGGREGATE, None, "test rate")
+    channel = make_channel(capacity=capacity, propagation_ticks=10)
+    model = make_model_config({LinkPath.SBD: _overhead_edge(
+        50, channel=channel)}).resolve()
+    first = model.reserve(LinkPath.SBD, payload_bits=4, now_ticks=100,
+                          attribution=valid_attribution(LinkPath.SBD))
+    # setup 50 ticks (engine-side) + serialization 4 bits / 1 bit-per-us
+    # + propagation 10 ticks
+    assert first.send_ticks == 150            # the wire sees the shifted send
+    assert first.serialization_ticks == us(4.0)
+    assert first.total_delay_ticks == 50 + us(4.0) + 10
+
+
+def test_setups_serialize_like_aladdins_single_dma_event():
+    model = make_model_config(
+        {LinkPath.SBD: _overhead_edge(50)}).resolve()
+    first = model.reserve(LinkPath.SBD, payload_bits=1, now_ticks=100,
+                          attribution=valid_attribution(LinkPath.SBD))
+    second = model.reserve(LinkPath.SBD, payload_bits=1, now_ticks=100,
+                           attribution=valid_attribution(LinkPath.SBD))
+    # one CPU programs the engine: the second setup starts when the first ends
+    assert first.total_delay_ticks == 50 + 7
+    assert second.total_delay_ticks == 100 + 7
+
+
+def test_zero_overhead_edges_reserve_identically_to_plain_edges():
+    plain = make_model_config().resolve()
+    with_field = make_model_config(
+        {LinkPath.SBD: _overhead_edge(0)}).resolve()
+    a = plain.reserve(LinkPath.SBD, payload_bits=4, now_ticks=10,
+                      attribution=valid_attribution(LinkPath.SBD))
+    b = with_field.reserve(LinkPath.SBD, payload_bits=4, now_ticks=10,
+                           attribution=valid_attribution(LinkPath.SBD))
+    assert a == b
+
+
+def test_shared_channel_with_mixed_overhead_is_refused():
+    shared = make_channel()
+    overrides = {LinkPath.SBD: _overhead_edge(50, channel=shared),
+                 LinkPath.WBD: make_actual_edge(channel=shared)}
+    with pytest.raises(ValueError, match="transfer overhead differs"):
+        make_model_config(overrides).resolve()
+
+
+def test_with_transfer_overhead_helper_covers_the_dma_paths():
+    from decsim.links.link_profiles import (logical_reference_profile,
+                                            with_transfer_overhead)
+    card = with_transfer_overhead(
+        logical_reference_profile(), overhead_us=0.4,
+        source="Shao MICRO 2016 measured 400 ns per transaction")
+    assert card.wbd.transfer_overhead is not None
+    assert card.sbd.transfer_overhead is not None
+    assert card.qc.transfer_overhead is None
+    assert card.wbd.transfer_overhead.overhead_ticks == us(0.4)
+
+
+def test_yaml_card_key_reaches_the_edge(tmp_path):
+    from experiments.build_run import link_model
+    from experiments.experiment_config import load_experiment
+    yaml_text = (
+        "mode: weak_baseline\n"
+        "code_task: surface_code:rotated_memory_z\n"
+        "rounds_per_shot: 15\n"
+        "windowing: {scheme: sliding, commit_rounds: null, buffer_rounds: null}\n"
+        "sweep: [{physical_error_probability: [0.001], distance: [3],\n"
+        "         round_period_us: [1.0], shots: 1}]\n"
+        "controller: {clock: fridge, t_binary_availability_cycles: 0, t_pack_cycles: 0}\n"
+        "clocks: {fridge: 250.0, room: 250.0}\n"
+        "links:\n"
+        "  qc:  {latency_cycles: 250, clock: fridge, bits_per_cycle: null}\n"
+        "  cwb: {latency_cycles: 125, clock: fridge, bits_per_cycle: 400.0}\n"
+        "  wbd: {latency_cycles: 250, clock: fridge, bits_per_cycle: null,\n"
+        "        transfer_overhead_cycles: 100}\n"
+        "  dd:  {latency_cycles: 125, clock: fridge, bits_per_cycle: null}\n"
+        "  wdo: {latency_cycles: 250, clock: fridge, bits_per_cycle: null}\n"
+        "buffers: {buffer_0_size: null, buffer_1_size: null,\n"
+        "          packing_workspace_size: null}\n"
+        "decoder:\n"
+        "  weak:\n"
+        "    algorithm: 0.028\n"
+        "    units: 1\n"
+        "    unit_buffer_size: null\n"
+        "    engine: {clock: fridge, fetch_cycles_per_round: 1, release_cycles_per_job: 1}\n"
+        "pauli_frame: {clock: fridge, commit_cycles: 1}\n")
+    (tmp_path / "overhead_card.yaml").write_text(yaml_text)
+    card = link_model(load_experiment(tmp_path / "overhead_card.yaml"))
+    assert card.wbd.transfer_overhead is not None
+    assert card.wbd.transfer_overhead.overhead_ticks == us(0.4)
+    assert card.dd.transfer_overhead is None

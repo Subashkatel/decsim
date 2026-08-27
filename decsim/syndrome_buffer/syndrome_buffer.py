@@ -1,21 +1,20 @@
-"""Store syndrome rounds until every decoder request is finished with them.
+"""Store finished syndrome rounds until every consumer is done with them.
 
-A round uses one buffer slot. Fragments fill that slot, packing marks the round
-ready, and consumer holds keep it alive. The slot is freed after its last hold
-is released.
+The controller's syndrome packing assembles and forms each round; this store
+accepts only the finished packed round (``accept_packed_round``, its one
+intake), gives it a slot, and consumer holds keep it alive. The slot is freed
+after its last hold is released.
 
-This module owns data lifetime only. It does not schedule events, model links,
-or manage decoder queues.
+This module owns data lifetime only. It does not assemble fragments, schedule
+events, model links, or manage decoder queues.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from enum import Enum, auto
+from dataclasses import dataclass
 from typing import Optional
 
 from ..message import (
-    RetainedSyndromeFragment,
     SyndromeRoundPacket,
     same_stable_identity,
     stable_identity_order_key,
@@ -24,21 +23,19 @@ from ..message import (
 
 @dataclass(frozen=True)
 class SyndromeBufferingConfig:
-    """Optional capacity of the upstream syndrome buffer, in rounds.
+    """Optional capacities of the syndrome path, in rounds.
 
-    ``None`` means unbounded. Decoder-side storage is configured separately and
-    in different units by ``RunSpec.decoder_memory``.
+    ``upstream_packet_slots`` bounds Buffer 0's retention and
+    ``sb1_packet_slots`` bounds syndrome buffer 1's; ``packing_assembly_slots``
+    bounds the packing stage's assembly workspace (rounds in flight through
+    the stage at once), a separate physical memory with a separate sizing
+    law. ``None`` means unbounded. Decoder-side storage is configured
+    separately and in different units by ``RunSpec.decoder_memory``.
     """
 
     upstream_packet_slots: Optional[int] = None
-
-
-class SyndromeBufferRoundState(Enum):
-    """Current state of one upstream round allocation."""
-
-    ASSEMBLING = auto()
-    PACKING = auto()
-    PACKED_RETAINED = auto()
+    sb1_packet_slots: Optional[int] = None
+    packing_assembly_slots: Optional[int] = None
 
 
 # ---- consumer hold tokens: who keeps rounds in Buffer 0 and why
@@ -59,7 +56,7 @@ class PendingStrong:
 
 @dataclass(frozen=True)
 class CsdInput:
-    """Buffer 0 hold: rounds in flight to a strong decoder over CSD."""
+    """Buffer 0 hold: rounds in flight to a strong decoder over SBD."""
 
     request_key: DecoderRequestKey
 
@@ -121,58 +118,19 @@ class SyndromeBufferMetrics:
     live_allocations: int
     peak_live_allocations: int
     released_rounds: int
-    fragments_accepted: int
 
 
 @dataclass
 class _RoundSlot:
     identity: tuple
-    expected_fragments: int
     slot_index: int
-    state: SyndromeBufferRoundState = SyndromeBufferRoundState.ASSEMBLING
-    fragments: list = field(default_factory=list)
-    packet: Optional[SyndromeRoundPacket] = None
+    packet: SyndromeRoundPacket
 
 
 @dataclass(frozen=True)
 class _HoldRecord:
     round_identities: tuple
     referenced_operation_ids: frozenset
-
-
-def _merge_fragments_by_patch(fragments) -> tuple:
-    """Order fragments by index, merging parts from the same patch.
-
-    ``SyndromeRoundPacket`` requires distinct patch identities, so parts of
-    one patch concatenate bits and sizes in fragment-index order. Distinct
-    patches keep their own immutable fragments untouched.
-    """
-    merged: list = []
-    for fragment in sorted(fragments, key=lambda item: item.fragment_index):
-        prior_index = next(
-            (
-                index
-                for index, prior in enumerate(merged)
-                if same_stable_identity(prior.patch_id, fragment.patch_id)
-            ),
-            None,
-        )
-        if prior_index is None:
-            merged.append(fragment)
-            continue
-        prior = merged[prior_index]
-        bits = (
-            prior.bits + fragment.bits
-            if prior.bits is not None and fragment.bits is not None
-            else None
-        )
-        size_bits = (
-            prior.size_bits + fragment.size_bits
-            if prior.size_bits is not None and fragment.size_bits is not None
-            else None
-        )
-        merged[prior_index] = replace(prior, bits=bits, size_bits=size_bits)
-    return tuple(merged)
 
 
 class SyndromeBuffer:
@@ -196,14 +154,12 @@ class SyndromeBuffer:
         self._open_operations: set = set()
         self._closed_operations: set = set()
         self._tombstones: set[tuple] = set()
-        self._orphan_on_publish: set[tuple] = set()
         self._live_holds: dict = {}
         self._released_holds: dict = {}
         self._holders_by_round: dict[tuple, set] = {}
         self._allocations_total = 0
         self._peak_live_allocations = 0
         self._released_rounds = 0
-        self._fragments_accepted = 0
 
     # ------------------------------------------------------ operation scope
 
@@ -253,98 +209,44 @@ class SyndromeBuffer:
         for holder in stale:
             del self._released_holds[holder]
 
-    # ---------------------------------------------------- fragment assembly
+    # -------------------------------------------------------------- intake
 
-    def accept_fragment(
-        self,
-        fragment: RetainedSyndromeFragment,
-        *,
-        expected_fragments: int,
+    def accept_packed_round(
+        self, packet: SyndromeRoundPacket, *,
+        publication_tick: Optional[int],
     ) -> FragmentAdmission:
-        """Add one fragment. The first fragment allocates the round slot; a
-        full buffer refuses the first fragment of a new round."""
-        if fragment.operation_id not in self._open_operations:
+        """Admit one complete packed round: the store's only intake.
+
+        The controller's syndrome packing merged the fragments and formed
+        the detection events; this store gives the finished round a slot
+        and retains it for its consumers. If the buffer is full, the write
+        is refused before anything is modified, so a refusal leaves no
+        trace."""
+        identity = (packet.operation_id, packet.round_index)
+        if packet.operation_id not in self._open_operations:
             raise RuntimeError(
-                f"operation {fragment.operation_id!r} is not open"
+                f"operation {packet.operation_id!r} is not open"
             )
-        identity = (fragment.operation_id, fragment.round_index)
         if identity in self._tombstones:
             raise ValueError(
-                f"late fragment: round {identity!r} was already released"
+                f"late write: round {identity!r} was already released"
             )
-        slot = self._rounds.get(identity)
-        if slot is None:
-            if self.capacity is not None and not self._free_slot_indices:
-                return FragmentAdmission(identity, 0, expected_fragments, False, refused=True)
-            slot = self._allocate(identity, expected_fragments)
-        elif slot.state is not SyndromeBufferRoundState.ASSEMBLING:
-            raise ValueError(
-                f"fragment admission for round {identity!r} was retired at "
-                f"packing"
-            )
-        if expected_fragments != slot.expected_fragments:
-            raise ValueError("all fragments must declare the same count")
-        if fragment.fragment_index >= slot.expected_fragments:
-            raise ValueError("fragment index exceeds the declared count")
-        if any(
-            fragment.fragment_index == held.fragment_index
-            for held in slot.fragments
-        ):
-            raise ValueError("duplicate syndrome fragment index")
-        slot.fragments.append(fragment)
-        self._fragments_accepted += 1
-        if len(slot.fragments) == slot.expected_fragments:
-            slot.state = SyndromeBufferRoundState.PACKING
-        return FragmentAdmission(
-            round_identity=identity,
-            received_fragments=len(slot.fragments),
-            expected_fragments=slot.expected_fragments,
-            round_complete=slot.state is SyndromeBufferRoundState.PACKING,
-        )
-
-    def _allocate(self, identity, expected_fragments: int) -> _RoundSlot:
+        if identity in self._rounds:
+            raise ValueError(f"round {identity!r} was already written")
+        if self.capacity is not None and not self._free_slot_indices:
+            return FragmentAdmission(identity, 0, 1, False, refused=True)
         if self._free_slot_indices:
             slot_index = min(self._free_slot_indices)
             self._free_slot_indices.remove(slot_index)
         else:
             slot_index = len(self._slots)
             self._slots.append(None)
-        slot = _RoundSlot(identity, expected_fragments, slot_index)
+        slot = _RoundSlot(identity, slot_index, packet)
         self._slots[slot_index] = slot
         self._rounds[identity] = slot
         self._allocations_total += 1
         self._peak_live_allocations = max(
             self._peak_live_allocations, len(self._rounds)
-        )
-        return slot
-
-    # -------------------------------------------------------------- packing
-
-    def finish_packing(
-        self, round_identity, *, publication_tick: Optional[int] = None,
-        form=None,
-    ) -> SyndromeRoundPacket:
-        """Finish packing and make the retained round readable.
-
-        ``form`` turns the merged raw fragments of the complete round into
-        the fragments the buffer retains (detection events, at the decoder
-        input); without it the fragments are retained as they arrived."""
-        slot = self._rounds.get(round_identity)
-        if slot is None:
-            raise RuntimeError(
-                f"round {round_identity!r} holds no live allocation"
-            )
-        if slot.state is not SyndromeBufferRoundState.PACKING:
-            raise RuntimeError(
-                f"round {round_identity!r} is {slot.state.name}, not PACKING"
-            )
-        fragments = _merge_fragments_by_patch(slot.fragments)
-        if form is not None:
-            fragments = form(fragments)
-        packet = SyndromeRoundPacket(
-            operation_id=slot.identity[0],
-            round_index=slot.identity[1],
-            fragments=fragments,
         )
         stored_keys = []
         try:
@@ -359,33 +261,19 @@ class SyndromeBuffer:
         except BaseException:
             for key in reversed(stored_keys):
                 self.memory_model.evict(key)
+            self._slots[slot_index] = None
+            self._free_slot_indices.add(slot_index)
+            del self._rounds[identity]
             raise
-        slot.packet = packet
-        slot.fragments = []
-        slot.state = SyndromeBufferRoundState.PACKED_RETAINED
-        self._publication_ticks[slot.identity] = publication_tick
+        self._publication_ticks[identity] = publication_tick
         self.payloads_held += len(packet.fragments)
         self.peak_payloads = max(self.peak_payloads, self.payloads_held)
-        if slot.identity in self._orphan_on_publish:
-            self._orphan_on_publish.remove(slot.identity)
-            self._free_round(slot)
-        return packet
-
-    def read_retained_round(self, round_identity) -> SyndromeRoundPacket:
-        """The packed packet of a retained round."""
-        slot = self._rounds.get(round_identity)
-        if slot is None or slot.state is not (
-            SyndromeBufferRoundState.PACKED_RETAINED
-        ):
-            raise RuntimeError(
-                f"round {round_identity!r} is not packed and retained"
-            )
-        return slot.packet
+        return FragmentAdmission(identity, 1, 1, True)
 
     def retained_fragments(self, round_identity) -> Optional[tuple]:
         """Return retained fragments, or ``None`` before/after retention."""
         slot = self._rounds.get(round_identity)
-        if slot is None or slot.state is not SyndromeBufferRoundState.PACKED_RETAINED:
+        if slot is None:
             return None
         return slot.packet.fragments
 
@@ -393,8 +281,8 @@ class SyndromeBuffer:
         """Stamp a retained round when its priced publication reaches Buffer 0."""
         identity = round_identity
         slot = self._rounds.get(identity)
-        if slot is None or slot.state is not SyndromeBufferRoundState.PACKED_RETAINED:
-            raise RuntimeError(f"round {identity!r} is not packed and retained")
+        if slot is None:
+            raise RuntimeError(f"round {identity!r} is not retained")
         if self._publication_ticks[identity] is not None:
             raise RuntimeError(f"round {identity!r} was already published")
         self._publication_ticks[identity] = publication_tick
@@ -402,11 +290,6 @@ class SyndromeBuffer:
     def publication_tick(self, round_identity) -> Optional[int]:
         """Tick a retained round was published to the window manager, or None."""
         return self._publication_ticks.get(round_identity)
-
-    def round_state(self, round_identity) -> Optional[SyndromeBufferRoundState]:
-        """Slot state of a round, or None when it holds no live allocation."""
-        slot = self._rounds.get(round_identity)
-        return None if slot is None else slot.state
 
     # ------------------------------------------------------- consumer holds
 
@@ -509,12 +392,8 @@ class SyndromeBuffer:
             return
         del self._holders_by_round[identity]
         slot = self._rounds.get(identity)
-        if slot is None:
-            return
-        if slot.state is SyndromeBufferRoundState.PACKED_RETAINED:
+        if slot is not None:
             self._free_round(slot)
-        else:
-            self._orphan_on_publish.add(identity)
 
     def has_hold(self, holder) -> bool:
         """True while this holder token is live."""
@@ -550,35 +429,42 @@ class SyndromeBuffer:
         self._free_round(slot)
 
     def _free_round(self, slot: _RoundSlot) -> None:
-        if slot.packet is not None:
-            self.payloads_held -= len(slot.packet.fragments)
-            if self.memory_model is not None:
-                for fragment in slot.packet.fragments:
-                    self.memory_model.evict((
-                        slot.packet.operation_id, slot.packet.round_index,
-                        fragment.patch_id,
-                    ))
+        self.payloads_held -= len(slot.packet.fragments)
+        if self.memory_model is not None:
+            for fragment in slot.packet.fragments:
+                self.memory_model.evict((
+                    slot.packet.operation_id, slot.packet.round_index,
+                    fragment.patch_id,
+                ))
         self._publication_ticks.pop(slot.identity, None)
         del self._rounds[slot.identity]
         self._slots[slot.slot_index] = None
         self._free_slot_indices.add(slot.slot_index)
         self._tombstones.add(slot.identity)
-        self._orphan_on_publish.discard(slot.identity)
         self._released_rounds += 1
 
     # -------------------------------------------------------- observability
+
+    def held_rounds_description(self) -> str:
+        """One compact line of the store's contents, for the I/O trace."""
+        round_indices_by_operation: dict = {}
+        for operation_id, round_index in self._rounds:
+            round_indices_by_operation.setdefault(operation_id, []).append(round_index)
+        if not round_indices_by_operation:
+            return "empty"
+        parts = []
+        for operation_id in sorted(round_indices_by_operation, key=str):
+            round_indices = round_indices_by_operation[operation_id]
+            ranges = _round_ranges_text(sorted(round_indices))
+            parts.append(f"op {operation_id} rounds {ranges} "
+                         f"({len(round_indices)})")
+        return "; ".join(parts)
 
     def snapshot(self) -> SyndromeBufferSnapshot:
         """Frozen view of every slot, hold and tombstone."""
         ordered = sorted(
             self._rounds.values(), key=lambda slot: slot.slot_index
         )
-        by_state = {
-            state: tuple(
-                slot.identity for slot in ordered if slot.state is state
-            )
-            for state in SyndromeBufferRoundState
-        }
         return SyndromeBufferSnapshot(
             capacity=self.capacity,
             occupancy=len(self._rounds),
@@ -590,13 +476,9 @@ class SyndromeBuffer:
             identity_to_slot=tuple(
                 (slot.identity, slot.slot_index) for slot in ordered
             ),
-            assembling_identities=by_state[
-                SyndromeBufferRoundState.ASSEMBLING
-            ],
-            packing_identities=by_state[SyndromeBufferRoundState.PACKING],
-            retained_identities=by_state[
-                SyndromeBufferRoundState.PACKED_RETAINED
-            ],
+            assembling_identities=(),
+            packing_identities=(),
+            retained_identities=tuple(slot.identity for slot in ordered),
             hold_counts=tuple(
                 sorted(
                     (
@@ -618,5 +500,18 @@ class SyndromeBuffer:
             live_allocations=len(self._rounds),
             peak_live_allocations=self._peak_live_allocations,
             released_rounds=self._released_rounds,
-            fragments_accepted=self._fragments_accepted,
         )
+
+
+def _round_ranges_text(sorted_round_indices: list) -> str:
+    """[1, 2, 3, 7, 8] -> "1..3, 7..8"."""
+    ranges = []
+    range_start = previous = sorted_round_indices[0]
+    for round_index in sorted_round_indices[1:]:
+        if round_index != previous + 1:
+            ranges.append((range_start, previous))
+            range_start = round_index
+        previous = round_index
+    ranges.append((range_start, previous))
+    return ", ".join(f"{low}" if low == high else f"{low}..{high}"
+                     for low, high in ranges)

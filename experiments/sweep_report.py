@@ -1,4 +1,4 @@
-"""Shot measurements -> one row per sweep point -> sweep.csv and sweep.md.
+"""Shot measurements -> one row per sweep point -> sweep.csv and links.csv.
 
 The summary pools every decoded window of a point's shots for its medians
 and p99s, and averages the per-shot means for its means; the logical error
@@ -101,42 +101,9 @@ def write_csv(rows: list, path: Path) -> None:
         writer.writerows(scalar_rows)
 
 
-def table_lines(rows: list) -> list:
-    """The sweep.md table: full names, the same vocabulary as the terminal
-    summary; the point columns carry sweep.csv's column stems."""
-    head = (["physical error rate", "algorithm", "round period us",
-             "load", "logical error rate", "logical failures / shots",
-             "direct PyMatching failures", "mismatches vs direct PyMatching",
-             "windows per us", "rounds per us", "decoder utilization",
-             "max queued windows"]
-            + [f"{point} mean us" for point in POINTS]
-            + ["buffer0_ready_to_frame median us",
-               "buffer0_ready_to_frame p99 us"])
-    lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
-    for row in rows:
-        algorithm = row["algorithm"]
-        cells = [f"{row['physical_error_probability']:g}",
-                 algorithm if isinstance(algorithm, str) else f"{algorithm:g}",
-                 f"{row['round_period_us']:g}",
-                 f"{row['load']:.2f}",
-                 f"{row['logical_error_rate']:.3f}",
-                 f"{row['logical_failures']}/{row['shots']}",
-                 f"{row['direct_pymatching_failures']}",
-                 f"{row['prediction_mismatches_vs_direct']}",
-                 f"{row['throughput_windows_per_us']:.4f}",
-                 f"{row['throughput_rounds_per_us']:.3f}",
-                 f"{row['decoder_utilization']:.3f}",
-                 f"{row['max_queued_windows']}"]
-        cells += [f"{row[f'{point}_mean_us']:.3f}" for point in POINTS]
-        cells.append(f"{row['buffer0_ready_to_frame_median_us']:.3f}")
-        cells.append(f"{row['buffer0_ready_to_frame_p99_us']:.3f}")
-        lines.append("| " + " | ".join(cells) + " |")
-    return lines
-
-
 def terminal_lines(rows: list) -> list:
     """The terminal summary: one labeled block per sweep point, full names,
-    no abbreviations. The full record is sweep.csv and sweep.md."""
+    no abbreviations. The full record is sweep.csv."""
     blocks = []
     for row in rows:
         algorithm = row["algorithm"]
@@ -196,11 +163,10 @@ def link_rows(measurements: list) -> list:
 
 def write_report(rows: list, report_dir: Path,
                  measurements: Optional[list] = None) -> None:
-    """sweep.csv (every column), sweep.md (the table), and links.csv (the
-    per-link ledger totals) when the measurements are given."""
+    """sweep.csv (every column) and links.csv (the per-link ledger
+    totals) when the measurements are given."""
     report_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, report_dir / "sweep.csv")
-    (report_dir / "sweep.md").write_text("\n".join(table_lines(rows)) + "\n")
     if measurements:
         per_link = link_rows(measurements)
         with open(report_dir / "links.csv", "w", newline="") as handle:

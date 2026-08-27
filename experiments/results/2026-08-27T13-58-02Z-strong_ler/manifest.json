@@ -1,0 +1,170 @@
+{
+  "config_files": [
+    "experiments/results/2026-08-27T13-58-02Z-strong_ler/config/strong_ler.yaml",
+    "experiments/results/2026-08-27T13-58-02Z-strong_ler/config/strong_decoder_baseline.yaml"
+  ],
+  "resolved_config": {
+    "name": "strong_ler",
+    "mode": "strong_only",
+    "code_task": "surface_code:rotated_memory_z",
+    "rounds_per_shot": {
+      "fixed": null,
+      "per_distance": 10
+    },
+    "windowing": {
+      "scheme": "sliding",
+      "commit_rounds": null,
+      "buffer_rounds": null
+    },
+    "sweep": [
+      {
+        "physical_error_probabilities": [
+          0.0005,
+          0.001,
+          0.002,
+          0.003,
+          0.005,
+          0.007,
+          0.01
+        ],
+        "distances": [
+          3,
+          5,
+          7,
+          9,
+          11
+        ],
+        "round_periods_us": [
+          1.0
+        ],
+        "shots": 100
+      }
+    ],
+    "controller": {
+      "t_binary_availability_cycles": 0,
+      "t_pack_cycles": 0,
+      "clock": "fridge",
+      "t_binary_availability_us": 0.0,
+      "t_pack_us": 0.0
+    },
+    "clocks": {
+      "fridge": 250.0,
+      "room": 250.0
+    },
+    "links": {
+      "qc": {
+        "latency_cycles": 1,
+        "clock": "fridge",
+        "bits_per_cycle": null,
+        "channels": 1,
+        "transfer_overhead_cycles": null,
+        "latency_us": 0.004,
+        "bits_per_us": null,
+        "transfer_overhead_us": null
+      },
+      "cwb": {
+        "latency_cycles": 1,
+        "clock": "fridge",
+        "bits_per_cycle": null,
+        "channels": 1,
+        "transfer_overhead_cycles": null,
+        "latency_us": 0.004,
+        "bits_per_us": null,
+        "transfer_overhead_us": null
+      },
+      "csb": {
+        "latency_cycles": 1,
+        "clock": "room",
+        "bits_per_cycle": null,
+        "channels": 1,
+        "transfer_overhead_cycles": null,
+        "latency_us": 0.004,
+        "bits_per_us": null,
+        "transfer_overhead_us": null
+      },
+      "wbd": null,
+      "wsd": null,
+      "sbd": {
+        "latency_cycles": 1,
+        "clock": "room",
+        "bits_per_cycle": null,
+        "channels": 1,
+        "transfer_overhead_cycles": null,
+        "latency_us": 0.004,
+        "bits_per_us": null,
+        "transfer_overhead_us": null
+      },
+      "dd": {
+        "latency_cycles": 1,
+        "clock": "room",
+        "bits_per_cycle": null,
+        "channels": 1,
+        "transfer_overhead_cycles": null,
+        "latency_us": 0.004,
+        "bits_per_us": null,
+        "transfer_overhead_us": null
+      },
+      "wdo": null,
+      "do": {
+        "latency_cycles": 1,
+        "clock": "room",
+        "bits_per_cycle": null,
+        "channels": 1,
+        "transfer_overhead_cycles": null,
+        "latency_us": 0.004,
+        "bits_per_us": null,
+        "transfer_overhead_us": null
+      },
+      "oc": null,
+      "cq": null
+    },
+    "buffers": {
+      "buffer_0_size": null,
+      "buffer_1_size": null,
+      "packing_workspace_size": null
+    },
+    "decoder": {
+      "weak": null,
+      "strong": {
+        "algorithm": "belief_matching",
+        "units": 1,
+        "unit_buffer_size": null,
+        "engine": {
+          "clock": "room",
+          "fetch_cycles_per_round": 1,
+          "release_cycles_per_job": 10,
+          "frequency_mhz": 250.0
+        }
+      }
+    },
+    "trace": "off",
+    "trace_io": false,
+    "verify_windows": "none",
+    "idle_policy": "separate_decode_jobs",
+    "pauli_frame_commit_us": 0.004,
+    "config_files": [
+      "experiments/results/2026-08-27T13-58-02Z-strong_ler/config/strong_ler.yaml",
+      "experiments/results/2026-08-27T13-58-02Z-strong_ler/config/strong_decoder_baseline.yaml"
+    ]
+  },
+  "git": {
+    "commit": "990b888b2d5ffa1c8b24a6a3dd8afb895456914d",
+    "dirty": null
+  },
+  "container": "/scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/08_2026_qlx_alpha/qlx-0.2.0-alpha.sif",
+  "versions": {
+    "python": "3.11.11",
+    "stim": "1.16.0",
+    "pymatching": "2.4.0",
+    "numpy": "2.2.6"
+  },
+  "host": "della-vis2.princeton.edu",
+  "slurm_job_id": null,
+  "argv": [
+    "/scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/decsim/experiments/offline_run.py",
+    "merge",
+    "experiments/results/2026-08-27T13-58-02Z-strong_ler"
+  ],
+  "started_utc": "2026-08-27T13:58:02.220250+00:00",
+  "finished_utc": "2026-08-27T14:36:52.388287+00:00"
+}

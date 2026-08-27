@@ -1,0 +1,78 @@
+# The strong decoder baseline. Every key is documented in reference.yaml.
+
+mode: strong_only
+code_task: surface_code:rotated_memory_z
+rounds_per_shot: 10d
+
+windowing:
+  scheme: sliding
+  commit_rounds: null
+  buffer_rounds: null
+
+sweep:
+  - physical_error_probability: [0.001]                                   # timing
+    distance: [3]
+    round_period_us: [10.0, 5.0, 3.0, 2.0, 1.5, 1.0, 0.5]
+    shots: 10
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER
+    distance: [3]
+    round_period_us: [1.0]
+    shots: 2000
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=5
+    distance: [5]
+    round_period_us: [1.0]
+    shots: 300
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=7
+    distance: [7]
+    round_period_us: [1.0]
+    shots: 200
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER, d=9
+    distance: [9]
+    round_period_us: [1.0]
+    shots: 100
+
+controller:
+  clock: fridge
+  t_binary_availability_cycles: 0
+  t_pack_cycles: 0
+
+clocks:
+  fridge: 250.0
+  room: 250.0
+
+links:
+  qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  csb: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  sbd: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  dd:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  do:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  wbd: null
+  wdo: null
+  wsd: null
+  oc:  null
+  cq:  null
+
+buffers:
+  buffer_0_size: null
+  buffer_1_size: null
+  packing_workspace_size: null
+
+decoder:
+  strong:
+    algorithm: belief_matching
+    units: 1
+    unit_buffer_size: null
+    engine:
+      clock: room
+      fetch_cycles_per_round: 1
+      release_cycles_per_job: 10
+
+pauli_frame:
+  clock: fridge
+  commit_cycles: 1
+
+idle_policy: separate_decode_jobs
+verify_windows: none
+trace_io: false
+trace: off

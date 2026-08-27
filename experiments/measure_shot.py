@@ -118,8 +118,12 @@ def link_delay_by_window(transfers: list) -> dict:
 
 def cwb_delays_us(transfers: list) -> list:
     """Every round's controller-to-Buffer-0 delay, in microseconds."""
-    return [us(row["delivery_ticks"] - row["send_ticks"])
-            for row in transfers if row["path"] == "cwb"]
+    delays = []
+    for row in transfers:
+        if row["path"] != "cwb":
+            continue
+        delays.append(us(row["delivery_ticks"] - row["send_ticks"]))
+    return delays
 
 
 def qc_send_ticks(transfers: list) -> dict:
@@ -181,8 +185,9 @@ def collect_samples(completed, engine, mode: str) -> dict:
         decoded = frame_record is not None and window.t_done is not None
         if not decoded:
             continue
+        stage_records = engine.stage_records_for(op_id, window_id)
         stage_us = {record.stage: us(record.end_ticks - record.start_ticks)
-                    for record in engine.stage_records_for(op_id, window_id)}
+                    for record in stage_records}
         points = window_points_us(window, frame_record, stage_us, link_delay,
                                   qc_send, INPUT_LINK[mode], OUTPUT_LINK[mode])
         for point, value in points.items():

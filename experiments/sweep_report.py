@@ -136,7 +136,8 @@ def terminal_lines(rows: list) -> list:
             f"ready to frame commit: median "
             f"{row['buffer0_ready_to_frame_median_us']:.3f} us, "
             f"p99 {row['buffer0_ready_to_frame_p99_us']:.3f} us"]))
-    return "\n\n".join(blocks).split("\n")
+    joined_blocks = "\n\n".join(blocks)
+    return joined_blocks.split("\n")
 
 
 def link_rows(measurements: list) -> list:

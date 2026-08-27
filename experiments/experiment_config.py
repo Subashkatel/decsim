@@ -168,7 +168,7 @@ class ExperimentConfig:
     decoder: DecoderCard
     trace: str                      # off | print | file | both: the engine
                                     # narrator, live on screen and/or one log
-                                    # file per shot in results/<name>/trace/
+                                    # file per shot in the run dir's trace/
     trace_io: bool                  # add component I/O lines to the trace:
                                     # what each store and unit received,
                                     # holds, and emitted

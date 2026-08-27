@@ -130,10 +130,13 @@ def write_manifest(config: ExperimentConfig, run_dir: Path,
     code_task, distance, rounds, p, seed), so the manifest plus seeds are
     the raw data."""
     import os
+    # default=str turns Paths and cards into strings; the round trip
+    # leaves a plain json-safe dict
+    config_as_dict = dataclasses.asdict(config)
+    json_safe_config = json.loads(json.dumps(config_as_dict, default=str))
     manifest = {
         "config_files": [str(path) for path in config.config_files],
-        "resolved_config": json.loads(json.dumps(
-            dataclasses.asdict(config), default=str)),
+        "resolved_config": json_safe_config,
         "git": _git_state(),
         "container": os.environ.get("APPTAINER_CONTAINER")
                      or os.environ.get("SINGULARITY_CONTAINER"),

@@ -2,7 +2,7 @@
 
 The config is the experiment; this module only orchestrates. It runs every
 shot of every sweep point, summarizes one row per point, and writes
-sweep.csv, sweep.md and the figures to experiments/results/<name>/.
+sweep.csv, links.csv and the figures to experiments/results/<name>/.
 Rerunning the same config reproduces the same rows (seeds 0..shots-1 per
 point; only the wall-clock column varies).
 """
@@ -30,8 +30,8 @@ def resolved_description(config: ExperimentConfig) -> list:
     files = " <- ".join(str(path) for path in config.config_files)
     unit = config.active_decoder
     lines = [f"config: {files}",
-             f"mode: {config.mode}, {config.code_task}, distance "
-             f"{config.distance}, {config.rounds_per_shot} rounds per shot",
+             f"mode: {config.mode}, {config.code_task}, "
+             f"{config.rounds_per_shot} rounds per shot",
              f"windows: {config.windowing.scheme}",
              f"decoder: the {MODE_TIER[config.mode]} tier, algorithm "
              f"{unit.algorithm}, {unit.units} unit(s), "
@@ -40,6 +40,7 @@ def resolved_description(config: ExperimentConfig) -> list:
         lines.append(
             f"sweep block {index}: "
             f"p {list(block.physical_error_probabilities)}, "
+            f"d {list(block.distances)}, "
             f"round period {list(block.round_periods_us)} us, "
             f"{block.shots} shots")
     lines.append(f"trace: {config.trace}"
@@ -53,19 +54,21 @@ def run_sweep(config: ExperimentConfig) -> list:
     measurements = {}
     for block in config.sweep:
         for physical_error_probability in block.physical_error_probabilities:
-            for round_period_us in block.round_periods_us:
-                for seed in range(block.shots):
-                    shot_key = (physical_error_probability,
-                                round_period_us, seed)
-                    if shot_key in measurements:
-                        continue
-                    measurements[shot_key] = measure_shot(
-                        config,
-                        physical_error_probability=physical_error_probability,
-                        round_period_us=round_period_us, seed=seed)
-                print(f"p {physical_error_probability}, "
-                      f"round period {round_period_us} us: "
-                      f"{block.shots} shots done", file=sys.stderr)
+            for distance in block.distances:
+                for round_period_us in block.round_periods_us:
+                    for seed in range(block.shots):
+                        shot_key = (physical_error_probability, distance,
+                                    round_period_us, seed)
+                        if shot_key in measurements:
+                            continue
+                        measurements[shot_key] = measure_shot(
+                            config,
+                            physical_error_probability=physical_error_probability,
+                            distance=distance,
+                            round_period_us=round_period_us, seed=seed)
+                    print(f"p {physical_error_probability}, d {distance}, "
+                          f"round period {round_period_us} us: "
+                          f"{block.shots} shots done", file=sys.stderr)
     return list(measurements.values())
 
 

@@ -37,18 +37,20 @@ def percentile(values: list, fraction: float) -> float:
 
 
 def sweep_point_of(measurement: ShotMeasurement) -> tuple:
-    return (measurement.physical_error_probability,
+    return (measurement.distance,
+            measurement.physical_error_probability,
             measurement.algorithm,
             measurement.round_period_us)
 
 
 def summarize_point(group: list) -> dict:
     """One sweep point: means over seeds of the per-shot means, maxes of maxes."""
-    physical_error_probability, algorithm, round_period_us = \
+    distance, physical_error_probability, algorithm, round_period_us = \
         sweep_point_of(group[0])
     failures = sum(m.logical_failure for m in group)
     ler_low, ler_high = wilson_interval(failures, len(group))
-    row = {"physical_error_probability": physical_error_probability,
+    row = {"distance": distance,
+           "physical_error_probability": physical_error_probability,
            "algorithm": algorithm,
            "round_period_us": round_period_us,
            "shots": len(group),
@@ -83,7 +85,8 @@ def summarize_point(group: list) -> dict:
 def summarize(measurements: list) -> list:
     """One row per sweep point, in a stable order."""
     sweep_points = sorted({sweep_point_of(m) for m in measurements},
-                          key=lambda point: (point[0], str(point[1]), -point[2]))
+                          key=lambda point: (point[0], point[1],
+                                             str(point[2]), -point[3]))
     rows = []
     for sweep_point in sweep_points:
         group = [m for m in measurements if sweep_point_of(m) == sweep_point]
@@ -110,6 +113,7 @@ def terminal_lines(rows: list) -> list:
         algorithm_text = (algorithm if isinstance(algorithm, str)
                           else f"{algorithm:g} us")
         blocks.append("\n".join([
+            f"distance: {row['distance']}",
             f"physical error rate: {row['physical_error_probability']:g}",
             f"algorithm: {algorithm_text}",
             f"round period: {row['round_period_us']:g} us",
@@ -133,15 +137,17 @@ def link_rows(measurements: list) -> list:
     run's TrafficCounters; nothing here re-counts transfers."""
     rows = []
     sweep_points = sorted({sweep_point_of(m) for m in measurements},
-                          key=lambda point: (point[0], str(point[1]), -point[2]))
+                          key=lambda point: (point[0], point[1],
+                                             str(point[2]), -point[3]))
     for sweep_point in sweep_points:
         group = [m for m in measurements if sweep_point_of(m) == sweep_point]
-        physical_error_probability, algorithm, round_period_us = sweep_point
+        distance, physical_error_probability, algorithm, round_period_us = sweep_point
         for path in sorted(group[0].link_totals):
             per_shot = [m.link_totals[path] for m in group]
             transfers = statistics.fmean(shot["transfers"] for shot in per_shot)
             payload_bits = statistics.fmean(shot["payload_bits"] for shot in per_shot)
             rows.append({
+                "distance": distance,
                 "physical_error_probability": physical_error_probability,
                 "algorithm": algorithm,
                 "round_period_us": round_period_us,

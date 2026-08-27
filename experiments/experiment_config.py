@@ -122,12 +122,34 @@ class ControllerCard:
 
 @dataclass(frozen=True)
 class SweepBlock:
-    """One cross product of the two axes, `shots` seeds per point. The
+    """One cross product of the three axes, `shots` seeds per point. The
     algorithm is not a sweep axis: it is structure, fixed per unit on the
-    decoder card; comparing algorithms is comparing configs."""
+    decoder card; comparing algorithms is comparing configs. Distance is
+    an axis because the papers' LER plots are one curve per d (Toshio
+    2510.25222 sweeps d at fixed p; threshold plots sweep p per d)."""
     physical_error_probabilities: tuple
+    distances: tuple
     round_periods_us: tuple
     shots: int
+
+
+@dataclass(frozen=True)
+class RoundsCard:
+    """rounds_per_shot: a fixed count, or per-distance scaling ("10d" =
+    ten rounds per unit of code distance, the 10 d-round memory experiment
+    of Toshio 2510.25222 Fig. 4)."""
+    fixed: Optional[int]
+    per_distance: Optional[int]
+
+    def rounds_for(self, distance: int) -> int:
+        if self.fixed is not None:
+            return self.fixed
+        return self.per_distance * distance
+
+    def __str__(self) -> str:
+        if self.fixed is not None:
+            return str(self.fixed)
+        return f"{self.per_distance}d"
 
 
 @dataclass(frozen=True)
@@ -135,8 +157,7 @@ class ExperimentConfig:
     name: str                       # the yaml file's stem; names the results folder
     mode: str                       # weak_baseline | strong_only
     code_task: str                  # stim generator task
-    distance: int
-    rounds_per_shot: int
+    rounds_per_shot: RoundsCard     # fixed count or per-distance ("10d")
     windowing: WindowingCard
     sweep: tuple                    # of SweepBlock
     controller: ControllerCard
@@ -282,17 +303,41 @@ def _decoder_card(raw_decoder, clocks: dict, mode: str) -> DecoderCard:
 
 
 def _sweep_block(block: dict, index: int) -> SweepBlock:
-    unknown = set(block) - {"physical_error_probability", "round_period_us",
-                            "shots"}
+    unknown = set(block) - {"physical_error_probability", "distance",
+                            "round_period_us", "shots"}
     if unknown:
         raise ValueError(
             f"sweep block {index} does not know {sorted(unknown)}; its axes "
-            f"are physical_error_probability and round_period_us, plus shots "
-            f"(the algorithm lives on the decoder card, not in the sweep)")
+            f"are physical_error_probability, distance and round_period_us, "
+            f"plus shots (the algorithm lives on the decoder card, not in "
+            f"the sweep)")
+    distances = tuple(block["distance"])
+    for distance in distances:
+        if isinstance(distance, bool) or not isinstance(distance, int) \
+                or distance < 3:
+            raise ValueError(
+                f"sweep block {index} distance entries must be code "
+                f"distances >= 3, got {distance!r}")
     return SweepBlock(
         physical_error_probabilities=tuple(block["physical_error_probability"]),
+        distances=distances,
         round_periods_us=tuple(block["round_period_us"]),
         shots=block["shots"])
+
+
+def _rounds_card(value) -> RoundsCard:
+    if isinstance(value, bool):
+        raise ValueError(f"rounds_per_shot must be a positive count or "
+                         f"'<n>d', got {value!r}")
+    if isinstance(value, int):
+        if value < 1:
+            raise ValueError(f"rounds_per_shot must be positive, got {value}")
+        return RoundsCard(fixed=value, per_distance=None)
+    if isinstance(value, str) and value.endswith("d") \
+            and value[:-1].isdigit() and int(value[:-1]) > 0:
+        return RoundsCard(fixed=None, per_distance=int(value[:-1]))
+    raise ValueError(f"rounds_per_shot must be a positive count or '<n>d' "
+                     f"(rounds per unit of distance), got {value!r}")
 
 
 def _pauli_frame_commit_us(card: dict, clocks: dict) -> float:
@@ -369,8 +414,7 @@ def load_experiment(path) -> ExperimentConfig:
         name=path.stem,
         mode=mode,
         code_task=raw["code_task"],
-        distance=raw["distance"],
-        rounds_per_shot=raw["rounds_per_shot"],
+        rounds_per_shot=_rounds_card(raw["rounds_per_shot"]),
         windowing=WindowingCard(
             scheme=_require(windowing["scheme"], SCHEMES, "windowing.scheme"),
             commit_rounds=windowing["commit_rounds"],

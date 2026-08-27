@@ -15,8 +15,10 @@ mode: weak_baseline                # decode path: weak_baseline | strong_only.
                                    # buffer 1, moves inputs on sbd, results on do
 
 code_task: surface_code:rotated_memory_z   # stim generator task (real detector data)
-distance: 3                        # code distance d
-rounds_per_shot: 15                # QEC rounds per shot
+rounds_per_shot: 15                # QEC rounds per shot: a fixed count, or
+                                   # "<n>d" to scale with the swept distance
+                                   # ("10d" = the 10 d-round memory experiment,
+                                   # Toshio 2510.25222 Fig. 4)
 
 windowing:
   scheme: sliding                  # sliding | parallel | sandwich | naive_online
@@ -34,6 +36,7 @@ windowing:
 # never change the decoded answer (Gate 10).
 sweep:
   - physical_error_probability: [0.001]    # p on all four Stim noise channels
+    distance: [3]                          # code distance d; one LER curve per d
     round_period_us: [1.0]                 # the QPU's physical round period, in us:
                                            # a quantum-device cadence, deliberately
                                            # not a classical clock's cycles

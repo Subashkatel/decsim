@@ -2,8 +2,7 @@
 
 mode: strong_only
 code_task: surface_code:rotated_memory_z
-distance: 3
-rounds_per_shot: 20
+rounds_per_shot: 10d
 
 windowing:
   scheme: sliding
@@ -12,11 +11,13 @@ windowing:
 
 sweep:
   - physical_error_probability: [0.001]                                   # timing
+    distance: [3]
     round_period_us: [10.0, 5.0, 3.0, 2.0, 1.5, 1.0, 0.5]
     shots: 10
   - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER
+    distance: [3]
     round_period_us: [1.0]
-    shots: 200
+    shots: 500
 
 controller:
   clock: fridge

@@ -243,6 +243,7 @@ def plan(config_path: str, seeds_per_shard: int = None) -> Path:
                  run_dir / "slurm_offline.sh")
     write_manifest(config, run_dir, started_utc=_now_utc())
     (run_dir / "shards").mkdir()
+    (run_dir / "logs").mkdir()
     lines = []
     for distance, probability, shots in points:
         chunk = seeds_per_shard or shots
@@ -251,8 +252,11 @@ def plan(config_path: str, seeds_per_shard: int = None) -> Path:
             lines.append(f"{distance}\t{probability}"
                          f"\t{seed_start}\t{seed_count}")
     (run_dir / "shards.tsv").write_text("\n".join(lines) + "\n")
+    # --output at submit time sends every task's log into the run dir;
+    # the #SBATCH lines in the script cannot name the run dir themselves
     print(f"{run_dir}: {len(lines)} shards\n"
           f"submit: sbatch --array=1-{len(lines)} "
+          f"--output={run_dir}/logs/slurm-%A_%a.out "
           f"{run_dir}/slurm_offline.sh {run_dir}\n"
           f"then:   python -m experiments.offline_run merge {run_dir}")
     return run_dir

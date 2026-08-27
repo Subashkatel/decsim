@@ -61,7 +61,6 @@ def summarize_point(group: list) -> dict:
            "ler_wilson_high": ler_high,
            "direct_pymatching_failures": sum(m.direct_failure for m in group),
            "prediction_mismatches_vs_direct": sum(m.direct_mismatch for m in group),
-           "backlog_trajectory": group[0].backlog,
            "throughput_windows_per_us": statistics.fmean(m.throughput_windows_per_us for m in group),
            "throughput_rounds_per_us": statistics.fmean(m.throughput_rounds_per_us for m in group),
            "decoder_utilization": statistics.fmean(m.decoder_utilization for m in group),
@@ -95,13 +94,10 @@ def summarize(measurements: list) -> list:
 
 
 def write_csv(rows: list, path: Path) -> None:
-    """Every scalar column; the backlog trajectory is a list and stays out."""
-    scalar_rows = [{key: value for key, value in row.items()
-                    if key != "backlog_trajectory"} for row in rows]
     with open(path, "w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(scalar_rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
-        writer.writerows(scalar_rows)
+        writer.writerows(rows)
 
 
 def terminal_lines(rows: list) -> list:
@@ -170,7 +166,7 @@ def link_rows(measurements: list) -> list:
 def shot_rows(measurements: list) -> list:
     """One row per shot: every scalar field plus each point's per-shot
     mean, so any aggregate can be re-cut without rerunning."""
-    bulky_fields = {"samples", "means", "maxes", "backlog", "link_totals"}
+    bulky_fields = {"samples", "means", "maxes", "link_totals"}
     rows = []
     for measurement in measurements:
         row = {name: getattr(measurement, name)

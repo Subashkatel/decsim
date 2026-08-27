@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from .config import TimingConfig
-from .message import ExecutionProgram, RunSeedPathSegment
+from .message import (DecoderTier, ExecutionProgram,
+                      RunSeedPathSegment)
 from .links.link_traffic_report import traffic_json_value
 from .seeding import bind_run_seed
 
@@ -121,8 +122,9 @@ class CompletedRun:
     conditional_release: Any
     factory: Any
     syndrome_buffer: Any
-    syndrome_ingress: Any
+    syndrome_packing: Any
     pauli_frame: Any = None
+    syndrome_buffer_1: Any = None
 
 
 @dataclass
@@ -160,8 +162,8 @@ class RunSpec:
     syndrome_buffering: Optional[Any] = None
     decoder_memory: Optional["DecoderMemoryConfig"] = None
     pauli_frame: Optional[Any] = None
-    syndrome_ingress_policy: Optional[Any] = None
-    make_syndrome_ingress: Optional[Callable] = None
+    syndrome_packing_policy: Optional[Any] = None
+    make_syndrome_packing: Optional[Callable] = None
     make_decoder_memory_transfer: Optional[Callable] = None
     make_factory: Optional[Callable] = None
     make_metrics: Optional[Callable] = None
@@ -170,13 +172,14 @@ class RunSpec:
     seed: Optional[int] = 0
     _built: bool = field(default=False, init=False, repr=False)
 
-    def build(self, verbose: bool = False) -> CompletedRun:
+    def build(self, verbose: bool = False, io_trace: bool = False) -> CompletedRun:
         """Wire and run this configuration once; a RunSpec is one run."""
         if self._built:
             raise RuntimeError("RunSpec was already built; make a new one per run")
         self._built = True
         from .engine import Engine
-        return self._build_once(Engine(verbose=verbose), _root_seed(self.seed))
+        return self._build_once(Engine(verbose=verbose, io_trace=io_trace),
+                                _root_seed(self.seed))
 
     def _build_once(self, engine, root_seed) -> CompletedRun:
         """Wire the run from its resolved configuration, in dependency order,
@@ -190,7 +193,8 @@ class RunSpec:
         from .run_configuration import (check_factory_decode_service,
                                         resolve_run_configuration)
         from .syndrome_buffer.syndrome_buffer import SyndromeBuffer
-        from .controller.syndrome_ingress import SyndromeIngress
+        from .syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
+        from .controller.syndrome_packing import SyndromePacking
         from .windows.window_manager import WindowManager
 
         config = resolve_run_configuration(self, root_seed)
@@ -202,6 +206,13 @@ class RunSpec:
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,
             memory_model=config.memory_model)
+        uses_strong_store = (
+            escalation_policy.requires_strong_context
+            or escalation_policy.primary_tier is DecoderTier.STRONG)
+        syndrome_buffer_1 = (SyndromeBuffer1(
+            engine, links,
+            capacity_rounds=config.buffering.sb1_packet_slots)
+            if uses_strong_store else None)
         pauli_frame = (None if config.pauli_frame is None
                        else config.pauli_frame.resolve(engine))
 
@@ -218,7 +229,8 @@ class RunSpec:
             fault_model_requirement_for=config.router.fault_model_requirement_for,
             feedback_boundary_mode=config.feedback_boundary_mode,
             error_model_provider=config.error_model_provider,
-            syndrome_buffer=syndrome_buffer, pauli_frame=pauli_frame,
+            syndrome_buffer=syndrome_buffer,
+            syndrome_buffer_1=syndrome_buffer_1, pauli_frame=pauli_frame,
             retain_strong_context=escalation_policy.requires_strong_context,
             double_window=escalation_policy.double_window,
             capture_enabled=config.capture_switching_windows,
@@ -228,31 +240,40 @@ class RunSpec:
             check_strong_route=lambda weak_job, strong_job:
                 decoder_manager.check_strong_route(weak_job, strong_job),
             on_workload_complete=lambda: factory.shutdown())
-        syndrome_ingress = (
-            config.make_syndrome_ingress(engine, links, config.buffering,
+        syndrome_packing = (
+            config.make_syndrome_packing(engine, links, config.buffering,
                                          window_manager, syndrome_buffer)
-            if config.make_syndrome_ingress else SyndromeIngress(
+            if config.make_syndrome_packing else SyndromePacking(
                 engine, links=links, t_pack=timing.ticks("t_pack"),
-                ingress_context_capacity=config.buffering.upstream_packet_slots,
+                packing_context_capacity=config.buffering.packing_assembly_slots,
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager,
                 syndrome_buffer=syndrome_buffer,
-                policy=config.syndrome_ingress_policy,
+                syndrome_buffer_1=syndrome_buffer_1,
+                policy=config.syndrome_packing_policy,
                 detector_formation=config.device))
+        if config.make_syndrome_packing and syndrome_buffer_1 is not None:
+            syndrome_packing.syndrome_buffer_1 = syndrome_buffer_1
         decoder_memory_transfer = (
             config.make_decoder_memory_transfer(engine, links, config.buffering)
             if config.make_decoder_memory_transfer else None)
         decoder_manager = DecoderManager(
             engine, router=config.router, scheduler=config.scheduler,
             unit_pools=config.unit_pools, num_units=config.num_units,
-            bulk_strong=escalation_policy.bulk_strong, lane_policy=config.lane_policy,
+            bulk_strong=escalation_policy.bulk_strong,
+            lane_policy=config.lane_policy,
             capture_enabled=config.capture_switching_windows,
             decoder_memory_transfer=decoder_memory_transfer,
             decoder_memory=config.decoder_memory,
             escalation_policy=escalation_policy, services=window_manager.escalation,
+            service_gate=window_manager.begin_service_gate,
+            apply_service_boundary=window_manager.apply_service_boundary,
+            stage_admission=window_manager.stage_admission,
             on_window_decoded=window_manager.on_decode_done,
             on_strong_window_decoded=window_manager.on_strong_decode_done)
         window_manager.connect_idle_decode_demand_receiver(decoder_manager.submit_decode)
+        window_manager.release_service = decoder_manager.release_parked
+        window_manager.withdraw_decode = decoder_manager.withdraw_window
         factory = (config.make_factory(engine, decoder_manager)
                    if config.make_factory else _make_infinite(engine))
         if factory.engine is not engine:
@@ -271,7 +292,7 @@ class RunSpec:
         ) if uses_streams else NoFeedbackStreams()
         controller = Controller(
             engine, qpu=qpu, window_manager=window_manager,
-            syndrome_ingress=syndrome_ingress,
+            syndrome_packing=syndrome_packing,
             binary_availability_ticks=timing.ticks("t_binary_availability"),
             links=links, round_ticks=plan.round_ticks,
             code_geometry=plan.code_geometry,
@@ -302,7 +323,7 @@ class RunSpec:
             boundary_policy=config.boundary_policy,
             window_interaction=config.window_interaction,
             idle_policy=config.idle_policy,
-            conditional_release=conditional_release, syndrome_ingress=syndrome_ingress,
+            conditional_release=conditional_release, syndrome_packing=syndrome_packing,
             controller=controller, qpu=qpu,
             execution_runtime=execution_runtime,
             pauli_frame=pauli_frame,
@@ -329,16 +350,19 @@ class RunSpec:
                 f"the run ended with pending strong escalations: "
                 f"{window_manager.escalation.pending_escalations}")
         decoder_manager.check_decode_work_settled()
-        check_ingress_settled = getattr(syndrome_ingress, "check_work_settled", None)
-        if callable(check_ingress_settled):
-            check_ingress_settled()
+        check_packing_settled = getattr(syndrome_packing, "check_work_settled", None)
+        if callable(check_packing_settled):
+            check_packing_settled()
+        if syndrome_buffer_1 is not None:
+            syndrome_buffer_1.check_settled()
         result = capture_primary_result(
             engine, execution_runtime, window_manager, config.all_operations,
             metric_bindings, links, config.device)
         return CompletedRun(
             result, engine, window_manager, decoder_manager, execution_runtime,
             controller, qpu, conditional_release, factory,
-            syndrome_buffer, syndrome_ingress, pauli_frame=pauli_frame)
+            syndrome_buffer, syndrome_packing, pauli_frame=pauli_frame,
+            syndrome_buffer_1=syndrome_buffer_1)
 
 
 def _metric_bindings(metrics):
@@ -376,5 +400,6 @@ def _make_infinite(engine):
     return InfiniteFactory(engine)
 
 
-def simulate(run: RunSpec, verbose: bool = False) -> CompletedRun:
-    return run.build(verbose=verbose)
+def simulate(run: RunSpec, verbose: bool = False,
+             io_trace: bool = False) -> CompletedRun:
+    return run.build(verbose=verbose, io_trace=io_trace)

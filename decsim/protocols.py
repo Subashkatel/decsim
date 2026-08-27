@@ -11,7 +11,7 @@ from enum import Enum, auto
 from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
                     runtime_checkable)
 
-from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, Directive, OutcomeDirective, Submission,
+from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecoderTier, Directive, OutcomeDirective, Submission,
                       DecoderRequestKey,
                       DecodeOutcome, DecodeResult, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
@@ -110,6 +110,10 @@ class EscalationPolicy(Protocol):
     requires_strong_context: bool
     bulk_strong: bool
     double_window: bool
+    # the tier that decodes the plan's windows; every tier-dependent site
+    # (arrival authority, input store and link, request-key tier, output
+    # link) derives from this one declaration
+    primary_tier: DecoderTier
 
     def validate_declared_run(
         self,

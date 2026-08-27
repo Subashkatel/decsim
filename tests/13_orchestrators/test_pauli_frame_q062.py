@@ -24,6 +24,9 @@ class ManualEngine:
     def schedule(self, delay_ticks, callback, label=""):
         self.scheduled.append((self.now + delay_ticks, callback, label))
 
+    def log_io(self, who, message):
+        """The I/O trace is off in these tests; the frame still narrates."""
+
     def run_next(self):
         event_ticks, callback, _ = self.scheduled.pop(0)
         self.now = event_ticks
@@ -224,7 +227,7 @@ def test_default_toggle_is_absent_and_zero_cost_matches_the_inline_off_path():
     assert zero_engine.scheduled == []
 
 
-def test_final_weak_uses_the_sink_while_provisional_and_strong_paths_bypass_it():
+def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_it():
     job = SimpleNamespace(
         request_key=request(8), op_id=4, window_id=1,
         awaiting_strong_result=False,
@@ -280,7 +283,9 @@ def test_final_weak_uses_the_sink_while_provisional_and_strong_paths_bypass_it()
     strong = object.__new__(WindowManager)
     strong.engine = engine
     strong.pauli_frame = SimpleNamespace(
-        commit_weak_correction=lambda **kwargs: pytest.fail("strong result reached weak sink")
+        commit_weak_correction=lambda **kwargs: pytest.fail(
+            "the DO delivery leg must not touch the frame; the fold happens "
+            "at the strong commit")
     )
     strong.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
     strong._ops = {4: SimpleNamespace(name="logical")}
@@ -371,3 +376,85 @@ def test_short_provenance_header_round_trips_from_source_and_wheel(tmp_path):
     assert shipped_module.startswith(("\n".join(module_lines[:13]) + "\n").encode("ascii"))
     assert b"BEGIN EMBEDDED APACHE" not in shipped_module
 
+
+
+def test_escalated_strong_final_folds_into_the_frame_and_gates_the_commit():
+    """The strong result is the window's final correction: it folds into the
+    frame (the provisional weak bypassed it) and the priced write gates the
+    rest of the commit."""
+    engine = ManualEngine(now=50)
+    manager = object.__new__(WindowManager)
+    manager.engine = engine
+    frame_calls = []
+    manager.pauli_frame = SimpleNamespace(
+        commit_weak_correction=lambda **kwargs: frame_calls.append(kwargs)
+    )
+    manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
+    manager._ops = {4: SimpleNamespace(id=4, name="logical")}
+    manager.op_strong_commit_time = {}
+    manager._selected_request_keys = None
+    manager.speculative_recovery = SimpleNamespace(complete=lambda completion: False)
+    finished = []
+    manager._finish_strong_commit = (
+        lambda completion, key, result, window, op: finished.append(key))
+    completion = SimpleNamespace(
+        request_key=request(9, tier="strong", operation_id=4, window_id=1),
+        result=SimpleNamespace(logical_observables=(1,)),
+    )
+    WindowManager._commit_strong_decode_done(manager, completion)
+    assert frame_calls[0]["window_key"] == (4, 1)
+    assert frame_calls[0]["logical_observables"] == (1,)
+    assert frame_calls[0]["request_key"] is completion.request_key
+    assert finished == []            # the priced frame write gates the commit
+    frame_calls[0]["on_committed"]()
+    assert finished == [(4, 1)]
+
+
+def test_frameless_strong_commit_finishes_directly():
+    engine = ManualEngine(now=50)
+    manager = object.__new__(WindowManager)
+    manager.engine = engine
+    manager.pauli_frame = None
+    manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
+    manager._ops = {4: SimpleNamespace(id=4, name="logical")}
+    manager.op_strong_commit_time = {}
+    manager._selected_request_keys = None
+    manager.speculative_recovery = SimpleNamespace(complete=lambda completion: False)
+    finished = []
+    manager._finish_strong_commit = (
+        lambda completion, key, result, window, op: finished.append(key))
+    completion = SimpleNamespace(
+        request_key=request(9, tier="strong", operation_id=4, window_id=1),
+        result=SimpleNamespace(logical_observables=(1,)),
+    )
+    WindowManager._commit_strong_decode_done(manager, completion)
+    assert finished == [(4, 1)]
+
+
+def test_final_result_rides_its_tiers_output_link():
+    """WDO carries a weak final home; DO carries a strong-primary final."""
+    from decsim.links.links import LinkPath
+    from decsim.message import DecoderRequestKey, DecoderTier
+
+    for tier, expected_path in ((DecoderTier.WEAK, LinkPath.WDO),
+                                (DecoderTier.STRONG, LinkPath.DO)):
+        engine = ManualEngine(now=10)
+        manager = object.__new__(WindowManager)
+        manager.engine = engine
+        manager.pauli_frame = None
+        manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
+        manager._ops = {4: SimpleNamespace(name="logical")}
+        paths = []
+        def arrival(path, window, op, request_key, paths=paths):
+            paths.append(path)
+            return engine.now + 4
+        manager._window_link_arrival = arrival
+        manager._hand_on_boundary = lambda *args: None
+        manager._commit_decode_done = lambda job, result: None
+        job = SimpleNamespace(
+            request_key=DecoderRequestKey(4, 1, tier, 0),
+            op_id=4, window_id=1, awaiting_strong_result=False,
+        )
+        WindowManager.on_decode_done(
+            manager, job, SimpleNamespace(logical_observables=(0,)))
+        assert paths == [expected_path], tier

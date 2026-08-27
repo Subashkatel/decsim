@@ -27,6 +27,7 @@ from ..decoders.strong_escalation import NoStrongTier, StrongEscalation
 from ..links.links import LinkPath, RequestTransferRelation, TrafficAttribution
 from ..syndrome_buffer.syndrome_buffer import (CsdInput, DecoderInputHold, PendingStrong,
                                                PotentialStrong, RephaseGuard, SyndromeBuffer)
+from ..syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
 from .dynamic_windows import DynamicWindows
 from .speculative_recovery import SpeculativeRecovery
 from .committed_rounds import LogicalLedger
@@ -46,6 +47,7 @@ class WindowManager:
                  error_model_provider=None, retain_strong_context: bool,
                  double_window: bool,
                  syndrome_buffer: Optional[SyndromeBuffer] = None,
+                 syndrome_buffer_1: Optional[SyndromeBuffer1] = None,
                  pauli_frame=None,
                  capture_enabled: bool = False,
                  escalation_policy, submit_fn: Callable, check_strong_route: Callable,
@@ -74,23 +76,39 @@ class WindowManager:
         self.error_model_provider = error_model_provider
         self.retain_strong_context = retain_strong_context
         self.double_window = double_window
+        # jobs whose windows still owe a boundary at the decoder; the
+        # boundary receive path releases them (wired by the run)
+        self.release_service: Optional[Callable] = None
         self._next_decoder_request_sequence = 0
         self._selected_request_keys = {} if capture_enabled else None
 
         self.escalation_policy = escalation_policy
+        self.primary_tier = escalation_policy.primary_tier
         self._idle_decode_demand_receiver = None
+        self.withdraw_decode = None      # wired to the decoder manager
         self.submit_fn = submit_fn                   # (job, reserve_transfer) -> None
         self.escalation = (StrongEscalation(self, check_strong_route)
                            if retain_strong_context else NoStrongTier())
         self.on_workload_complete = on_workload_complete
 
         self.syndrome_buffer = syndrome_buffer if syndrome_buffer is not None else SyndromeBuffer()
+        uses_strong_store = (retain_strong_context
+                             or self.primary_tier is DecoderTier.STRONG)
+        if syndrome_buffer_1 is None and uses_strong_store:
+            syndrome_buffer_1 = SyndromeBuffer1(engine, links)
+        self.syndrome_buffer_1 = syndrome_buffer_1
+        if self.syndrome_buffer_1 is not None:
+            # the room-side store's arrival signal: always the terminal-slab
+            # listener; the readiness authority too when the strong tier is
+            # primary (readiness listens to the store its lane reads)
+            self.syndrome_buffer_1.on_round_stored = self._on_room_round_stored
         self.lifecycle = DynamicWindows(self)
 
         self._ops: dict[int, Operation] = {}
         self.rounds_arrived: dict[int, int] = {}
         self.memory_rounds: dict[int, int] = {}
         self.memory_rounds_total = 0
+        self.memory_filled_buffer_windows = 0
 
         self.windows: dict[tuple, Window] = {}
         self.op_windows: dict[int, list] = {}
@@ -226,37 +244,64 @@ class WindowManager:
             "upstream": (
                 buffering_plan.minimum_live_rounds,
                 buffering_plan.sufficient_live_rounds,
-            )
+            ),
+            "sb1": (
+                buffering_plan.sb1_minimum_live_rounds,
+                buffering_plan.sb1_sufficient_live_rounds,
+            ),
         }
+        strong_is_primary = self.primary_tier is DecoderTier.STRONG
         capacity = self.syndrome_buffer.capacity
-        minimum = buffering_plan.minimum_live_rounds
+        minimum = () if strong_is_primary else buffering_plan.minimum_live_rounds
         if capacity is not None and capacity < len(minimum):
             raise ValueError(
                 f"upstream syndrome buffer needs {len(minimum)} packet slots, "
                 f"got {capacity}"
             )
+        if self.syndrome_buffer_1 is not None:
+            sb1_capacity = self.syndrome_buffer_1.capacity_rounds
+            sb1_minimum = buffering_plan.sb1_minimum_live_rounds
+            if strong_is_primary:
+                # the plan's window reads live on the room-side store
+                sb1_minimum = buffering_plan.minimum_live_rounds
+            if sb1_capacity is not None and sb1_capacity < len(sb1_minimum):
+                raise ValueError(
+                    f"syndrome buffer 1 needs {len(sb1_minimum)} packet "
+                    f"slots, got {sb1_capacity}"
+                )
         self._register_planned_holds(buffering_plan)
+
+    @property
+    def primary_store(self):
+        """The store the primary tier reads: Buffer 0 for the weak lane,
+        syndrome buffer 1 for a strong-primary plan."""
+        if self.primary_tier is DecoderTier.STRONG:
+            return self.syndrome_buffer_1
+        return self.syndrome_buffer
 
     def _register_planned_holds(self, plan) -> None:
         for owner, identities in plan.weak_holds:
-            self.syndrome_buffer.register_hold(owner, identities)
+            self.primary_store.register_hold(owner, identities)
         for owner, identities in plan.potential_holds:
-            self.syndrome_buffer.register_hold(owner, identities)
+            self.syndrome_buffer_1.register_hold(owner, identities)
 
-    def _transfer_retention_hold(self, previous, replacement) -> tuple:
-        keys = self.syndrome_buffer.hold_round_identities(previous)
-        self.syndrome_buffer.transfer_hold(previous, replacement)
+    def _transfer_retention_hold(self, previous, replacement, store=None) -> tuple:
+        store = self.syndrome_buffer if store is None else store
+        keys = store.hold_round_identities(previous)
+        store.transfer_hold(previous, replacement)
         return keys
 
-    def _release_hold_if_live(self, owner) -> None:
-        if self.syndrome_buffer.has_hold(owner):
-            self.syndrome_buffer.release_hold(owner)
+    def _release_hold_if_live(self, owner, store=None) -> None:
+        store = self.syndrome_buffer if store is None else store
+        if store.has_hold(owner):
+            store.release_hold(owner)
 
     def _transfer_potential_to_pending(
         self, window_key, request_key,
     ) -> tuple:
         return self._transfer_retention_hold(
-            PotentialStrong(window_key), PendingStrong(request_key))
+            PotentialStrong(window_key), PendingStrong(request_key),
+            self.syndrome_buffer_1)
 
     def _build_window_error_models(self) -> None:
         """Ask the syndrome source for per-window detector error models."""
@@ -285,7 +330,7 @@ class WindowManager:
         strong = self._strong_context_read_keys(window, weak)
         self.syndrome_buffer.register_hold(key, weak)
         if self.retain_strong_context:
-            self.syndrome_buffer.register_hold(PotentialStrong(key), weak + strong)
+            self.syndrome_buffer_1.register_hold(PotentialStrong(key), weak + strong)
 
     def _read_keys_for_bounds(self, op_id, start_round: int, buffer_hi: int,
                               window: Optional[Window] = None) -> list:
@@ -316,20 +361,97 @@ class WindowManager:
             window.op_id, window.start_round, window.buffer_hi, window)
         strong = self._strong_context_read_keys(window, weak)
         potential = PotentialStrong(key)
-        if self.syndrome_buffer.has_hold(potential):
-            self.syndrome_buffer.replace_hold(
+        if (self.syndrome_buffer_1 is not None
+                and self.syndrome_buffer_1.has_hold(potential)):
+            self.syndrome_buffer_1.replace_hold(
                 potential, weak + strong)
         self.syndrome_buffer.replace_hold(key, weak)
 
+    def withdraw_window_decode(self, key: tuple) -> None:
+        """Withdraw one window's early-shipped, unstarted decode and reset
+        its submission bookkeeping so a replay resubmits it fresh."""
+        window = self.windows[key]
+        self.withdraw_decode(key)
+        window.queued = False
+        window.blocked_logged = False
+        window.t_queued = None
+        window.t_dispatch = None
+        window.service_began = False
+
+    def stage_admission(self, job: DecodeJob) -> bool:
+        """May this boundary-blocked job occupy an input slot yet? Only when
+        every unmet dependency is already resolving without needing a slot
+        of its own: decoded, decoding, or itself dispatched with resolving
+        dependencies all the way down. Admitted earlier, a job like the Tan
+        seam (which reads both neighbors) squats a slot against the very
+        decode that must release it."""
+        window = job.window
+        if window is None or window.deps_remaining <= 0:
+            return True
+        visiting = {(window.op_id, window.k)}
+        return all(self._resolving_without_new_slots(dep, visiting)
+                   for dep in window.deps)
+
+    def _resolving_without_new_slots(self, key: tuple, visiting: set) -> bool:
+        if key in visiting:
+            return False
+        if key in self.absorbed_windows:
+            return True
+        window = self.windows.get(key)
+        if window is None:
+            return True
+        if window.t_done is not None or window.service_began:
+            return True
+        if window.t_dispatch is None:
+            return False
+        return all(self._resolving_without_new_slots(dep, visiting | {key})
+                   for dep in window.deps)
+
+    def begin_service_gate(self, job: DecodeJob) -> bool:
+        """May this landed job start its decode? False parks the job in its
+        slot until its window's last boundary arrives. Pure check: the mask
+        itself is applied by apply_service_boundary at the actual start, so
+        a re-check can never fold the boundary twice."""
+        window = job.window
+        if window is None:
+            return True
+        return window.deps_remaining <= 0
+
+    def apply_service_boundary(self, job: DecodeJob) -> None:
+        """XOR the window's boundary mask into the landed decoder input.
+
+        The unit's stored copy stays raw (cudaq-x keeps raw rounds and
+        applies syndrome_mods at window assembly); the job's input view is
+        replaced with the masked rounds the decode will read."""
+        window = job.window
+        if window is None:
+            return
+        state = window.boundary_in
+        if not state or job.decoder_input is None:
+            return
+        window_info = WindowInfo.from_window(window)
+        masked_rounds = []
+        for round_input in job.decoder_input.rounds:
+            fragments = tuple(
+                self.window_interaction.apply_boundary(
+                    state, window_info, fragment, round_input.round_index)
+                for fragment in round_input.fragments)
+            masked_rounds.append(replace(round_input, fragments=fragments))
+        job.decoder_input = replace(
+            job.decoder_input, rounds=tuple(masked_rounds))
+
     def _require_retained_payloads(
-        self, round_keys: list, purpose: str,
+        self, round_keys: list, purpose: str, store=None,
     ) -> None:
         """Reject a new consumer if any already-arrived input was released."""
+        store = self.syndrome_buffer if store is None else store
+        arrived = (self.rounds_arrived if store is self.syndrome_buffer
+                   else store.rounds_arrived)
         missing = [
             round_key for round_key in round_keys
-            if (not self.syndrome_buffer.has_operation(round_key[0])
-                or (round_key[1] <= self.rounds_arrived.get(round_key[0], 0)
-                    and self.syndrome_buffer.retained_fragments(round_key) is None))
+            if (not store.has_operation(round_key[0])
+                or (round_key[1] <= arrived.get(round_key[0], 0)
+                    and store.retained_fragments(round_key) is None))
         ]
         if missing:
             raise RuntimeError(
@@ -415,11 +537,18 @@ class WindowManager:
                 f"unknown syndrome operation {packet.operation_id!r}"
             ) from error
         self._store_payload(packet, op)
-        self.lifecycle.maybe_update(op.id)
-        self.escalation.after_arrival(op.id)
-        self.check_windows_for_operation(op.id)
-        for predecessor_id in op.decoder_boundary_predecessors:
-            self.check_windows_for_operation(predecessor_id)
+        if self.primary_tier is not DecoderTier.STRONG:
+            # Buffer 0 publication is the readiness authority for the weak lane
+            self._count_arrival(op, packet.round_index)
+            self.lifecycle.maybe_update(op.id)
+            self.escalation.after_arrival(op.id)
+            self._wake_windows(op)
+        # a round whose every consumer already resolved (an absorbed window's
+        # tail, or every round of a strong-primary plan) frees its Buffer 0
+        # slot on arrival, the same drop-on-arrival rule syndrome buffer 1
+        # applies
+        self.syndrome_buffer.release_round_if_unheld(
+            (packet.operation_id, packet.round_index))
 
     def accept_window_input(self, packet: SyndromeRoundPacket) -> bool:
         """Publish one already-retained upstream round to window readiness.
@@ -433,7 +562,7 @@ class WindowManager:
         return True
 
     def accept_feedback_memory_round(self, source_operation_id) -> None:
-        """Accept one standalone feedback-memory notification after CWD."""
+        """Accept one standalone feedback-memory notification after WBD."""
         self.on_memory_round(source_operation_id)
 
     def _store_payload(
@@ -463,13 +592,33 @@ class WindowManager:
             raise RuntimeError(
                 "syndrome packet was not published from the retained "
                 "syndrome buffer round")
+
+    def _count_arrival(self, op: Operation, round_index: int) -> None:
+        """Advance the readiness arrival counter; the authority calls this."""
         self.rounds_arrived[op.id] = max(
             self.rounds_arrived[op.id],
-            packet.round_index,
+            round_index,
         )
         self.engine.log("DecoderCluster",
-                        f"round {packet.round_index} of {op.name} arrived "
+                        f"round {round_index} of {op.name} arrived "
                         f"(op now has rounds 1..{self.rounds_arrived[op.id]})")
+
+    def _wake_windows(self, op: Operation) -> None:
+        self.check_windows_for_operation(op.id)
+        for predecessor_id in op.decoder_boundary_predecessors:
+            self.check_windows_for_operation(predecessor_id)
+
+    def _on_room_round_stored(self, op_id) -> None:
+        """Syndrome buffer 1 stored a round: wake the strong tier's
+        listeners, and drive readiness when the strong tier is primary."""
+        self.escalation.after_arrival(op_id)
+        if self.primary_tier is not DecoderTier.STRONG:
+            return
+        op = self._ops[op_id]
+        stored_through = self.syndrome_buffer_1.rounds_arrived.get(op_id, 0)
+        self._count_arrival(op, stored_through)
+        self.lifecycle.maybe_update(op_id)
+        self._wake_windows(op)
 
     def on_memory_round(self, op_id: int) -> None:
         """Record an idle/memory round and re-check waiting windows."""
@@ -480,6 +629,20 @@ class WindowManager:
                         f"(idle buffer rounds: {self.memory_rounds[op_id]})")
         for k in range(self.window_count[op_id]):
             self.check_window((op_id, k))
+
+    def _note_memory_filled_buffer(self, window: Window, op) -> None:
+        """A trailing buffer satisfied by memory rounds alone releases on
+        time with no syndrome content behind it; the flag keeps that
+        approximation visible wherever the window's result is read."""
+        from .windowing_schemes import buffer_filled_by_memory_only
+        if not buffer_filled_by_memory_only(window, self._window_readiness(window)):
+            return
+        window.buffer_filled_by_memory = True
+        self.memory_filled_buffer_windows += 1
+        self.engine.log(
+            "DecoderCluster",
+            f"{op.name} W{window.k} buffer filled by memory rounds "
+            f"(time-only, no syndrome content)")
 
     def prepend_idle_rounds(self, op_id: int, round_count: int) -> None:
         """Fold pre-gate idle rounds into a batch-style op when the scheme asks."""
@@ -510,13 +673,15 @@ class WindowManager:
             )
         if not self._window_data_complete(window):
             return
+        op = self._ops[window.op_id]
         if window.t_data_complete is None:
             window.t_data_complete = self.engine.now
-        op = self._ops[window.op_id]
-        if window.deps_remaining > 0:
-            if not window.blocked_logged:
-                window.blocked_logged = True
-            return
+            self._note_memory_filled_buffer(window, op)
+        if window.deps_remaining > 0 and not window.blocked_logged:
+            # raw rounds ship now; the boundary is XORed into the landed
+            # input at the decoder when it arrives (qLDPC net_error /
+            # cudaq-x syndrome_mods / LILLIPUT's state register)
+            window.blocked_logged = True
         self._submit_window_decode(key, window, op)
 
     def _window_data_complete(self, w: Window) -> bool:
@@ -587,10 +752,11 @@ class WindowManager:
             tail_closed=self._closed_boundary_round_for_window(window) is not None,
         )
 
-    def _stamp_first_round_tick(self, window: Window) -> None:
+    def _stamp_first_round_tick(self, window: Window, store=None) -> None:
         """Retain arrival provenance for latency accounting."""
+        store = self.syndrome_buffer if store is None else store
         if window.t_first_round is None:
-            window.t_first_round = self.syndrome_buffer.publication_tick((window.op_id, window.start_round))
+            window.t_first_round = store.publication_tick((window.op_id, window.start_round))
 
     def _new_request_key(
         self, operation_id, window_id: int, tier: DecoderTier,
@@ -600,32 +766,34 @@ class WindowManager:
         self._next_decoder_request_sequence += 1
         return request_key
 
-    def _bind_decoder_input_hold(self, job: DecodeJob, previous_owner) -> None:
+    def _bind_decoder_input_hold(self, job: DecodeJob, previous_owner,
+                                 store=None) -> None:
         """Atomically transfer upstream retention to an admitted input request.
 
         The callback is invoked only after decoder memory materialization, so
         overlapping rounds remain upstream until their last consumer transfer.
 
         """
+        store = self.syndrome_buffer if store is None else store
         owner = DecoderInputHold(job.request_key)
         if previous_owner != owner:
-            if self.syndrome_buffer.has_hold(previous_owner):
-                self.syndrome_buffer.transfer_hold(previous_owner, owner)
+            if store.has_hold(previous_owner):
+                store.transfer_hold(previous_owner, owner)
             else:
                 identities = tuple(dict.fromkeys(
                     (fragment.operation_id, fragment.round_index)
                     for fragment in job.payloads
                 ))
-                self.syndrome_buffer.register_hold(owner, identities)
-        job.input_hold = lambda token=owner: self.syndrome_buffer.release_hold(token)
+                store.register_hold(owner, identities)
+        job.input_hold = lambda token=owner, held_in=store: held_in.release_hold(token)
 
     def _submit_window_decode(self, key: tuple, window: Window,
                               op: Operation) -> None:
         """Build the weak job, ask the escalation_policy, and enqueue its submissions."""
-        self._stamp_first_round_tick(window)
+        self._stamp_first_round_tick(window, self.primary_store)
         window.t_queued = self.engine.now
         request_key = self._new_request_key(
-            window.op_id, window.k, DecoderTier.WEAK)
+            window.op_id, window.k, self.primary_tier)
         job = DecodeJob(
                         op_id=window.op_id, window_id=window.k,
                         n_rounds=(
@@ -634,7 +802,8 @@ class WindowManager:
                         ),
                         ready_time=self.engine.now,
                         spatial_nodes=self._resolved_operations[op.id].spatial_node_count,
-                        payloads=self._assemble_payloads(window),
+                        payloads=self._assemble_payloads(
+                            window, self.primary_store),
                         dem=self.window_models.get(key),
                         code=(
                             self._resolved_operations[
@@ -655,17 +824,23 @@ class WindowManager:
                     self.submit_fn(submission.job,
                                    lambda delay=submission.delay_ticks: delay)
                     continue
-                self._bind_decoder_input_hold(submission.job, key)
-                weak_job = submission.job
-                payload_bits = self._job_payload_bits(weak_job)
+                self._bind_decoder_input_hold(
+                    submission.job, key, self.primary_store)
+                primary_job = submission.job
+                payload_bits = self._job_payload_bits(primary_job)
                 extra_delay = submission.delay_ticks
+                # unit assigned: move the window from the primary store into
+                # its memory, over the primary tier's input link
+                input_path = (LinkPath.WBD
+                              if self.primary_tier is DecoderTier.WEAK
+                              else LinkPath.SBD)
 
-                def reserve_transfer(job=weak_job, bits=payload_bits, extra=extra_delay) -> int:
-                    # Unit assigned: move the window from Buffer 0 into its memory (CWD).
-                    return (self._link_arrival(LinkPath.CWD, job, payload_bits=bits)
+                def reserve_transfer(job=primary_job, bits=payload_bits,
+                                     extra=extra_delay, path=input_path) -> int:
+                    return (self._link_arrival(path, job, payload_bits=bits)
                             - self.engine.now + extra)
 
-                self.submit_fn(weak_job, reserve_transfer)
+                self.submit_fn(primary_job, reserve_transfer)
             else:
                 if submission.delay_ticks != 0:
                     raise ValueError(
@@ -673,18 +848,22 @@ class WindowManager:
                     )
                 self.escalation.submit_strong(submission.job)
 
-    def _assemble_payloads(self, w: Window) -> list:
-        """Collect this window's payloads, including successor overflow rounds."""
+    def _assemble_payloads(self, w: Window, store=None) -> list:
+        """Collect this window's raw payloads, including successor overflow
+        rounds. The boundary is never folded here: the mask is XORed into
+        the landed input at the decoder when the decode starts."""
+        store = self.syndrome_buffer if store is None else store
+        boundary_state = None
         operation_rounds = self._effective_round_count_for_window(w.op_id, w)
         end_round = min(w.buffer_hi, operation_rounds)
         payloads = []
         window_info = WindowInfo.from_window(w)
         for round_index in range(w.start_round, end_round + 1):
-            frags = self.syndrome_buffer.retained_fragments((w.op_id, round_index))
+            frags = store.retained_fragments((w.op_id, round_index))
             if frags is not None:
                 payloads += [
                     self.window_interaction.apply_boundary(
-                        w.boundary_in, window_info, fragment,
+                        boundary_state, window_info, fragment,
                         round_index)
                     for fragment in sorted(
                         frags,
@@ -697,11 +876,11 @@ class WindowManager:
         if overflow > 0:
             for successor_id in self.successors.get(w.op_id, []):
                 for round_index in range(1, overflow + 1):
-                    frags = self.syndrome_buffer.retained_fragments((successor_id, round_index))
+                    frags = store.retained_fragments((successor_id, round_index))
                     if frags is not None:
                         payloads += [
                             self.window_interaction.apply_boundary(
-                                w.boundary_in, window_info, fragment,
+                                boundary_state, window_info, fragment,
                                 operation_rounds + round_index)
                             for fragment in sorted(
                                 frags,
@@ -832,8 +1011,13 @@ class WindowManager:
             return
         op = self._ops[job.op_id]
         self._hand_on_boundary(job, res, window, op)
+        # the result rides its tier's output link home: WDO for the weak
+        # tier, DO for a strong-primary decode
+        output_path = (LinkPath.WDO
+                       if job.request_key.tier is DecoderTier.WEAK
+                       else LinkPath.DO)
         delivery_ticks = self._window_link_arrival(
-            LinkPath.WDO,
+            output_path,
             window,
             op,
             job.request_key,
@@ -841,11 +1025,12 @@ class WindowManager:
         self.engine.schedule(
             delivery_ticks - self.engine.now,
             lambda: self._sink_weak_correction(job, res),
-            label=f"weak result {op.name}W{window.k}->pauli frame",
+            label=f"{job.request_key.tier.value} result "
+                  f"{op.name}W{window.k}->pauli frame",
         )
 
     def _sink_weak_correction(self, job: DecodeJob, res: DecodeResult) -> None:
-        """Charge and install one final weak correction before committing it."""
+        """Charge and install one final correction before committing it."""
         if self.pauli_frame is None:
             self._commit_decode_done(job, res)
             return
@@ -867,9 +1052,10 @@ class WindowManager:
         self.lifecycle.update_committed_round_count(op.id)
         if job.awaiting_strong_result:       # provisional: boundary leaves with the commit
             self._hand_on_boundary(job, res, window, op)
-        if not job.awaiting_strong_result:
+        if (not job.awaiting_strong_result
+                and self.syndrome_buffer_1 is not None):
             self._release_hold_if_live(
-                PotentialStrong(key))
+                PotentialStrong(key), self.syndrome_buffer_1)
         self.escalation.after_weak_commit(key)
         self.speculative_recovery.after_commit()
         self._finish_operation_if_ready(op)
@@ -1003,6 +1189,23 @@ class WindowManager:
             self._selected_request_keys[key] = completion.request_key
         if self.speculative_recovery.complete(completion):
             return
+        if self.pauli_frame is None:
+            self._finish_strong_commit(completion, key, result, window, op)
+            return
+        # the strong result is this window's FINAL correction: it folds into
+        # the frame like any final result (the provisional weak bypassed it),
+        # and the priced frame write gates the rest of the commit
+        self.pauli_frame.commit_weak_correction(
+            window_key=key,
+            logical_observables=result.logical_observables,
+            request_key=completion.request_key,
+            on_committed=lambda: self._finish_strong_commit(
+                completion, key, result, window, op),
+        )
+
+    def _finish_strong_commit(self, completion: StrongDecodeCompletion,
+                              key: tuple, result: DecodeResult,
+                              window: Window, op: Operation) -> None:
         if result.logical_observables is not None:
             self.ledger.replace_prediction(
                 key,
@@ -1050,11 +1253,17 @@ class WindowManager:
             return
         if self.syndrome_buffer.has_live_operation_reference(op.id):
             return
+        if (self.syndrome_buffer_1 is not None
+                and self.syndrome_buffer_1.has_live_operation_reference(op.id)):
+            return
         if (self._committed_per_op.get(op.id, 0) == self.window_count[op.id]
                 and self.lifecycle.sealed(op.id)):
             self._finished_ops.add(op.id)
             self._deliver_result(op)
             self.syndrome_buffer.close_operation(op.id)
+            if (self.syndrome_buffer_1 is not None
+                    and self.syndrome_buffer_1.has_operation(op.id)):
+                self.syndrome_buffer_1.close_operation(op.id)
 
     def finish_workload_if_ready(self) -> None:
         if self._workload_complete_sent:

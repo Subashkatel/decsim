@@ -227,14 +227,16 @@ def test_builtin_and_external_policies_satisfy_runtime_protocols():
 
 
 def test_runspec_builds_fresh_policy_defaults():
-    """Each run with omitted policies receives fresh eager and ignore defaults."""
+    """Each run with omitted policies receives fresh eager and charged-idle
+    defaults: idle rounds are decoder workload in every reference system
+    (SWIPER, XQsim, Terhal backlog), so the default costs them."""
     first = RunSpec(ops=[]).build()
     second = RunSpec(ops=[]).build()
 
     assert isinstance(first.window_manager.boundary_policy, Eager)
-    assert isinstance(first.controller.idle_policy, Ignore)
+    assert isinstance(first.controller.idle_policy, SeparateDecodeJobs)
     assert isinstance(second.window_manager.boundary_policy, Eager)
-    assert isinstance(second.controller.idle_policy, Ignore)
+    assert isinstance(second.controller.idle_policy, SeparateDecodeJobs)
     assert first.window_manager.boundary_policy is not second.window_manager.boundary_policy
     assert first.controller.idle_policy is not second.controller.idle_policy
 
@@ -247,7 +249,7 @@ def test_runspec_preserves_truthy_custom_policies_on_independent_axes():
     idle_run = RunSpec(ops=[], idle_policy=idle_policy).build()
 
     assert boundary_run.window_manager.boundary_policy is boundary_policy
-    assert isinstance(boundary_run.controller.idle_policy, Ignore)
+    assert isinstance(boundary_run.controller.idle_policy, SeparateDecodeJobs)
     assert idle_run.controller.idle_policy is idle_policy
     assert isinstance(idle_run.window_manager.boundary_policy, Eager)
 
@@ -446,3 +448,113 @@ def test_sliding_tail_follows_qldpc_rule():
             assert ours == qldpc_windows(round_count, commit + buffer, commit)
     last = _finite_forward_window_geometries(31, 3, 6)[-1]
     assert (last.commit_lo, last.commit_hi) == (22, 31)
+
+
+# ---- idle rounds as decoder workload (2026-08-26 study) ----------------------
+#
+# References validated against, line for line:
+# - SWIPER-SIM (ISCA 2025, arXiv 2412.05115): device_manager emits one
+#   UNWANTED_IDLE syndrome round per unused patch per cycle and the window
+#   builder has no idle special-case; idle volume is decode volume.
+# - XQsim (ISCA 2022): the error decode unit consumes every patch under each
+#   RUN_ESM; nothing is exempt.
+# - Terhal's backlog bound (via Battistel, arXiv 2303.00054): the decoder
+#   must cover the generation rate, so deleting idle volume undercounts.
+# - Bombin et al. (arXiv 2303.04846) and the RT system stack (arXiv
+#   2605.30765): a stall before a feed-forward decision generates more
+#   syndrome; buffer-region content is decoded in every reference.
+
+
+def _feedback_chain(idle_policy=None):
+    """The T-gate feed-forward chain of the study: T1 blocked on T0's outcome
+    idles the patch while T0's last window waits for its trailing buffer,
+    exactly SWIPER Fig. 1 / Bombin's stall. Mirrors the refactor-lock
+    feedback_chain spec."""
+    from decsim.decoders.decoders import PresetLatencyDecoder
+    from decsim.frontends.circuit_frontend import CircuitFrontend
+    from decsim.message import Operation
+    from decsim.qpu.code_geometry import SurfaceCodeModel
+    from decsim.qpu.round_policies import FixedRounds
+
+    ops = CircuitFrontend([
+        Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
+        Operation(1, "T1", (0,), clifford=False, consumes_magic_state=False,
+                  blocked_by=0),
+    ]).build()
+    return RunSpec(
+        ops=ops, num_units=1, rounds_policy=FixedRounds(3), round_us=1.0,
+        code=SurfaceCodeModel(d=3),
+        scheme=SlidingWindowScheme(
+            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
+        decoder=PresetLatencyDecoder(2.0),
+        feedback_boundary_mode="trailing_buffer",
+        idle_policy=idle_policy, seed=13).build()
+
+
+def _idle_decode_labels(completed) -> set:
+    """The distinct synthetic idle-decode jobs the run charged."""
+    labels = set()
+    for line in completed.engine.log_lines:
+        start = line.find("mem(")
+        if start != -1:
+            labels.add(line[start:line.index(")", start) + 1])
+    return labels
+
+
+def test_idle_rounds_cost_decode_jobs_by_default():
+    """The default charges idle volume like the references; Ignore does not.
+
+    SWIPER windows idle syndrome exactly like operation syndrome and XQsim
+    decodes every patch each cycle, so the charged default must produce
+    synthetic idle decode jobs wherever the patch idles, and the optimistic
+    card must produce none while the rounds themselves still travel."""
+    charged = _feedback_chain()
+    optimistic = _feedback_chain(idle_policy=Ignore())
+
+    assert _idle_decode_labels(charged), "the default charged no idle work"
+    assert not _idle_decode_labels(optimistic)
+    assert optimistic.controller.idle_rounds_emitted > 0
+    assert (charged.controller.idle_rounds_emitted
+            >= optimistic.controller.idle_rounds_emitted)
+
+
+def test_memory_filled_trailing_buffer_is_flagged():
+    """A trailing buffer satisfied by memory rounds alone is a time-only
+    release with no syndrome content behind it, where every reference
+    decodes the buffer region's content; the window carries the
+    approximation flag and the manager counts it."""
+    completed = _feedback_chain()
+
+    flagged = [window for window in completed.window_manager.windows.values()
+               if window.buffer_filled_by_memory]
+    assert len(flagged) >= 1
+    assert completed.window_manager.memory_filled_buffer_windows == len(flagged)
+    for window in flagged:
+        # the flag marks the approximation; the release itself stands
+        assert window.t_data_complete is not None
+        assert window.t_done is not None
+    assert any(line for line in completed.engine.log_lines
+               if "buffer filled by memory rounds" in line)
+
+
+def test_single_operation_run_charges_no_idle_work():
+    """A workload whose one op keeps its patch busy every round emits no idle
+    rounds, so the charged default is inert there: the single-op experiment
+    sweeps are unchanged by the policy flip."""
+    from decsim.decoders.decoders import PresetLatencyDecoder
+    from decsim.frontends.circuit_frontend import CircuitFrontend
+    from decsim.message import Operation
+    from decsim.qpu.code_geometry import SurfaceCodeModel
+    from decsim.qpu.round_policies import FixedRounds
+
+    ops = CircuitFrontend([
+        Operation(0, "M", (0,), clifford=True, consumes_magic_state=False),
+    ]).build()
+    completed = RunSpec(
+        ops=ops, num_units=1, rounds_policy=FixedRounds(6), round_us=1.0,
+        code=SurfaceCodeModel(d=3), scheme=SlidingWindowScheme(),
+        decoder=PresetLatencyDecoder(2.0), seed=13).build()
+
+    assert completed.controller.idle_rounds_emitted == 0
+    assert completed.window_manager.memory_filled_buffer_windows == 0
+    assert not _idle_decode_labels(completed)

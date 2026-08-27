@@ -11,7 +11,7 @@ The next approved run gets listed here with its results stamp.
 ## The plots
 
 1. LER vs p, one curve per d, weak and strong on the SAME d set
-   {3, 5, 7, 9}. Sweep p {0.5, 1, 2, 3, 5, 7, 10} x 1e-3, rounds 10d,
+   {3, 5, 7, 9, 11}. Sweep p {0.5, 1, 2, 3, 5, 7, 10} x 1e-3, rounds 10d,
    paired seeds across tiers, >= 100 failures per plotted point.
    Status: machinery ready; shot plan not yet approved.
 2. Decode latency vs d, weak and strong (SWIPER Fig 3 draws these as
@@ -55,7 +55,7 @@ shard memory measured 0.46 GB (strong d=9); the script books 8G.
 ## Next runs
 
 - LER pilot (awaiting sbatch): weak_ler + strong_ler at 100 shots per
-  point, d {3, 5, 7, 9}, p {0.5, 1, 2, 3, 5, 7, 10} x 1e-3. Purpose:
+  point, d {3, 5, 7, 9, 11}, p {0.5, 1, 2, 3, 5, 7, 10} x 1e-3. Purpose:
   smoke the array pipeline and measure per-shot cost per point.
 - LER production: same configs with shots raised per point, sized from
   the pilot's cost table toward >= 100 failures per point under an

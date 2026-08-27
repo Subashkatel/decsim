@@ -1,7 +1,8 @@
 # The reference config: every key the yaml layer reads, in one runnable file.
 # Copy it, delete the comments you don't need, and you have a new experiment.
-# Values here are the defaults the two shipped configs share; the tiny sweep
-# makes this file cheap to run, so the test suite runs it as a smoke check.
+# Values here are the defaults the two shipped baselines
+# (weak_decoder_baseline.yaml, strong_decoder_baseline.yaml) share; the tiny
+# sweep makes this file cheap to run, so the test suite runs it as a smoke check.
 #
 # Kept honest by experiments/tests/test_decoder_units.py: the test fails
 # if this file and the loader (experiment_config.py) drift apart. Knobs the

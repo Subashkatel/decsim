@@ -1,5 +1,6 @@
-# Weak baseline closed loop: the single source of every parameter.
-# Every number that costs simulated time carries its source next to it.
+# The weak decoder baseline: every window decoded once on the weak tier.
+# Every number that costs simulated time carries its source next to it;
+# every key the loader reads is stated, none left to defaults.
 
 mode: weak_baseline                          # decode path: rounds -> Buffer 0 -> weak decoder -> frame
 
@@ -84,3 +85,14 @@ decoder:                                     # this mode decodes on the weak tie
 pauli_frame:
   clock: fridge
   commit_cycles: 1                           # one cycle to XOR the correction into the frame (XQsim PFU)
+
+idle_policy: separate_decode_jobs            # separate_decode_jobs | ignore | extend_stream:
+                                             # how an idle patch's rounds are charged (inert while
+                                             # the workload is a single always-busy operation)
+
+verify_windows: none                         # none | tesseract: re-decode every window with the
+                                             # Tesseract referee and count disagreements (never priced)
+
+trace_io: false                              # true adds component I/O lines to the trace
+
+trace: off                                   # off | print | file | both: the engine narrator

@@ -51,7 +51,7 @@ class LinkCard:
     channels: int
     transfer_overhead_cycles: Optional[float]
     latency_us: float                     # latency_cycles / clock MHz
-    bits_per_us: Optional[float]          # aggregate: bits_per_cycle x channels x MHz
+    bits_per_us: Optional[float]          # bits_per_cycle x channels x MHz
     transfer_overhead_us: Optional[float]
 
 
@@ -154,7 +154,7 @@ class RoundsCard:
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    name: str                       # the yaml file's stem; suffixes the run folder
+    name: str                       # the yaml stem; suffixes the run folder
     mode: str                       # weak_baseline | strong_only
     code_task: str                  # stim generator task
     rounds_per_shot: RoundsCard     # fixed count or per-distance ("10d")
@@ -163,7 +163,7 @@ class ExperimentConfig:
     controller: ControllerCard
     clocks: dict                    # clock domain name -> MHz; links price
                                     # their cycles on the domain they name
-    links: dict                     # path -> LinkCard | None (None = reference card)
+    links: dict                     # path -> LinkCard | None (reference card)
     buffers: BuffersCard
     decoder: DecoderCard
     trace: str                      # off | print | file | both: the engine
@@ -346,11 +346,13 @@ def load_experiment(path) -> ExperimentConfig:
             packing_workspace_size=buffers["packing_workspace_size"]),
         decoder=_decoder_card(raw["decoder"], clocks, mode),
         trace=_require(raw_trace, TRACE_MODES, "trace"),
-        trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
+        trace_io=_require(raw.get("trace_io", False), (True, False),
+                          "trace_io"),
         idle_policy=_require(raw.get("idle_policy", "separate_decode_jobs"),
                              IDLE_POLICIES, "idle_policy"),
         verify_windows=_require(raw.get("verify_windows", "none"),
                                 ("none", "tesseract"), "verify_windows"),
-        pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"], clocks),
+        pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"],
+                                                      clocks),
         config_files=config_files)
 

@@ -14,7 +14,8 @@ from dataclasses import replace
 import stim
 
 from decsim.config import TimingConfig, us as us_ticks
-from decsim.decoders.decoder_engine import DecoderEngine, DecoderStage, DecoderTiming
+from decsim.decoders.decoder_engine import (DecoderEngine, DecoderStage,
+                                            DecoderTiming)
 from decsim.decoders.decoder_memory import DecoderMemoryConfig
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
@@ -70,14 +71,17 @@ def decoder_engine(config: ExperimentConfig) -> DecoderEngine:
     if unit.algorithm == "pymatching":
         algorithm = PyMatchingDecoder(latency_model=None)
     elif unit.algorithm == "belief_matching":
-        from decsim.decoders.belief_matching.decoder import BeliefMatchingDecoder
+        from decsim.decoders.belief_matching.decoder import (
+            BeliefMatchingDecoder)
         algorithm = BeliefMatchingDecoder(latency_model=None)
     else:
         algorithm = PyMatchingDecoder(PresetLatencyDecoder(unit.algorithm))
     if config.verify_windows == "tesseract":
         algorithm = TesseractCheckedDecoder(algorithm)
-    fetch = DecoderStage("fetch", cycles_per_round=unit.engine.fetch_cycles_per_round)
-    release = DecoderStage("release", cycles_per_job=unit.engine.release_cycles_per_job)
+    fetch = DecoderStage(
+        "fetch", cycles_per_round=unit.engine.fetch_cycles_per_round)
+    release = DecoderStage(
+        "release", cycles_per_job=unit.engine.release_cycles_per_job)
     timing = DecoderTiming(before=(fetch,), after=(release,),
                            frequency_mhz=unit.engine.frequency_mhz)
     return DecoderEngine(algorithm, timing)
@@ -146,8 +150,8 @@ class TesseractCheckedDecoder:
         owned_correction = referee_correction & physical.owned
         observable_flip_counts = (physical.observables.astype(np.int64)
                                   @ owned_correction.astype(np.int64))
-        referee_flips = tuple(
-            int(count) % 2 for count in np.asarray(observable_flip_counts).ravel())
+        flip_counts = np.asarray(observable_flip_counts).ravel()
+        referee_flips = tuple(int(count) % 2 for count in flip_counts)
         self.windows_checked += 1
         if referee_flips != tuple(result.logical_observables):
             self.window_disagreements += 1
@@ -196,9 +200,10 @@ def link_model(config: ExperimentConfig):
 
 
 def code_model(config: ExperimentConfig, distance: int) -> SurfaceCodeModel:
-    return SurfaceCodeModel(d=distance,
-                            commit_rounds_override=config.windowing.commit_rounds,
-                            buffer_rounds_override=config.windowing.buffer_rounds)
+    return SurfaceCodeModel(
+        d=distance,
+        commit_rounds_override=config.windowing.commit_rounds,
+        buffer_rounds_override=config.windowing.buffer_rounds)
 
 
 def idle_policy(config: ExperimentConfig):
@@ -251,7 +256,8 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
         ops=[operation], code=code_model(config, distance),
         scheme=WINDOWING_SCHEMES[config.windowing.scheme](),
         rounds_policy=FixedRounds(config.rounds_per_shot.rounds_for(distance)),
-        device=StimDevice(), decoder=engine, num_units=config.active_decoder.units,
+        device=StimDevice(), decoder=engine,
+        num_units=config.active_decoder.units,
         timing=timing, links=link_model(config),
         decoder_memory=decoder_memory(config),
         syndrome_buffering=syndrome_buffering(config),

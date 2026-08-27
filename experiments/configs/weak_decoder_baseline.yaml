@@ -1,98 +1,64 @@
-# The weak decoder baseline: every window decoded once on the weak tier.
-# Every number that costs simulated time carries its source next to it;
-# every key the loader reads is stated, none left to defaults.
+# The weak decoder baseline. Every key is documented in reference.yaml.
 
-mode: weak_baseline                          # decode path: rounds -> Buffer 0 -> weak decoder -> frame
-
-code_task: surface_code:rotated_memory_z     # stim generator task (real detector data)
+mode: weak_baseline
+code_task: surface_code:rotated_memory_z
 distance: 3
-rounds_per_shot: 60                          # QEC rounds per shot
-windowing:
-  scheme: sliding                            # sliding | parallel | sandwich | naive_online
-  commit_rounds: null                        # rounds committed per window; null = d
-  buffer_rounds: null                        # look-ahead rounds per window; null = d
+rounds_per_shot: 60
 
-# The sweep: a list of blocks. Each block is the cross product of its two axes, `shots` runs
-# per point (seeds 0..shots-1); a point and seed named by two blocks runs once. The decoder
-# algorithm is structure, not a sweep axis: it lives on the decoder card below, and comparing
-# algorithms is comparing configs (copy this file, change decoder.weak.algorithm). Blocks put
-# shots where they matter: the timing block sweeps many timing points with few shots, the LER
-# block sweeps several probabilities with many shots at one timing point (timing knobs never
-# change the decoded answer, Gate 10, so LER needs only one timing point).
+windowing:
+  scheme: sliding
+  commit_rounds: null
+  buffer_rounds: null
+
 sweep:
-  # timing: every round period, few shots
-  - physical_error_probability: [0.001]      # p on every physical operation, as Stim's guide and sinter do
+  - physical_error_probability: [0.001]                                   # timing
     round_period_us: [10.0, 5.0, 2.0, 1.0, 0.9, 0.85, 0.8, 0.5, 0.2, 0.1, 0.05, 0.02]
-                                             # input round period, slow to fast; 0.9/0.85/0.8 bracket
-                                             # the load = 1 knee of the 0.028 card
     shots: 10
-  # logical error rate: several probabilities, one timing point, many shots (Wilson 95% on the plot)
-  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
+  - physical_error_probability: [0.001, 0.002, 0.003, 0.005, 0.007, 0.01] # LER
     round_period_us: [1.0]
     shots: 200
 
-controller:                                  # controller work per round, in fridge cycles
+controller:
   clock: fridge
-  t_binary_availability_cycles: 0            # pulses to binary; zero: classification is inside the priced round
-                                             # (Google 2023 Nature 614 sec. Methods)
-  t_pack_cycles: 0                           # one fragment per round makes packing a no-op (StimDevice)
+  t_binary_availability_cycles: 0
+  t_pack_cycles: 0
 
-clocks:                            # clock domain name -> MHz; a link prices its
-                                   # cycles on the domain it names. More domains
-                                   # (an mK stage, a 4K SFQ decoder) are one more
-                                   # entry here. Both start at LILLIPUT's 250 MHz
-                                   # ([d=3,m=2] FPGA clock, 2108.06569 Table 4).
+clocks:
   fridge: 250.0
   room: 250.0
 
-links:                                       # one card per path, in cycles of its named clock
-                                             # domain (see clocks:); every interconnect starts at
-                                             # 1 cycle, unbounded bandwidth (2026-08-26 directive)
-  # on the baseline path (all fridge-side)
-  qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # QPU -> controller, one readout
-  cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # controller -> Buffer 0 (the weak buffer), one round
-  wbd: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # Buffer 0 -> weak decoder memory, one window
-  dd:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # decoder -> decoder boundary handoff
-  wdo: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}  # weak decoder -> Pauli frame
-  # not on this path: null = the logical_reference card's numbers
-  csb: null                             # controller -> syndrome buffer 1 (the strong buffer)
-  oc:  null                                  # Pauli frame -> controller, a release
-  cq:  null                                  # controller -> QPU, an instruction
-  wsd: null                                  # weak -> strong escalation
-  sbd: null                                  # syndrome buffer 1 -> strong decoder memory, one window
+links:
+  qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  wbd: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  dd:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  wdo: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  csb: null
+  sbd: null
+  wsd: null
+  oc:  null
+  cq:  null
 
-buffers:                                     # syndrome-path store capacities, in rounds (null = unbounded)
-  buffer_0_size: null                        # Buffer 0, the upstream round store
-  buffer_1_size: null                        # syndrome buffer 1 (unused on this path)
-  packing_workspace_size: null               # packing assembly workspace
+buffers:
+  buffer_0_size: null
+  buffer_1_size: null
+  packing_workspace_size: null
 
-decoder:                                     # this mode decodes on the weak tier only
+decoder:
   weak:
-    algorithm: 0.028                         # the algorithm stage's cost. A number: fixed core latency in us;
-                                             # a name (pymatching | belief_matching): the real algorithm,
-                                             # measured wall clock per window. The card prices the algorithm
-                                             # stage ONLY; fetch and release cycles are charged below.
-                                             # 0.028 = LILLIPUT-class core: [d=3, m=2] 7 cycles at 250 MHz,
-                                             #         2108.06569 sec. 6.3 and Table 4
-    units: 1                                 # one weak ASIC
-    unit_buffer_size: null                   # input SRAM rounds PER UNIT; null = unbounded
+    algorithm: 0.028                       # LILLIPUT card
+    units: 1
+    unit_buffer_size: null
     engine:
-      clock: fridge                          # LILLIPUT [d=3,m=2] FPGA clock, 2108.06569 Table 4 (clocks: 250 MHz)
-      fetch_cycles_per_round: 1              # read one round out of decoder memory per cycle (LILLIPUT FIFO, sec. 4)
-      release_cycles_per_job: 10             # correction register write-out, experiment card
-
+      clock: fridge
+      fetch_cycles_per_round: 1
+      release_cycles_per_job: 10
 
 pauli_frame:
   clock: fridge
-  commit_cycles: 1                           # one cycle to XOR the correction into the frame (XQsim PFU)
+  commit_cycles: 1
 
-idle_policy: separate_decode_jobs            # separate_decode_jobs | ignore | extend_stream:
-                                             # how an idle patch's rounds are charged (inert while
-                                             # the workload is a single always-busy operation)
-
-verify_windows: none                         # none | tesseract: re-decode every window with the
-                                             # Tesseract referee and count disagreements (never priced)
-
-trace_io: false                              # true adds component I/O lines to the trace
-
-trace: off                                   # off | print | file | both: the engine narrator
+idle_policy: separate_decode_jobs
+verify_windows: none
+trace_io: false
+trace: off

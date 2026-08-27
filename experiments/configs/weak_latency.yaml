@@ -22,4 +22,4 @@ sweep:
   - physical_error_probability: [0.001]
     distance: [3, 5, 7, 9, 11]
     round_period_us: [1.0]
-    shots: 100
+    shots: 500

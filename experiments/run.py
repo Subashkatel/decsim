@@ -9,7 +9,12 @@ point; only the wall-clock column varies).
 
 from __future__ import annotations
 
+import dataclasses
+import json
+import platform
+import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from experiments.experiment_config import (MODE_TIER, ExperimentConfig,
@@ -48,7 +53,64 @@ def resolved_description(config: ExperimentConfig) -> list:
     return lines
 
 
-def run_sweep(config: ExperimentConfig) -> list:
+def new_run_dir(config: ExperimentConfig) -> Path:
+    """results/<name>/<UTC stamp>/, never reused; `latest` points at it."""
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    run_dir = config.results_dir / stamp
+    run_dir.mkdir(parents=True, exist_ok=False)
+    latest = config.results_dir / "latest"
+    latest.unlink(missing_ok=True)
+    latest.symlink_to(stamp)
+    return run_dir
+
+
+def _git_state() -> dict:
+    # the container image has no git; the manifest records what it can
+    def output(*arguments):
+        try:
+            return subprocess.run(arguments, capture_output=True,
+                                  text=True).stdout.strip()
+        except FileNotFoundError:
+            return None
+    commit = output("git", "rev-parse", "HEAD")
+    porcelain = output("git", "status", "--porcelain")
+    return {"commit": commit,
+            "dirty": None if porcelain is None else bool(porcelain)}
+
+
+def _versions() -> dict:
+    import numpy
+    import pymatching
+    import stim
+    return {"python": sys.version.split()[0], "stim": stim.__version__,
+            "pymatching": pymatching.__version__,
+            "numpy": numpy.__version__}
+
+
+def write_manifest(config: ExperimentConfig, run_dir: Path,
+                   started_utc: str, finished_utc: str = None) -> None:
+    """The run's identity: everything needed to interpret or reproduce it
+    without the source tree. Sampling is deterministic from (stim version,
+    code_task, distance, rounds, p, seed), so the manifest plus seeds are
+    the raw data."""
+    import os
+    manifest = {
+        "config_files": [str(path) for path in config.config_files],
+        "resolved_config": json.loads(json.dumps(
+            dataclasses.asdict(config), default=str)),
+        "git": _git_state(),
+        "container": os.environ.get("APPTAINER_CONTAINER")
+                     or os.environ.get("SINGULARITY_CONTAINER"),
+        "versions": _versions(),
+        "host": platform.node(),
+        "argv": sys.argv,
+        "started_utc": started_utc,
+        "finished_utc": finished_utc,
+    }
+    (run_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
+
+
+def run_sweep(config: ExperimentConfig, run_dir: Path = None) -> list:
     """Every shot of every point of the config's sweep blocks; a point and
     seed named by more than one block runs once."""
     measurements = {}
@@ -65,7 +127,8 @@ def run_sweep(config: ExperimentConfig) -> list:
                             config,
                             physical_error_probability=physical_error_probability,
                             distance=distance,
-                            round_period_us=round_period_us, seed=seed)
+                            round_period_us=round_period_us, seed=seed,
+                            run_dir=run_dir)
                     print(f"p {physical_error_probability}, d {distance}, "
                           f"round period {round_period_us} us: "
                           f"{block.shots} shots done", file=sys.stderr)
@@ -76,14 +139,19 @@ def run_experiment(config_path) -> tuple:
     """One full experiment: sweep, summary, report, figures. Returns the
     results folder and the summary rows."""
     config = load_experiment(config_path)
-    print("\n".join(resolved_description(config)) + "\n", file=sys.stderr)
-    measurements = run_sweep(config)
+    run_dir = new_run_dir(config)
+    started_utc = datetime.now(timezone.utc).isoformat()
+    write_manifest(config, run_dir, started_utc)
+    print("\n".join(resolved_description(config))
+          + f"\nrun dir: {run_dir}\n", file=sys.stderr)
+    measurements = run_sweep(config, run_dir)
     rows = summarize(measurements)
-    results_dir = config.results_dir
-    write_report(rows, results_dir, measurements)
+    write_report(rows, run_dir, measurements)
     from experiments.plots import plots
-    plots(config, rows, results_dir)
-    return results_dir, rows
+    plots(config, rows, run_dir)
+    write_manifest(config, run_dir, started_utc,
+                   finished_utc=datetime.now(timezone.utc).isoformat())
+    return run_dir, rows
 
 
 def main(argv) -> None:

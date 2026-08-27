@@ -59,6 +59,10 @@ pauli_frame:
   clock: fridge
   commit_cycles: 1
 
+records:
+  windows: false
+  failure_events: true
+
 idle_policy: separate_decode_jobs
 verify_windows: none
 trace_io: false

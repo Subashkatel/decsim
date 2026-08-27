@@ -180,3 +180,35 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
                                distance=5, round_period_us=1.0, seed=0)
     assert measurement.distance == 5
     assert measurement.windows > 5
+
+
+def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
+    """One tiny run end to end: a timestamped run dir with manifest.json,
+    shots.csv, sweep.csv, links.csv, and the latest symlink."""
+    import csv
+    import json
+    from experiments.run import run_experiment
+
+    config_path = write_config(tmp_path, {
+        "records": {"windows": True, "failure_events": True}})
+    monkeypatch.chdir(tmp_path)
+    run_dir, rows = run_experiment(config_path)
+
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["versions"]["stim"]
+    assert manifest["resolved_config"]["mode"] == "weak_baseline"
+    assert manifest["started_utc"] and manifest["finished_utc"]
+
+    with open(run_dir / "shots.csv") as handle:
+        shots = list(csv.DictReader(handle))
+    assert len(shots) == 1 and shots[0]["seed"] == "0"
+
+    windows = (run_dir / "windows.jsonl").read_text().splitlines()
+    assert len(windows) >= 1
+    first_window = json.loads(windows[0])
+    assert first_window["commit_lo"] >= 1
+    assert first_window["frame_committed_us"] is not None
+
+    latest = run_dir.parent / "latest"
+    assert latest.is_symlink() and latest.resolve() == run_dir.resolve()
+    assert (run_dir / "sweep.csv").exists() and (run_dir / "links.csv").exists()

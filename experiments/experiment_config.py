@@ -134,6 +134,15 @@ class SweepBlock:
 
 
 @dataclass(frozen=True)
+class RecordsCard:
+    """What each run persists beyond the aggregate reports. Failure events
+    are cheap (failures are rare) and default on; per-window records are
+    bulky at long shots and default off."""
+    windows: bool
+    failure_events: bool
+
+
+@dataclass(frozen=True)
 class RoundsCard:
     """rounds_per_shot: a fixed count, or per-distance scaling ("10d" =
     ten rounds per unit of code distance, the 10 d-round memory experiment
@@ -179,6 +188,7 @@ class ExperimentConfig:
                                     # extend_stream: how an idle patch's
                                     # rounds are charged (inert while the
                                     # workload is a single always-busy op)
+    records: RecordsCard            # per-shot artifacts beyond the reports
     pauli_frame_commit_us: float    # resolved from pauli_frame.commit_cycles
                                     # on its named clock
     config_files: tuple             # the yaml files this config was read
@@ -325,6 +335,20 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
         shots=block["shots"])
 
 
+def _records_card(card) -> RecordsCard:
+    if card is None:
+        return RecordsCard(windows=False, failure_events=True)
+    unknown = set(card) - {"windows", "failure_events"}
+    if unknown:
+        raise ValueError(f"records does not know {sorted(unknown)}; its keys "
+                         f"are windows and failure_events")
+    windows = _require(card.get("windows", False), (True, False),
+                       "records.windows")
+    failure_events = _require(card.get("failure_events", True), (True, False),
+                              "records.failure_events")
+    return RecordsCard(windows=windows, failure_events=failure_events)
+
+
 def _rounds_card(value) -> RoundsCard:
     if isinstance(value, bool):
         raise ValueError(f"rounds_per_shot must be a positive count or "
@@ -436,6 +460,7 @@ def load_experiment(path) -> ExperimentConfig:
         trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
         idle_policy=_require(raw.get("idle_policy", "separate_decode_jobs"),
                              IDLE_POLICIES, "idle_policy"),
+        records=_records_card(raw.get("records")),
         verify_windows=_require(raw.get("verify_windows", "none"),
                                 ("none", "tesseract"), "verify_windows"),
         pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"], clocks),

@@ -167,13 +167,33 @@ def link_rows(measurements: list) -> list:
     return rows
 
 
+def shot_rows(measurements: list) -> list:
+    """One row per shot: every scalar field plus each point's per-shot
+    mean, so any aggregate can be re-cut without rerunning."""
+    bulky_fields = {"samples", "means", "maxes", "backlog", "link_totals"}
+    rows = []
+    for measurement in measurements:
+        row = {name: getattr(measurement, name)
+               for name in measurement.__dataclass_fields__
+               if name not in bulky_fields}
+        for point in POINTS:
+            row[f"{point}_mean_us"] = measurement.means[point]
+        rows.append(row)
+    return rows
+
+
 def write_report(rows: list, report_dir: Path,
                  measurements: Optional[list] = None) -> None:
-    """sweep.csv (every column) and links.csv (the per-link ledger
-    totals) when the measurements are given."""
+    """sweep.csv (per point), shots.csv (per shot) and links.csv (the
+    per-link ledger totals) when the measurements are given."""
     report_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, report_dir / "sweep.csv")
     if measurements:
+        per_shot = shot_rows(measurements)
+        with open(report_dir / "shots.csv", "w", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(per_shot[0]))
+            writer.writeheader()
+            writer.writerows(per_shot)
         per_link = link_rows(measurements)
         with open(report_dir / "links.csv", "w", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=list(per_link[0]))

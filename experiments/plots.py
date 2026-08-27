@@ -76,7 +76,7 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
                in sorted(completed.window_manager.windows.items())}
     frame_records = {record.window_key[1]: record
                      for record in completed.pauli_frame.snapshot().records}
-    rounds = config.rounds_per_shot
+    rounds = config.rounds_per_shot.rounds_for(distance)
 
     rows = ["qpu round", "qc link"]
     if store:

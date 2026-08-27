@@ -65,7 +65,6 @@ class ShotMeasurement:
     load: float            # chain service per window / window inter-arrival (rho)
     direct_failure: bool   # whole-circuit PyMatching on the same sampled events failed
     direct_mismatch: bool  # the loop's prediction differs from direct PyMatching's
-    backlog: list          # (time us, windows ready but not decoded) over the shot
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     decoder_utilization: float
@@ -187,24 +186,6 @@ def direct_prediction(completed, circuit: stim.Circuit) -> tuple:
                         dtype=bool)
     predicted = matching.decode(events)
     return tuple(int(bit) for bit in predicted)
-
-
-def backlog_trajectory(completed) -> list:
-    """(time us, number of windows whose data is complete but whose decode is
-    not done) at every change, over the shot."""
-    changes = []
-    for window in completed.window_manager.windows.values():
-        if window.t_data_complete is None or window.t_done is None:
-            continue
-        changes.append((window.t_data_complete, +1))
-        changes.append((window.t_done, -1))
-    changes.sort()
-    trajectory = [(0.0, 0)]
-    outstanding = 0
-    for tick, delta in changes:
-        outstanding += delta
-        trajectory.append((us(tick), outstanding))
-    return trajectory
 
 
 def chain_load(samples: dict, config: ExperimentConfig, distance: int,
@@ -342,7 +323,6 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
         load=load,
         direct_failure=reference_prediction != truth,
         direct_mismatch=loop_prediction != reference_prediction,
-        backlog=backlog_trajectory(completed),
         throughput_windows_per_us=decoded_windows / span_us,
         throughput_rounds_per_us=config.rounds_per_shot.rounds_for(distance) / span_us,
         decoder_utilization=sum(samples["service"]) / span_us,

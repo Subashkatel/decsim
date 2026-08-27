@@ -1,4 +1,4 @@
-"""The two experiment figures.
+"""The experiment figures.
 
 timeline.png   one shot of the first sweep point, seed 0: every stage of
                every window on its own row, in real time, the weak
@@ -6,10 +6,17 @@ timeline.png   one shot of the first sweep point, seed 0: every stage of
                lighter, geometry in the subtitle)
 ler.png        logical error rate vs physical error rate, Wilson 95%
                bars, drawn when more than one p was swept
+latency.png    decode wall clock per window vs code distance, violins,
+               drawn when a wall-clock algorithm swept more than one d;
+               the cross-tier combined figure comes from
+               `python -m experiments.plots latency <run_dir> <run_dir>
+               <out.png>` reading each run's latency_samples.csv
 
 Every time is in microseconds.
 """
 
+import math
+import sys
 from pathlib import Path
 
 from decsim.config import TICKS_PER_US
@@ -257,38 +264,112 @@ def latency_samples_by_distance(measurements: list) -> dict:
             if samples}
 
 
+def _log_decade_axis(axis, log_values: list) -> None:
+    """Label a log10-transformed time axis in plain microseconds. The
+    violins are drawn on log10(us) values so their density is estimated
+    in log space, where wall-clock latency is roughly symmetric; a raw
+    linear KDE under a log axis would smear the tails."""
+    lowest = math.floor(min(min(values) for values in log_values))
+    highest = math.ceil(max(max(values) for values in log_values))
+    ticks = list(range(lowest, highest + 1))
+    axis.set_yticks(ticks)
+    axis.set_yticklabels([f"{10.0 ** tick:g}" for tick in ticks])
+
+
+def _latency_violins(axis, pooled: dict, positions: list, width: float,
+                     color: str, label: str) -> None:
+    """One violin per distance on log10(us) values, median marked."""
+    log_samples = [[math.log10(sample) for sample in pooled[distance]]
+                   for distance in pooled]
+    parts = axis.violinplot(log_samples, positions=positions, widths=width,
+                            showmedians=True, showextrema=False)
+    for body in parts["bodies"]:
+        body.set_facecolor(color)
+        body.set_alpha(0.6)
+    parts["cmedians"].set_color(color)
+    maxima = [max(samples) for samples in log_samples]
+    axis.plot(positions, maxima, "v", color=color, markersize=4,
+              label=f"{label} (worst window marked)")
+
+
+def _deadline_line(axis, distances: list, round_period_us: float) -> None:
+    # the deadline: a new window arrives every d rounds (the code's
+    # default commit region), so decode must beat d x round period
+    deadline_log_us = [math.log10(distance * round_period_us)
+                       for distance in distances]
+    axis.plot(distances, deadline_log_us, "--", color="grey",
+              label=f"window generation ({round_period_us:g} µs rounds)")
+
+
 def latency_plot(config: ExperimentConfig, measurements: list,
                  path: Path) -> None:
-    """Decode wall clock per window against code distance: one box per d
-    (whiskers at the 5th and 95th percentile, median line, max marked),
-    log time axis, with the window-generation deadline (commit rounds x
-    round period) drawn as the throughput boundary."""
+    """Decode wall clock per window against code distance: one violin
+    per d (median marked, worst window flagged), microsecond log axis,
+    with the window-generation deadline drawn as the throughput
+    boundary. The violin/deadline shape follows Helios Fig. 7, Google
+    Fig. 4d and SWIPER Fig. 3."""
     import matplotlib.pyplot as plt
     pooled = latency_samples_by_distance(measurements)
     distances = list(pooled)
     round_period_us = measurements[0].round_period_us
     probability = measurements[0].physical_error_probability
+    algorithm = config.active_decoder.algorithm
 
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
-    axis.boxplot([pooled[distance] for distance in distances],
-                 positions=distances, whis=(5, 95), showfliers=False,
-                 widths=0.9, medianprops={"color": "C0"})
-    maxima = [max(pooled[distance]) for distance in distances]
-    axis.plot(distances, maxima, "v", color="C3", markersize=4,
-              label="worst window")
-    # the deadline: a new window arrives every commit_rounds rounds
-    # (the code's default commit region is d rounds when the card is null)
-    commit_rounds_override = config.windowing.commit_rounds
-    deadline_us = [(commit_rounds_override or distance) * round_period_us
-                   for distance in distances]
-    axis.plot(distances, deadline_us, "--", color="grey",
-              label=f"window generation ({round_period_us:g} µs rounds)")
-    axis.set_yscale("log")
+    _latency_violins(axis, pooled, distances, 1.4, "C0", algorithm)
+    _deadline_line(axis, distances, round_period_us)
+    _log_decade_axis(axis, [[math.log10(sample) for sample in samples]
+                            for samples in pooled.values()])
+    axis.set_xticks(distances)
     axis.set_xlabel("Code distance")
     axis.set_ylabel("Decode wall clock per window (µs)")
-    algorithm = config.active_decoder.algorithm
     axis.set_title(f"{algorithm} decode latency, p={probability:g}")
-    axis.grid(alpha=0.3, which="both", axis="y")
+    axis.grid(alpha=0.3, axis="y")
+    axis.legend(fontsize=8)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+    plt.close(figure)
+
+
+def combined_latency_plot(sample_files: list, path: Path) -> None:
+    """Both tiers on one axes from their runs' latency_samples.csv, one
+    violin pair per distance. The log axis is what makes this legible:
+    the tiers sit decades apart, which is itself the figure's message.
+
+        python -m experiments.plots latency <run_dir> <run_dir> <out.png>
+    """
+    import csv
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figure, axis = plt.subplots(figsize=(5.6, 3.8))
+    all_log_values = []
+    round_period_us = None
+    distances = []
+    for file_index, sample_file in enumerate(sample_files):
+        with open(sample_file) as handle:
+            rows = list(csv.DictReader(handle))
+        pooled = {}
+        for row in rows:
+            pooled.setdefault(int(row["distance"]), []).append(
+                float(row["algorithm_us"]))
+        pooled = dict(sorted(pooled.items()))
+        distances = sorted(set(distances) | set(pooled))
+        round_period_us = float(rows[0]["round_period_us"])
+        algorithm = rows[0]["algorithm"]
+        color = f"C{file_index}"
+        _latency_violins(axis, pooled, list(pooled), 1.4, color, algorithm)
+        all_log_values.extend(
+            [math.log10(sample) for sample in samples]
+            for samples in pooled.values())
+    _deadline_line(axis, distances, round_period_us)
+    _log_decade_axis(axis, all_log_values)
+    axis.set_xticks(distances)
+    axis.set_xlabel("Code distance")
+    axis.set_ylabel("Decode wall clock per window (µs)")
+    axis.set_title("Decode latency, weak and strong tiers")
+    axis.grid(alpha=0.3, axis="y")
     axis.legend(fontsize=8)
     figure.tight_layout()
     figure.savefig(path, dpi=150)
@@ -312,3 +393,19 @@ def plots(config: ExperimentConfig, rows: list, report_dir: Path,
                        for measurement in measurements or ()}
     if measured_wall_clock and len(swept_distances) > 1:
         latency_plot(config, measurements, report_dir / "latency.png")
+
+
+def main(argv) -> None:
+    usage = ("usage: python -m experiments.plots latency "
+             "<run_dir> <run_dir> <out.png>")
+    if len(argv) != 5 or argv[1] != "latency":
+        print(usage, file=sys.stderr)
+        raise SystemExit(2)
+    sample_files = [Path(run_dir) / "latency_samples.csv"
+                    for run_dir in argv[2:4]]
+    combined_latency_plot(sample_files, Path(argv[4]))
+    print(argv[4])
+
+
+if __name__ == "__main__":
+    main(sys.argv)

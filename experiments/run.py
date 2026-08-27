@@ -55,11 +55,20 @@ def resolved_description(config: ExperimentConfig) -> list:
 
 
 def new_run_dir(config: ExperimentConfig) -> Path:
-    """results/<UTC stamp>-<config name>/, never reused; sorted by time."""
+    """results/<UTC stamp>-<config name>/, never reused; sorted by time.
+    The stamp is whole seconds, so a second run started within the same
+    second gets a numeric suffix instead of clobbering the first."""
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    run_dir = Path("experiments/results") / f"{stamp}-{config.name}"
-    run_dir.mkdir(parents=True, exist_ok=False)
-    return run_dir
+    base = Path("experiments/results") / f"{stamp}-{config.name}"
+    run_dir = base
+    suffix = 2
+    while True:
+        try:
+            run_dir.mkdir(parents=True, exist_ok=False)
+            return run_dir
+        except FileExistsError:
+            run_dir = base.with_name(f"{base.name}-{suffix}")
+            suffix += 1
 
 
 def snapshot_code_state(config: ExperimentConfig, run_dir: Path) -> None:

@@ -63,7 +63,6 @@ def summarize_point(group: list) -> dict:
            "prediction_mismatches_vs_direct": sum(m.direct_mismatch for m in group),
            "throughput_windows_per_us": statistics.fmean(m.throughput_windows_per_us for m in group),
            "throughput_rounds_per_us": statistics.fmean(m.throughput_rounds_per_us for m in group),
-           "decoder_utilization": statistics.fmean(m.decoder_utilization for m in group),
            "max_queued_windows": max(m.max_queued_windows for m in group),
            "tesseract_windows_checked": sum(m.tesseract_windows_checked for m in group),
            "tesseract_window_disagreements": sum(
@@ -117,8 +116,6 @@ def terminal_lines(rows: list) -> list:
             f"logical failures: {row['logical_failures']} of {row['shots']} shots",
             f"mismatches vs direct PyMatching: {row['prediction_mismatches_vs_direct']}",
             f"throughput: {row['throughput_rounds_per_us']:.3f} rounds per us",
-            f"decoder utilization (fraction of the run a unit computes): "
-            f"{row['decoder_utilization']:.3f}",
             f"queue wait, mean: {row['queue_wait_mean_us']:.3f} us",
             f"service time per window, mean: {row['service_mean_us']:.3f} us",
             f"ready to frame commit: median "

@@ -134,15 +134,6 @@ class SweepBlock:
 
 
 @dataclass(frozen=True)
-class RecordsCard:
-    """What each run persists beyond the aggregate reports. Failure events
-    are cheap (failures are rare) and default on; per-window records are
-    bulky at long shots and default off."""
-    windows: bool
-    failure_events: bool
-
-
-@dataclass(frozen=True)
 class RoundsCard:
     """rounds_per_shot: a fixed count, or per-distance scaling ("10d" =
     ten rounds per unit of code distance, the 10 d-round memory experiment
@@ -188,7 +179,6 @@ class ExperimentConfig:
                                     # extend_stream: how an idle patch's
                                     # rounds are charged (inert while the
                                     # workload is a single always-busy op)
-    records: RecordsCard            # per-shot artifacts beyond the reports
     pauli_frame_commit_us: float    # resolved from pauli_frame.commit_cycles
                                     # on its named clock
     config_files: tuple             # the yaml files this config was read
@@ -205,28 +195,15 @@ class ExperimentConfig:
 def _link_card(card: Optional[dict], clocks: dict, path: str) -> Optional[LinkCard]:
     if card is None:
         return None
-    clock = card["clock"]
-    if clock not in clocks:
-        raise ValueError(f"links.{path} names clock {clock!r}; "
-                         f"clocks defines {sorted(clocks)}")
-    megahertz = clocks[clock]
-    latency_cycles = card["latency_cycles"]
-    if not isinstance(latency_cycles, (int, float)) or latency_cycles < 0:
-        raise ValueError(f"links.{path}.latency_cycles must be >= 0")
+    megahertz = clocks[card["clock"]]
     bits_per_cycle = card["bits_per_cycle"]
-    if bits_per_cycle is not None and bits_per_cycle <= 0:
-        raise ValueError(f"links.{path}.bits_per_cycle must be positive or null")
     channels = card.get("channels", 1)
-    if isinstance(channels, bool) or not isinstance(channels, int) or channels < 1:
-        raise ValueError(f"links.{path}.channels must be a positive count")
     overhead_cycles = card.get("transfer_overhead_cycles")
-    if overhead_cycles is not None and overhead_cycles < 0:
-        raise ValueError(f"links.{path}.transfer_overhead_cycles must be >= 0")
     return LinkCard(
-        latency_cycles=latency_cycles, clock=clock,
+        latency_cycles=card["latency_cycles"], clock=card["clock"],
         bits_per_cycle=bits_per_cycle, channels=channels,
         transfer_overhead_cycles=overhead_cycles,
-        latency_us=latency_cycles / megahertz,
+        latency_us=card["latency_cycles"] / megahertz,
         bits_per_us=(None if bits_per_cycle is None
                      else bits_per_cycle * channels * megahertz),
         transfer_overhead_us=(None if overhead_cycles is None
@@ -234,67 +211,36 @@ def _link_card(card: Optional[dict], clocks: dict, path: str) -> Optional[LinkCa
 
 
 def _controller_card(card: dict, clocks: dict) -> ControllerCard:
-    clock = card["clock"]
-    if clock not in clocks:
-        raise ValueError(f"controller.clock names {clock!r}; "
-                         f"clocks defines {sorted(clocks)}")
-    megahertz = clocks[clock]
-    binary_cycles = card["t_binary_availability_cycles"]
-    pack_cycles = card["t_pack_cycles"]
-    for name, value in (("t_binary_availability_cycles", binary_cycles),
-                        ("t_pack_cycles", pack_cycles)):
-        if isinstance(value, bool) or not isinstance(value, (int, float)) \
-                or value < 0:
-            raise ValueError(f"controller.{name} must be >= 0")
+    megahertz = clocks[card["clock"]]
     return ControllerCard(
-        t_binary_availability_cycles=binary_cycles,
-        t_pack_cycles=pack_cycles, clock=clock,
-        t_binary_availability_us=binary_cycles / megahertz,
-        t_pack_us=pack_cycles / megahertz)
+        t_binary_availability_cycles=card["t_binary_availability_cycles"],
+        t_pack_cycles=card["t_pack_cycles"], clock=card["clock"],
+        t_binary_availability_us=card["t_binary_availability_cycles"] / megahertz,
+        t_pack_us=card["t_pack_cycles"] / megahertz)
 
 
 def _decoder_unit(card: Optional[dict], clocks: dict,
                   tier: str) -> Optional[DecoderUnitCard]:
     if card is None:
         return None
-    unknown = set(card) - {"algorithm", "units", "unit_buffer_size", "engine"}
-    if unknown:
-        raise ValueError(f"decoder.{tier} does not know {sorted(unknown)}; "
-                         f"it takes algorithm, units, unit_buffer_size, engine")
     algorithm = card["algorithm"]
-    if isinstance(algorithm, str):
-        if algorithm not in ALGORITHMS:
-            raise ValueError(
-                f"decoder.{tier}.algorithm is a number (fixed core latency, "
-                f"us) or one of {ALGORITHMS}, got {algorithm!r}")
-    elif isinstance(algorithm, bool) or not isinstance(algorithm, (int, float)) \
-            or algorithm < 0:
+    if isinstance(algorithm, str) and algorithm not in ALGORITHMS:
         raise ValueError(
             f"decoder.{tier}.algorithm is a number (fixed core latency, us) "
             f"or one of {ALGORITHMS}, got {algorithm!r}")
-    units = card["units"]
-    if isinstance(units, bool) or not isinstance(units, int) or units < 1:
-        raise ValueError(f"decoder.{tier}.units must be a positive count")
     engine = card["engine"]
-    clock = engine["clock"]
-    if clock not in clocks:
-        raise ValueError(f"decoder.{tier}.engine.clock names {clock!r}; "
-                         f"clocks defines {sorted(clocks)}")
     return DecoderUnitCard(
-        algorithm=algorithm, units=units,
-        unit_buffer_size=_buffer_size(
-            card["unit_buffer_size"], f"decoder.{tier}.unit_buffer_size"),
+        algorithm=algorithm, units=card["units"],
+        unit_buffer_size=card["unit_buffer_size"],
         engine=EngineCard(
-            clock=clock,
+            clock=engine["clock"],
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
             release_cycles_per_job=engine["release_cycles_per_job"],
-            frequency_mhz=clocks[clock]))
+            frequency_mhz=clocks[engine["clock"]]))
 
 
 def _decoder_card(raw_decoder, clocks: dict, mode: str) -> DecoderCard:
     """The decoder card: one unit card per tier, the mode's tier required."""
-    if not isinstance(raw_decoder, dict):
-        raise ValueError("decoder maps tier names (weak, strong) to unit cards")
     unknown = set(raw_decoder) - {"weak", "strong"}
     if unknown:
         raise ValueError(f"decoder does not know {sorted(unknown)}; its keys "
@@ -318,79 +264,24 @@ def _sweep_block(block: dict, index: int) -> SweepBlock:
             f"are physical_error_probability, distance and round_period_us, "
             f"plus shots (the algorithm lives on the decoder card, not in "
             f"the sweep)")
-    distances = tuple(block["distance"])
-    for distance in distances:
-        if isinstance(distance, bool) or not isinstance(distance, int) \
-                or distance < 3:
-            raise ValueError(
-                f"sweep block {index} distance entries must be code "
-                f"distances >= 3, got {distance!r}")
     return SweepBlock(
         physical_error_probabilities=tuple(block["physical_error_probability"]),
-        distances=distances,
+        distances=tuple(block["distance"]),
         round_periods_us=tuple(block["round_period_us"]),
         shots=block["shots"])
 
 
-def _records_card(card) -> RecordsCard:
-    if card is None:
-        return RecordsCard(windows=False, failure_events=True)
-    unknown = set(card) - {"windows", "failure_events"}
-    if unknown:
-        raise ValueError(f"records does not know {sorted(unknown)}; its keys "
-                         f"are windows and failure_events")
-    windows = _require(card.get("windows", False), (True, False),
-                       "records.windows")
-    failure_events = _require(card.get("failure_events", True), (True, False),
-                              "records.failure_events")
-    return RecordsCard(windows=windows, failure_events=failure_events)
-
-
 def _rounds_card(value) -> RoundsCard:
-    if isinstance(value, bool):
-        raise ValueError(f"rounds_per_shot must be a positive count or "
-                         f"'<n>d', got {value!r}")
     if isinstance(value, int):
-        if value < 1:
-            raise ValueError(f"rounds_per_shot must be positive, got {value}")
         return RoundsCard(fixed=value, per_distance=None)
-    if isinstance(value, str) and value.endswith("d") \
-            and value[:-1].isdigit() and int(value[:-1]) > 0:
+    if isinstance(value, str) and value.endswith("d") and value[:-1].isdigit():
         return RoundsCard(fixed=None, per_distance=int(value[:-1]))
-    raise ValueError(f"rounds_per_shot must be a positive count or '<n>d' "
-                     f"(rounds per unit of distance), got {value!r}")
+    raise ValueError(f"rounds_per_shot is a round count or '<n>d' (rounds "
+                     f"per unit of distance), got {value!r}")
 
 
 def _pauli_frame_commit_us(card: dict, clocks: dict) -> float:
-    clock = card["clock"]
-    if clock not in clocks:
-        raise ValueError(f"pauli_frame.clock names {clock!r}; "
-                         f"clocks defines {sorted(clocks)}")
-    commit_cycles = card["commit_cycles"]
-    if isinstance(commit_cycles, bool) \
-            or not isinstance(commit_cycles, (int, float)) or commit_cycles < 0:
-        raise ValueError("pauli_frame.commit_cycles must be >= 0")
-    return commit_cycles / clocks[clock]
-
-
-def _clocks(raw_clocks) -> dict:
-    """The clock domains: name -> MHz. More domains are one more entry."""
-    if not isinstance(raw_clocks, dict) or not raw_clocks:
-        raise ValueError("clocks must map at least one domain name to MHz")
-    for name, megahertz in raw_clocks.items():
-        if isinstance(megahertz, bool) or not isinstance(megahertz, (int, float)) \
-                or megahertz <= 0:
-            raise ValueError(f"clocks.{name} must be a positive MHz value")
-    return dict(raw_clocks)
-
-
-def _buffer_size(value, key: str) -> Optional[int]:
-    if value is None:
-        return None
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError(
-            f"{key} must be a positive round count or null, got {value!r}")
-    return value
+    return card["commit_cycles"] / clocks[card["clock"]]
 
 
 def _require(value, allowed: tuple, key: str):
@@ -423,7 +314,7 @@ def load_experiment(path) -> ExperimentConfig:
     controller = raw["controller"]
     buffers = raw["buffers"]
     mode = _require(raw["mode"], MODES, "mode")
-    clocks = _clocks(raw["clocks"])
+    clocks = dict(raw["clocks"])
     links = {link_path: _link_card(raw["links"].get(link_path), clocks, link_path)
              for link_path in LINK_PATHS}
     raw_trace = raw.get("trace", "off")
@@ -445,19 +336,14 @@ def load_experiment(path) -> ExperimentConfig:
         clocks=clocks,
         links=links,
         buffers=BuffersCard(
-            buffer_0_size=_buffer_size(
-                buffers["buffer_0_size"], "buffers.buffer_0_size"),
-            buffer_1_size=_buffer_size(
-                buffers["buffer_1_size"], "buffers.buffer_1_size"),
-            packing_workspace_size=_buffer_size(
-                buffers["packing_workspace_size"],
-                "buffers.packing_workspace_size")),
+            buffer_0_size=buffers["buffer_0_size"],
+            buffer_1_size=buffers["buffer_1_size"],
+            packing_workspace_size=buffers["packing_workspace_size"]),
         decoder=_decoder_card(raw["decoder"], clocks, mode),
         trace=_require(raw_trace, TRACE_MODES, "trace"),
         trace_io=_require(raw.get("trace_io", False), (True, False), "trace_io"),
         idle_policy=_require(raw.get("idle_policy", "separate_decode_jobs"),
                              IDLE_POLICIES, "idle_policy"),
-        records=_records_card(raw.get("records")),
         verify_windows=_require(raw.get("verify_windows", "none"),
                                 ("none", "tesseract"), "verify_windows"),
         pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"], clocks),

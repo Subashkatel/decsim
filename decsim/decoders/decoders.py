@@ -161,17 +161,26 @@ class PerRoundDecoder:
 
 
 class SwitchingRouter:
-    """Route strong side jobs to the strong decoder and all other jobs to weak."""
+    """Route strong side jobs to the strong decoder and all other jobs to weak.
 
-    def __init__(self, weak: "Decoder", strong: "Decoder"):
+    An optional ``gap`` engine serves split-pair sibling jobs (hint
+    "gap"): the second forced-class solve on its own decoder unit. Its
+    presence is also the manager's signal that split-pair joins are on.
+    """
+
+    def __init__(self, weak: "Decoder", strong: "Decoder",
+                 gap: "Decoder" = None):
         self.weak = weak
         self.strong = strong
+        self.gap = gap
         _fault_model_requirement_for(weak, None)
         _fault_model_requirement_for(strong, None)
+        if gap is not None:
+            _fault_model_requirement_for(gap, None)
 
     def run_seed_children(self):
-        """Expose both routed decoder tiers."""
-        return (
+        """Expose every routed decoder tier."""
+        children = [
             RunSeedChild(
                 (RunSeedPathSegment("field", "weak"),),
                 self.weak,
@@ -180,10 +189,18 @@ class SwitchingRouter:
                 (RunSeedPathSegment("field", "strong"),),
                 self.strong,
             ),
-        )
+        ]
+        if self.gap is not None:
+            children.append(RunSeedChild(
+                (RunSeedPathSegment("field", "gap"),),
+                self.gap,
+            ))
+        return tuple(children)
 
     def route(self, job: DecodeJob):
         """Strong decoder for escalated jobs, weak decoder for everything else."""
+        if job.hint == "gap" and self.gap is not None:
+            return self.gap
         return self.strong if job.hint == "strong" else self.weak
 
     def fault_model_requirement_for(

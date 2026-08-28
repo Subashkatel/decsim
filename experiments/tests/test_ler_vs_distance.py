@@ -1,9 +1,9 @@
 """The LER-vs-distance figure: both tiers at one p from their ler.csv.
 
 The figure's contract: measured points carry Wilson bars, a
-zero-failure point is drawn as its Wilson upper bound (never a point
-at zero, which a log axis cannot hold), and a run that never swept the
-requested p is refused rather than silently dropped.
+zero-failure point is left off (a log axis cannot hold zero, so the
+curve ends at the last distance that saw failures), and a run that
+never swept the requested p is refused rather than silently dropped.
 """
 
 import csv
@@ -45,7 +45,7 @@ def two_tier_runs(tmp_path):
     return weak, strong
 
 
-def test_figure_written_with_zero_failure_point_as_bound(tmp_path):
+def test_figure_written_with_zero_failure_point_left_off(tmp_path):
     weak, strong = two_tier_runs(tmp_path)
     figure_path = tmp_path / "ler_vs_d.png"
     ler_vs_distance_plot([weak, strong], 0.001, figure_path)

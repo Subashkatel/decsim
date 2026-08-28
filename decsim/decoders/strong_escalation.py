@@ -1215,10 +1215,15 @@ class StrongEscalation:
                 f"{plan.commit_hi}")
         for absorbed_key in absorbed:
             absorbed_window = self.wm.windows[absorbed_key]
-            if absorbed_window.queued or absorbed_window.committed:
+            if absorbed_window.committed or absorbed_window.t_done is not None:
                 raise RuntimeError(
                     f"cannot absorb window {absorbed_key}: already "
-                    f"{'queued' if absorbed_window.queued else 'committed'}")
+                    f"{'committed' if absorbed_window.committed else 'decoded'}")
+            if absorbed_window.queued:
+                # early-shipped at data-complete but parked on the
+                # escalated window's boundary, which will never arrive
+                # (the strong window owns it); withdraw the unstarted attempt
+                self.wm.withdraw_window_decode(absorbed_key)
         expected_restart = next(
             (window.key for window in later_windows
              if window.commit_lo > plan.commit_hi),

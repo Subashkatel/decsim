@@ -49,7 +49,7 @@ from decsim.windows.window_interactions import DefaultWindowInteraction
 
 from experiments.build_run import code_model, decoder_engine, memory_circuit
 from experiments.experiment_config import ExperimentConfig, load_experiment
-from experiments.plots import ler_plot
+from experiments.plots import decoder_title, ler_plot
 from experiments.run import new_run_dir, snapshot_code_state, write_manifest
 from experiments.sweep_report import wilson_interval, write_csv
 
@@ -346,9 +346,9 @@ def merge(run_dir: str) -> list:
             # one period
             "round_period_us": 0.0})
     write_csv(ler_rows, run_dir / "ler.csv")
-    ler_plot(ler_rows, run_dir / "ler.png")
-
     config = _run_config(run_dir)
+    ler_plot(ler_rows, run_dir / "ler.png", title=decoder_title(config))
+
     manifest = json.loads((run_dir / "manifest.json").read_text())
     write_manifest(config, run_dir, started_utc=manifest["started_utc"],
                    finished_utc=_now_utc())

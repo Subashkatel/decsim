@@ -218,7 +218,18 @@ def ler_groups(rows: list) -> list:
     return groups
 
 
-def ler_plot(rows: list, path: Path) -> None:
+def decoder_title(config: ExperimentConfig) -> str:
+    """"pymatching decoder (weak)" / "belief matching decoder (strong)".
+    A numeric card reads as pymatching: the card prices latency but its
+    corrections come from the same MWPM path."""
+    from experiments.experiment_config import MODE_TIER
+    algorithm = config.active_decoder.algorithm
+    name = algorithm if isinstance(algorithm, str) else "pymatching"
+    return f"{name.replace('_', ' ')} decoder ({MODE_TIER[config.mode]})"
+
+
+def ler_plot(rows: list, path: Path,
+             title: str = "Logical error rate") -> None:
     """Logical error rate against physical error rate, Wilson 95% bars, one
     line per card and round time that swept more than one p."""
     import matplotlib.pyplot as plt
@@ -240,7 +251,7 @@ def ler_plot(rows: list, path: Path) -> None:
     axis.set_yscale("log")
     axis.set_xlabel("Physical error rate")
     axis.set_ylabel("Logical error rate")
-    axis.set_title("Logical error rate")
+    axis.set_title(title)
     axis.grid(alpha=0.3, which="both")
     axis.legend(fontsize=8)
     figure.tight_layout()
@@ -385,7 +396,7 @@ def plots(config: ExperimentConfig, rows: list, report_dir: Path,
     matplotlib.use("Agg")
     timeline_plot(config, report_dir / "timeline.png")
     if len({row["physical_error_probability"] for row in rows}) > 1:
-        ler_plot(rows, report_dir / "ler.png")
+        ler_plot(rows, report_dir / "ler.png", title=decoder_title(config))
     # a named algorithm charges measured wall clock; a numeric card is a
     # fixed latency, flat in d, so its figure would be a horizontal line
     measured_wall_clock = isinstance(config.active_decoder.algorithm, str)

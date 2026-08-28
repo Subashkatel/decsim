@@ -433,13 +433,10 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
     rows = _shot_rows(run_dir)
     medians_by_distance = _median_stage_us_by_distance(rows)
     distances = list(medians_by_distance)
-    # both figures stay linear; a slow tier is drawn in ms so the axis
-    # carries plain numbers instead of a scientific offset
-    largest_total_us = max(sum(stage_medians)
-                           for stage_medians in medians_by_distance.values())
-    axis_is_ms = largest_total_us >= 10_000.0
-    unit_divisor = 1000.0 if axis_is_ms else 1.0
-    unit_name = "ms" if axis_is_ms else "µs"
+    # every breakdown is drawn in ms so the two tiers' figures share
+    # one unit; the axis stays linear with plain tick numbers
+    unit_divisor = 1000.0
+    unit_name = "ms"
     figure, axis = plt.subplots(figsize=(6.4, 3.6))
     bar_positions = range(len(distances))
     stacked_left = [0.0] * len(distances)
@@ -451,8 +448,8 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
         stacked_left = [left + width
                         for left, width in zip(stacked_left, stage_widths)]
     for position, total in zip(bar_positions, stacked_left):
-        axis.text(total, position, f"  {total:,.1f}",
-                  va="center", fontsize=8)
+        label = f"{total:.3g}" if total < 100 else f"{total:,.0f}"
+        axis.text(total, position, f"  {label}", va="center", fontsize=8)
     axis.set_yticks(list(bar_positions))
     axis.set_yticklabels([f"d={distance}" for distance in distances])
     axis.invert_yaxis()

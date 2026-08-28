@@ -69,6 +69,236 @@ class ThresholdRegister:
         )
 
 
+class EscalationRateTracker:
+    """Inner calibration loop: pin the escalation fraction at a target.
+
+    Label-free: every window reveals whether it escalated
+    (gap < threshold), so the escalation FRACTION is fully observable.
+    The update is the adaptive conformal recursion (Gibbs and Candes,
+    arXiv:2106.00170): raise the threshold a little on every kept
+    window, lower it a lot on every escalation, balancing at the target
+    quantile of the live gap distribution with a per-sequence long-run
+    guarantee under any drift. Hardware precedent: O-GEHL's
+    update threshold is servoed by the same event-rate-balancing
+    counter (Seznec, CBP-1 2004).
+
+    Threshold and step are in the gap's own unit, natural-log weight
+    (nats), the unit ``Switching`` compares in; the yaml layer converts
+    from the paper's decibels."""
+
+    def __init__(self, target_escalation_rate: float, threshold: float,
+                 step: float):
+        self.target_escalation_rate = target_escalation_rate
+        self.threshold = threshold
+        self.step = step
+        self.window_count = 0
+        self.escalated_count = 0
+
+    def observe(self, gap: float) -> bool:
+        """Consume one window's gap; return True when it escalates."""
+        escalated = gap < self.threshold
+        self.window_count += 1
+        self.escalated_count += int(escalated)
+        move = self.target_escalation_rate - float(escalated)
+        self.threshold += self.step * move
+        if self.threshold < 0.0:
+            self.threshold = 0.0
+        return escalated
+
+    def escalation_rate(self) -> float:
+        if self.window_count == 0:
+            return 0.0
+        return self.escalated_count / self.window_count
+
+
+class AuditLane:
+    """Randomized strong-decoder audits of kept windows.
+
+    The lane is cache set-dueling's move (Qureshi et al., ISCA 2007):
+    dedicate a small fixed sample to the expensive path so ground truth
+    keeps flowing whatever threshold is live. Sampling KEPT windows is
+    what breaks the selective-labels bias (Lakkaraju et al., KDD 2017):
+    without it every label comes from below the threshold and the kept
+    region is pure extrapolation.
+
+    ``kept_bad_rate`` estimates P(weak revised AND kept) per window,
+    the quantity the paper's Eq. 4 bounds with epsilon * PL_strong.
+    Each audited bad outcome counts 1/audit_rate kept windows (inverse
+    propensity). The label is disagreement with the strong result, the
+    reference the paper's protocol also measures against."""
+
+    def __init__(self, audit_rate: float):
+        self.audit_rate = audit_rate
+        self.audited_count = 0
+        self.audited_bad_count = 0
+        self.weighted_bad_sum = 0.0
+        self.kept_count = 0
+
+    def should_audit(self, unit_random: float) -> bool:
+        return unit_random < self.audit_rate
+
+    def record_kept(self) -> None:
+        self.kept_count += 1
+
+    def record_audit(self, weak_was_bad: bool) -> None:
+        self.audited_count += 1
+        if weak_was_bad:
+            self.audited_bad_count += 1
+            self.weighted_bad_sum += 1.0 / self.audit_rate
+
+    def kept_bad_rate(self, total_window_count: int) -> float:
+        if total_window_count == 0:
+            return 0.0
+        return self.weighted_bad_sum / total_window_count
+
+
+class OnlineThresholdController:
+    """Both calibration loops together: duty tracking steered by audits.
+
+    The two directions of the outer loop have asymmetric evidence costs
+    and are handled asymmetrically:
+
+      raise    each audited bad outcome carries importance weight one
+               over the audit rate, so one event is already strong
+               evidence the budget is blown. The escalation target is
+               multiplied by ``adjust_factor`` immediately.
+      relax    certifying the bad rate is BELOW budget needs the
+               rule-of-three quota, about 3 / kept_bad_budget clean
+               audits for a 95% upper bound at the budget. Only a full
+               clean quota shrinks the target.
+
+    The target always stays inside [min_escalation_rate,
+    max_escalation_rate]; the max is the Theorem 1 backlog bound: the
+    strong tier's duty cycle may never exceed what its latency can
+    absorb, whatever accuracy would prefer."""
+
+    def __init__(self, tracker: EscalationRateTracker, audit: AuditLane,
+                 kept_bad_budget: float, adjust_factor: float,
+                 min_escalation_rate: float, max_escalation_rate: float):
+        self.tracker = tracker
+        self.audit = audit
+        self.kept_bad_budget = kept_bad_budget
+        self.adjust_factor = adjust_factor
+        self.min_escalation_rate = min_escalation_rate
+        self.max_escalation_rate = max_escalation_rate
+        self.clean_audit_streak = 0
+        self.raise_count = 0
+        self.relax_count = 0
+
+    def relax_audit_quota(self) -> int:
+        """Clean audits needed before a relax is statistically earned."""
+        return int(math.ceil(3.0 / self.kept_bad_budget))
+
+    def observe(self, gap: float, unit_random: float) -> tuple:
+        """One window: (escalated, audited)."""
+        escalated = self.tracker.observe(gap)
+        audited = False
+        if not escalated:
+            self.audit.record_kept()
+            audited = self.audit.should_audit(unit_random)
+        return escalated, audited
+
+    def record_audit_outcome(self, weak_was_bad: bool) -> None:
+        self.audit.record_audit(weak_was_bad)
+        if weak_was_bad:
+            self.clean_audit_streak = 0
+            self.raise_count += 1
+            self._scale_target(self.adjust_factor)
+            return
+        self.clean_audit_streak += 1
+        if self.clean_audit_streak >= self.relax_audit_quota():
+            self.clean_audit_streak = 0
+            self.relax_count += 1
+            self._scale_target(1.0 / self.adjust_factor)
+
+    def _scale_target(self, factor: float) -> None:
+        proposed = self.tracker.target_escalation_rate * factor
+        if proposed < self.min_escalation_rate:
+            proposed = self.min_escalation_rate
+        if proposed > self.max_escalation_rate:
+            proposed = self.max_escalation_rate
+        self.tracker.target_escalation_rate = proposed
+
+
+class OnlineGapCalibrator:
+    """The controller wired to Switching's decision point.
+
+    Owns the live threshold when ``switching.threshold_source: online``
+    (the ThresholdRegister stays the actuator for externally computed
+    thresholds and is refused alongside this). One instance persists
+    across every shot of a sweep point, so the controller learns over
+    the point's whole window stream, the same continuous stream the
+    drift-replay validation ran on; its random stream is seeded once at
+    construction, so a rerun of the point reproduces the same audits.
+
+    An audited window still escalates (the strong result commits, so
+    the audit costs latency, never accuracy) and is remembered here;
+    when its strong result arrives, the label is whether the strong
+    answer revised the weak committed observables."""
+
+    def __init__(self, controller: OnlineThresholdController, rng):
+        self.controller = controller
+        self.rng = rng
+        self._pending_audits: dict = {}   # (op_id, window_id) -> weak observables
+        self.trajectory: list = []        # (window_count, threshold, event)
+        self._record("start")
+
+    def _record(self, event: str) -> None:
+        self.trajectory.append(
+            (self.controller.tracker.window_count,
+             self.controller.tracker.threshold, event))
+
+    def decide_keep(self, result, job) -> bool:
+        """One weak outcome: True keeps the weak result, False escalates
+        (an audit escalates with the decision recorded for labeling)."""
+        escalated, audited = self.controller.observe(
+            result.soft_output.gap, self.rng.random())
+        if self.controller.tracker.window_count % 100 == 0:
+            self._record("sample")
+        if audited:
+            if result.logical_observables is None:
+                raise ValueError(
+                    "online threshold calibration needs the weak decoder "
+                    "to produce logical observables for audit labels; "
+                    "the configured weak card is timing-only")
+            key = (job.op_id, job.window_id)
+            self._pending_audits[key] = tuple(result.logical_observables)
+            self._record("audit")
+            return False
+        return not escalated
+
+    def absorb_strong_result(self, key: tuple, strong_result) -> None:
+        """A strong result arrived; if it answers an audit, label it."""
+        weak_observables = self._pending_audits.pop(key, None)
+        if weak_observables is None:
+            return
+        if strong_result.logical_observables is None:
+            raise ValueError(
+                f"audited window {key}: the strong result carries no "
+                "logical observables to compare against")
+        weak_was_bad = (
+            tuple(strong_result.logical_observables) != weak_observables)
+        self.controller.record_audit_outcome(weak_was_bad)
+        self._record("audit_bad" if weak_was_bad else "audit_clean")
+
+    def summary(self) -> dict:
+        tracker = self.controller.tracker
+        audit = self.controller.audit
+        return {
+            "windows": tracker.window_count,
+            "escalated": tracker.escalated_count,
+            "escalation_rate": tracker.escalation_rate(),
+            "threshold": tracker.threshold,
+            "target_escalation_rate": tracker.target_escalation_rate,
+            "audited": audit.audited_count,
+            "audited_bad": audit.audited_bad_count,
+            "kept_bad_rate": audit.kept_bad_rate(tracker.window_count),
+            "raises": self.controller.raise_count,
+            "relaxes": self.controller.relax_count,
+            "pending_audits": len(self._pending_audits),
+        }
+
+
 class Baseline:
     """Plain windowed decoding: submit the weak job, accept every outcome."""
 
@@ -188,6 +418,7 @@ class Switching:
                  weak_keepup_ratio: Optional[float] = None,
                  bulk_strong: bool = False,
                  threshold_register: Optional["ThresholdRegister"] = None,
+                 threshold_calibrator: Optional["OnlineGapCalibrator"] = None,
                  double_window: bool = False):
         if weak_keepup_ratio is not None and not 0 < weak_keepup_ratio < 1:
             raise ValueError(f"weak_keepup_ratio must be between 0 and 1 "
@@ -215,9 +446,27 @@ class Switching:
                     "Switching expected source must equal the threshold "
                     "register source"
                 )
+        if threshold_calibrator is not None:
+            if threshold_register is not None:
+                raise ValueError(
+                    "an online threshold calibrator and a threshold "
+                    "register are two owners for the same threshold; "
+                    "configure one")
+            if run_both_at_once:
+                raise ValueError(
+                    "online threshold calibration is meaningless with "
+                    "run_both_at_once: the strong decoder already runs "
+                    "for every window, so there is nothing to audit")
+            if double_window:
+                raise ValueError(
+                    "online threshold calibration is serial-only: an "
+                    "audit label compares one window's weak and strong "
+                    "committed observables, and a double-window strong "
+                    "result owns a larger extent than the audited window")
         self.confidence_threshold = confidence_threshold
         self.expected_source = expected_source
         self.threshold_register = threshold_register   # P17 (None = scalar)
+        self.threshold_calibrator = threshold_calibrator
         self.run_both_at_once = run_both_at_once
         self.weak_keepup_ratio = weak_keepup_ratio
         self.bulk_strong = bulk_strong
@@ -248,8 +497,11 @@ class Switching:
     def on_decode_outcome(self, outcome, services) -> OutcomeDirective:
         job = outcome.job
         if job.strong_decode_for is not None:
+            if self.threshold_calibrator is not None:
+                self.threshold_calibrator.absorb_strong_result(
+                    job.strong_decode_for, outcome.result)
             return OutcomeDirective(Directive.FINALIZE_STRONG)
-        if job.attempt != 0 or self.keep_weak_result(outcome.result, job):
+        if job.attempt != 0 or self._keep_weak_outcome(outcome.result, job):
             return OutcomeDirective(Directive.FINALIZE)   # pool cancels sibling
         extra = None
         strong_request_key = None
@@ -354,6 +606,21 @@ class Switching:
             )
 
     # ---------------------------------------------------------- policy knobs
+
+    def _keep_weak_outcome(self, result, job) -> bool:
+        """The run's keep decision for one weak outcome, made exactly
+        once per window: the calibrator's when one is configured (it
+        learns from every call), the fixed threshold's otherwise."""
+        if self.threshold_calibrator is None:
+            return self.keep_weak_result(result, job)
+        if result is None or result.soft_output is None:
+            return False
+        if result.soft_output.source != self.expected_source:
+            raise ValueError(
+                "decoder confidence source does not match the switching "
+                "threshold source"
+            )
+        return self.threshold_calibrator.decide_keep(result, job)
 
     def keep_weak_result(self, result, job) -> bool:
         """True when the weak result should be committed (switching.py:28-31).

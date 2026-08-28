@@ -50,8 +50,10 @@ POINTS = (
     "qpu_first_round_to_frame",      # first required round off QPU -> frame
 )
 
-INPUT_LINK = {"weak_baseline": "wbd", "strong_only": "sbd"}
-OUTPUT_LINK = {"weak_baseline": "wdo", "strong_only": "do"}
+INPUT_LINK = {"weak_baseline": "wbd", "strong_only": "sbd",
+              "switching": "wbd"}
+OUTPUT_LINK = {"weak_baseline": "wdo", "strong_only": "do",
+               "switching": "wdo"}
 
 
 @dataclass(frozen=True)
@@ -240,12 +242,15 @@ def _write_trace(completed, run_dir, label: str) -> None:
 
 def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                  distance: int, round_period_us: float, seed: int,
-                 run_dir=None) -> ShotMeasurement:
+                 run_dir=None, threshold_calibrator=None) -> ShotMeasurement:
     """run_dir receives the trace file when trace: file|both is on;
-    None writes nothing beyond the returned measurement."""
+    None writes nothing beyond the returned measurement.
+    threshold_calibrator is the sweep point's online controller
+    (threshold_source online): one instance across the point's shots."""
     spec, engine = build_run(
         config, physical_error_probability=physical_error_probability,
-        distance=distance, round_period_us=round_period_us, seed=seed)
+        distance=distance, round_period_us=round_period_us, seed=seed,
+        threshold_calibrator=threshold_calibrator)
     wall_start = time.perf_counter()
     completed = spec.build(verbose=config.trace in ("print", "both"),
                            io_trace=config.trace_io)

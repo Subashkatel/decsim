@@ -451,8 +451,14 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
     axis.invert_yaxis()
     axis.set_xlim(0, max(stacked_left) * 1.12)
     axis.set_xlabel("median time per window (µs)")
-    algorithm_label = card_label(rows[0]["algorithm"])
-    axis.set_title(f"Where a window's time goes, {algorithm_label}")
+    breakdown_titles = {
+        "pymatching": "Time breakdown: Weak decoder (pymatching)",
+        "belief_matching": "Time breakdown: Strong decoder (belief matching)",
+    }
+    algorithm = rows[0]["algorithm"]
+    title = breakdown_titles.get(
+        algorithm, f"Time breakdown: {card_label(algorithm)}")
+    axis.set_title(title)
     axis.legend(fontsize=7, ncol=3)
     figure.tight_layout()
     figure.savefig(path, dpi=150)

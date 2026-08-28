@@ -369,6 +369,96 @@ def ler_vs_distance_plot(run_dirs: list, probability: float,
     plt.close(figure)
 
 
+# ---- the stage breakdown ---------------------------------------------------
+
+# The measured window chain from syndrome arrival to frame commit, in
+# pipeline order; each name is a per-shot mean column of shots.csv.
+STAGE_BREAKDOWN_STAGES = (
+    ("buffer_fill_mean_us", "buffer fill"),
+    ("queue_wait_mean_us", "queue wait"),
+    ("input_link_per_window_mean_us", "input link"),
+    ("fetch_mean_us", "fetch"),
+    ("algorithm_mean_us", "algorithm"),
+    ("release_mean_us", "release"),
+    ("dd_per_window_mean_us", "boundary handoff"),
+    ("output_link_per_window_mean_us", "output link"),
+    ("frame_commit_mean_us", "frame commit"),
+)
+
+
+def _shot_rows(run_dir) -> list:
+    """Every row of the run's shots.csv; a run without one is refused."""
+    import csv
+
+    shots_path = Path(run_dir) / "shots.csv"
+    if not shots_path.exists():
+        raise FileNotFoundError(
+            f"{run_dir} has no shots.csv; the stage breakdown reads the "
+            f"per-shot stage means a closed-loop run records")
+    with open(shots_path) as handle:
+        return list(csv.DictReader(handle))
+
+
+def _median_stage_us_by_distance(rows: list) -> dict:
+    """distance -> [median us per stage, in STAGE_BREAKDOWN_STAGES order].
+
+    The median is over shots of each shot's per-window mean, so one
+    slow shot cannot move the bar the way a mean of means would let it.
+    """
+    import statistics
+
+    samples_by_distance = {}
+    for row in rows:
+        distance = int(row["distance"])
+        per_stage = samples_by_distance.setdefault(
+            distance, [[] for _ in STAGE_BREAKDOWN_STAGES])
+        for stage_index, (column, _) in enumerate(STAGE_BREAKDOWN_STAGES):
+            per_stage[stage_index].append(float(row[column]))
+    return {
+        distance: [statistics.median(values) for values in per_stage]
+        for distance, per_stage in sorted(samples_by_distance.items())
+    }
+
+
+def stage_breakdown_plot(run_dir, path: Path) -> None:
+    """One stacked bar per distance: where a window's time goes, from
+    syndrome arrival in the buffer to the Pauli-frame commit.
+
+        python -m experiments.plots stage_breakdown <run_dir> <out.png>
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    rows = _shot_rows(run_dir)
+    medians_by_distance = _median_stage_us_by_distance(rows)
+    distances = list(medians_by_distance)
+    figure, axis = plt.subplots(figsize=(6.4, 3.6))
+    bar_positions = range(len(distances))
+    stacked_left = [0.0] * len(distances)
+    for stage_index, (_, stage_label) in enumerate(STAGE_BREAKDOWN_STAGES):
+        stage_widths = [medians_by_distance[distance][stage_index]
+                        for distance in distances]
+        axis.barh(bar_positions, stage_widths, left=stacked_left,
+                  height=0.6, label=stage_label)
+        stacked_left = [left + width
+                        for left, width in zip(stacked_left, stage_widths)]
+    for position, total_us in zip(bar_positions, stacked_left):
+        axis.text(total_us, position, f"  {total_us:.1f}",
+                  va="center", fontsize=8)
+    axis.set_yticks(list(bar_positions))
+    axis.set_yticklabels([f"d={distance}" for distance in distances])
+    axis.invert_yaxis()
+    axis.set_xlim(0, max(stacked_left) * 1.12)
+    axis.set_xlabel("median time per window (µs)")
+    algorithm_label = card_label(rows[0]["algorithm"])
+    axis.set_title(f"Where a window's time goes, {algorithm_label}")
+    axis.legend(fontsize=7, ncol=3)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+    plt.close(figure)
+
+
 # ---- the decode latency ----------------------------------------------------
 
 def latency_samples_by_distance(measurements: list) -> dict:
@@ -520,7 +610,9 @@ def main(argv) -> None:
     usage = ("usage: python -m experiments.plots "
              "latency <run_dir> <run_dir> <out.png>\n"
              "       python -m experiments.plots "
-             "ler_vs_d <run_dir> <run_dir> <p> <out.png>")
+             "ler_vs_d <run_dir> <run_dir> <p> <out.png>\n"
+             "       python -m experiments.plots "
+             "stage_breakdown <run_dir> <out.png>")
     if len(argv) == 5 and argv[1] == "latency":
         sample_files = [Path(run_dir) / "latency_samples.csv"
                         for run_dir in argv[2:4]]
@@ -529,6 +621,9 @@ def main(argv) -> None:
     elif len(argv) == 6 and argv[1] == "ler_vs_d":
         ler_vs_distance_plot(argv[2:4], float(argv[4]), Path(argv[5]))
         print(argv[5])
+    elif len(argv) == 4 and argv[1] == "stage_breakdown":
+        stage_breakdown_plot(argv[2], Path(argv[3]))
+        print(argv[3])
     else:
         print(usage, file=sys.stderr)
         raise SystemExit(2)

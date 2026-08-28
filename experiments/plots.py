@@ -228,6 +228,16 @@ def decoder_title(config: ExperimentConfig) -> str:
     return f"{name.replace('_', ' ')} decoder ({MODE_TIER[config.mode]})"
 
 
+def _power_of_ten_label(value: float) -> str:
+    """5e-4 -> $5{\\times}10^{-4}$, 1e-3 -> $10^{-3}$: the y axis's
+    notation."""
+    exponent = math.floor(math.log10(value))
+    mantissa = value / 10.0 ** exponent
+    if math.isclose(mantissa, 1.0):
+        return f"$10^{{{exponent}}}$"
+    return f"${mantissa:g}{{\\times}}10^{{{exponent}}}$"
+
+
 def ler_plot(rows: list, path: Path,
              title: str = "Logical error rate") -> None:
     """Logical error rate against physical error rate, Wilson 95% bars, one
@@ -250,13 +260,15 @@ def ler_plot(rows: list, path: Path,
     axis.set_xscale("log")
     axis.set_yscale("log")
     # a decades-only log axis labels two of our seven p values; tick
-    # every swept p, in 1e-3 units so the labels stay short
+    # every swept p, in the y axis's power-of-ten notation
     swept = sorted({row["physical_error_probability"] for row in rows})
     axis.set_xticks(swept)
-    axis.set_xticklabels([f"{probability * 1e3:g}" for probability in swept])
+    axis.set_xticklabels([_power_of_ten_label(probability)
+                          for probability in swept], fontsize=8,
+                         rotation=30, ha="right")
     from matplotlib.ticker import NullFormatter
     axis.xaxis.set_minor_formatter(NullFormatter())
-    axis.set_xlabel(r"Physical error rate ($\times 10^{-3}$)")
+    axis.set_xlabel("Physical error rate")
     axis.set_ylabel("Logical error rate")
     axis.set_title(title)
     axis.grid(alpha=0.3, which="both")

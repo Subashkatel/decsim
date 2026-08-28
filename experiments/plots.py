@@ -11,6 +11,10 @@ latency.png    decode wall clock per window vs code distance, violins,
                the cross-tier combined figure comes from
                `python -m experiments.plots latency <run_dir> <run_dir>
                <out.png>` reading each run's latency_samples.csv
+ler vs d       both tiers' logical error rate against code distance at
+               one physical error rate, from each run's ler.csv:
+               `python -m experiments.plots ler_vs_d <run_dir> <run_dir>
+               <p> <out.png>`
 
 Every time is in microseconds.
 """
@@ -278,6 +282,82 @@ def ler_plot(rows: list, path: Path,
     plt.close(figure)
 
 
+def _csv_tier_label(algorithm_field: str) -> str:
+    """"pymatching (weak)" / "belief matching (strong)" from ler.csv's
+    algorithm column. A numeric card reads as pymatching, the same
+    ruling as decoder_title."""
+    try:
+        float(algorithm_field)
+        algorithm_name = "pymatching"
+    except ValueError:
+        algorithm_name = algorithm_field
+    tier = "strong" if algorithm_name == "belief_matching" else "weak"
+    return f"{algorithm_name.replace('_', ' ')} ({tier})"
+
+
+def ler_vs_distance_plot(run_dirs: list, probability: float,
+                         path: Path) -> None:
+    """Both tiers' logical error rate against code distance at one
+    physical error rate, from each run's ler.csv. Measured points carry
+    Wilson 95% bars; a zero-failure point is drawn as its Wilson upper
+    bound with a downward arrow, not as a point at zero.
+
+        python -m experiments.plots ler_vs_d <run_dir> <run_dir> <p>
+        <out.png>
+    """
+    import csv
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    figure, axis = plt.subplots(figsize=(4.8, 3.6))
+    all_distances = []
+    for run_index, run_dir in enumerate(run_dirs):
+        with open(Path(run_dir) / "ler.csv") as handle:
+            rows = [row for row in csv.DictReader(handle)
+                    if math.isclose(float(row["physical_error_probability"]),
+                                    probability)]
+        if not rows:
+            raise ValueError(f"{run_dir} swept no p={probability:g} point")
+        rows.sort(key=lambda row: int(row["distance"]))
+        color = f"C{run_index}"
+        label = _csv_tier_label(rows[0]["algorithm"])
+
+        measured = [row for row in rows if int(row["failures"]) > 0]
+        distances = [int(row["distance"]) for row in measured]
+        rates = [float(row["logical_error_rate"]) for row in measured]
+        lower = [rate - float(row["ler_wilson_low"])
+                 for rate, row in zip(rates, measured)]
+        upper = [float(row["ler_wilson_high"]) - rate
+                 for rate, row in zip(rates, measured)]
+        axis.errorbar(distances, rates, yerr=[lower, upper], fmt="o-",
+                      capsize=3, color=color, label=label)
+
+        bounds = [row for row in rows if int(row["failures"]) == 0]
+        for row in bounds:
+            bound = float(row["ler_wilson_high"])
+            # uplims points the arrow toward lower values: the true
+            # rate lies below the bound; arrow length spans a factor 2
+            axis.errorbar([int(row["distance"])], [bound],
+                          yerr=bound * 0.5, uplims=True, fmt="o",
+                          markerfacecolor="none", color=color,
+                          label=f"0 of {int(row['shots']):,} shots "
+                                "(95% bound)")
+        all_distances = sorted(set(all_distances) | {int(row["distance"])
+                                                     for row in rows})
+    axis.set_yscale("log")
+    axis.set_xticks(all_distances)
+    axis.set_xlabel("Code distance")
+    axis.set_ylabel("Logical error rate per shot (10d rounds)")
+    axis.set_title(f"Logical error rate vs distance, "
+                   f"p={_power_of_ten_label(probability)}")
+    axis.grid(alpha=0.3, which="both")
+    axis.legend(fontsize=8)
+    figure.tight_layout()
+    figure.savefig(path, dpi=150)
+    plt.close(figure)
+
+
 # ---- the decode latency ----------------------------------------------------
 
 def latency_samples_by_distance(measurements: list) -> dict:
@@ -426,15 +506,21 @@ def plots(config: ExperimentConfig, rows: list, report_dir: Path,
 
 
 def main(argv) -> None:
-    usage = ("usage: python -m experiments.plots latency "
-             "<run_dir> <run_dir> <out.png>")
-    if len(argv) != 5 or argv[1] != "latency":
+    usage = ("usage: python -m experiments.plots "
+             "latency <run_dir> <run_dir> <out.png>\n"
+             "       python -m experiments.plots "
+             "ler_vs_d <run_dir> <run_dir> <p> <out.png>")
+    if len(argv) == 5 and argv[1] == "latency":
+        sample_files = [Path(run_dir) / "latency_samples.csv"
+                        for run_dir in argv[2:4]]
+        combined_latency_plot(sample_files, Path(argv[4]))
+        print(argv[4])
+    elif len(argv) == 6 and argv[1] == "ler_vs_d":
+        ler_vs_distance_plot(argv[2:4], float(argv[4]), Path(argv[5]))
+        print(argv[5])
+    else:
         print(usage, file=sys.stderr)
         raise SystemExit(2)
-    sample_files = [Path(run_dir) / "latency_samples.csv"
-                    for run_dir in argv[2:4]]
-    combined_latency_plot(sample_files, Path(argv[4]))
-    print(argv[4])
 
 
 if __name__ == "__main__":

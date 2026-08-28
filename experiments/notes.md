@@ -53,6 +53,11 @@ Pilot runs (100 shots/point, complete, validated): results/
 4. Stage breakdown, syndrome generation -> commit, per d (the POINTS
    chain: transport, fetch, algorithm, release, output link, commit).
    Free from any run's shots.csv; plotting only.
+   Status: drawn (python -m experiments.plots stage_breakdown
+   <run_dir> <out.png>) from the weak latency run and the strong
+   preview; per-window medians of the shot means, stacked in pipeline
+   order. Queue wait dominates both tiers; links are invisible at
+   scale. Both figures on the artifact.
 
 Retired: latency vs p (no paper draws it).
 

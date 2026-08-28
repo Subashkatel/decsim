@@ -22,10 +22,13 @@ import yaml
 ALGORITHMS = ("pymatching", "belief_matching")
 AlgorithmCard = Union[float, str]
 
-MODES = ("weak_baseline", "strong_only")
+MODES = ("weak_baseline", "strong_only", "switching")
 # The decoder unit each mode decodes on. A mode's unit must be defined;
-# the other tier's card may be omitted.
-MODE_TIER = {"weak_baseline": "weak", "strong_only": "strong"}
+# the other tier's card may be omitted. Switching decodes every window
+# on the weak tier first (its unit is the active one) and requires the
+# strong tier too, for escalation.
+MODE_TIER = {"weak_baseline": "weak", "strong_only": "strong",
+             "switching": "weak"}
 TRACE_MODES = ("off", "print", "file", "both")
 SCHEMES = ("sliding", "parallel", "sandwich", "naive_online")
 # How an idle patch's rounds are charged. Idle rounds are decoder workload
@@ -84,6 +87,67 @@ class DecoderCard:
     units its mode uses; the mode picks the active one."""
     weak: Optional[DecoderUnitCard]
     strong: Optional[DecoderUnitCard]
+
+
+@dataclass(frozen=True)
+class OnlineThresholdCard:
+    """The online calibrator's knobs (threshold_source: online).
+
+    Two loops around the live threshold: a rate tracker steps it toward
+    ``target_escalation_rate`` on every window (``step_db`` per event),
+    and a randomized audit lane strong-decodes ``audit_rate`` of the
+    KEPT windows; one revised audit multiplies the target by
+    ``adjust_factor``, and only ceil(3 / kept_bad_budget) consecutive
+    clean audits divide it back. The target stays inside
+    [min_escalation_rate, max_escalation_rate]; the max is the
+    Theorem 1 backlog cap. Defaults are the validated drift-replay
+    configuration."""
+    target_escalation_rate: float
+    step_db: float
+    step_nats: float
+    audit_rate: float
+    kept_bad_budget: float
+    adjust_factor: float
+    min_escalation_rate: float
+    max_escalation_rate: float
+
+
+@dataclass(frozen=True)
+class SwitchingCard:
+    """The escalation decision's knobs: keep the weak result when its
+    complementary gap is at or above the threshold, in decibels (the
+    paper's unit; Toshio 2510.25222 uses gth = 20 dB). The core compares
+    in natural-log weight units; the loader stores both.
+
+    threshold_source picks where the threshold comes from: "fixed"
+    (gap_threshold_db as given), "table" (looked up per sweep point in
+    an offline calibration table, threshold_table's threshold_column;
+    the table must be calibrated for this run's window geometry, since
+    a threshold does not transfer between geometries), or "online"
+    (gap_threshold_db is only the starting point and the online card's
+    two-loop controller adapts it across the point's shots; serial
+    switching only).
+
+    double_window selects the paper's Sec. III C scheme (the weak chain
+    keeps committing past an escalated strong window); without it,
+    escalation is serial and boundaries are held until results are
+    final. gap_computation picks the weak unit's gap engine: "serial"
+    runs the forced solves after the decode on one core,
+    "parallel_pair" runs the two forced-class solves on two cores
+    inside the unit and charges the slower core plus the join,
+    "split_pair" sends the second forced solve to its own decoder unit
+    pool (gap_units of them) with its own syndrome transfer, and the
+    window's decision waits at the join. split_pair is the option for a
+    unit that cannot hold two cores."""
+    gap_threshold_db: Optional[float]   # None exactly when source is table
+    gap_threshold_nats: Optional[float]
+    threshold_source: str
+    threshold_table: Optional[str]      # table source: the csv path
+    threshold_column: Optional[str]     # table source: which computed column
+    online: Optional[OnlineThresholdCard]
+    double_window: bool
+    gap_computation: str
+    gap_units: int
 
 
 @dataclass(frozen=True)
@@ -166,6 +230,8 @@ class ExperimentConfig:
     links: dict                     # path -> LinkCard | None (reference card)
     buffers: BuffersCard
     decoder: DecoderCard
+    switching: Optional[SwitchingCard]  # the escalation threshold; present
+                                    # exactly when mode is switching
     trace: str                      # off | print | file | both: the engine
                                     # narrator, live on screen and/or one log
                                     # file per shot in the run dir's trace/
@@ -257,7 +323,162 @@ def _decoder_card(raw_decoder, clocks: dict, mode: str) -> DecoderCard:
     if getattr(card, tier) is None:
         raise ValueError(f"mode {mode} decodes on decoder.{tier}, "
                          f"which this config does not define")
+    if mode == "switching" and card.strong is None:
+        raise ValueError("mode switching escalates to decoder.strong, "
+                         "which this config does not define")
     return card
+
+
+def _switching_card(raw_switching, mode: str) -> Optional[SwitchingCard]:
+    """The switching card, present exactly when the mode escalates."""
+    if mode != "switching":
+        if raw_switching is not None:
+            raise ValueError(f"mode {mode} never escalates; drop the "
+                             f"switching card")
+        return None
+    if raw_switching is None:
+        raise ValueError("mode switching needs a switching card with "
+                         "gap_threshold_db")
+    unknown = set(raw_switching) - {"gap_threshold_db", "double_window",
+                                    "gap_computation", "gap_units",
+                                    "threshold_source", "threshold_table",
+                                    "threshold_column", "online"}
+    if unknown:
+        raise ValueError(f"switching does not know {sorted(unknown)}; its "
+                         f"keys are gap_threshold_db, double_window, "
+                         f"gap_computation, gap_units, threshold_source, "
+                         f"threshold_table, threshold_column and online")
+    import math
+    threshold_source = _require(
+        raw_switching.get("threshold_source", "fixed"),
+        ("fixed", "table", "online"), "switching.threshold_source")
+    if threshold_source == "table":
+        if "gap_threshold_db" in raw_switching:
+            raise ValueError(
+                "threshold_source table computes the threshold from "
+                "threshold_table; drop gap_threshold_db")
+        if "threshold_table" not in raw_switching:
+            raise ValueError(
+                "threshold_source table needs threshold_table, the "
+                "calibration csv path (calibrate offline for this run's "
+                "window geometry)")
+        gap_threshold_db = None
+        gap_threshold_nats = None
+    else:
+        if "threshold_table" in raw_switching or (
+                "threshold_column" in raw_switching):
+            raise ValueError(
+                f"threshold_table/threshold_column belong to "
+                f"threshold_source table; the source is {threshold_source}")
+        if "gap_threshold_db" not in raw_switching:
+            raise ValueError("mode switching needs a switching card with "
+                             "gap_threshold_db")
+        gap_threshold_db = float(raw_switching["gap_threshold_db"])
+        # decibels are 10 log10 of the likelihood ratio; matching weights
+        # are its natural log
+        gap_threshold_nats = gap_threshold_db * math.log(10.0) / 10.0
+    threshold_table = raw_switching.get("threshold_table")
+    threshold_column = None
+    if threshold_source == "table":
+        threshold_column = str(
+            raw_switching.get("threshold_column", "gth_eq4_wilson"))
+    if "online" in raw_switching and threshold_source != "online":
+        raise ValueError(
+            f"the online card belongs to threshold_source online; the "
+            f"source is {threshold_source}")
+    online = None
+    if threshold_source == "online":
+        online = _online_threshold_card(raw_switching.get("online") or {})
+    gap_computation = _require(
+        raw_switching.get("gap_computation", "serial"),
+        ("serial", "parallel_pair", "split_pair"),
+        "switching.gap_computation")
+    gap_units = int(raw_switching.get("gap_units", 1))
+    if gap_units < 1:
+        raise ValueError("switching.gap_units needs at least 1 unit "
+                         f"(got {gap_units})")
+    if "gap_units" in raw_switching and gap_computation != "split_pair":
+        raise ValueError(
+            "switching.gap_units sizes the split_pair sibling pool; "
+            f"gap_computation is {gap_computation!r}, so drop the key")
+    double_window = _require(
+        raw_switching.get("double_window", False),
+        (True, False), "switching.double_window")
+    if gap_computation == "split_pair" and double_window:
+        raise ValueError(
+            "split_pair is validated for serial switching only: a strong "
+            "window absorbing windows whose gap join is still open is not "
+            "supported yet")
+    if threshold_source == "online" and double_window:
+        raise ValueError(
+            "threshold_source online is serial-only: an audit label "
+            "compares one window's weak and strong committed "
+            "observables, and a double-window strong result owns a "
+            "larger extent than the audited window")
+    return SwitchingCard(gap_threshold_db=gap_threshold_db,
+                         gap_threshold_nats=gap_threshold_nats,
+                         threshold_source=threshold_source,
+                         threshold_table=threshold_table,
+                         threshold_column=threshold_column,
+                         online=online,
+                         double_window=double_window,
+                         gap_computation=gap_computation,
+                         gap_units=gap_units)
+
+
+def _online_threshold_card(raw_online) -> OnlineThresholdCard:
+    """The online card, defaults from the validated drift replay."""
+    import math
+    unknown = set(raw_online) - {
+        "target_escalation_rate", "step_db", "audit_rate",
+        "kept_bad_budget", "adjust_factor", "min_escalation_rate",
+        "max_escalation_rate"}
+    if unknown:
+        raise ValueError(
+            f"switching.online does not know {sorted(unknown)}; its keys "
+            f"are target_escalation_rate, step_db, audit_rate, "
+            f"kept_bad_budget, adjust_factor, min_escalation_rate and "
+            f"max_escalation_rate")
+    target_escalation_rate = float(
+        raw_online.get("target_escalation_rate", 1e-3))
+    step_db = float(raw_online.get("step_db", 0.25))
+    audit_rate = float(raw_online.get("audit_rate", 0.01))
+    kept_bad_budget = float(raw_online.get("kept_bad_budget", 2e-4))
+    adjust_factor = float(raw_online.get("adjust_factor", 2.0))
+    min_escalation_rate = float(raw_online.get("min_escalation_rate", 1e-5))
+    max_escalation_rate = float(raw_online.get("max_escalation_rate", 0.30))
+    if step_db <= 0:
+        raise ValueError(f"switching.online.step_db must be positive "
+                         f"(got {step_db})")
+    if not 0 < audit_rate < 1:
+        raise ValueError(f"switching.online.audit_rate must be in (0, 1) "
+                         f"(got {audit_rate})")
+    if not 0 < kept_bad_budget < 1:
+        raise ValueError(f"switching.online.kept_bad_budget must be in "
+                         f"(0, 1) (got {kept_bad_budget})")
+    if adjust_factor <= 1:
+        raise ValueError(f"switching.online.adjust_factor must exceed 1 "
+                         f"(got {adjust_factor})")
+    if not 0 < min_escalation_rate <= max_escalation_rate <= 1:
+        raise ValueError(
+            f"switching.online needs 0 < min_escalation_rate <= "
+            f"max_escalation_rate <= 1 (got {min_escalation_rate} and "
+            f"{max_escalation_rate})")
+    if not min_escalation_rate <= target_escalation_rate <= (
+            max_escalation_rate):
+        raise ValueError(
+            f"switching.online.target_escalation_rate must lie inside "
+            f"[min_escalation_rate, max_escalation_rate] "
+            f"(got {target_escalation_rate})")
+    return OnlineThresholdCard(
+        target_escalation_rate=target_escalation_rate,
+        step_db=step_db,
+        step_nats=step_db * math.log(10.0) / 10.0,
+        audit_rate=audit_rate,
+        kept_bad_budget=kept_bad_budget,
+        adjust_factor=adjust_factor,
+        min_escalation_rate=min_escalation_rate,
+        max_escalation_rate=max_escalation_rate)
 
 
 def _sweep_block(block: dict, index: int) -> SweepBlock:
@@ -345,6 +566,7 @@ def load_experiment(path) -> ExperimentConfig:
             buffer_1_size=buffers["buffer_1_size"],
             packing_workspace_size=buffers["packing_workspace_size"]),
         decoder=_decoder_card(raw["decoder"], clocks, mode),
+        switching=_switching_card(raw.get("switching"), mode),
         trace=_require(raw_trace, TRACE_MODES, "trace"),
         trace_io=_require(raw.get("trace_io", False), (True, False),
                           "trace_io"),

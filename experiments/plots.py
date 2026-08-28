@@ -167,8 +167,10 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     axis.set_yticklabels(rows, fontsize=9)
     axis.invert_yaxis()
     axis.set_xlabel("time from shot start (µs)")
-    axis.set_title(f"{config.name}: one shot, every stage at its real time",
-                   pad=22)
+    timeline_titles = {"weak_baseline": "Weak only path timeline",
+                       "strong_only": "Strong only path timeline",
+                       "switching": "Switching path timeline"}
+    axis.set_title(timeline_titles.get(config.mode, config.name), pad=22)
     commit_rounds = config.windowing.commit_rounds or distance
     buffer_rounds = config.windowing.buffer_rounds or distance
     axis.text(0.5, 1.005,

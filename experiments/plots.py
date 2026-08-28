@@ -249,7 +249,14 @@ def ler_plot(rows: list, path: Path,
                       capsize=3, label=label)
     axis.set_xscale("log")
     axis.set_yscale("log")
-    axis.set_xlabel("Physical error rate")
+    # a decades-only log axis labels two of our seven p values; tick
+    # every swept p, in 1e-3 units so the labels stay short
+    swept = sorted({row["physical_error_probability"] for row in rows})
+    axis.set_xticks(swept)
+    axis.set_xticklabels([f"{probability * 1e3:g}" for probability in swept])
+    from matplotlib.ticker import NullFormatter
+    axis.xaxis.set_minor_formatter(NullFormatter())
+    axis.set_xlabel(r"Physical error rate ($\times 10^{-3}$)")
     axis.set_ylabel("Logical error rate")
     axis.set_title(title)
     axis.grid(alpha=0.3, which="both")

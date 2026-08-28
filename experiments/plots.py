@@ -292,7 +292,55 @@ def _csv_tier_label(algorithm_field: str) -> str:
     except ValueError:
         algorithm_name = algorithm_field
     tier = "strong" if algorithm_name == "belief_matching" else "weak"
-    return f"{algorithm_name.replace('_', ' ')} ({tier})"
+    display_name = algorithm_name.replace("_", " ")
+    return f"{display_name} ({tier})"
+
+
+def _ler_rows_at_probability(run_dir, probability: float) -> list:
+    """A run's ler.csv rows at one physical error rate, sorted by
+    distance; a run that never swept that p is refused."""
+    import csv
+    with open(Path(run_dir) / "ler.csv") as handle:
+        all_rows = list(csv.DictReader(handle))
+    selected_rows = []
+    for row in all_rows:
+        row_probability = float(row["physical_error_probability"])
+        if math.isclose(row_probability, probability):
+            selected_rows.append(row)
+    if not selected_rows:
+        raise ValueError(f"{run_dir} swept no p={probability:g} point")
+    selected_rows.sort(key=lambda row: int(row["distance"]))
+    return selected_rows
+
+
+def _draw_measured_ler_points(axis, rows: list, color: str,
+                              label: str) -> None:
+    """The failures > 0 rows: a connected line with Wilson 95% bars."""
+    distances = []
+    rates = []
+    bars_below = []
+    bars_above = []
+    for row in rows:
+        rate = float(row["logical_error_rate"])
+        distances.append(int(row["distance"]))
+        rates.append(rate)
+        bars_below.append(rate - float(row["ler_wilson_low"]))
+        bars_above.append(float(row["ler_wilson_high"]) - rate)
+    axis.errorbar(distances, rates, yerr=[bars_below, bars_above],
+                  fmt="o-", capsize=3, color=color, label=label)
+
+
+def _draw_zero_failure_bound(axis, row: dict, color: str) -> None:
+    """A failures == 0 row: an open marker at the Wilson upper bound.
+    uplims points the arrow toward lower values, where the true rate
+    lies; the arrow length spans a factor 2 down from the bound."""
+    distance = int(row["distance"])
+    bound = float(row["ler_wilson_high"])
+    shot_count = int(row["shots"])
+    arrow_length = bound * 0.5
+    axis.errorbar([distance], [bound], yerr=arrow_length, uplims=True,
+                  fmt="o", markerfacecolor="none", color=color,
+                  label=f"0 of {shot_count:,} shots (95% bound)")
 
 
 def ler_vs_distance_plot(run_dirs: list, probability: float,
@@ -305,52 +353,33 @@ def ler_vs_distance_plot(run_dirs: list, probability: float,
         python -m experiments.plots ler_vs_d <run_dir> <run_dir> <p>
         <out.png>
     """
-    import csv
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
-    all_distances = []
+    swept_distances = set()
     for run_index, run_dir in enumerate(run_dirs):
-        with open(Path(run_dir) / "ler.csv") as handle:
-            rows = [row for row in csv.DictReader(handle)
-                    if math.isclose(float(row["physical_error_probability"]),
-                                    probability)]
-        if not rows:
-            raise ValueError(f"{run_dir} swept no p={probability:g} point")
-        rows.sort(key=lambda row: int(row["distance"]))
+        rows = _ler_rows_at_probability(run_dir, probability)
         color = f"C{run_index}"
-        label = _csv_tier_label(rows[0]["algorithm"])
-
-        measured = [row for row in rows if int(row["failures"]) > 0]
-        distances = [int(row["distance"]) for row in measured]
-        rates = [float(row["logical_error_rate"]) for row in measured]
-        lower = [rate - float(row["ler_wilson_low"])
-                 for rate, row in zip(rates, measured)]
-        upper = [float(row["ler_wilson_high"]) - rate
-                 for rate, row in zip(rates, measured)]
-        axis.errorbar(distances, rates, yerr=[lower, upper], fmt="o-",
-                      capsize=3, color=color, label=label)
-
-        bounds = [row for row in rows if int(row["failures"]) == 0]
-        for row in bounds:
-            bound = float(row["ler_wilson_high"])
-            # uplims points the arrow toward lower values: the true
-            # rate lies below the bound; arrow length spans a factor 2
-            axis.errorbar([int(row["distance"])], [bound],
-                          yerr=bound * 0.5, uplims=True, fmt="o",
-                          markerfacecolor="none", color=color,
-                          label=f"0 of {int(row['shots']):,} shots "
-                                "(95% bound)")
-        all_distances = sorted(set(all_distances) | {int(row["distance"])
-                                                     for row in rows})
+        tier_label = _csv_tier_label(rows[0]["algorithm"])
+        measured_rows = []
+        zero_failure_rows = []
+        for row in rows:
+            swept_distances.add(int(row["distance"]))
+            if int(row["failures"]) > 0:
+                measured_rows.append(row)
+            else:
+                zero_failure_rows.append(row)
+        _draw_measured_ler_points(axis, measured_rows, color, tier_label)
+        for row in zero_failure_rows:
+            _draw_zero_failure_bound(axis, row, color)
     axis.set_yscale("log")
-    axis.set_xticks(all_distances)
+    axis.set_xticks(sorted(swept_distances))
     axis.set_xlabel("Code distance")
     axis.set_ylabel("Logical error rate per shot (10d rounds)")
-    axis.set_title(f"Logical error rate vs distance, "
-                   f"p={_power_of_ten_label(probability)}")
+    probability_label = _power_of_ten_label(probability)
+    axis.set_title(f"Logical error rate vs distance, p={probability_label}")
     axis.grid(alpha=0.3, which="both")
     axis.legend(fontsize=8)
     figure.tight_layout()

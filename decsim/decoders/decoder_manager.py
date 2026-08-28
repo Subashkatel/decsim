@@ -31,6 +31,32 @@ class RequestProcessingOutcome(Enum):
     WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
 
 
+@dataclass
+class GapJoinState:
+    """One window's split-gap rendezvous: the weak outcome is processed
+    only when both forced-class halves have reported.
+
+    The join is an AND of two completions, the same shape as the
+    landed-input join in ``_start_job`` (both DMAs must land before the
+    decode starts); here both SOLVES must land before the escalation
+    decision runs. The weak unit itself is freed at its own solve end;
+    only the outcome waits.
+    """
+
+    sibling_weight: Optional[float] = None
+    sibling_reported: bool = False
+    held_weak_job: Optional[DecodeJob] = None
+    held_weak_result: Optional["DecodeResult"] = None
+
+    def hold_weak(self, job: DecodeJob, result) -> None:
+        self.held_weak_job = job
+        self.held_weak_result = result
+
+    def report_sibling(self, weight) -> None:
+        self.sibling_reported = True
+        self.sibling_weight = weight
+
+
 @dataclass(frozen=True)
 class TerminalRequestRecord:
     request_key: DecoderRequestKey
@@ -139,6 +165,11 @@ class DecoderManager:
                 pool, unit, None if decoder_memory is None else decoder_memory.capacity_for(pool))
             for pool, n in unit_pools.items() for unit in range(n)}
         self._dispatching = False
+        # Split-pair gap joins: a router with a gap route turns them on.
+        # (op_id, window_id) -> GapJoinState, created when the sibling
+        # is spawned and removed when the join concludes the window.
+        self.gap_split_enabled = getattr(router, "gap", None) is not None
+        self._gap_joins: dict[tuple, GapJoinState] = {}
         self.num_units = self.unit_totals["default"]
         self.ready: list[DecodeJob] = []
         self.pool_ready: dict[str, list] = {
@@ -190,7 +221,8 @@ class DecoderManager:
         self._reject_spent_job(job)
         if job.strong_decode_for is not None:
             self.strong.admit_strong(job, self.engine.now)
-        elif job.on_done is None:
+        elif job.on_done is None and job.gap_sibling_for is None:
+            # a gap half is neither tier: it feeds the join, not the ledger
             self.strong.admit_weak(job, self.engine.now)
         job.submitted = True
         job.reserve_transfer = reserve_transfer
@@ -637,6 +669,7 @@ class DecoderManager:
         job.service_started = True
         if job.window is not None:
             job.window.service_began = True
+        self._spawn_gap_sibling(job)
         decoder = self.router.route(job)
         self.engine.log(self.log_name, f"START DECODE {job.label}")
         run = getattr(decoder, "run", None)
@@ -658,6 +691,94 @@ class DecoderManager:
 
         self.engine.schedule(decoder.latency(job), decode_now,
                              label=f"decode_done({job.label})")
+
+    def _spawn_gap_sibling(self, job: DecodeJob) -> None:
+        """Submit the other forced-class solve to the gap pool.
+
+        Fired at the primary weak decode's service start: the boundary
+        mask is applied by then, so the sibling reads the same masked
+        rounds the primary decodes (both units receive the same adjusted
+        stream, the CSB dual-write pattern on the strong side). The
+        sibling carries its own copy of the rounds, pays its own WBD
+        transfer and queues for its own unit. The copy is taken here
+        instead of holding Buffer 0 for a second read, so the sibling's
+        transfer is priced but never blocks on round retention.
+        """
+        if not self.gap_split_enabled:
+            return
+        if job.strong_decode_for is not None or job.on_done is not None:
+            return
+        if job.gap_sibling_for is not None:
+            return
+        if job.window is None or job.dem is None or job.decoder_input is None:
+            return
+        key = (job.op_id, job.window_id)
+        if key in self._gap_joins:
+            return
+        masked_fragments = [
+            fragment
+            for round_input in job.decoder_input.rounds
+            for fragment in round_input.fragments
+        ]
+        sibling = DecodeJob(
+            op_id=job.op_id, window_id=job.window_id,
+            n_rounds=len(job.decoder_input.rounds),
+            dem=job.dem, payloads=masked_fragments,
+            ready_time=self.engine.now,
+            label=f"gap({job.label})", hint="gap",
+            spatial_nodes=job.spatial_nodes, code=job.code,
+            gap_sibling_for=key)
+        self._gap_joins[key] = GapJoinState()
+        window_manager = getattr(self.services, "wm", None)
+
+        def reserve_transfer(sibling=sibling, primary=job):
+            if window_manager is None:
+                return 0
+            from ..links.links import LinkPath
+            payload_bits = window_manager._job_payload_bits(sibling)
+            # the link attribution is the window's, so the reservation
+            # rides the primary job's window identity; the delay applies
+            # to the sibling's own delivery
+            arrival = window_manager._link_arrival(
+                LinkPath.WBD, primary, payload_bits=payload_bits)
+            return arrival - self.engine.now
+
+        self.engine.log(self.log_name,
+                        f"SPLIT GAP {job.label}: sibling submitted to the "
+                        f"gap pool")
+        self.enqueue(sibling, reserve_transfer)
+
+    def _gap_sibling_done(self, key: tuple, sibling_weight) -> None:
+        """One gap half landed; conclude the window if the other is in."""
+        join = self._gap_joins.get(key)
+        if join is None:
+            raise RuntimeError(
+                f"gap sibling finished for window {key} with no join entry")
+        join.report_sibling(sibling_weight)
+        if join.held_weak_job is None:
+            return                    # the primary decode is still running
+        del self._gap_joins[key]
+        self._attach_joined_gap(join.held_weak_result, sibling_weight)
+        self._conclude_weak(join.held_weak_job, join.held_weak_result)
+
+    @staticmethod
+    def _attach_joined_gap(result: DecodeResult, sibling_weight) -> None:
+        """Build the SoftOutput from the two forced-class weights.
+
+        Either half missing leaves soft_output None, and the policy then
+        escalates (the same behavior a metric-less serial decode has).
+        """
+        primary_weight = result.gap_half_weight
+        if primary_weight is None or sibling_weight is None:
+            return
+        from ..confidence.complementary import COMPLEMENTARY_GAP_SOURCE
+        w_min = min(primary_weight, sibling_weight)
+        w_comp = max(primary_weight, sibling_weight)
+        result.soft_output = SoftOutput(
+            gap=w_comp - w_min,
+            source=COMPLEMENTARY_GAP_SOURCE,
+            w_min=w_min,
+            w_comp=w_comp)
 
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back one window's submitted, not-yet-started weak decode:
@@ -745,6 +866,16 @@ class DecoderManager:
             self.staging.release(job)
             self.try_dispatch()
             return
+        if job.gap_sibling_for is not None:
+            job.completed = True
+            self._free_unit(job)
+            self.staging.release(job)
+            self.engine.log(self.log_name,
+                            f"DECODE DONE {job.label} (gap half)")
+            sibling_weight = None if result is None else result.gap_half_weight
+            self._gap_sibling_done(job.gap_sibling_for, sibling_weight)
+            self.try_dispatch()
+            return
         if job.strong_decode_for is not None:
             self._validate_logical_observables(job, result)
             self.staging.release(job)
@@ -781,6 +912,25 @@ class DecoderManager:
         self._validate_logical_observables(job, result)
         job.completed = True
         self._free_unit(job)
+        key = (job.op_id, job.window_id)
+        join = self._gap_joins.get(key)
+        if join is not None:
+            # the unit is free either way; the OUTCOME waits at the join
+            self.staging.release(job)
+            if not join.sibling_reported:
+                join.hold_weak(job, result)
+                self.engine.log(self.log_name,
+                                f"GAP JOIN {job.label}: holding for the "
+                                f"sibling half")
+                self.try_dispatch()
+                return
+            del self._gap_joins[key]
+            self._attach_joined_gap(result, join.sibling_weight)
+        self._conclude_weak(job, result)
+
+    def _conclude_weak(self, job: DecodeJob, result) -> None:
+        """The weak outcome's decision and delivery; in split-pair mode
+        this runs at the gap join, otherwise straight from decode end."""
         key = (job.op_id, job.window_id)
         directive = self.escalation_policy.on_decode_outcome(DecodeOutcome(job, result),
                                                     self.services)
@@ -912,6 +1062,10 @@ class DecoderManager:
             parked = sorted(job.label for job in self._parked_service.values())
             raise RuntimeError(
                 f"run ended with parked decodes never released: {parked}")
+        if self._gap_joins:
+            raise RuntimeError(
+                f"run ended with split-gap joins unresolved: "
+                f"{sorted(self._gap_joins)}")
         unsettled = self.strong.unsettled()
         held = [f"{m.pool}#{m.unit}" for m in self.decoder_memories.values()
                 if m.occupied_rounds]

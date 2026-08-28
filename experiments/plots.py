@@ -433,24 +433,31 @@ def stage_breakdown_plot(run_dir, path: Path) -> None:
     rows = _shot_rows(run_dir)
     medians_by_distance = _median_stage_us_by_distance(rows)
     distances = list(medians_by_distance)
+    # both figures stay linear; a slow tier is drawn in ms so the axis
+    # carries plain numbers instead of a scientific offset
+    largest_total_us = max(sum(stage_medians)
+                           for stage_medians in medians_by_distance.values())
+    axis_is_ms = largest_total_us >= 10_000.0
+    unit_divisor = 1000.0 if axis_is_ms else 1.0
+    unit_name = "ms" if axis_is_ms else "µs"
     figure, axis = plt.subplots(figsize=(6.4, 3.6))
     bar_positions = range(len(distances))
     stacked_left = [0.0] * len(distances)
     for stage_index, (_, stage_label) in enumerate(STAGE_BREAKDOWN_STAGES):
-        stage_widths = [medians_by_distance[distance][stage_index]
+        stage_widths = [medians_by_distance[distance][stage_index] / unit_divisor
                         for distance in distances]
         axis.barh(bar_positions, stage_widths, left=stacked_left,
                   height=0.6, label=stage_label)
         stacked_left = [left + width
                         for left, width in zip(stacked_left, stage_widths)]
-    for position, total_us in zip(bar_positions, stacked_left):
-        axis.text(total_us, position, f"  {total_us:.1f}",
+    for position, total in zip(bar_positions, stacked_left):
+        axis.text(total, position, f"  {total:,.1f}",
                   va="center", fontsize=8)
     axis.set_yticks(list(bar_positions))
     axis.set_yticklabels([f"d={distance}" for distance in distances])
     axis.invert_yaxis()
     axis.set_xlim(0, max(stacked_left) * 1.12)
-    axis.set_xlabel("median time per window (µs)")
+    axis.set_xlabel(f"median time per window ({unit_name})")
     breakdown_titles = {
         "pymatching": "Time breakdown: Weak decoder (pymatching)",
         "belief_matching": "Time breakdown: Strong decoder (belief matching)",

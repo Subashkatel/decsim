@@ -330,25 +330,12 @@ def _draw_measured_ler_points(axis, rows: list, color: str,
                   fmt="o-", capsize=3, color=color, label=label)
 
 
-def _draw_zero_failure_bound(axis, row: dict, color: str) -> None:
-    """A failures == 0 row: an open marker at the Wilson upper bound.
-    uplims points the arrow toward lower values, where the true rate
-    lies; the arrow length spans a factor 2 down from the bound."""
-    distance = int(row["distance"])
-    bound = float(row["ler_wilson_high"])
-    shot_count = int(row["shots"])
-    arrow_length = bound * 0.5
-    axis.errorbar([distance], [bound], yerr=arrow_length, uplims=True,
-                  fmt="o", markerfacecolor="none", color=color,
-                  label=f"0 of {shot_count:,} shots (95% bound)")
-
-
 def ler_vs_distance_plot(run_dirs: list, probability: float,
                          path: Path) -> None:
     """Both tiers' logical error rate against code distance at one
     physical error rate, from each run's ler.csv. Measured points carry
-    Wilson 95% bars; a zero-failure point is drawn as its Wilson upper
-    bound with a downward arrow, not as a point at zero.
+    Wilson 95% bars; a zero-failure point cannot sit on a log axis, so
+    its curve simply ends at the last distance that saw failures.
 
         python -m experiments.plots ler_vs_d <run_dir> <run_dir> <p>
         <out.png>
@@ -364,16 +351,11 @@ def ler_vs_distance_plot(run_dirs: list, probability: float,
         color = f"C{run_index}"
         tier_label = _csv_tier_label(rows[0]["algorithm"])
         measured_rows = []
-        zero_failure_rows = []
         for row in rows:
             swept_distances.add(int(row["distance"]))
             if int(row["failures"]) > 0:
                 measured_rows.append(row)
-            else:
-                zero_failure_rows.append(row)
         _draw_measured_ler_points(axis, measured_rows, color, tier_label)
-        for row in zero_failure_rows:
-            _draw_zero_failure_bound(axis, row, color)
     axis.set_yscale("log")
     axis.set_xticks(sorted(swept_distances))
     axis.set_xlabel("Code distance")

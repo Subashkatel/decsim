@@ -298,7 +298,7 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
         if absorbed:
             owners = [owner for owner, value in
                       window_manager.ledger.contributions.items()
-                      if value.ownership_kind == "strong_slab"
+                      if value.ownership_kind == "strong_window"
                       and value.commit_lo <= window.commit_lo
                       and value.commit_hi >= window.commit_hi]
             if len(owners) != 1:

@@ -28,7 +28,7 @@ class RequestProcessingOutcome(Enum):
     STRONG_CANCELLED_DURING_SERVICE = "strong_cancelled_during_service"
     STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED = (
         "strong_cancelled_member_service_continued")
-    WEAK_WITHDRAWN_FOR_REPLAY = "weak_withdrawn_for_replay"
+    WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
 
 
 @dataclass(frozen=True)
@@ -661,7 +661,7 @@ class DecoderManager:
 
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back one window's submitted, not-yet-started weak decode:
-        the window is being rewritten (a slab absorbs it), so its
+        the window is being rewritten (a strong window absorbs it), so its
         raw input is superseded. The attempt closes in the ledger and the
         caller resubmits a fresh job if the window is rebuilt."""
         job = self._find_window_job(window_key)
@@ -694,7 +694,8 @@ class DecoderManager:
                 f"{job.label} is neither queued nor resident; nothing to withdraw")
         self.strong.resolve_weak(window_key)
         self._record_request(
-            job, None, RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_REPLAY, None)
+            job, None,
+            RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_STRONG_WINDOW, None)
         self.engine.log(self.log_name,
                         f"WITHDRAW {job.label} (invalidated before start)")
         self.try_dispatch()

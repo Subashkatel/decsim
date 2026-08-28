@@ -12,7 +12,8 @@ attempt that asked; a strong result with no possible consumer is an error,
 never dropped silently.
 
 The window side (StrongEscalation, below) plans the escalation: the strong
-context window or the forward slab, the windows it absorbs, the rephased
+context window or the forward strong window, the windows it absorbs, the
+rephased
 suffix, and when the deferred strong job is submitted. Both sides live in
 this file so the strong tier is one deletable feature; a run without it uses
 NoStrongTier on the window side and an empty ledger on the decoder side.
@@ -447,7 +448,7 @@ class NoStrongTier:
 
 class StrongEscalation:
     """The window side of the strong tier: when a weak window escalates, how
-    its strong job is built (two-sided context, or a forward slab that
+    its strong job is built (two-sided context, or a forward strong window that
     absorbs the windows it covers and restarts the weak chain past it), when
     the deferred job is submitted (the far weak boundary, or the terminal
     data), and how the strong result's selection reaches the decoder side.
@@ -466,7 +467,8 @@ class StrongEscalation:
         self._submit_strong_with_sbd(strong_job)
 
     def after_weak_commit(self, key) -> None:
-        """A weak commit at a slab's far boundary releases the deferred strong job."""
+        """A weak commit at a strong window's far boundary releases the
+        deferred strong job."""
         pending = self._escalations.peek_far(key)
         if pending is not None:
             self._submit_far_strong(key, pending)
@@ -625,9 +627,9 @@ class StrongEscalation:
         strong_window.boundary_in = weak_window.boundary_in
         return strong_window
     def defer_strong_escalation(self, weak_job: DecodeJob) -> DecoderRequestKey:
-        """Lay out the forward slab, absorb the windows it covers, and hold
-        the strong job until the restart window's weak commit
-        (waiting_far_boundary) or, terminally, until every clamped slab
+        """Lay out the forward strong window, absorb the windows it
+        covers, and hold the strong job until the restart window's weak commit
+        (waiting_far_boundary) or, terminally, until every clamped strong window
         round is stored (waiting_terminal_data). One strong job per
         escalation; duplicates raise."""
         key = (weak_job.op_id, weak_job.window_id)
@@ -636,7 +638,7 @@ class StrongEscalation:
             self._escalations.peek_key(key) is not None
             or (
                 existing_contribution is not None
-                and existing_contribution.ownership_kind == "strong_slab"
+                and existing_contribution.ownership_kind == "strong_window"
             )
         ):
             raise RuntimeError(
@@ -694,7 +696,7 @@ class StrongEscalation:
                 round_count,
                 resolved_region.restart_fault_exclusion_ranges,
             )
-        slab = Window(
+        strong_window = Window(
             op_id=key[0], k=key[1],
             commit_lo=plan.commit_lo,
             commit_hi=plan.commit_hi,
@@ -703,9 +705,9 @@ class StrongEscalation:
             n_rounds=plan.context_hi - plan.context_lo + 1,
         )
         strong_model = self._build_strong_window_model(
-            self.wm._ops[op_id], slab, round_count,
+            self.wm._ops[op_id], strong_window, round_count,
             resolved_region.strong_fault_exclusion_ranges)
-        logical_candidate = self._strong_slab_ownership_candidate(
+        logical_candidate = self._strong_window_ownership_candidate(
             key, resolved_region)
         guard = None
         if restart_key is not None:
@@ -733,7 +735,7 @@ class StrongEscalation:
                 weak_job=weak_job,
                 label=weak_job.strong_label,
                 resolved_region=resolved_region,
-                strong_window=slab,
+                strong_window=strong_window,
                 strong_model=strong_model,
                 wsd_arrival_ticks=None,
                 phase=phase,
@@ -760,7 +762,7 @@ class StrongEscalation:
             )
             self.wm.engine.log(
                 "DecoderCluster",
-                f"{pending.label}: slab rounds {plan.commit_lo}-"
+                f"{pending.label}: strong window rounds {plan.commit_lo}-"
                 f"{plan.commit_hi} assigned; weak chain skips "
                 f"{len(resolved_region.absorbed_window_keys)} window(s); "
                 f"strong start deferred until {readiness_description}",
@@ -787,11 +789,12 @@ class StrongEscalation:
         strong_request_created_ticks: int,
     ) -> None:
         raise NotImplementedError(
-            "the crossing-slab rephase is not wired to syndrome buffer 1; "
+            "the crossing-strong-window rephase is not wired to syndrome buffer 1; "
             "no test or scenario exercises this path (architecture trace "
             "F4.1), so it refuses loudly instead of mutating two stores "
             "unverified")
-        """Atomically replace a non-aligned post-slab suffix before deferral."""
+        """Atomically replace a non-aligned suffix past the strong window
+        before deferral."""
         key = weak_window.key
         op_id = key[0]
         if not (
@@ -971,7 +974,7 @@ class StrongEscalation:
                 raise RuntimeError(
                     f"device returned {len(suffix_models)} models for "
                     f"{len(replacement_windows)} rephased windows")
-        slab = Window(
+        strong_window = Window(
             op_id=op_id,
             k=key[1],
             commit_lo=plan.commit_lo,
@@ -981,7 +984,7 @@ class StrongEscalation:
             n_rounds=plan.context_hi - plan.context_lo + 1,
         )
         strong_model = self._build_strong_window_model(
-            operation, slab, round_count, strong_exclusions)
+            operation, strong_window, round_count, strong_exclusions)
         restart_window = replacement_windows[0]
         restart_reads = self.wm._read_keys_for_bounds(
             op_id, restart_window.start_round, restart_window.buffer_hi,
@@ -997,14 +1000,14 @@ class StrongEscalation:
         if self._escalations.peek_far(restart_window.key) is not None:
             raise RuntimeError(
                 f"readiness index collision for {restart_window.key}")
-        logical_candidate = self._strong_slab_ownership_candidate(
+        logical_candidate = self._strong_window_ownership_candidate(
             key, resolved_region)
         pending = _PendingEscalation(
             key=key,
             weak_job=weak_job,
             label=weak_job.strong_label,
             resolved_region=resolved_region,
-            strong_window=slab,
+            strong_window=strong_window,
             strong_model=strong_model,
             wsd_arrival_ticks=None,
             phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
@@ -1137,13 +1140,13 @@ class StrongEscalation:
 
         self.wm.engine.log(
             "DecoderCluster",
-            f"{pending.label}: slab rounds {plan.commit_lo}-"
+            f"{pending.label}: strong window rounds {plan.commit_lo}-"
             f"{plan.commit_hi} assigned; suffix rephased to "
             f"{len(replacement_windows)} window(s); strong start deferred "
             "until the far-side weak boundary",
         )
         self.wm.check_window(restart_window.key)
-    def _strong_slab_ownership_candidate(
+    def _strong_window_ownership_candidate(
         self,
         key: tuple,
         resolved_region: _ResolvedStrongRegion,
@@ -1166,7 +1169,7 @@ class StrongEscalation:
                 and plan.commit_lo <= contribution.commit_hi
             ):
                 raise RuntimeError(
-                    f"strong slab {key} extent {plan.commit_lo}-"
+                    f"strong window {key} extent {plan.commit_lo}-"
                     f"{plan.commit_hi} overlaps unabsorbed logical "
                     f"contribution {other_key} extent "
                     f"{contribution.commit_lo}-{contribution.commit_hi}")
@@ -1174,7 +1177,7 @@ class StrongEscalation:
             owner_key=key,
             commit_lo=plan.commit_lo,
             commit_hi=plan.commit_hi,
-            ownership_kind="strong_slab",
+            ownership_kind="strong_window",
             logical_observables=None,
         )
         return candidate
@@ -1264,8 +1267,9 @@ class StrongEscalation:
             (weak_window.op_id, round_index)
             for round_index in range(plan.context_lo, plan.context_hi + 1)
         ]
-        # the slab context lives in syndrome buffer 1; the restart window's
-        # weak reads stay retained in Buffer 0 by its own window hold
+        # the strong window's context lives in syndrome buffer 1; the
+        # restart window's weak reads stay retained in Buffer 0 by its
+        # own window hold
         self.wm._require_retained_payloads(
             context_reads, f"strong-region plan for {key}",
             self.wm.syndrome_buffer_1)
@@ -1304,7 +1308,7 @@ class StrongEscalation:
         )
     def _reslice_restart_window(
         self, restart_key: tuple, buffer_lo: int, model,
-        slab_hi: int, seam_owner: SeamFaultOwner,
+        strong_window_hi: int, seam_owner: SeamFaultOwner,
     ) -> None:
         """Install a restart model prepared before plan mutation."""
         restart = self.wm.windows[restart_key]
@@ -1314,14 +1318,14 @@ class StrongEscalation:
         if model is not None:
             self.wm.window_models[restart_key] = model
         self.wm.engine.log("DecoderCluster",
-                        f"restart window {restart_key} re-sliced across slab "
-                        f"edge {slab_hi} (reads rounds {restart.buffer_lo}-"
+                        f"restart window {restart_key} re-sliced across strong window "
+                        f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
                         f"{restart.buffer_hi}; crossing faults owned by "
                         f"{seam_owner.name.lower()})")
     def _absorb_window(
         self, key: tuple, restart_key: Optional[tuple], replacement,
     ) -> None:
-        """A slab-covered window is never weak-decoded: count it committed
+        """A strong-window-covered window is never weak-decoded: count it committed
         with no logical contribution and unhook the restart window."""
         window = self.wm.windows[key]
         if window.queued or window.committed:
@@ -1350,42 +1354,42 @@ class StrongEscalation:
             raise RuntimeError("absorption replacement does not cover packets")
         self.wm.syndrome_buffer_1.release_hold(absorbed)
         self.wm.engine.log("DecoderCluster",
-                        f"window {key} absorbed into the strong slab "
+                        f"window {key} absorbed into the strong window "
                         f"(weak chain skips it)")
     def _build_pending_strong_job(
         self,
         pending: _PendingEscalation,
     ) -> DecodeJob:
-        """Build a slab job after both boundary conditions are satisfied.
+        """Build a strong window job after both boundary conditions are satisfied.
 
-        The slab commits all r_strong rounds and reads one buffer of raw
-        context per face, owning nothing that touches pre-slab rounds (see the
-        seam formalism on Switching).
+        The strong window commits all r_strong rounds and reads one
+        buffer of raw context per face, owning nothing that touches
+        rounds before its extent (see the seam formalism on Switching).
         """
         key = pending.key
         weak_job = pending.weak_job
-        slab = pending.strong_window
+        strong_window = pending.strong_window
         dem = pending.strong_model
         payloads = self.wm._assemble_payloads(
-            slab, self.wm.syndrome_buffer_1)
+            strong_window, self.wm.syndrome_buffer_1)
         covered = {payload.round_index for payload in payloads}
         plan = pending.resolved_region.plan
         needed = set(range(plan.context_lo, plan.context_hi + 1))
         if covered != needed:
             raise RuntimeError(
-                f"{pending.label}: slab submitted with rounds "
+                f"{pending.label}: strong window submitted with rounds "
                 f"{sorted(covered)} but it needs "
-                f"{plan.context_lo}-{plan.context_hi}; a slab may "
+                f"{plan.context_lo}-{plan.context_hi}; a strong window may "
                 "only start once every required round is retained")
-        self.wm._stamp_first_round_tick(slab, self.wm.syndrome_buffer_1)
+        self.wm._stamp_first_round_tick(strong_window, self.wm.syndrome_buffer_1)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
-            n_rounds=slab.n_rounds,
+            n_rounds=strong_window.n_rounds,
             ready_time=self.wm.engine.now,
             label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,
-            attempt=1, window=slab, strong_decode_for=key,
+            attempt=1, window=strong_window, strong_decode_for=key,
             request_key=pending.strong_request_key,
             request_created_ticks=pending.strong_request_created_ticks)
     def _submit_far_strong(
@@ -1404,8 +1408,8 @@ class StrongEscalation:
         )
         self.wm.engine.log(
             "DecoderCluster",
-            f"{pending.label}: far-side weak boundary determined -> strong "
-            "slab submitted",
+            f"{pending.label}: far-side weak boundary determined -> "
+            "strong window submitted",
         )
     def _submit_terminal_strong(
         self,
@@ -1423,10 +1427,11 @@ class StrongEscalation:
         )
         self.wm.engine.log(
             "DecoderCluster",
-            f"{pending.label}: terminal data complete -> strong slab submitted",
+            f"{pending.label}: terminal data complete -> strong window submitted",
         )
     def after_arrival(self, op_id) -> None:
-        """A round arrived: a terminal slab waits for its clamped tail rounds to be stored."""
+        """A round arrived: a terminal strong window waits for its
+        clamped tail rounds to be stored."""
         pending = self._escalations.peek_terminal(op_id)
         if pending is None:
             return
@@ -1443,5 +1448,5 @@ class StrongEscalation:
             for key, phase in self._escalations.snapshot_phases().items()
         }
     def pending_strong_work_snapshot(self) -> tuple:
-        """Snapshot strong slabs assigned but not yet admitted for service."""
+        """Snapshot strong windows assigned but not yet admitted for service."""
         return self._escalations.snapshot_work()

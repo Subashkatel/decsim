@@ -9,7 +9,6 @@ from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, Separa
 from decsim.protocols import BoundaryPolicy, IdlePolicy
 from decsim.run_spec import RunSpec
 from decsim.windows.windowing_schemes import SlidingTerminalPolicy, SlidingWindowScheme
-from decsim.windows.speculative_recovery import SpeculativeRecovery
 from decsim.decoders.weak_strong_switching import Baseline, Switching
 
 
@@ -162,50 +161,6 @@ def test_boundary_policies_decide_without_argument_validation():
     assert Held().on_commit(unchecked_window, final=truthy_final) is truthy_final
 
 
-def test_recovery_uses_optional_speculation_and_skips_inert_cases():
-    """Recovery honors an eager request while treating an absent request and inert cones as false."""
-    job = SimpleNamespace(op_id=4, window_id=2)
-
-    class InteractionProbe:
-        def __init__(self, fail_on_call=False):
-            self.fail_on_call = fail_on_call
-            self.invalidated_keys = []
-
-        def invalidated_windows(self, key, windows):
-            if self.fail_on_call:
-                raise AssertionError("inert recovery inspected the interaction")
-            self.invalidated_keys.append(key)
-            return ()
-
-    held_runtime = SimpleNamespace(
-        boundary_policy=Held(),
-        window_interaction=InteractionProbe(fail_on_call=True),
-    )
-    held_runtime._window_infos = lambda: {}
-    SpeculativeRecovery(held_runtime, double_window=False).begin(job, object())
-
-    eager_interaction = InteractionProbe()
-    eager_runtime = SimpleNamespace(
-        boundary_policy=Eager(),
-        window_interaction=eager_interaction,
-        windows={(4, 2): SimpleNamespace(dependents=[])},
-    )
-    eager_runtime._window_infos = lambda: {}
-    recovery = SpeculativeRecovery(eager_runtime, double_window=False)
-    recovery.begin(job, object())
-
-    double_runtime = SimpleNamespace(
-        boundary_policy=Eager(),
-        window_interaction=InteractionProbe(fail_on_call=True),
-    )
-    double_runtime._window_infos = lambda: {}
-    SpeculativeRecovery(double_runtime, double_window=True).begin(job, object())
-
-    assert Eager.speculative is True
-    assert eager_interaction.invalidated_keys == [(4, 2)]
-    assert not recovery.has_finality_blockers
-
-
 def test_policies_are_stateless():
     for policy in (Ignore(), ExtendStream(), SeparateDecodeJobs()):
         assert vars(policy) == {}
@@ -261,7 +216,7 @@ def test_policy_module_has_no_registry_or_string_selector():
 
 
 def test_switching_validates_builtin_boundary_contexts():
-    """Switching rejects shipped boundary choices that conflict with dynamic or double windows."""
+    """Switching rejects boundary policies that conflict with serial or double windows."""
     scheme = SlidingWindowScheme(
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     )
@@ -272,9 +227,9 @@ def test_switching_validates_builtin_boundary_contexts():
     }
     switching = Switching(1.0, switching_source())
 
-    with pytest.raises(ValueError, match="static.*replay cone"):
+    with pytest.raises(ValueError, match="serial switching requires Held"):
         switching.validate_declared_run(
-            boundary_policy=Eager(), has_dynamic_streams=True, **common
+            boundary_policy=Eager(), has_dynamic_streams=False, **common
         )
     switching.validate_declared_run(
         boundary_policy=Held(), has_dynamic_streams=True, **common

@@ -300,11 +300,11 @@ class Switching:
                 "sliding keep-up contract and requires SlidingWindowScheme"
             )
         if not self.double_window:
-            if has_dynamic_streams and isinstance(boundary_policy, Eager):
+            if isinstance(boundary_policy, Eager):
                 raise ValueError(
-                    "Eager speculative recovery needs a statically planned "
-                    "replay cone; dynamic streams create future windows at "
-                    "runtime. Use Held boundaries for dynamic streams."
+                    "serial switching requires Held boundaries: an eagerly "
+                    "shipped provisional boundary is never corrected when "
+                    "the strong result later revises the window"
                 )
             return
         if type(scheme) is not SlidingWindowScheme:

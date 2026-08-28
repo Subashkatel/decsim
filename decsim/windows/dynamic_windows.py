@@ -253,15 +253,6 @@ class DynamicWindows:
         self.committed_round_counts[stream_id] = committed
         self.window_manager.release_stream_segments_at_commit(stream_id, committed)
 
-    def recompute_committed_round_count(self, stream_id) -> int:
-        """Reset a speculative stream prefix from its actual committed windows."""
-        committed = self._committed_prefix_round_count(stream_id)
-        if committed:
-            self.committed_round_counts[stream_id] = committed
-        else:
-            self.committed_round_counts.pop(stream_id, None)
-        return committed
-
     def _committed_prefix_round_count(self, stream_id) -> int:
         """How many initial rounds are covered by committed windows."""
         wm = self.window_manager

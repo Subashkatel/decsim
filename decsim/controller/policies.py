@@ -15,10 +15,7 @@ choice: only data feeding the next non-Clifford decision is latency-critical
 
 
 class Eager:
-    """Ships every committed boundary and requests replay when a later strong
-    result revises it."""
-
-    speculative = True
+    """Ships every committed boundary, final or provisional."""
 
     def on_commit(self, window, final: bool) -> bool:
         return True

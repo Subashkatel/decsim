@@ -661,9 +661,9 @@ class DecoderManager:
 
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back one window's submitted, not-yet-started weak decode:
-        speculative invalidation is rewriting the window, so its raw input
-        is superseded. The attempt closes in the ledger and the caller
-        resubmits a fresh job when the replay rebuilds the window."""
+        the window is being rewritten (a slab absorbs it), so its
+        raw input is superseded. The attempt closes in the ledger and the
+        caller resubmits a fresh job if the window is rebuilt."""
         job = self._find_window_job(window_key)
         if job is None:
             raise RuntimeError(

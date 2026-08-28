@@ -554,6 +554,7 @@ class DecodeJob:
     pool: Optional[str] = None               # unit pool assigned at dispatch
     window: Optional[Window] = None          # back-reference to the source window
     strong_decode_for: Optional[tuple] = None      # (op_id, window_id) this strong job re-decodes
+    gap_sibling_for: Optional[tuple] = None        # (op_id, window_id) whose split-gap half this job solves
     awaiting_strong_result: bool = False     # weak result held non-final until the strong sibling lands
     cancelled: bool = False                  # cancelled siblings discard completion
     completed: bool = False                  # terminal flag; admission refuses reuse of a completed job
@@ -589,6 +590,9 @@ class DecodeResult:
     correction: Optional[Any] = None         # correction operator (None = timing-only)
     logical_observables: Optional[tuple[int, ...]] = None  # full prediction
     soft_output: Optional["SoftOutput"] = None  # source-compatible confidence
+    # one forced-class solve's weight, carried to the split-gap join
+    # (the gap exists only once both halves have reported)
+    gap_half_weight: Optional[float] = None
     boundary_defects: Optional[dict] = None  # round-keyed seam defects (synthetic decoders, recovery lock scenarios)
     boundary_data: Optional[Any] = None      # optional richer interaction payload
     # BackendDecodeStatus of a best-effort correction (nonconverged, low

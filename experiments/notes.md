@@ -5,14 +5,13 @@ SWIPER 2412.05115, Skoric 2209.08552, Toshio 2510.25222.
 
 ## Currently running
 
-Production LER sweeps (plot 1), submitted 2026-08-27, owner-approved
-sizing (>= 100 failures where reachable; per-p shot schedule in the
-configs):
+Production LER sweeps (plot 1): COMPLETE 2026-08-28, all 820 shards,
+merged and validated (monotone in p, d-ordered below threshold,
+crossing at p ~ 5e-3 to 7e-3; strong below weak at every matched
+point):
 
-- results/2026-08-27T15-23-12Z-weak_ler, slurm 13044146, 535 shards,
-  ~350 core-hours
-- results/2026-08-27T15-23-13Z-strong_ler, slurm 13044173, 285 shards,
-  ~400 core-hours
+- results/2026-08-27T15-23-12Z-weak_ler (10.4M shots, 786M)
+- results/2026-08-27T15-23-13Z-strong_ler (1.1M shots, 133M)
 
 Latency runs (plot 2), closed loop, submitted 2026-08-27: 500 shots
 per d {3, 5, 7, 9, 11}, p = 1e-3, measured algorithm wall clock:

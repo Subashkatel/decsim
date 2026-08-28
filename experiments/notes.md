@@ -13,12 +13,19 @@ point):
 - results/2026-08-27T15-23-12Z-weak_ler (10.4M shots, 786M)
 - results/2026-08-27T15-23-13Z-strong_ler (1.1M shots, 133M)
 
-Latency runs (plot 2), closed loop, submitted 2026-08-27: 500 shots
-per d {3, 5, 7, 9, 11}, p = 1e-3, measured algorithm wall clock:
+Latency runs (plot 2), closed loop, 500 shots per d {3, 5, 7, 9, 11},
+p = 1e-3, measured algorithm wall clock:
 
-- weak_latency (pymatching), slurm 13066165, ~2 h
-- strong_latency (belief_matching), slurm 13066170, ~25 h estimated,
-  36 h limit
+- weak_latency (pymatching), slurm 13066165, COMPLETE 2026-08-28
+  (2h50): medians 10 to 72 us d=3 to 11, worst window < 160 us, all
+  ~7x above the 1 us-round deadline; figure + latency_samples.csv in
+  results/2026-08-27T22-07-45Z-weak_latency.
+- strong_latency_preview (100 shots), slurm 13071302, COMPLETE
+  (8h56): medians 0.7 ms to ~350 ms; results/
+  2026-08-28T00-31-53Z-strong_latency_preview. Combined preview
+  figure on the artifact; preview retires when the full run lands.
+- strong_latency (belief_matching, 500 shots), slurm 13066170, still
+  running (~10 h elapsed of ~25 h estimated, 36 h limit).
 
 Pilot runs (100 shots/point, complete, validated): results/
 2026-08-27T13-58-01Z-weak_ler and 2026-08-27T13-58-02Z-strong_ler.

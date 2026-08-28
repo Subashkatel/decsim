@@ -1,9 +1,9 @@
 """Which window owns which committed rounds of a stream, and the logical
 observables that result. A contribution is one owner (an ordinary window or
-a strong slab) over an exact inclusive round extent; contributions of one
+a strong window) over an exact inclusive round extent; contributions of one
 stream tile it without gap or overlap, and the observables of an interval
 are the XOR of the contributions that cover it. A strong result may replace
-the prediction of an owner; a strong slab may replace ordinary windows.
+the prediction of an owner; a strong window may replace ordinary windows.
 """
 
 from __future__ import annotations
@@ -30,11 +30,11 @@ class LogicalLedger:
         extents never overlap, and one stream has one observable arity."""
         if contribution.ownership_kind not in (
             "ordinary_window",
-            "strong_slab",
+            "strong_window",
         ):
             raise ValueError(
                 "logical contribution ownership_kind must be "
-                "'ordinary_window' or 'strong_slab'")
+                "'ordinary_window' or 'strong_window'")
         if (
             contribution.commit_lo < 1
             or contribution.commit_hi < contribution.commit_lo

@@ -94,8 +94,8 @@ class WindowManager:
             syndrome_buffer_1 = SyndromeBuffer1(engine, links)
         self.syndrome_buffer_1 = syndrome_buffer_1
         if self.syndrome_buffer_1 is not None:
-            # the room-side store's arrival signal: always the terminal-slab
-            # listener; the readiness authority too when the strong tier is
+            # the room-side store's arrival signal: always the terminal
+            # strong-window listener; the readiness authority too when the strong tier is
             # primary (readiness listens to the store its lane reads)
             self.syndrome_buffer_1.on_round_stored = self._on_room_round_stored
         self.lifecycle = DynamicWindows(self)
@@ -365,7 +365,8 @@ class WindowManager:
     def withdraw_window_decode(self, key: tuple) -> None:
         """Withdraw one window's early-shipped, unstarted decode and reset
         its submission bookkeeping so it can be resubmitted fresh (a
-        slab that absorbs the window owns its rounds from then on)."""
+        strong window that absorbs the window owns its rounds from then
+        on)."""
         window = self.windows[key]
         self.withdraw_decode(key)
         window.queued = False
@@ -1112,7 +1113,7 @@ class WindowManager:
         existing_contribution = self.ledger.get(key)
         if (
             existing_contribution is None
-            or existing_contribution.ownership_kind != "strong_slab"
+            or existing_contribution.ownership_kind != "strong_window"
         ):
             self.ledger.install(
                 LogicalContribution(

@@ -110,7 +110,7 @@ class StrongOnly:
     LILLIPUT's FIFO-fed decoder and Google's streaming decoder. Every window
     job carries tier STRONG, reads its rounds from syndrome buffer 1 over
     SBD, and rides DO home; the escalation machinery (WSD, ledger, context
-    windows, slabs) is never engaged."""
+    windows, strong windows) is never engaged."""
 
     requires_strong_context = False
     bulk_strong = False
@@ -158,22 +158,23 @@ class Switching:
     batches queued serial redos (timing-only). Redo covers commit + 2*buffer
     rounds (the paper's two-sided context).
 
-    With ``double_window=True``, the slab contains the suspicious commit
-    region plus one buffer on each side. The slab
-    starts at the suspicious commit and extends forward; the weak chain
-    skips the windows the slab absorbs and restarts past the slab; the
-    strong result owns the whole slab; the strong job starts only after
-    both slab boundaries are weak-determined (left: pre-slab commits,
-    right: the restart window's commit, or the terminal boundary). The
-    weak pipeline never waits on strong work.
+    With ``double_window=True``, the strong window contains the
+    suspicious commit region plus one buffer on each side. It starts at
+    the suspicious commit and extends forward; the weak chain skips the
+    windows it absorbs and restarts past it; the strong result owns the
+    whole extent; the strong job starts only after both of its
+    boundaries are weak-determined (left: the commits before it, right:
+    the restart window's commit, or the terminal boundary). The weak
+    pipeline never waits on strong work.
 
-    Seam modelling: both slab faces are decoded as two-sided B-windows:
+    Seam modelling: both faces of the strong window are decoded as
+    two-sided B-windows:
     one buffer of raw context per face, exact fault-ownership partition,
     no folded decoded defects (folding at a raw-read face double-counts;
     see test_parallel_two_sided_windows_match_global_decoding). Unlike the
     paper's exactly-r_strong read with weak-pinned faces, the context
     reads are extra: seam-edge accuracy is slightly optimistic, and the
-    slab is priced for the whole context it reads rather than the
+    strong window is priced for the whole context it reads rather than the
     r_strong rounds it commits, so its decode cost is conservative
     against Theorem 1 rather than optimistic. The transfer cost of the
     extra context still belongs to the strong-data-path backlog item."""
@@ -202,7 +203,7 @@ class Switching:
         if double_window and bulk_strong:
             raise ValueError(
                 "double_window + bulk_strong is not supported: deferred "
-                "slabs are submitted one per escalation")
+                "strong windows are submitted one per escalation")
         if threshold_register is not None:
             if confidence_threshold != threshold_register.default:
                 raise ValueError(
@@ -253,8 +254,8 @@ class Switching:
         extra = None
         strong_request_key = None
         if self.double_window:
-            # Register now. The window manager submits the slab after the
-            # far-side weak boundary is ready.
+            # Register now. The window manager submits the strong window
+            # after the far-side weak boundary is ready.
             strong_request_key = services.defer_strong_escalation(job)
         elif not self.run_both_at_once:        # serial: redo after ws (dm:153-154)
             strong = services.make_strong_job(
@@ -288,7 +289,7 @@ class Switching:
             is not SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
         ):
             raise ValueError(
-                "switching and strong-slab recovery require the explicit "
+                "switching and strong-window recovery require the explicit "
                 "REGULAR_STRIDE_LOOKAHEAD terminal policy; the literature-exact "
                 "QUITS/Tan all-core flush has no trailing tail context"
             )
@@ -317,11 +318,11 @@ class Switching:
                 "double_window requires the weak chain to keep committing "
                 "(the far boundary IS the restart window's weak commit); "
                 "the Held boundary policy would make later windows wait for "
-                "the strong result and deadlock the slab")
+                "the strong result and deadlock the strong window")
         if has_dynamic_streams or static_decode_plan_selected:
             raise ValueError(
-                "double_window skips statically planned windows when a slab "
-                "is assigned; stream windows created or folded at runtime "
+                "double_window skips statically planned windows when a "
+                "strong window is assigned; stream windows created or folded at runtime "
                 "(dynamic_streams/decode_ops) are not supported yet")
         if has_frontend:
             raise ValueError(
@@ -335,8 +336,8 @@ class Switching:
         ):
             raise ValueError(
                 "double_window supports one single-patch stream per operation; "
-                "decoder-boundary chains would let a slab cross an operation "
-                "seam before its far boundary exists")
+                "decoder-boundary chains would let a strong window cross "
+                "an operation seam before its far boundary exists")
 
     def validate_code_geometry(self, geometry) -> None:
         if self.weak_keepup_ratio is None:

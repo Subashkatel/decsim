@@ -1,0 +1,136 @@
+# External reference pins for the 2026-08-30 responsibility audit and the
+# 2026-08-30 stabilization pass. Rule: a source is VERIFIED only when its
+# own official example or test suite ran end to end on this host; anything
+# else is READ_ONLY_REFERENCE and is never used as a numeric oracle.
+# Clones live outside this repo (qlx-qec-sandbox/tmp/reference-decoders and
+# tmp/swiper_timing_v1); nothing external is vendored here.
+
+audited_decsim_commit: 65660a05ef91913f423843cfa4fdcf48d82d13f5
+golden_sha256: 84e8f5bb4299dbf9b85f8c7c236925f1ce8a008a6d6466c752973b60d9a66f32
+
+references:
+  - name: swiper
+    paper_id: arXiv:2412.05115        # the SWIPER ISCA'25 paper, preprint title "Predictive Window Decoding"
+    repository: https://github.com/jviszlai/swiper
+    commit: 1c00e097dc4b01d9b1c618e60274f452181c2649
+    license: MIT
+    status: VERIFIED
+    files_studied: [swiper/simulator.py, swiper/device_manager.py,
+                    swiper/window_manager.py, swiper/window_builder.py,
+                    swiper/decoder_manager.py, swiper/lattice_surgery_schedule.py]
+    official_reproduction_command: tmp/swiper_timing_v1/run.sh then reference/venv/bin/python verify.py
+    expected_output: 17/17 checks PASS on the official Toffoli schedule (d=15, 86 instructions)
+    actual_output: 17/17 PASS, rerun 2026-08-30 (tmp/swiper_timing_v1/output/verification.txt)
+    local_patch: none
+    supported_decsim_claims: [window lifecycle, decoder-resource limits,
+                              conditional release, reaction time, program dependencies]
+    unsupported_decsim_claims: [Buffer 1 design, CSB, WSD, SBD]
+
+  - name: pecos
+    repository: https://github.com/PECOS-packages/PECOS
+    commit: 0af1893e5c47eee9c2f2917ff69856cbfaf3e5c7
+    license: Apache-2.0
+    status: VERIFIED
+    files_studied: [crates/pecos-decoder-core/src/pauli_frame.rs,
+                    crates/pecos-decoder-core/src/obs_mask.rs,
+                    crates/pecos-decoder-core/src/two_pass_decoder.rs,
+                    crates/pecos-decoder-core/src/adaptive.rs,
+                    crates/pecos-decoder-core/src/multi_decoder.rs]
+    official_reproduction_command: cargo test -p pecos-decoder-core
+    expected_output: all crate tests pass
+    actual_output: 124/124 lib tests + 6 integration + 7 doctests pass, rerun 2026-08-30
+    local_patch: none
+    supported_decsim_claims: [Pauli-frame XOR accumulation, frame consumption,
+                              two-pass and adaptive decoding shape]
+    unsupported_decsim_claims: [CSB, Buffer 1, WSD, SBD, strong-job scheduling]
+
+  - name: helios
+    paper_id: arXiv:2301.08419
+    repository: https://github.com/NamiLiy/Helios_scalable_QEC
+    commit: 622d85dfb7a2ca66c904ee5c85051e2d02b8b8e2
+    license: BSD-3-Clause
+    status: VERIFIED
+    files_studied: [design/, test_benches/full_tests/single_FPGA_FIFO_verification_test_rsc.sv,
+                    scripts/total.tcl]
+    official_reproduction_command: iverilog v12_0 (built from source) on the repo's own
+      d=3 rsc bench against shipped golden data
+    expected_output: Total 1000, Passed 1000, Failed 0
+    actual_output: 1000/1000 PASS, rerun 2026-08-30 (job tmp helios_repro/helios_p1_rerun.log)
+    local_patch: copies only (absolute $fopen paths, fifo_fwft comment idiom,
+      CODE_DISTANCE 13 to 3); no logic touched
+    supported_decsim_claims: [streaming syndrome input, round latching,
+                              decode-start gating, RTL verification methodology]
+    unsupported_decsim_claims: [decsim decoder-unit latency numbers]
+
+  - name: xqsim
+    repository: https://github.com/SNU-HPCS/XQsim
+    commit: 006c384ffa2e70d3e79d1e574e9d20a3da0af92e
+    license: MIT
+    status: READ_ONLY_REFERENCE
+    reason: released code crashes on its own README example (self.emulate never
+      assigned, AttributeError; a one-line patched copy completes the 17679-cycle
+      simulation and then hits a second released defect in result printing)
+    files_studied: [README section 2 unit decomposition, src/XQ-simulator/*.py]
+
+  - name: qick
+    paper_id: arXiv:2110.00557
+    repository: https://github.com/openquantumhardware/qick
+    commit: 0b1613e0d0deb15b02ae1d2c56dd6e4d0028300a
+    license: MIT
+    status: READ_ONLY_REFERENCE
+    reason: official tests run on a physical ZCU111 RFSoC board (CI runs-on zcu111);
+      no board on this host; software slice (QickConfig on shipped soccfg.json) works
+    files_studied: [qick_lib timed processor, readout, tProc dispatcher config]
+
+  - name: risc-q
+    paper_id: arXiv:2505.14902
+    repository: https://github.com/Wu-Quantum-Application-System-Group/RISC-Q
+    commit: e7686d6dedaef05a1a2ac83947e0edd8db7ef65e
+    license: NONE AT PINNED COMMIT (all rights reserved; cite only, never copy)
+    status: READ_ONLY_REFERENCE
+    reason: mill/Verilator toolchain absent, ext/ submodules not vendored, no license
+
+  - name: qubic-distributed_processor
+    paper_id: arXiv:2309.10333        # QubiC 2.0
+    repository: https://gitlab.com/LBL-QubiC/distributed_processor
+    commit: c22cce81db5f84a607e46646e9f3441709aef9dd
+    license: QubiC LBNL/Regents BSD-3-clause variant (LICENSE in repo)
+    status: VERIFIED            # scope: the distproc python toolchain slice
+    official_reproduction_command: pytest . -q from python/test (its documented cwd)
+    expected_output: python test suite passes
+    actual_output: 37 passed, 5 skipped, 0 failed, 2026-08-30 (python 3.12.13)
+    scope_note: the HDL cocotb benches were not run (no Verilator on host);
+      RTL-level claims stay read-only
+    files_studied: [python/distproc compiler and assembler, hdl/ layout]
+
+  - name: qubic_emulator
+    paper_id: arXiv:2309.10333
+    repository: https://gitlab.com/LBL-QubiC/qubic_emulator
+    commit: 8cc66588aa792782231996587d1bd2780242e61d
+    license: QubiC LBNL/Regents BSD-3-clause variant (LICENSE in repo)
+    status: READ_ONLY_REFERENCE
+    reason: official pytest test_suite gives 10 passed, 3 failed on this host;
+      the 3 failures are the repo's own golden waveform comparisons exceeding
+      tolerance (differences 50.5 and 67.5 on a 32767 full scale, about 0.2
+      percent, likely scipy/numpy version drift in filter response). Also
+      requires python 3.12+ (PEP 701 f-strings) and the undeclared qubic
+      'software' repo for qubic.toolchain.
+    companion_pins:
+      software: ab680657c32907b8b2fafbf5d5fa07b5356a4109
+      qubitconfig: c766ddbcae76e08ff7dbd770fa1203b4aee224b9
+
+papers_on_disk:
+  - {id: arXiv:2412.05115, role: SWIPER windows and reaction time}
+  - {id: arXiv:2209.08552, role: parallel window decoding, commit/buffer regions}
+  - {id: arXiv:2209.09219, role: parallelization in time, forward decoder}
+  - {id: arXiv:2510.25222, role: decoder switching, complementary gap}
+  - {id: arXiv:2208.08547, role: better-than-worst-case decoding, Clique}
+  - {id: arXiv:2406.17995, role: elastic decoder pools}
+  - {id: arXiv:2108.06569, role: LILLIPUT}
+  - {id: arXiv:2001.06598, role: AFS decoder microarchitecture}
+  - {id: arXiv:2301.08419, role: Helios}
+  - {id: arXiv:2309.05558, role: collision clustering}
+  - {id: arXiv:2110.00557, role: QICK}
+  - {id: arXiv:2309.10333, role: QubiC 2.0}
+  - {id: arXiv:2505.14902, role: RISC-Q}
+  - {id: arXiv:1808.02449, role: eQASM/QuMA reserve and trigger phases}

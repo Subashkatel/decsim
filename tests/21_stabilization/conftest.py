@@ -61,7 +61,7 @@ def declared_profile(*, cwb=True, csb=True, csb_us=None):
         do=_declared_edge(base.do, DECLARED_US["do"]),
         oc=_declared_edge(base.oc, DECLARED_US["oc"]),
         cq=_declared_edge(base.cq, DECLARED_US["cq"]),
-        # the declared qc tick is wire time only; t_binary_availability
+        # the declared qc tick is wire time only; readout classification
         # prices the controller processing separately
         qc_excludes_controller_processing=True,
     )
@@ -78,7 +78,7 @@ def declared_profile(*, cwb=True, csb=True, csb_us=None):
 
 def declared_timing(round_us=ROUND_US):
     return TimingConfig(round_us=round_us,
-                        t_binary_availability_us=DECLARED_US["binary"],
+                        measurement_signal_to_classical_bits_us=DECLARED_US["binary"],
                         t_pack_us=DECLARED_US["pack"])
 
 

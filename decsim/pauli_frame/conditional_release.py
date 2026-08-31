@@ -2,8 +2,9 @@
 operations that were waiting on it may go. One "conditional release"
 decision per operation blocked by this one, or a "result return" when the
 outcome itself must travel back to the QPU. Each decision goes over OC to
-the controller and CQ to the QPU, which is the feedback part of the
-reaction time. The value of the outcome is the Pauli frame's business; the
+the controller. A release causes the actual operation command to traverse
+controller output processing and CQ; a standalone result return traverses
+those stages itself. The value of the outcome is the Pauli frame's business; the
 timing model never branches on it, so nothing here reads it (SWIPER's rule:
 a conditional instruction starts once its dependency is fully decoded)."""
 

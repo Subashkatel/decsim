@@ -9,11 +9,20 @@ boundary and consume whole cycles. This module owns that cadence only; program
 dependencies, windowing and decoder state live elsewhere.
 """
 from __future__ import annotations
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from ..message import (
     RunOperationBody, QPUReadout, SyndromePacketRoute, WINDOW_INPUT_ROUTE,
 )
+
+
+@dataclass(frozen=True)
+class QPUCommandEvent:
+    """Arrival/start evidence for the actual immutable QPU command."""
+
+    kind: str
+    tick: int
+    command: RunOperationBody
 
 
 class QPUDevice:
@@ -34,6 +43,7 @@ class QPUDevice:
         self._finished = False
         self._scheduled = set()        # boundary ticks already scheduled
         self._emitted_boundary = 0     # last boundary whose rounds were emitted
+        self.command_events: list[QPUCommandEvent] = []
 
     def connect_readout_receiver(self, receiver) -> None:
         self.readout_receiver = receiver
@@ -53,6 +63,7 @@ class QPUDevice:
         if command.round_count == 0 and command.emits_detector_data \
                 and not command.finalizes_stream_round:
             raise ValueError("zero-duration detector emitters must finalize a stream round")
+        self.command_events.append(QPUCommandEvent("ARRIVED", self.engine.now, command))
         self._pending.append(command)
         self._arm()
 
@@ -64,9 +75,14 @@ class QPUDevice:
 
     def next_boundary(self) -> int:
         """The cycle boundary at or after now, where issued operations start."""
-        now = self.engine.now
-        return now if now % self.cycle_ticks == 0 else \
-            (now // self.cycle_ticks + 1) * self.cycle_ticks
+        return self.boundary_at_or_after(self.engine.now)
+
+    def boundary_at_or_after(self, tick: int) -> int:
+        """The first valid QEC-cycle boundary not earlier than ``tick``."""
+        if tick < 0:
+            raise ValueError("QPU boundary query tick must be nonnegative")
+        return tick if tick % self.cycle_ticks == 0 else \
+            (tick // self.cycle_ticks + 1) * self.cycle_ticks
 
     def _arm(self, boundary=None) -> None:
         if boundary is None:
@@ -113,6 +129,7 @@ class QPUDevice:
         pending, self._pending = self._pending, []
         for command in pending:
             op = command.operation
+            self.command_events.append(QPUCommandEvent("STARTED", self.engine.now, command))
             for patch in _patches(op):
                 self._idle.pop(patch, None)
             if command.round_count == 0:

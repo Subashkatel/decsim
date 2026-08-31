@@ -449,7 +449,7 @@ def event_ledger(completed) -> RunLedgerView:
             row = add(kind, tick, op_id, window=window_id, prev=row)
         frame_prev[(op_id, window_id)] = row
 
-    # frame commits and releases
+    # frame commits and controller/QPU feedback
     committed_of_op: dict = {}
     frame = completed.pauli_frame
     if frame is not None:
@@ -469,13 +469,69 @@ def event_ledger(completed) -> RunLedgerView:
             op_id, window_id = drop.window_key
             add("FRAME_DUPLICATE_DROPPED", drop.arrived_ticks, op_id,
                 window=window_id, route=drop.tier, status="terminal")
-    # a release decision's cause is the BLOCKING operation's final commit
+    # The output path uses the owners' actual payload records. A release is
+    # available after OC, then its real RunOperationBody crosses controller
+    # output processing and CQ before it arrives and starts at the QPU.
     operations = completed.execution_runtime.operations
+    decision_of_op = {}
+    decision_issued_of_op = {}
+    command_issued_by_identity = {}
+    preloaded_by_identity = {}
+    controller = getattr(completed, "controller", None)
+    for event in getattr(controller, "output_events", ()):
+        if event.kind == "DECISION_AVAILABLE":
+            operation = operations.get(event.operation_id)
+            blocking_op = getattr(operation, "blocked_by", None)
+            row = add(event.kind, event.tick, event.operation_id,
+                      prev=committed_of_op.get(blocking_op))
+            decision_of_op[event.operation_id] = row
+        elif event.kind == "CONTROL_PULSE_COMMAND_ISSUED":
+            row = add(event.kind, event.tick, event.operation_id,
+                      prev=decision_of_op.get(event.operation_id))
+            command_issued_by_identity[id(event.payload)] = row
+        elif event.kind == "PRELOADED_COMMAND":
+            row = add(event.kind, event.tick, event.operation_id)
+            preloaded_by_identity[id(event.payload)] = row
+        elif event.kind == "CONTROL_DECISION_ISSUED":
+            decision_issued_of_op[event.operation_id] = add(
+                event.kind, event.tick, event.operation_id,
+                prev=decision_of_op.get(event.operation_id))
+
+    released_of_op = {}
     for op_id, tick in sorted(
             completed.execution_runtime.decode_release_time.items(), key=repr):
-        blocking_op = getattr(operations.get(op_id), "blocked_by", None)
-        add("DECODE_RELEASED", tick, op_id,
-            prev=committed_of_op.get(blocking_op), status="terminal")
+        released_of_op[op_id] = add(
+            "DECODE_RELEASED", tick, op_id,
+            prev=decision_of_op.get(op_id) or committed_of_op.get(
+                getattr(operations.get(op_id), "blocked_by", None)))
+
+    # Rewire a dynamic command's issued event through the runtime release at
+    # the same controller timestamp, making the dependency explicit.
+    for command_identity, row in command_issued_by_identity.items():
+        release = released_of_op.get(row["op"])
+        if release is not None:
+            row["prev"] = release
+
+    qpu = getattr(completed, "qpu", None)
+    arrived_by_identity = {}
+    for event in getattr(qpu, "command_events", ()):
+        command_identity = id(event.command)
+        operation_id = event.command.operation.id
+        if event.kind == "ARRIVED":
+            row = add("QPU_COMMAND_ARRIVED", event.tick, operation_id,
+                      prev=(command_issued_by_identity.get(command_identity) or
+                            preloaded_by_identity.get(command_identity)))
+            arrived_by_identity[command_identity] = row
+        elif event.kind == "STARTED":
+            add("QPU_COMMAND_STARTED", event.tick, operation_id,
+                prev=arrived_by_identity.get(command_identity), status="terminal")
+
+    for op_id, tick in sorted(
+            getattr(completed.execution_runtime,
+                    "result_return_time_by_operation", {}).items(), key=repr):
+        add("RESULT_RETURNED_TO_QPU", tick, op_id,
+            prev=decision_issued_of_op.get(op_id) or decision_of_op.get(op_id),
+            status="terminal")
 
     ordered = sorted(enumerate(raw), key=lambda pair: (pair[1]["tick"], pair[0]))
     ids = {id(row): event_id for event_id, (_, row) in enumerate(ordered)}

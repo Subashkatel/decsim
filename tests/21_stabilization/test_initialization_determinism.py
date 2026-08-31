@@ -1,7 +1,7 @@
 """Setup determinism: one workload, two views, registration before data.
 
 The initialization contract these tests pin is
-validation/responsibility_audit_2026_08_30/initialization_contract.md.
+../validation/responsibility_audit_2026_08_30/initialization_contract.md.
 """
 
 import pytest

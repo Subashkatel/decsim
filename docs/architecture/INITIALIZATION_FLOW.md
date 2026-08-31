@@ -2,7 +2,7 @@
 
 Verified against `decsim/run_spec.py` at commit 65660a0. The contract
 form of this document is
-`validation/responsibility_audit_2026_08_30/initialization_contract.md`.
+`../validation/responsibility_audit_2026_08_30/initialization_contract.md`.
 
 ## One source, two views
 

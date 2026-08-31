@@ -145,6 +145,10 @@ class DecoderManager:
         # empty under non-pipelined decoders, whose occupancy IS latency.
         self._pipeline_flights: dict = {}
         self._pipeline_stalled: dict = {}
+        # A pipelined unit's intake remains unavailable until the declared
+        # initiation interval ends, even when the response finishes first.
+        # This is distinct from an in-flight result and from a depth stall.
+        self._pipeline_intake_busy: dict = {}
         self.log_name = log_name
         self._terminal_request_records = [] if capture_enabled else None
         self._terminal_service_records = [] if capture_enabled else None
@@ -406,7 +410,8 @@ class DecoderManager:
         residents = self._residents(slot)
         if job in residents:
             residents.remove(job)
-        if self._computing.get(slot) is job:
+        intake_still_busy = self._pipeline_intake_busy.get(slot) is job
+        if self._computing.get(slot) is job and not intake_still_busy:
             self._computing[slot] = None
         self.engine.log_io(
             f"unit {pool}#{unit} SRAM",
@@ -581,9 +586,15 @@ class DecoderManager:
         """The pipelined unit's intake is free again: release the compute
         claim so the next start may begin, unless the pipeline is full;
         a full pipeline keeps the claim until the next completion."""
-        if job.cancelled or job.completed:
+        if self._pipeline_intake_busy.get(slot) is not job:
             return
+        del self._pipeline_intake_busy[slot]
         if self._computing.get(slot) is not job:
+            return
+        if job.cancelled or job.completed:
+            self._computing[slot] = None
+            self._offer_compute(slot)
+            self.try_dispatch()
             return
         if len(self._pipeline_flights.get(slot, ())) >= depth:
             self._pipeline_stalled[slot] = (job, depth)
@@ -798,6 +809,12 @@ class DecoderManager:
                     f"flight with a different latency: a pipelined unit "
                     f"completes in order and takes one latency per unit")
             flights.append((job, latency_ticks))
+            if slot in self._pipeline_intake_busy:
+                raise RuntimeError(
+                    f"pipelined unit {slot!r} started {job.label!r} before "
+                    "its prior initiation interval completed"
+                )
+            self._pipeline_intake_busy[slot] = job
             self.engine.schedule(
                 interval_ticks,
                 lambda s=slot, j=job, d=pipeline_depth:
@@ -1186,6 +1203,11 @@ class DecoderManager:
             raise RuntimeError(
                 f"run ended with pipelined decodes still in flight: "
                 f"{leftover_flights}")
+        if self._pipeline_intake_busy:
+            raise RuntimeError(
+                "run ended with pipelined decoder intake intervals still active: "
+                f"{sorted(self._pipeline_intake_busy, key=repr)}"
+            )
         unsettled = self.strong.unsettled()
         held = [f"{m.pool}#{m.unit}" for m in self.decoder_memories.values()
                 if m.occupied_rounds]

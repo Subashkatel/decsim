@@ -458,7 +458,7 @@ class Link:
             # a whole-tick duration is never inflated by float error.
             serialization_ticks = math.ceil(
                 Fraction(payload_bits) * TICKS_PER_US
-                / Fraction(capacity.aggregate_bits_per_us))
+                / Fraction(str(capacity.aggregate_bits_per_us)))
         serializer_end_ticks = serializer_start_ticks + serialization_ticks
         queue_wait_ticks = serializer_start_ticks - now_ticks
         propagation_ticks = self._config.propagation_latency_ticks

@@ -201,7 +201,7 @@ def test_none_cadence_uses_the_run_level_fallback(model_type):
     card = model_type(round_us=None)
     completed = build_run(card, round_us=2.25)
     assert card.round_period_us() is None
-    assert completed.controller.round_ticks == us(2.25)
+    assert completed.qpu.cycle_ticks == us(2.25)
 
 
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))
@@ -213,7 +213,7 @@ def test_card_cadence_precedes_run_and_timing_fallbacks(model_type):
         round_us=2.25,
         timing=TimingConfig(round_us=3.5),
     )
-    assert completed.controller.round_ticks == us(1.75)
+    assert completed.qpu.cycle_ticks == us(1.75)
 
 
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))
@@ -434,13 +434,13 @@ def test_outside_structural_code_model_completes_a_full_run():
     assert isinstance(card, CodeModel)
     completed = build_run(card)
     assert completed.result.terminal_status == "complete"
-    assert completed.controller._code_geometry.code_name == card.name
+    assert completed.window_manager._code_geometry.code_name == card.name
 
 
 def test_default_run_resolves_a_distance_three_surface_card():
     """A run without an explicit code resolves the default distance-three Surface geometry."""
     completed = build_run()
-    geometry = completed.controller._code_geometry
+    geometry = completed.window_manager._code_geometry
     assert geometry.code_name == "rotated surface code (d=3)"
     assert geometry.distance == 3
 
@@ -450,7 +450,7 @@ def test_outside_name_annotation_is_declared_but_not_runtime_validated():
     card = OutsideCodeModel()
     card.name = 7
     completed = build_run(card)
-    geometry = completed.controller._code_geometry
+    geometry = completed.window_manager._code_geometry
     assert geometry.code_name == 7
     assert geometry.window_floor_justification is None
     assert completed.result.terminal_status == "complete"

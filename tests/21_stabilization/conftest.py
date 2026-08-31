@@ -91,7 +91,7 @@ def memory_op(op_id=1, *, name=None, blocked_by=None, predecessors=(),
 
 
 def weak_only_run(*, rounds=6, ops=None, cwb=True, seed=0, io_trace=False,
-                  frame=True):
+                  frame=True, make_metrics=None):
     """Weak-only baseline on the declared fabric; d=3 sliding windows."""
     spec = RunSpec(
         ops=(ops if ops is not None else [memory_op(1)]),
@@ -101,6 +101,7 @@ def weak_only_run(*, rounds=6, ops=None, cwb=True, seed=0, io_trace=False,
         timing=declared_timing(),
         pauli_frame=(PauliFrameConfig(commit_us=DECLARED_US["frame"])
                      if frame else None),
+        make_metrics=make_metrics,
         seed=seed)
     return spec.build(io_trace=io_trace)
 
@@ -123,7 +124,8 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
                   run_both_at_once=False, double_window=False,
                   unit_pools=None, seed=0, io_trace=False,
                   probability_for=None, record=False, csb_us=None,
-                  weak_memory_rounds=None, round_us=ROUND_US):
+                  weak_memory_rounds=None, round_us=ROUND_US,
+                  make_metrics=None):
     """Weak-primary switching on the declared fabric.
 
     escalation_probability 0.0 or 1.0 (or a per-job probability_for
@@ -151,10 +153,49 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
         timing=declared_timing(round_us),
         pauli_frame=PauliFrameConfig(commit_us=DECLARED_US["frame"]),
         record_switching_windows=record,
+        make_metrics=make_metrics,
         decoder_memory=(None if weak_memory_rounds is None else
                         DecoderMemoryConfig({"default": weak_memory_rounds})),
         seed=seed)
     return spec.build(io_trace=io_trace)
+
+
+class OccupancyProbe:
+    """Metric recording each store's live-round timeline, for hold-lifetime
+    assertions (observe runs after every engine event)."""
+
+    name = "hold_occupancy_probe"
+
+    def __init__(self, window_manager):
+        self.window_manager = window_manager
+        self.buffer0_timeline = []
+        self.sb1_timeline = []
+
+    def observe(self, engine):
+        live_upstream = self.window_manager.syndrome_buffer.metrics().live_allocations
+        if not self.buffer0_timeline or self.buffer0_timeline[-1][1] != live_upstream:
+            self.buffer0_timeline.append((engine.now, live_upstream))
+        room_store = self.window_manager.syndrome_buffer_1
+        if room_store is not None:
+            live_room = room_store.store.metrics().live_allocations
+            if not self.sb1_timeline or self.sb1_timeline[-1][1] != live_room:
+                self.sb1_timeline.append((engine.now, live_room))
+
+    def result(self):
+        return {"buffer0": list(self.buffer0_timeline),
+                "sb1": list(self.sb1_timeline)}
+
+
+def occupancy_metrics():
+    """make_metrics factory returning ONE probe; read it off CompletedRun."""
+    probes = []
+
+    def make(engine, window_manager, decoder_manager, execution_runtime, factory):
+        probe = OccupancyProbe(window_manager)
+        probes.append(probe)
+        return [probe]
+
+    return make, probes
 
 
 def log_tick(log_lines, needle):
@@ -189,4 +230,5 @@ def fabric():
         "switching_run": switching_run,
         "log_tick": log_tick,
         "log_index": log_index,
+        "occupancy_metrics": occupancy_metrics,
     }

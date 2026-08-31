@@ -98,3 +98,18 @@ def test_component_boundaries_are_structural(fabric):
     assert not hasattr(completed.execution_runtime, "register_op")
     assert not hasattr(completed.execution_runtime, "create_dynamic_window")
     assert not hasattr(completed.decoder_manager, "qpu")
+
+
+def test_every_program_operation_is_registered(fabric):
+    """The execution-view registration covers non-emitting operations,
+    which the decode-plan view never sees; dropping it would leave them
+    without readiness accounts."""
+    quiet = Operation(id=1, name="quiet", qubits=(1,), patches=(1,),
+                      emits_detector_data=False)
+    completed = fabric["weak_only_run"](rounds=6,
+                                        ops=[quiet, fabric["memory_op"](2)])
+    window_manager = completed.window_manager
+
+    assert {1, 2} <= set(window_manager._ops)
+    assert 1 in window_manager.memory_rounds
+    assert set(completed.execution_runtime.body_done_time) == {1, 2}

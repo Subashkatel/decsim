@@ -98,6 +98,36 @@ class ComplementaryGapMetric:
         from scipy.sparse import csc_matrix, vstack
         check_aug = vstack([self.check, csc_matrix(self.obs[0:1, :])]).tocsc()
         self._aug = pymatching.Matching.from_check_matrix(check_aug, weights=self.weights)
+        self._warm_matchings()
+
+    def _warm_matchings(self) -> None:
+        """Decode a few single-fault syndromes on both graphs at build.
+
+        PyMatching finishes its internal graph construction lazily on
+        the first decode; without this, every window's first timed solve
+        silently pays graph build (the base window decoder warms for the
+        same reason). Each warm-up syndrome is one column's detector
+        set, which that fault alone explains, so it is satisfiable; the
+        augmented graph additionally gets that fault's observable bit.
+        """
+        import numpy as np
+
+        warmed = 0
+        for column in range(self.check.shape[1]):
+            rows = self.check.indices[
+                self.check.indptr[column]:self.check.indptr[column + 1]]
+            if rows.size == 0:
+                continue
+            syndrome = np.zeros(self.check.shape[0], dtype=np.uint8)
+            syndrome[rows] = 1
+            self._base.decode(syndrome)
+            observable_bit = int(self.obs[0, column])
+            augmented_syndrome = np.concatenate(
+                [syndrome, [observable_bit]]).astype(np.uint8)
+            self._aug.decode(augmented_syndrome)
+            warmed += 1
+            if warmed == 3:
+                break
 
     @classmethod
     def from_dem(cls, dem: "stim.DetectorErrorModel") -> "ComplementaryGapMetric":
@@ -117,6 +147,60 @@ class ComplementaryGapMetric:
             matching_weights(faults.priors),
         )
 
+    def forced_class_solve(self, syndrome, forced_class: int) -> tuple:
+        """(weight, nanoseconds) of one forced-class solve.
+
+        The augmented virtual-detector bit pins the observable's parity
+        to ``forced_class``; the solve is independent of the other
+        class's solve, which is what lets the two run on different
+        hardware. ``paired_evaluate`` is both solves on one host;
+        the split engines call this once each.
+        """
+        import time
+
+        import numpy as np
+
+        bits = np.asarray(syndrome, dtype=np.uint8).ravel()
+        forced_bits = np.concatenate([bits, [forced_class]]).astype(np.uint8)
+        started_ns = time.perf_counter_ns()
+        _, weight = self._aug.decode(forced_bits, return_weight=True)
+        elapsed_ns = time.perf_counter_ns() - started_ns
+        return float(weight), elapsed_ns
+
+    def paired_evaluate(self, syndrome) -> "PairedGapEvaluation":
+        """Evaluate the gap as two independent forced-class solves.
+
+        Each solve constrains the observable to one class by setting the
+        augmented virtual-detector bit, so neither depends on the other:
+        this is the form two matching cores compute side by side. The
+        unconstrained minimum weight equals the smaller forced weight,
+        the prediction is the winning class, and the gap is the weight
+        difference; ``evaluate`` computes the same object serially.
+        Each solve carries its own wall-clock time so a caller can model
+        the pair's latency as the slower core, not the sum.
+        """
+        forced_weights = []
+        solve_times_ns = []
+        for forced_class in (0, 1):
+            weight, elapsed_ns = self.forced_class_solve(
+                syndrome, forced_class)
+            forced_weights.append(weight)
+            solve_times_ns.append(elapsed_ns)
+        predicted_class = int(forced_weights[1] < forced_weights[0])
+        w_min = forced_weights[predicted_class]
+        w_comp = forced_weights[1 - predicted_class]
+        soft_output = SoftOutput(
+            gap=abs(w_comp - w_min),
+            source=COMPLEMENTARY_GAP_SOURCE,
+            w_min=w_min,
+            w_comp=w_comp,
+        )
+        return PairedGapEvaluation(
+            soft_output=soft_output,
+            predicted_class=predicted_class,
+            forced_solve_ns=tuple(solve_times_ns),
+        )
+
     def evaluate(self, syndrome) -> SoftOutput:
         """Return the :class:`SoftOutput` (logical value + gap) for one syndrome."""
         import numpy as np
@@ -132,6 +216,15 @@ class ComplementaryGapMetric:
             w_min=float(w_min),
             w_comp=float(w_comp),
         )
+
+
+@dataclass(frozen=True)
+class PairedGapEvaluation:
+    """One window's gap computed as two parallel forced-class solves."""
+
+    soft_output: SoftOutput
+    predicted_class: int
+    forced_solve_ns: tuple
 
 
 @dataclass(frozen=True)

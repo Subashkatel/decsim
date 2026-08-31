@@ -393,7 +393,6 @@ def test_escalated_strong_final_folds_into_the_frame_and_gates_the_commit():
     manager._ops = {4: SimpleNamespace(id=4, name="logical")}
     manager.op_strong_commit_time = {}
     manager._selected_request_keys = None
-    manager.speculative_recovery = SimpleNamespace(complete=lambda completion: False)
     finished = []
     manager._finish_strong_commit = (
         lambda completion, key, result, window, op: finished.append(key))
@@ -419,7 +418,6 @@ def test_frameless_strong_commit_finishes_directly():
     manager._ops = {4: SimpleNamespace(id=4, name="logical")}
     manager.op_strong_commit_time = {}
     manager._selected_request_keys = None
-    manager.speculative_recovery = SimpleNamespace(complete=lambda completion: False)
     finished = []
     manager._finish_strong_commit = (
         lambda completion, key, result, window, op: finished.append(key))

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import Callable, Optional
 
 from ..message import (DecodeJob, DecodeOutcome, DecodeResult,
@@ -28,7 +29,33 @@ class RequestProcessingOutcome(Enum):
     STRONG_CANCELLED_DURING_SERVICE = "strong_cancelled_during_service"
     STRONG_CANCELLED_MEMBER_SERVICE_CONTINUED = (
         "strong_cancelled_member_service_continued")
-    WEAK_WITHDRAWN_FOR_REPLAY = "weak_withdrawn_for_replay"
+    WEAK_WITHDRAWN_FOR_STRONG_WINDOW = "weak_withdrawn_for_strong_window"
+
+
+@dataclass
+class GapJoinState:
+    """One window's split-gap rendezvous: the weak outcome is processed
+    only when both forced-class halves have reported.
+
+    The join is an AND of two completions, the same shape as the
+    landed-input join in ``_start_job`` (both DMAs must land before the
+    decode starts); here both SOLVES must land before the escalation
+    decision runs. The weak unit itself is freed at its own solve end;
+    only the outcome waits.
+    """
+
+    sibling_weight: Optional[float] = None
+    sibling_reported: bool = False
+    held_weak_job: Optional[DecodeJob] = None
+    held_weak_result: Optional["DecodeResult"] = None
+
+    def hold_weak(self, job: DecodeJob, result) -> None:
+        self.held_weak_job = job
+        self.held_weak_result = result
+
+    def report_sibling(self, weight) -> None:
+        self.sibling_reported = True
+        self.sibling_weight = weight
 
 
 @dataclass(frozen=True)
@@ -111,6 +138,13 @@ class DecoderManager:
         # (pool, unit) -> the job holding or reserving the unit's compute
         # (from assignment through decode end), None when compute is free
         self._computing: dict = {}
+        # Pipelined units only (a routed decoder declaring an initiation
+        # interval): (pool, unit) -> decodes started and not yet finished,
+        # and (pool, unit) -> (owner, depth) when the pipeline is full and
+        # the intake stays claimed until the next completion. Both stay
+        # empty under non-pipelined decoders, whose occupancy IS latency.
+        self._pipeline_flights: dict = {}
+        self._pipeline_stalled: dict = {}
         self.log_name = log_name
         self._terminal_request_records = [] if capture_enabled else None
         self._terminal_service_records = [] if capture_enabled else None
@@ -139,6 +173,11 @@ class DecoderManager:
                 pool, unit, None if decoder_memory is None else decoder_memory.capacity_for(pool))
             for pool, n in unit_pools.items() for unit in range(n)}
         self._dispatching = False
+        # Split-pair gap joins: a router with a gap route turns them on.
+        # (op_id, window_id) -> GapJoinState, created when the sibling
+        # is spawned and removed when the join concludes the window.
+        self.gap_split_enabled = getattr(router, "gap", None) is not None
+        self._gap_joins: dict[tuple, GapJoinState] = {}
         self.num_units = self.unit_totals["default"]
         self.ready: list[DecodeJob] = []
         self.pool_ready: dict[str, list] = {
@@ -190,7 +229,8 @@ class DecoderManager:
         self._reject_spent_job(job)
         if job.strong_decode_for is not None:
             self.strong.admit_strong(job, self.engine.now)
-        elif job.on_done is None:
+        elif job.on_done is None and job.gap_sibling_for is None:
+            # a gap half is neither tier: it feeds the join, not the ledger
             self.strong.admit_weak(job, self.engine.now)
         job.submitted = True
         job.reserve_transfer = reserve_transfer
@@ -359,6 +399,7 @@ class DecoderManager:
     def _free_unit(self, job: DecodeJob) -> None:
         """Compute finished: drop the job from its slot and offer the
         compute onward (the ping-pong swap at compute end)."""
+        self._end_flight(job, offer_now=False)
         pool, unit = job.pool, job.unit
         job.unit = None
         slot = (pool, unit)
@@ -402,14 +443,14 @@ class DecoderManager:
         if self._computing.get(slot) is not None:
             return
         for resident in self._residents(slot):
-            if resident.cancelled or resident.completed:
-                continue
+            if resident.cancelled or resident.completed or resident.service_started:
+                continue                 # an in-flight pipelined decode stays resident
             if resident.input_landed and not self._is_parked(resident):
                 self._computing[slot] = resident
                 self._begin_service(resident)
                 return
         for resident in self._residents(slot):
-            if resident.cancelled or resident.completed:
+            if resident.cancelled or resident.completed or resident.service_started:
                 continue
             if not resident.input_landed and self._startable(resident):
                 self._computing[slot] = resident   # starts at its landing
@@ -478,18 +519,99 @@ class DecoderManager:
         if not startable and (self.stage_admission is not None
                               and not self.stage_admission(job)):
             return None
+        resident_capacity = self._resident_capacity(job)
         free = set(self._free_units[pool])
         for unit in self._free_units[pool]:
             slot = (pool, unit)
-            if len(self._residents(slot)) < 2 and self._slot_memory_ok(slot, job):
+            if len(self._residents(slot)) < resident_capacity \
+                    and self._slot_memory_ok(slot, job):
                 return unit, startable
         for unit in range(self.unit_totals[pool]):
             slot = (pool, unit)
-            if unit in free or len(self._residents(slot)) >= 2:
+            if unit in free or len(self._residents(slot)) >= resident_capacity:
                 continue
             if self._slot_memory_ok(slot, job):
                 return unit, False
         return None
+
+    def _resident_capacity(self, job: DecodeJob) -> int:
+        """Two residents per unit (the depth-1 access-execute machine)
+        unless the routed decoder pipelines: then every in-flight decode
+        stays resident (its input lives in the unit's memory until its
+        result emerges) plus one landing next. Memory admission still
+        gates every resident, so a deep pipeline pays its SRAM price
+        visibly or refuses loudly."""
+        decoder = self.router.route(job)
+        if getattr(decoder, "initiation_interval", None) is None:
+            return 2
+        interval = decoder.initiation_interval(job)
+        depth = getattr(decoder, "pipeline_depth", None)
+        if depth is None:
+            depth = max(1, math.ceil(decoder.latency(job) / interval))
+        return depth + 1
+
+    def _initiation_interval_ticks(self, decoder, job: DecodeJob,
+                                   latency_ticks: int):
+        """(interval, depth) for a pipelined start, (None, None) otherwise.
+
+        The pipelined model serves plain window and external decodes
+        only; the strong tier, gap siblings, and merged batches keep
+        occupancy == latency until they get their own design pass, and a
+        pipelined route there refuses loudly rather than silently
+        serializing."""
+        interval_of = getattr(decoder, "initiation_interval", None)
+        if interval_of is None:
+            return None, None
+        members = job.service_original_request_keys or ()
+        if (job.strong_decode_for is not None
+                or job.gap_sibling_for is not None
+                or len(members) > 1):
+            raise RuntimeError(
+                f"decode job {job.label!r}: a pipelined decoder serves plain "
+                f"window or external decodes only; the strong tier, gap "
+                f"siblings, and merged batches are not pipelined yet")
+        interval = interval_of(job)
+        depth = getattr(decoder, "pipeline_depth", None)
+        if depth is None:
+            depth = max(1, math.ceil(latency_ticks / interval))
+        return interval, depth
+
+    def _initiation_complete(self, slot: tuple, job: DecodeJob,
+                             depth: int) -> None:
+        """The pipelined unit's intake is free again: release the compute
+        claim so the next start may begin, unless the pipeline is full;
+        a full pipeline keeps the claim until the next completion."""
+        if job.cancelled or job.completed:
+            return
+        if self._computing.get(slot) is not job:
+            return
+        if len(self._pipeline_flights.get(slot, ())) >= depth:
+            self._pipeline_stalled[slot] = (job, depth)
+            return
+        self._computing[slot] = None
+        self._offer_compute(slot)
+        self.try_dispatch()
+
+    def _end_flight(self, job: DecodeJob, offer_now: bool) -> None:
+        """A pipelined decode left the unit (done or cancelled): retire
+        its flight and lift a full-pipeline stall. The caller's normal
+        flow performs the compute offer unless offer_now says otherwise."""
+        for slot, flights in self._pipeline_flights.items():
+            entry = next((f for f in flights if f[0] is job), None)
+            if entry is None:
+                continue
+            flights.remove(entry)
+            stalled = self._pipeline_stalled.get(slot)
+            if stalled is not None and len(flights) < stalled[1]:
+                owner = stalled[0]
+                del self._pipeline_stalled[slot]
+                if (self._computing.get(slot) is owner
+                        and not owner.cancelled and not owner.completed):
+                    self._computing[slot] = None
+                    if offer_now:
+                        self._offer_compute(slot)
+                        self.try_dispatch()
+            return
 
     def _slot_memory_ok(self, slot: tuple, job: DecodeJob) -> bool:
         """A second resident joins only if the unit's memory holds both
@@ -637,6 +759,7 @@ class DecoderManager:
         job.service_started = True
         if job.window is not None:
             job.window.service_began = True
+        self._spawn_gap_sibling(job)
         decoder = self.router.route(job)
         self.engine.log(self.log_name, f"START DECODE {job.label}")
         run = getattr(decoder, "run", None)
@@ -656,14 +779,124 @@ class DecoderManager:
                       else decoder.decode(j))
             self._on_decode_done(j, result)
 
-        self.engine.schedule(decoder.latency(job), decode_now,
+        latency_ticks = decoder.latency(job)
+        interval_ticks, pipeline_depth = self._initiation_interval_ticks(
+            decoder, job, latency_ticks)
+        self.engine.schedule(latency_ticks, decode_now,
                              label=f"decode_done({job.label})")
+        if interval_ticks is not None:
+            slot = (job.pool, job.unit)
+            flights = self._pipeline_flights.setdefault(slot, [])
+            # in-order completion: a hardware pipeline retires in issue
+            # order, so every in-flight decode on one unit must declare
+            # the same latency; mixed latencies refuse loudly
+            mixed = [f for f, ticks in flights if ticks != latency_ticks]
+            if mixed:
+                raise RuntimeError(
+                    f"decode job {job.label!r} declares latency "
+                    f"{latency_ticks} ticks while {mixed[0].label!r} is in "
+                    f"flight with a different latency: a pipelined unit "
+                    f"completes in order and takes one latency per unit")
+            flights.append((job, latency_ticks))
+            self.engine.schedule(
+                interval_ticks,
+                lambda s=slot, j=job, d=pipeline_depth:
+                    self._initiation_complete(s, j, d),
+                label=f"initiation_complete({job.label})")
+
+    def _spawn_gap_sibling(self, job: DecodeJob) -> None:
+        """Submit the other forced-class solve to the gap pool.
+
+        Fired at the primary weak decode's service start: the boundary
+        mask is applied by then, so the sibling reads the same masked
+        rounds the primary decodes (both units receive the same adjusted
+        stream, the CSB dual-write pattern on the strong side). The
+        sibling carries its own copy of the rounds, pays its own WBD
+        transfer and queues for its own unit. The copy is taken here
+        instead of holding Buffer 0 for a second read, so the sibling's
+        transfer is priced but never blocks on round retention.
+        """
+        if not self.gap_split_enabled:
+            return
+        if job.strong_decode_for is not None or job.on_done is not None:
+            return
+        if job.gap_sibling_for is not None:
+            return
+        if job.window is None or job.dem is None or job.decoder_input is None:
+            return
+        key = (job.op_id, job.window_id)
+        if key in self._gap_joins:
+            return
+        masked_fragments = [
+            fragment
+            for round_input in job.decoder_input.rounds
+            for fragment in round_input.fragments
+        ]
+        sibling = DecodeJob(
+            op_id=job.op_id, window_id=job.window_id,
+            n_rounds=len(job.decoder_input.rounds),
+            dem=job.dem, payloads=masked_fragments,
+            ready_time=self.engine.now,
+            label=f"gap({job.label})", hint="gap",
+            spatial_nodes=job.spatial_nodes, code=job.code,
+            gap_sibling_for=key)
+        self._gap_joins[key] = GapJoinState()
+        window_manager = getattr(self.services, "wm", None)
+
+        def reserve_transfer(sibling=sibling, primary=job):
+            if window_manager is None:
+                return 0
+            from ..links.links import LinkPath
+            payload_bits = window_manager._job_payload_bits(sibling)
+            # the link attribution is the window's, so the reservation
+            # rides the primary job's window identity; the delay applies
+            # to the sibling's own delivery
+            arrival = window_manager._link_arrival(
+                LinkPath.WBD, primary, payload_bits=payload_bits)
+            return arrival - self.engine.now
+
+        self.engine.log(self.log_name,
+                        f"SPLIT GAP {job.label}: sibling submitted to the "
+                        f"gap pool")
+        self.enqueue(sibling, reserve_transfer)
+
+    def _gap_sibling_done(self, key: tuple, sibling_weight) -> None:
+        """One gap half landed; conclude the window if the other is in."""
+        join = self._gap_joins.get(key)
+        if join is None:
+            raise RuntimeError(
+                f"gap sibling finished for window {key} with no join entry")
+        join.report_sibling(sibling_weight)
+        if join.held_weak_job is None:
+            return                    # the primary decode is still running
+        del self._gap_joins[key]
+        self._attach_joined_gap(join.held_weak_result, sibling_weight)
+        self._conclude_weak(join.held_weak_job, join.held_weak_result)
+
+    @staticmethod
+    def _attach_joined_gap(result: DecodeResult, sibling_weight) -> None:
+        """Build the SoftOutput from the two forced-class weights.
+
+        Either half missing leaves soft_output None, and the policy then
+        escalates (the same behavior a metric-less serial decode has).
+        """
+        primary_weight = result.gap_half_weight
+        if primary_weight is None or sibling_weight is None:
+            return
+        from ..confidence.complementary import COMPLEMENTARY_GAP_SOURCE
+        w_min = min(primary_weight, sibling_weight)
+        w_comp = max(primary_weight, sibling_weight)
+        result.soft_output = SoftOutput(
+            gap=w_comp - w_min,
+            source=COMPLEMENTARY_GAP_SOURCE,
+            w_min=w_min,
+            w_comp=w_comp)
 
     def withdraw_window(self, window_key: tuple) -> None:
         """Take back one window's submitted, not-yet-started weak decode:
-        speculative invalidation is rewriting the window, so its raw input
-        is superseded. The attempt closes in the ledger and the caller
-        resubmits a fresh job when the replay rebuilds the window."""
+        the window is being rewritten (a strong window absorbs it), so its
+        raw input is superseded. The attempt closes in the ledger and the
+        caller resubmits a fresh job if the window is rebuilt."""
         job = self._find_window_job(window_key)
         if job is None:
             raise RuntimeError(
@@ -694,7 +927,8 @@ class DecoderManager:
                 f"{job.label} is neither queued nor resident; nothing to withdraw")
         self.strong.resolve_weak(window_key)
         self._record_request(
-            job, None, RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_REPLAY, None)
+            job, None,
+            RequestProcessingOutcome.WEAK_WITHDRAWN_FOR_STRONG_WINDOW, None)
         self.engine.log(self.log_name,
                         f"WITHDRAW {job.label} (invalidated before start)")
         self.try_dispatch()
@@ -741,7 +975,18 @@ class DecoderManager:
     def _on_decode_done(self, job: DecodeJob, result) -> None:
         """One decode finished: free the unit, ask the escalation_policy, commit or await strong."""
         if job.cancelled:
+            self._end_flight(job, offer_now=True)
             self.staging.release(job)
+            self.try_dispatch()
+            return
+        if job.gap_sibling_for is not None:
+            job.completed = True
+            self._free_unit(job)
+            self.staging.release(job)
+            self.engine.log(self.log_name,
+                            f"DECODE DONE {job.label} (gap half)")
+            sibling_weight = None if result is None else result.gap_half_weight
+            self._gap_sibling_done(job.gap_sibling_for, sibling_weight)
             self.try_dispatch()
             return
         if job.strong_decode_for is not None:
@@ -780,6 +1025,25 @@ class DecoderManager:
         self._validate_logical_observables(job, result)
         job.completed = True
         self._free_unit(job)
+        key = (job.op_id, job.window_id)
+        join = self._gap_joins.get(key)
+        if join is not None:
+            # the unit is free either way; the OUTCOME waits at the join
+            self.staging.release(job)
+            if not join.sibling_reported:
+                join.hold_weak(job, result)
+                self.engine.log(self.log_name,
+                                f"GAP JOIN {job.label}: holding for the "
+                                f"sibling half")
+                self.try_dispatch()
+                return
+            del self._gap_joins[key]
+            self._attach_joined_gap(result, join.sibling_weight)
+        self._conclude_weak(job, result)
+
+    def _conclude_weak(self, job: DecodeJob, result) -> None:
+        """The weak outcome's decision and delivery; in split-pair mode
+        this runs at the gap join, otherwise straight from decode end."""
         key = (job.op_id, job.window_id)
         directive = self.escalation_policy.on_decode_outcome(DecodeOutcome(job, result),
                                                     self.services)
@@ -911,6 +1175,17 @@ class DecoderManager:
             parked = sorted(job.label for job in self._parked_service.values())
             raise RuntimeError(
                 f"run ended with parked decodes never released: {parked}")
+        if self._gap_joins:
+            raise RuntimeError(
+                f"run ended with split-gap joins unresolved: "
+                f"{sorted(self._gap_joins)}")
+        leftover_flights = sorted(
+            flight_job.label for flights in self._pipeline_flights.values()
+            for flight_job, _ in flights)
+        if leftover_flights:
+            raise RuntimeError(
+                f"run ended with pipelined decodes still in flight: "
+                f"{leftover_flights}")
         unsettled = self.strong.unsettled()
         held = [f"{m.pool}#{m.unit}" for m in self.decoder_memories.values()
                 if m.occupied_rounds]

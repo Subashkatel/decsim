@@ -69,14 +69,6 @@ class DecoderInputHold:
 
 
 @dataclass(frozen=True)
-class Replay:
-    """Buffer 0 hold: rounds a window needs again for a speculative replay of one boundary generation."""
-
-    window_key: tuple
-    boundary_generation: int
-
-
-@dataclass(frozen=True)
 class RephaseGuard:
     """Buffer 0 hold: rounds a rephased suffix keeps while its strong request is live."""
 
@@ -305,9 +297,7 @@ class SyndromeBuffer:
                     f"hold references released round {identity!r}"
                 )
         references = {identity[0] for identity in identities}
-        if type(holder) is Replay:
-            references.add(holder.window_key[0])
-        elif type(holder) is RephaseGuard:
+        if type(holder) is RephaseGuard:
             references.add(holder.request_key.operation_id)
         closed = references - self._open_operations
         if closed:

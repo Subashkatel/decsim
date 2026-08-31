@@ -96,7 +96,6 @@ class PauliFrameSnapshot:
 
     configured_commit_ticks: int
     commit_count: int
-    window_count: int
     duplicate_drop_count: int
     pending_write_count: int
     charged_ticks: int
@@ -234,7 +233,6 @@ class PauliFrame:
         return PauliFrameSnapshot(
             configured_commit_ticks=self.commit_ticks,
             commit_count=commit_count,
-            window_count=commit_count,
             duplicate_drop_count=len(self._duplicate_drops),
             pending_write_count=len(self._pending_by_window_key),
             charged_ticks=commit_count * self.commit_ticks,

@@ -6,7 +6,7 @@ protected regions are FeedbackStreams'."""
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Callable
 
@@ -15,16 +15,40 @@ from ..message import (Decision, Operation, QPUReadout, RunOperationBody,
                        SyndromePacketRoute, SyndromePayload, normalize_binary_bits)
 
 
+@dataclass(frozen=True)
+class ControllerOutputEvent:
+    """One auditable transition on the controller's digital-to-QPU path.
+
+    ``payload`` is the actual immutable decision or QPU command crossing the
+    boundary, so tests and ledgers can prove that timing was not modeled with
+    a detached token while different data reached the QPU.
+    """
+
+    kind: str
+    tick: int
+    operation_id: object
+    payload: object
+
+
 class Controller:
     def __init__(self, engine, *, qpu, window_manager, syndrome_packing=None,
-                 binary_availability_ticks: int = 0, links=None,
-                 resolved_operations, resolved_patches, idle_policy,
+                 measurement_signal_to_classical_bits_ticks: int = 0,
+                 instruction_or_decision_to_analog_control_pulse_ticks: int = 0,
+                 links=None, resolved_operations, resolved_patches, idle_policy,
                  feedback_streams):
         self.engine = engine
         self.qpu = qpu
         self.window_manager = window_manager
         self.syndrome_packing = syndrome_packing
-        self.binary_availability_ticks = binary_availability_ticks
+        if measurement_signal_to_classical_bits_ticks < 0:
+            raise ValueError("measurement_signal_to_classical_bits_ticks must be nonnegative")
+        if instruction_or_decision_to_analog_control_pulse_ticks < 0:
+            raise ValueError(
+                "instruction_or_decision_to_analog_control_pulse_ticks must be nonnegative")
+        self.measurement_signal_to_classical_bits_ticks = \
+            measurement_signal_to_classical_bits_ticks
+        self.instruction_or_decision_to_analog_control_pulse_ticks = \
+            instruction_or_decision_to_analog_control_pulse_ticks
         self.links = links
         self.runtime = None
         self.idle_policy = idle_policy
@@ -34,6 +58,7 @@ class Controller:
         self._resolved_patches = MappingProxyType({
             patch.patch_identity: patch for patch in resolved_patches})
         self.idle_rounds_emitted = 0
+        self.output_events: list[ControllerOutputEvent] = []
 
     def round_ticks_for(self, operation: Operation) -> int:
         """The resolved QEC cycle length of one operation, in ticks."""
@@ -62,7 +87,14 @@ class Controller:
         return not self.streams.blocks_start(operation)
 
     def issue_operation(self, operation: Operation, idle_rounds: int) -> int:
-        """Command the QPU; return the cycle boundary the operation starts on."""
+        """Prepare one real QPU command and return its physical start boundary.
+
+        Program roots and ordinary DAG successors are time-tagged/preloaded;
+        their online controller preparation occurred before the simulated
+        interval.  A feedback-blocked operation is dynamic: its actual
+        ``RunOperationBody`` pays controller output processing and CQ before
+        it can enter the QPU.
+        """
         self.streams.begin(operation)
         if idle_rounds:
             self.window_manager.prepend_idle_rounds(operation.id, idle_rounds)
@@ -76,15 +108,54 @@ class Controller:
                                        stream_offset=binding.stream_offset)
             source_operation_id = binding.stream_id
         source_round_count = self._resolved_operations[source_operation_id].round_count
-        self.qpu.issue(RunOperationBody(
+        command = RunOperationBody(
             operation=issued_operation,
             round_ticks=self.round_ticks_for(operation),
             round_count=self.round_count_for(operation),
             source_round_count=source_round_count,
             emits_detector_data=operation.emits_detector_data,
             finalizes_stream_round=operation.finalizes_stream_round,
-        ))
-        return self.qpu.next_boundary()
+        )
+        if operation.blocked_by is None:
+            self.output_events.append(ControllerOutputEvent(
+                "PRELOADED_COMMAND", self.engine.now, operation.id, command))
+            self.qpu.issue(command)
+            return self.qpu.next_boundary()
+        return self._dispatch_dynamic_command(command)
+
+    def _dispatch_dynamic_command(self, command: RunOperationBody) -> int:
+        """Carry the feedback-selected command through pulse generation and CQ."""
+        arrival_tick = self._send_controller_output(
+            payload=command, operation_id=command.operation.id,
+            event_kind="CONTROL_PULSE_COMMAND_ISSUED",
+            deliver=self.qpu.issue)
+        return self.qpu.boundary_at_or_after(arrival_tick)
+
+    def _send_controller_output(self, *, payload, operation_id,
+                                event_kind: str, deliver: Callable) -> int:
+        """Process one output payload, reserve CQ, and schedule its delivery."""
+        output_tick = (self.engine.now +
+                       self.instruction_or_decision_to_analog_control_pulse_ticks)
+        attribution = TrafficAttribution(
+            operation_id=operation_id, patch_ids=(), window_id=None,
+            round_lo=None, round_hi=None)
+        if self.links is None:
+            arrival_tick = output_tick
+        else:
+            reservation = self.links.reserve(
+                LinkPath.CQ, payload_bits=None, now_ticks=output_tick,
+                attribution=attribution)
+            arrival_tick = output_tick + reservation.total_delay_ticks
+
+        def output_ready():
+            self.output_events.append(ControllerOutputEvent(
+                event_kind, self.engine.now, operation_id, payload))
+
+        self.engine.schedule(output_tick - self.engine.now, output_ready,
+                             label="controller-output-ready")
+        self.engine.schedule(arrival_tick - self.engine.now,
+                             lambda: deliver(payload), label="controller->qpu")
+        return arrival_tick
 
     def _log_start(self, operation: Operation) -> None:
         kind = "Clifford" if operation.clifford else "non-Clifford"
@@ -162,23 +233,37 @@ class Controller:
             size_bits=readout.size_bits,
         )
         self.syndrome_packing.relay_qpu_readout(
-            payload, route, processing_ticks=self.binary_availability_ticks)
+            payload, route,
+            processing_ticks=self.measurement_signal_to_classical_bits_ticks)
 
     def relay_instruction(self, decision: Decision,
                           deliver: Callable[[Decision], None]) -> None:
-        """Carry a Pauli frame decision over OC to the controller, then over CQ to the QPU."""
-        if self.links is None:
-            deliver(decision)
-            return
+        """Carry a Pauli-frame decision over OC to the controller.
+
+        A release is consumed at the controller; the resulting real operation
+        command subsequently traverses pulse generation and CQ in ``issue_operation``.
+        A result-return without an operation still traverses those stages
+        before it is reported as available at the QPU.
+        """
         attribution = TrafficAttribution(
             operation_id=decision.target_operation_id, patch_ids=(),
             window_id=None, round_lo=None, round_hi=None)
 
         def at_controller():
-            cq_delay = self._instruction_delay(LinkPath.CQ, attribution)
-            self.engine.schedule(cq_delay, lambda: deliver(decision), label="controller->qpu")
+            self.output_events.append(ControllerOutputEvent(
+                "DECISION_AVAILABLE", self.engine.now,
+                decision.target_operation_id, decision))
+            if decision.releases_operation:
+                deliver(decision)
+            else:
+                self._send_controller_output(
+                    payload=decision,
+                    operation_id=decision.target_operation_id,
+                    event_kind="CONTROL_DECISION_ISSUED",
+                    deliver=deliver)
 
-        oc_delay = self._instruction_delay(LinkPath.OC, attribution)
+        oc_delay = (0 if self.links is None else
+                    self._instruction_delay(LinkPath.OC, attribution))
         self.engine.schedule(oc_delay, at_controller, label="pauli frame->controller")
 
     def _instruction_delay(self, path: LinkPath, attribution: TrafficAttribution) -> int:

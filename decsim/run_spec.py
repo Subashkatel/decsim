@@ -293,8 +293,7 @@ class RunSpec:
             engine, qpu=qpu, window_manager=window_manager,
             syndrome_packing=syndrome_packing,
             binary_availability_ticks=timing.ticks("t_binary_availability"),
-            links=links, round_ticks=plan.round_ticks,
-            code_geometry=plan.code_geometry,
+            links=links,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches, idle_policy=config.idle_policy,
             feedback_streams=feedback_streams)

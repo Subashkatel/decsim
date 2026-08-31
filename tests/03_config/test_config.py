@@ -20,7 +20,7 @@ def timing_with(field_name, value):
 
 
 def built_round_ticks(**overrides):
-    return RunSpec(ops=[], **overrides).build().controller.round_ticks
+    return RunSpec(ops=[], **overrides).build().qpu.cycle_ticks
 
 
 def test_us_converts_with_fixed_resolution_and_half_even_rounding():

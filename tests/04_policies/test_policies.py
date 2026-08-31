@@ -122,8 +122,6 @@ def make_controller(idle_policy, *, live_streams=()):
         engine,
         qpu=qpu,
         window_manager=window_manager,
-        round_ticks=11,
-        code_geometry=geometry,
         resolved_operations=(),
         resolved_patches=(patch,),
         idle_policy=idle_policy,

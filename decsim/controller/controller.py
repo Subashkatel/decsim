@@ -18,8 +18,8 @@ from ..message import (Decision, Operation, QPUReadout, RunOperationBody,
 class Controller:
     def __init__(self, engine, *, qpu, window_manager, syndrome_packing=None,
                  binary_availability_ticks: int = 0, links=None,
-                 round_ticks: int, code_geometry, resolved_operations,
-                 resolved_patches, idle_policy, feedback_streams):
+                 resolved_operations, resolved_patches, idle_policy,
+                 feedback_streams):
         self.engine = engine
         self.qpu = qpu
         self.window_manager = window_manager
@@ -27,8 +27,6 @@ class Controller:
         self.binary_availability_ticks = binary_availability_ticks
         self.links = links
         self.runtime = None
-        self.round_ticks = round_ticks
-        self._code_geometry = code_geometry
         self.idle_policy = idle_policy
         self.streams = feedback_streams
         self._resolved_operations = MappingProxyType({

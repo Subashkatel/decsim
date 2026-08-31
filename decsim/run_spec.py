@@ -292,7 +292,10 @@ class RunSpec:
         controller = Controller(
             engine, qpu=qpu, window_manager=window_manager,
             syndrome_packing=syndrome_packing,
-            binary_availability_ticks=timing.ticks("t_binary_availability"),
+            measurement_signal_to_classical_bits_ticks=timing.ticks(
+                "measurement_signal_to_classical_bits"),
+            instruction_or_decision_to_analog_control_pulse_ticks=timing.ticks(
+                "instruction_or_decision_to_analog_control_pulse"),
             links=links,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches, idle_policy=config.idle_policy,

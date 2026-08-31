@@ -140,7 +140,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     router = spec.router or CodeRouter(default=spec.decoder, by_code=dict(spec.decoders))
 
     link_config = spec.links if spec.links is not None else logical_reference_profile()
-    if (spec.timing.ticks("t_binary_availability") > 0
+    if (spec.timing.ticks("measurement_signal_to_classical_bits") > 0
             and not link_config.qc_excludes_controller_processing):
         raise ValueError("a separate controller readout cost requires a link "
                          "profile whose QC latency excludes that cost")

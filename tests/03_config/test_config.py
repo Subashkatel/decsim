@@ -12,8 +12,9 @@ from decsim.run_spec import RunSpec
 def timing_with(field_name, value):
     values = {
         "round_us": 1.1,
-        "t_binary_availability_us": 0.0,
+        "measurement_signal_to_classical_bits_us": 0.0,
         "t_pack_us": 0.0,
+        "instruction_or_decision_to_analog_control_pulse_us": 0.0,
     }
     values[field_name] = value
     return TimingConfig(**values)
@@ -64,20 +65,20 @@ def test_timing_config_defaults_field_order_and_public_exports():
 
     assert [field.name for field in fields(TimingConfig)] == [
         "round_us",
-        "t_binary_availability_us",
+        "measurement_signal_to_classical_bits_us",
         "t_pack_us",
+        "instruction_or_decision_to_analog_control_pulse_us",
     ]
     assert (
         config.round_us,
-        config.t_binary_availability_us,
+        config.measurement_signal_to_classical_bits_us,
         config.t_pack_us,
-    ) == (1.1, 0.0, 0.0)
+        config.instruction_or_decision_to_analog_control_pulse_us,
+    ) == (1.1, 0.0, 0.0, 0.0)
     assert RunSpec(ops=[]).timing == config
     assert decsim.TimingConfig is TimingConfig
     assert decsim.us is us
     assert not hasattr(decsim, "TICKS_PER_US")
-
-
 def test_timing_config_is_frozen_hashable_and_value_comparable():
     """Timing configurations compare by value, hash, and reject assignment."""
     first = TimingConfig(t_pack_us=0.25)
@@ -93,13 +94,13 @@ def test_timing_config_accepts_natural_numeric_and_bool_values():
     """Numeric scalars and bools follow their natural arithmetic behavior."""
     config = TimingConfig(
         round_us=True,
-        t_binary_availability_us=False,
+        measurement_signal_to_classical_bits_us=False,
         t_pack_us=Decimal("0.000001"),
     )
 
     assert config.round_us is True
-    assert config.t_binary_availability_us is False
-    assert config.ticks("t_binary_availability") == 0
+    assert config.measurement_signal_to_classical_bits_us is False
+    assert config.ticks("measurement_signal_to_classical_bits") == 0
     assert config.ticks("t_pack") == 1
 
     assert TimingConfig(round_us=False).round_us is False
@@ -109,7 +110,8 @@ def test_timing_config_accepts_natural_numeric_and_bool_values():
 
 @pytest.mark.parametrize(
     "field_name",
-    ["round_us", "t_binary_availability_us", "t_pack_us"],
+    ["round_us", "measurement_signal_to_classical_bits_us", "t_pack_us",
+     "instruction_or_decision_to_analog_control_pulse_us"],
 )
 @pytest.mark.parametrize(
     "invalid_value",
@@ -126,7 +128,8 @@ def test_timing_config_rejects_nonfinite_or_negative_fields(
 
 @pytest.mark.parametrize(
     "field_name",
-    ["round_us", "t_binary_availability_us", "t_pack_us"],
+    ["round_us", "measurement_signal_to_classical_bits_us", "t_pack_us",
+     "instruction_or_decision_to_analog_control_pulse_us"],
 )
 def test_timing_config_rejects_positive_values_that_collapse_to_zero_ticks(
     field_name,
@@ -138,7 +141,8 @@ def test_timing_config_rejects_positive_values_that_collapse_to_zero_ticks(
 
 @pytest.mark.parametrize(
     "field_name",
-    ["round_us", "t_binary_availability_us", "t_pack_us"],
+    ["round_us", "measurement_signal_to_classical_bits_us", "t_pack_us",
+     "instruction_or_decision_to_analog_control_pulse_us"],
 )
 def test_timing_config_accepts_zero_and_one_tick_on_every_axis(field_name):
     """Every timing axis accepts exact zero and the smallest positive tick."""
@@ -149,23 +153,24 @@ def test_timing_config_accepts_zero_and_one_tick_on_every_axis(field_name):
 
 def test_optional_timing_axes_are_independent():
     """Either optional stage can be enabled without changing the other stage."""
-    binary_only = TimingConfig(t_binary_availability_us=Decimal("0.000002"))
+    binary_only = TimingConfig(
+        measurement_signal_to_classical_bits_us=Decimal("0.000002"))
     pack_only = TimingConfig(t_pack_us=Decimal("0.000003"))
     both = TimingConfig(
-        t_binary_availability_us=Decimal("0.000002"),
+        measurement_signal_to_classical_bits_us=Decimal("0.000002"),
         t_pack_us=Decimal("0.000003"),
     )
 
     assert (
-        binary_only.ticks("t_binary_availability"),
+        binary_only.ticks("measurement_signal_to_classical_bits"),
         binary_only.ticks("t_pack"),
     ) == (2, 0)
     assert (
-        pack_only.ticks("t_binary_availability"),
+        pack_only.ticks("measurement_signal_to_classical_bits"),
         pack_only.ticks("t_pack"),
     ) == (0, 3)
     assert (
-        both.ticks("t_binary_availability"),
+        both.ticks("measurement_signal_to_classical_bits"),
         both.ticks("t_pack"),
     ) == (2, 3)
 
@@ -173,11 +178,11 @@ def test_optional_timing_axes_are_independent():
 def test_ticks_accepts_only_optional_names_and_preserves_key_error():
     """Named tick lookup accepts two stages and preserves natural missing-key errors."""
     config = TimingConfig(
-        t_binary_availability_us=0.25,
+        measurement_signal_to_classical_bits_us=0.25,
         t_pack_us=0.5,
     )
 
-    assert config.ticks("t_binary_availability") == 250_000
+    assert config.ticks("measurement_signal_to_classical_bits") == 250_000
     assert config.ticks("t_pack") == 500_000
     for missing_name in ("round_us", "unknown"):
         with pytest.raises(KeyError) as error:

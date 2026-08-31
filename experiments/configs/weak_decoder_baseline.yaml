@@ -33,7 +33,8 @@ sweep:
 
 controller:
   clock: fridge
-  t_binary_availability_cycles: 0
+  measurement_signal_to_classical_bits_cycles: 0
+  instruction_or_decision_to_analog_control_pulse_cycles: 0
   t_pack_cycles: 0
 
 clocks:

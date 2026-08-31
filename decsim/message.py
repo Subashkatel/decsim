@@ -148,11 +148,12 @@ WINDOW_INPUT_ROUTE = SyndromePacketRoute(SyndromePacketRouteKind.WINDOW_INPUT)
 
 @dataclass(frozen=True)
 class QPUReadout:
-    """One QPU-side result awaiting controller availability handling.
+    """One QPU-side readout awaiting controller front-end handling.
 
-    Values are raw measurement bits (one round's packet, post state
-    discrimination) or timing-only markers; detection events are formed
-    from these packets at the decoder input.
+    DECSIM intentionally does not carry an analog waveform. ``bits`` is the
+    sampled/classifiable outcome cargo; after the configured physical
+    acquisition/discrimination latency, the controller exposes its normalized
+    classical-bit tuple. Detection events are formed later from these packets.
     """
 
     operation_id: Any

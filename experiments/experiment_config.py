@@ -177,11 +177,13 @@ class WindowingCard:
 class ControllerCard:
     """Controller work per round, in cycles of a named clock domain; the
     loader resolves the microsecond fields once, like the link cards."""
-    t_binary_availability_cycles: float
+    measurement_signal_to_classical_bits_cycles: float
     t_pack_cycles: float
+    instruction_or_decision_to_analog_control_pulse_cycles: float
     clock: str
-    t_binary_availability_us: float
+    measurement_signal_to_classical_bits_us: float
     t_pack_us: float
+    instruction_or_decision_to_analog_control_pulse_us: float
 
 
 @dataclass(frozen=True)
@@ -280,13 +282,18 @@ def _link_card(card: Optional[dict], clocks: dict) -> Optional[LinkCard]:
 def _controller_card(card: dict, clocks: dict) -> ControllerCard:
     clock = card["clock"]
     megahertz = clocks[clock]
-    binary_cycles = card["t_binary_availability_cycles"]
+    input_cycles = card["measurement_signal_to_classical_bits_cycles"]
     pack_cycles = card["t_pack_cycles"]
+    output_cycles = card["instruction_or_decision_to_analog_control_pulse_cycles"]
     return ControllerCard(
-        t_binary_availability_cycles=binary_cycles,
-        t_pack_cycles=pack_cycles, clock=clock,
-        t_binary_availability_us=binary_cycles / megahertz,
-        t_pack_us=pack_cycles / megahertz)
+        measurement_signal_to_classical_bits_cycles=input_cycles,
+        t_pack_cycles=pack_cycles,
+        instruction_or_decision_to_analog_control_pulse_cycles=output_cycles,
+        clock=clock,
+        measurement_signal_to_classical_bits_us=input_cycles / megahertz,
+        t_pack_us=pack_cycles / megahertz,
+        instruction_or_decision_to_analog_control_pulse_us=
+            output_cycles / megahertz)
 
 
 def _decoder_unit(card: Optional[dict], clocks: dict,
@@ -577,4 +584,3 @@ def load_experiment(path) -> ExperimentConfig:
         pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"],
                                                       clocks),
         config_files=config_files)
-

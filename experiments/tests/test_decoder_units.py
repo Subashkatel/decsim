@@ -30,8 +30,10 @@ MINIMAL_CONFIG = {
                   "buffer_rounds": None},
     "sweep": [{"physical_error_probability": [0.001], "distance": [3],
                "round_period_us": [1.0], "shots": 1}],
-    "controller": {"clock": "fridge", "t_binary_availability_cycles": 0,
-                   "t_pack_cycles": 0},
+    "controller": {"clock": "fridge",
+                   "measurement_signal_to_classical_bits_cycles": 0,
+                   "t_pack_cycles": 0,
+                   "instruction_or_decision_to_analog_control_pulse_cycles": 0},
     "clocks": {"fridge": 250.0, "room": 250.0},
     "links": {"qc": {"latency_cycles": 1, "clock": "fridge",
                      "bits_per_cycle": None}},
@@ -77,6 +79,32 @@ def test_every_shipped_config_loads():
     for config_path in sorted(CONFIGS_DIR.glob("*.yaml")):
         config = load_experiment(config_path)
         assert config.active_decoder is not None, config_path.name
+
+
+def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
+    from decsim.config import us
+    from experiments.build_run import build_run
+
+    config_path = write_config(tmp_path, {
+        "clocks": {"fridge": 500.0, "room": 250.0},
+        "controller": {
+            "clock": "fridge",
+            "measurement_signal_to_classical_bits_cycles": 27,
+            "t_pack_cycles": 0,
+            "instruction_or_decision_to_analog_control_pulse_cycles": 8,
+        },
+    })
+    config = load_experiment(config_path)
+    assert config.controller.measurement_signal_to_classical_bits_us == 0.054
+    assert config.controller.instruction_or_decision_to_analog_control_pulse_us == 0.016
+
+    spec, _ = build_run(
+        config, physical_error_probability=0.001, distance=3,
+        round_period_us=1.0, seed=0)
+    completed = spec.build()
+    assert completed.controller.measurement_signal_to_classical_bits_ticks == us(0.054)
+    assert (completed.controller.instruction_or_decision_to_analog_control_pulse_ticks
+            == us(0.016))
 
 
 def test_a_mode_without_its_tier_is_refused(tmp_path):

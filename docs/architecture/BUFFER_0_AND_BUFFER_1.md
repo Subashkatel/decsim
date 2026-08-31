@@ -38,7 +38,7 @@ All anchors verified at commit 65660a0.
 round_index). The ordered-arrival argument (Proof A) and the fail-loud
 exactness backstop (Proof B) are in `buffer_contract.md`; the
 deterministic tests pin both
-(`tests/16_stabilization/test_buffer_readiness.py`).
+(`tests/21_stabilization/test_buffer_readiness.py`).
 
 ## Mode diagrams
 

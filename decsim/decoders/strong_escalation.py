@@ -12,7 +12,8 @@ attempt that asked; a strong result with no possible consumer is an error,
 never dropped silently.
 
 The window side (StrongEscalation, below) plans the escalation: the strong
-context window or the forward slab, the windows it absorbs, the rephased
+context window or the forward strong window, the windows it absorbs, the
+rephased
 suffix, and when the deferred strong job is submitted. Both sides live in
 this file so the strong tier is one deletable feature; a run without it uses
 NoStrongTier on the window side and an empty ledger on the decoder side.
@@ -447,7 +448,7 @@ class NoStrongTier:
 
 class StrongEscalation:
     """The window side of the strong tier: when a weak window escalates, how
-    its strong job is built (two-sided context, or a forward slab that
+    its strong job is built (two-sided context, or a forward strong window that
     absorbs the windows it covers and restarts the weak chain past it), when
     the deferred job is submitted (the far weak boundary, or the terminal
     data), and how the strong result's selection reaches the decoder side.
@@ -466,7 +467,8 @@ class StrongEscalation:
         self._submit_strong_with_sbd(strong_job)
 
     def after_weak_commit(self, key) -> None:
-        """A weak commit at a slab's far boundary releases the deferred strong job."""
+        """A weak commit at a strong window's far boundary releases the
+        deferred strong job."""
         pending = self._escalations.peek_far(key)
         if pending is not None:
             self._submit_far_strong(key, pending)
@@ -625,9 +627,9 @@ class StrongEscalation:
         strong_window.boundary_in = weak_window.boundary_in
         return strong_window
     def defer_strong_escalation(self, weak_job: DecodeJob) -> DecoderRequestKey:
-        """Lay out the forward slab, absorb the windows it covers, and hold
-        the strong job until the restart window's weak commit
-        (waiting_far_boundary) or, terminally, until every clamped slab
+        """Lay out the forward strong window, absorb the windows it
+        covers, and hold the strong job until the restart window's weak commit
+        (waiting_far_boundary) or, terminally, until every clamped strong window
         round is stored (waiting_terminal_data). One strong job per
         escalation; duplicates raise."""
         key = (weak_job.op_id, weak_job.window_id)
@@ -636,7 +638,7 @@ class StrongEscalation:
             self._escalations.peek_key(key) is not None
             or (
                 existing_contribution is not None
-                and existing_contribution.ownership_kind == "strong_slab"
+                and existing_contribution.ownership_kind == "strong_window"
             )
         ):
             raise RuntimeError(
@@ -694,7 +696,7 @@ class StrongEscalation:
                 round_count,
                 resolved_region.restart_fault_exclusion_ranges,
             )
-        slab = Window(
+        strong_window = Window(
             op_id=key[0], k=key[1],
             commit_lo=plan.commit_lo,
             commit_hi=plan.commit_hi,
@@ -703,14 +705,23 @@ class StrongEscalation:
             n_rounds=plan.context_hi - plan.context_lo + 1,
         )
         strong_model = self._build_strong_window_model(
-            self.wm._ops[op_id], slab, round_count,
+            self.wm._ops[op_id], strong_window, round_count,
             resolved_region.strong_fault_exclusion_ranges)
-        logical_candidate = self._strong_slab_ownership_candidate(
+        logical_candidate = self._strong_window_ownership_candidate(
             key, resolved_region)
         guard = None
         if restart_key is not None:
             guard = RephaseGuard(strong_request_key)
             sb1 = self.wm.syndrome_buffer_1
+            # the restart window's weak reads must still sit under its own
+            # window hold; once its weak decode is built the hold moves to
+            # the job, and a rephase can no longer claim those rounds
+            if not self.wm.syndrome_buffer.has_hold(restart_key):
+                raise RuntimeError(
+                    f"strong-region plan for {key} requires restart window "
+                    f"{restart_key}'s weak reads under its window hold, "
+                    f"which is no longer live (its weak decode already "
+                    f"consumed them)")
             guarded_weak = list(self.wm.syndrome_buffer.hold_round_identities(restart_key))
             guarded_weak += list(resolved_region.restart_read_keys)
             guarded_strong = list(sb1.hold_round_identities(PotentialStrong(key)))
@@ -733,7 +744,7 @@ class StrongEscalation:
                 weak_job=weak_job,
                 label=weak_job.strong_label,
                 resolved_region=resolved_region,
-                strong_window=slab,
+                strong_window=strong_window,
                 strong_model=strong_model,
                 wsd_arrival_ticks=None,
                 phase=phase,
@@ -760,7 +771,7 @@ class StrongEscalation:
             )
             self.wm.engine.log(
                 "DecoderCluster",
-                f"{pending.label}: slab rounds {plan.commit_lo}-"
+                f"{pending.label}: strong window rounds {plan.commit_lo}-"
                 f"{plan.commit_hi} assigned; weak chain skips "
                 f"{len(resolved_region.absorbed_window_keys)} window(s); "
                 f"strong start deferred until {readiness_description}",
@@ -787,363 +798,11 @@ class StrongEscalation:
         strong_request_created_ticks: int,
     ) -> None:
         raise NotImplementedError(
-            "the crossing-slab rephase is not wired to syndrome buffer 1; "
+            "the crossing-strong-window rephase is not wired to syndrome buffer 1; "
             "no test or scenario exercises this path (architecture trace "
             "F4.1), so it refuses loudly instead of mutating two stores "
             "unverified")
-        """Atomically replace a non-aligned post-slab suffix before deferral."""
-        key = weak_window.key
-        op_id = key[0]
-        if not (
-            1 <= plan.context_lo <= plan.commit_lo
-            <= weak_window.commit_lo <= weak_window.commit_hi
-            <= plan.commit_hi <= plan.context_hi <= round_count
-        ):
-            raise RuntimeError(
-                f"invalid strong-region bounds for {key}: context "
-                f"{plan.context_lo}-{plan.context_hi}, commit "
-                f"{plan.commit_lo}-{plan.commit_hi}, operation 1-{round_count}")
-        if plan.commit_lo != weak_window.commit_lo:
-            raise RuntimeError(
-                f"strong-region commit for {key} must start at the "
-                f"escalated window's commit start {weak_window.commit_lo}")
-        if (
-            plan.restart_buffer_lo is None
-            or not 1 <= plan.restart_buffer_lo <= plan.commit_hi + 1
-            or not isinstance(plan.restart_seam_fault_owner, SeamFaultOwner)
-        ):
-            raise RuntimeError(
-                f"strong-region restart after {key} needs an exact buffer "
-                f"start and seam owner")
-
-        absorbed = tuple(
-            window.key for window in later_windows
-            if window.commit_hi <= plan.commit_hi
-        )
-        crossing_index = later_windows.index(crossing_window)
-        reusable_keys = tuple(
-            window.key for window in later_windows[crossing_index:]
-        )
-        residual_round_count = round_count - plan.commit_hi
-        suffix_plan = self.wm.scheme.plan_operation(
-            op_id,
-            residual_round_count,
-            commit_round_count=self.wm._code_geometry.commit_round_count,
-            buffer_round_count=self.wm._code_geometry.buffer_round_count,
-        )
-        if not suffix_plan.windows:
-            raise RuntimeError(
-                f"crossing strong-region plan for {key} produced no suffix")
-        if len(suffix_plan.windows) > len(reusable_keys):
-            raise RuntimeError(
-                f"crossing strong-region plan for {key} needs "
-                f"{len(suffix_plan.windows)} stable keys but only "
-                f"{len(reusable_keys)} remain")
-
-        retained_keys = reusable_keys[:len(suffix_plan.windows)]
-        retired_keys = reusable_keys[len(suffix_plan.windows):]
-        replacement_windows = []
-        for index, (window_key, geometry) in enumerate(zip(
-            retained_keys, suffix_plan.windows,
-        )):
-            buffer_lo = geometry.buffer_lo + plan.commit_hi
-            if index == 0:
-                buffer_lo = plan.restart_buffer_lo
-            commit_lo = geometry.commit_lo + plan.commit_hi
-            commit_hi = geometry.commit_hi + plan.commit_hi
-            buffer_hi = min(
-                geometry.buffer_hi + plan.commit_hi,
-                round_count,
-            )
-            if not (
-                1 <= buffer_lo <= commit_lo <= commit_hi
-                <= buffer_hi <= round_count
-            ):
-                raise RuntimeError(
-                    f"invalid rephased suffix geometry for {window_key}: "
-                    f"buffer {buffer_lo}-{buffer_hi}, commit "
-                    f"{commit_lo}-{commit_hi}, operation 1-{round_count}")
-            replacement_windows.append(Window(
-                op_id=op_id,
-                k=window_key[1],
-                buffer_lo=buffer_lo,
-                commit_lo=commit_lo,
-                commit_hi=commit_hi,
-                buffer_hi=buffer_hi,
-                n_rounds=buffer_hi - buffer_lo + 1,
-            ))
-        if (
-            replacement_windows[0].commit_lo != plan.commit_hi + 1
-            or replacement_windows[-1].commit_hi != round_count
-            or any(
-                left.commit_hi + 1 != right.commit_lo
-                for left, right in zip(
-                    replacement_windows, replacement_windows[1:]
-                )
-            )
-        ):
-            raise RuntimeError(
-                f"rephased suffix for {key} must tile rounds "
-                f"{plan.commit_hi + 1}-{round_count} exactly")
-
-        affected_keys = absorbed + reusable_keys
-        if op_id in self.wm._finished_ops or op_id in self.wm.op_results:
-            raise RuntimeError(
-                f"cannot rephase suffix for completed operation {op_id}")
-        historical_sets = (
-            self.wm.committed_windows,
-            self.wm.absorbed_windows,
-            self.wm._pending_strong_windows,
-        )
-        for affected_key in affected_keys:
-            window = self.wm.windows[affected_key]
-            if window.queued or window.committed:
-                raise RuntimeError(
-                    f"cannot rephase window {affected_key}: decode lifecycle "
-                    "already started")
-            if any(affected_key in values for values in historical_sets):
-                raise RuntimeError(
-                    f"cannot rephase historical window {affected_key}")
-            if (self.wm.courier.is_published(affected_key)
-                    or affected_key in self.wm.ledger.contributions):
-                raise RuntimeError(
-                    f"cannot rephase window {affected_key} with published state")
-            if self._escalations.peek_key(affected_key) is not None:
-                raise RuntimeError(
-                    f"cannot rephase pending escalation {affected_key}")
-            readiness_owner = self._escalations.peek_far(affected_key)
-            if readiness_owner is not None:
-                raise RuntimeError(
-                    f"cannot rephase readiness key {affected_key}: owned by "
-                    f"pending escalation {readiness_owner.key}")
-        if self.wm.courier.touches(affected_keys):
-            raise RuntimeError(
-                f"cannot rephase suffix for {key} after boundary delivery")
-
-        serial_windows = [weak_window, *later_windows]
-        for source, destination in zip(serial_windows, serial_windows[1:]):
-            if source.dependents != [destination.key]:
-                raise RuntimeError(
-                    f"cannot rephase suffix with external or non-serial edge "
-                    f"from {source.key}: {source.dependents}")
-            if destination.deps != [source.key] or destination.deps_remaining != 1:
-                raise RuntimeError(
-                    f"cannot rephase suffix with released or non-serial edge "
-                    f"into {destination.key}")
-        if later_windows[-1].dependents:
-            raise RuntimeError(
-                f"cannot rephase suffix with external edge from "
-                f"{later_windows[-1].key}")
-
-        for index, window in enumerate(replacement_windows):
-            predecessor_key = key if index == 0 else retained_keys[index - 1]
-            window.deps = [predecessor_key]
-            window.deps_remaining = 1
-            if index + 1 < len(replacement_windows):
-                window.dependents = [retained_keys[index + 1]]
-            window.boundary_in = self.wm.window_interaction.initial_boundary_state(
-                WindowInfo.from_window(window))
-
-        left_exclusions = (
-            ((1, plan.commit_lo - 1),) if plan.commit_lo > 1 else ()
-        )
-        if plan.restart_seam_fault_owner is SeamFaultOwner.STRONG_REGION:
-            strong_exclusions = left_exclusions
-            suffix_exclusions = ((1, plan.commit_hi),)
-        else:
-            strong_exclusions = left_exclusions + (
-                (plan.commit_hi + 1, round_count),
-            )
-            suffix_exclusions = left_exclusions
-
-        operation = self.wm._ops[op_id]
-        suffix_models = []
-        if self.wm.error_model_provider is not None:
-            suffix_models = self.wm.error_model_provider.window_models_for_operation(
-                operation,
-                replacement_windows,
-                round_count,
-                fault_model_requirement=self.wm._fault_model_requirement(operation),
-                fault_exclusion_ranges=suffix_exclusions,
-                window_protocol=self.wm._protocol_by_operation[operation.id],
-            )
-            if suffix_models and len(suffix_models) != len(replacement_windows):
-                raise RuntimeError(
-                    f"device returned {len(suffix_models)} models for "
-                    f"{len(replacement_windows)} rephased windows")
-        slab = Window(
-            op_id=op_id,
-            k=key[1],
-            commit_lo=plan.commit_lo,
-            commit_hi=plan.commit_hi,
-            buffer_lo=plan.context_lo,
-            buffer_hi=plan.context_hi,
-            n_rounds=plan.context_hi - plan.context_lo + 1,
-        )
-        strong_model = self._build_strong_window_model(
-            operation, slab, round_count, strong_exclusions)
-        restart_window = replacement_windows[0]
-        restart_reads = self.wm._read_keys_for_bounds(
-            op_id, restart_window.start_round, restart_window.buffer_hi,
-            restart_window)
-        resolved_region = _ResolvedStrongRegion(
-            plan=plan,
-            absorbed_window_keys=absorbed,
-            restart_window_key=restart_window.key,
-            restart_read_keys=tuple(restart_reads),
-            strong_fault_exclusion_ranges=strong_exclusions,
-            restart_fault_exclusion_ranges=suffix_exclusions,
-        )
-        if self._escalations.peek_far(restart_window.key) is not None:
-            raise RuntimeError(
-                f"readiness index collision for {restart_window.key}")
-        logical_candidate = self._strong_slab_ownership_candidate(
-            key, resolved_region)
-        pending = _PendingEscalation(
-            key=key,
-            weak_job=weak_job,
-            label=weak_job.strong_label,
-            resolved_region=resolved_region,
-            strong_window=slab,
-            strong_model=strong_model,
-            wsd_arrival_ticks=None,
-            phase=_EscalationPhase.WAITING_FAR_BOUNDARY,
-            strong_request_key=strong_request_key,
-            strong_request_created_ticks=strong_request_created_ticks,
-        )
-
-        absent = object()
-        owner_tokens = list(dict.fromkeys(
-            token for window_key in affected_keys
-            for token in (window_key, PotentialStrong(window_key))
-        ))
-        strong_token = PotentialStrong(key)
-        owner_tokens.append(strong_token)
-        owner_snapshot = {
-            token: self.wm.syndrome_buffer.hold_round_identities(token)
-            if self.wm.syndrome_buffer.has_hold(token) else absent
-            for token in owner_tokens
-        }
-        if owner_snapshot[strong_token] is absent:
-            raise RuntimeError(f"strong owner for {key} is not live")
-        replacement_memberships = {}
-        for window in replacement_windows:
-            weak_reads = self.wm._read_keys_for_bounds(
-                op_id, window.start_round, window.buffer_hi, window)
-            replacement_memberships[window.key] = weak_reads
-            replacement_memberships[PotentialStrong(window.key)] = (
-                weak_reads + self.wm._strong_context_read_keys(window, weak_reads)
-            )
-        pending_reads = [
-            (op_id, round_index)
-            for round_index in range(plan.context_lo, plan.context_hi + 1)
-        ]
-        replacement_memberships[strong_token] = pending_reads
-        guarded_reads = list(dict.fromkeys(
-            identity
-            for memberships in (owner_snapshot, replacement_memberships)
-            for reads in memberships.values()
-            if reads is not absent
-            for identity in reads
-        ))
-        self.wm._require_retained_payloads(
-            guarded_reads, f"suffix rephase guard for {key}")
-
-        guard = RephaseGuard(strong_request_key)
-        windows_snapshot = dict(self.wm.windows)
-        op_window_indices = self.wm.op_windows[op_id]
-        op_window_snapshot = list(op_window_indices)
-        window_count_snapshot = self.wm.window_count[op_id]
-        total_windows_snapshot = self.wm.total_windows
-        window_models_snapshot = dict(self.wm.window_models)
-        committed_count_snapshot = self.wm._committed_per_op.get(op_id, absent)
-        logical_snapshot = self.wm.ledger.contributions
-        escalated_dependents = list(weak_window.dependents)
-
-        self.wm.syndrome_buffer.register_hold(guard, guarded_reads)
-        registered = False
-        try:
-            weak_window.dependents[:] = [restart_window.key]
-            for absorbed_key in absorbed:
-                absorbed_window = deepcopy(self.wm.windows[absorbed_key])
-                absorbed_window.queued = True
-                absorbed_window.committed = True
-                absorbed_window.deps = []
-                absorbed_window.dependents = []
-                absorbed_window.deps_remaining = 0
-                self.wm.windows[absorbed_key] = absorbed_window
-            for window in replacement_windows:
-                self.wm.windows[window.key] = window
-            for retired_key in retired_keys:
-                self.wm.windows.pop(retired_key)
-                self.wm.window_models.pop(retired_key, None)
-            retired_indices = {retired_key[1] for retired_key in retired_keys}
-            op_window_indices[:] = [
-                index for index in op_window_indices
-                if index not in retired_indices
-            ]
-            self.wm.window_count[op_id] -= len(retired_keys)
-            self.wm.total_windows -= len(retired_keys)
-            self.wm.committed_windows.update(absorbed)
-            self.wm.absorbed_windows.update(absorbed)
-            self.wm._committed_per_op[op_id] = (
-                self.wm._committed_per_op.get(op_id, 0) + len(absorbed)
-            )
-            for affected_key in affected_keys:
-                self.wm.window_models.pop(affected_key, None)
-            for model_key, model in zip(retained_keys, suffix_models):
-                self.wm.window_models[model_key] = model
-            self.wm.ledger.contributions = logical_candidate
-            self._escalations.register_far(pending, restart_window.key)
-            registered = True
-            for token, old_reads in owner_snapshot.items():
-                if old_reads is absent:
-                    continue
-                self.wm.syndrome_buffer.replace_hold(
-                    token, replacement_memberships.get(token, ()))
-        except Exception:
-            for token, old_reads in owner_snapshot.items():
-                if old_reads is not absent:
-                    self.wm.syndrome_buffer.replace_hold(token, old_reads)
-            weak_window.dependents[:] = escalated_dependents
-            self.wm.windows.clear()
-            self.wm.windows.update(windows_snapshot)
-            op_window_indices[:] = op_window_snapshot
-            self.wm.window_count[op_id] = window_count_snapshot
-            self.wm.total_windows = total_windows_snapshot
-            self.wm.window_models.clear()
-            self.wm.window_models.update(window_models_snapshot)
-            self.wm.committed_windows.difference_update(absorbed)
-            self.wm.absorbed_windows.difference_update(absorbed)
-            if committed_count_snapshot is absent:
-                self.wm._committed_per_op.pop(op_id, None)
-            else:
-                self.wm._committed_per_op[op_id] = committed_count_snapshot
-            self.wm.ledger.contributions = logical_snapshot
-            if registered:
-                self._escalations.take_far(restart_window.key, pending)
-            self.wm._release_hold_if_live(guard)
-            raise
-
-        self.wm._transfer_potential_to_pending(key, strong_request_key)
-        for token, old_reads in owner_snapshot.items():
-            if (
-                old_reads is not absent
-                and token not in replacement_memberships
-                and self.wm.syndrome_buffer.has_hold(token)
-            ):
-                self.wm.syndrome_buffer.release_hold(token)
-        self.wm._release_hold_if_live(guard)
-
-        self.wm.engine.log(
-            "DecoderCluster",
-            f"{pending.label}: slab rounds {plan.commit_lo}-"
-            f"{plan.commit_hi} assigned; suffix rephased to "
-            f"{len(replacement_windows)} window(s); strong start deferred "
-            "until the far-side weak boundary",
-        )
-        self.wm.check_window(restart_window.key)
-    def _strong_slab_ownership_candidate(
+    def _strong_window_ownership_candidate(
         self,
         key: tuple,
         resolved_region: _ResolvedStrongRegion,
@@ -1166,7 +825,7 @@ class StrongEscalation:
                 and plan.commit_lo <= contribution.commit_hi
             ):
                 raise RuntimeError(
-                    f"strong slab {key} extent {plan.commit_lo}-"
+                    f"strong window {key} extent {plan.commit_lo}-"
                     f"{plan.commit_hi} overlaps unabsorbed logical "
                     f"contribution {other_key} extent "
                     f"{contribution.commit_lo}-{contribution.commit_hi}")
@@ -1174,7 +833,7 @@ class StrongEscalation:
             owner_key=key,
             commit_lo=plan.commit_lo,
             commit_hi=plan.commit_hi,
-            ownership_kind="strong_slab",
+            ownership_kind="strong_window",
             logical_observables=None,
         )
         return candidate
@@ -1212,10 +871,15 @@ class StrongEscalation:
                 f"{plan.commit_hi}")
         for absorbed_key in absorbed:
             absorbed_window = self.wm.windows[absorbed_key]
-            if absorbed_window.queued or absorbed_window.committed:
+            if absorbed_window.committed or absorbed_window.t_done is not None:
                 raise RuntimeError(
                     f"cannot absorb window {absorbed_key}: already "
-                    f"{'queued' if absorbed_window.queued else 'committed'}")
+                    f"{'committed' if absorbed_window.committed else 'decoded'}")
+            if absorbed_window.queued:
+                # early-shipped at data-complete but parked on the
+                # escalated window's boundary, which will never arrive
+                # (the strong window owns it); withdraw the unstarted attempt
+                self.wm.withdraw_window_decode(absorbed_key)
         expected_restart = next(
             (window.key for window in later_windows
              if window.commit_lo > plan.commit_hi),
@@ -1264,8 +928,9 @@ class StrongEscalation:
             (weak_window.op_id, round_index)
             for round_index in range(plan.context_lo, plan.context_hi + 1)
         ]
-        # the slab context lives in syndrome buffer 1; the restart window's
-        # weak reads stay retained in Buffer 0 by its own window hold
+        # the strong window's context lives in syndrome buffer 1; the
+        # restart window's weak reads stay retained in Buffer 0 by its
+        # own window hold
         self.wm._require_retained_payloads(
             context_reads, f"strong-region plan for {key}",
             self.wm.syndrome_buffer_1)
@@ -1304,7 +969,7 @@ class StrongEscalation:
         )
     def _reslice_restart_window(
         self, restart_key: tuple, buffer_lo: int, model,
-        slab_hi: int, seam_owner: SeamFaultOwner,
+        strong_window_hi: int, seam_owner: SeamFaultOwner,
     ) -> None:
         """Install a restart model prepared before plan mutation."""
         restart = self.wm.windows[restart_key]
@@ -1314,14 +979,14 @@ class StrongEscalation:
         if model is not None:
             self.wm.window_models[restart_key] = model
         self.wm.engine.log("DecoderCluster",
-                        f"restart window {restart_key} re-sliced across slab "
-                        f"edge {slab_hi} (reads rounds {restart.buffer_lo}-"
+                        f"restart window {restart_key} re-sliced across strong window "
+                        f"edge {strong_window_hi} (reads rounds {restart.buffer_lo}-"
                         f"{restart.buffer_hi}; crossing faults owned by "
                         f"{seam_owner.name.lower()})")
     def _absorb_window(
         self, key: tuple, restart_key: Optional[tuple], replacement,
     ) -> None:
-        """A slab-covered window is never weak-decoded: count it committed
+        """A strong-window-covered window is never weak-decoded: count it committed
         with no logical contribution and unhook the restart window."""
         window = self.wm.windows[key]
         if window.queued or window.committed:
@@ -1350,42 +1015,42 @@ class StrongEscalation:
             raise RuntimeError("absorption replacement does not cover packets")
         self.wm.syndrome_buffer_1.release_hold(absorbed)
         self.wm.engine.log("DecoderCluster",
-                        f"window {key} absorbed into the strong slab "
+                        f"window {key} absorbed into the strong window "
                         f"(weak chain skips it)")
     def _build_pending_strong_job(
         self,
         pending: _PendingEscalation,
     ) -> DecodeJob:
-        """Build a slab job after both boundary conditions are satisfied.
+        """Build a strong window job after both boundary conditions are satisfied.
 
-        The slab commits all r_strong rounds and reads one buffer of raw
-        context per face, owning nothing that touches pre-slab rounds (see the
-        seam formalism on Switching).
+        The strong window commits all r_strong rounds and reads one
+        buffer of raw context per face, owning nothing that touches
+        rounds before its extent (see the seam formalism on Switching).
         """
         key = pending.key
         weak_job = pending.weak_job
-        slab = pending.strong_window
+        strong_window = pending.strong_window
         dem = pending.strong_model
         payloads = self.wm._assemble_payloads(
-            slab, self.wm.syndrome_buffer_1)
+            strong_window, self.wm.syndrome_buffer_1)
         covered = {payload.round_index for payload in payloads}
         plan = pending.resolved_region.plan
         needed = set(range(plan.context_lo, plan.context_hi + 1))
         if covered != needed:
             raise RuntimeError(
-                f"{pending.label}: slab submitted with rounds "
+                f"{pending.label}: strong window submitted with rounds "
                 f"{sorted(covered)} but it needs "
-                f"{plan.context_lo}-{plan.context_hi}; a slab may "
+                f"{plan.context_lo}-{plan.context_hi}; a strong window may "
                 "only start once every required round is retained")
-        self.wm._stamp_first_round_tick(slab, self.wm.syndrome_buffer_1)
+        self.wm._stamp_first_round_tick(strong_window, self.wm.syndrome_buffer_1)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
-            n_rounds=slab.n_rounds,
+            n_rounds=strong_window.n_rounds,
             ready_time=self.wm.engine.now,
             label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
             dem=dem, payloads=payloads,
-            attempt=1, window=slab, strong_decode_for=key,
+            attempt=1, window=strong_window, strong_decode_for=key,
             request_key=pending.strong_request_key,
             request_created_ticks=pending.strong_request_created_ticks)
     def _submit_far_strong(
@@ -1404,8 +1069,8 @@ class StrongEscalation:
         )
         self.wm.engine.log(
             "DecoderCluster",
-            f"{pending.label}: far-side weak boundary determined -> strong "
-            "slab submitted",
+            f"{pending.label}: far-side weak boundary determined -> "
+            "strong window submitted",
         )
     def _submit_terminal_strong(
         self,
@@ -1423,10 +1088,11 @@ class StrongEscalation:
         )
         self.wm.engine.log(
             "DecoderCluster",
-            f"{pending.label}: terminal data complete -> strong slab submitted",
+            f"{pending.label}: terminal data complete -> strong window submitted",
         )
     def after_arrival(self, op_id) -> None:
-        """A round arrived: a terminal slab waits for its clamped tail rounds to be stored."""
+        """A round arrived: a terminal strong window waits for its
+        clamped tail rounds to be stored."""
         pending = self._escalations.peek_terminal(op_id)
         if pending is None:
             return
@@ -1443,5 +1109,5 @@ class StrongEscalation:
             for key, phase in self._escalations.snapshot_phases().items()
         }
     def pending_strong_work_snapshot(self) -> tuple:
-        """Snapshot strong slabs assigned but not yet admitted for service."""
+        """Snapshot strong windows assigned but not yet admitted for service."""
         return self._escalations.snapshot_work()

@@ -128,7 +128,6 @@ def test_real_manager_constructs_with_segment_delivery_state_in_its_owner():
         planning_view_by_operation_id={},
         fault_model_requirement_for=lambda _code_name: None,
         retain_strong_context=False,
-        double_window=False,
         escalation_policy=SimpleNamespace(
             primary_tier=DecoderTier.WEAK),
         submit_fn=lambda job, reserve_transfer=None: None,
@@ -500,11 +499,6 @@ def test_committed_round_count_reads_the_exact_cache_without_manager_events():
     lifecycle.update_committed_round_count("stream")
     manager.committed_windows.remove(("stream", 1))
     assert lifecycle.committed_round_count("stream") == 6
-    assert lifecycle.recompute_committed_round_count("stream") == 3
-    assert lifecycle.committed_round_count("stream") == 3
-    manager.committed_windows.clear()
-    assert lifecycle.recompute_committed_round_count("stream") == 0
-    assert lifecycle.committed_round_count("stream") == 0
     expected_events = [
         ("release", "stream", 3),
         ("release", "stream", 6),
@@ -515,8 +509,8 @@ def test_committed_round_count_reads_the_exact_cache_without_manager_events():
     assert manager.events == expected_events
 
 
-def test_committed_prefix_updates_monotonically_and_recompute_can_regress():
-    """Ordinary commits advance once while recovery recomputation may lower or clear the cache."""
+def test_committed_prefix_updates_monotonically():
+    """Ordinary commits advance the cache once and never lower it."""
     manager = RecordingWindowManager()
     manager.windows = {
         ("stream", 0): SimpleNamespace(commit_lo=1, commit_hi=3),
@@ -537,16 +531,6 @@ def test_committed_prefix_updates_monotonically_and_recompute_can_regress():
     ]
     assert lifecycle.committed_round_counts["stream"] == 6
 
-    assert lifecycle.recompute_committed_round_count("stream") == 3
-    assert lifecycle.committed_round_counts["stream"] == 3
-    manager.committed_windows.clear()
-    assert lifecycle.recompute_committed_round_count("stream") == 0
-    assert "stream" not in lifecycle.committed_round_counts
-    assert manager.events == [
-        ("release", "stream", 3),
-        ("release", "stream", 6),
-    ]
-
 
 def test_unsealed_streams_block_real_manager_workload_finality_until_seal():
     """Real manager finality remains blocked until every registered timing stream seals."""
@@ -555,7 +539,6 @@ def test_unsealed_streams_block_real_manager_workload_finality_until_seal():
     manager.committed_windows = set()
     manager.total_windows = 0
     manager._pending_strong_windows = set()
-    manager.speculative_recovery = SimpleNamespace(has_finality_blockers=False)
     completions = []
     manager.on_workload_complete = lambda: completions.append("complete")
     manager.error_model_provider = None

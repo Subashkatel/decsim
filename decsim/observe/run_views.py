@@ -298,7 +298,7 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
         if absorbed:
             owners = [owner for owner, value in
                       window_manager.ledger.contributions.items()
-                      if value.ownership_kind == "strong_slab"
+                      if value.ownership_kind == "strong_window"
                       and value.commit_lo <= window.commit_lo
                       and value.commit_hi >= window.commit_hi]
             if len(owners) != 1:
@@ -317,3 +317,175 @@ def switching_records_view(window_manager, decoder_manager) -> SwitchingRecordsV
     return SwitchingRecordsView(
         tuple(rows), decoder_manager.terminal_request_records_snapshot(),
         decoder_manager.terminal_service_records_snapshot())
+
+
+@dataclass(frozen=True)
+class LedgerEvent:
+    """One row of the run's flight recorder: a hardware-significant
+    transition with its causal predecessor. ``status`` is "terminal" on
+    the last event of a syndrome round's controller chain and on the
+    frame/release tail of a window chain, empty elsewhere."""
+
+    event_id: int
+    kind: str
+    tick: int
+    op: object
+    round: Optional[int] = None
+    window: Optional[int] = None
+    patch: object = None
+    route: str = ""
+    prev_event_id: Optional[int] = None
+    status: str = ""
+
+
+@dataclass(frozen=True)
+class RunLedgerView:
+    """The assembled cycle/event ledger of one completed run.
+
+    Sources are the owners' own records (packing round events, syndrome
+    buffer 1's stored log, window stamps, frame records, release times);
+    the ledger derives nothing a component did not record, so it can be
+    used as evidence. ``check()`` proves the accounting: every emitted
+    window-input round reaches exactly one terminal state, every chain
+    is causally ordered, and every decoded window's input rounds are
+    accounted for."""
+
+    events: tuple
+
+    def chain(self, *, op, round: Optional[int] = None,
+              window: Optional[int] = None) -> tuple:
+        rows = [event for event in self.events
+                if event.op == op and (round is None or event.round == round)
+                and (window is None or event.window == window)]
+        return tuple(sorted(rows, key=lambda event: event.event_id))
+
+    def check(self) -> None:
+        by_id = {event.event_id: event for event in self.events}
+        problems = []
+        for event in self.events:
+            if event.prev_event_id is None:
+                continue
+            prev = by_id[event.prev_event_id]
+            if event.tick < prev.tick:
+                problems.append(
+                    f"{event.kind}@{event.tick} precedes its cause "
+                    f"{prev.kind}@{prev.tick} (op {event.op})")
+        round_terminals: dict = {}
+        emitted_rounds = set()
+        for event in self.events:
+            if event.round is None or event.window is not None:
+                continue
+            key = (event.op, event.round)
+            if event.kind == "EMITTED":
+                emitted_rounds.add(key)
+            if event.status == "terminal":
+                round_terminals.setdefault(key, []).append(event.kind)
+        for key in sorted(emitted_rounds, key=repr):
+            terminals = round_terminals.get(key, [])
+            if len(terminals) != 1:
+                problems.append(
+                    f"round {key} reached {len(terminals)} terminal states "
+                    f"{terminals}: expected exactly one")
+        if problems:
+            raise RuntimeError(
+                "ledger check failed:\n  " + "\n  ".join(problems))
+
+
+def event_ledger(completed) -> RunLedgerView:
+    """Assemble the flight recorder of one CompletedRun."""
+    raw = []          # (tick, order, kind, fields...) before ids
+
+    def add(kind, tick, op, *, round=None, window=None, patch=None,
+            route="", prev=None, status=""):
+        row = {"kind": kind, "tick": tick, "op": op, "round": round,
+               "window": window, "patch": patch, "route": route,
+               "prev": prev, "status": status}
+        raw.append(row)
+        return row
+
+    # controller chain, from the packing stage's own records
+    last_of_round: dict = {}
+    packed_of_round: dict = {}
+    for event in completed.syndrome_packing.round_events:
+        key = (event.operation_id, event.round_index)
+        terminal = event.kind in ("PUBLISHED", "DROPPED",
+                                  "FEEDBACK_MEMORY_DELIVERED")
+        row = add(event.kind, event.tick, event.operation_id,
+                  round=event.round_index, patch=event.patch_id,
+                  route=event.route,
+                  prev=last_of_round.get(key),
+                  status="terminal" if terminal else "")
+        last_of_round[key] = row
+        if event.kind == "PACKED":
+            packed_of_round[key] = row
+
+    # the dual write's landing in syndrome buffer 1: its cause is the
+    # PACKED round, because CSB leaves packing in parallel with the CWB
+    # publication and a fast csb legitimately lands first
+    stored_of_round: dict = {}
+    room_store = completed.syndrome_buffer_1
+    if room_store is not None:
+        for tick, operation_id, round_index in room_store.stored_log:
+            key = (operation_id, round_index)
+            stored_of_round[key] = add(
+                "STORED_SB1", tick, operation_id, round=round_index,
+                prev=packed_of_round.get(key))
+
+    # window chains, from the window stamps
+    frame_prev: dict = {}
+    for (op_id, window_id), window in sorted(
+            completed.window_manager.windows.items(), key=repr):
+        if window.t_data_complete is None:
+            continue
+        input_key = (op_id, window.buffer_hi)
+        prev = last_of_round.get(input_key) or stored_of_round.get(input_key)
+        row = add("WINDOW_DATA_COMPLETE", window.t_data_complete, op_id,
+                  window=window_id, prev=prev)
+        for kind, tick in (("DECODE_QUEUED", window.t_queued),
+                           ("UNIT_ASSIGNED", window.t_dispatch),
+                           ("DECODE_DONE", window.t_done)):
+            if tick is None:
+                continue
+            row = add(kind, tick, op_id, window=window_id, prev=row)
+        frame_prev[(op_id, window_id)] = row
+
+    # frame commits and releases
+    committed_of_op: dict = {}
+    frame = completed.pauli_frame
+    if frame is not None:
+        snapshot = frame.snapshot()
+        for record in snapshot.records:
+            op_id, window_id = record.window_key
+            accepted = add("FRAME_ACCEPTED", record.accepted_ticks, op_id,
+                           window=window_id, route=record.tier,
+                           prev=frame_prev.get(record.window_key))
+            committed = add("FRAME_COMMITTED", record.committed_ticks, op_id,
+                            window=window_id, route=record.tier,
+                            prev=accepted, status="terminal")
+            best = committed_of_op.get(op_id)
+            if best is None or committed["tick"] > best["tick"]:
+                committed_of_op[op_id] = committed
+        for drop in snapshot.duplicate_drops:
+            op_id, window_id = drop.window_key
+            add("FRAME_DUPLICATE_DROPPED", drop.arrived_ticks, op_id,
+                window=window_id, route=drop.tier, status="terminal")
+    # a release decision's cause is the BLOCKING operation's final commit
+    operations = completed.execution_runtime.operations
+    for op_id, tick in sorted(
+            completed.execution_runtime.decode_release_time.items(), key=repr):
+        blocking_op = getattr(operations.get(op_id), "blocked_by", None)
+        add("DECODE_RELEASED", tick, op_id,
+            prev=committed_of_op.get(blocking_op), status="terminal")
+
+    ordered = sorted(enumerate(raw), key=lambda pair: (pair[1]["tick"], pair[0]))
+    ids = {id(row): event_id for event_id, (_, row) in enumerate(ordered)}
+    events = tuple(
+        LedgerEvent(
+            event_id=ids[id(row)], kind=row["kind"], tick=row["tick"],
+            op=row["op"], round=row["round"], window=row["window"],
+            patch=row["patch"], route=row["route"],
+            prev_event_id=(None if row["prev"] is None
+                           else ids[id(row["prev"])]),
+            status=row["status"])
+        for _, row in ordered)
+    return RunLedgerView(events=events)

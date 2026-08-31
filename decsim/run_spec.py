@@ -232,7 +232,6 @@ class RunSpec:
             syndrome_buffer=syndrome_buffer,
             syndrome_buffer_1=syndrome_buffer_1, pauli_frame=pauli_frame,
             retain_strong_context=escalation_policy.requires_strong_context,
-            double_window=escalation_policy.double_window,
             capture_enabled=config.capture_switching_windows,
             escalation_policy=escalation_policy,
             submit_fn=lambda job, reserve_transfer=None:
@@ -294,8 +293,7 @@ class RunSpec:
             engine, qpu=qpu, window_manager=window_manager,
             syndrome_packing=syndrome_packing,
             binary_availability_ticks=timing.ticks("t_binary_availability"),
-            links=links, round_ticks=plan.round_ticks,
-            code_geometry=plan.code_geometry,
+            links=links,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches, idle_policy=config.idle_policy,
             feedback_streams=feedback_streams)

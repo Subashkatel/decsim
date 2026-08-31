@@ -149,9 +149,8 @@ class BoundaryPolicy(Protocol):
     """Port 16. Decides when a committed window may ship its boundary
     defects to dependent windows: True = ship now. Eager ships at every
     weak commit (the default); Held ships only once the result is final.
-    Implementations may set ``speculative = True`` to request recovery when
-    an eagerly sent boundary is later revised. The attribute is optional for
-    compatibility; absence means non-speculative delivery."""
+    A provisional boundary that ships is never revised, so serial
+    switching (which can revise a result) requires Held."""
 
     def on_commit(self, window: Window, *, final: bool) -> bool: ...
 

@@ -123,3 +123,37 @@ def test_stores_settle_empty(fabric):
     assert buffer0.occupancy == 0
     completed.syndrome_buffer_1.check_settled()
     assert completed.syndrome_buffer_1.peak_occupancy_rounds() > 0
+
+
+def test_upstream_rounds_survive_until_the_input_transfer_lands(fabric):
+    """Buffer 0 occupancy holds all six rounds through the WBD transfer
+    and frees them exactly at its landing (dispatch 15 + wbd 5)."""
+    make_metrics, probes = fabric["occupancy_metrics"]()
+    fabric["weak_only_run"](rounds=6, make_metrics=make_metrics)
+    (probe,) = probes
+    timeline = probe.buffer0_timeline
+
+    assert max(occupancy for _, occupancy in timeline) == 6
+    first_release_tick = next(
+        tick for (tick, occupancy), (_, previous) in
+        zip(timeline[1:], timeline) if occupancy < previous)
+    assert first_release_tick == us(15 + 5)
+
+
+def test_room_side_rounds_survive_until_the_final_strong_commit(fabric):
+    """SB1 occupancy holds the escalated window's context through the
+    whole strong path; the refcounted holds free it only after the final
+    commit, never at the SBD landing."""
+    make_metrics, probes = fabric["occupancy_metrics"]()
+    fabric["switching_run"](escalation_probability=1.0, rounds=6,
+                            make_metrics=make_metrics)
+    (probe,) = probes
+    timeline = probe.sb1_timeline
+
+    assert max(occupancy for _, occupancy in timeline) == 6
+    first_release_tick = next(
+        tick for (tick, occupancy), (_, previous) in
+        zip(timeline[1:], timeline) if occupancy < previous)
+    # strong committed at 71, held boundary and courier resolve after;
+    # the empirically pinned release tick of this configuration
+    assert first_release_tick == us(87.5)

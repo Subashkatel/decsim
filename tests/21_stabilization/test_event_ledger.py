@@ -168,6 +168,56 @@ def test_dropped_round_is_an_accounted_terminal_state():
     assert packing.packing_drops == 1
 
 
+def test_reassembly_context_drop_is_an_accounted_terminal_state():
+    """LINK-004 applies before packing as well as at Buffer 0 admission.
+
+    Hold one fragmented round open in the controller's sole reassembly slot,
+    then deliver another round.  DROP_ROUND must leave a terminal ledger row
+    for the rejected round instead of changing only an internal counter.
+    """
+    from types import SimpleNamespace
+
+    from decsim.controller.syndrome_packing import (PackingOverflowPolicy,
+                                                    SyndromePacking,
+                                                    SyndromePackingPolicy)
+    from decsim.engine import Engine
+    from decsim.message import QPUReadout, WINDOW_INPUT_ROUTE
+    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
+
+    engine = Engine(verbose=False)
+    packing = SyndromePacking(
+        engine, t_pack=0, packing_context_capacity=1,
+        window_input_receiver=SimpleNamespace(
+            accept_window_input=lambda packet: True),
+        feedback_memory_receiver=None,
+        syndrome_buffer=SyndromeBuffer(capacity=None),
+        policy=SyndromePackingPolicy(
+            overflow=PackingOverflowPolicy.DROP_ROUND))
+    # Event insertion order makes round 1 occupy the context, round 2 lose
+    # admission, and the final fragment then complete round 1.
+    for payload in (
+        QPUReadout(1, 0, 1, n_fragments=2, fragment_index=0, size_bits=12),
+        QPUReadout(1, 0, 2, size_bits=24),
+        QPUReadout(1, 0, 1, n_fragments=2, fragment_index=1, size_bits=12),
+    ):
+        packing.relay_qpu_readout(payload, WINDOW_INPUT_ROUTE,
+                                  processing_ticks=0)
+    engine.run()
+
+    completed = SimpleNamespace(
+        syndrome_packing=packing, syndrome_buffer_1=None,
+        window_manager=SimpleNamespace(windows={}), pauli_frame=None,
+        execution_runtime=SimpleNamespace(decode_release_time={},
+                                          operations={}))
+    ledger = event_ledger(completed)
+    ledger.check()
+
+    terminals = {(event.round, event.kind) for event in ledger.events
+                 if event.status == "terminal"}
+    assert terminals == {(1, "PUBLISHED"), (2, "DROPPED")}
+    assert packing.packing_drops == 1
+
+
 _SWEEP_MODES = ("weak", "weak_blocked", "weak_pipelined", "strong",
                 "switching_keep", "switching_escalate",
                 "switching_parallel", "switching_double")

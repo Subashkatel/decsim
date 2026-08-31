@@ -107,6 +107,24 @@ def test_pipelined_unit_starts_every_initiation_interval(fabric):
     assert all(start >= landing for start in service_starts)  # F: never early
 
 
+def test_initiation_interval_remains_a_lower_bound_when_latency_is_short(fabric):
+    """DEC-003: the intake rate is independent in both directions.
+
+    A one-microsecond response does not permit a second start before a declared
+    ten-microsecond initiation interval.  Completion may free result/storage
+    state, but it must not silently erase the intake cooldown.
+    """
+    response_us = 1.0
+    interval_us = 10.0
+    decoder = PipelinedDecoder(
+        PresetLatencyDecoder(response_us), interval_us
+    )
+    windows = _windows(_backlog_run(fabric, decoder=decoder, n_ops=2), n_ops=2)
+    starts = [window.t_done - us(response_us) for window in windows]
+
+    assert starts[1] - starts[0] == us(interval_us)
+
+
 def test_pipeline_depth_bounds_in_flight_work(fabric):
     """Depth 2 (B): the third start waits for the first COMPLETION even
     though the intake stage is free, and the fourth window cannot even

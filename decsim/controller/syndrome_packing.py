@@ -243,6 +243,9 @@ class SyndromePacking:
             if self.policy.overflow is PackingOverflowPolicy.DROP_ROUND:
                 self.packing_drops += 1
                 self._dropped_rounds.add(round_key)
+                self.round_events.append(SyndromeRoundEvent(
+                    "DROPPED", self.engine.now, fragment.operation_id,
+                    fragment.round_index, fragment.patch_id, route.kind.name))
                 return None
             raise SyndromePackingOverflow(
                 tick=self.engine.now, route=route, incoming_identity=identity,

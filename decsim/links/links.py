@@ -54,11 +54,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from fractions import Fraction
 import math
 from types import MappingProxyType
 from typing import Optional, Union
 
-from ..config import us
+from ..config import TICKS_PER_US, us
 from ..message import DecoderRequestKey
 
 
@@ -451,7 +452,13 @@ class Link:
             serialization_ticks = 0
         else:
             serializer_start_ticks = max(now_ticks, self._next_free_tick)
-            serialization_ticks = us(payload_bits / capacity.aggregate_bits_per_us)
+            # Causality (LINK-002): serialization may never end before the
+            # exact transmission time, so a fractional tick rounds UP. The
+            # exact Fraction arithmetic keeps representable rates exact, so
+            # a whole-tick duration is never inflated by float error.
+            serialization_ticks = math.ceil(
+                Fraction(payload_bits) * TICKS_PER_US
+                / Fraction(capacity.aggregate_bits_per_us))
         serializer_end_ticks = serializer_start_ticks + serialization_ticks
         queue_wait_ticks = serializer_start_ticks - now_ticks
         propagation_ticks = self._config.propagation_latency_ticks

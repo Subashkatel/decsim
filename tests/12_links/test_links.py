@@ -1135,3 +1135,31 @@ def test_yaml_card_key_reaches_the_edge(tmp_path):
     assert card.wbd.transfer_overhead is not None
     assert card.wbd.transfer_overhead.overhead_ticks == us(0.4)
     assert card.dd.transfer_overhead is None
+
+
+def test_serialization_never_ends_before_the_exact_transmission_time():
+    """LINK-002 causality: a fractional-tick serialization rounds UP, never
+    down. One bit at 3 bits/us takes 333333.33... ticks; a reservation that
+    ends at 333333 finishes before the bit has fully left the serializer."""
+    from fractions import Fraction
+
+    from decsim.config import TICKS_PER_US
+
+    cases = [
+        (1, 3.0, 333_334),           # fractional: must round up
+        (1, 7.0, 142_858),           # fractional: must round up
+        (10, 1_000_000.0, 10),       # exact: must NOT inflate
+        (8, 2.0, 4_000_000),         # exact: must NOT inflate
+        (1, 10.0, 100_000),          # decimal-exact rate: must NOT inflate
+    ]
+    for payload_bits, rate, expected_ticks in cases:
+        capacity = LinkCapacityConfig(
+            rate, LinkQuantityBasis.DIRECT_AGGREGATE, None, "causality case")
+        link = Link(make_channel(capacity=capacity, propagation_ticks=0))
+        reservation = link.reserve(payload_bits=payload_bits, now_ticks=0)
+        exact_ticks = Fraction(payload_bits) * TICKS_PER_US / Fraction(rate)
+        assert reservation.serialization_ticks >= exact_ticks, \
+            f"{payload_bits} bits at {rate} bits/us ends early"
+        assert reservation.serialization_ticks - exact_ticks < 1, \
+            f"{payload_bits} bits at {rate} bits/us inflated by a full tick"
+        assert reservation.serialization_ticks == expected_ticks

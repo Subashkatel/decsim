@@ -10,9 +10,58 @@
 # yaml cannot reach are Python objects: multi-op workloads, dynamic
 # streams, routers, escalation families, schedulers, devices, policies.
 
-mode: weak_baseline                # decode path: weak_baseline | strong_only.
-                                   # strong_only wakes windows from syndrome
-                                   # buffer 1, moves inputs on sbd, results on do
+mode: weak_baseline                # decode path: weak_baseline | strong_only
+                                   # | switching. strong_only wakes windows from
+                                   # syndrome buffer 1, moves inputs on sbd,
+                                   # results on do
+
+# mode switching adds the switching card (refused for any other mode, so it
+# is documented here as comments; switching_validation.yaml runs it):
+# switching:
+#   gap_threshold_db: 20.0         # keep the weak result when its complementary
+#                                  # gap is at or above this, in the paper's
+#                                  # decibels (Toshio 2510.25222 gth = 20 dB).
+#                                  # threshold_source table computes the value
+#                                  # instead and refuses this key
+#   threshold_source: fixed        # fixed | table | online. fixed uses
+#                                  # gap_threshold_db as given. table looks the
+#                                  # sweep point up in an offline calibration csv
+#                                  # and refuses uncalibrated points. online
+#                                  # starts at gap_threshold_db and adapts it
+#                                  # across the point's shots (serial only)
+#   threshold_table: cal.csv       # table only: calibrate_threshold.py's
+#                                  # calibration_table.csv (one row per d and p,
+#                                  # thresholds in dB), path relative to this
+#                                  # config file. Calibrate for this run's
+#                                  # window geometry; thresholds do not transfer
+#                                  # between geometries
+#   threshold_column: gth_eq4_wilson  # table only: which computed column;
+#                                  # gth_brute_force | gth_eq4 | gth_eq4_wilson
+#                                  # (default: the Wilson-conservative one)
+#   online:                        # online only; defaults are the validated
+#                                  # drift-replay configuration
+#     target_escalation_rate: 1e-3 # the rate tracker's starting duty target
+#     step_db: 0.25                # threshold step per window (adaptive
+#                                  # conformal recursion, arXiv:2106.00170)
+#     audit_rate: 0.01             # fraction of KEPT windows strong-decoded
+#                                  # anyway for ground truth (set-dueling's
+#                                  # sampler sets; breaks the selective-labels
+#                                  # bias)
+#     kept_bad_budget: 2e-4        # budget on P(weak revised AND kept); one
+#                                  # blown audit doubles the target, and only
+#                                  # ceil(3/budget) consecutive clean audits
+#                                  # halve it back (rule of three)
+#     adjust_factor: 2.0           # the raise/relax multiplier
+#     min_escalation_rate: 1e-5    # the target's floor
+#     max_escalation_rate: 0.30    # the target's cap: the Theorem 1 backlog
+#                                  # bound on strong duty
+#   double_window: false           # the paper's Sec. III C scheme: the weak
+#                                  # chain keeps committing past an escalated
+#                                  # strong window; false = serial escalation
+#                                  # with Held boundaries
+#   gap_computation: serial        # serial | parallel_pair | split_pair: where
+#                                  # the two forced-class gap solves run
+#   gap_units: 1                   # split_pair only: sibling pool size
 
 code_task: surface_code:rotated_memory_z   # stim generator task (real detector data)
 rounds_per_shot: 15                # QEC rounds per shot: a fixed count, or
@@ -73,7 +122,14 @@ links:                             # one card per path; null = the logical_refer
                                    #     per-transfer DMA setup (setups serialize)
   qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # QPU -> controller, one readout
   cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}  # controller -> Buffer 0 (the weak buffer), one round
-  csb: null                   # controller -> syndrome buffer 1 (the strong buffer), one round
+  csb: null                   # controller -> syndrome buffer 1 (the strong buffer), one round.
+                                   #   Parallel switching (run_both_at_once, a
+                                   #   Python-level Switching knob) builds the
+                                   #   strong job at weak readiness, so csb must
+                                   #   not lag the Buffer 0 publication path
+                                   #   (cwb); a slower csb refuses loudly at
+                                   #   strong-job build ("csb lag beyond the
+                                   #   escalation margin")
   wbd: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # Buffer 0 -> weak decoder, one window
   wsd: null                        # weak -> strong escalation decision
   sbd: null                        # syndrome buffer 1 -> strong decoder, one window

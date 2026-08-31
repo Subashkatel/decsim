@@ -1,10 +1,25 @@
 # The strong tier's offline LER sweep (plot 1). Runs through
 # experiments.offline_run; every key is documented in reference.yaml.
+# Shot counts sized from the 2026-08-27 pilot cost table: >= 100
+# failures where reachable, ~400 core-hours total; sub-threshold
+# points at d >= 7 plot as upper bounds.
 
 extends: strong_decoder_baseline.yaml
 
 sweep:
-  - physical_error_probability: [0.0005, 0.001, 0.002, 0.003, 0.005, 0.007, 0.01]
+  - physical_error_probability: [0.005, 0.007, 0.01]
     distance: [3, 5, 7, 9, 11]
     round_period_us: [1.0]
-    shots: 100          # pilot scale; sized from the pilot's cost table
+    shots: 5000
+  - physical_error_probability: [0.003]
+    distance: [3, 5, 7, 9, 11]
+    round_period_us: [1.0]
+    shots: 20000
+  - physical_error_probability: [0.002]
+    distance: [3, 5, 7, 9, 11]
+    round_period_us: [1.0]
+    shots: 50000
+  - physical_error_probability: [0.0005, 0.001]
+    distance: [3, 5, 7, 9, 11]
+    round_period_us: [1.0]
+    shots: 100000

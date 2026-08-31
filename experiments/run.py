@@ -9,15 +9,18 @@ point; only the wall-clock column varies).
 
 from __future__ import annotations
 
+import csv
 import dataclasses
 import itertools
 import json
+import math
 import platform
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+from experiments.build_run import online_threshold_calibrator
 from experiments.experiment_config import (MODE_TIER, ExperimentConfig,
                                            load_experiment)
 from experiments.measure_shot import measure_shot
@@ -55,11 +58,20 @@ def resolved_description(config: ExperimentConfig) -> list:
 
 
 def new_run_dir(config: ExperimentConfig) -> Path:
-    """results/<UTC stamp>-<config name>/, never reused; sorted by time."""
+    """results/<UTC stamp>-<config name>/, never reused; sorted by time.
+    The stamp is whole seconds, so a second run started within the same
+    second gets a numeric suffix instead of clobbering the first."""
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
-    run_dir = Path("experiments/results") / f"{stamp}-{config.name}"
-    run_dir.mkdir(parents=True, exist_ok=False)
-    return run_dir
+    base = Path("experiments/results") / f"{stamp}-{config.name}"
+    run_dir = base
+    suffix = 2
+    while True:
+        try:
+            run_dir.mkdir(parents=True, exist_ok=False)
+            return run_dir
+        except FileExistsError:
+            run_dir = base.with_name(f"{base.name}-{suffix}")
+            suffix += 1
 
 
 def snapshot_code_state(config: ExperimentConfig, run_dir: Path) -> None:
@@ -158,6 +170,10 @@ def run_sweep(config: ExperimentConfig, run_dir: Path = None) -> list:
         points = itertools.product(block.physical_error_probabilities,
                                    block.distances, block.round_periods_us)
         for physical_error_probability, distance, round_period_us in points:
+            threshold_calibrator = online_threshold_calibrator(
+                config,
+                physical_error_probability=physical_error_probability,
+                distance=distance)
             for seed in range(block.shots):
                 shot_key = (physical_error_probability, distance,
                             round_period_us, seed)
@@ -166,11 +182,49 @@ def run_sweep(config: ExperimentConfig, run_dir: Path = None) -> list:
                 measurements[shot_key] = measure_shot(
                     config, distance=distance, seed=seed,
                     physical_error_probability=physical_error_probability,
-                    round_period_us=round_period_us, run_dir=run_dir)
+                    round_period_us=round_period_us, run_dir=run_dir,
+                    threshold_calibrator=threshold_calibrator)
             print(f"p {physical_error_probability}, d {distance}, "
                   f"round period {round_period_us} us: "
                   f"{block.shots} shots done", file=sys.stderr)
+            if threshold_calibrator is not None:
+                _write_online_threshold_record(
+                    threshold_calibrator, run_dir,
+                    physical_error_probability=physical_error_probability,
+                    distance=distance, round_period_us=round_period_us)
     return list(measurements.values())
+
+
+def _write_online_threshold_record(calibrator, run_dir,
+                                   *, physical_error_probability: float,
+                                   distance: int,
+                                   round_period_us: float) -> None:
+    """One csv per sweep point: the online threshold's trajectory
+    (every audit and target move, plus every 100th window) and a
+    summary line on stderr. The gap unit inside the calibrator is
+    nats; the csv converts to the paper's decibels."""
+    nats_to_db = 10.0 / math.log(10.0)
+    summary = calibrator.summary()
+    print(f"    online threshold: {summary['windows']} windows, "
+          f"escalation rate {summary['escalation_rate']:.4f}, "
+          f"threshold {summary['threshold'] * nats_to_db:.2f} dB, "
+          f"{summary['audited']} audits ({summary['audited_bad']} bad), "
+          f"{summary['raises']} raises, {summary['relaxes']} relaxes, "
+          f"{summary['pending_audits']} pending",
+          file=sys.stderr)
+    if run_dir is None:
+        return
+    record_path = Path(run_dir) / (
+        f"online_threshold_p{physical_error_probability}_d{distance}"
+        f"_round{round_period_us}us.csv")
+    with open(record_path, "w", newline="") as record_file:
+        writer = csv.writer(record_file)
+        writer.writerow(["window_count", "threshold_db", "event"])
+        for window_count, threshold_nats, event in calibrator.trajectory:
+            writer.writerow(
+                [window_count, threshold_nats * nats_to_db, event])
+        writer.writerow([summary["windows"],
+                         summary["threshold"] * nats_to_db, "end"])
 
 
 def run_experiment(config_path) -> tuple:
@@ -187,7 +241,7 @@ def run_experiment(config_path) -> tuple:
     rows = summarize(measurements)
     write_report(rows, run_dir, measurements)
     from experiments.plots import plots
-    plots(config, rows, run_dir)
+    plots(config, rows, run_dir, measurements)
     write_manifest(config, run_dir, started_utc,
                    finished_utc=datetime.now(timezone.utc).isoformat())
     return run_dir, rows

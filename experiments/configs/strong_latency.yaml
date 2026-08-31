@@ -1,0 +1,12 @@
+# The strong tier's decode-latency run (plot 2). Runs through the
+# closed-loop runner; every key is documented in reference.yaml.
+# belief_matching already charges measured wall clock, so only the
+# sweep changes from the baseline.
+
+extends: strong_decoder_baseline.yaml
+
+sweep:
+  - physical_error_probability: [0.001]
+    distance: [3, 5, 7, 9, 11]
+    round_period_us: [1.0]
+    shots: 500

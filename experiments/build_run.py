@@ -9,7 +9,9 @@ tier, woken from syndrome buffer 1).
 
 from __future__ import annotations
 
+import math
 from dataclasses import replace
+from pathlib import Path
 
 import stim
 
@@ -59,25 +61,21 @@ def memory_circuit(config: ExperimentConfig, physical_error_probability: float,
         before_measure_flip_probability=p, after_reset_flip_probability=p)
 
 
-def decoder_engine(config: ExperimentConfig) -> DecoderEngine:
-    """The mode's decoder unit built from its card: the algorithm between
-    fetch cycles before it and release cycles after it, on the engine's
-    named clock. A named algorithm decodes every window for real and charges
-    its measured wall clock (pymatching = MWPM, the weak tier;
-    belief_matching = the strong tier, Toshio arXiv 2510.25222); a number is
-    a fixed core latency in us on the MWPM path. The algorithm card prices
-    the algorithm stage only, never a total decoder latency."""
-    unit = config.active_decoder
+def _unit_algorithm(unit):
+    """A unit card's algorithm object: a named real algorithm or a fixed
+    core latency in us on the MWPM path."""
     if unit.algorithm == "pymatching":
-        algorithm = PyMatchingDecoder(latency_model=None)
-    elif unit.algorithm == "belief_matching":
+        return PyMatchingDecoder(latency_model=None)
+    if unit.algorithm == "belief_matching":
         from decsim.decoders.belief_matching.decoder import (
             BeliefMatchingDecoder)
-        algorithm = BeliefMatchingDecoder(latency_model=None)
-    else:
-        algorithm = PyMatchingDecoder(PresetLatencyDecoder(unit.algorithm))
-    if config.verify_windows == "tesseract":
-        algorithm = TesseractCheckedDecoder(algorithm)
+        return BeliefMatchingDecoder(latency_model=None)
+    return PyMatchingDecoder(PresetLatencyDecoder(unit.algorithm))
+
+
+def _unit_engine(unit, algorithm) -> DecoderEngine:
+    """One decoder unit: the algorithm between fetch cycles before it and
+    release cycles after it, on the engine's named clock."""
     fetch = DecoderStage(
         "fetch", cycles_per_round=unit.engine.fetch_cycles_per_round)
     release = DecoderStage(
@@ -85,6 +83,61 @@ def decoder_engine(config: ExperimentConfig) -> DecoderEngine:
     timing = DecoderTiming(before=(fetch,), after=(release,),
                            frequency_mhz=unit.engine.frequency_mhz)
     return DecoderEngine(algorithm, timing)
+
+
+def decoder_engine(config: ExperimentConfig) -> DecoderEngine:
+    """The mode's decoder unit built from its card. A named algorithm
+    decodes every window for real and charges its measured wall clock
+    (pymatching = MWPM, the weak tier; belief_matching = the strong tier,
+    Toshio arXiv 2510.25222); a number is a fixed core latency in us on
+    the MWPM path. The algorithm card prices the algorithm stage only,
+    never a total decoder latency. In switching mode this is the weak
+    unit, wrapped so every weak decode carries its complementary gap."""
+    unit = config.active_decoder
+    algorithm = _unit_algorithm(unit)
+    if config.mode == "switching":
+        from decsim.confidence.complementary import (
+            ComplementaryGapMetricFactory)
+        from decsim.confidence.decoder import (
+            ParallelGapDecoder, SoftOutputDecoder, SplitGapDecoder)
+        gap_computation = config.switching.gap_computation
+        if gap_computation == "parallel_pair":
+            algorithm = ParallelGapDecoder(algorithm,
+                                           ComplementaryGapMetricFactory())
+        elif gap_computation == "split_pair":
+            if not getattr(algorithm, "measures_wall_clock", False):
+                raise ValueError(
+                    "split_pair times two real forced-class solves on "
+                    "separate units, so the weak tier needs a named "
+                    "wall-clock algorithm; a priced card already models "
+                    "the whole unit (use parallel_pair to change its "
+                    "cost sheet instead)")
+            algorithm = SplitGapDecoder(algorithm,
+                                        ComplementaryGapMetricFactory())
+        else:
+            algorithm = SoftOutputDecoder(algorithm,
+                                          ComplementaryGapMetricFactory())
+    if config.verify_windows == "tesseract":
+        algorithm = TesseractCheckedDecoder(algorithm)
+    return _unit_engine(unit, algorithm)
+
+
+def strong_decoder_engine(config: ExperimentConfig) -> DecoderEngine:
+    """Switching mode's second unit: the strong tier's card, unwrapped
+    (the strong result is final; no soft output, no referee)."""
+    unit = config.decoder.strong
+    return _unit_engine(unit, _unit_algorithm(unit))
+
+
+def gap_half_engine(config: ExperimentConfig) -> DecoderEngine:
+    """split_pair's sibling pool: one forced-class solve per window on
+    its own unit, timed for real, staged over the weak tier's engine
+    timing (same fetch and release stages as the weak unit: it reads
+    the same rounds)."""
+    from decsim.confidence.complementary import ComplementaryGapMetricFactory
+    from decsim.confidence.decoder import GapHalfDecoder
+    unit = config.active_decoder
+    return _unit_engine(unit, GapHalfDecoder(ComplementaryGapMetricFactory()))
 
 
 class TesseractCheckedDecoder:
@@ -232,16 +285,111 @@ def syndrome_buffering(config: ExperimentConfig) -> SyndromeBufferingConfig:
         packing_assembly_slots=buffers.packing_workspace_size)
 
 
-def escalation_policy(config: ExperimentConfig):
+def resolve_gap_threshold_nats(config: ExperimentConfig, *,
+                               physical_error_probability: float,
+                               distance: int) -> float:
+    """The sweep point's threshold in nats, per threshold_source.
+
+    fixed and online read the card (online starts there and adapts);
+    table looks the point up in the offline calibration csv
+    (calibrate_threshold.py's calibration_table.csv shape: one row per
+    distance and p, thresholds in dB) and refuses a point the table
+    does not certify, instead of guessing."""
+    card = config.switching
+    if card.threshold_source in ("fixed", "online"):
+        return card.gap_threshold_nats
+    table_path = Path(card.threshold_table)
+    if not table_path.is_absolute():
+        table_path = config.config_files[0].parent / table_path
+    if not table_path.exists():
+        raise ValueError(f"threshold_table {table_path} does not exist")
+    import csv
+    with open(table_path, newline="") as table_file:
+        rows = list(csv.DictReader(table_file))
+    if rows and card.threshold_column not in rows[0]:
+        raise ValueError(
+            f"threshold_table {table_path} has no column "
+            f"{card.threshold_column!r}; its columns are "
+            f"{sorted(rows[0])}")
+    for row in rows:
+        same_distance = int(row["distance"]) == distance
+        same_probability = math.isclose(
+            float(row["p"]), physical_error_probability, rel_tol=1e-9)
+        if same_distance and same_probability:
+            cell = row[card.threshold_column]
+            if cell == "":
+                raise ValueError(
+                    f"threshold_table {table_path} refuses d={distance} "
+                    f"p={physical_error_probability}: the "
+                    f"{card.threshold_column} entry is empty (not enough "
+                    f"evidence at calibration time)")
+            gap_threshold_db = float(cell)
+            return gap_threshold_db * math.log(10.0) / 10.0
+    calibrated_points = sorted(
+        (int(row["distance"]), float(row["p"])) for row in rows)
+    raise ValueError(
+        f"threshold_table {table_path} has no row for d={distance} "
+        f"p={physical_error_probability}; calibrated points: "
+        f"{calibrated_points}")
+
+
+def online_threshold_calibrator(config: ExperimentConfig, *,
+                                physical_error_probability: float,
+                                distance: int):
+    """One calibrator per sweep point (threshold_source online), shared
+    by every shot of the point so the controller learns over the
+    point's whole window stream. Seeded by the point's identity, so a
+    rerun reproduces the same audit draws."""
+    if config.mode != "switching" or (
+            config.switching.threshold_source != "online"):
+        return None
+    import random
+    from decsim.decoders.weak_strong_switching import (
+        AuditLane, EscalationRateTracker, OnlineGapCalibrator,
+        OnlineThresholdController)
+    online = config.switching.online
+    tracker = EscalationRateTracker(
+        target_escalation_rate=online.target_escalation_rate,
+        threshold=config.switching.gap_threshold_nats,
+        step=online.step_nats)
+    controller = OnlineThresholdController(
+        tracker=tracker,
+        audit=AuditLane(audit_rate=online.audit_rate),
+        kept_bad_budget=online.kept_bad_budget,
+        adjust_factor=online.adjust_factor,
+        min_escalation_rate=online.min_escalation_rate,
+        max_escalation_rate=online.max_escalation_rate)
+    rng = random.Random(
+        f"online-threshold d={distance} p={physical_error_probability}")
+    return OnlineGapCalibrator(controller, rng)
+
+
+def escalation_policy(config: ExperimentConfig, *,
+                      gap_threshold_nats: float = None,
+                      threshold_calibrator=None):
     """weak_baseline: None, the core's default (every window weak, final).
-    strong_only: every window decoded once on the strong tier."""
+    strong_only: every window decoded once on the strong tier.
+    switching: weak first, escalate serially on a small complementary gap
+    (the paper's Sec. III A protocol without the parallel head start);
+    the threshold is the resolved sweep-point value, and an online
+    calibrator (threshold_source online) owns it from there."""
     if config.mode == "strong_only":
         return StrongOnly()
+    if config.mode == "switching":
+        from decsim.confidence.complementary import COMPLEMENTARY_GAP_SOURCE
+        from decsim.decoders.weak_strong_switching import Switching
+        if gap_threshold_nats is None:
+            gap_threshold_nats = config.switching.gap_threshold_nats
+        return Switching(gap_threshold_nats,
+                         COMPLEMENTARY_GAP_SOURCE,
+                         threshold_calibrator=threshold_calibrator,
+                         double_window=config.switching.double_window)
     return None
 
 
 def build_run(config: ExperimentConfig, *, physical_error_probability: float,
-              distance: int, round_period_us: float, seed: int):
+              distance: int, round_period_us: float, seed: int,
+              threshold_calibrator=None):
     """The wired RunSpec for one sweep point and seed, plus its engine
     (the engine is returned so the measurement can read its stage records)."""
     circuit = memory_circuit(config, physical_error_probability, distance)
@@ -252,17 +400,56 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
         round_us=round_period_us,
         t_binary_availability_us=config.controller.t_binary_availability_us,
         t_pack_us=config.controller.t_pack_us)
+    scheme = WINDOWING_SCHEMES[config.windowing.scheme]()
+    routing = {"decoder": engine, "num_units": config.active_decoder.units}
+    if config.mode == "switching":
+        # Two units behind one router; the strong pool serves escalated
+        # jobs (hint "strong"). Switching requires the lookahead terminal
+        # policy: the literature-exact flush has no trailing tail context.
+        # Serial switching holds boundaries until results are final
+        # (descendants wait out an escalation); double_window keeps the
+        # weak chain committing eagerly and absorbs escalations in strong
+        # windows.
+        from decsim.controller.policies import Held
+        from decsim.decoders.decoders import SwitchingRouter
+        from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
+                                                      SlidingWindowScheme)
+        if config.windowing.scheme != "sliding":
+            raise ValueError("mode switching requires windowing.scheme "
+                             "sliding")
+        scheme = SlidingWindowScheme(
+            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD)
+        unit_pools = {"default": config.active_decoder.units,
+                      "strong": config.decoder.strong.units}
+        gap_engine = None
+        if config.switching.gap_computation == "split_pair":
+            gap_engine = gap_half_engine(config)
+            unit_pools["gap"] = config.switching.gap_units
+        routing = {
+            "router": SwitchingRouter(engine, strong_decoder_engine(config),
+                                      gap=gap_engine),
+            "unit_pools": unit_pools}
+        if not config.switching.double_window:
+            routing["boundary_policy"] = Held()
     spec = RunSpec(
         ops=[operation], code=code_model(config, distance),
-        scheme=WINDOWING_SCHEMES[config.windowing.scheme](),
+        scheme=scheme,
         rounds_policy=FixedRounds(config.rounds_per_shot.rounds_for(distance)),
-        device=StimDevice(), decoder=engine,
-        num_units=config.active_decoder.units,
+        device=StimDevice(),
         timing=timing, links=link_model(config),
         decoder_memory=decoder_memory(config),
         syndrome_buffering=syndrome_buffering(config),
-        escalation_policy=escalation_policy(config),
+        escalation_policy=escalation_policy(
+            config,
+            gap_threshold_nats=(
+                resolve_gap_threshold_nats(
+                    config,
+                    physical_error_probability=physical_error_probability,
+                    distance=distance)
+                if config.mode == "switching" else None),
+            threshold_calibrator=threshold_calibrator),
         idle_policy=idle_policy(config),
         pauli_frame=PauliFrameConfig(commit_us=config.pauli_frame_commit_us),
-        seed=seed)
+        seed=seed,
+        **routing)
     return spec, engine

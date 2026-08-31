@@ -190,12 +190,39 @@ def shot_rows(measurements: list) -> list:
     return rows
 
 
+def latency_sample_rows(measurements: list) -> list:
+    """One row per decoded window: the measured algorithm wall clock.
+    Only wall-clock algorithms (a name, not a latency card) produce
+    rows; this is the latency figure's raw data, persisted so the
+    figure, including the cross-tier combined one, rebuilds from run
+    folders alone."""
+    rows = []
+    for measurement in measurements:
+        if not isinstance(measurement.algorithm, str):
+            continue
+        for sample_us in measurement.samples["algorithm"]:
+            rows.append({
+                "distance": measurement.distance,
+                "physical_error_probability":
+                    measurement.physical_error_probability,
+                "round_period_us": measurement.round_period_us,
+                "algorithm": measurement.algorithm,
+                "seed": measurement.seed,
+                "algorithm_us": sample_us,
+            })
+    return rows
+
+
 def write_report(rows: list, report_dir: Path,
                  measurements: Optional[list] = None) -> None:
-    """sweep.csv (per point), shots.csv (per shot) and links.csv (the
-    per-link ledger totals) when the measurements are given."""
+    """sweep.csv (per point), shots.csv (per shot), links.csv (the
+    per-link ledger totals) and latency_samples.csv (per decoded window,
+    wall-clock algorithms only) when the measurements are given."""
     report_dir.mkdir(parents=True, exist_ok=True)
     write_csv(rows, report_dir / "sweep.csv")
     if measurements:
         write_csv(shot_rows(measurements), report_dir / "shots.csv")
         write_csv(link_rows(measurements), report_dir / "links.csv")
+        samples = latency_sample_rows(measurements)
+        if samples:
+            write_csv(samples, report_dir / "latency_samples.csv")

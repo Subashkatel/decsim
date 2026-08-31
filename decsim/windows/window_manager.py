@@ -3,14 +3,12 @@ needs, when it is ready, when its result commits and reaches the
 Pauli frame and its conditional release. Boundaries between windows are the
 BoundaryCourier's, ownership of committed rounds is the LogicalLedger's, the
 strong tier is StrongEscalation's (NoStrongTier when the policy never
-escalates), dynamic streams are DynamicWindows', replays are the
-SpeculativeRecovery's; all of them are built here and work on this manager's
-tables. Reading path for one round: on_syndrome_arrival, check_window,
+escalates), dynamic streams are DynamicWindows'; all of them are built here
+and work on this manager's tables. Reading path for one round: on_syndrome_arrival, check_window,
 _submit_window_decode, on_decode_done, _commit_window."""
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from types import MappingProxyType
@@ -19,17 +17,16 @@ from typing import Callable, Optional
 from ..message import (DecodeJob,
                       DecodeResult, DecoderRequestKey, DecoderTier, LogicalContribution,
                       Operation,
-                      SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
+                      StrongDecodeCompletion,
                       SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
                       WindowPlan, WindowProtocol, WindowReadiness,
                       stable_identity_order_key)
 from ..decoders.strong_escalation import NoStrongTier, StrongEscalation
 from ..links.links import LinkPath, RequestTransferRelation, TrafficAttribution
-from ..syndrome_buffer.syndrome_buffer import (CsdInput, DecoderInputHold, PendingStrong,
-                                               PotentialStrong, RephaseGuard, SyndromeBuffer)
+from ..syndrome_buffer.syndrome_buffer import (DecoderInputHold, PendingStrong,
+                                               PotentialStrong, SyndromeBuffer)
 from ..syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
 from .dynamic_windows import DynamicWindows
-from .speculative_recovery import SpeculativeRecovery
 from .committed_rounds import LogicalLedger
 from .window_boundaries import BoundaryCourier, HeldBoundary
 
@@ -45,7 +42,6 @@ class WindowManager:
                  fault_model_requirement_for,
                  feedback_boundary_mode: str = "trailing_buffer",
                  error_model_provider=None, retain_strong_context: bool,
-                 double_window: bool,
                  syndrome_buffer: Optional[SyndromeBuffer] = None,
                  syndrome_buffer_1: Optional[SyndromeBuffer1] = None,
                  pauli_frame=None,
@@ -75,7 +71,6 @@ class WindowManager:
         self.feedback_boundary_mode = feedback_boundary_mode
         self.error_model_provider = error_model_provider
         self.retain_strong_context = retain_strong_context
-        self.double_window = double_window
         # jobs whose windows still owe a boundary at the decoder; the
         # boundary receive path releases them (wired by the run)
         self.release_service: Optional[Callable] = None
@@ -98,8 +93,8 @@ class WindowManager:
             syndrome_buffer_1 = SyndromeBuffer1(engine, links)
         self.syndrome_buffer_1 = syndrome_buffer_1
         if self.syndrome_buffer_1 is not None:
-            # the room-side store's arrival signal: always the terminal-slab
-            # listener; the readiness authority too when the strong tier is
+            # the room-side store's arrival signal: always the terminal
+            # strong-window listener; the readiness authority too when the strong tier is
             # primary (readiness listens to the store its lane reads)
             self.syndrome_buffer_1.on_round_stored = self._on_room_round_stored
         self.lifecycle = DynamicWindows(self)
@@ -129,7 +124,6 @@ class WindowManager:
         self.op_strong_commit_time: dict[int, int] = {}
         self._finished_ops: set[int] = set()
         self._workload_complete_sent = False
-        self.speculative_recovery = SpeculativeRecovery(self, double_window)
         self.window_models: dict = {}
         self.total_windows = 0
         self._windows_built = False
@@ -369,7 +363,9 @@ class WindowManager:
 
     def withdraw_window_decode(self, key: tuple) -> None:
         """Withdraw one window's early-shipped, unstarted decode and reset
-        its submission bookkeeping so a replay resubmits it fresh."""
+        its submission bookkeeping so it can be resubmitted fresh (a
+        strong window that absorbs the window owns its rounds from then
+        on)."""
         window = self.windows[key]
         self.withdraw_decode(key)
         window.queued = False
@@ -1057,7 +1053,6 @@ class WindowManager:
             self._release_hold_if_live(
                 PotentialStrong(key), self.syndrome_buffer_1)
         self.escalation.after_weak_commit(key)
-        self.speculative_recovery.after_commit()
         self._finish_operation_if_ready(op)
         self.finish_workload_if_ready()
 
@@ -1066,8 +1061,6 @@ class WindowManager:
         """Ship the decoder's boundary to dependent windows, or hold it when the
         policy waits for a final result."""
         boundary = self.window_interaction.boundary_from_result(res, None)
-        if job.awaiting_strong_result:
-            self.speculative_recovery.begin(job, boundary)
         final = not job.awaiting_strong_result
         if self.boundary_policy.on_commit(window, final=final):
             self.courier.send(
@@ -1103,16 +1096,6 @@ class WindowManager:
             return None
         return self._selected_request_keys.get(key)
 
-    def uncommit_window(self, window: Window) -> None:
-        """A committed window is about to be replayed: it leaves the committed set."""
-        self.committed_windows.discard(window.key)
-        remaining = self._committed_per_op.get(window.op_id, 0) - 1
-        if remaining > 0:
-            self._committed_per_op[window.op_id] = remaining
-        else:
-            self._committed_per_op.pop(window.op_id, None)
-        window.committed = False
-
     def _commit_window(self, job: DecodeJob, res: DecodeResult, key: tuple,
                        window: Window, op: Operation) -> None:
         window.committed = True
@@ -1129,7 +1112,7 @@ class WindowManager:
         existing_contribution = self.ledger.get(key)
         if (
             existing_contribution is None
-            or existing_contribution.ownership_kind != "strong_slab"
+            or existing_contribution.ownership_kind != "strong_window"
         ):
             self.ledger.install(
                 LogicalContribution(
@@ -1173,11 +1156,8 @@ class WindowManager:
         self,
         completion: StrongDecodeCompletion,
     ) -> None:
-        """Finalize a weak-committed window with the delivered strong result.
-
-        Held ships the strong boundary now. Eager delegates a boundary change
-        to SpeculativeRecovery, which replays the affected static descendants.
-        """
+        """Finalize a weak-committed window with the delivered strong result,
+        shipping the held boundary now that it is final."""
         key = (completion.request_key.operation_id,
                completion.request_key.window_id)
         result = completion.result
@@ -1187,8 +1167,6 @@ class WindowManager:
             self.op_strong_commit_time.get(op.id, 0), self.engine.now)
         if self._selected_request_keys is not None:
             self._selected_request_keys[key] = completion.request_key
-        if self.speculative_recovery.complete(completion):
-            return
         if self.pauli_frame is None:
             self._finish_strong_commit(completion, key, result, window, op)
             return
@@ -1219,7 +1197,6 @@ class WindowManager:
                 self.window_interaction.boundary_from_result(
                     result, held.boundary),
                 source_request_key=completion.request_key)
-        self.speculative_recovery.after_commit()
         self.release_stream_segments_at_commit(
             op.id, self.lifecycle.committed_round_count(op.id))
         self._finish_operation_if_ready(op)
@@ -1244,12 +1221,10 @@ class WindowManager:
 
     def _finish_operation_if_ready(self, op: Operation) -> None:
         """Deliver an op result once every window is committed, no strong
-        redo or speculative ancestor is pending, and the stream is sealed."""
+        redo is pending, and the stream is sealed."""
         if op.id in self._finished_ops:
             return
         if self._pending_strong_per_op.get(op.id, 0) > 0:
-            return
-        if self.speculative_recovery.blocks_finality(op.id):
             return
         if self.syndrome_buffer.has_live_operation_reference(op.id):
             return
@@ -1270,7 +1245,6 @@ class WindowManager:
             return
         if (len(self.committed_windows) == self.total_windows
                 and not self._pending_strong_windows
-                and not self.speculative_recovery.has_finality_blockers
                 and not self.lifecycle.has_unsealed_streams()
                 and self.on_workload_complete is not None):
             self._workload_complete_sent = True
@@ -1321,10 +1295,6 @@ class WindowManager:
                 continue
             segment_end = self._stream_segment_end(operation)
             if segment_end is None or segment_end > committed_round_count:
-                continue
-            if (self.speculative_recovery.blocks_finality(operation.id)
-                    or self.speculative_recovery.blocks_stream_segment(
-                        stream_id, segment_end)):
                 continue
             if self._segment_waits_for_strong(stream_id, segment_end):
                 continue

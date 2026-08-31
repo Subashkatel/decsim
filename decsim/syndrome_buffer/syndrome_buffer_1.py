@@ -40,6 +40,8 @@ class SyndromeBuffer1:
         self.rounds_arrived: dict = {}
         self.copied_bits_total = 0
         self.on_round_stored = on_round_stored
+        # flight-recorder rows: (tick, operation_id, round_index) per store
+        self.stored_log: list = []
         self._in_flight_writes = 0
         self._written: set = set()
 
@@ -99,6 +101,8 @@ class SyndromeBuffer1:
         # is dropped at the door: nobody can ever read it
         self.store.release_round_if_unheld(admission.round_identity)
         operation_id = packet.operation_id
+        self.stored_log.append(
+            (self.engine.now, operation_id, packet.round_index))
         arrived = self.rounds_arrived.get(operation_id, 0)
         self.rounds_arrived[operation_id] = max(arrived, packet.round_index)
         self.engine.log_io(

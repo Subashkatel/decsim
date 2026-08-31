@@ -49,7 +49,7 @@ from decsim.windows.window_interactions import DefaultWindowInteraction
 
 from experiments.build_run import code_model, decoder_engine, memory_circuit
 from experiments.experiment_config import ExperimentConfig, load_experiment
-from experiments.plots import ler_plot
+from experiments.plots import decoder_title, ler_plot
 from experiments.run import new_run_dir, snapshot_code_state, write_manifest
 from experiments.sweep_report import wilson_interval, write_csv
 
@@ -243,6 +243,7 @@ def plan(config_path: str, seeds_per_shard: int = None) -> Path:
                  run_dir / "slurm_offline.sh")
     write_manifest(config, run_dir, started_utc=_now_utc())
     (run_dir / "shards").mkdir()
+    (run_dir / "logs").mkdir()
     lines = []
     for distance, probability, shots in points:
         chunk = seeds_per_shard or shots
@@ -251,8 +252,11 @@ def plan(config_path: str, seeds_per_shard: int = None) -> Path:
             lines.append(f"{distance}\t{probability}"
                          f"\t{seed_start}\t{seed_count}")
     (run_dir / "shards.tsv").write_text("\n".join(lines) + "\n")
+    # --output at submit time sends every task's log into the run dir;
+    # the #SBATCH lines in the script cannot name the run dir themselves
     print(f"{run_dir}: {len(lines)} shards\n"
           f"submit: sbatch --array=1-{len(lines)} "
+          f"--output={run_dir}/logs/slurm-%A_%a.out "
           f"{run_dir}/slurm_offline.sh {run_dir}\n"
           f"then:   python -m experiments.offline_run merge {run_dir}")
     return run_dir
@@ -286,43 +290,65 @@ def decode_shard(run_dir: str, shard_number: int) -> Path:
 
 
 def merge(run_dir: str) -> list:
-    """shards/ -> shots.csv, ler.csv, ler.png; stamps finished_utc."""
+    """shards/ -> shots.csv, ler.csv, ler.png; stamps finished_utc.
+
+    Shards stream one at a time in shards.tsv order, which is sorted by
+    point and then seed range, so shots.csv comes out sorted without
+    holding the run in memory (the big sweeps are 10^7 rows). A missing
+    shard raises before anything is written."""
     run_dir = Path(run_dir)
-    shots = []
-    for shard_path in sorted(run_dir.glob("shards/shard_*.csv")):
-        with open(shard_path) as handle:
-            shots.extend(csv.DictReader(handle))
-    shots.sort(key=lambda row: (int(row["distance"]),
-                                float(row["physical_error_probability"]),
-                                int(row["seed"])))
-    write_csv(shots, run_dir / "shots.csv")
+    shard_count = len((run_dir / "shards.tsv").read_text().splitlines())
+    shard_paths = [run_dir / "shards" / f"shard_{number}.csv"
+                   for number in range(1, shard_count + 1)]
+    missing = [path.name for path in shard_paths if not path.exists()]
+    if missing:
+        raise FileNotFoundError(f"{len(missing)} shards not decoded yet, "
+                                f"first: {missing[0]}")
 
     by_point = {}
-    for row in shots:
-        key = (int(row["distance"]),
-               float(row["physical_error_probability"]))
-        by_point.setdefault(key, []).append(row)
+    writer = None
+    with open(run_dir / "shots.csv", "w", newline="") as out:
+        for shard_path in shard_paths:
+            with open(shard_path) as handle:
+                for row in csv.DictReader(handle):
+                    if writer is None:
+                        writer = csv.DictWriter(out, fieldnames=list(row))
+                        writer.writeheader()
+                    writer.writerow(row)
+                    key = (int(row["distance"]),
+                           float(row["physical_error_probability"]))
+                    point = by_point.setdefault(
+                        key, {"shots": 0, "failures": 0, "wall": 0.0,
+                              "algorithm": row["algorithm"]})
+                    point["shots"] += 1
+                    point["failures"] += row["logical_failure"] == "True"
+                    point["wall"] += float(row["wall_seconds"])
+
     ler_rows = []
-    for (distance, probability), group in sorted(by_point.items()):
-        failures = sum(row["logical_failure"] == "True" for row in group)
-        low, high = wilson_interval(failures, len(group))
+    for (distance, probability), point in sorted(by_point.items()):
+        low, high = wilson_interval(point["failures"], point["shots"])
+        shot_rate = point["failures"] / point["shots"]
+        # a 10d-round shot is ten d-round chunks; papers report LER per
+        # d rounds (Toshio 2510.25222 Fig. 7), the production figure's
+        # convention
+        per_d_rounds = 1.0 - (1.0 - shot_rate) ** 0.1
         ler_rows.append({
             "distance": distance,
             "physical_error_probability": probability,
-            "algorithm": group[0]["algorithm"],
-            "shots": len(group), "failures": failures,
-            "logical_error_rate": failures / len(group),
+            "algorithm": point["algorithm"],
+            "shots": point["shots"], "failures": point["failures"],
+            "logical_error_rate": shot_rate,
+            "ler_per_d_rounds": per_d_rounds,
             "ler_wilson_low": low, "ler_wilson_high": high,
             "wall_seconds_per_shot": round(
-                sum(float(row["wall_seconds"]) for row in group)
-                / len(group), 6),
+                point["wall"] / point["shots"], 6),
             # ler_plot groups by (distance, round period); one lane,
             # one period
             "round_period_us": 0.0})
     write_csv(ler_rows, run_dir / "ler.csv")
-    ler_plot(ler_rows, run_dir / "ler.png")
-
     config = _run_config(run_dir)
+    ler_plot(ler_rows, run_dir / "ler.png", title=decoder_title(config))
+
     manifest = json.loads((run_dir / "manifest.json").read_text())
     write_manifest(config, run_dir, started_utc=manifest["started_utc"],
                    finished_utc=_now_utc())

@@ -90,6 +90,23 @@ class SyndromePackingOverflow(RuntimeError):
         super().__init__(f"controller packing capacity {capacity} is full at tick {tick}")
 
 
+@dataclass(frozen=True)
+class SyndromeRoundEvent:
+    """One recorded transition of one syndrome round through the
+    controller: the flight-recorder rows the run ledger is built from.
+    Append-only and passive; recording never schedules or decides.
+    Reassembly expiry raises instead of recording, so a finished run's
+    terminal states are PUBLISHED, DROPPED, or FEEDBACK_MEMORY_DELIVERED."""
+
+    kind: str            # EMITTED, BINARY_AVAILABLE, PACKED, CWB_SENT,
+                         # PUBLISHED, DROPPED, FEEDBACK_MEMORY_DELIVERED
+    tick: int
+    operation_id: object
+    round_index: int
+    patch_id: object = None
+    route: str = ""
+
+
 class _PackingSlotState(Enum):
     PARTIAL = auto()
     PACKED_WAIT = auto()
@@ -148,6 +165,8 @@ class SyndromePacking:
         self._next_route_index = 0
         self._arbitration_pending = False
         self._dropped_rounds: set = set()
+        # the flight-recorder rows (SyndromeRoundEvent), append-only
+        self.round_events: list = []
         self.reassembly_timeouts = 0
         self.packing_drops = 0
         connect_ready = getattr(window_input_receiver, "connect_window_input_ready_receiver", None)
@@ -161,6 +180,9 @@ class SyndromePacking:
         """Carry one readout over QC, then receive it after controller processing."""
         fragment = RetainedSyndromeFragment.from_payload(payload)
         fragment_count = payload.n_fragments
+        self.round_events.append(SyndromeRoundEvent(
+            "EMITTED", self.engine.now, fragment.operation_id,
+            fragment.round_index, fragment.patch_id, route.kind.name))
         attribution = self._round_attribution(
             fragment.operation_id, (fragment.patch_id,), fragment.round_index)
         qc_delay = self._reserve(LinkPath.QC, payload_bits=payload.size_bits,
@@ -180,6 +202,9 @@ class SyndromePacking:
 
     def _receive_fragment(self, fragment: RetainedSyndromeFragment, fragment_count: int,
                           route: SyndromePacketRoute) -> None:
+        self.round_events.append(SyndromeRoundEvent(
+            "BINARY_AVAILABLE", self.engine.now, fragment.operation_id,
+            fragment.round_index, fragment.patch_id, route.kind.name))
         round_key = (fragment.operation_id, fragment.round_index)
         if round_key in self._dropped_rounds:
             return
@@ -257,6 +282,9 @@ class SyndromePacking:
         priced later."""
         cwb_is_priced = LinkPath.CWB in self.links.paths
         publication_tick = None if cwb_is_priced else self.engine.now
+        self.round_events.append(SyndromeRoundEvent(
+            "PACKED", self.engine.now, context.round_key[0],
+            context.round_key[1], None, context.route.kind.name))
         raw_fragments = _merge_fragments_by_patch(context.fragments)
         # CWB carries the raw measurement bits; detection events exist
         # only from the decoder input (Buffer 0) onward
@@ -274,6 +302,9 @@ class SyndromePacking:
             if self.policy.overflow is PackingOverflowPolicy.DROP_ROUND:
                 self.packing_drops += 1
                 self._dropped_rounds.add(context.round_key)
+                self.round_events.append(SyndromeRoundEvent(
+                    "DROPPED", self.engine.now, context.round_key[0],
+                    context.round_key[1], None, context.route.kind.name))
                 return
             raise SyndromePackingOverflow(
                 tick=self.engine.now, route=context.route,
@@ -281,6 +312,10 @@ class SyndromePacking:
                 capacity=self.syndrome_buffer.capacity,
                 snapshot=self.packing_snapshot())
         self._packed_rounds.add(context.round_key)
+        if publication_tick is not None:
+            self.round_events.append(SyndromeRoundEvent(
+                "PUBLISHED", publication_tick, context.round_key[0],
+                context.round_key[1], None, context.route.kind.name))
         self.engine.log_io(
             "Buffer 0",
             lambda: f"received round {packet.round_index} of "
@@ -372,6 +407,9 @@ class SyndromePacking:
         delay_ticks = self._reserve(LinkPath.CWB, payload_bits=context.packet_bits,
                                     attribution=self._packet_attribution(packet))
         context.cwb_reserved = True
+        self.round_events.append(SyndromeRoundEvent(
+            "CWB_SENT", self.engine.now, context.round_key[0],
+            context.round_key[1], None, context.route.kind.name))
         context.state = _PackingSlotState.DRAINING
         self.engine.schedule(delay_ticks, lambda: self._deliver_window_input_round(context),
                              label="controller->syndrome buffer 0")
@@ -382,6 +420,9 @@ class SyndromePacking:
         if cwb_is_priced and not context.cwb_delivered:
             self.syndrome_buffer.mark_publication_tick(context.round_key, self.engine.now)
             context.cwb_delivered = True
+            self.round_events.append(SyndromeRoundEvent(
+                "PUBLISHED", self.engine.now, context.round_key[0],
+                context.round_key[1], None, context.route.kind.name))
         if self._refused_round_ahead_of(context):
             context.state = _PackingSlotState.PACKED_WAIT   # keep round order
             return False
@@ -419,6 +460,9 @@ class SyndromePacking:
     def _deliver_feedback_memory_round(self, context: _PackingContext,
                                        source_operation_id) -> None:
         self.feedback_memory_receiver.accept_feedback_memory_round(source_operation_id)
+        self.round_events.append(SyndromeRoundEvent(
+            "FEEDBACK_MEMORY_DELIVERED", self.engine.now, context.round_key[0],
+            context.round_key[1], None, context.route.kind.name))
         self.syndrome_buffer.release_round(context.round_key)
         self._release_context(context)
 

@@ -9,7 +9,6 @@ from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, Separa
 from decsim.protocols import BoundaryPolicy, IdlePolicy
 from decsim.run_spec import RunSpec
 from decsim.windows.windowing_schemes import SlidingTerminalPolicy, SlidingWindowScheme
-from decsim.windows.speculative_recovery import SpeculativeRecovery
 from decsim.decoders.weak_strong_switching import Baseline, Switching
 
 
@@ -123,8 +122,6 @@ def make_controller(idle_policy, *, live_streams=()):
         engine,
         qpu=qpu,
         window_manager=window_manager,
-        round_ticks=11,
-        code_geometry=geometry,
         resolved_operations=(),
         resolved_patches=(patch,),
         idle_policy=idle_policy,
@@ -160,50 +157,6 @@ def test_boundary_policies_decide_without_argument_validation():
     assert Held().on_commit(unchecked_window, final=True) is True
     assert Held().on_commit(unchecked_window, final=falsey_final) is falsey_final
     assert Held().on_commit(unchecked_window, final=truthy_final) is truthy_final
-
-
-def test_recovery_uses_optional_speculation_and_skips_inert_cases():
-    """Recovery honors an eager request while treating an absent request and inert cones as false."""
-    job = SimpleNamespace(op_id=4, window_id=2)
-
-    class InteractionProbe:
-        def __init__(self, fail_on_call=False):
-            self.fail_on_call = fail_on_call
-            self.invalidated_keys = []
-
-        def invalidated_windows(self, key, windows):
-            if self.fail_on_call:
-                raise AssertionError("inert recovery inspected the interaction")
-            self.invalidated_keys.append(key)
-            return ()
-
-    held_runtime = SimpleNamespace(
-        boundary_policy=Held(),
-        window_interaction=InteractionProbe(fail_on_call=True),
-    )
-    held_runtime._window_infos = lambda: {}
-    SpeculativeRecovery(held_runtime, double_window=False).begin(job, object())
-
-    eager_interaction = InteractionProbe()
-    eager_runtime = SimpleNamespace(
-        boundary_policy=Eager(),
-        window_interaction=eager_interaction,
-        windows={(4, 2): SimpleNamespace(dependents=[])},
-    )
-    eager_runtime._window_infos = lambda: {}
-    recovery = SpeculativeRecovery(eager_runtime, double_window=False)
-    recovery.begin(job, object())
-
-    double_runtime = SimpleNamespace(
-        boundary_policy=Eager(),
-        window_interaction=InteractionProbe(fail_on_call=True),
-    )
-    double_runtime._window_infos = lambda: {}
-    SpeculativeRecovery(double_runtime, double_window=True).begin(job, object())
-
-    assert Eager.speculative is True
-    assert eager_interaction.invalidated_keys == [(4, 2)]
-    assert not recovery.has_finality_blockers
 
 
 def test_policies_are_stateless():
@@ -261,7 +214,7 @@ def test_policy_module_has_no_registry_or_string_selector():
 
 
 def test_switching_validates_builtin_boundary_contexts():
-    """Switching rejects shipped boundary choices that conflict with dynamic or double windows."""
+    """Switching rejects boundary policies that conflict with serial or double windows."""
     scheme = SlidingWindowScheme(
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     )
@@ -272,9 +225,9 @@ def test_switching_validates_builtin_boundary_contexts():
     }
     switching = Switching(1.0, switching_source())
 
-    with pytest.raises(ValueError, match="static.*replay cone"):
+    with pytest.raises(ValueError, match="serial switching requires Held"):
         switching.validate_declared_run(
-            boundary_policy=Eager(), has_dynamic_streams=True, **common
+            boundary_policy=Eager(), has_dynamic_streams=False, **common
         )
     switching.validate_declared_run(
         boundary_policy=Held(), has_dynamic_streams=True, **common
@@ -558,3 +511,163 @@ def test_single_operation_run_charges_no_idle_work():
     assert completed.controller.idle_rounds_emitted == 0
     assert completed.window_manager.memory_filled_buffer_windows == 0
     assert not _idle_decode_labels(completed)
+
+
+# ----------------------------------------------------- online threshold
+
+
+def make_online_controller(*, target=0.5, threshold=2.0, step=0.1,
+                           audit_rate=1.0, kept_bad_budget=0.5,
+                           max_escalation_rate=0.9):
+    from decsim.decoders.weak_strong_switching import (
+        AuditLane, EscalationRateTracker, OnlineThresholdController)
+    tracker = EscalationRateTracker(
+        target_escalation_rate=target, threshold=threshold, step=step)
+    return OnlineThresholdController(
+        tracker=tracker, audit=AuditLane(audit_rate=audit_rate),
+        kept_bad_budget=kept_bad_budget, adjust_factor=2.0,
+        min_escalation_rate=1e-5, max_escalation_rate=max_escalation_rate)
+
+
+def test_escalation_rate_tracker_pins_the_target_rate():
+    """The adaptive conformal recursion holds the escalation fraction at
+    the target on a stationary gap stream (arXiv:2106.00170)."""
+    import random
+
+    from decsim.decoders.weak_strong_switching import EscalationRateTracker
+
+    tracker = EscalationRateTracker(
+        target_escalation_rate=0.1, threshold=4.6, step=0.05)
+    gap_stream = random.Random(7)
+    for _ in range(20000):
+        tracker.observe(gap_stream.gauss(9.0, 3.0))
+
+    assert abs(tracker.escalation_rate() - 0.1) < 0.01
+    assert tracker.threshold > 0.0
+
+
+def test_audit_lane_estimate_is_inverse_propensity_weighted():
+    """Each audited bad outcome stands for 1/audit_rate kept windows."""
+    from decsim.decoders.weak_strong_switching import AuditLane
+
+    lane = AuditLane(audit_rate=0.5)
+    for _ in range(100):
+        lane.record_kept()
+    lane.record_audit(weak_was_bad=True)
+    lane.record_audit(weak_was_bad=True)
+    lane.record_audit(weak_was_bad=False)
+
+    assert lane.audited_count == 3
+    assert lane.audited_bad_count == 2
+    assert lane.kept_bad_rate(total_window_count=200) == (2 / 0.5) / 200
+
+
+def test_one_bad_audit_raises_the_target_and_a_clean_quota_relaxes_it():
+    """Raising is immediate (one weighted event blows the budget); a
+    relax needs the full rule-of-three clean quota."""
+    controller = make_online_controller(target=0.1, kept_bad_budget=0.5)
+    quota = controller.relax_audit_quota()          # ceil(3 / 0.5) = 6
+
+    controller.record_audit_outcome(weak_was_bad=True)
+    assert controller.tracker.target_escalation_rate == pytest.approx(0.2)
+    assert controller.raise_count == 1
+
+    for _ in range(quota - 1):
+        controller.record_audit_outcome(weak_was_bad=False)
+    assert controller.relax_count == 0              # quota not yet reached
+    controller.record_audit_outcome(weak_was_bad=False)
+    assert controller.relax_count == 1
+    assert controller.tracker.target_escalation_rate == pytest.approx(0.1)
+
+
+def test_the_raised_target_respects_the_backlog_cap():
+    """The Theorem 1 duty cap bounds the target whatever the audits say."""
+    controller = make_online_controller(
+        target=0.6, kept_bad_budget=0.5, max_escalation_rate=0.9)
+    controller.record_audit_outcome(weak_was_bad=True)
+    assert controller.tracker.target_escalation_rate == pytest.approx(0.9)
+
+
+def test_calibrator_audits_kept_windows_and_labels_on_the_strong_result():
+    """An audited window escalates, and the strong result's agreement
+    with the stored weak observables is the label."""
+    import random
+
+    from decsim.decoders.weak_strong_switching import OnlineGapCalibrator
+
+    calibrator = OnlineGapCalibrator(
+        make_online_controller(target=0.0, threshold=0.0, step=0.0),
+        random.Random(0))                            # audit_rate=1: always audit
+    result = SimpleNamespace(
+        soft_output=SimpleNamespace(gap=5.0), logical_observables=(1, 0))
+    job = SimpleNamespace(op_id=1, window_id=4)
+
+    kept = calibrator.decide_keep(result, job)
+    assert kept is False                             # audits escalate
+    assert calibrator.summary()["pending_audits"] == 1
+
+    clean_strong = SimpleNamespace(logical_observables=(1, 0))
+    calibrator.absorb_strong_result((1, 4), clean_strong)
+    assert calibrator.controller.raise_count == 0
+    assert calibrator.summary()["pending_audits"] == 0
+
+    kept = calibrator.decide_keep(result, SimpleNamespace(op_id=1, window_id=5))
+    revised_strong = SimpleNamespace(logical_observables=(0, 0))
+    calibrator.absorb_strong_result((1, 5), revised_strong)
+    assert calibrator.controller.raise_count == 1
+
+    # a strong result that answers no audit (an ordinary escalation) is
+    # ignored rather than mislabeled
+    calibrator.absorb_strong_result((1, 6), clean_strong)
+    assert calibrator.controller.audit.audited_count == 2
+
+
+def test_switching_refuses_a_second_threshold_owner_and_double_window():
+    """The calibrator owns the live threshold: a register alongside it,
+    run_both_at_once, or double_window are refused."""
+    import random
+
+    from decsim.decoders.weak_strong_switching import (
+        OnlineGapCalibrator, ThresholdRegister)
+
+    calibrator = OnlineGapCalibrator(
+        make_online_controller(), random.Random(0))
+    with pytest.raises(ValueError, match="two owners"):
+        Switching(1.0, switching_source(),
+                  threshold_register=ThresholdRegister(1.0, switching_source()),
+                  threshold_calibrator=calibrator)
+    with pytest.raises(ValueError, match="nothing to audit"):
+        Switching(1.0, switching_source(), run_both_at_once=True,
+                  threshold_calibrator=calibrator)
+    with pytest.raises(ValueError, match="serial-only"):
+        Switching(1.0, switching_source(), double_window=True,
+                  threshold_calibrator=calibrator)
+
+
+def test_switching_keep_decision_delegates_to_the_calibrator():
+    """With a calibrator configured, the keep decision is the
+    controller's (which learns from every call), not the fixed
+    threshold's."""
+    import random
+
+    from decsim.decoders.weak_strong_switching import OnlineGapCalibrator
+
+    calibrator = OnlineGapCalibrator(
+        make_online_controller(target=0.0, threshold=10.0, step=0.0,
+                               audit_rate=1e-12),
+        random.Random(0))
+    switching = Switching(1.0, switching_source(),
+                          threshold_calibrator=calibrator)
+    source = switching_source()
+    job = SimpleNamespace(op_id=1, window_id=1, code=None)
+
+    below = SimpleNamespace(
+        soft_output=SimpleNamespace(gap=5.0, source=source),
+        logical_observables=(0,))
+    above = SimpleNamespace(
+        soft_output=SimpleNamespace(gap=15.0, source=source),
+        logical_observables=(0,))
+    assert switching._keep_weak_outcome(below, job) is False
+    assert switching._keep_weak_outcome(above, job) is True
+    assert calibrator.controller.tracker.window_count == 2
+    assert switching._keep_weak_outcome(None, job) is False

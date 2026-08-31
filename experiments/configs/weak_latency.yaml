@@ -1,0 +1,25 @@
+# The weak tier's decode-latency run (plot 2). Runs through the
+# closed-loop runner; every key is documented in reference.yaml.
+# The decoder card here names pymatching so the latency figure shows
+# measured software wall clock; the baseline's 0.028 LILLIPUT card is
+# flat in d by construction and appears on the figure as a reference
+# line. Corrections are identical either way (the card wraps the same
+# MWPM path), so LER stays consistent with the baseline.
+
+extends: weak_decoder_baseline.yaml
+
+decoder:
+  weak:
+    algorithm: pymatching
+    units: 1
+    unit_buffer_size: null
+    engine:
+      clock: fridge
+      fetch_cycles_per_round: 1
+      release_cycles_per_job: 10
+
+sweep:
+  - physical_error_probability: [0.001]
+    distance: [3, 5, 7, 9, 11]
+    round_period_us: [1.0]
+    shots: 500

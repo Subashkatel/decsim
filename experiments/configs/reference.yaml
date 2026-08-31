@@ -122,7 +122,14 @@ links:                             # one card per path; null = the logical_refer
                                    #     per-transfer DMA setup (setups serialize)
   qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # QPU -> controller, one readout
   cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: 1.0, channels: 8}  # controller -> Buffer 0 (the weak buffer), one round
-  csb: null                   # controller -> syndrome buffer 1 (the strong buffer), one round
+  csb: null                   # controller -> syndrome buffer 1 (the strong buffer), one round.
+                                   #   Parallel switching (run_both_at_once, a
+                                   #   Python-level Switching knob) builds the
+                                   #   strong job at weak readiness, so csb must
+                                   #   not lag the Buffer 0 publication path
+                                   #   (cwb); a slower csb refuses loudly at
+                                   #   strong-job build ("csb lag beyond the
+                                   #   escalation margin")
   wbd: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}   # Buffer 0 -> weak decoder, one window
   wsd: null                        # weak -> strong escalation decision
   sbd: null                        # syndrome buffer 1 -> strong decoder, one window

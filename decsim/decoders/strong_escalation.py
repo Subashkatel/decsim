@@ -713,6 +713,15 @@ class StrongEscalation:
         if restart_key is not None:
             guard = RephaseGuard(strong_request_key)
             sb1 = self.wm.syndrome_buffer_1
+            # the restart window's weak reads must still sit under its own
+            # window hold; once its weak decode is built the hold moves to
+            # the job, and a rephase can no longer claim those rounds
+            if not self.wm.syndrome_buffer.has_hold(restart_key):
+                raise RuntimeError(
+                    f"strong-region plan for {key} requires restart window "
+                    f"{restart_key}'s weak reads under its window hold, "
+                    f"which is no longer live (its weak decode already "
+                    f"consumed them)")
             guarded_weak = list(self.wm.syndrome_buffer.hold_round_identities(restart_key))
             guarded_weak += list(resolved_region.restart_read_keys)
             guarded_strong = list(sb1.hold_round_identities(PotentialStrong(key)))

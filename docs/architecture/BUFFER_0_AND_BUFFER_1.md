@@ -88,6 +88,13 @@ trusted weak -> cancel_strong: queued, crossing, running, or held
                requests all cancel idempotently.
 ```
 
+Parallel switching is only usable on cards where the CSB margin holds:
+the strong job is built AT weak-window readiness, so the two-sided
+context must already be stored in SB1 then. A csb latency beyond the
+Buffer 0 publication path (cwb) trips the same fail-loud check as the
+serial path, at build time ("csb lag beyond the escalation margin");
+pinned by `test_parallel_requires_the_csb_margin`.
+
 ### Double-window terminal escalation
 
 ```

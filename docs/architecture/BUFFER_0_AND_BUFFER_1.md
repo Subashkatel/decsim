@@ -1,7 +1,7 @@
 # Buffer 0 and syndrome buffer 1
 
 Two stores, two readiness authorities. The invariant form of this
-document is `validation/responsibility_audit_2026_08_30/buffer_contract.md`.
+document is `../validation/responsibility_audit_2026_08_30/buffer_contract.md`.
 All anchors verified at commit 65660a0.
 
 ## Buffer 0 (upstream store, weak lane)

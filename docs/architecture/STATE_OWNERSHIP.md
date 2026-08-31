@@ -3,7 +3,7 @@
 The rule: every mutable runtime fact has exactly one owner; everyone
 else reads through the owner or receives a notification. The exhaustive
 field-by-field table (created by / writers / readers / invariant /
-verdict) lives in `reports/DECSIM_RUNTIME_STATE_OWNERSHIP.md`; this file
+verdict) lives in `../reports/DECSIM_RUNTIME_STATE_OWNERSHIP.md`; this file
 records the ownership boundaries a change must not blur.
 
 ## Owners and their state

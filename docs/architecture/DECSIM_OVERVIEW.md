@@ -7,7 +7,7 @@ configurable links, buffers, decoder tiers, and windowing. The
 scientific outputs of one run are the logical operation results, the
 event log, link traffic, buffer occupancy, per-window decode tiers, and
 the Pauli-frame record sequence; the frozen suite in
-`validation/responsibility_audit_2026_08_30/` pins all of them.
+`../validation/responsibility_audit_2026_08_30/` pins all of them.
 
 The architecture has two phases, documented separately:
 
@@ -49,4 +49,4 @@ notification contracts: `BUFFER_0_AND_BUFFER_1.md`.
 2. `INITIALIZATION_FLOW.md`, then `RUNTIME_FLOW.md`.
 3. `BUFFER_0_AND_BUFFER_1.md` and `STRONG_REQUEST_LIFECYCLE.md`.
 4. `STATE_OWNERSHIP.md`; the exhaustive field table lives in
-   `reports/DECSIM_RUNTIME_STATE_OWNERSHIP.md`.
+   `../reports/DECSIM_RUNTIME_STATE_OWNERSHIP.md`.

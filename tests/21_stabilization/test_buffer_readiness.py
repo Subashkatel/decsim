@@ -1,6 +1,6 @@
 """Buffer 0 and syndrome buffer 1 readiness under declared ticks.
 
-Contract: validation/responsibility_audit_2026_08_30/buffer_contract.md.
+Contract: ../validation/responsibility_audit_2026_08_30/buffer_contract.md.
 Round r of a 1.0 us cadence is emitted at tick r us; every stage below
 adds its declared cost, so each assertion is exact arithmetic.
 """

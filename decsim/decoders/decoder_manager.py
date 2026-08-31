@@ -597,9 +597,10 @@ class DecoderManager:
         its flight and lift a full-pipeline stall. The caller's normal
         flow performs the compute offer unless offer_now says otherwise."""
         for slot, flights in self._pipeline_flights.items():
-            if job not in flights:
+            entry = next((f for f in flights if f[0] is job), None)
+            if entry is None:
                 continue
-            flights.remove(job)
+            flights.remove(entry)
             stalled = self._pipeline_stalled.get(slot)
             if stalled is not None and len(flights) < stalled[1]:
                 owner = stalled[0]
@@ -785,7 +786,18 @@ class DecoderManager:
                              label=f"decode_done({job.label})")
         if interval_ticks is not None:
             slot = (job.pool, job.unit)
-            self._pipeline_flights.setdefault(slot, []).append(job)
+            flights = self._pipeline_flights.setdefault(slot, [])
+            # in-order completion: a hardware pipeline retires in issue
+            # order, so every in-flight decode on one unit must declare
+            # the same latency; mixed latencies refuse loudly
+            mixed = [f for f, ticks in flights if ticks != latency_ticks]
+            if mixed:
+                raise RuntimeError(
+                    f"decode job {job.label!r} declares latency "
+                    f"{latency_ticks} ticks while {mixed[0].label!r} is in "
+                    f"flight with a different latency: a pipelined unit "
+                    f"completes in order and takes one latency per unit")
+            flights.append((job, latency_ticks))
             self.engine.schedule(
                 interval_ticks,
                 lambda s=slot, j=job, d=pipeline_depth:
@@ -1168,8 +1180,8 @@ class DecoderManager:
                 f"run ended with split-gap joins unresolved: "
                 f"{sorted(self._gap_joins)}")
         leftover_flights = sorted(
-            job.label for flights in self._pipeline_flights.values()
-            for job in flights)
+            flight_job.label for flights in self._pipeline_flights.values()
+            for flight_job, _ in flights)
         if leftover_flights:
             raise RuntimeError(
                 f"run ended with pipelined decodes still in flight: "

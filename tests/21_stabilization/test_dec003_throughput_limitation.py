@@ -194,3 +194,17 @@ def test_pipelined_decoder_validates_its_parameters():
         PipelinedDecoder(inner, 1e-9)
     with pytest.raises(ValueError, match="at least 1"):
         PipelinedDecoder(inner, 1.0, pipeline_depth=0)
+
+
+def test_pipelined_unit_refuses_mixed_inflight_latencies(fabric):
+    """In-order completion (criterion H's other half): a pipelined unit
+    takes one latency; a job declaring a different latency while another
+    is in flight refuses loudly instead of completing out of order."""
+    from decsim.decoders.decoders import FunctionLatencyDecoder
+
+    per_op_latency = {1: 100.0, 2: 50.0}
+    decoder = PipelinedDecoder(
+        FunctionLatencyDecoder(lambda job: per_op_latency[job.op_id]),
+        INITIATION_US)
+    with pytest.raises(RuntimeError, match="completes in order"):
+        _backlog_run(fabric, decoder=decoder, n_ops=2)

@@ -160,6 +160,57 @@ class PerRoundDecoder:
         return DecodeResult(job.op_id, job.window_id)
 
 
+class PipelinedDecoder:
+    """A pipelined decoder unit model: the DEC-003 pair of numbers.
+
+    Results return after the inner model's latency; a new job may START
+    on the same unit every ``initiation_interval_us``, with at most
+    ``pipeline_depth`` decodes in flight at once (default: the fully
+    occupied pipeline, ceil(latency / interval), computed per job). The
+    non-pipelined models above keep their exact meaning: occupancy equal
+    to latency is what "no initiation interval" means.
+
+    Serves plain window and external decodes; the strong tier, gap
+    siblings, and merged batches refuse a pipelined route until they get
+    their own design pass."""
+
+    def __init__(self, inner, initiation_interval_us: float,
+                 pipeline_depth: Optional[int] = None):
+        if not math.isfinite(initiation_interval_us) \
+                or initiation_interval_us <= 0:
+            raise ValueError("initiation_interval_us must be positive and finite")
+        if us(initiation_interval_us) == 0:
+            raise ValueError("initiation_interval_us is positive but rounds to zero ticks")
+        if pipeline_depth is not None and pipeline_depth < 1:
+            raise ValueError("pipeline_depth must be at least 1")
+        if getattr(inner, "run", None) is not None:
+            raise ValueError("PipelinedDecoder wraps an algorithm timing model, "
+                             "not a staged DecoderEngine")
+        self.inner = inner
+        self.initiation_interval_us = initiation_interval_us
+        self.pipeline_depth = pipeline_depth
+
+    @property
+    def fault_model_requirement(self):
+        return getattr(self.inner, "fault_model_requirement",
+                       NO_FAULT_MODEL_REQUIRED)
+
+    def run_seed_children(self):
+        """Expose the wrapped timing model to the seed graph."""
+        return (RunSeedChild((RunSeedPathSegment("field", "inner"),),
+                             self.inner),)
+
+    def latency(self, job: DecodeJob) -> int:
+        return self.inner.latency(job)
+
+    def initiation_interval(self, job: DecodeJob) -> int:
+        """Minimum ticks between consecutive starts on one unit."""
+        return us(self.initiation_interval_us)
+
+    def decode(self, job: DecodeJob) -> DecodeResult:
+        return self.inner.decode(job)
+
+
 class SwitchingRouter:
     """Route strong side jobs to the strong decoder and all other jobs to weak.
 

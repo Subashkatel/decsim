@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
 from typing import Callable, Optional
 
 from ..message import (DecodeJob, DecodeOutcome, DecodeResult,
@@ -137,6 +138,13 @@ class DecoderManager:
         # (pool, unit) -> the job holding or reserving the unit's compute
         # (from assignment through decode end), None when compute is free
         self._computing: dict = {}
+        # Pipelined units only (a routed decoder declaring an initiation
+        # interval): (pool, unit) -> decodes started and not yet finished,
+        # and (pool, unit) -> (owner, depth) when the pipeline is full and
+        # the intake stays claimed until the next completion. Both stay
+        # empty under non-pipelined decoders, whose occupancy IS latency.
+        self._pipeline_flights: dict = {}
+        self._pipeline_stalled: dict = {}
         self.log_name = log_name
         self._terminal_request_records = [] if capture_enabled else None
         self._terminal_service_records = [] if capture_enabled else None
@@ -391,6 +399,7 @@ class DecoderManager:
     def _free_unit(self, job: DecodeJob) -> None:
         """Compute finished: drop the job from its slot and offer the
         compute onward (the ping-pong swap at compute end)."""
+        self._end_flight(job, offer_now=False)
         pool, unit = job.pool, job.unit
         job.unit = None
         slot = (pool, unit)
@@ -434,14 +443,14 @@ class DecoderManager:
         if self._computing.get(slot) is not None:
             return
         for resident in self._residents(slot):
-            if resident.cancelled or resident.completed:
-                continue
+            if resident.cancelled or resident.completed or resident.service_started:
+                continue                 # an in-flight pipelined decode stays resident
             if resident.input_landed and not self._is_parked(resident):
                 self._computing[slot] = resident
                 self._begin_service(resident)
                 return
         for resident in self._residents(slot):
-            if resident.cancelled or resident.completed:
+            if resident.cancelled or resident.completed or resident.service_started:
                 continue
             if not resident.input_landed and self._startable(resident):
                 self._computing[slot] = resident   # starts at its landing
@@ -510,18 +519,98 @@ class DecoderManager:
         if not startable and (self.stage_admission is not None
                               and not self.stage_admission(job)):
             return None
+        resident_capacity = self._resident_capacity(job)
         free = set(self._free_units[pool])
         for unit in self._free_units[pool]:
             slot = (pool, unit)
-            if len(self._residents(slot)) < 2 and self._slot_memory_ok(slot, job):
+            if len(self._residents(slot)) < resident_capacity \
+                    and self._slot_memory_ok(slot, job):
                 return unit, startable
         for unit in range(self.unit_totals[pool]):
             slot = (pool, unit)
-            if unit in free or len(self._residents(slot)) >= 2:
+            if unit in free or len(self._residents(slot)) >= resident_capacity:
                 continue
             if self._slot_memory_ok(slot, job):
                 return unit, False
         return None
+
+    def _resident_capacity(self, job: DecodeJob) -> int:
+        """Two residents per unit (the depth-1 access-execute machine)
+        unless the routed decoder pipelines: then every in-flight decode
+        stays resident (its input lives in the unit's memory until its
+        result emerges) plus one landing next. Memory admission still
+        gates every resident, so a deep pipeline pays its SRAM price
+        visibly or refuses loudly."""
+        decoder = self.router.route(job)
+        if getattr(decoder, "initiation_interval", None) is None:
+            return 2
+        interval = decoder.initiation_interval(job)
+        depth = getattr(decoder, "pipeline_depth", None)
+        if depth is None:
+            depth = max(1, math.ceil(decoder.latency(job) / interval))
+        return depth + 1
+
+    def _initiation_interval_ticks(self, decoder, job: DecodeJob,
+                                   latency_ticks: int):
+        """(interval, depth) for a pipelined start, (None, None) otherwise.
+
+        The pipelined model serves plain window and external decodes
+        only; the strong tier, gap siblings, and merged batches keep
+        occupancy == latency until they get their own design pass, and a
+        pipelined route there refuses loudly rather than silently
+        serializing."""
+        interval_of = getattr(decoder, "initiation_interval", None)
+        if interval_of is None:
+            return None, None
+        members = job.service_original_request_keys or ()
+        if (job.strong_decode_for is not None
+                or job.gap_sibling_for is not None
+                or len(members) > 1):
+            raise RuntimeError(
+                f"decode job {job.label!r}: a pipelined decoder serves plain "
+                f"window or external decodes only; the strong tier, gap "
+                f"siblings, and merged batches are not pipelined yet")
+        interval = interval_of(job)
+        depth = getattr(decoder, "pipeline_depth", None)
+        if depth is None:
+            depth = max(1, math.ceil(latency_ticks / interval))
+        return interval, depth
+
+    def _initiation_complete(self, slot: tuple, job: DecodeJob,
+                             depth: int) -> None:
+        """The pipelined unit's intake is free again: release the compute
+        claim so the next start may begin, unless the pipeline is full;
+        a full pipeline keeps the claim until the next completion."""
+        if job.cancelled or job.completed:
+            return
+        if self._computing.get(slot) is not job:
+            return
+        if len(self._pipeline_flights.get(slot, ())) >= depth:
+            self._pipeline_stalled[slot] = (job, depth)
+            return
+        self._computing[slot] = None
+        self._offer_compute(slot)
+        self.try_dispatch()
+
+    def _end_flight(self, job: DecodeJob, offer_now: bool) -> None:
+        """A pipelined decode left the unit (done or cancelled): retire
+        its flight and lift a full-pipeline stall. The caller's normal
+        flow performs the compute offer unless offer_now says otherwise."""
+        for slot, flights in self._pipeline_flights.items():
+            if job not in flights:
+                continue
+            flights.remove(job)
+            stalled = self._pipeline_stalled.get(slot)
+            if stalled is not None and len(flights) < stalled[1]:
+                owner = stalled[0]
+                del self._pipeline_stalled[slot]
+                if (self._computing.get(slot) is owner
+                        and not owner.cancelled and not owner.completed):
+                    self._computing[slot] = None
+                    if offer_now:
+                        self._offer_compute(slot)
+                        self.try_dispatch()
+            return
 
     def _slot_memory_ok(self, slot: tuple, job: DecodeJob) -> bool:
         """A second resident joins only if the unit's memory holds both
@@ -689,8 +778,19 @@ class DecoderManager:
                       else decoder.decode(j))
             self._on_decode_done(j, result)
 
-        self.engine.schedule(decoder.latency(job), decode_now,
+        latency_ticks = decoder.latency(job)
+        interval_ticks, pipeline_depth = self._initiation_interval_ticks(
+            decoder, job, latency_ticks)
+        self.engine.schedule(latency_ticks, decode_now,
                              label=f"decode_done({job.label})")
+        if interval_ticks is not None:
+            slot = (job.pool, job.unit)
+            self._pipeline_flights.setdefault(slot, []).append(job)
+            self.engine.schedule(
+                interval_ticks,
+                lambda s=slot, j=job, d=pipeline_depth:
+                    self._initiation_complete(s, j, d),
+                label=f"initiation_complete({job.label})")
 
     def _spawn_gap_sibling(self, job: DecodeJob) -> None:
         """Submit the other forced-class solve to the gap pool.
@@ -863,6 +963,7 @@ class DecoderManager:
     def _on_decode_done(self, job: DecodeJob, result) -> None:
         """One decode finished: free the unit, ask the escalation_policy, commit or await strong."""
         if job.cancelled:
+            self._end_flight(job, offer_now=True)
             self.staging.release(job)
             self.try_dispatch()
             return
@@ -1066,6 +1167,13 @@ class DecoderManager:
             raise RuntimeError(
                 f"run ended with split-gap joins unresolved: "
                 f"{sorted(self._gap_joins)}")
+        leftover_flights = sorted(
+            job.label for flights in self._pipeline_flights.values()
+            for job in flights)
+        if leftover_flights:
+            raise RuntimeError(
+                f"run ended with pipelined decodes still in flight: "
+                f"{leftover_flights}")
         unsettled = self.strong.unsettled()
         held = [f"{m.pool}#{m.unit}" for m in self.decoder_memories.values()
                 if m.occupied_rounds]

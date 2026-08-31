@@ -98,7 +98,7 @@ Both registration passes are load-bearing; the overlap is idempotent.
 - The overlap registers twice safely: one object per id, and the
   `if op.id not in self._ops` guard makes the second call a no-op apart
   from rewriting the same mapping entry. Deterministic setup tests pin
-  this (`tests/16_stabilization/test_initialization_determinism.py`).
+  this (`tests/21_stabilization/test_initialization_determinism.py`).
 
 Dynamic streams use `_register_dynamic_stream`
 (window_manager.py:151-203) because their windows are created at

@@ -1,7 +1,7 @@
 """Switching and feedback under declared ticks: serial, parallel,
 double-window, the strong-result ledger, and the release chain.
 
-Contract: docs/architecture/STRONG_REQUEST_LIFECYCLE.md. The sampled
+Contract: ../docs/architecture/STRONG_REQUEST_LIFECYCLE.md (sandbox root). The sampled
 confidence decoder with probability 0.0 or 1.0 keeps every scenario
 deterministic; all times are exact arithmetic over the declared ticks.
 """

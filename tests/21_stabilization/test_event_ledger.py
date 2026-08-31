@@ -122,3 +122,134 @@ def test_check_detects_a_disappeared_round():
     orphan = LedgerEvent(event_id=0, kind="EMITTED", tick=us(1), op=1, round=1)
     with pytest.raises(RuntimeError, match="terminal states"):
         RunLedgerView(events=(orphan,)).check()
+
+
+def test_dropped_round_is_an_accounted_terminal_state():
+    """LINK-004 whole-run accounting including the drop path: with
+    DROP_ROUND policy and a one-round Buffer 0 that nobody drains, the
+    second round is dropped; the ledger records DROPPED as its terminal
+    state and the conservation check passes because the loss is
+    accounted, not silent."""
+    from types import SimpleNamespace
+
+    from decsim.controller.syndrome_packing import (PackingOverflowPolicy,
+                                                    SyndromePacking,
+                                                    SyndromePackingPolicy)
+    from decsim.engine import Engine
+    from decsim.message import QPUReadout, WINDOW_INPUT_ROUTE
+    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
+
+    engine = Engine(verbose=False)
+    packing = SyndromePacking(
+        engine, t_pack=0, packing_context_capacity=None,
+        window_input_receiver=SimpleNamespace(
+            accept_window_input=lambda packet: True),
+        feedback_memory_receiver=None,
+        syndrome_buffer=SyndromeBuffer(capacity=1),
+        policy=SyndromePackingPolicy(
+            overflow=PackingOverflowPolicy.DROP_ROUND))
+    for round_index in (1, 2):
+        packing.relay_qpu_readout(
+            QPUReadout(1, 0, round_index, size_bits=24),
+            WINDOW_INPUT_ROUTE, processing_ticks=0)
+    engine.run()
+
+    completed = SimpleNamespace(
+        syndrome_packing=packing, syndrome_buffer_1=None,
+        window_manager=SimpleNamespace(windows={}), pauli_frame=None,
+        execution_runtime=SimpleNamespace(decode_release_time={},
+                                          operations={}))
+    ledger = event_ledger(completed)
+    ledger.check()
+
+    terminals = {(event.round, event.kind) for event in ledger.events
+                 if event.status == "terminal"}
+    assert terminals == {(1, "PUBLISHED"), (2, "DROPPED")}
+    assert packing.packing_drops == 1
+
+
+_SWEEP_MODES = ("weak", "weak_blocked", "weak_pipelined", "strong",
+                "switching_keep", "switching_escalate",
+                "switching_parallel", "switching_double")
+
+
+@pytest.mark.parametrize("seed", range(24))
+def test_ledger_holds_over_randomized_configurations(fabric, seed):
+    """E2E-001 as a property: over seeded random configurations of every
+    run mode, the assembled ledger passes its causal and conservation
+    checks, every decoded window's input rounds are accounted for in a
+    store, and the window stamps are monotone."""
+    import random
+
+    from decsim.decoders.decoders import PipelinedDecoder, PresetLatencyDecoder
+    from decsim.qpu.round_policies import FixedRounds
+    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+    from decsim.run_spec import RunSpec
+
+    rng = random.Random(seed)
+    mode = _SWEEP_MODES[seed % len(_SWEEP_MODES)]
+    rounds = rng.randint(6, 9)
+    if mode == "weak":
+        ops = [fabric["memory_op"](op_id)
+               for op_id in range(1, rng.randint(1, 3) + 1)]
+        completed = fabric["weak_only_run"](rounds=rounds, ops=ops)
+    elif mode == "weak_blocked":
+        completed = fabric["weak_only_run"](
+            rounds=rounds, ops=[fabric["memory_op"](1),
+                                fabric["memory_op"](2, blocked_by=1)])
+    elif mode == "weak_pipelined":
+        spec = RunSpec(
+            ops=[fabric["memory_op"](op_id)
+                 for op_id in range(1, rng.randint(2, 4) + 1)],
+            d=3, rounds_policy=FixedRounds(rng.randint(3, 6)),
+            decoder=PipelinedDecoder(
+                PresetLatencyDecoder(100.0), 1.0,
+                pipeline_depth=rng.choice([None, 2, 3])),
+            links=fabric["declared_profile"](cwb=True, csb=False),
+            timing=fabric["declared_timing"](),
+            pauli_frame=PauliFrameConfig(
+                commit_us=fabric["DECLARED_US"]["frame"]),
+            seed=seed)
+        completed = spec.build()
+    elif mode == "strong":
+        completed = fabric["strong_only_run"](rounds=rounds)
+    elif mode == "switching_keep":
+        completed = fabric["switching_run"](rounds=rounds,
+                                            escalation_probability=0.0)
+    elif mode == "switching_escalate":
+        completed = fabric["switching_run"](rounds=rounds,
+                                            escalation_probability=1.0)
+    elif mode == "switching_parallel":
+        completed = fabric["switching_run"](
+            rounds=rounds, escalation_probability=1.0,
+            run_both_at_once=True, csb_us=2.0)
+    else:
+        completed = fabric["switching_run"](
+            rounds=rounds, escalation_probability=1.0, double_window=True)
+
+    ledger = event_ledger(completed)
+    ledger.check()
+
+    accounted_rounds = {(event.op, event.round) for event in ledger.events
+                        if event.kind in ("PUBLISHED", "STORED_SB1")}
+    emitted_hi = {}
+    for event in ledger.events:
+        if event.kind == "EMITTED":
+            emitted_hi[event.op] = max(emitted_hi.get(event.op, 0), event.round)
+    for window in completed.window_manager.windows.values():
+        if window.t_done is None:
+            continue
+        # a sliding window's lookahead range is clamped to the operation's
+        # actual rounds, exactly as the window manager reads it
+        # (window_manager.py _read_keys_for_bounds)
+        input_hi = min(window.buffer_hi, emitted_hi[window.op_id])
+        for round_index in range(window.start_round, input_hi + 1):
+            assert (window.op_id, round_index) in accounted_rounds, \
+                (f"{mode} seed {seed}: window ({window.op_id}) decoded round "
+                 f"{round_index} that no store ever accounted for")
+        stamps = [tick for tick in (window.t_first_round,
+                                    window.t_data_complete, window.t_queued,
+                                    window.t_dispatch, window.t_done)
+                  if tick is not None]
+        assert stamps == sorted(stamps), \
+            f"{mode} seed {seed}: window stamps not monotone: {stamps}"

@@ -175,6 +175,7 @@ def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry
         state=_PackingSlotState.PACKED_WAIT,
     )
     packing = object.__new__(SyndromePacking)
+    packing.round_events = []
     packing.engine = engine
     packing.links = links
     packing.window_input_receiver = receiver
@@ -216,6 +217,7 @@ def test_unwired_legacy_packing_delivery_is_immediate_and_has_no_cwb_publication
         cwb_delivered=False, state=_PackingSlotState.PACKED_WAIT,
     )
     packing = object.__new__(SyndromePacking)
+    packing.round_events = []
     packing.engine = engine
     packing.links = links
     packing.window_input_receiver = receiver

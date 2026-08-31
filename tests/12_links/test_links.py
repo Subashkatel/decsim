@@ -1112,7 +1112,8 @@ def test_yaml_card_key_reaches_the_edge(tmp_path):
         "windowing: {scheme: sliding, commit_rounds: null, buffer_rounds: null}\n"
         "sweep: [{physical_error_probability: [0.001], distance: [3],\n"
         "         round_period_us: [1.0], shots: 1}]\n"
-        "controller: {clock: fridge, t_binary_availability_cycles: 0, t_pack_cycles: 0}\n"
+        "controller: {clock: fridge, measurement_signal_to_classical_bits_cycles: 0, "
+        "t_pack_cycles: 0, instruction_or_decision_to_analog_control_pulse_cycles: 0}\n"
         "clocks: {fridge: 250.0, room: 250.0}\n"
         "links:\n"
         "  qc:  {latency_cycles: 250, clock: fridge, bits_per_cycle: null}\n"
@@ -1163,3 +1164,34 @@ def test_serialization_never_ends_before_the_exact_transmission_time():
         assert reservation.serialization_ticks - exact_ticks < 1, \
             f"{payload_bits} bits at {rate} bits/us inflated by a full tick"
         assert reservation.serialization_ticks == expected_ticks
+
+
+def test_serialization_respects_the_declared_decimal_rate_for_large_payloads():
+    """LINK-002 also applies to a decimal-valued parameter card.
+
+    Treating the binary float's hidden expansion as the physical bandwidth can
+    move the ceiling down by one tick for a long transfer.  The value written
+    in the card is 0.20846 bits/us, so that decimal quantity is the referent.
+    """
+    from fractions import Fraction
+    import math
+
+    from decsim.config import TICKS_PER_US
+
+    payload_bits = 400_310_292
+    declared_rate = 0.20846
+    capacity = LinkCapacityConfig(
+        declared_rate,
+        LinkQuantityBasis.DIRECT_AGGREGATE,
+        None,
+        "decimal parameter-card regression",
+    )
+    reservation = Link(
+        make_channel(capacity=capacity, propagation_ticks=0)
+    ).reserve(payload_bits=payload_bits, now_ticks=0)
+    exact_declared_ticks = (
+        Fraction(payload_bits) * TICKS_PER_US / Fraction(str(declared_rate))
+    )
+
+    assert reservation.serialization_ticks == math.ceil(exact_declared_ticks)
+    assert reservation.serialization_ticks >= exact_declared_ticks

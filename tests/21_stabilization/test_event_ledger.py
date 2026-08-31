@@ -90,21 +90,37 @@ def test_switching_run_ledger_checks(fabric):
 
 def test_release_links_to_the_blocking_operations_commit(fabric):
     """A blocked operation's release decision is caused by the BLOCKING
-    operation's final commit and costs exactly oc + cq."""
+    operation's final commit. OC makes the decision available at the
+    controller; the actual command then crosses controller output and CQ."""
     completed = fabric["weak_only_run"](
         rounds=6, ops=[fabric["memory_op"](1),
                        fabric["memory_op"](2, blocked_by=1)])
     ledger = event_ledger(completed)
     ledger.check()
 
+    (decision,) = [event for event in ledger.events
+                   if event.kind == "DECISION_AVAILABLE" and event.op == 2]
     (release,) = [event for event in ledger.events
-                  if event.kind == "DECODE_RELEASED"]
+                  if event.kind == "DECODE_RELEASED" and event.op == 2]
+    (issued,) = [event for event in ledger.events
+                 if event.kind == "CONTROL_PULSE_COMMAND_ISSUED" and event.op == 2]
+    (arrived,) = [event for event in ledger.events
+                  if event.kind == "QPU_COMMAND_ARRIVED" and event.op == 2]
+    (started,) = [event for event in ledger.events
+                  if event.kind == "QPU_COMMAND_STARTED" and event.op == 2]
     events_by_id = {event.event_id: event for event in ledger.events}
-    cause = events_by_id[release.prev_event_id]
-    oc_cq = us(fabric["DECLARED_US"]["oc"] + fabric["DECLARED_US"]["cq"])
+    cause = events_by_id[decision.prev_event_id]
     assert release.op == 2
     assert (cause.kind, cause.op) == ("FRAME_COMMITTED", 1)
-    assert release.tick == cause.tick + oc_cq
+    assert decision.tick == cause.tick + us(fabric["DECLARED_US"]["oc"])
+    assert release.tick == decision.tick
+    assert issued.tick == release.tick
+    assert arrived.tick == issued.tick + us(fabric["DECLARED_US"]["cq"])
+    assert started.tick == arrived.tick
+    assert release.prev_event_id == decision.event_id
+    assert issued.prev_event_id == release.event_id
+    assert arrived.prev_event_id == issued.event_id
+    assert started.prev_event_id == arrived.event_id
 
 
 def test_check_detects_an_effect_before_its_cause():
@@ -152,6 +168,56 @@ def test_dropped_round_is_an_accounted_terminal_state():
         packing.relay_qpu_readout(
             QPUReadout(1, 0, round_index, size_bits=24),
             WINDOW_INPUT_ROUTE, processing_ticks=0)
+    engine.run()
+
+    completed = SimpleNamespace(
+        syndrome_packing=packing, syndrome_buffer_1=None,
+        window_manager=SimpleNamespace(windows={}), pauli_frame=None,
+        execution_runtime=SimpleNamespace(decode_release_time={},
+                                          operations={}))
+    ledger = event_ledger(completed)
+    ledger.check()
+
+    terminals = {(event.round, event.kind) for event in ledger.events
+                 if event.status == "terminal"}
+    assert terminals == {(1, "PUBLISHED"), (2, "DROPPED")}
+    assert packing.packing_drops == 1
+
+
+def test_reassembly_context_drop_is_an_accounted_terminal_state():
+    """LINK-004 applies before packing as well as at Buffer 0 admission.
+
+    Hold one fragmented round open in the controller's sole reassembly slot,
+    then deliver another round.  DROP_ROUND must leave a terminal ledger row
+    for the rejected round instead of changing only an internal counter.
+    """
+    from types import SimpleNamespace
+
+    from decsim.controller.syndrome_packing import (PackingOverflowPolicy,
+                                                    SyndromePacking,
+                                                    SyndromePackingPolicy)
+    from decsim.engine import Engine
+    from decsim.message import QPUReadout, WINDOW_INPUT_ROUTE
+    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
+
+    engine = Engine(verbose=False)
+    packing = SyndromePacking(
+        engine, t_pack=0, packing_context_capacity=1,
+        window_input_receiver=SimpleNamespace(
+            accept_window_input=lambda packet: True),
+        feedback_memory_receiver=None,
+        syndrome_buffer=SyndromeBuffer(capacity=None),
+        policy=SyndromePackingPolicy(
+            overflow=PackingOverflowPolicy.DROP_ROUND))
+    # Event insertion order makes round 1 occupy the context, round 2 lose
+    # admission, and the final fragment then complete round 1.
+    for payload in (
+        QPUReadout(1, 0, 1, n_fragments=2, fragment_index=0, size_bits=12),
+        QPUReadout(1, 0, 2, size_bits=24),
+        QPUReadout(1, 0, 1, n_fragments=2, fragment_index=1, size_bits=12),
+    ):
+        packing.relay_qpu_readout(payload, WINDOW_INPUT_ROUTE,
+                                  processing_ticks=0)
     engine.run()
 
     completed = SimpleNamespace(

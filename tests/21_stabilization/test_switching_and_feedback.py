@@ -227,8 +227,8 @@ def test_no_feedback_when_none_is_required(fabric):
 
 
 def test_release_travels_oc_then_cq_with_exact_cost(fabric):
-    """The blocked successor's release lands frame-commit + oc 2 + cq 2
-    later, and the successor starts on that boundary."""
+    """The release reaches the controller after OC; the actual successor
+    command reaches the QPU after CQ and starts on that boundary."""
     ops = [fabric["memory_op"](1), fabric["memory_op"](2, blocked_by=1)]
     completed = fabric["weak_only_run"](rounds=6, ops=ops)
     runtime = completed.execution_runtime
@@ -236,8 +236,8 @@ def test_release_travels_oc_then_cq_with_exact_cost(fabric):
     blocker_commit = next(r.committed_ticks for r in frame_records
                           if r.window_key == (1, 0))
 
-    assert runtime.decode_release_time[2] == blocker_commit + us(2 + 2)
-    assert runtime.op_start_time[2] == runtime.decode_release_time[2]
+    assert runtime.decode_release_time[2] == blocker_commit + us(2)
+    assert runtime.op_start_time[2] == blocker_commit + us(2 + 2)
 
 
 def test_successor_cannot_start_before_its_release(fabric):

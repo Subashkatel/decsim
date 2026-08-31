@@ -244,8 +244,7 @@ def link_model(config: ExperimentConfig):
                 us_ticks(card.transfer_overhead_us), source)
         edge_overrides[path] = replace(getattr(profile, path), channel=channel,
                                        transfer_overhead=overhead)
-    # The config prices controller processing on its own line
-    # (controller.t_binary_availability_us), so its qc card is link
+    # The config prices readout classification on its own line, so its QC card is link
     # propagation only; the attestation lets a nonzero processing cost run.
     return replace(profile, **edge_overrides,
                    profile_name=f"{config.name}.yaml",
@@ -398,8 +397,11 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
     engine = decoder_engine(config)
     timing = TimingConfig(
         round_us=round_period_us,
-        t_binary_availability_us=config.controller.t_binary_availability_us,
-        t_pack_us=config.controller.t_pack_us)
+        measurement_signal_to_classical_bits_us=
+            config.controller.measurement_signal_to_classical_bits_us,
+        t_pack_us=config.controller.t_pack_us,
+        instruction_or_decision_to_analog_control_pulse_us=
+            config.controller.instruction_or_decision_to_analog_control_pulse_us)
     scheme = WINDOWING_SCHEMES[config.windowing.scheme]()
     routing = {"decoder": engine, "num_units": config.active_decoder.units}
     if config.mode == "switching":

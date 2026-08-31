@@ -90,21 +90,37 @@ def test_switching_run_ledger_checks(fabric):
 
 def test_release_links_to_the_blocking_operations_commit(fabric):
     """A blocked operation's release decision is caused by the BLOCKING
-    operation's final commit and costs exactly oc + cq."""
+    operation's final commit. OC makes the decision available at the
+    controller; the actual command then crosses controller output and CQ."""
     completed = fabric["weak_only_run"](
         rounds=6, ops=[fabric["memory_op"](1),
                        fabric["memory_op"](2, blocked_by=1)])
     ledger = event_ledger(completed)
     ledger.check()
 
+    (decision,) = [event for event in ledger.events
+                   if event.kind == "DECISION_AVAILABLE" and event.op == 2]
     (release,) = [event for event in ledger.events
-                  if event.kind == "DECODE_RELEASED"]
+                  if event.kind == "DECODE_RELEASED" and event.op == 2]
+    (issued,) = [event for event in ledger.events
+                 if event.kind == "CONTROL_PULSE_COMMAND_ISSUED" and event.op == 2]
+    (arrived,) = [event for event in ledger.events
+                  if event.kind == "QPU_COMMAND_ARRIVED" and event.op == 2]
+    (started,) = [event for event in ledger.events
+                  if event.kind == "QPU_COMMAND_STARTED" and event.op == 2]
     events_by_id = {event.event_id: event for event in ledger.events}
-    cause = events_by_id[release.prev_event_id]
-    oc_cq = us(fabric["DECLARED_US"]["oc"] + fabric["DECLARED_US"]["cq"])
+    cause = events_by_id[decision.prev_event_id]
     assert release.op == 2
     assert (cause.kind, cause.op) == ("FRAME_COMMITTED", 1)
-    assert release.tick == cause.tick + oc_cq
+    assert decision.tick == cause.tick + us(fabric["DECLARED_US"]["oc"])
+    assert release.tick == decision.tick
+    assert issued.tick == release.tick
+    assert arrived.tick == issued.tick + us(fabric["DECLARED_US"]["cq"])
+    assert started.tick == arrived.tick
+    assert release.prev_event_id == decision.event_id
+    assert issued.prev_event_id == release.event_id
+    assert arrived.prev_event_id == issued.event_id
+    assert started.prev_event_id == arrived.event_id
 
 
 def test_check_detects_an_effect_before_its_cause():

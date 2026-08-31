@@ -94,7 +94,13 @@ sweep:
 controller:                        # controller work per round, in cycles of its
                                    # named clock domain
   clock: fridge
-  t_binary_availability_cycles: 0  # pulses -> binary classification cost; zero:
+  measurement_signal_to_classical_bits_cycles: 0  # post-QC classification;
+                                                    # the QPU measurement window
+                                                    # remains in the QEC cycle
+  instruction_or_decision_to_analog_control_pulse_cycles: 0  # online branch,
+                                                               # sequencing, pulse
+                                                               # generation; CQ is
+                                                               # a separate link
                                    # classification is inside the priced round
                                    # (Google 2023 Nature 614, Methods)
   t_pack_cycles: 0                 # packet assembly cost per round; zero: one

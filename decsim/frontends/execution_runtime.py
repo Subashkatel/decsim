@@ -152,6 +152,10 @@ class ExecutionRuntime:
             return
         if not self.controller.can_start(operation):
             return
+        # the provisional stamp marks the operation as started before
+        # issue_operation runs: issuing can retry ready operations, and a
+        # reentrant _maybe_begin must not issue this one twice; the QPU's
+        # actual start boundary then replaces the stamp
         self.op_start_time[operation.id] = self.engine.now
         idle_rounds = self.consume_idle_rounds(operation)
         self.op_start_time[operation.id] = self.controller.issue_operation(operation, idle_rounds)

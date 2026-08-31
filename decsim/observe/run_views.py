@@ -405,6 +405,7 @@ def event_ledger(completed) -> RunLedgerView:
 
     # controller chain, from the packing stage's own records
     last_of_round: dict = {}
+    packed_of_round: dict = {}
     for event in completed.syndrome_packing.round_events:
         key = (event.operation_id, event.round_index)
         terminal = event.kind in ("PUBLISHED", "DROPPED",
@@ -415,8 +416,12 @@ def event_ledger(completed) -> RunLedgerView:
                   prev=last_of_round.get(key),
                   status="terminal" if terminal else "")
         last_of_round[key] = row
+        if event.kind == "PACKED":
+            packed_of_round[key] = row
 
-    # the dual write's landing in syndrome buffer 1
+    # the dual write's landing in syndrome buffer 1: its cause is the
+    # PACKED round, because CSB leaves packing in parallel with the CWB
+    # publication and a fast csb legitimately lands first
     stored_of_round: dict = {}
     room_store = completed.syndrome_buffer_1
     if room_store is not None:
@@ -424,7 +429,7 @@ def event_ledger(completed) -> RunLedgerView:
             key = (operation_id, round_index)
             stored_of_round[key] = add(
                 "STORED_SB1", tick, operation_id, round=round_index,
-                prev=last_of_round.get(key))
+                prev=packed_of_round.get(key))
 
     # window chains, from the window stamps
     frame_prev: dict = {}

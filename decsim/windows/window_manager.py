@@ -9,7 +9,6 @@ _submit_window_decode, on_decode_done, _commit_window."""
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from types import MappingProxyType
@@ -18,14 +17,14 @@ from typing import Callable, Optional
 from ..message import (DecodeJob,
                       DecodeResult, DecoderRequestKey, DecoderTier, LogicalContribution,
                       Operation,
-                      SeamFaultOwner, StrongDecodeCompletion, StrongRegionPlan,
+                      StrongDecodeCompletion,
                       SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
                       WindowPlan, WindowProtocol, WindowReadiness,
                       stable_identity_order_key)
 from ..decoders.strong_escalation import NoStrongTier, StrongEscalation
 from ..links.links import LinkPath, RequestTransferRelation, TrafficAttribution
-from ..syndrome_buffer.syndrome_buffer import (CsdInput, DecoderInputHold, PendingStrong,
-                                               PotentialStrong, RephaseGuard, SyndromeBuffer)
+from ..syndrome_buffer.syndrome_buffer import (DecoderInputHold, PendingStrong,
+                                               PotentialStrong, SyndromeBuffer)
 from ..syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
 from .dynamic_windows import DynamicWindows
 from .committed_rounds import LogicalLedger

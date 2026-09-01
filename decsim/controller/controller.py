@@ -11,6 +11,7 @@ from types import MappingProxyType
 from typing import Callable
 
 from ..links.links import LinkPath, TrafficAttribution
+from ..qpu.cycle_clock import patches_of
 from ..message import (Decision, Operation, QPUReadout, RunOperationBody,
                        SyndromePacketRoute, SyndromePayload, normalize_binary_bits)
 
@@ -58,6 +59,10 @@ class Controller:
         self._resolved_patches = MappingProxyType({
             patch.patch_identity: patch for patch in resolved_patches})
         self.idle_rounds_emitted = 0
+        # idle rounds per patch not yet covered by a load-only decode job,
+        # and the index of the latest one (it names the job)
+        self._uncharged_idle_rounds_by_patch: dict = {}
+        self._last_idle_round_index_by_patch: dict = {}
         self.output_events: list[ControllerOutputEvent] = []
 
     def round_ticks_for(self, operation: Operation) -> int:
@@ -96,6 +101,8 @@ class Controller:
         it can enter the QPU.
         """
         self.streams.begin(operation)
+        for patch in patches_of(operation):
+            self.end_idle_period(operation, patch)
         if idle_rounds:
             self.window_manager.prepend_idle_rounds(operation.id, idle_rounds)
         self._log_start(operation)
@@ -208,15 +215,41 @@ class Controller:
 
     def submit_idle_decode_if_due(self, operation: Operation, patch,
                                   round_index: int) -> None:
-        """Every commit region of idle rounds costs one load-only decode job."""
+        """Count one idle round toward the patch's next decode job and charge
+        the job once a full commit region of idle rounds has accumulated."""
+        geometry = self._resolved_patches[patch].code_geometry
+        uncharged_rounds = self._uncharged_idle_rounds_by_patch.get(patch, 0) + 1
+        self._uncharged_idle_rounds_by_patch[patch] = uncharged_rounds
+        if uncharged_rounds == geometry.commit_round_count:
+            self._submit_idle_decode(operation, patch, uncharged_rounds, round_index)
+            self._uncharged_idle_rounds_by_patch[patch] = 0
+        self._last_idle_round_index_by_patch[patch] = round_index
+
+    def submit_idle_decode_for_remaining_rounds(self, operation: Operation,
+                                                patch) -> None:
+        """Charge the idle rounds left after the last full commit region as
+        one shorter job; every idle round is decoded."""
+        uncharged_rounds = self._uncharged_idle_rounds_by_patch.pop(patch, 0)
+        last_round_index = self._last_idle_round_index_by_patch.pop(patch, 0)
+        if uncharged_rounds:
+            self._submit_idle_decode(operation, patch, uncharged_rounds, last_round_index)
+
+    def _submit_idle_decode(self, operation: Operation, patch,
+                            idle_round_count: int, round_index: int) -> None:
+        """One load-only decode job for a region of idle rounds, sized to
+        those rounds plus the buffer rounds a window reads past them."""
         patch_record = self._resolved_patches[patch]
         geometry = patch_record.code_geometry
-        if round_index % geometry.commit_round_count == 0:
-            self.window_manager.accept_idle_decode_demand(
-                rounds=geometry.commit_round_count + geometry.buffer_round_count,
-                code=geometry.code_name,
-                spatial_nodes=patch_record.spatial_node_count,
-                label=f"mem({operation.name},r{round_index})")
+        self.window_manager.accept_idle_decode_demand(
+            rounds=idle_round_count + geometry.buffer_round_count,
+            code=geometry.code_name,
+            spatial_nodes=patch_record.spatial_node_count,
+            label=f"mem({operation.name},r{round_index})")
+
+    def end_idle_period(self, operation: Operation, patch) -> None:
+        """An operation claims the patch: the idle policy settles the idle
+        rounds it has not charged yet."""
+        self.idle_policy.end_idle_period(self, operation, patch)
 
     # ---- readouts and instructions
 

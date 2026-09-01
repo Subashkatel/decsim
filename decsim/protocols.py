@@ -210,9 +210,13 @@ class WindowInteraction(Protocol):
 class IdlePolicy(Protocol):
     """How idle rounds travel while an op waits for feedback (see
     controller/policies.py for the three built-in policies). relay() carries
-    one idle round through the controller it is given."""
+    one idle round through the controller it is given; end_idle_period()
+    runs when an operation claims the patch, so rounds the policy has not
+    charged yet can be settled."""
 
     def relay(self, controller, operation, patch, round_index: int) -> None: ...
+
+    def end_idle_period(self, controller, operation, patch) -> None: ...
 
 
 # -------------------------------------------------------------- decode stage

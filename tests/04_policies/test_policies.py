@@ -25,6 +25,9 @@ class ExternalIdlePolicy:
         self.relayed.append((operation, patch, round_index))
         controller.emit_memory_round(operation, patch, round_index)
 
+    def end_idle_period(self, controller, operation, patch):
+        pass
+
 
 class EngineProbe:
     def __init__(self):
@@ -300,6 +303,24 @@ def test_separate_decode_jobs_submits_only_complete_idle_regions():
             "label": "mem(logical-cnot,r4)",
         },
     ]
+
+
+def test_separate_decode_jobs_charges_the_trailing_idle_region_when_the_patch_is_claimed():
+    """Idle rounds left over after the last complete commit region are
+    still decoded: when an operation claims the patch, the remainder costs
+    one load-only job sized to those rounds plus the buffer. SWIPER's
+    window builder flushes dangling rounds into a shorter window rather
+    than dropping them (swiper/window_builder.py, flush)."""
+    controller, _, _, window_manager = make_controller(SeparateDecodeJobs())
+    operation = controller.runtime.operations[7]
+
+    for round_index in (1, 2, 3, 4, 5):
+        controller.emit_idle_round(7, "patch-a", round_index)
+    controller.end_idle_period(operation, "patch-a")
+    controller.end_idle_period(operation, "patch-a")
+
+    assert [demand["rounds"] for demand in window_manager.idle_demands] == [3, 3, 2]
+    assert window_manager.idle_demands[-1]["label"] == "mem(logical-cnot,r5)"
 
 
 def test_an_external_idle_policy_relays_through_the_controller():

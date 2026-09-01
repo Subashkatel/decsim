@@ -489,7 +489,7 @@ class Switching:
         submissions = [Submission(weak_job)]
         if self.run_both_at_once:              # parallel: no ws delay (dm:109-110)
             strong = services.make_strong_job(
-                weak_job, self.strong_redo_rounds(window),
+                weak_job,
                 getattr(weak_job, "strong_label", f"strong({weak_job.label})"))
             submissions.append(Submission(strong, delay_ticks=0))
         return submissions
@@ -511,8 +511,7 @@ class Switching:
             strong_request_key = services.defer_strong_escalation(job)
         elif not self.run_both_at_once:        # serial: redo after ws (dm:153-154)
             strong = services.make_strong_job(
-                job, self.strong_redo_rounds(job.window),
-                getattr(job, "strong_label", f"strong({job.label})"))
+                job, getattr(job, "strong_label", f"strong({job.label})"))
             extra = Submission(strong)
             strong_request_key = strong.request_key
         return OutcomeDirective(
@@ -642,9 +641,3 @@ class Switching:
             )
         return result.soft_output.gap >= threshold
 
-    @staticmethod
-    def strong_redo_rounds(window) -> int:
-        """Rounds the strong decoder reprocesses: commit + 2*buffer."""
-        commit = window.commit_hi - window.commit_lo + 1
-        buffer = window.buffer_hi - window.commit_hi
-        return commit + 2 * buffer

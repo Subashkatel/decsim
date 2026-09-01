@@ -82,8 +82,7 @@ class RunSeedComposite(Protocol):
 class EscalationServices(Protocol):
     """Strong-job construction and strong-result selection offered to an escalation policy."""
 
-    def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
-                        label: str) -> DecodeJob: ...
+    def make_strong_job(self, weak_job: DecodeJob, label: str) -> DecodeJob: ...
 
     def defer_strong_escalation(
         self, weak_job: DecodeJob,

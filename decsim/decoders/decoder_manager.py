@@ -641,14 +641,22 @@ class DecoderManager:
         demand = sum(self._memory_demand(resident) for resident in live)
         return demand + self._memory_demand(job) <= capacity
 
-    @staticmethod
-    def _memory_demand(job: DecodeJob) -> int:
+    def _memory_demand(self, job: DecodeJob) -> int:
         """The rounds a job's input occupies in unit memory: the distinct
-        rounds of its payloads, the same count the deposit charges; an
-        external job carries no syndrome data and stores nothing."""
+        rounds of its payloads, the same count the deposit charges. An
+        external job carries no syndrome data and stores nothing; a merged
+        batch stores every member's input."""
         if job.on_done is not None:
             return 0
+        if self._is_merged_batch(job):
+            return sum(count_decoder_input_round_demand(member.payloads)
+                       for member in self.strong.members_of(job))
         return count_decoder_input_round_demand(job.payloads)
+
+    @staticmethod
+    def _is_merged_batch(job: DecodeJob) -> bool:
+        """A batch serves several strong requests and has no request of its own."""
+        return job.request_key is None and job.strong_decode_for is not None
 
     def _next_job(self, pool: str, queue: list) -> DecodeJob:
         if self.bulk_strong and pool != "default":
@@ -657,11 +665,18 @@ class DecoderManager:
         return self.scheduler.pop(queue)
 
     def _merge_strong_batch(self, queue: list) -> DecodeJob:
-        """Batch queued strong jobs (timing-only) into one decode."""
-        jobs = [
-            self.scheduler.pop(queue)
-            for _ in range(len(queue))
-        ]
+        """Batch every queued strong job (timing-only) into one decode.
+
+        A batch that found no unit last time waits in the queue like any job;
+        it is opened back into its member requests here so the new batch
+        serves every request exactly once."""
+        jobs = []
+        for _ in range(len(queue)):
+            queued = self.scheduler.pop(queue)
+            if self._is_merged_batch(queued):
+                jobs.extend(self.strong.members_of(queued))
+            else:
+                jobs.append(queued)
         if len(jobs) > 1:
             for job in jobs:
                 has_model = job.dem is not None
@@ -677,9 +692,10 @@ class DecoderManager:
             jobs[0].service_original_request_keys = request_keys
             return jobs[0]
         total = sum(j.n_rounds for j in jobs)
+        # the batch is decoded like any strong job: its timing-only result is
+        # split into one empty completion per member request at decode end
         batch = DecodeJob(op_id=-1, window_id=0, n_rounds=total,
                           ready_time=min(j.ready_time for j in jobs),
-                          on_done=lambda: None,
                           label=f"strong-batch x{len(jobs)} ({total}r)",
                           hint="strong", spatial_nodes=jobs[0].spatial_nodes,
                           strong_decode_for=window_keys[0] if window_keys

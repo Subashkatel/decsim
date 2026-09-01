@@ -168,6 +168,49 @@ def test_decode_jobs_are_priced_for_the_rounds_they_read(fabric):
     assert by_request[(1, DecoderTier.WEAK)].input_round_count == 6
 
 
+def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
+    """Four patches escalate at once against one strong unit: one strong
+    job computes, one sits in the unit's second input slot, and the two
+    still queued are served as one batched decode; every window commits
+    from the strong tier. Batching the strong decoder's queued
+    input is the paper's own recommendation (Toshio et al. 2510.25222,
+    Sec. III C: the strong decoder processes its assigned data in bulk)."""
+    from decsim.decoders.decoders import (SAMPLED_CONFIDENCE_SOURCE,
+                                          PresetLatencyDecoder,
+                                          SampledConfidenceDecoder,
+                                          SwitchingRouter)
+    from decsim.decoders.weak_strong_switching import Switching
+    from decsim.controller.policies import Held
+    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+    from decsim.qpu.round_policies import FixedRounds
+    from decsim.run_spec import RunSpec
+    from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
+                                                  SlidingWindowScheme)
+    declared = fabric["DECLARED_US"]
+    weak = SampledConfidenceDecoder(PresetLatencyDecoder(declared["weak"]), 1.0)
+    router = SwitchingRouter(weak=weak,
+                             strong=PresetLatencyDecoder(declared["strong"]))
+    completed = RunSpec(
+        ops=[fabric["memory_op"](patch) for patch in (1, 2, 3, 4)],
+        d=3, rounds_policy=FixedRounds(6),
+        scheme=SlidingWindowScheme(
+            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
+        router=router,
+        escalation_policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE, bulk_strong=True),
+        boundary_policy=Held(),
+        unit_pools={"default": 4, "strong": 1},
+        links=fabric["declared_profile"](cwb=True, csb=True),
+        timing=fabric["declared_timing"](),
+        pauli_frame=PauliFrameConfig(commit_us=declared["frame"]),
+        seed=0).build()
+    log_lines = completed.engine.log_lines
+    assert any("strong-batch x2" in line for line in log_lines)
+    records = completed.pauli_frame.snapshot().records
+    assert sorted((record.window_key, record.tier) for record in records) == [
+        ((patch, window), "strong")
+        for patch in (1, 2, 3, 4) for window in (0, 1)]
+
+
 # ------------------------------------------------------------- the ledger
 
 def _request_key(sequence):

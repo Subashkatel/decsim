@@ -109,6 +109,24 @@ def _feedback_run(fabric, *, controller_output_us):
     ).build()
 
 
+def test_results_and_decisions_cross_links_at_their_own_size(fabric):
+    """A decoder result reaches the frame as one bit per logical
+    observable (a Pauli frame update, LILLIPUT's decoder output register,
+    Das et al. ASPLOS 2022), and a decision or command crosses oc and cq as
+    one 32-bit bus word (the decoder sequencer's 32-bit WISHBONE interface,
+    Barber et al. Nature Electronics 2025). The reference card carries no
+    system-wide aggregate on these paths."""
+    completed = _feedback_run(fabric, controller_output_us=0.0)
+    transfers = completed.result.link_traffic["transfers"]
+    payload_by_path = {}
+    for transfer in transfers:
+        payload_by_path.setdefault(transfer["path"], set()).add(
+            transfer["payload_bits"])
+    assert payload_by_path["wdo"] == {1}
+    assert payload_by_path["oc"] == {32}
+    assert payload_by_path["cq"] == {32}
+
+
 def test_feedback_operation_command_traverses_controller_output_and_cq(fabric):
     """The returned decision reaches the controller over OC; the actual
     blocked operation command then pays output processing and CQ before the

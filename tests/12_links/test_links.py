@@ -705,17 +705,17 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
         "cq": us(0.15),
     }
     expected_defaults = {
-        "wdo": 5_000_000,
         "dd": 100,
-        "do": 5_000_000,
-        "oc": 20_000_000,
-        "cq": 5_000_000,
+        "oc": 32,
+        "cq": 32,
     }
     actual_sources = {
         "qc": "SyndromePayload.size_bits",
         "wbd": "SyndromeRoundPacket.fragment_size_sum",
         "wsd": "switching decision payload_bits",
         "sbd": "DecodeJob.retained_payload_size_bits",
+        "wdo": "DecodeResult.logical_observables bits",
+        "do": "DecodeResult.logical_observables bits",
     }
 
     assert config.profile_name == "logical_reference"
@@ -816,22 +816,22 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
         "wbd": (48.0, "direct_aggregate", None, 48.0),
         "wsd": (24.0, "direct_aggregate", None, 24.0),
         "sbd": (72.0, "direct_aggregate", None, 72.0),
-        "wdo": (10_000.0, "per_channel", 100, 1_000_000.0),
+        "wdo": (24.0, "direct_aggregate", None, 24.0),
         "dd": (24.0, "direct_aggregate", None, 24.0),
-        "do": (10_000.0, "per_channel", 100, 1_000_000.0),
-        "oc": (4_000.0, "per_channel", 1_000, 4_000_000.0),
-        "cq": (0.2, "per_channel", 5_000_000, 1_000_000.0),
+        "do": (24.0, "direct_aggregate", None, 24.0),
+        "oc": (24.0, "direct_aggregate", None, 24.0),
+        "cq": (24.0, "direct_aggregate", None, 24.0),
     }
     expected_fallbacks = {
         "qc": (24, "direct_aggregate", None, 24),
         "wbd": (240, "direct_aggregate", None, 240),
         "wsd": (1, "direct_aggregate", None, 1),
         "sbd": (360, "direct_aggregate", None, 360),
-        "wdo": (50_000, "per_channel", 100, 5_000_000),
+        "wdo": (1, "direct_aggregate", None, 1),
         "dd": (100, "direct_aggregate", None, 100),
-        "do": (50_000, "per_channel", 100, 5_000_000),
-        "oc": (20_000, "per_channel", 1_000, 20_000_000),
-        "cq": (1, "per_channel", 5_000_000, 5_000_000),
+        "do": (1, "direct_aggregate", None, 1),
+        "oc": (32, "direct_aggregate", None, 32),
+        "cq": (32, "direct_aggregate", None, 32),
     }
     capacities = {
         channel["member_paths"][0]: (
@@ -877,8 +877,8 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
 
     reference_edges = {edge["path"]: edge for edge in reference_topology["edges"]}
     bandwidth_edges = {edge["path"]: edge for edge in bandwidth_topology["edges"]}
-    configured_default_paths = ("wdo", "dd", "do", "oc", "cq")
-    actual_payload_paths = ("qc", "wbd", "wsd", "sbd")
+    configured_default_paths = ("dd", "oc", "cq")
+    actual_payload_paths = ("qc", "wbd", "wsd", "sbd", "wdo", "do")
 
     assert reference.profile_name == "logical_reference"
     assert reference.qc_excludes_controller_processing is False
@@ -983,11 +983,11 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
         "wbd": 48.0,
         "wsd": 24.0,
         "sbd": 72.0,
-        "wdo": 1_000_000.0,
+        "wdo": 24.0,
         "dd": 24.0,
-        "do": 1_000_000.0,
-        "oc": 4_000_000.0,
-        "cq": 1_000_000.0,
+        "do": 24.0,
+        "oc": 24.0,
+        "cq": 24.0,
     }
 
     def aggregate_capacities(scale):

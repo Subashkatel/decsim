@@ -331,11 +331,11 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
         "wbd": 48.0,
         "wsd": 24.0,
         "sbd": 72.0,
-        "wdo": 1_000_000.0,
+        "wdo": 24.0,
         "dd": 24.0,
-        "do": 1_000_000.0,
-        "oc": 4_000_000.0,
-        "cq": 1_000_000.0,
+        "do": 24.0,
+        "oc": 24.0,
+        "cq": 24.0,
     }
 
 

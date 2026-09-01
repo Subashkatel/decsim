@@ -342,8 +342,11 @@ class PayloadSelectionSource(str, Enum):
 
 @dataclass(frozen=True)
 class LinkReservation:
-    """One FIFO interval on one channel: when it was sent, how long it waited,
-    serialized and propagated, and its position in the channel's order."""
+    """One FIFO interval on one channel: when it reached the wire, how long
+    it waited, serialized and propagated, its position in the channel's
+    order, and the engine-side setup that preceded the wire. ``send_ticks``
+    is the wire time; the transfer was requested ``setup_ticks`` earlier and
+    ``total_delay_ticks`` counts from that request."""
 
     payload_bits: Optional[int]
     send_ticks: int
@@ -354,6 +357,7 @@ class LinkReservation:
     serializer_end_ticks: int
     total_delay_ticks: int
     physical_sequence: int
+    setup_ticks: int = 0
 
 
 @dataclass(frozen=True)
@@ -606,7 +610,7 @@ class LinkModel:
         if setup_ticks:
             from dataclasses import replace as _replace
             reservation = _replace(
-                reservation,
+                reservation, setup_ticks=setup_ticks,
                 total_delay_ticks=reservation.total_delay_ticks + setup_ticks)
         self._semantic_counters[path] = self._semantic_counters[path].plus_reservation(reservation)
         self._transfers.append(SemanticTransferRecord(

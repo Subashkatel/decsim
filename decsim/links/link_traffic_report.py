@@ -43,10 +43,16 @@ def traffic_json_value(fabric: LinkFabricSnapshot) -> dict:
     """What the links carried: counters per path, counters per channel (the sum
     of its paths' counters must equal the channel's own), and every transfer."""
     counters_by_path = {edge.path: edge.counters for edge in fabric.edges}
+    # setup is engine-side work before the wire, so it is itemized per path
+    # here and never enters the channel counters
+    setup_by_path = {edge.path: 0 for edge in fabric.edges}
+    for record in fabric.transfers:
+        setup_by_path[record.path] += record.reservation.setup_ticks
     semantic_edges = [{
         "path": edge.path.value,
         "physical_alias": edge.physical_alias,
         "counters": edge.counters.to_json_value(),
+        "setup_ticks": setup_by_path[edge.path],
     } for edge in fabric.edges]
     physical_channels = []
     reconciliation = []
@@ -96,10 +102,11 @@ def _transfer_json(record: SemanticTransferRecord) -> dict:
         "payload_bits": reservation.payload_bits,
         "payload_selection": record.payload_selection.value,
         "payload_source": record.payload_source,
+        "setup_ticks": reservation.setup_ticks,
         "send_ticks": reservation.send_ticks,
         "serializer_start_ticks": reservation.serializer_start_ticks,
         "serializer_end_ticks": reservation.serializer_end_ticks,
-        "delivery_ticks": reservation.send_ticks + reservation.total_delay_ticks,
+        "delivery_ticks": reservation.serializer_end_ticks + reservation.propagation_ticks,
         "queue_wait_ticks": reservation.queue_wait_ticks,
         "serialization_ticks": reservation.serialization_ticks,
         "propagation_ticks": reservation.propagation_ticks,

@@ -21,7 +21,7 @@ from ..config import fmt
 
 
 class RequestProcessingOutcome(Enum):
-    WEAK_FORWARDED_FOR_DELIVERY = "weak_forwarded_for_delivery"
+    PRIMARY_FORWARDED_FOR_DELIVERY = "primary_forwarded_for_delivery"
     WEAK_AWAITED_STRONG = "weak_awaited_strong"
     STRONG_FORWARDED_FOR_DELIVERY = "strong_forwarded_for_delivery"
     STRONG_COMPLETED_DISCARDED = "strong_completed_discarded"
@@ -1111,7 +1111,7 @@ class DecoderManager:
         self._record_request(
             job, result,
             (RequestProcessingOutcome.WEAK_AWAITED_STRONG if awaiting else
-             RequestProcessingOutcome.WEAK_FORWARDED_FOR_DELIVERY),
+             RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY),
             self.engine.now)
         self._record_service(job)
         self.staging.release(job)

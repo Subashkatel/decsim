@@ -57,7 +57,6 @@ def test_provisional_weak_result_never_reaches_the_frame(fabric):
     keys = [record.window_key for record in frame.records]
     assert sorted(keys) == [(1, 0), (1, 1), (1, 2)]
     assert all(record.tier == "strong" for record in frame.records)
-    assert frame.duplicate_drop_count == 0
 
 
 # -------------------------------------------------------------- parallel

@@ -90,36 +90,32 @@ def test_changed_observable_arity_is_rejected_when_the_stream_is_read():
         frame.frame_for(5)
 
 
-def test_pending_and_installed_duplicates_are_dropped_without_work_or_charge():
+def test_a_second_correction_for_a_window_is_refused_loudly():
+    """One authoritative correction per window enters the frame; a second
+    write for the same window, pending or installed, is a protocol
+    violation and raises instead of being dropped, so no caller's
+    continuation is ever silently lost. A Pauli frame applies each
+    window's correction exactly once (Riesebos et al. DAC 2017; PECOS
+    frame semantics)."""
     engine = ManualEngine(now=17)
     frame = RuntimePauliFrame(engine, commit_ticks=11)
     continuations = []
 
     accept(frame, (3, 7), [1, 0], run_sequence=2,
            callback=lambda: continuations.append(("accepted", engine.now)))
-    accept(frame, (3, 7), [0, 1], run_sequence=3,
-           callback=lambda: continuations.append(("pending duplicate", engine.now)))
-
-    pending = frame.snapshot()
-    assert len(engine.scheduled) == 1
-    assert pending.commit_count == 1
-    assert pending.pending_write_count == 1
-    assert pending.duplicate_drop_count == 1
-    assert pending.charged_ticks == 11
-    assert continuations == []
+    with pytest.raises(RuntimeError, match="already accepted"):
+        accept(frame, (3, 7), [0, 1], run_sequence=3,
+               callback=lambda: continuations.append(("pending duplicate", engine.now)))
 
     engine.run_all()
-    accept(frame, (3, 7), [1, 1], run_sequence=4,
-           callback=lambda: continuations.append(("installed duplicate", engine.now)))
-
-    settled = frame.snapshot()
-    assert engine.scheduled == []
     assert continuations == [("accepted", 28)]
+    with pytest.raises(RuntimeError, match="already accepted"):
+        accept(frame, (3, 7), [1, 1], run_sequence=4,
+               callback=lambda: continuations.append(("installed duplicate", engine.now)))
+    settled = frame.snapshot()
     assert settled.commit_count == 1
     assert settled.pending_write_count == 0
-    assert settled.duplicate_drop_count == 2
     assert settled.charged_ticks == 11
-    assert [drop.run_sequence for drop in settled.duplicate_drops] == [3, 4]
 
 
 def test_positive_latency_installs_then_continues_exactly_once():

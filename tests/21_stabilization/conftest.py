@@ -106,7 +106,8 @@ def weak_only_run(*, rounds=6, ops=None, cwb=True, seed=0, io_trace=False,
     return spec.build(io_trace=io_trace)
 
 
-def strong_only_run(*, rounds=6, ops=None, seed=0, io_trace=False):
+def strong_only_run(*, rounds=6, ops=None, seed=0, io_trace=False,
+                    record=False):
     """Strong-primary baseline: readiness listens to syndrome buffer 1."""
     spec = RunSpec(
         ops=(ops if ops is not None else [memory_op(1)]),
@@ -116,6 +117,7 @@ def strong_only_run(*, rounds=6, ops=None, seed=0, io_trace=False):
         links=declared_profile(cwb=True, csb=True),
         timing=declared_timing(),
         pauli_frame=PauliFrameConfig(commit_us=DECLARED_US["frame"]),
+        record_switching_windows=record,
         seed=seed)
     return spec.build(io_trace=io_trace)
 

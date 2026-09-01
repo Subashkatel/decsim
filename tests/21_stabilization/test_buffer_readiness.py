@@ -11,7 +11,7 @@ from decsim.config import us
 from decsim.engine import Engine
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.links.links import TrafficAttribution
-from decsim.message import RetainedSyndromeFragment, SyndromeRoundPacket
+from decsim.message import DecoderTier, RetainedSyndromeFragment, SyndromeRoundPacket
 from decsim.syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
 
 
@@ -98,7 +98,7 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
     allocates, the single-path streaming of a one-tier system (LILLIPUT's
     readout-to-decoder FIFO, Das et al. ASPLOS 2022; Google's streaming
     decoder, Nature 2024)."""
-    completed = fabric["strong_only_run"](rounds=6)
+    completed = fabric["strong_only_run"](rounds=6, record=True)
     link_traffic = completed.result.link_traffic
     transfers_by_path = {edge["path"]: edge["counters"]["transfer_count"]
                          for edge in link_traffic["semantic_edges"]}
@@ -108,6 +108,9 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
     assert buffer_0.allocations_total == 0
     (record,) = completed.pauli_frame.snapshot().records
     assert record.tier == "strong"
+    (request,) = completed.decoder_manager.terminal_request_records_snapshot()
+    assert request.request_key.tier is DecoderTier.STRONG
+    assert request.terminal_processing_outcome.value == "primary_forwarded_for_delivery"
 
 
 def test_sb1_gap_cannot_be_served(fabric):

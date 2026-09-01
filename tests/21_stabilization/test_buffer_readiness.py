@@ -92,6 +92,24 @@ def test_strong_primary_readiness_is_sb1(fabric):
     assert record.committed_ticks == record.accepted_ticks + us(1)
 
 
+def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
+    """When the strong tier is the only decoder, a round travels once: over
+    csb into syndrome buffer 1. Nothing crosses cwb and Buffer 0 never
+    allocates, the single-path streaming of a one-tier system (LILLIPUT's
+    readout-to-decoder FIFO, Das et al. ASPLOS 2022; Google's streaming
+    decoder, Nature 2024)."""
+    completed = fabric["strong_only_run"](rounds=6)
+    link_traffic = completed.result.link_traffic
+    transfers_by_path = {edge["path"]: edge["counters"]["transfer_count"]
+                         for edge in link_traffic["semantic_edges"]}
+    assert transfers_by_path["cwb"] == 0
+    assert transfers_by_path["csb"] == 6
+    buffer_0 = completed.window_manager.syndrome_buffer.metrics()
+    assert buffer_0.allocations_total == 0
+    (record,) = completed.pauli_frame.snapshot().records
+    assert record.tier == "strong"
+
+
 def test_sb1_gap_cannot_be_served(fabric):
     """A missing interior round is never hidden by the stored-through
     counter: exact reads refuse."""

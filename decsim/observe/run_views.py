@@ -406,10 +406,13 @@ def event_ledger(completed) -> RunLedgerView:
     # controller chain, from the packing stage's own records
     last_of_round: dict = {}
     packed_of_round: dict = {}
+    published_rounds: set = set()
     for event in completed.syndrome_packing.round_events:
         key = (event.operation_id, event.round_index)
         terminal = event.kind in ("PUBLISHED", "DROPPED",
                                   "FEEDBACK_MEMORY_DELIVERED")
+        if event.kind == "PUBLISHED":
+            published_rounds.add(key)
         row = add(event.kind, event.tick, event.operation_id,
                   round=event.round_index, patch=event.patch_id,
                   route=event.route,
@@ -419,9 +422,10 @@ def event_ledger(completed) -> RunLedgerView:
         if event.kind == "PACKED":
             packed_of_round[key] = row
 
-    # the dual write's landing in syndrome buffer 1: its cause is the
-    # PACKED round, because CSB leaves packing in parallel with the CWB
-    # publication and a fast csb legitimately lands first
+    # the landing in syndrome buffer 1: its cause is the PACKED round,
+    # because CSB leaves packing in parallel with the CWB publication and a
+    # fast csb legitimately lands first. A round that was never published
+    # to Buffer 0 (the strong tier is primary) ends its journey here
     stored_of_round: dict = {}
     room_store = completed.syndrome_buffer_1
     if room_store is not None:
@@ -429,7 +433,8 @@ def event_ledger(completed) -> RunLedgerView:
             key = (operation_id, round_index)
             stored_of_round[key] = add(
                 "STORED_SB1", tick, operation_id, round=round_index,
-                prev=packed_of_round.get(key))
+                prev=packed_of_round.get(key),
+                status="" if key in published_rounds else "terminal")
 
     # window chains, from the window stamps
     frame_prev: dict = {}

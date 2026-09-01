@@ -138,6 +138,7 @@ class SyndromePacking:
         window_input_receiver, feedback_memory_receiver,
         syndrome_buffer: Optional[SyndromeBuffer] = None,
         syndrome_buffer_1=None,
+        window_input_store=None,
         policy: SyndromePackingPolicy = SyndromePackingPolicy(),
         detector_formation=None,
     ):
@@ -159,6 +160,13 @@ class SyndromePacking:
             syndrome_buffer = SyndromeBuffer(capacity=packing_context_capacity)
         self.syndrome_buffer = syndrome_buffer
         self.syndrome_buffer_1 = syndrome_buffer_1
+        # the store whose arrival wakes windows: Buffer 0 for a weak-primary
+        # run, syndrome buffer 1 when the strong tier decodes the plan's
+        # windows itself. A one-tier system has one path from the controller
+        # to its decoder buffer, so a strong-primary round never crosses cwb
+        self.window_input_store = (
+            self.syndrome_buffer if window_input_store is None
+            else window_input_store)
         self._contexts: dict[tuple, _PackingContext] = {}
         self._packed_rounds: set = set()
         self._route_queues = {kind: [] for kind in SyndromePacketRouteKind}
@@ -299,6 +307,9 @@ class SyndromePacking:
             operation_id=context.round_key[0],
             round_index=context.round_key[1],
             fragments=self._form_detection_events(raw_fragments))
+        if self._stores_window_input_in_syndrome_buffer_1(context):
+            self._store_in_syndrome_buffer_1(packet, context)
+            return
         if not self.syndrome_buffer.has_operation(packet.operation_id):
             self.syndrome_buffer.open_operation(packet.operation_id)
         admission = self.syndrome_buffer.accept_packed_round(
@@ -340,6 +351,22 @@ class SyndromePacking:
         if self.policy.queue_admission is ReassemblyQueueAdmission.ON_COMPLETION:
             self._route_queues[context.route.kind].append(context.identity)
         self._schedule_arbitration()
+
+    def _stores_window_input_in_syndrome_buffer_1(self, context) -> bool:
+        return (context.route.kind is SyndromePacketRouteKind.WINDOW_INPUT
+                and self.window_input_store is self.syndrome_buffer_1)
+
+    def _store_in_syndrome_buffer_1(self, packet, context) -> None:
+        """A strong-primary round's only hop: csb into syndrome buffer 1,
+        whose arrival signal wakes the window."""
+        self._packed_rounds.add(context.round_key)
+        self.syndrome_buffer_1.write(
+            packet, packet_bits=context.packet_bits,
+            attribution=self._packet_attribution(packet))
+        context.fragments = []
+        self._forget_context(context)
+        if any(self._route_queues.values()):
+            self._schedule_arbitration()
 
     def _form_detection_events(self, raw_fragments):
         """Form the complete round's detection events from its raw packet.

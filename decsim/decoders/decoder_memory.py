@@ -180,20 +180,17 @@ class DecoderMemorySnapshot:
     admissions: int
 
 
-def count_decoder_input_round_demand(job: DecodeJob) -> int:
-    """Count the distinct syndrome rounds one job will store.
-
-    The demand is the number of distinct ``(operation_id, round_index)``
-    identities in the job's payloads, which is exactly the number of rounds
-    ``materialize_decoder_input`` groups them into. It is counted here so that
-    capacity is charged in actual stored rounds without building a second
-    immutable input while a request waits, and without reading ``n_rounds``,
-    which is service extent rather than stored data. Payload type admission
-    stays at materialization, after credits fit.
+def count_decoder_input_round_demand(payloads) -> int:
+    """The distinct syndrome rounds a set of payloads stores: the number of
+    ``(operation_id, round_index)`` identities, which is exactly the number
+    of rounds ``materialize_decoder_input`` groups them into. A decode job
+    is priced and admitted for this count, the rounds the decoder actually
+    reads, the way a sliding-window decoder's work scales with the rounds
+    in its window (Skoric et al. 2209.08552) and a fixed-depth syndrome
+    FIFO holds only rounds that were measured (LILLIPUT, Das et al. 2022).
     """
-    round_identities = {
-        (payload.operation_id, payload.round_index) for payload in job.payloads
-    }
+    round_identities = {(payload.operation_id, payload.round_index)
+                        for payload in payloads}
     return len(round_identities)
 
 

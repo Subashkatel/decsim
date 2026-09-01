@@ -256,7 +256,7 @@ class Window:
     commit_lo: int                    # first round this window commits
     commit_hi: int                    # last round this window commits
     buffer_hi: int                    # last round it reads (trailing buffer)
-    n_rounds: int                     # rounds the decode spans (sets job size)
+    n_rounds: int                     # planned rounds from start_round to buffer_hi; the job is priced for the rounds that exist
     buffer_lo: Optional[int] = None   # leading-buffer start (for two-sided A windows)
     closed_temporal_boundaries: bool = False
     batched_preceding_idle_round_count: int = 0
@@ -536,7 +536,7 @@ class DecodeJob:
 
     op_id: int                               # operation the window belongs to
     window_id: int                           # window index within that op
-    n_rounds: int                            # syndrome rounds in the window
+    n_rounds: int                            # rounds the decoder processes: the distinct rounds landed in its input, plus batched idle rounds
     dem: Optional[Any] = None                # window detector error model (data-path decoders)
     payloads: list = field(default_factory=list)   # transfer-source view; cleared after materialization
     decoder_input: Optional[Any] = None             # materialized decoder memory value

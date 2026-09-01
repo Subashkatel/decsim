@@ -143,6 +143,31 @@ def test_double_window_far_boundary_waits_for_the_restart_commit(fabric):
     assert completed.window_manager.escalation.pending_escalations == {}
 
 
+def test_decode_jobs_are_priced_for_the_rounds_they_read(fabric):
+    """A job's round count is the number of rounds landed in its input.
+    Rounds past the operation's end never exist, so a first-window strong
+    context clipped at round 1 reads 6 rounds, not commit + 2 buffer = 9,
+    and the last lookahead window of a 9-round operation reads 3 rounds,
+    not 6. Decoder work scales with the rounds actually fed (Skoric et al.
+    2209.08552, tau_W over n_W; SWIPER's window builder emits a shorter
+    tail window, swiper/window_builder.py)."""
+    from decsim.message import DecoderTier
+    from decsim.observe.run_views import switching_records_view
+    completed = fabric["switching_run"](
+        escalation_probability=0.0, rounds=9, record=True,
+        probability_for=lambda job: 1.0 if job.window_id == 0 else 0.0)
+    view = switching_records_view(completed.window_manager,
+                                  completed.decoder_manager)
+    by_request = {(r.request_key.window_id, r.request_key.tier): r
+                  for r in view.requests}
+    strong_first = by_request[(0, DecoderTier.STRONG)]
+    assert (strong_first.input_round_lo, strong_first.input_round_hi) == (1, 6)
+    assert strong_first.input_round_count == 6
+    weak_tail = by_request[(2, DecoderTier.WEAK)]
+    assert weak_tail.input_round_count == 3
+    assert by_request[(1, DecoderTier.WEAK)].input_round_count == 6
+
+
 # ------------------------------------------------------------- the ledger
 
 def _request_key(sequence):

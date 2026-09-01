@@ -21,6 +21,7 @@ from ..message import (DecodeJob,
                       SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
                       WindowPlan, WindowProtocol, WindowReadiness,
                       stable_identity_order_key)
+from ..decoders.decoder_memory import count_decoder_input_round_demand
 from ..decoders.strong_escalation import NoStrongTier, StrongEscalation
 from ..links.links import LinkPath, RequestTransferRelation, TrafficAttribution
 from ..syndrome_buffer.syndrome_buffer import (DecoderInputHold, PendingStrong,
@@ -790,16 +791,16 @@ class WindowManager:
         window.t_queued = self.engine.now
         request_key = self._new_request_key(
             window.op_id, window.k, self.primary_tier)
+        payloads = self._assemble_payloads(window, self.primary_store)
         job = DecodeJob(
                         op_id=window.op_id, window_id=window.k,
                         n_rounds=(
-                            window.n_rounds
+                            count_decoder_input_round_demand(payloads)
                             + window.batched_preceding_idle_round_count
                         ),
                         ready_time=self.engine.now,
                         spatial_nodes=self._resolved_operations[op.id].spatial_node_count,
-                        payloads=self._assemble_payloads(
-                            window, self.primary_store),
+                        payloads=payloads,
                         dem=self.window_models.get(key),
                         code=(
                             self._resolved_operations[

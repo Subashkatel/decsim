@@ -35,6 +35,7 @@ from ..message import (DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier,
                        StrongRegionPlan, Window, WindowInfo, stable_identity_order_key)
 from ..syndrome_buffer.syndrome_buffer import (CsdInput, PendingStrong, PotentialStrong,
                                                RephaseGuard)
+from .decoder_memory import count_decoder_input_round_demand
 
 
 @dataclass(frozen=True)
@@ -563,17 +564,18 @@ class StrongEscalation:
             request_key=strong_request_key,
         )
         return wsd_arrival_ticks - self.wm.engine.now
-    def make_strong_job(self, weak_job: DecodeJob, n_rounds: int,
-                        label: str) -> DecodeJob:
+    def make_strong_job(self, weak_job: DecodeJob, label: str) -> DecodeJob:
         """Build the strong job for a weak one; a route back to the weak decoder fails now."""
-        strong = self.make_strong_decode_job(weak_job, n_rounds, label)
+        strong = self.make_strong_decode_job(weak_job, label)
         self.check_strong_route(weak_job, strong)
         return strong
     def check_strong_route(self, weak_job: DecodeJob, strong_job: DecodeJob) -> None:
         self._check_strong_route(weak_job, strong_job)
-    def make_strong_decode_job(self, weak_job: DecodeJob, round_count: int,
+    def make_strong_decode_job(self, weak_job: DecodeJob,
                                label: str) -> DecodeJob:
-        """Build the two-sided strong re-decode job for an escalated window."""
+        """Build the two-sided strong re-decode job for an escalated window.
+        The job is priced for the context rounds that exist: a window at
+        the operation's edge has a shorter context than commit + 2 buffer."""
         key = (weak_job.op_id, weak_job.window_id)
         weak_window = self.wm.windows[key]
         op = self.wm._ops[weak_job.op_id]
@@ -607,14 +609,15 @@ class StrongEscalation:
                 f"beyond the escalation margin, or an early release)")
         self.wm._stamp_first_round_tick(
             strong_window, self.wm.syndrome_buffer_1)
+        payloads = self.wm._assemble_payloads(
+            strong_window, self.wm.syndrome_buffer_1)
         return DecodeJob(
             op_id=weak_job.op_id, window_id=weak_job.window_id,
-            n_rounds=round_count, ready_time=self.wm.engine.now,
+            n_rounds=count_decoder_input_round_demand(payloads),
+            ready_time=self.wm.engine.now,
             label=label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,
-            dem=dem,
-            payloads=self.wm._assemble_payloads(
-                strong_window, self.wm.syndrome_buffer_1),
+            dem=dem, payloads=payloads,
             attempt=1, window=strong_window, strong_decode_for=key,
             request_key=request_key, request_created_ticks=self.wm.engine.now)
     def _strong_context_window(self, weak_window: Window) -> Window:
@@ -1045,7 +1048,7 @@ class StrongEscalation:
         self.wm._stamp_first_round_tick(strong_window, self.wm.syndrome_buffer_1)
         return DecodeJob(
             op_id=key[0], window_id=key[1],
-            n_rounds=strong_window.n_rounds,
+            n_rounds=count_decoder_input_round_demand(payloads),
             ready_time=self.wm.engine.now,
             label=pending.label, hint="strong",
             spatial_nodes=weak_job.spatial_nodes, code=weak_job.code,

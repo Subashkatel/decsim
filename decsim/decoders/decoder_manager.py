@@ -13,7 +13,8 @@ from typing import Callable, Optional
 from ..message import (DecodeJob, DecodeOutcome, DecodeResult,
                       DecoderRequestKey, DecoderServiceKey, SoftOutput)
 from ..message import Directive
-from .decoder_memory import DecoderMemory, DecoderMemoryConfig
+from .decoder_memory import (DecoderMemory, DecoderMemoryConfig,
+                             count_decoder_input_round_demand)
 from .decoder_memory_transfer import DecoderInputStaging, FixedLatencyDecoderMemoryTransfer
 from .strong_escalation import HeldStrongCompletion, StrongRequestLedger
 from ..config import fmt
@@ -642,8 +643,12 @@ class DecoderManager:
 
     @staticmethod
     def _memory_demand(job: DecodeJob) -> int:
-        # an external job carries no syndrome data and stores nothing
-        return 0 if job.on_done is not None else job.n_rounds
+        """The rounds a job's input occupies in unit memory: the distinct
+        rounds of its payloads, the same count the deposit charges; an
+        external job carries no syndrome data and stores nothing."""
+        if job.on_done is not None:
+            return 0
+        return count_decoder_input_round_demand(job.payloads)
 
     def _next_job(self, pool: str, queue: list) -> DecodeJob:
         if self.bulk_strong and pool != "default":

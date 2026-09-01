@@ -30,12 +30,20 @@ from .links import (
 )
 
 
+# A decoder result reaches the frame as one bit per logical observable, a
+# Pauli frame update (LILLIPUT's decoder output register, Das et al. ASPLOS
+# 2022); the window manager supplies the count from the result itself.
+RESULT_PAYLOAD_SOURCE = "DecodeResult.logical_observables bits"
+
+# A decision or command crosses the control fabric as one bus word: the
+# decoder sequencer's 32-bit WISHBONE interface (Barber et al., Nature
+# Electronics 2025, arXiv 2410.05202 Methods).
+BUS_WORD_BITS = 32
+BUS_WORD_SOURCE = "one 32-bit control bus word (Barber et al. 2025, WISHBONE)"
+
+
 def _aggregate_payload(bits: int, source: str) -> PayloadSizeConfig:
     return PayloadSizeConfig(bits, LinkQuantityBasis.DIRECT_AGGREGATE, None, source)
-
-
-def _per_channel_payload(bits: int, count: int, source: str) -> PayloadSizeConfig:
-    return PayloadSizeConfig(bits, LinkQuantityBasis.PER_CHANNEL, count, source)
 
 
 def logical_reference_profile() -> LinkModelConfig:
@@ -57,11 +65,12 @@ def logical_reference_profile() -> LinkModelConfig:
                         "SyndromeRoundPacket.fragment_size_sum"),
         wsd=actual_edge(0.5, "repository weak-to-strong model choice", "switching decision payload_bits"),
         sbd=actual_edge(2.0, "Khalid cd mapped to the strong input", "DecodeJob.retained_payload_size_bits"),
-        wdo=default_edge(1.0, _per_channel_payload(50_000, 100, "Khalid do mapped to weak output")),
+        wdo=actual_edge(1.0, "Khalid do latency mapped to the weak output",
+                        RESULT_PAYLOAD_SOURCE),
         dd=default_edge(0.5, _aggregate_payload(100, "Khalid dd representative aggregate transaction")),
-        do=default_edge(1.0, _per_channel_payload(50_000, 100, "Khalid do")),
-        oc=default_edge(4.0, _per_channel_payload(20_000, 1000, "Khalid oc")),
-        cq=default_edge(0.15, _per_channel_payload(1, 5_000_000, "Khalid cq")),
+        do=actual_edge(1.0, "Khalid do latency", RESULT_PAYLOAD_SOURCE),
+        oc=default_edge(4.0, _aggregate_payload(BUS_WORD_BITS, BUS_WORD_SOURCE)),
+        cq=default_edge(0.15, _aggregate_payload(BUS_WORD_BITS, BUS_WORD_SOURCE)),
         profile_name="logical_reference",
     )
 
@@ -94,12 +103,6 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
         capacity = LinkCapacityConfig(rate, LinkQuantityBasis.DIRECT_AGGREGATE, None, source)
         channel = LinkConfig(us(latency_us), capacity, source)
         return LinkEdgeConfig(channel, _aggregate_payload(bits, source), actual_payload_source)
-
-    def per_channel_edge(latency_us: float, bits: int, count: int, source: str) -> LinkEdgeConfig:
-        rate = max(anchor_bits_per_us / count, bits / commit_region_us) * capacity_scale
-        capacity = LinkCapacityConfig(rate, LinkQuantityBasis.PER_CHANNEL, count, source)
-        channel = LinkConfig(us(latency_us), capacity, source)
-        return LinkEdgeConfig(channel, _per_channel_payload(bits, count, source), None)
 
     return LinkModelConfig(
         qc=aggregate_edge(
@@ -141,9 +144,11 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             "\"In this paper, we assume that rstrong = rcom + 2rbuf.\")",
             "DecodeJob.retained_payload_size_bits",
         ),
-        wdo=per_channel_edge(
-            1.0, 50_000, 100,
-            "one weak decoder output payload per commit region",
+        wdo=aggregate_edge(
+            1.0, 1, 1 / commit_region_us,
+            "one frame-update bit per logical observable per commit region, "
+            "floored at the 24 Mbps syndrome anchor",
+            RESULT_PAYLOAD_SOURCE,
         ),
         dd=aggregate_edge(
             0.5,
@@ -153,17 +158,21 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             "24 Mbps syndrome anchor",
             None,
         ),
-        do=per_channel_edge(
-            1.0, 50_000, 100,
-            "one decoder output payload per commit region",
+        do=aggregate_edge(
+            1.0, 1, 1 / commit_region_us,
+            "one frame-update bit per logical observable per commit region, "
+            "floored at the 24 Mbps syndrome anchor",
+            RESULT_PAYLOAD_SOURCE,
         ),
-        oc=per_channel_edge(
-            4.0, 20_000, 1000,
-            "one output-to-controller payload per commit region",
+        oc=aggregate_edge(
+            4.0, BUS_WORD_BITS, BUS_WORD_BITS / commit_region_us,
+            BUS_WORD_SOURCE + ", one per commit region, floored at the anchor",
+            None,
         ),
-        cq=per_channel_edge(
-            0.15, 1, 5_000_000,
-            "one controller-to-QPU payload per commit region",
+        cq=aggregate_edge(
+            0.15, BUS_WORD_BITS, BUS_WORD_BITS / commit_region_us,
+            BUS_WORD_SOURCE + ", one per commit region, floored at the anchor",
+            None,
         ),
         profile_name="bandwidth_limited",
     )

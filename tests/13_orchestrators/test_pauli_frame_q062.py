@@ -244,7 +244,7 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     manager.pauli_frame = sink
     manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
     manager._ops = {4: SimpleNamespace(name="logical")}
-    manager._window_link_arrival = lambda *args: final_engine.now + 4
+    manager._window_link_arrival = lambda *args, **kwargs: final_engine.now + 4
     manager._commit_decode_done = lambda actual_job, actual_result: weak_commits.append(
         (actual_job, actual_result)
     )
@@ -289,11 +289,11 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     )
     strong.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
     strong._ops = {4: SimpleNamespace(name="logical")}
-    strong._window_link_arrival = lambda *args: engine.now + 5
+    strong._window_link_arrival = lambda *args, **kwargs: engine.now + 5
     strong._commit_strong_decode_done = lambda completion: strong_calls.append(completion)
-    completion = SimpleNamespace(request_key=request(
-        9, tier="strong", operation_id=4, window_id=1
-    ))
+    completion = SimpleNamespace(
+        request_key=request(9, tier="strong", operation_id=4, window_id=1),
+        result=SimpleNamespace(logical_observables=(0,)))
     WindowManager.on_strong_decode_done(strong, completion)
     assert strong_calls == []
     engine.run_all()
@@ -443,7 +443,7 @@ def test_final_result_rides_its_tiers_output_link():
         manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
         manager._ops = {4: SimpleNamespace(name="logical")}
         paths = []
-        def arrival(path, window, op, request_key, paths=paths):
+        def arrival(path, window, op, request_key, payload_bits=None, paths=paths):
             paths.append(path)
             return engine.now + 4
         manager._window_link_arrival = arrival

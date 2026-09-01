@@ -954,14 +954,23 @@ class WindowManager:
         window: Window,
         op: Operation,
         request_key: DecoderRequestKey,
+        payload_bits: Optional[int] = None,
     ) -> int:
         reservation = self.links.reserve(
             path,
-            payload_bits=None,
+            payload_bits=payload_bits,
             now_ticks=self.engine.now,
             attribution=self._window_attribution(window, op, request_key),
         )
         return self.engine.now + reservation.total_delay_ticks
+
+    @staticmethod
+    def _result_payload_bits(result: DecodeResult, op: Operation) -> int:
+        """A result reaches the frame as one bit per logical observable; a
+        timing-only result stands for one observable per patch."""
+        if result.logical_observables is not None:
+            return len(result.logical_observables)
+        return max(1, len(op.patches))
 
     def _link_arrival(
         self,
@@ -1014,11 +1023,8 @@ class WindowManager:
                        if job.request_key.tier is DecoderTier.WEAK
                        else LinkPath.DO)
         delivery_ticks = self._window_link_arrival(
-            output_path,
-            window,
-            op,
-            job.request_key,
-        )
+            output_path, window, op, job.request_key,
+            payload_bits=self._result_payload_bits(res, op))
         self.engine.schedule(
             delivery_ticks - self.engine.now,
             lambda: self._sink_weak_correction(job, res),
@@ -1142,11 +1148,8 @@ class WindowManager:
         window = self.windows[key]
         op = self._ops[window.op_id]
         delivery_ticks = self._window_link_arrival(
-            LinkPath.DO,
-            window,
-            op,
-            completion.request_key,
-        )
+            LinkPath.DO, window, op, completion.request_key,
+            payload_bits=self._result_payload_bits(completion.result, op))
         self.engine.schedule(
             delivery_ticks - self.engine.now,
             lambda: self._commit_strong_decode_done(completion),

@@ -132,6 +132,9 @@ class SyndromeBuffer:
         self, *, capacity: Optional[int] = None, memory_model=None,
     ) -> None:
         self.capacity = capacity
+        # a store that frees a slot tells its writer, so a round stalled
+        # for room can be admitted; None when nobody waits on this store
+        self.on_round_released = None
         self.memory_model = memory_model
         self.payloads_held = 0
         self.peak_payloads = 0
@@ -432,6 +435,8 @@ class SyndromeBuffer:
         self._free_slot_indices.add(slot.slot_index)
         self._tombstones.add(slot.identity)
         self._released_rounds += 1
+        if self.on_round_released is not None:
+            self.on_round_released()
 
     # -------------------------------------------------------- observability
 

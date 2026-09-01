@@ -35,8 +35,14 @@ class ReassemblyQueueAdmission(Enum):
 
 
 class PackingOverflowPolicy(Enum):
-    """What a full Buffer 0 does with a round that cannot fit."""
+    """What the controller does with a finished round when its store is
+    full. STALL holds the round in the packing workspace until a slot frees
+    and publishes it in order, the backpressure real-time decoders apply to
+    their source (Riverlane's sequencer stalls on the decoder's status
+    register, Barber et al. 2025; QubiC's cores block in WAIT_MEAS,
+    arXiv 2404.15260). DROP_ROUND and FAIL_STOP are study knobs."""
 
+    STALL = "stall"
     FAIL_STOP = "fail_stop"
     DROP_ROUND = "drop_round"
 
@@ -44,7 +50,7 @@ class PackingOverflowPolicy(Enum):
 @dataclass(frozen=True)
 class SyndromePackingPolicy:
     queue_admission: ReassemblyQueueAdmission = ReassemblyQueueAdmission.ON_COMPLETION
-    overflow: PackingOverflowPolicy = PackingOverflowPolicy.FAIL_STOP
+    overflow: PackingOverflowPolicy = PackingOverflowPolicy.STALL
     reassembly_timeout_ticks: Optional[int] = None
 
 
@@ -54,6 +60,7 @@ class SyndromePackingSnapshot:
     packing_context_capacity: Optional[int]
     packing_contexts: int
     partial_identities: tuple[tuple, ...]
+    stalled_identities: tuple[tuple, ...]
     packed_wait_identities: tuple[tuple, ...]
     draining_identities: tuple[tuple, ...]
 
@@ -98,7 +105,7 @@ class SyndromeRoundEvent:
     Reassembly expiry raises instead of recording, so a finished run's
     terminal states are PUBLISHED, DROPPED, or FEEDBACK_MEMORY_DELIVERED."""
 
-    kind: str            # EMITTED, BINARY_AVAILABLE, PACKED, CWB_SENT,
+    kind: str            # EMITTED, BINARY_AVAILABLE, PACKED, STALLED, CWB_SENT,
                          # PUBLISHED, DROPPED, FEEDBACK_MEMORY_DELIVERED
     tick: int
     operation_id: object
@@ -109,6 +116,7 @@ class SyndromeRoundEvent:
 
 class _PackingSlotState(Enum):
     PARTIAL = auto()
+    STALLED = auto()         # packed, waiting for a free store slot
     PACKED_WAIT = auto()
     DRAINING = auto()
 
@@ -168,6 +176,11 @@ class SyndromePacking:
             self.syndrome_buffer if window_input_store is None
             else window_input_store)
         self._contexts: dict[tuple, _PackingContext] = {}
+        # finished rounds waiting for store room, in completion order
+        self._stalled_identities: list = []
+        self.syndrome_buffer.on_round_released = self._retry_stalled_rounds
+        if self.syndrome_buffer_1 is not None:
+            self.syndrome_buffer_1.store.on_round_released = self._retry_stalled_rounds
         self._packed_rounds: set = set()
         self._route_queues = {kind: [] for kind in SyndromePacketRouteKind}
         self._next_route_index = 0
@@ -291,11 +304,8 @@ class SyndromePacking:
             route_queue.remove(context.identity)
 
     def _finish_packing(self, context: _PackingContext) -> None:
-        """The round is complete: merge, form, store, and let it compete for
-        its route. Its publication tick is set now unless a CWB hop is
-        priced later."""
-        cwb_is_priced = LinkPath.CWB in self.links.paths
-        publication_tick = None if cwb_is_priced else self.engine.now
+        """The round is complete: merge its fragments, form its detection
+        events, and hand it to the stores."""
         self.round_events.append(SyndromeRoundEvent(
             "PACKED", self.engine.now, context.round_key[0],
             context.round_key[1], None, context.route.kind.name))
@@ -303,31 +313,34 @@ class SyndromePacking:
         # CWB carries the raw measurement bits; detection events exist
         # only from the decoder input (Buffer 0) onward
         context.packet_bits = _fragment_bits(raw_fragments)
-        packet = SyndromeRoundPacket(
+        context.packet = SyndromeRoundPacket(
             operation_id=context.round_key[0],
             round_index=context.round_key[1],
             fragments=self._form_detection_events(raw_fragments))
+        context.fragments = []
+        self._admit_packed_round(context)
+
+    def _admit_packed_round(self, context: _PackingContext) -> bool:
+        """Store the packed round and let it compete for its route. Its
+        publication tick is set now unless a CWB hop is priced later.
+        Returns False when the store is full and the overflow policy keeps
+        the round waiting."""
+        packet = context.packet
         if self._stores_window_input_in_syndrome_buffer_1(context):
+            if not self.syndrome_buffer_1.has_room():
+                return self._store_is_full(context)
             self._store_in_syndrome_buffer_1(packet, context)
-            return
+            return True
         if not self.syndrome_buffer.has_operation(packet.operation_id):
             self.syndrome_buffer.open_operation(packet.operation_id)
+        if self.syndrome_buffer_1 is not None and not self.syndrome_buffer_1.has_room():
+            return self._store_is_full(context)
+        cwb_is_priced = LinkPath.CWB in self.links.paths
+        publication_tick = None if cwb_is_priced else self.engine.now
         admission = self.syndrome_buffer.accept_packed_round(
             packet, publication_tick=publication_tick)
         if admission.refused:
-            self._forget_context(context)
-            if self.policy.overflow is PackingOverflowPolicy.DROP_ROUND:
-                self.packing_drops += 1
-                self._dropped_rounds.add(context.round_key)
-                self.round_events.append(SyndromeRoundEvent(
-                    "DROPPED", self.engine.now, context.round_key[0],
-                    context.round_key[1], None, context.route.kind.name))
-                return
-            raise SyndromePackingOverflow(
-                tick=self.engine.now, route=context.route,
-                incoming_identity=context.identity,
-                capacity=self.syndrome_buffer.capacity,
-                snapshot=self.packing_snapshot())
+            return self._store_is_full(context)
         self._packed_rounds.add(context.round_key)
         if publication_tick is not None:
             self.round_events.append(SyndromeRoundEvent(
@@ -339,18 +352,51 @@ class SyndromePacking:
                     f"op {packet.operation_id} from packing; "
                     f"{packet.defects_text()}; holds "
                     f"{self.syndrome_buffer.held_rounds_description()}")
-        context.fragments = []
         if self.syndrome_buffer_1 is not None:
             # the dual write: the same packed round leaves for the room-side
             # store in parallel with its Buffer 0 publication
             self.syndrome_buffer_1.write(
                 packet, packet_bits=context.packet_bits,
                 attribution=self._packet_attribution(packet))
-        context.packet = packet
         context.state = _PackingSlotState.PACKED_WAIT
         if self.policy.queue_admission is ReassemblyQueueAdmission.ON_COMPLETION:
             self._route_queues[context.route.kind].append(context.identity)
         self._schedule_arbitration()
+        return True
+
+    def _store_is_full(self, context: _PackingContext) -> bool:
+        """Apply the overflow policy to a packed round its store cannot take."""
+        policy = self.policy.overflow
+        if policy is PackingOverflowPolicy.STALL:
+            if context.state is not _PackingSlotState.STALLED:
+                context.state = _PackingSlotState.STALLED
+                self._stalled_identities.append(context.identity)
+                self.round_events.append(SyndromeRoundEvent(
+                    "STALLED", self.engine.now, context.round_key[0],
+                    context.round_key[1], None, context.route.kind.name))
+            return False
+        self._forget_context(context)
+        if policy is PackingOverflowPolicy.DROP_ROUND:
+            self.packing_drops += 1
+            self._dropped_rounds.add(context.round_key)
+            self.round_events.append(SyndromeRoundEvent(
+                "DROPPED", self.engine.now, context.round_key[0],
+                context.round_key[1], None, context.route.kind.name))
+            return False
+        raise SyndromePackingOverflow(
+            tick=self.engine.now, route=context.route,
+            incoming_identity=context.identity,
+            capacity=self.syndrome_buffer.capacity,
+            snapshot=self.packing_snapshot())
+
+    def _retry_stalled_rounds(self) -> None:
+        """A store freed a slot: admit waiting rounds in completion order,
+        stopping at the first that still finds no room."""
+        while self._stalled_identities:
+            context = self._contexts[self._stalled_identities[0]]
+            if not self._admit_packed_round(context):
+                return
+            self._stalled_identities.pop(0)
 
     def _stores_window_input_in_syndrome_buffer_1(self, context) -> bool:
         return (context.route.kind is SyndromePacketRouteKind.WINDOW_INPUT
@@ -363,7 +409,6 @@ class SyndromePacking:
         self.syndrome_buffer_1.write(
             packet, packet_bits=context.packet_bits,
             attribution=self._packet_attribution(packet))
-        context.fragments = []
         self._forget_context(context)
         if any(self._route_queues.values()):
             self._schedule_arbitration()
@@ -524,8 +569,8 @@ class SyndromePacking:
         """Fail if the run ended with a partial or blocked packing context."""
         snapshot = self.packing_snapshot()
         if snapshot.packing_contexts:
-            live = (snapshot.partial_identities + snapshot.packed_wait_identities
-                    + snapshot.draining_identities)
+            live = (snapshot.partial_identities + snapshot.stalled_identities
+                    + snapshot.packed_wait_identities + snapshot.draining_identities)
             raise RuntimeError(f"run ended with incomplete syndrome packing contexts: {live}")
 
     def packing_snapshot(self) -> SyndromePackingSnapshot:
@@ -537,6 +582,7 @@ class SyndromePacking:
             packing_context_capacity=self.packing_context_capacity,
             packing_contexts=len(self._contexts),
             partial_identities=identities_by_state[_PackingSlotState.PARTIAL],
+            stalled_identities=identities_by_state[_PackingSlotState.STALLED],
             packed_wait_identities=identities_by_state[_PackingSlotState.PACKED_WAIT],
             draining_identities=identities_by_state[_PackingSlotState.DRAINING])
 

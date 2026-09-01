@@ -137,6 +137,44 @@ def test_sb1_gap_cannot_be_served(fabric):
         sb1.ready_tick([(1, 2)])
 
 
+def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
+    """When Buffer 0 is full, the controller holds the finished round in
+    its packing workspace and publishes it once a slot frees, in round
+    order; nothing is dropped and the run completes. Real-time decoders
+    apply backpressure to the source rather than discarding syndromes:
+    Riverlane's sequencer stalls on the decoder's status register (Barber
+    et al. 2025) and QubiC's cores block in WAIT_MEAS until readout data
+    is consumed (arXiv 2404.15260)."""
+    from decsim.decoders.decoders import PresetLatencyDecoder
+    from decsim.pauli_frame.pauli_frame import PauliFrameConfig
+    from decsim.qpu.round_policies import FixedRounds
+    from decsim.run_spec import RunSpec
+    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBufferingConfig
+    declared = fabric["DECLARED_US"]
+    completed = RunSpec(
+        ops=[fabric["memory_op"](1)], d=3, rounds_policy=FixedRounds(12),
+        decoder=PresetLatencyDecoder(declared["weak"]),
+        links=fabric["declared_profile"](cwb=True, csb=False),
+        timing=fabric["declared_timing"](),
+        syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=7),
+        pauli_frame=PauliFrameConfig(commit_us=declared["frame"]),
+        seed=0).build()
+    packing = completed.syndrome_packing
+    assert packing.packing_drops == 0
+    published = [(event.round_index, event.tick) for event in packing.round_events
+                 if event.kind == "PUBLISHED"]
+    assert [round_index for round_index, _ in published] == list(range(1, 13))
+    ticks = [tick for _, tick in published]
+    assert ticks == sorted(ticks)
+    # round 8 finds the store full (rounds 1..7 are held for the first
+    # window) and waits for the first window's input to land
+    publication = dict(published)
+    assert publication[7] == us(7 + 2 + 3 + 4)
+    assert publication[8] > us(8 + 2 + 3 + 4)
+    records = completed.pauli_frame.snapshot().records
+    assert [record.tier for record in records] == ["weak"] * 3
+
+
 def test_stores_settle_empty(fabric):
     """At the end of a run neither store holds a round or a hold."""
     completed = fabric["switching_run"](escalation_probability=1.0, rounds=9)

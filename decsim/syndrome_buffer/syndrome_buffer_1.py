@@ -45,6 +45,13 @@ class SyndromeBuffer1:
         self._in_flight_writes = 0
         self._written: set = set()
 
+    def has_room(self) -> bool:
+        """A write can land: capacity counts the rounds stored and in flight."""
+        if self.capacity_rounds is None:
+            return True
+        occupied = self.store.metrics().live_allocations
+        return occupied + self._in_flight_writes < self.capacity_rounds
+
     # ------------------------------------------------------------- writes
 
     def write(self, packet: SyndromeRoundPacket, *, packet_bits: Optional[int],

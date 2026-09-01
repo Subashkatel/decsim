@@ -148,10 +148,12 @@ links:                             # one card per path; null = the logical_refer
   cq:  null                        # controller -> QPU, an instruction
 
 buffers:                           # syndrome-path store capacities, in rounds
-  buffer_0_size: null              # Buffer 0, the upstream round store; a full
-                                   # buffer refuses the next round and the packing
-                                   # overflow policy decides (fail-stop by default).
-                                   # null = unbounded
+  buffer_0_size: null              # Buffer 0, the upstream round store. When it
+                                   # is full the controller holds the finished
+                                   # round and publishes it in order once a slot
+                                   # frees, the backpressure real systems apply
+                                   # to their source; drop_round and fail_stop
+                                   # are Python-level study knobs. null = unbounded
   buffer_1_size: null              # syndrome buffer 1, the strong-side store
                                    # (exists only when the mode uses it); overflow
                                    # is a hard error. null = unbounded

@@ -75,31 +75,31 @@ def logical_reference_profile() -> LinkModelConfig:
     )
 
 
-def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig:
-    """The reference card with finite, calibrated rates: same latencies, paths
-    and default payloads as logical_reference_profile, so switching cards
-    changes bandwidth and nothing else. Capacity is bits per microsecond.
+def bandwidth_limited_profile(*, syndrome_bits_per_round: int, round_us: float,
+                              commit_rounds: int, buffer_rounds: int,
+                              capacity_scale: float = 1.0) -> LinkModelConfig:
+    """The reference card with finite rates provisioned from the run's own
+    geometry: same latencies, paths and payload rules as
+    logical_reference_profile, so switching cards changes bandwidth and
+    nothing else. Capacity is bits per microsecond.
 
-    Calibration point: one distance-5 patch, 24 syndrome bits per 1.0 us
-    round, 24 bits/us; a repository modelling choice (no reference states the
-    bit width; the setting is 2408.13687v1.txt:68-71 with a 1.1 us cycle at
-    :87, and 2303.00054.txt:141-143 puts syndrome data at "a few tens of
-    Mbps" per logical qubit). Each channel carries its nominal transfer once
-    per commit region and no channel is provisioned below the 24 bits/us
-    anchor. ``capacity_scale`` multiplies every channel.
+    Every path is provisioned to carry exactly its nominal traffic in one
+    commit region (qc: one round's syndrome bits per round period), so at
+    ``capacity_scale`` 1 each link runs at utilization one, and a scale of
+    s runs it at utilization 1/s. State the utilization when reporting
+    results from this card: a single-server queue at utilization one waits
+    zero only under perfectly periodic arrivals, and any jitter
+    accumulates (Little's law). The rates are an explicit per-link
+    provisioning, the way ns-3 declares a DataRate per point-to-point
+    device, never a floor borrowed from another path.
     """
-    syndrome_bits_per_round = 24
-    round_us = 1.0
-    commit_rounds = 5
-    buffer_rounds = 5
     commit_region_us = commit_rounds * round_us
     weak_window_bits = (commit_rounds + buffer_rounds) * syndrome_bits_per_round
     strong_window_bits = (commit_rounds + 2 * buffer_rounds) * syndrome_bits_per_round
-    anchor_bits_per_us = syndrome_bits_per_round / round_us
 
     def aggregate_edge(latency_us: float, bits: int, nominal_bits_per_us: float,
                        source: str, actual_payload_source) -> LinkEdgeConfig:
-        rate = max(anchor_bits_per_us, nominal_bits_per_us) * capacity_scale
+        rate = nominal_bits_per_us * capacity_scale
         capacity = LinkCapacityConfig(rate, LinkQuantityBasis.DIRECT_AGGREGATE, None, source)
         channel = LinkConfig(us(latency_us), capacity, source)
         return LinkEdgeConfig(channel, _aggregate_payload(bits, source), actual_payload_source)
@@ -109,13 +109,7 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             0.15,
             syndrome_bits_per_round,
             syndrome_bits_per_round / round_us,
-            "one 24-bit distance-5 syndrome round per 1.0 us calibration "
-            "round period; both figures are repository modelling choices "
-            "with no cited source. Setting: "
-            "tmp/references/papers/2408.13687v1.txt:68-71. Reported cadence: "
-            "tmp/references/papers/2408.13687v1.txt:87 \"fast 1.1 µs cycle duration.\". "
-            "Envelope: tmp/references/papers/2303.00054.txt:141-143 "
-            "\"QEC rounds were performed every ∼1 µs\", \"a few tens of Mbps of syndrome data\" per logical qubit",
+            "one syndrome round per round period",
             "SyndromePayload.size_bits",
         ),
         wbd=aggregate_edge(
@@ -131,8 +125,7 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
             0.5,
             1,
             1 / commit_region_us,
-            "one escalation decision per commit region, floored at the "
-            "24 Mbps syndrome anchor",
+            "one escalation decision per commit region",
             "switching decision payload_bits",
         ),
         sbd=aggregate_edge(
@@ -146,32 +139,29 @@ def bandwidth_limited_profile(*, capacity_scale: float = 1.0) -> LinkModelConfig
         ),
         wdo=aggregate_edge(
             1.0, 1, 1 / commit_region_us,
-            "one frame-update bit per logical observable per commit region, "
-            "floored at the 24 Mbps syndrome anchor",
+            "one frame-update bit per logical observable per commit region",
             RESULT_PAYLOAD_SOURCE,
         ),
         dd=aggregate_edge(
             0.5,
             100,
             100 / commit_region_us,
-            "one boundary transaction per commit region, floored at the "
-            "24 Mbps syndrome anchor",
+            "one boundary transaction per commit region",
             None,
         ),
         do=aggregate_edge(
             1.0, 1, 1 / commit_region_us,
-            "one frame-update bit per logical observable per commit region, "
-            "floored at the 24 Mbps syndrome anchor",
+            "one frame-update bit per logical observable per commit region",
             RESULT_PAYLOAD_SOURCE,
         ),
         oc=aggregate_edge(
             4.0, BUS_WORD_BITS, BUS_WORD_BITS / commit_region_us,
-            BUS_WORD_SOURCE + ", one per commit region, floored at the anchor",
+            BUS_WORD_SOURCE + ", one per commit region",
             None,
         ),
         cq=aggregate_edge(
             0.15, BUS_WORD_BITS, BUS_WORD_BITS / commit_region_us,
-            BUS_WORD_SOURCE + ", one per commit region, floored at the anchor",
+            BUS_WORD_SOURCE + ", one per commit region",
             None,
         ),
         profile_name="bandwidth_limited",

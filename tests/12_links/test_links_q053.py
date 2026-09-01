@@ -14,6 +14,12 @@ import decsim.links.link_profiles as link_profiles
 import decsim.links.links as links_module
 from decsim.config import us
 from decsim.links.link_profiles import bandwidth_limited_profile, logical_reference_profile
+
+# The bandwidth card is provisioned from a run's geometry; the tests use
+# one distance-5 patch: 24 syndrome bits per 1.0 us round, commit and
+# buffer regions of 5 rounds.
+DISTANCE_5_GEOMETRY = dict(syndrome_bits_per_round=24, round_us=1.0,
+                           commit_rounds=5, buffer_rounds=5)
 from decsim.links.links import (
     BoundaryTransferRelation,
     Link,
@@ -121,7 +127,8 @@ def test_rule_table_and_reference_cards_cover_the_closed_vocabulary():
     paths = tuple(p for p in LinkPath
                   if p is not LinkPath.CWB and p is not LinkPath.CSB)
     assert all(links_module._PATH_RULES[path].required for path in paths)
-    for profile in (logical_reference_profile, bandwidth_limited_profile):
+    for profile in (logical_reference_profile,
+                    lambda: bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)):
         config = profile()
         assert config.wired_paths() == paths
         assert config.resolve().paths == paths
@@ -296,7 +303,7 @@ def test_profile_functions_live_only_in_the_configuration_data_module():
 def test_reference_cards_preserve_numeric_values_and_unicode_sources():
     """Reference cards preserve their calibrated numbers and Unicode source labels."""
     logical = _topology(logical_reference_profile())
-    bandwidth = _topology(bandwidth_limited_profile())
+    bandwidth = _topology(bandwidth_limited_profile(**DISTANCE_5_GEOMETRY))
     expected_latency = {
         "qc": us(0.15),
         "wbd": us(2.0),
@@ -329,13 +336,13 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
     assert capacities == {
         "qc": 24.0,
         "wbd": 48.0,
-        "wsd": 24.0,
+        "wsd": 0.2,
         "sbd": 72.0,
-        "wdo": 24.0,
-        "dd": 24.0,
-        "do": 24.0,
-        "oc": 24.0,
-        "cq": 24.0,
+        "wdo": 0.2,
+        "dd": 20.0,
+        "do": 0.2,
+        "oc": 6.4,
+        "cq": 6.4,
     }
 
 

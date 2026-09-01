@@ -46,6 +46,12 @@ PATH_ORDER = ["qc", "cwb", "wbd", "wsd", "sbd", "wdo", "dd", "do", "oc", "cq",
 # optional and unset.
 REQUIRED_PATH_ORDER = [p for p in PATH_ORDER if p not in ("cwb", "csb")]
 
+# The bandwidth card is provisioned from a run's geometry; the tests use
+# one distance-5 patch: 24 syndrome bits per 1.0 us round, commit and
+# buffer regions of 5 rounds.
+DISTANCE_5_GEOMETRY = dict(syndrome_bits_per_round=24, round_us=1.0,
+                           commit_rounds=5, buffer_rounds=5)
+
 
 def make_channel(*, capacity=None, propagation_ticks=7, source="test channel"):
     return LinkConfig(propagation_ticks, capacity, source)
@@ -809,18 +815,18 @@ def test_links_expose_timing_only_without_scheduler_or_reclamation_ownership():
 
 def test_bandwidth_profile_declares_finite_calibrated_capacities():
     """The bandwidth profile exposes all calibrated capacities and fallback payloads."""
-    config = bandwidth_limited_profile()
+    config = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
     topology = topology_json_value(config.resolve().snapshot())
     expected_capacities = {
         "qc": (24.0, "direct_aggregate", None, 24.0),
         "wbd": (48.0, "direct_aggregate", None, 48.0),
-        "wsd": (24.0, "direct_aggregate", None, 24.0),
+        "wsd": (0.2, "direct_aggregate", None, 0.2),
         "sbd": (72.0, "direct_aggregate", None, 72.0),
-        "wdo": (24.0, "direct_aggregate", None, 24.0),
-        "dd": (24.0, "direct_aggregate", None, 24.0),
-        "do": (24.0, "direct_aggregate", None, 24.0),
-        "oc": (24.0, "direct_aggregate", None, 24.0),
-        "cq": (24.0, "direct_aggregate", None, 24.0),
+        "wdo": (0.2, "direct_aggregate", None, 0.2),
+        "dd": (20.0, "direct_aggregate", None, 20.0),
+        "do": (0.2, "direct_aggregate", None, 0.2),
+        "oc": (6.4, "direct_aggregate", None, 6.4),
+        "cq": (6.4, "direct_aggregate", None, 6.4),
     }
     expected_fallbacks = {
         "qc": (24, "direct_aggregate", None, 24),
@@ -865,7 +871,7 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
 def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters():
     """The reference profile stays pure latency while shared semantic parameters match."""
     reference = logical_reference_profile()
-    bandwidth = bandwidth_limited_profile()
+    bandwidth = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
     reference_topology = topology_json_value(reference.resolve().snapshot())
     bandwidth_topology = topology_json_value(bandwidth.resolve().snapshot())
 
@@ -915,7 +921,7 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
 
 def test_bandwidth_profile_serializes_and_queues_in_physical_fifo_order():
     """Finite QC transfers serialize FIFO and WSD uses its configured fallback."""
-    model = bandwidth_limited_profile().resolve()
+    model = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY).resolve()
     first = model.reserve(
         LinkPath.QC,
         payload_bits=24,
@@ -959,7 +965,7 @@ def test_bandwidth_profile_serializes_and_queues_in_physical_fifo_order():
     assert second.total_delay_ticks == us(2.15)
     assert second.physical_sequence == 1
     assert wsd.payload_bits == 1
-    assert wsd.serialization_ticks == us(1 / 24.0)
+    assert wsd.serialization_ticks == us(5.0)     # one decision bit at 0.2 bits/us
     assert wsd_transfer["payload_selection"] == "configured_default"
     assert qc_transfers[1]["serializer_start_ticks"] >= qc_transfers[0][
         "serializer_end_ticks"
@@ -981,18 +987,18 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
     base_capacities = {
         "qc": 24.0,
         "wbd": 48.0,
-        "wsd": 24.0,
+        "wsd": 0.2,
         "sbd": 72.0,
-        "wdo": 24.0,
-        "dd": 24.0,
-        "do": 24.0,
-        "oc": 24.0,
-        "cq": 24.0,
+        "wdo": 0.2,
+        "dd": 20.0,
+        "do": 0.2,
+        "oc": 6.4,
+        "cq": 6.4,
     }
 
     def aggregate_capacities(scale):
         topology = topology_json_value(
-            bandwidth_limited_profile(capacity_scale=scale).resolve().snapshot())
+            bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=scale).resolve().snapshot())
         return {
             channel["member_paths"][0]: channel["capacity"][
                 "aggregate_bits_per_us"
@@ -1000,11 +1006,9 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
             for channel in topology["physical_channels"]
         }
 
-    slow_model = bandwidth_limited_profile(
-        capacity_scale=0.5
+    slow_model = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=0.5
     ).resolve()
-    fast_model = bandwidth_limited_profile(
-        capacity_scale=2.0
+    fast_model = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=2.0
     ).resolve()
     slow = slow_model.reserve(
         LinkPath.QC,
@@ -1029,8 +1033,7 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
     assert fast.serialization_ticks == us(0.5)
     for invalid_scale in (0.0, -1.0, math.inf, -math.inf, math.nan):
         with pytest.raises(ValueError):
-            bandwidth_limited_profile(
-                capacity_scale=invalid_scale
+            bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=invalid_scale
             )
 
 

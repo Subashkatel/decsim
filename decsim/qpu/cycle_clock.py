@@ -130,7 +130,7 @@ class QPUDevice:
         for command in pending:
             op = command.operation
             self.command_events.append(QPUCommandEvent("STARTED", self.engine.now, command))
-            for patch in _patches(op):
+            for patch in patches_of(op):
                 self._idle.pop(patch, None)
             if command.round_count == 0:
                 if command.emits_detector_data:
@@ -146,7 +146,7 @@ class QPUDevice:
         self.completion_receiver(command.operation)
 
     def _release_patches(self, command: RunOperationBody) -> None:
-        for patch in _patches(command.operation):
+        for patch in patches_of(command.operation):
             self._idle.setdefault(patch, [command.operation.id, 0])
 
     # ---------------------------------------------------------------- emit
@@ -187,7 +187,7 @@ class QPUDevice:
             payload, SyndromePacketRoute.feedback_memory_round(operation_id))
 
 
-def _patches(operation) -> tuple:
+def patches_of(operation) -> tuple:
     if operation.patches:
         return tuple(operation.patches)
     if operation.qubits:

@@ -29,7 +29,7 @@ class TimingConfig:
     # Analog readout acquisition / discrimination, represented by
     # its latency and the classified bits it produces (not an ADC waveform).
     measurement_signal_to_classical_bits_us: float = 0.0
-    t_pack_us: float = 0.0         # controller packet assembly before WBD send
+    t_pack_us: float = 0.0         # controller packet assembly, charged once per completed round
     # Online sequencer/branch plus waveform-command generation.
     # CQ transport remains a separate link latency.
     instruction_or_decision_to_analog_control_pulse_us: float = 0.0

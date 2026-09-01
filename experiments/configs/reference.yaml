@@ -103,8 +103,10 @@ controller:                        # controller work per round, in cycles of its
                                                                # a separate link
                                    # classification is inside the priced round
                                    # (Google 2023 Nature 614, Methods)
-  t_pack_cycles: 0                 # packet assembly cost per round; zero: one
-                                   # fragment per round makes packing a no-op
+  t_pack_cycles: 0                 # packet assembly cost, charged once per
+                                   # completed round (Riverlane's pipeline pays
+                                   # 250 to 370 cycles of packetization per
+                                   # round, Barber et al. 2025)
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains

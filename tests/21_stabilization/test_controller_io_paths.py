@@ -58,6 +58,37 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
     assert qc_transfer.reservation.payload_bits == 4
 
 
+def test_packing_charges_its_assembly_time_for_every_round(fabric):
+    """A completed round pays the controller's packet assembly time once,
+    whether it arrived in one fragment or several: the packetization and
+    framing work a real-time controller does per syndrome word (Riverlane's
+    decoder pipeline, Barber et al. 2025, charges 250 to 370 FPGA cycles
+    per round of packetization and conditional logic)."""
+    engine = Engine(verbose=False)
+    receiver = _WindowInputReceiver()
+    links = fabric["declared_profile"](cwb=False, csb=False).resolve()
+    packing = SyndromePacking(
+        engine, links=links, t_pack=us(1), packing_context_capacity=None,
+        window_input_receiver=receiver, feedback_memory_receiver=None)
+    controller = Controller(
+        engine, qpu=None, window_manager=None, syndrome_packing=packing,
+        measurement_signal_to_classical_bits_ticks=us(3), links=links,
+        resolved_operations=(), resolved_patches=(), idle_policy=None,
+        feedback_streams=None)
+
+    controller.accept_qpu_readout(
+        QPUReadout(7, "patch-a", 4, bits=[1, 0, 1, 0], size_bits=4),
+        WINDOW_INPUT_ROUTE)
+    engine.run()
+
+    assert [(event.kind, event.tick) for event in packing.round_events[:3]] == [
+        ("EMITTED", 0),
+        ("BINARY_AVAILABLE", us(2 + 3)),
+        ("PACKED", us(2 + 3 + 1)),
+    ]
+    assert len(receiver.packets) == 1
+
+
 def _feedback_run(fabric, *, controller_output_us):
     operations = (
         fabric["memory_op"](1),

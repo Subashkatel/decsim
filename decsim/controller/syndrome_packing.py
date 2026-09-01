@@ -214,8 +214,11 @@ class SyndromePacking:
         self._assemble_fragment(fragment, context)
         if context.received_fragments != context.fragment_count:
             return
-        packing_takes_time = context.fragment_count > 1 and self.t_pack
-        if packing_takes_time:
+        # every completed round pays the assembly time once: packetization
+        # and framing cost the controller per syndrome word, however many
+        # fragments the word arrived in (Riverlane's pipeline charges 250 to
+        # 370 FPGA cycles per round, Barber et al. Nature Electronics 2025)
+        if self.t_pack > 0:
             self.engine.schedule(self.t_pack, lambda: self._finish_packing(context),
                                  label="controller pack")
         else:

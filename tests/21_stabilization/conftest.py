@@ -31,10 +31,10 @@ def sliding_scheme():
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD)
 
 # The declared stage ticks of this suite, in microseconds. QEC cycle is
-# 1.0 us. t_pack applies only to multi-fragment rounds by design
-# (SyndromePacking._receive_fragment), so single-patch workloads see 0.
+# 1.0 us. The packet assembly time is declared zero here; its per-round
+# charge has its own test in test_controller_io_paths.py.
 DECLARED_US = {
-    "qc": 2.0, "binary": 3.0, "pack": 1.0, "cwb": 4.0, "csb": 7.0,
+    "qc": 2.0, "binary": 3.0, "pack": 0.0, "cwb": 4.0, "csb": 7.0,
     "wbd": 5.0, "wsd": 3.0, "sbd": 6.0, "weak": 10.0, "strong": 30.0,
     "wdo": 2.0, "dd": 0.5, "do": 4.0, "frame": 1.0, "oc": 2.0, "cq": 2.0,
 }

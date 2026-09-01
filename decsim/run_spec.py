@@ -249,6 +249,7 @@ class RunSpec:
                 feedback_memory_receiver=window_manager,
                 syndrome_buffer=syndrome_buffer,
                 syndrome_buffer_1=syndrome_buffer_1,
+                window_input_store=window_manager.primary_store,
                 policy=config.syndrome_packing_policy,
                 detector_formation=config.device))
         if config.make_syndrome_packing and syndrome_buffer_1 is not None:

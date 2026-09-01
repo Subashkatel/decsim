@@ -64,15 +64,15 @@ def test_every_emitted_round_reaches_exactly_one_terminal(fabric):
 
 
 def test_strong_run_records_the_room_store_landing(fabric):
-    """Strong-primary: the dual write lands round r in syndrome buffer 1
-    at r+12 (csb 7 after binary availability), and the window chain runs
-    18 / 54 / 58 / 59 on the strong tier."""
+    """Strong-primary: round r travels once, over csb into syndrome buffer
+    1, landing at r+12 (csb 7 after binary availability); nothing crosses
+    cwb, and the window chain runs 18 / 54 / 58 / 59 on the strong tier."""
     ledger = event_ledger(fabric["strong_only_run"](rounds=6))
     ledger.check()
 
     assert _kinds_and_ticks(ledger.chain(op=1, round=3)) == [
         ("EMITTED", us(3)), ("BINARY_AVAILABLE", us(8)), ("PACKED", us(8)),
-        ("CWB_SENT", us(8)), ("PUBLISHED", us(12)), ("STORED_SB1", us(15))]
+        ("STORED_SB1", us(15))]
     window_chain = ledger.chain(op=1, window=0)
     assert _kinds_and_ticks(window_chain) == [
         ("WINDOW_DATA_COMPLETE", us(18)), ("DECODE_QUEUED", us(18)),

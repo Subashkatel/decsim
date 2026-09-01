@@ -1059,6 +1059,31 @@ def test_transfer_overhead_delays_delivery_without_occupying_the_wire():
     assert first.total_delay_ticks == 50 + us(4.0) + 10
 
 
+def test_report_delivery_counts_the_setup_once():
+    """A transfer arrives at send + setup + queue + serialization +
+    propagation: the sending-overhead, transmission and time-of-flight terms
+    of Hennessy and Patterson's interconnect model, each counted once. The
+    exported ledger names the setup on its own line and reconciles."""
+    from decsim.links.links import LinkCapacityConfig, LinkQuantityBasis
+    from decsim.links.link_traffic_report import traffic_json_value
+    capacity = LinkCapacityConfig(
+        1.0, LinkQuantityBasis.DIRECT_AGGREGATE, None, "test rate")
+    channel = make_channel(capacity=capacity, propagation_ticks=10)
+    model = make_model_config({LinkPath.SBD: _overhead_edge(
+        50, channel=channel)}).resolve()
+    model.reserve(LinkPath.SBD, payload_bits=4, now_ticks=100,
+                  attribution=valid_attribution(LinkPath.SBD))
+    row = traffic_json_value(model.snapshot())["transfers"][0]
+    assert row["setup_ticks"] == 50
+    assert row["delivery_ticks"] == 100 + 50 + us(4.0) + 10
+    assert row["delivery_ticks"] == row["serializer_end_ticks"] + row["propagation_ticks"]
+    assert row["total_delay_ticks"] == (row["setup_ticks"] + row["queue_wait_ticks"]
+                                        + row["serialization_ticks"] + row["propagation_ticks"])
+    edges = traffic_json_value(model.snapshot())["semantic_edges"]
+    sbd = next(entry for entry in edges if entry["path"] == "sbd")
+    assert sbd["setup_ticks"] == 50
+
+
 def test_setups_serialize_like_aladdins_single_dma_event():
     model = make_model_config(
         {LinkPath.SBD: _overhead_edge(50)}).resolve()

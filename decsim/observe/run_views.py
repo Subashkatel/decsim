@@ -470,10 +470,6 @@ def event_ledger(completed) -> RunLedgerView:
             best = committed_of_op.get(op_id)
             if best is None or committed["tick"] > best["tick"]:
                 committed_of_op[op_id] = committed
-        for drop in snapshot.duplicate_drops:
-            op_id, window_id = drop.window_key
-            add("FRAME_DUPLICATE_DROPPED", drop.arrived_ticks, op_id,
-                window=window_id, route=drop.tier, status="terminal")
     # The output path uses the owners' actual payload records. A release is
     # available after OC, then its real RunOperationBody crosses controller
     # output processing and CQ before it arrives and starts at the QPU.

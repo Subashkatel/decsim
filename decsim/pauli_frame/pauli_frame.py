@@ -29,11 +29,7 @@ from ..message import stable_identity_order_key
 
 @dataclass(frozen=True)
 class PauliFrameConfig:
-    """Card selecting the minimal Pauli frame and pricing one frame write.
-
-    A dropped duplicate performs no frame write and therefore charges no write
-    cost; the drop is decided synchronously on arrival.
-    """
+    """Card selecting the minimal Pauli frame and pricing one frame write."""
 
     commit_us: float
     zero_commit_cost_justification: Optional[str] = None
@@ -77,33 +73,17 @@ class PauliFrameCommitRecord:
 
 
 @dataclass(frozen=True)
-class PauliFrameDuplicateDrop:
-    """One defensively dropped arrival for an already accepted window.
-
-    This cannot occur in the supported weak-final scope and is not evidence
-    about strong-duplicate drops.
-    """
-
-    window_key: tuple
-    tier: str
-    run_sequence: int
-    arrived_ticks: int
-
-
-@dataclass(frozen=True)
 class PauliFrameSnapshot:
     """Immutable report of the frame at one instant."""
 
     configured_commit_ticks: int
     commit_count: int
-    duplicate_drop_count: int
     pending_write_count: int
     charged_ticks: int
     first_commit_ticks: Optional[int]
     last_commit_ticks: Optional[int]
     frames: tuple
     records: tuple
-    duplicate_drops: tuple
 
 
 @dataclass(frozen=True)
@@ -125,7 +105,6 @@ class PauliFrame:
         self._entry_by_window_key: dict[tuple, PauliFrameCommitRecord] = {}
         self._window_keys_by_stream: dict[Any, list] = {}
         self._records: list[PauliFrameCommitRecord] = []
-        self._duplicate_drops: list[PauliFrameDuplicateDrop] = []
 
     def commit_weak_correction(
         self,
@@ -135,17 +114,16 @@ class PauliFrame:
         request_key,
         on_committed,
     ) -> None:
-        """Accept one window correction once, charge its write, then continue."""
+        """Accept one window correction once, charge its write, then continue.
+        A second correction for a window is a protocol violation: the frame
+        applies each window's correction exactly once, and a swallowed write
+        would strand its caller's continuation."""
         if window_key in self._accepted_window_keys:
-            self._duplicate_drops.append(
-                PauliFrameDuplicateDrop(
-                    window_key=window_key,
-                    tier=request_key.tier.value,
-                    run_sequence=request_key.run_sequence,
-                    arrived_ticks=self.engine.now,
-                )
-            )
-            return
+            raise RuntimeError(
+                f"window {window_key} already accepted a "
+                f"{self._entry_tier(window_key)} correction; the "
+                f"{request_key.tier.value} correction (request "
+                f"{request_key.run_sequence}) is a second write for it")
 
         self._accepted_window_keys.add(window_key)
         self.engine.log_io(
@@ -178,6 +156,11 @@ class PauliFrame:
             lambda: self._install_accepted_write(window_key),
             label=f"pauli frame commit {window_key}",
         )
+
+    def _entry_tier(self, window_key) -> str:
+        pending = self._pending_by_window_key.get(window_key)
+        record = pending.record if pending is not None else self._entry_by_window_key[window_key]
+        return record.tier
 
     def _install_accepted_write(self, window_key) -> None:
         accepted_write = self._pending_by_window_key.pop(window_key)
@@ -233,12 +216,10 @@ class PauliFrame:
         return PauliFrameSnapshot(
             configured_commit_ticks=self.commit_ticks,
             commit_count=commit_count,
-            duplicate_drop_count=len(self._duplicate_drops),
             pending_write_count=len(self._pending_by_window_key),
             charged_ticks=commit_count * self.commit_ticks,
             first_commit_ticks=commit_ticks[0] if commit_ticks else None,
             last_commit_ticks=commit_ticks[-1] if commit_ticks else None,
             frames=frames,
             records=tuple(self._records),
-            duplicate_drops=tuple(self._duplicate_drops),
         )

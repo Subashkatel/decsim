@@ -565,3 +565,133 @@ def test_a_default_payload_on_another_basis_than_the_capacity_is_refused():
     )
     with pytest.raises(ValueError, match="bases must match"):
         links.LinkEdgeConfig(channel, aggregate_payload, None)
+
+
+def test_a_negative_payload_leaves_the_channel_untouched():
+    channel = bounded_channel(1000.0, 0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    setup_card = card(qc=qpu_edge)
+    model = setup_card.build()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    with pytest.raises(RuntimeError, match="whole number"):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=-1,
+            now_ticks=10,
+            attribution=first_round,
+        )
+    accepted = model.reserve(
+        links.LinkPath.QC,
+        payload_bits=8,
+        now_ticks=10,
+        attribution=second_round,
+    )
+    assert (accepted.setup_ticks, accepted.send_ticks) == (5, 15)
+    assert accepted.physical_sequence == 0
+    snapshot = model.snapshot()
+    assert len(snapshot.transfers) == 1
+
+
+def test_a_fractional_payload_leaves_the_channel_untouched():
+    channel = bounded_channel(1000.0, 0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    setup_card = card(qc=qpu_edge)
+    model = setup_card.build()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    with pytest.raises(RuntimeError, match="whole number"):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=1.5,
+            now_ticks=10,
+            attribution=first_round,
+        )
+    accepted = model.reserve(
+        links.LinkPath.QC,
+        payload_bits=8,
+        now_ticks=10,
+        attribution=second_round,
+    )
+    assert (accepted.setup_ticks, accepted.send_ticks) == (5, 15)
+    assert accepted.physical_sequence == 0
+    snapshot = model.snapshot()
+    assert len(snapshot.transfers) == 1
+
+
+def test_a_fractional_request_tick_leaves_the_channel_untouched():
+    channel = bounded_channel(1000.0, 0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    setup_card = card(qc=qpu_edge)
+    model = setup_card.build()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    with pytest.raises(RuntimeError, match="whole number"):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=8,
+            now_ticks=10.5,
+            attribution=first_round,
+        )
+    accepted = model.reserve(
+        links.LinkPath.QC,
+        payload_bits=8,
+        now_ticks=10,
+        attribution=second_round,
+    )
+    assert (accepted.setup_ticks, accepted.send_ticks) == (5, 15)
+    assert accepted.physical_sequence == 0
+    snapshot = model.snapshot()
+    assert len(snapshot.transfers) == 1
+
+
+def test_a_request_tick_that_is_not_a_number_leaves_the_channel_untouched():
+    channel = bounded_channel(1000.0, 0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    setup_card = card(qc=qpu_edge)
+    model = setup_card.build()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    with pytest.raises(RuntimeError, match="whole number"):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=8,
+            now_ticks=math.nan,
+            attribution=first_round,
+        )
+    accepted = model.reserve(
+        links.LinkPath.QC,
+        payload_bits=8,
+        now_ticks=10,
+        attribution=second_round,
+    )
+    assert (accepted.setup_ticks, accepted.send_ticks) == (5, 15)
+    assert accepted.physical_sequence == 0
+    snapshot = model.snapshot()
+    assert len(snapshot.transfers) == 1
+
+
+def test_a_negative_first_request_tick_leaves_the_channel_untouched():
+    channel = bounded_channel(1000.0, 0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    setup_card = card(qc=qpu_edge)
+    model = setup_card.build()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    with pytest.raises(RuntimeError, match="not negative"):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=8,
+            now_ticks=-5,
+            attribution=first_round,
+        )
+    accepted = model.reserve(
+        links.LinkPath.QC,
+        payload_bits=8,
+        now_ticks=10,
+        attribution=second_round,
+    )
+    assert (accepted.setup_ticks, accepted.send_ticks) == (5, 15)
+    assert accepted.physical_sequence == 0
+    snapshot = model.snapshot()
+    assert len(snapshot.transfers) == 1

@@ -693,6 +693,7 @@ class LinkModel:
         selected_bits, selection, payload_source = _select_payload(
             path, edge, payload_bits
         )
+        _check_request(path, selected_bits, now_ticks)
         setup_ticks = self._queue_setup(path, channel, edge, now_ticks)
         wire_ticks = now_ticks + setup_ticks
         reservation = channel.reserve(
@@ -747,7 +748,9 @@ class LinkModel:
         costs the edge's overhead; the channel's setup queue moves.
         Requests on one channel arrive in nondecreasing order; a request
         earlier than the channel's previous one is a broken contract and
-        is refused before the queue moves.
+        is refused before the queue moves. Every other check on the
+        request has already passed, so a refusal anywhere leaves the
+        queue as it was.
         """
         queue = self._setup_queue_by_channel[channel]
         has_earlier_request = queue.last_request_ticks is not None
@@ -940,6 +943,34 @@ def _serialization_ticks(payload_bits, capacity: LinkCapacityConfig) -> int:
     bits_times_ticks = payload * config.TICKS_PER_MICROSECOND
     exact_ticks = bits_times_ticks / rate
     return math.ceil(exact_ticks)
+
+
+def _check_request(path: LinkPath, payload_bits, now_ticks) -> None:
+    """Refuse a malformed request before any state moves.
+
+    A wrong caller is a bug; the setup queue, the wire, the counters and
+    the ledger stay as they were.
+    """
+    if not _is_whole_number(now_ticks) or now_ticks < 0:
+        raise RuntimeError(
+            f"{path.value} requested at tick {now_ticks!r}; a request tick "
+            f"is a whole number, not negative"
+        )
+    if payload_bits is None:
+        return
+    if not _is_whole_number(payload_bits) or payload_bits < 0:
+        raise RuntimeError(
+            f"{path.value} requested with {payload_bits!r} bits; a payload "
+            f"is a whole number of bits, not negative"
+        )
+
+
+def _is_whole_number(value) -> bool:
+    try:
+        whole = int(value)
+    except (OverflowError, ValueError, TypeError):
+        return False
+    return whole == value
 
 
 def _select_payload(path: LinkPath, edge: LinkEdgeConfig, payload_bits):

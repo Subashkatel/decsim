@@ -158,3 +158,35 @@ def test_a_fault_between_two_windows_of_the_same_depth_has_no_owner():
             fault_exclusion_ranges=(),
             dependency_edges=(),
         )
+
+
+def test_an_excluded_fault_is_owned_by_nobody_and_stays_a_column_everywhere():
+    circuit = surface_code_circuit(4)
+    # Window 1 is terminal and window 0 depends on it; both see rounds 1
+    # to 4. Nobody commits the 16 graphlike faults that flip a round-1
+    # detector, so each window keeps them as columns to explain its
+    # defects (Skoric et al. 2209.08552, section I.B).
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 3, 3, 4), (1, 4, 4, 4)],
+        round_count=4,
+        fault_model_requirement=fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED,
+        fault_exclusion_ranges=((1, 1),),
+        dependency_edges=((1, 0),),
+    )
+    dependent_faults = models[0].require_faults(GRAPHLIKE)
+    terminal_faults = models[1].require_faults(GRAPHLIKE)
+    dependent_owns = owned_faults(models[0])
+    terminal_owns = owned_faults(models[1])
+    touching_round_one = {0, 1, 2, 3, 4, 6, 7, 8, 9, 11, 14, 15, 16, 17, 18, 19}
+    # The terminal window owns 30 faults of round 4 alone, 18 of rounds
+    # 3 and 4, and the 14 of round 2 alone that no commit round reaches;
+    # the dependent window drops those 62 and owns the 32 of round 3.
+    assert len(dependent_faults.source_fault_ids) == 48
+    assert len(dependent_owns) == 32
+    assert len(terminal_faults.source_fault_ids) == 110
+    assert len(terminal_owns) == 62
+    assert touching_round_one <= set(dependent_faults.source_fault_ids)
+    assert touching_round_one <= set(terminal_faults.source_fault_ids)
+    assert touching_round_one & set(dependent_owns) == set()
+    assert touching_round_one & set(terminal_owns) == set()

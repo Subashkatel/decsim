@@ -20,11 +20,11 @@ from .observe.metrics import (DecoderMemoryOccupancy, DecoderUtilization,
 from .windows.windowing_schemes import ParallelWindowScheme
 from .run_spec import RunSpec, simulate
 from .decoders.weak_strong_switching import Switching
-from .config import TimingConfig, fmt, us
+from .config import TimingConfig, format_ticks, microseconds_to_ticks
 
 __all__ = [
     "RunSpec", "TimingConfig", "simulate",
-    "us", "fmt",
+    "microseconds_to_ticks", "format_ticks",
     "CircuitFrontend", "SurgeryIRFrontend",
     "three_cnot_circuit", "cnot_plus_two_t_circuit", "independent_t_circuit",
     "three_cnot_six_qubits_circuit",

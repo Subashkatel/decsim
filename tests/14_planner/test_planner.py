@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from decsim.config import TICKS_PER_US
+from decsim.config import TICKS_PER_MICROSECOND
 from decsim.syndrome_buffer.syndrome_buffer import PotentialStrong
 from decsim.message import (
     Operation,
@@ -86,7 +86,7 @@ def resolved(operation_id, *, rounds=4, nodes=10, name="surface"):
         operation_id=operation_id,
         code_geometry=geometry(name),
         round_count=rounds,
-        round_ticks=TICKS_PER_US,
+        round_ticks=TICKS_PER_MICROSECOND,
         spatial_node_count=nodes,
     )
 

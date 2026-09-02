@@ -183,7 +183,7 @@ def test_metric_registration_rejects_duplicate_names():
     duplicate = ProbeMetric(name="duplicate")
     engine.add_metric(registered)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError):
         engine.add_metric(duplicate)
 
     assert engine.metrics == [registered]

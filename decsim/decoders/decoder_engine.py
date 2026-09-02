@@ -22,7 +22,7 @@ from dataclasses import dataclass
 import math
 from typing import Callable, Optional
 
-from ..config import us
+from ..config import microseconds_to_ticks
 from ..message import DecodeJob, DecodeResult, RunSeedChild, RunSeedPathSegment
 
 ALGORITHM_STAGE = "algorithm"
@@ -64,7 +64,7 @@ class DecoderTiming:
         ticks, cumulative, previous = {}, 0, 0
         for stage in self.before + self.after:
             cumulative += stage.cycles_for(job)
-            end = us(cumulative / self.frequency_mhz)
+            end = microseconds_to_ticks(cumulative / self.frequency_mhz)
             ticks[stage.name] = end - previous
             previous = end
         return ticks
@@ -160,7 +160,7 @@ class DecoderEngine:
                 if not job.cancelled:
                     running.result = self.decoder.decode(job)
                     measured_ns = self.decoder.last_decode_ns
-                ticks = us((measured_ns or 0) / 1000.0)
+                ticks = microseconds_to_ticks((measured_ns or 0) / 1000.0)
             else:
                 ticks = self.decoder.latency(job)
         self.stage_records.append(DecoderStageRecord(

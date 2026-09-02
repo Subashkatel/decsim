@@ -8,7 +8,7 @@ whose boundary has not arrived waits in its slot, never on the unit
 import pytest
 import stim
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoder_memory import (DecoderMemoryCapacityExhaustion,
                                             DecoderMemoryConfig)
 from decsim.decoders.decoders import PresetLatencyDecoder
@@ -79,8 +79,8 @@ def test_saturated_cadence_is_max_of_transfer_and_compute():
     gaps = [b - a for a, b in zip(dones, dones[1:])]
     saturated = [gap for gap in gaps if gap > 0]
     # sbd 2.0, decode 5.0: back-to-back completions tick at 5.0 us
-    assert us(5.0) in saturated, sorted(set(saturated))
-    assert us(7.0) not in saturated, sorted(set(saturated))
+    assert microseconds_to_ticks(5.0) in saturated, sorted(set(saturated))
+    assert microseconds_to_ticks(7.0) not in saturated, sorted(set(saturated))
 
 
 def test_unit_idles_until_a_late_landing():
@@ -89,7 +89,7 @@ def test_unit_idles_until_a_late_landing():
     completed = _run(decode_us=0.5)
     sends, stamps = _events(completed)
     at_landing = sum(1 for k, (_, done) in stamps.items()
-                     if done - us(0.5) == sends[k][1])
+                     if done - microseconds_to_ticks(0.5) == sends[k][1])
     assert at_landing > 0
 
 
@@ -103,7 +103,7 @@ def test_tight_memory_degrades_to_serial_residency_where_pairs_do_not_fit():
     _, stamps = _events(completed)
     dones = sorted(done for _, done in stamps.values())
     gaps = [b - a for a, b in zip(dones, dones[1:])]
-    assert us(7.0) in gaps, sorted(set(gaps))
+    assert microseconds_to_ticks(7.0) in gaps, sorted(set(gaps))
 
 
 def test_an_oversized_single_window_still_stops_loudly():
@@ -144,8 +144,8 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
         job = DecodeJob(op_id=1, window_id=index, n_rounds=1, payloads=[payload],
                         label=f"w{index}",
                         request_key=DecoderRequestKey(1, index, DecoderTier.WEAK, index))
-        engine.schedule(us(arrival_us),
-                        lambda: manager.enqueue(job, lambda: us(transfer_us)))
+        engine.schedule(microseconds_to_ticks(arrival_us),
+                        lambda: manager.enqueue(job, lambda: microseconds_to_ticks(transfer_us)))
 
     return engine, manager, submit, compute_start
 
@@ -162,9 +162,9 @@ def test_a_full_pool_stages_the_next_window_on_the_unit_that_frees_first():
     manager.check_decode_work_settled()
     # unit 0: w0 5.5..9.5, w2 12.0..16.0, w4 20.0..24.0 (claimed at 16.5,
     # input lands 20.0); unit 1: w1 7.5..11.5, w3 18.5..22.5
-    assert compute_start["w3"] == us(18.5) and compute_start["w4"] == us(20.0)
+    assert compute_start["w3"] == microseconds_to_ticks(18.5) and compute_start["w4"] == microseconds_to_ticks(20.0)
     # w5's input lands at 22.5: unit 1 frees at 22.5, unit 0 not before 24.0
-    assert compute_start["w5"] == us(22.5)
+    assert compute_start["w5"] == microseconds_to_ticks(22.5)
 
 
 def test_a_job_without_input_waits_in_the_queue_for_free_compute():
@@ -184,11 +184,11 @@ def test_a_job_without_input_waits_in_the_queue_for_free_compute():
         on_window_decoded=None, on_strong_window_decoded=None)
     done = {}
     for label, arrival in (("a", 0.0), ("b", 1.0), ("c", 2.0)):
-        engine.schedule(us(arrival), lambda label=label: manager.submit_decode(
+        engine.schedule(microseconds_to_ticks(arrival), lambda label=label: manager.submit_decode(
             1, lambda label=label: done.__setitem__(label, engine.now), label=label))
     engine.run()
     # a on unit 0 (0..4), b on unit 1 (1..5); c waits for unit 0 at 4
-    assert done == {"a": us(4.0), "b": us(5.0), "c": us(8.0)}
+    assert done == {"a": microseconds_to_ticks(4.0), "b": microseconds_to_ticks(5.0), "c": microseconds_to_ticks(8.0)}
 
 
 def test_a_pipelined_units_compute_returns_to_the_pool_once():
@@ -208,6 +208,6 @@ def test_a_pipelined_units_compute_returns_to_the_pool_once():
     engine.run()
     manager.check_decode_work_settled()
     assert manager.pool_free["default"] == 1
-    assert compute_start["w1"] == us(4.5)
+    assert compute_start["w1"] == microseconds_to_ticks(4.5)
     # one start per initiation interval: w2 and w3 follow at 0.5 us steps
-    assert compute_start["w2"] == us(5.0) and compute_start["w3"] == us(5.5)
+    assert compute_start["w2"] == microseconds_to_ticks(5.0) and compute_start["w3"] == microseconds_to_ticks(5.5)

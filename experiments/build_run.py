@@ -15,7 +15,7 @@ from pathlib import Path
 
 import stim
 
-from decsim.config import TimingConfig, us as us_ticks
+from decsim.config import TimingConfig, microseconds_to_ticks
 from decsim.decoders.decoder_engine import (DecoderEngine, DecoderStage,
                                             DecoderTiming)
 from decsim.decoders.decoder_memory import DecoderMemoryConfig
@@ -237,11 +237,11 @@ def link_model(config: ExperimentConfig):
             capacity = LinkCapacityConfig(card.bits_per_us,
                                           LinkQuantityBasis.DIRECT_AGGREGATE,
                                           None, source)
-        channel = LinkConfig(us_ticks(card.latency_us), capacity, source)
+        channel = LinkConfig(microseconds_to_ticks(card.latency_us), capacity, source)
         overhead = None
         if card.transfer_overhead_us:
             overhead = TransferOverheadConfig(
-                us_ticks(card.transfer_overhead_us), source)
+                microseconds_to_ticks(card.transfer_overhead_us), source)
         edge_overrides[path] = replace(getattr(profile, path), channel=channel,
                                        transfer_overhead=overhead)
     # The config prices readout classification on its own line, so its QC card is link
@@ -451,7 +451,7 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
                 if config.mode == "switching" else None),
             threshold_calibrator=threshold_calibrator),
         idle_policy=idle_policy(config),
-        pauli_frame=PauliFrameConfig(commit_us=config.pauli_frame_commit_us),
+        pauli_frame=PauliFrameConfig(commit_microseconds=config.pauli_frame_commit_us),
         seed=seed,
         **routing)
     return spec, engine

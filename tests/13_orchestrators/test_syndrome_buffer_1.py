@@ -5,7 +5,7 @@ recorded scenarios)."""
 
 import pytest
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
 from decsim.links.link_profiles import (logical_reference_profile,
                                         with_csb_edge)
@@ -66,8 +66,8 @@ def test_priced_csb_gates_arrival():
     with pytest.raises(RuntimeError, match="not stored in syndrome buffer 1"):
         sb1.ready_tick([(1, 1)])
     engine.run()
-    assert sb1.publication_tick((1, 1)) == us(0.5)
-    assert sb1.ready_tick([(1, 1)]) == us(0.5)
+    assert sb1.publication_tick((1, 1)) == microseconds_to_ticks(0.5)
+    assert sb1.ready_tick([(1, 1)]) == microseconds_to_ticks(0.5)
     assert _csb_transfer_count(links) == 1
 
 

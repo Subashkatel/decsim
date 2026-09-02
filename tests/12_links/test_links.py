@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 import decsim.links.links as links_module
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.links.link_profiles import (
     bandwidth_limited_profile,
     logical_reference_profile,
@@ -700,15 +700,15 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
     model = config.resolve()
     topology = topology_json_value(model.snapshot())
     expected_propagation = {
-        "qc": us(0.15),
-        "wbd": us(2.0),
-        "wsd": us(0.5),
-        "sbd": us(2.0),
-        "wdo": us(1.0),
-        "dd": us(0.5),
-        "do": us(1.0),
-        "oc": us(4.0),
-        "cq": us(0.15),
+        "qc": microseconds_to_ticks(0.15),
+        "wbd": microseconds_to_ticks(2.0),
+        "wsd": microseconds_to_ticks(0.5),
+        "sbd": microseconds_to_ticks(2.0),
+        "wdo": microseconds_to_ticks(1.0),
+        "dd": microseconds_to_ticks(0.5),
+        "do": microseconds_to_ticks(1.0),
+        "oc": microseconds_to_ticks(4.0),
+        "cq": microseconds_to_ticks(0.15),
     }
     expected_defaults = {
         "dd": 100,
@@ -954,18 +954,18 @@ def test_bandwidth_profile_serializes_and_queues_in_physical_fifo_order():
         if channel["member_paths"] == ["qc"]
     )
 
-    assert first.serialization_ticks == us(1.0)
+    assert first.serialization_ticks == microseconds_to_ticks(1.0)
     assert first.queue_wait_ticks == 0
     assert first.serializer_start_ticks == 0
-    assert first.propagation_ticks == us(0.15)
-    assert first.total_delay_ticks == us(1.15)
+    assert first.propagation_ticks == microseconds_to_ticks(0.15)
+    assert first.total_delay_ticks == microseconds_to_ticks(1.15)
     assert second.serializer_start_ticks == first.serializer_end_ticks
-    assert second.queue_wait_ticks == us(1.0)
-    assert second.serialization_ticks == us(1.0)
-    assert second.total_delay_ticks == us(2.15)
+    assert second.queue_wait_ticks == microseconds_to_ticks(1.0)
+    assert second.serialization_ticks == microseconds_to_ticks(1.0)
+    assert second.total_delay_ticks == microseconds_to_ticks(2.15)
     assert second.physical_sequence == 1
     assert wsd.payload_bits == 1
-    assert wsd.serialization_ticks == us(5.0)     # one decision bit at 0.2 bits/us
+    assert wsd.serialization_ticks == microseconds_to_ticks(5.0)     # one decision bit at 0.2 bits/us
     assert wsd_transfer["payload_selection"] == "configured_default"
     assert qc_transfers[1]["serializer_start_ticks"] >= qc_transfers[0][
         "serializer_end_ticks"
@@ -1029,8 +1029,8 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
     assert aggregate_capacities(2.0) == {
         path: capacity * 2.0 for path, capacity in base_capacities.items()
     }
-    assert slow.serialization_ticks == us(2.0)
-    assert fast.serialization_ticks == us(0.5)
+    assert slow.serialization_ticks == microseconds_to_ticks(2.0)
+    assert fast.serialization_ticks == microseconds_to_ticks(0.5)
     for invalid_scale in (0.0, -1.0, math.inf, -math.inf, math.nan):
         with pytest.raises(ValueError):
             bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=invalid_scale
@@ -1058,8 +1058,8 @@ def test_transfer_overhead_delays_delivery_without_occupying_the_wire():
     # setup 50 ticks (engine-side) + serialization 4 bits / 1 bit-per-us
     # + propagation 10 ticks
     assert first.send_ticks == 150            # the wire sees the shifted send
-    assert first.serialization_ticks == us(4.0)
-    assert first.total_delay_ticks == 50 + us(4.0) + 10
+    assert first.serialization_ticks == microseconds_to_ticks(4.0)
+    assert first.total_delay_ticks == 50 + microseconds_to_ticks(4.0) + 10
 
 
 def test_report_delivery_counts_the_setup_once():
@@ -1078,7 +1078,7 @@ def test_report_delivery_counts_the_setup_once():
                   attribution=valid_attribution(LinkPath.SBD))
     row = traffic_json_value(model.snapshot())["transfers"][0]
     assert row["setup_ticks"] == 50
-    assert row["delivery_ticks"] == 100 + 50 + us(4.0) + 10
+    assert row["delivery_ticks"] == 100 + 50 + microseconds_to_ticks(4.0) + 10
     assert row["delivery_ticks"] == row["serializer_end_ticks"] + row["propagation_ticks"]
     assert row["total_delay_ticks"] == (row["setup_ticks"] + row["queue_wait_ticks"]
                                         + row["serialization_ticks"] + row["propagation_ticks"])
@@ -1148,7 +1148,7 @@ def test_with_transfer_overhead_helper_covers_the_dma_paths():
     assert card.wbd.transfer_overhead is not None
     assert card.sbd.transfer_overhead is not None
     assert card.qc.transfer_overhead is None
-    assert card.wbd.transfer_overhead.overhead_ticks == us(0.4)
+    assert card.wbd.transfer_overhead.overhead_ticks == microseconds_to_ticks(0.4)
 
 
 def test_yaml_card_key_reaches_the_edge(tmp_path):
@@ -1183,7 +1183,7 @@ def test_yaml_card_key_reaches_the_edge(tmp_path):
     (tmp_path / "overhead_card.yaml").write_text(yaml_text)
     card = link_model(load_experiment(tmp_path / "overhead_card.yaml"))
     assert card.wbd.transfer_overhead is not None
-    assert card.wbd.transfer_overhead.overhead_ticks == us(0.4)
+    assert card.wbd.transfer_overhead.overhead_ticks == microseconds_to_ticks(0.4)
     assert card.dd.transfer_overhead is None
 
 
@@ -1193,7 +1193,7 @@ def test_serialization_never_ends_before_the_exact_transmission_time():
     ends at 333333 finishes before the bit has fully left the serializer."""
     from fractions import Fraction
 
-    from decsim.config import TICKS_PER_US
+    from decsim.config import TICKS_PER_MICROSECOND
 
     cases = [
         (1, 3.0, 333_334),           # fractional: must round up
@@ -1207,7 +1207,7 @@ def test_serialization_never_ends_before_the_exact_transmission_time():
             rate, LinkQuantityBasis.DIRECT_AGGREGATE, None, "causality case")
         link = Link(make_channel(capacity=capacity, propagation_ticks=0))
         reservation = link.reserve(payload_bits=payload_bits, now_ticks=0)
-        exact_ticks = Fraction(payload_bits) * TICKS_PER_US / Fraction(rate)
+        exact_ticks = Fraction(payload_bits) * TICKS_PER_MICROSECOND / Fraction(rate)
         assert reservation.serialization_ticks >= exact_ticks, \
             f"{payload_bits} bits at {rate} bits/us ends early"
         assert reservation.serialization_ticks - exact_ticks < 1, \
@@ -1225,7 +1225,7 @@ def test_serialization_respects_the_declared_decimal_rate_for_large_payloads():
     from fractions import Fraction
     import math
 
-    from decsim.config import TICKS_PER_US
+    from decsim.config import TICKS_PER_MICROSECOND
 
     payload_bits = 400_310_292
     declared_rate = 0.20846
@@ -1239,7 +1239,7 @@ def test_serialization_respects_the_declared_decimal_rate_for_large_payloads():
         make_channel(capacity=capacity, propagation_ticks=0)
     ).reserve(payload_bits=payload_bits, now_ticks=0)
     exact_declared_ticks = (
-        Fraction(payload_bits) * TICKS_PER_US / Fraction(str(declared_rate))
+        Fraction(payload_bits) * TICKS_PER_MICROSECOND / Fraction(str(declared_rate))
     )
 
     assert reservation.serialization_ticks == math.ceil(exact_declared_ticks)

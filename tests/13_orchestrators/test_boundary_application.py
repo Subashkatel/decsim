@@ -6,7 +6,7 @@ A boundary-blocked job waits in its input slot, never on the unit."""
 
 import stim
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.decoders.weak_strong_switching import StrongOnly
@@ -54,7 +54,7 @@ def test_saturated_chain_is_dd_plus_max_of_transfer_and_decode():
     """The reference cadence: with the raw input shipped under the previous
     decode, each window costs dd (0.5) + max(sbd 2.0, decode 5.0) = 5.5 us,
     never the serial dd + sbd + decode = 7.5 us."""
-    assert _gaps(_stim_run()) == [us(5.5)]
+    assert _gaps(_stim_run()) == [microseconds_to_ticks(5.5)]
 
 
 def test_parked_decode_starts_at_the_boundary_arrival():
@@ -66,8 +66,8 @@ def test_parked_decode_starts_at_the_boundary_arrival():
     for (_, k), window in windows.items():
         if k == 0 or window.t_done is None:
             continue
-        boundary_arrival = dones[k - 1] + us(0.5)
-        assert window.t_done - us(5.0) >= boundary_arrival
+        boundary_arrival = dones[k - 1] + microseconds_to_ticks(0.5)
+        assert window.t_done - microseconds_to_ticks(5.0) >= boundary_arrival
 
 def test_relaxed_stream_parks_only_the_clamped_terminal_window():
     """With rounds every 3.0 us the chain drains between arrivals: no
@@ -77,7 +77,7 @@ def test_relaxed_stream_parks_only_the_clamped_terminal_window():
     windows = dict(sorted(completed.window_manager.windows.items()))
     late = [k for (_, k), w in windows.items()
             if w.t_done is not None
-            and w.t_done - us(5.0) - us(2.0) > w.t_data_complete + us(0.6)]
+            and w.t_done - microseconds_to_ticks(5.0) - microseconds_to_ticks(2.0) > w.t_data_complete + microseconds_to_ticks(0.6)]
     last = max(k for (_, k) in windows)
     assert late in ([], [last]), late
 

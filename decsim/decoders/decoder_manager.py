@@ -17,7 +17,7 @@ from .decoder_memory import (DecoderMemory, DecoderMemoryConfig,
                              count_decoder_input_round_demand)
 from .decoder_memory_transfer import DecoderInputStaging, FixedLatencyDecoderMemoryTransfer
 from .strong_escalation import HeldStrongCompletion, StrongRequestLedger
-from ..config import fmt
+from ..config import format_ticks
 
 
 class RequestProcessingOutcome(Enum):
@@ -757,7 +757,7 @@ class DecoderManager:
         slot_note = "" if claim_compute else "staged, "
         self.engine.log(self.log_name,
                         f"ASSIGN UNIT {job.label} "
-                        f"({slot_note}waited {fmt(waited_ticks).strip()} in queue, "
+                        f"({slot_note}waited {format_ticks(waited_ticks).strip()} in queue, "
                         f"{self.pool_tag(pool)}units free now "
                         f"{self.pool_free[pool]})")
         self.queue_log.append((self.engine.now, self.queued_total()))

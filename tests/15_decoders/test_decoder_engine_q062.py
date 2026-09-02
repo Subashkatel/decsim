@@ -2,7 +2,7 @@
 
 import pytest
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoder_engine import (
     ALGORITHM_STAGE,
     DecoderStage,
@@ -14,7 +14,7 @@ from decsim.engine import Engine
 from decsim.message import DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier
 
 MHZ = 250.0
-CYCLE = us(1 / MHZ)
+CYCLE = microseconds_to_ticks(1 / MHZ)
 
 
 def _timing(before=(DecoderStage("fetch", cycles_per_round=1),),
@@ -34,7 +34,7 @@ class _RecordingInner:
         self.decode_ticks = []
 
     def latency(self, job):
-        return us(self.latency_us)
+        return microseconds_to_ticks(self.latency_us)
 
     def decode(self, job):
         self.decode_ticks.append(self.engine.now)
@@ -70,10 +70,10 @@ def test_stages_before_algorithm_after_in_order_with_ticks():
     records = decoder.stage_records_for(1, 0)
     assert [(r.stage, r.cycles, r.start_ticks, r.end_ticks) for r in records] == [
         ("fetch", 3, 0, 3 * CYCLE),
-        (ALGORITHM_STAGE, None, 3 * CYCLE, 3 * CYCLE + us(2.0)),
-        ("release", 1, 3 * CYCLE + us(2.0), 4 * CYCLE + us(2.0)),
+        (ALGORITHM_STAGE, None, 3 * CYCLE, 3 * CYCLE + microseconds_to_ticks(2.0)),
+        ("release", 1, 3 * CYCLE + microseconds_to_ticks(2.0), 4 * CYCLE + microseconds_to_ticks(2.0)),
     ]
-    assert seen["done_at"] == 4 * CYCLE + us(2.0)
+    assert seen["done_at"] == 4 * CYCLE + microseconds_to_ticks(2.0)
     assert seen["result"].window_id == 0
     assert decoder.latency(_job(n_rounds=3)) == seen["done_at"]
 
@@ -206,7 +206,7 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     assert algorithm
     for record in algorithm:
         assert record.measured_ns is not None and record.measured_ns > 0
-        assert record.end_ticks - record.start_ticks == us(record.measured_ns / 1000.0)
+        assert record.end_ticks - record.start_ticks == microseconds_to_ticks(record.measured_ns / 1000.0)
     with pytest.raises(RuntimeError, match="measured wall-clock"):
         PyMatchingDecoder(latency_model=None).latency(_job())
 
@@ -235,4 +235,4 @@ def test_stage_ticks_sum_to_the_whole_job_at_the_clock_for_any_partition():
     one = DecoderTiming((DecoderStage("a", cycles_per_job=2),), (), 300.0)
     split = DecoderTiming((DecoderStage("a", cycles_per_job=1),
                            DecoderStage("b", cycles_per_job=1)), (), 300.0)
-    assert sum(one.stage_ticks(job).values()) == sum(split.stage_ticks(job).values()) == us(2 / 300.0)
+    assert sum(one.stage_ticks(job).values()) == sum(split.stage_ticks(job).values()) == microseconds_to_ticks(2 / 300.0)

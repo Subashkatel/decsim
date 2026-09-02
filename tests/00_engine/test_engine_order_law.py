@@ -25,8 +25,10 @@ def scheduled_order_oracle(requests):
 
 def record_arrival(ran, arrival_index):
     """An action that notes which request ran."""
+
     def action():
         ran.append(arrival_index)
+
     return action
 
 
@@ -35,10 +37,11 @@ def test_random_programs_run_in_time_priority_arrival_order():
     for _ in range(200):
         engine = Engine(verbose=False)
         request_count = rng.randint(1, 30)
-        requests = [
-            (rng.randint(0, 10), rng.randint(0, 3))
-            for _ in range(request_count)
-        ]
+        requests = []
+        for _ in range(request_count):
+            due_time = rng.randint(0, 10)
+            priority = rng.randint(0, 3)
+            requests.append((due_time, priority))
         ran = []
         for arrival_index, (due_time, priority) in enumerate(requests):
             action = record_arrival(ran, arrival_index)
@@ -67,8 +70,9 @@ def test_actions_scheduled_while_running_join_the_same_order():
         engine.schedule(3, lambda: ran.append("three ticks later"))
 
     engine.schedule(1, schedule_two_more)
-    engine.schedule(1, lambda: ran.append("same tick, earlier arrival"),
-                    priority=1)
+    engine.schedule(
+        1, lambda: ran.append("same tick, earlier arrival"), priority=1
+    )
     engine.run()
     assert ran == [
         "first",

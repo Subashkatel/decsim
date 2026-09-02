@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Optional
 
-from ..config import us
+from ..config import microseconds_to_ticks
 from .links import (
     LinkCapacityConfig,
     LinkConfig,
@@ -60,7 +60,7 @@ def logical_reference_profile() -> LinkModelConfig:
     only, nothing ever queues). Actual-payload edges price the runtime's own
     bit counts; default-payload edges price Khalid's Table II sizes."""
     def unbounded(latency_us: float, source: str) -> LinkConfig:
-        return LinkConfig(us(latency_us), None, source)
+        return LinkConfig(microseconds_to_ticks(latency_us), None, source)
 
     def actual_edge(latency_us: float, source: str, actual: str) -> LinkEdgeConfig:
         return LinkEdgeConfig(unbounded(latency_us, source), None, actual)
@@ -111,7 +111,7 @@ def bandwidth_limited_profile(*, syndrome_bits_per_round: int, round_us: float,
                        source: str, actual_payload_source) -> LinkEdgeConfig:
         rate = nominal_bits_per_us * capacity_scale
         capacity = LinkCapacityConfig(rate, LinkQuantityBasis.DIRECT_AGGREGATE, None, source)
-        channel = LinkConfig(us(latency_us), capacity, source)
+        channel = LinkConfig(microseconds_to_ticks(latency_us), capacity, source)
         return LinkEdgeConfig(channel, _aggregate_payload(bits, source), actual_payload_source)
 
     return LinkModelConfig(
@@ -193,7 +193,7 @@ def with_transfer_overhead(
     see ``TransferOverheadConfig`` for the measured numbers), so paths
     sharing a channel reach its wire in request order.
     """
-    overhead = TransferOverheadConfig(us(overhead_us), source)
+    overhead = TransferOverheadConfig(microseconds_to_ticks(overhead_us), source)
     replacements = {}
     for path in paths:
         edge = getattr(profile, path)
@@ -230,7 +230,7 @@ def with_csb_edge(
             None,
             source,
         )
-    channel = LinkConfig(us(latency_us), capacity, source)
+    channel = LinkConfig(microseconds_to_ticks(latency_us), capacity, source)
     edge = LinkEdgeConfig(
         channel,
         None,
@@ -265,7 +265,7 @@ def with_controller_to_buffer_edge(
             None,
             source,
         )
-    channel = LinkConfig(us(latency_us), capacity, source)
+    channel = LinkConfig(microseconds_to_ticks(latency_us), capacity, source)
     edge = LinkEdgeConfig(
         channel,
         None,

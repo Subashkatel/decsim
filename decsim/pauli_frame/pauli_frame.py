@@ -29,7 +29,14 @@ from ..message import stable_identity_order_key
 
 @dataclass(frozen=True)
 class PauliFrameConfig:
-    """Card selecting the minimal Pauli frame and pricing one frame write."""
+    """Card selecting the minimal Pauli frame and pricing one frame write.
+
+    A frame write is one XOR into a register: one clock cycle of the frame
+    unit. Measured point: 4 ns per Pauli frame update on the FPGA of a
+    550 ns closed loop (Yang et al. 2605.04892, Fig. 1), one cycle at
+    250 MHz; XQsim's PFU likewise updates in one cycle. Writes to
+    different windows are charged in parallel, never queued.
+    """
 
     commit_us: float
     zero_commit_cost_justification: Optional[str] = None

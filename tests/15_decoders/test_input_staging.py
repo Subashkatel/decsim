@@ -111,7 +111,7 @@ def test_an_oversized_single_window_still_stops_loudly():
         _run(capacity=8)
 
 
-def _standalone_pool(units, transfer_us, compute_us):
+def _standalone_pool(units, transfer_us, compute_us, decoder=None):
     """A decoder manager fed window jobs directly: (engine, manager,
     submit(index, arrival), compute start ticks by window)."""
     from decsim.decoders.decoder_manager import DecoderManager
@@ -124,7 +124,7 @@ def _standalone_pool(units, transfer_us, compute_us):
 
     engine = Engine(verbose=False)
     manager = DecoderManager(
-        engine, router=CodeRouter(PresetLatencyDecoder(compute_us)),
+        engine, router=CodeRouter(decoder or PresetLatencyDecoder(compute_us)),
         scheduler=FifoScheduler(), num_units=units,
         escalation_policy=Baseline(), services=None,
         on_window_decoded=lambda job, result: None,
@@ -189,3 +189,25 @@ def test_a_job_without_input_waits_in_the_queue_for_free_compute():
     engine.run()
     # a on unit 0 (0..4), b on unit 1 (1..5); c waits for unit 0 at 4
     assert done == {"a": us(4.0), "b": us(5.0), "c": us(8.0)}
+
+
+def test_a_pipelined_units_compute_returns_to_the_pool_once():
+    """The intake goes back to the pool when the initiation interval ends;
+    the decode's later completion must not return it a second time, or
+    the pool counts free units it does not have and starts the next
+    window while the intake is still busy (Hennessy and Patterson App. C:
+    one issue per initiation interval)."""
+    from decsim.decoders.decoders import PipelinedDecoder
+    decoder = PipelinedDecoder(PresetLatencyDecoder(4.0), initiation_interval_us=0.5)
+    engine, manager, submit, compute_start = _standalone_pool(1, 0.2, 4.0, decoder)
+    # w0 starts at 0.2, its intake frees at 0.7, its result is out at 4.2;
+    # w1 starts at 4.5 - 0.2 = 4.3 ... w2 and w3 arrive back to back after
+    # the result of w0 has been out, when a double free would show
+    for index, arrival in enumerate((0.0, 4.3, 4.31, 4.32)):
+        submit(index, arrival)
+    engine.run()
+    manager.check_decode_work_settled()
+    assert manager.pool_free["default"] == 1
+    assert compute_start["w1"] == us(4.5)
+    # one start per initiation interval: w2 and w3 follow at 0.5 us steps
+    assert compute_start["w2"] == us(5.0) and compute_start["w3"] == us(5.5)

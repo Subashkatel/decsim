@@ -467,6 +467,10 @@ class DecoderManager:
                 self._computing[slot] = resident   # starts at its landing
                 self._predict_compute_free(resident)
                 return
+        if unit in self._free_units[pool]:
+            # a pipelined unit's intake went back to the pool at the end of
+            # its initiation interval; the decode's completion offers again
+            return
         self.pool_free[pool] += 1
         self._free_units[pool].append(unit)
 

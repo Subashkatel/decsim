@@ -96,3 +96,46 @@ def test_operation_cadence_must_equal_the_qpu_cycle():
         assert "cadence" in str(error)
     else:
         raise AssertionError("mismatched cadence accepted")
+
+
+def test_a_command_starts_on_the_cycle_boundary_at_or_after_its_arrival():
+    """Operations are cycle-locked: a command reaching the QPU starts on the
+    first boundary not earlier than its arrival, the boundary itself
+    included (QubiC's pulse timestamp is the time after which the pulse
+    plays, arXiv 2404.15260 Sec. IV; SWIPER starts instructions on the
+    next round)."""
+    from decsim.engine import Engine
+    from decsim.message import Operation, RunOperationBody
+    from decsim.qpu.cycle_clock import QPUDevice
+
+    class SilentModel:
+        def begin_operation(self, operation, rounds, source_rounds):
+            pass
+
+        def round_payloads(self, operation, round_index):
+            return []
+
+    cycle = 100
+
+    def start_tick(arrival):
+        engine = Engine(verbose=False)
+        qpu = QPUDevice(engine, SilentModel(), cycle,
+                        completion_receiver=lambda operation: None,
+                        idle_receiver=lambda *_: None)
+        operation = Operation(id=1, name="op", qubits=(0,), patches=(0,),
+                              emits_detector_data=False)
+        command = RunOperationBody(operation=operation, round_ticks=cycle, round_count=2,
+                                   source_round_count=2, emits_detector_data=False,
+                                   finalizes_stream_round=False)
+        qpu._idle[9] = [0, 0]                # an idle patch keeps the clock ticking
+        engine.schedule(arrival, lambda: qpu.issue(command))
+        engine.schedule(arrival + 5 * cycle, qpu.finish)
+        engine.run()
+        return dict((event.kind, event.tick) for event in qpu.command_events)["STARTED"]
+
+    for arrival in (0, 1, 99, 100, 101, 250, 300):
+        assert start_tick(arrival) == qpu_boundary(arrival, cycle)
+
+
+def qpu_boundary(tick, cycle):
+    return tick if tick % cycle == 0 else (tick // cycle + 1) * cycle

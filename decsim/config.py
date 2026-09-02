@@ -25,13 +25,24 @@ def fmt(ticks: int) -> str:
 class TimingConfig:
     """Run-wide non-link timing quantities, expressed in microseconds."""
 
-    round_us: float = 1.1          # QEC round period (one syndrome-extraction cycle)
-    # Analog readout acquisition / discrimination, represented by
-    # its latency and the classified bits it produces (not an ADC waveform).
+    # QEC round period (one syndrome-extraction cycle). Published cadences:
+    # Google 921 ns (2207.06431) and 1.1 us (2408.13687); Krinner 1.1 us
+    # (2112.03708); Yang 1.25 us (2605.04892); USTC 3.9 us effective
+    # (2110.07965).
+    round_us: float = 1.1
+    # Analog readout acquisition / discrimination, represented by its
+    # latency and the classified bits it produces (not an ADC waveform).
+    # Zero means the classification sits inside the round period, as
+    # Google's 921 ns cycle holds its 500 ns measurement; a separate
+    # point: 40 ns in-FPGA discrimination (Fermilab 2406.18807).
     measurement_signal_to_classical_bits_us: float = 0.0
-    t_pack_us: float = 0.0         # controller packet assembly, charged once per completed round
-    # Online sequencer/branch plus waveform-command generation.
-    # CQ transport remains a separate link latency.
+    # Controller packet assembly, charged once per completed round.
+    # Yang 2605.04892 compute the syndrome from the bit strings in 20 ns.
+    t_pack_us: float = 0.0
+    # Online sequencer/branch plus waveform-command generation; CQ
+    # transport remains a separate link latency. Points: QICK conditional
+    # jump 42 ns and next pulse 52 ns (2110.00557 Table II); USTC 125 ns
+    # (2110.07965); Liu et al. root to leaf 155 ns (2603.16203).
     instruction_or_decision_to_analog_control_pulse_us: float = 0.0
 
     def __post_init__(self) -> None:

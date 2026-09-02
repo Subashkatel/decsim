@@ -168,15 +168,14 @@ def test_capacity_guards_basis_count_and_aggregate_overflow():
         LinkCapacityConfig(
             1.0, LinkQuantityBasis.DIRECT_AGGREGATE, 1, "capacity"
         )
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         LinkCapacityConfig(
             1.0, LinkQuantityBasis.PER_CHANNEL, None, "capacity"
         )
-    normalized_bool = LinkCapacityConfig(
-        1.0, LinkQuantityBasis.PER_CHANNEL, True, "capacity"
-    )
-    assert normalized_bool.channel_count == 1
-    assert type(normalized_bool.channel_count) is int
+    with pytest.raises(ValueError):
+        LinkCapacityConfig(
+            1.0, LinkQuantityBasis.PER_CHANNEL, True, "capacity"
+        )
     with pytest.raises(ValueError):
         LinkCapacityConfig(1.0, LinkQuantityBasis.PER_CHANNEL, 0, "capacity")
     with pytest.raises(ValueError):
@@ -195,13 +194,10 @@ def test_payload_guards_nonnegative_basis_and_count():
         PayloadSizeConfig(1, "direct_aggregate", None, "payload")
     with pytest.raises(ValueError):
         PayloadSizeConfig(1, LinkQuantityBasis.DIRECT_AGGREGATE, 1, "payload")
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         PayloadSizeConfig(1, LinkQuantityBasis.PER_CHANNEL, None, "payload")
-    normalized_bool = PayloadSizeConfig(
-        1, LinkQuantityBasis.PER_CHANNEL, True, "payload"
-    )
-    assert normalized_bool.channel_count == 1
-    assert type(normalized_bool.channel_count) is int
+    with pytest.raises(ValueError):
+        PayloadSizeConfig(1, LinkQuantityBasis.PER_CHANNEL, True, "payload")
     with pytest.raises(ValueError):
         PayloadSizeConfig(1, LinkQuantityBasis.PER_CHANNEL, 0, "payload")
 
@@ -224,7 +220,7 @@ def test_removed_provenance_checks_and_kept_whole_normalization():
     assert capacity.aggregate_bits_per_microsecond == 2
     assert payload.aggregate_bits == 1
     assert edge.actual_payload_source == ""
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError):
         PayloadSizeConfig(
             object(), LinkQuantityBasis.DIRECT_AGGREGATE, None, "payload"
         )
@@ -232,9 +228,8 @@ def test_removed_provenance_checks_and_kept_whole_normalization():
 
 def test_physical_and_edge_configuration_keep_only_corruption_guards():
     """Physical and edge configuration retain timing and basis corruption guards."""
-    normalized_bool = LinkConfig(True, None, "channel")
-    assert normalized_bool.propagation_latency_ticks == 1
-    assert type(normalized_bool.propagation_latency_ticks) is int
+    with pytest.raises(ValueError):
+        LinkConfig(True, None, "channel")
     with pytest.raises(ValueError):
         LinkConfig(-1, None, "channel")
     with pytest.raises(ValueError):

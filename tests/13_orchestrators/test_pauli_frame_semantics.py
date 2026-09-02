@@ -27,6 +27,10 @@ class RequestKey:
     run_sequence: int
 
 
+def do_nothing():
+    return None
+
+
 def frame_with_commit_ticks(commit_ticks):
     engine = Engine(verbose=False)
     frame = PauliFrame(engine, commit_ticks=commit_ticks)
@@ -36,7 +40,7 @@ def frame_with_commit_ticks(commit_ticks):
 def commit(frame, window_key, observables, tier=Tier.WEAK, on_committed=None):
     request_key = RequestKey(tier, run_sequence=window_key[1])
     if on_committed is None:
-        on_committed = lambda: None
+        on_committed = do_nothing
     frame.commit_correction(
         window_key=window_key,
         logical_observables=observables,

@@ -23,20 +23,26 @@ def scheduled_order_oracle(requests):
     return [arrival_index for _, _, arrival_index in sorted(keyed)]
 
 
+def record_arrival(ran, arrival_index):
+    """An action that notes which request ran."""
+    def action():
+        ran.append(arrival_index)
+    return action
+
+
 def test_random_programs_run_in_time_priority_arrival_order():
     rng = random.Random(7)
     for _ in range(200):
         engine = Engine(verbose=False)
         request_count = rng.randint(1, 30)
         requests = [
-            (rng.randint(0, 10), rng.randint(0, 3)) for _ in range(request_count)
+            (rng.randint(0, 10), rng.randint(0, 3))
+            for _ in range(request_count)
         ]
         ran = []
         for arrival_index, (due_time, priority) in enumerate(requests):
-            engine.schedule(
-                due_time,
-                lambda index=arrival_index: ran.append(index),
-                priority=priority)
+            action = record_arrival(ran, arrival_index)
+            engine.schedule(due_time, action, priority=priority)
         engine.run()
         assert ran == scheduled_order_oracle(requests)
 

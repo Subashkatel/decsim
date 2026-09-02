@@ -342,7 +342,7 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
         "dd": 20.0,
         "do": 0.2,
         "oc": 6.4,
-        "cq": 6.4,
+        "cq": 25.6,
     }
 
 

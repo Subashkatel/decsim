@@ -194,13 +194,13 @@ class LinkConfig:
 @dataclass(frozen=True, eq=False)
 class TransferOverheadConfig:
     """Fixed per-transfer setup cost on one path: the descriptor programming
-    and doorbell work a CPU does before the data mover starts (gem5-Aladdin
-    charges this engine-side while issued transfers keep streaming, and the
-    setups of successive transfers SERIALIZE on the one CPU doing them;
-    Shao et al. MICRO 2016 measured 400 ns per transaction, the Aladdin
-    parameter default is 234 ns, and NIC doorbell writes measure ~230 ns).
-    The size-proportional cache-flush component of Aladdin's setup is not
-    modeled separately at this altitude."""
+    and doorbell work a CPU does before the data mover starts. gem5-Aladdin
+    charges this on the CPU while issued transfers keep streaming, and the
+    setups of successive transfers SERIALIZE on the one CPU doing them
+    (Shao et al., MICRO 2016: initiating a DMA from the CPU costs 17 cycles
+    plus housekeeping; the size-proportional cache flush and invalidate
+    they measure at 84 and 71 ns per line are not modeled separately at
+    this altitude)."""
 
     overhead_ticks: int
     source: str

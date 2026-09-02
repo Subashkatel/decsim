@@ -113,10 +113,11 @@ def test_results_and_decisions_cross_links_at_their_own_size(fabric):
     """A decoder result reaches the frame as one bit per logical
     observable (Caune et al. 2410.05202 return one Boolean per decode;
     Google 2408.13687 an observable bitmask; PECOS XORs an observable mask
-    into its frame), and a decision or command crosses oc and cq as one
-    32-bit bus word (the decoder sequencer's 32-bit WISHBONE interface,
-    Caune et al. 2410.05202). The reference card carries no system-wide
-    aggregate on these paths."""
+    into its frame); a decision crosses oc as one 32-bit bus word (the
+    decoder sequencer's WISHBONE interface, Caune et al. 2410.05202) and a
+    command crosses cq as one 128-bit instruction word (QubiC's distributed
+    processor, Fruitwala et al. 2404.15260). The reference card carries no
+    system-wide aggregate on these paths."""
     completed = _feedback_run(fabric, controller_output_us=0.0)
     transfers = completed.result.link_traffic["transfers"]
     payload_by_path = {}
@@ -125,7 +126,7 @@ def test_results_and_decisions_cross_links_at_their_own_size(fabric):
             transfer["payload_bits"])
     assert payload_by_path["wdo"] == {1}
     assert payload_by_path["oc"] == {32}
-    assert payload_by_path["cq"] == {32}
+    assert payload_by_path["cq"] == {128}
 
 
 def test_feedback_operation_command_traverses_controller_output_and_cq(fabric):

@@ -117,9 +117,12 @@ class PauliFrame:
         """Accept one window correction once, charge its write, then continue.
         A second correction for a window is a protocol violation: the frame
         applies each window's correction exactly once, and a swallowed write
-        would strand its caller's continuation. The refusal is a simulator
-        invariant guard, stricter than any frame implementation (PECOS's
-        accumulator would XOR a repeated mask and cancel it silently)."""
+        would strand its caller's continuation. Correction gates from QEC
+        are Pauli gates stored in the frame's records (Riesebos, Pauli
+        frames for quantum computer architectures, TU Delft 2016 and DAC
+        2017); the refusal is a simulator invariant guard, stricter than any
+        frame implementation (PECOS's accumulator would XOR a repeated mask
+        and cancel it silently)."""
         if window_key in self._accepted_window_keys:
             raise RuntimeError(
                 f"window {window_key} already accepted a "

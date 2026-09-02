@@ -39,11 +39,16 @@ from .links import (
 # window manager supplies the count from the result itself.
 RESULT_PAYLOAD_SOURCE = "DecodeResult.logical_observables bits"
 
-# A decision or command crosses the control fabric as one bus word: the
-# decoder sequencer's 32-bit WISHBONE interface (Caune et al., arXiv
-# 2410.05202, Methods).
+# A decision crosses the control fabric as one bus word: the decoder
+# sequencer's 32-bit WISHBONE interface (Caune et al., arXiv 2410.05202,
+# Methods). A command to the pulse controller is one instruction word:
+# QubiC's distributed processor implements every instruction as a 128-bit
+# word (Fruitwala et al., arXiv 2404.15260, Sec. III and IV).
 BUS_WORD_BITS = 32
 BUS_WORD_SOURCE = "one 32-bit control bus word (Caune et al. 2410.05202, WISHBONE)"
+INSTRUCTION_WORD_BITS = 128
+INSTRUCTION_WORD_SOURCE = ("one 128-bit control-processor instruction word "
+                           "(QubiC distributed processor, Fruitwala et al. 2404.15260)")
 
 
 def _aggregate_payload(bits: int, source: str) -> PayloadSizeConfig:
@@ -74,7 +79,8 @@ def logical_reference_profile() -> LinkModelConfig:
         dd=default_edge(0.5, _aggregate_payload(100, "Khalid dd representative aggregate transaction")),
         do=actual_edge(1.0, "Khalid do latency", RESULT_PAYLOAD_SOURCE),
         oc=default_edge(4.0, _aggregate_payload(BUS_WORD_BITS, BUS_WORD_SOURCE)),
-        cq=default_edge(0.15, _aggregate_payload(BUS_WORD_BITS, BUS_WORD_SOURCE)),
+        cq=default_edge(0.15, _aggregate_payload(INSTRUCTION_WORD_BITS,
+                                                 INSTRUCTION_WORD_SOURCE)),
         profile_name="logical_reference",
     )
 
@@ -164,8 +170,8 @@ def bandwidth_limited_profile(*, syndrome_bits_per_round: int, round_us: float,
             None,
         ),
         cq=aggregate_edge(
-            0.15, BUS_WORD_BITS, BUS_WORD_BITS / commit_region_us,
-            BUS_WORD_SOURCE + ", one per commit region",
+            0.15, INSTRUCTION_WORD_BITS, INSTRUCTION_WORD_BITS / commit_region_us,
+            INSTRUCTION_WORD_SOURCE + ", one per commit region",
             None,
         ),
         profile_name="bandwidth_limited",

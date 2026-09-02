@@ -713,7 +713,7 @@ def test_reference_profile_has_the_exact_timing_only_project_metadata():
     expected_defaults = {
         "dd": 100,
         "oc": 32,
-        "cq": 32,
+        "cq": 128,
     }
     actual_sources = {
         "qc": "SyndromePayload.size_bits",
@@ -826,7 +826,7 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
         "dd": (20.0, "direct_aggregate", None, 20.0),
         "do": (0.2, "direct_aggregate", None, 0.2),
         "oc": (6.4, "direct_aggregate", None, 6.4),
-        "cq": (6.4, "direct_aggregate", None, 6.4),
+        "cq": (25.6, "direct_aggregate", None, 25.6),
     }
     expected_fallbacks = {
         "qc": (24, "direct_aggregate", None, 24),
@@ -837,7 +837,7 @@ def test_bandwidth_profile_declares_finite_calibrated_capacities():
         "dd": (100, "direct_aggregate", None, 100),
         "do": (1, "direct_aggregate", None, 1),
         "oc": (32, "direct_aggregate", None, 32),
-        "cq": (32, "direct_aggregate", None, 32),
+        "cq": (128, "direct_aggregate", None, 128),
     }
     capacities = {
         channel["member_paths"][0]: (
@@ -993,7 +993,7 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
         "dd": 20.0,
         "do": 0.2,
         "oc": 6.4,
-        "cq": 6.4,
+        "cq": 25.6,
     }
 
     def aggregate_capacities(scale):

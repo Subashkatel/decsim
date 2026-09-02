@@ -998,3 +998,27 @@ def test_a_numpy_tick_near_the_int64_limit_is_stored_as_a_python_int():
     assert type(reservation.send_ticks) is int
     assert reservation.send_ticks == 2**63 - 3
     assert reservation.setup_ticks == 5
+
+
+def test_settings_built_from_the_same_numbers_compare_equal():
+    first_capacity = links.LinkCapacityConfig(
+        8.0, links.LinkQuantityBasis.DIRECT_AGGREGATE, None, "test"
+    )
+    second_capacity = links.LinkCapacityConfig(
+        8.0, links.LinkQuantityBasis.DIRECT_AGGREGATE, None, "test"
+    )
+    first_payload = links.PayloadSizeConfig(
+        9, links.LinkQuantityBasis.DIRECT_AGGREGATE, None, "test"
+    )
+    second_payload = links.PayloadSizeConfig(
+        9, links.LinkQuantityBasis.DIRECT_AGGREGATE, None, "test"
+    )
+    first_overhead = links.TransferOverheadConfig(5, "test")
+    second_overhead = links.TransferOverheadConfig(5, "test")
+    channel = links.LinkConfig(7, first_capacity, "test")
+    first_edge = links.LinkEdgeConfig(channel, None, "test payload", None)
+    second_edge = links.LinkEdgeConfig(channel, None, "test payload", None)
+    assert first_capacity == second_capacity
+    assert first_payload == second_payload
+    assert first_overhead == second_overhead
+    assert first_edge == second_edge

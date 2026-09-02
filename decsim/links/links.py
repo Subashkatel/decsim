@@ -87,9 +87,7 @@ class LinkQuantityBasis(str, enum.Enum):
     PER_CHANNEL = "per_channel"
 
 
-# Identity comparison kept from the original file; the reshape decides
-# value equality.
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True)
 class LinkCapacityConfig:
     """Bandwidth of one channel: bits per microsecond, aggregate or per channel.
 
@@ -157,9 +155,7 @@ class LinkCapacityConfig:
         }
 
 
-# Identity comparison kept from the original file; the reshape decides
-# value equality.
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True)
 class PayloadSizeConfig:
     """Default payload of one path: bits, aggregate or per channel."""
 
@@ -221,9 +217,7 @@ class LinkConfig:
             raise ValueError("propagation_latency_ticks must be nonnegative")
 
 
-# Identity comparison kept from the original file; the reshape decides
-# value equality.
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True)
 class TransferOverheadConfig:
     """Fixed setup cost paid before each transfer on one path reaches the wire.
 
@@ -246,7 +240,7 @@ class TransferOverheadConfig:
             raise ValueError("overhead_ticks must be nonnegative")
 
 
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True)
 class LinkEdgeConfig:
     """One path on a card: its channel, its default payload, its payload source.
 

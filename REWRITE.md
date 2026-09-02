@@ -2,7 +2,7 @@
 
 This is the contract for the rewrite and for every line written after it.
 The plan that schedules the work is in the sandbox at docs/rewrite/PLAN.md.
-The behavior gate that every change must pass is described there too.
+The behavior gate every change must pass is described there.
 
 ## The one sentence
 
@@ -11,15 +11,18 @@ unpacking a line, or guessing what happens somewhere else.
 
 ## Rule 1. One line does one thing
 
-A line calls one function, or reads one attribute, or does one arithmetic
-step, or makes one decision. When a value is needed twice or is the result
-of a step, it gets a name on its own line.
+A line calls one function, or does one arithmetic step, or makes one
+decision. A line may walk attributes and indexes on a named value
+(`snapshot.records[0]`, `record.window.tier`); it may not take anything
+from a call's result. A value that is needed twice, or that is the result
+of a step, gets a name on its own line.
 
 Not this:
 
     return PauliFrame(engine, commit_ticks=self.commit_ticks())
     record = frame.snapshot().records[0]
     first = ticks[0] if ticks else None
+    record = Record(due=self.now + delay)
 
 This:
 
@@ -33,42 +36,72 @@ This:
     if ticks:
         first = ticks[0]
 
-`tools/check_one_action.py` enforces this. It reports a call used as an
-argument of another call, an attribute or index taken from a call's
-result, an inline conditional, a comprehension that both filters and
-calls, an `and` or `or` with more than two operands, and a walrus. Small
-built-ins that read as part of a phrase are allowed inside a call: len,
-str, tuple, sorted, enumerate, zip, min, max, isinstance and their kin,
-listed at the top of the script. Calls inside f-strings and lambdas are
-allowed, since a log line or a scheduled action is one thing.
+    due = self.now + delay
+    record = Record(due=due)
+
+When the value that would be hoisted has no honest name, keep the call in
+the condition: `if not math.isfinite(cost) or cost < 0:` is one decision
+and needs no `cost_is_a_number`.
+
+`tools/check_one_action.py` enforces the rule. It reports: a call inside
+another call's arguments; arithmetic, a comparison or a boolean inside a
+call's arguments; an attribute, index or call taken from a call's result;
+an inline conditional; an `and` or `or` with more than two operands, or
+`and` and `or` mixed in one expression; a comprehension whose element
+does two things, or that calls while it filters; a lambda that is more
+than one call on plain values or one f-string; a call inside an f-string;
+a walrus; a function longer than 40 lines; blocks nested deeper than two;
+a class whose `__init__` sets more than six attributes.
+
+These built-ins may appear inside a call's arguments or an f-string,
+because they read as part of the phrase: len, str, repr, int, float, bool,
+tuple, list, set, dict, sorted, range, enumerate, zip, min, max, abs,
+isinstance, next, iter, reversed, any, all, sum. Nothing else, including
+`math.isfinite` and the project's own helpers. Adding a name to that list
+is a structural commit with a reason.
+
+A lambda passed to `schedule` or `log_io` is one call on plain values, or
+one f-string of names and attribute walks. Anything more becomes a named
+method. A lambda is never built inside a loop.
+
+A function longer than 40 lines is split. A block nested deeper than two
+levels is hoisted into a named method.
 
 ## Rule 2. Names are full words that say what the thing is
 
-No acronyms. No abbreviations. No single letters, except inside a formula
-that matches a paper, where `p` and `d` may stay because the reader has
-the paper open.
+No abbreviations. No acronyms except these, which are words in this field
+and stay: qpu, id, io, xor, yaml. The glossary in the sandbox at
+docs/architecture/TERMINOLOGY.md maps every plain name to the exact term
+the literature uses, so `minimum_weight_perfect_matching` is listed
+beside "MWPM".
 
     wm            -> window_manager
     dem           -> detector_error_model
-    mwpm          -> minimum_weight_matching
+    mwpm          -> minimum_weight_perfect_matching
     seq           -> sequence_number
     res, val, tmp -> the thing's real name in that place
-    cfg           -> settings, or the specific settings object
+    cfg           -> the specific settings object
     us(x)         -> microseconds_to_ticks(x)
     fmt(ticks)    -> format_ticks(ticks)
+    TICKS_PER_US  -> TICKS_PER_MICROSECOND
+
+A single-letter name is allowed only inside a function whose docstring
+cites the paper and the equation it implements; `p` and `d` may then stay.
+An uppercase symbol from a paper is spelled out (`qubit_count`, never
+bare `N`), which also keeps pep8-naming quiet.
 
 A method is named for what it does, not for the phase it belongs to:
-`release_waiters`, not `integrate`; `decisions_for`, not `on_result`.
-A collection is named for what it holds, keyed by what looks it up:
-`waiting_by_blocker`, `pending_by_window`, `windows_by_stream`.
+`release_waiters`, not `integrate`; `decisions_for`, not `on_result`. A
+collection is named for what it holds, keyed by what looks it up:
+`waiting_by_blocker`, `pending_by_window`, `windows_by_stream`. A boolean
+starts with `is_`, `has_`, `can_`, or reads as a question (`verbose` and
+`idle` are fine; `flag` is not). A duration field ends in `_microseconds`
+or `_ticks`; a count ends in `_count`.
 
 Link paths and yaml keys are renamed to plain words too. The owner chooses
-the final names; the current list is on the sample page and in
-docs/rewrite/PLAN.md. So far: `qc` becomes `qpu_to_controller`, and every
-path is named source to destination by component.
-
-A glossary in the docs maps each plain name to the paper's term, for a
-reader arriving from the literature.
+the final names; the list lives on the sample page and in PLAN.md. So
+far: `qc` becomes `qpu_to_controller`, and every path is named source to
+destination by component.
 
 ## Rule 3. Comments say why, in the present tense
 
@@ -78,80 +111,144 @@ finding number. If a workaround needs a paragraph to justify it, the code
 is wrong; fix the code.
 
 Every module starts with a docstring that says, in plain words, what the
-component is and what it does, and names the source it follows. Two to
-four short paragraphs. Docstrings follow the Google style: a one-line
-summary, a blank line, then the detail; Args, Returns and Raises sections
-only when the signature does not already say it.
+component is and what it does. When the component follows a paper or a
+reference implementation, the docstring names it. Docstrings follow the
+Google style: a one-line summary, a blank line, then the detail; Args,
+Returns and Raises only when the signature does not already say it.
+Review checks this; no tool can.
 
-## Rule 4. Checks live where input enters
+## Rule 4. Checks live where input enters, and where a contract would break
 
-A yaml loader, a device reading, a file being read: checked once, loudly,
-with a message that reads as a sentence. Inside the machine a component
-trusts its collaborators. A check that no input can trigger is deleted,
-together with the test that forced the state by hand. A check that guards
-an entry point stays.
+An entry point is where something from outside the machine arrives: a
+yaml file, a data file, a device reading. It is checked once, loudly, with
+a message that reads as a sentence, and raises ValueError.
+
+Inside the machine a component trusts what a collaborator already
+guaranteed and never re-checks it. It does refuse a call that breaks its
+own contract (a negative delay, a second correction for the same window,
+a duplicate metric name), because a wrong caller is a bug and a silent
+wrong answer is worse than a loud stop; that raises RuntimeError. A check
+that no caller can trigger is deleted, together with the test that forced
+the state by hand.
 
 ## Rule 5. No compatibility layer
 
 A rename is a rename. Nothing keeps an old name alive: no alias, no
-wrapper, no deprecated path. Callers and tests move in the same commit.
+wrapper, no deprecated path. Callers move in the same commit. Old tests
+are edited for renames only, never for behavior, until they are deleted.
 
 ## Rule 6. One reason per component
 
-A class owns one job. Its state is listed in `__init__` and fits on one
-hand. Its public methods read top to bottom, in the order a reader meets
-them. Private helpers come after the public methods. Records are grouped
-next to the component that owns them.
+A class owns one job: its docstring's first sentence says it without an
+"and". Its state is set in `__init__` and is at most six attributes; the
+checker reports more as wide state, which a mechanical slice records in
+the checklist for the structural slice that splits the class. Every
+attribute has its final value when `__init__` returns; a collaborator
+arrives through the constructor. Public methods read top to bottom in the
+order a reader meets them; private classes and functions come after every
+public one in the module and carry a leading underscore. A package's
+`__init__.py` holds the package docstring and nothing else.
+
+A record used by one component lives next to it. A record shared by two
+or more components lives in `message.py`.
 
 The target shape, taken from gem5: a component owns its settings and its
 state, exposes a few named methods other components call, and is wired by
-one root object. A mechanical rewrite keeps a file's current shape and
-only makes it read well; a structural change moves toward this shape and
-is planned and gated on its own.
+one root object. A mechanical rewrite keeps a file's current shape,
+including a `connect` step that exists today, and only makes it read
+well; a structural change moves toward the target shape and is planned
+and gated on its own.
+
+Every public signature is annotated. An `engine` parameter is typed
+`Engine`. `Any` is used only for an opaque identity, with a comment that
+says so.
 
 ## Rule 7. Google Python style, enforced
 
 The Google Python Style Guide applies wherever the rules above are
-silent. `ruff` enforces it with the settings in `pyproject.toml`: 80
-columns, pycodestyle, pyflakes, pep8-naming, Google docstrings, import
-by module. Run both checks before every commit:
+silent. Import modules, not names: `import decsim.message as message`,
+then `message.Decision`; the exceptions are `typing`, `dataclasses`,
+`collections.abc` and `enum`. No module uses `from __future__ import
+annotations`; `Optional[X]` is written out because the package runs on
+Python 3.9.
 
-    .venv/bin/python -m ruff check decsim experiments tests
-    .venv/bin/python tools/check_one_action.py decsim experiments tests
+`ruff` enforces the rest with the settings in `pyproject.toml`: 80
+columns, pycodestyle (E, W), pyflakes (F), pep8-naming (N), Google
+docstrings (D), bugbear (B), import order (I), pyupgrade (UP) without the
+`X | None` rules, unused arguments (ARG). The `SIM` family is off because
+it asks for inline conditionals and merged conditions, the opposite of
+rule 1. `ruff format` runs before `ruff check` and settles line breaks
+and trailing commas.
+
+Run, from the repo root, before every commit:
+
+    PYTHONPATH=.pydeps .venv/bin/python -m ruff format decsim experiments tests tools
+    PYTHONPATH=.pydeps .venv/bin/python -m ruff check decsim experiments tests tools
+    .venv/bin/python tools/check_one_action.py decsim experiments tests tools
+
+`tools/check.sh` runs all three. The ruff binary lives at
+`.pydeps/bin/ruff`; if `-m ruff` reports RuffNotFound, copy it from the
+ruff wheel's `data/scripts/ruff` into that folder.
 
 ## Tests
 
 New tests are written from sources, not copied from the old ones. A test
 file's docstring names the paper, the reference code, or the closed form
-it checks against. A test name is a sentence that states the behavior:
-`test_a_second_correction_for_a_window_is_refused`. The old tests keep
+it checks against; ruff keeps the module docstring required under
+`tests/`. A test name is a sentence that states the behavior:
+`test_a_second_correction_for_a_window_is_refused`. One new test file per
+module, at `tests/<component>/test_<module>.py`. The old tests keep
 running until the new ones cover the same behavior, then they are deleted
 in one commit per test directory.
 
+Log lines are part of the pinned behavior: the gate hashes the full log
+of every strict point. A change to a log line's text or source name is a
+surface change (below), never part of a mechanical slice.
+
 ## Slices and commits
 
-Every commit is one of two kinds, never both:
+Every commit is one of three kinds, never two:
 
 - mechanical: a file reads better, its shape is unchanged, the gate passes
   unchanged;
 - structural: a split, a new component, a new wiring; planned, reviewed,
-  and gated on its own.
+  and gated on its own;
+- surface: a config key, a link path name, or a log line changes;
+  reference.yaml, the parameter reference, the frozen suite configs and
+  the golden move in the same commit, under a design note.
 
 A bug found on the way gets its own commit with a test and a referent. The
 golden is regenerated only under a design note.
 
 Before a slice commit: gate green, component harnesses exact, old and new
-tests green, ruff clean, one-action checker clean on the touched files.
-The file checklist in docs/rewrite/PLAN.md moves in the same commit.
+tests green, `tools/check.sh` clean on the touched files. The file
+checklist in docs/rewrite/PLAN.md moves in the same commit.
 
 ## Review
 
 Each slice has an implementer, a reviewer who sees only the diff and is
-told to assume it is wrong, and a fixer. The reviewer's checklist is this
-file. A file the owner finds unreadable is not done.
+told to assume it is wrong, and a fixer. The reviewer answers this list
+with yes or no for every touched file:
 
-## Where the tree stands today
+1. Does every line do one thing, and does `tools/check.sh` pass?
+2. Is every name a full word that says what the thing is, with no
+   abbreviation and no acronym outside qpu, id, io, xor, yaml?
+3. Does every comment say why, and does every module docstring say what
+   the component is in plain words?
+4. Is every check either at an entry point or a contract of the method it
+   sits in, and is nothing re-checked?
+5. Did every rename move its callers and its tests, with no alias left?
+6. Does every class own one job, with at most six attributes, all final
+   at the end of `__init__`, public before private?
+7. Are imports by module, signatures annotated, and Optional written out?
+8. Is the commit one kind only, and does the checklist row move with it?
+9. Is the gate green, are the harnesses exact, and are the tests green?
 
-At decsim aad5747 the one-action checker reports 1,170 lines in 82 files:
-604 nested calls, 261 call chains, 258 inline conditionals, 40 long
-conditions, 7 busy comprehensions. That count goes to zero file by file.
+A file the owner finds unreadable is not done.
+
+## Where the tree stands
+
+Recorded when the tooling landed, at decsim aad5747, by running the three
+commands above over decsim, experiments and tests. The numbers are
+findings, not lines; one line can carry several. The current numbers are
+in docs/rewrite/PLAN.md, section 3, and go to zero file by file.

@@ -40,7 +40,7 @@ class PauliFrameConfig:
         cost_is_a_number = math.isfinite(self.commit_us)
         if not cost_is_a_number or self.commit_us < 0:
             raise ValueError(
-                "commit_us must be a finite number, zero or more")
+                "commit_us must be a finite number that is not negative")
         rounds_to_nothing = self.commit_us > 0 and us(self.commit_us) == 0
         if rounds_to_nothing:
             raise ValueError("commit_us is positive but rounds to zero ticks")

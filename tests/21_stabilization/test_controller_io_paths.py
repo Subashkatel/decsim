@@ -61,9 +61,9 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
 def test_packing_charges_its_assembly_time_for_every_round(fabric):
     """A completed round pays the controller's packet assembly time once,
     whether it arrived in one fragment or several: the packetization and
-    framing work a real-time controller does per syndrome word (Riverlane's
-    decoder pipeline, Barber et al. 2025, charges 250 to 370 FPGA cycles
-    per round of packetization and conditional logic)."""
+    framing work a real-time controller does per syndrome word (Caune et
+    al. 2410.05202 measure 250 to 370 FPGA cycles per decode for
+    packetization, bus transfer, result return and the conditional)."""
     engine = Engine(verbose=False)
     receiver = _WindowInputReceiver()
     links = fabric["declared_profile"](cwb=False, csb=False).resolve()
@@ -111,11 +111,12 @@ def _feedback_run(fabric, *, controller_output_us):
 
 def test_results_and_decisions_cross_links_at_their_own_size(fabric):
     """A decoder result reaches the frame as one bit per logical
-    observable (a Pauli frame update, LILLIPUT's decoder output register,
-    Das et al. ASPLOS 2022), and a decision or command crosses oc and cq as
-    one 32-bit bus word (the decoder sequencer's 32-bit WISHBONE interface,
-    Barber et al. Nature Electronics 2025). The reference card carries no
-    system-wide aggregate on these paths."""
+    observable (Caune et al. 2410.05202 return one Boolean per decode;
+    Google 2408.13687 an observable bitmask; PECOS XORs an observable mask
+    into its frame), and a decision or command crosses oc and cq as one
+    32-bit bus word (the decoder sequencer's 32-bit WISHBONE interface,
+    Caune et al. 2410.05202). The reference card carries no system-wide
+    aggregate on these paths."""
     completed = _feedback_run(fabric, controller_output_us=0.0)
     transfers = completed.result.link_traffic["transfers"]
     payload_by_path = {}

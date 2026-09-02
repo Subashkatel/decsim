@@ -79,3 +79,24 @@ def test_sliding_windows_match_qldpc_shot_for_shot(recorded):
                          decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)),
                          seed=shot).build().result.operation_results[0]
         assert result.logical_observables == tuple(int(b) for b in reference_predictions[shot])
+
+
+def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
+    """One bit per measure qubit per cycle (Google 2207.06431, 2408.13687):
+    d*d - 1 stabilizer bits per round, plus the d*d data-qubit readout on
+    the final round, exactly the measurement counts of Stim's circuit."""
+    from collections import defaultdict
+    from decsim.links.links import LinkPath
+    circuit, measurements, _, _, _ = recorded
+    rounds, distance = 9, 3
+    op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
+    completed = RunSpec(ops=[op], d=distance, rounds_policy=FixedRounds(rounds),
+                        device=RecordedStimDevice(measurements, 0),
+                        decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)), seed=0).build()
+    bits_by_round = defaultdict(int)
+    for transfer in completed.window_manager.links.snapshot().transfers:
+        if transfer.path is LinkPath.QC:
+            bits_by_round[transfer.attribution.round_lo] += transfer.reservation.payload_bits
+    stabilizers, data = distance * distance - 1, distance * distance
+    assert bits_by_round == {**{r: stabilizers for r in range(1, rounds)}, rounds: stabilizers + data}
+    assert sum(bits_by_round.values()) == circuit.num_measurements

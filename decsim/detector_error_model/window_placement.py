@@ -12,10 +12,12 @@ rounds; the buffer rounds after the commit rounds are decoded but not
 committed, so a chain that crosses the commit boundary is cut there and
 its far end becomes an artificial defect for the next window (Skoric et
 al., Fig. 2). A fault a window owns is never offered to a later window
-again (qLDPC's `d_errors[addressed] = False`). The last window of an
-operation owns everything it sees, because nothing comes after it. When
-a plan compiled from a dependency graph supplies the owner sets
-explicitly, they replace this incremental rule.
+again (qLDPC's `d_errors[addressed] = False`). The terminal window of an
+operation, the one whose commit rounds reach the last round, owns every
+fault it sees that nothing committed before, because nothing comes after
+it. When a plan compiled from a dependency graph supplies the owner sets
+explicitly, they replace the incremental rule and already carry the
+terminal law (window_ownership_dag).
 
 Every owned column keeps its whole detector effect in boundary_flips, so
 the window that receives the handoff can intersect it with its own rows
@@ -24,7 +26,7 @@ seam windows receive flips from both neighbours).
 """
 
 import dataclasses
-from collections.abc import Container
+from collections.abc import Container, Sequence
 from typing import Optional
 
 import numpy
@@ -80,45 +82,34 @@ def detectors_in_window(
     detectors_by_round: dict[int, list[int]],
     first_buffer_round: int,
     last_buffer_round: int,
-    *,
-    is_last: bool,
 ) -> list[int]:
-    """The window's rows: the detectors of its buffer rounds, sorted.
-
-    The last window takes every round from its start, so a plan that ends
-    early still sees the whole tail.
-    """
-    if is_last:
-        rounds = [
-            round_index
-            for round_index in detectors_by_round
-            if round_index >= first_buffer_round
-        ]
-    else:
-        rounds = [
-            round_index
-            for round_index in detectors_by_round
-            if first_buffer_round <= round_index <= last_buffer_round
-        ]
+    """The window's rows: the detectors of its buffer rounds, sorted."""
+    rounds = [
+        round_index
+        for round_index in detectors_by_round
+        if first_buffer_round <= round_index <= last_buffer_round
+    ]
     rows = []
     for round_index in rounds:
         rows.extend(detectors_by_round[round_index])
     return sorted(rows)
 
 
-def validate_fault_exclusion_ranges(
-    fault_exclusion_ranges: tuple[tuple[int, int], ...], round_count: int
-) -> None:
-    """Refuse a range that is not an ordered pair of ints inside the operation.
+def checked_fault_exclusion_ranges(
+    fault_exclusion_ranges: Sequence[Sequence[int]], round_count: int
+) -> tuple[tuple[int, int], ...]:
+    """The ranges as a tuple of pairs, each checked against the operation.
 
-    A round outside 1..round_count holds no detector, so a range reaching
-    there is a caller's mistake rather than an empty exclusion.
+    Any sequence of pairs is accepted. A round outside 1..round_count
+    holds no detector, so a range reaching there is a caller's mistake
+    rather than an empty exclusion.
     """
-    if not isinstance(fault_exclusion_ranges, tuple):
+    if not isinstance(fault_exclusion_ranges, Sequence):
         raise ValueError(
-            "fault_exclusion_ranges must be a tuple of ranges, got "
+            "fault_exclusion_ranges must be a sequence of ranges, got "
             f"{fault_exclusion_ranges!r}"
         )
+    checked = []
     for exclusion in fault_exclusion_ranges:
         _check_range_is_a_pair_of_ints(exclusion)
         first_excluded, last_excluded = exclusion
@@ -132,6 +123,8 @@ def validate_fault_exclusion_ranges(
                 f"fault-exclusion range {first_excluded}-{last_excluded} "
                 f"lies outside rounds 1..{round_count}"
             )
+        checked.append((first_excluded, last_excluded))
+    return tuple(checked)
 
 
 def placed_faults_for_window(
@@ -218,7 +211,7 @@ _WindowArrays = tuple[
 
 
 def _check_range_is_a_pair_of_ints(exclusion: object) -> None:
-    if not isinstance(exclusion, tuple):
+    if not isinstance(exclusion, Sequence):
         _refuse_exclusion_range(exclusion)
     if len(exclusion) != 2:
         _refuse_exclusion_range(exclusion)
@@ -266,9 +259,10 @@ def _fault_owned_by_window(
     """Whether this window commits the fault.
 
     Precedence: an excluded fault is never owned; an explicit owner set
-    decides next; a fault committed elsewhere is not owned; the last
-    window owns the rest; any other window owns what touches its commit
-    rounds.
+    decides next, and it already names the terminal window for every
+    fault no window's commit rounds reach; a fault committed elsewhere is
+    not owned; the terminal window owns the rest; any other window owns
+    what touches its commit rounds.
     """
     if fault_index in unowned_faults:
         return False

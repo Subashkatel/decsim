@@ -388,7 +388,54 @@ def test_the_terminal_window_owns_every_uncommitted_fault_it_sees():
     assert faults.owned[0]
 
 
-def test_the_last_window_of_a_sliding_plan_owns_exactly_the_faults_left_to_it():
+def test_the_terminal_window_owns_every_uncommitted_fault_with_edges_given():
+    circuit = surface_code_circuit(4)
+    # The runtime always hands the plan builder a tuple of edges, so its
+    # ownership is compiled from the graph even when the tuple is empty.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+        dependency_edges=(),
+    )
+    faults = models[0].require_faults(GRAPHLIKE)
+    assert models[0].detector_ids == tuple(range(32))
+    assert len(faults.source_fault_ids) == 110
+    assert faults.owned.all()
+    assert faults.source_fault_ids[0] == 0
+    assert faults.owned[0]
+
+
+def test_a_plan_tiling_the_operation_owns_the_same_faults_on_both_paths():
+    circuit = surface_code_circuit(4)
+    in_plan_order = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 2, 4), (1, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+    )
+    from_the_graph = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 2, 4), (1, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+        dependency_edges=((0, 1),),
+    )
+    first_in_plan_order = owned_faults(in_plan_order[0])
+    last_in_plan_order = owned_faults(in_plan_order[1])
+    first_from_the_graph = owned_faults(from_the_graph[0])
+    last_from_the_graph = owned_faults(from_the_graph[1])
+    assert first_from_the_graph == first_in_plan_order
+    assert last_from_the_graph == last_in_plan_order
+    assert len(first_from_the_graph) == 48
+    assert len(last_from_the_graph) == 62
+
+
+def test_two_windows_with_front_buffers_partition_the_catalog_between_them():
     circuit = surface_code_circuit(4)
     # The runtime's geometry with two buffer rounds: both windows see the
     # whole operation; only the second is terminal.
@@ -450,6 +497,57 @@ def test_a_linked_plan_of_several_windows_with_an_exclusion_range_is_refused():
         )
 
 
+def test_a_linked_plan_of_several_windows_without_a_range_is_accepted():
+    circuit = surface_code_circuit(4)
+    # The belief-matching runtime path: window_manager passes no range.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 2, 3), (3, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=(
+            fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
+        ),
+        fault_exclusion_ranges=(),
+    )
+    first_projection = models[0].physical_to_graphlike_detector_projection
+    second_projection = models[1].physical_to_graphlike_detector_projection
+    first_owns = owned_faults(models[0])
+    last_owns = owned_faults(models[1])
+    assert len(models) == 2
+    assert first_projection.shape == (80, 336)
+    assert second_projection.shape == (62, 227)
+    assert len(first_owns) == 48
+    assert len(last_owns) == 62
+
+
+def test_a_graphlike_plan_of_several_windows_keeps_its_exclusion_range():
+    circuit = surface_code_circuit(4)
+    plain = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 2, 3), (3, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+    )
+    excluded = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 2, 3), (3, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=((1, 1),),
+    )
+    first_plain = owned_faults(plain[0])
+    first_excluded = owned_faults(excluded[0])
+    last_plain = owned_faults(plain[1])
+    last_excluded = owned_faults(excluded[1])
+    # The 16 graphlike faults that flip a round-1 detector stay unowned
+    # by the first window, and the terminal window never sees them.
+    assert len(first_plain) == 48
+    assert len(first_excluded) == 32
+    assert len(last_plain) == 62
+    assert len(last_excluded) == 62
+
+
 def test_a_linked_plan_of_one_window_keeps_its_exclusion_range():
     circuit = surface_code_circuit(4)
     models = window_model_builders.build_window_error_models(
@@ -482,9 +580,34 @@ def test_an_exclusion_range_that_is_a_bare_int_is_refused():
         )
 
 
+def test_exclusion_ranges_given_as_a_list_of_lists_build_the_same_model():
+    circuit = surface_code_circuit(4)
+    from_tuple = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=((1, 1),),
+    )
+    from_list = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=[[1, 1]],
+    )
+    tuple_faults = from_tuple[0].require_faults(GRAPHLIKE)
+    list_faults = from_list[0].require_faults(GRAPHLIKE)
+    assert list_faults.source_fault_ids == tuple_faults.source_fault_ids
+    assert list_faults.owned.tolist() == tuple_faults.owned.tolist()
+    assert list_faults.owned.sum() == 94
+
+
 def test_exclusion_ranges_given_as_none_are_refused():
     circuit = surface_code_circuit(4)
-    with pytest.raises(ValueError, match="must be a tuple of ranges, got None"):
+    with pytest.raises(
+        ValueError, match="must be a sequence of ranges, got None"
+    ):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 4, 4)],

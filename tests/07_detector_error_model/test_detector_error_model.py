@@ -1090,16 +1090,14 @@ def test_a_detector_free_source_is_still_refused():
         assert "requires at least one detector" in str(failure.value)
 
 
-def test_explicit_map_is_shallow_copied_and_not_transformed():
-    """An explicit detector-round map is copied and used verbatim, with no coordinate transformation."""
+def test_explicit_map_is_used_as_given_and_not_transformed():
+    """An explicit detector-round map is used as given, with no copy and no coordinate transformation."""
     supplied = dict(CHAIN_DETECTOR_ROUNDS)
     resolved = detector_chronology.resolve_detector_rounds(
         chain_circuit(), supplied, CHAIN_ROUND_COUNT
     )
     assert resolved == CHAIN_DETECTOR_ROUNDS
-    assert resolved is not supplied
-    supplied[0] = 4
-    assert resolved[0] == 1
+    assert resolved is supplied
 
 
 def test_explicit_map_must_cover_detectors_and_stay_inside_the_rounds():
@@ -1374,7 +1372,7 @@ def test_require_faults_returns_or_fails_at_the_consuming_boundary():
     """Requesting a fault view returns it, or fails clearly when the view is missing or the argument is not a representation."""
     window = chain_models([(1, 2, 2), (3, 4, 4)])[0]
     assert window.require_faults(GRAPHLIKE) is window.graphlike_faults
-    with pytest.raises(ValueError) as missing:
+    with pytest.raises(RuntimeError) as missing:
         window.require_faults(PHYSICAL)
     assert "window model does not contain physical faults" in str(missing.value)
     with pytest.raises(RuntimeError) as wrong_type:
@@ -1420,11 +1418,10 @@ def test_parse_window_entry_lets_a_malformed_length_fail_naturally(entry):
 
 
 def test_detectors_in_window_selects_rows_by_round():
-    """A window takes the detectors of its buffer rounds, and the terminal window takes everything from its start onward."""
+    """A window takes the detectors of its buffer rounds."""
     detectors_by_round = {1: [0], 2: [1], 3: [2], 4: [3]}
-    assert window_placement.detectors_in_window(detectors_by_round, 2, 3, is_last=False) == [1, 2]
-    assert window_placement.detectors_in_window(detectors_by_round, 2, 3, is_last=True) == [1, 2, 3]
-    assert window_placement.detectors_in_window(detectors_by_round, 5, 6, is_last=False) == []
+    assert window_placement.detectors_in_window(detectors_by_round, 2, 3) == [1, 2]
+    assert window_placement.detectors_in_window(detectors_by_round, 5, 6) == []
 
 
 # --------------------------------------------------------------------------
@@ -1563,14 +1560,14 @@ def test_owned_columns_are_not_recorded_on_the_explicit_path():
 def test_fault_exclusion_ranges_are_validated(ranges, expected_error, expected_message):
     """Exclusion ranges must be built-in integer pairs that are not inverted."""
     with pytest.raises(expected_error) as failure:
-        window_placement.validate_fault_exclusion_ranges(ranges, 4)
+        window_placement.checked_fault_exclusion_ranges(ranges, 4)
     assert expected_message in str(failure.value)
 
 
 def test_valid_exclusion_ranges_pass():
     """Well-formed and empty exclusion range tuples are accepted."""
-    window_placement.validate_fault_exclusion_ranges(((1, 3), (5, 5)), 6)
-    window_placement.validate_fault_exclusion_ranges((), 6)
+    window_placement.checked_fault_exclusion_ranges(((1, 3), (5, 5)), 6)
+    window_placement.checked_fault_exclusion_ranges((), 6)
 
 
 def test_unowned_faults_are_those_touching_an_exclusion_range():
@@ -1955,7 +1952,7 @@ def test_uncovered_fault_is_left_unowned_by_a_partial_plan():
     """A fault touching no commit region of a partial plan is left unowned."""
     partial_entries = ((3, 3, 3, 3), (4, 4, 4, 4))
     ownership = window_ownership_dag.explicit_fault_ownership(
-        isolated_slicer(), partial_entries, (0, 1)
+        isolated_slicer(), partial_entries, (0, 1), CHAIN_ROUND_COUNT
     )
     assert ownership == ({GRAPHLIKE: {1}}, {GRAPHLIKE: set()})
 

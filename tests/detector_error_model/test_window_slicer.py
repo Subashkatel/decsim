@@ -348,6 +348,25 @@ def test_a_window_has_no_coordinates_when_a_detector_has_none():
     assert model.detector_coordinates is None
 
 
+def test_a_physical_fault_kept_uncommitted_past_its_component_is_refused():
+    slicer = surface_code_slicer(
+        6, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
+    )
+    # The first window commits the component that flips detector 13 (a
+    # round-3 detector) of physical fault 167, which flips detectors 12,
+    # 13 and 20; excluding round 4 keeps the fault itself uncommitted, so
+    # the second window holds the fault without that component. The
+    # builders refuse this input at entry; the slicer's own contract
+    # check is reached only this way.
+    slicer.slice_window(
+        1, 1, 3, 4, is_last=False, fault_exclusion_ranges=((4, 4),)
+    )
+    with pytest.raises(RuntimeError, match="graphlike component XOR"):
+        slicer.slice_window(
+            3, 4, 6, 6, is_last=True, fault_exclusion_ranges=((4, 4),)
+        )
+
+
 def test_explicit_owner_and_prior_maps_must_come_together():
     slicer = surface_code_slicer(4)
     with pytest.raises(RuntimeError, match="supplied together"):

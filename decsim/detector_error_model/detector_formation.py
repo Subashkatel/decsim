@@ -32,9 +32,11 @@ from typing import Optional
 
 import stim
 
+from decsim.detector_error_model import detector_chronology
+
 
 class LayerKind(enum.Enum):
-    """How many records a detector reads, and so what it compares."""
+    """What a detector compares, told by how many records it reads."""
 
     # Compared against the prepared state: one record.
     PREPARATION = "prep"
@@ -248,7 +250,7 @@ def _circuit_tables(
     """What the recipes are read against, with the declared rounds checked."""
     declared_rounds = None
     if detector_rounds is not None:
-        declared_rounds = _declared_detector_rounds(
+        declared_rounds = detector_chronology.checked_detector_round_map(
             detector_rounds, circuit.num_detectors, round_count
         )
     reference_sample = circuit.reference_sample()
@@ -259,28 +261,6 @@ def _circuit_tables(
         coordinates=coordinates,
         detector_rounds=declared_rounds,
     )
-
-
-def _declared_detector_rounds(
-    detector_rounds: dict[int, int], detector_count: int, round_count: int
-) -> dict[int, int]:
-    """The declared map, checked as detector_chronology checks it.
-
-    It covers every detector exactly once, with every round inside
-    1..round_count; a detector declared past the last round would never
-    be formed.
-    """
-    declared = dict(detector_rounds)
-    if set(declared) != set(range(detector_count)):
-        raise ValueError("detector-round map must cover every detector exactly")
-    after_last_round = round_count + 1
-    emitted_rounds = set(range(1, after_last_round))
-    declared_rounds = declared.values()
-    if not set(declared_rounds) <= emitted_rounds:
-        raise ValueError(
-            "detector-round map must lie inside the emitted rounds"
-        )
-    return declared
 
 
 class _MeasurementRoundReader:

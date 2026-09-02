@@ -3,11 +3,13 @@
 Sources: qLDPC's SlidingWindowDecoder, which is run here on the same
 detector error model (its windows are cut in time order, each committing
 the region the next one starts after, and the last window commits
-everything it holds): qLDPC's detection and commit regions are asserted
-against literals, and decsim's committed identities against qLDPC's,
-since a WindowErrorModel carries no commit region of its own; Skoric et
-al. 2209.08552 (a fault the decoder may use to explain the syndrome but
-may not commit stays outside the commit region).
+everything it holds): qLDPC's detection regions are asserted against
+decsim's detector_ids, its commit regions against literals, and decsim's
+committed identities against qLDPC's, since a WindowErrorModel carries no
+commit region of its own; Skoric et al. 2209.08552, section I.B (a fault
+the decoder may use to explain the syndrome but may not commit stays
+outside the commit region; the last window commits its whole decoding
+region).
 """
 
 import numpy
@@ -64,7 +66,7 @@ def column_identity(detector_matrix, observable_matrix, column):
 
 
 class QldpcWindow:
-    """One window as qLDPC cut it: its regions and the errors it commits."""
+    """One window as qLDPC cut it, its two regions plus its committed errors."""
 
     def __init__(self, detection_detectors, commit_detectors, committed):
         self.detection_detectors = tuple(sorted(detection_detectors))
@@ -365,13 +367,78 @@ def test_a_front_buffer_round_is_decoded_but_not_owned():
     assert not faults.owned[5]
 
 
-def test_a_physical_fault_kept_uncommitted_past_its_component_is_refused():
+def test_the_terminal_window_owns_every_uncommitted_fault_it_sees():
+    circuit = surface_code_circuit(4)
+    # Commit rounds 3 and 4 reach the last round, so the window is
+    # terminal; its front buffer starts at round 1.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+    )
+    faults = models[0].require_faults(GRAPHLIKE)
+    assert models[0].detector_ids == tuple(range(32))
+    assert len(faults.source_fault_ids) == 110
+    assert faults.owned.all()
+    # Fault 0 flips detector 0 only, a round-1 detector in the front
+    # buffer: nobody committed it before, so the terminal window does.
+    assert faults.source_fault_ids[0] == 0
+    assert faults.owned[0]
+
+
+def test_the_last_window_of_a_sliding_plan_owns_exactly_the_faults_left_to_it():
+    circuit = surface_code_circuit(4)
+    # The runtime's geometry with two buffer rounds: both windows see the
+    # whole operation; only the second is terminal.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 2, 4), (1, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+    )
+    first_faults = models[0].require_faults(GRAPHLIKE)
+    last_faults = models[1].require_faults(GRAPHLIKE)
+    first_owns = owned_faults(models[0])
+    last_owns = owned_faults(models[1])
+    assert len(first_faults.source_fault_ids) == 110
+    assert len(first_owns) == 48
+    assert len(last_faults.source_fault_ids) == 62
+    assert len(last_owns) == 62
+    assert set(last_owns) == set(range(110)) - set(first_owns)
+
+
+def test_a_single_window_built_alone_is_never_terminal():
+    circuit = surface_code_circuit(4)
+    model = window_model_builders.build_single_window_error_model(
+        circuit,
+        (1, 3, 4, 4),
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+    )
+    faults = model.require_faults(GRAPHLIKE)
+    owned_count = faults.owned.sum()
+    assert model.detector_ids == tuple(range(32))
+    assert len(faults.source_fault_ids) == 110
+    assert owned_count == 80
+    # Fault 0 (detector 0, round 1) lies in the front buffer: decoded,
+    # not owned, although the commit rounds reach the last round.
+    assert faults.source_fault_ids[0] == 0
+    assert not faults.owned[0]
+
+
+def test_a_linked_plan_of_several_windows_with_an_exclusion_range_is_refused():
     circuit = surface_code_circuit(6)
-    # The first window commits the component that flips detector 13 (a
-    # round-3 detector) of physical fault 167, which flips detectors 12,
-    # 13 and 20; excluding round 4 keeps the fault itself uncommitted, so
-    # the second window would hold the fault without that component.
-    with pytest.raises(RuntimeError, match="graphlike component XOR"):
+    # The first window would commit the component that flips detector 13
+    # of physical fault 167 while the excluded round 4 kept the fault
+    # itself uncommitted; the second window would then hold the fault
+    # without its component.
+    with pytest.raises(
+        ValueError,
+        match="linked fault model requirement with fault_exclusion_ranges",
+    ):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 1, 3, 4), (3, 4, 6, 6)],
@@ -380,6 +447,101 @@ def test_a_physical_fault_kept_uncommitted_past_its_component_is_refused():
                 fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
             ),
             fault_exclusion_ranges=((4, 4),),
+        )
+
+
+def test_a_linked_plan_of_one_window_keeps_its_exclusion_range():
+    circuit = surface_code_circuit(4)
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 4, 4)],
+        round_count=4,
+        fault_model_requirement=(
+            fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
+        ),
+        fault_exclusion_ranges=((1, 1),),
+    )
+    graphlike = models[0].require_faults(GRAPHLIKE)
+    # The 16 graphlike faults that flip a round-1 detector stay unowned.
+    assert len(graphlike.source_fault_ids) == 110
+    assert graphlike.owned.sum() == 94
+    assert not graphlike.owned[0]
+
+
+def test_an_exclusion_range_that_is_a_bare_int_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(
+        ValueError, match="must be a pair of built-in integers, got 5"
+    ):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 4, 4)],
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            fault_exclusion_ranges=(5,),
+        )
+
+
+def test_exclusion_ranges_given_as_none_are_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(ValueError, match="must be a tuple of ranges, got None"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 4, 4)],
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            fault_exclusion_ranges=None,
+        )
+
+
+def test_an_exclusion_range_before_the_first_round_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(
+        ValueError, match=r"range 0-0 lies outside rounds 1\.\.4"
+    ):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 4, 4)],
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            fault_exclusion_ranges=((0, 0),),
+        )
+
+
+def test_an_exclusion_range_after_the_last_round_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(
+        ValueError, match=r"range 9-9 lies outside rounds 1\.\.4"
+    ):
+        window_model_builders.build_single_window_error_model(
+            circuit,
+            (1, 1, 2, 3),
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            exclude_faults_touching=(9, 9),
+        )
+
+
+def test_a_last_buffer_round_past_round_count_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(ValueError, match="buffer region exceeds round_count"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 4, 9)],
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            fault_exclusion_ranges=(),
+        )
+
+
+def test_a_single_window_whose_buffer_passes_round_count_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(ValueError, match="buffer region exceeds round_count"):
+        window_model_builders.build_single_window_error_model(
+            circuit,
+            (1, 3, 4, 9),
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
         )
 
 
@@ -458,4 +620,34 @@ def test_an_exclusion_endpoint_that_is_a_bool_is_refused():
             round_count=4,
             fault_model_requirement=GRAPHLIKE_REQUIRED,
             exclude_faults_touching=(True, 3),
+        )
+
+
+def test_an_exclusion_endpoint_that_is_a_bool_in_second_place_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(
+        ValueError,
+        match=r"must be a pair of built-in integers, got \(3, True\)",
+    ):
+        window_model_builders.build_single_window_error_model(
+            circuit,
+            (1, 1, 2, 3),
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            exclude_faults_touching=(3, True),
+        )
+
+
+def test_an_exclusion_endpoint_that_is_a_float_in_second_place_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(
+        ValueError,
+        match=r"must be a pair of built-in integers, got \(2, 1.0\)",
+    ):
+        window_model_builders.build_single_window_error_model(
+            circuit,
+            (1, 1, 2, 3),
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            exclude_faults_touching=(2, 1.0),
         )

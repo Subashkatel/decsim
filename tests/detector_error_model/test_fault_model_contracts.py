@@ -138,7 +138,7 @@ def test_a_window_refuses_a_representation_that_is_not_a_member():
         graphlike_faults=placed,
         physical_faults=None,
     )
-    with pytest.raises(ValueError, match="FaultRepresentation"):
+    with pytest.raises(RuntimeError, match="FaultRepresentation"):
         window.require_faults("physical")
 
 

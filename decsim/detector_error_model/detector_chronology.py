@@ -42,18 +42,32 @@ def resolve_detector_rounds(
             circuit, detector_count, round_count
         )
     else:
-        resolved = dict(detector_rounds)
+        resolved = detector_rounds
+    return checked_detector_round_map(resolved, detector_count, round_count)
+
+
+def checked_detector_round_map(
+    detector_rounds: dict[int, int], detector_count: int, round_count: int
+) -> dict[int, int]:
+    """A copy of the map, checked once against this module's law.
+
+    Raises ValueError unless the map covers every detector exactly once
+    with rounds inside 1..round_count. detector_formation holds a declared
+    map to the same law through this function, so the check lives here
+    alone.
+    """
+    checked = dict(detector_rounds)
     every_detector = set(range(detector_count))
-    if set(resolved) != every_detector:
+    if set(checked) != every_detector:
         raise ValueError("detector-round map must cover every detector exactly")
     after_last_round = round_count + 1
     emitted_rounds = set(range(1, after_last_round))
-    resolved_rounds = resolved.values()
-    if not set(resolved_rounds) <= emitted_rounds:
+    declared_rounds = checked.values()
+    if not set(declared_rounds) <= emitted_rounds:
         raise ValueError(
             "detector-round map must lie inside the emitted rounds"
         )
-    return resolved
+    return checked
 
 
 def detectors_by_round(

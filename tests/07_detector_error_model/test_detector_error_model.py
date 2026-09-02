@@ -259,7 +259,7 @@ PACKAGE_LAYERS = {
     "fault_model_contracts": 0,
     "fault_identity_validation": 0,
     "detector_chronology": 0,
-    "detector_formation": 0,
+    "detector_formation": 1,
     "stim_fault_catalog": 1,
     "window_placement": 1,
     "window_slicer": 2,
@@ -1377,7 +1377,7 @@ def test_require_faults_returns_or_fails_at_the_consuming_boundary():
     with pytest.raises(ValueError) as missing:
         window.require_faults(PHYSICAL)
     assert "window model does not contain physical faults" in str(missing.value)
-    with pytest.raises(ValueError) as wrong_type:
+    with pytest.raises(RuntimeError) as wrong_type:
         window.require_faults("graphlike")
     assert "representation must be a FaultRepresentation value" in str(wrong_type.value)
 
@@ -1563,14 +1563,14 @@ def test_owned_columns_are_not_recorded_on_the_explicit_path():
 def test_fault_exclusion_ranges_are_validated(ranges, expected_error, expected_message):
     """Exclusion ranges must be built-in integer pairs that are not inverted."""
     with pytest.raises(expected_error) as failure:
-        window_placement.validate_fault_exclusion_ranges(ranges)
+        window_placement.validate_fault_exclusion_ranges(ranges, 4)
     assert expected_message in str(failure.value)
 
 
 def test_valid_exclusion_ranges_pass():
     """Well-formed and empty exclusion range tuples are accepted."""
-    window_placement.validate_fault_exclusion_ranges(((1, 3), (5, 5)))
-    window_placement.validate_fault_exclusion_ranges(())
+    window_placement.validate_fault_exclusion_ranges(((1, 3), (5, 5)), 6)
+    window_placement.validate_fault_exclusion_ranges((), 6)
 
 
 def test_unowned_faults_are_those_touching_an_exclusion_range():

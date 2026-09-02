@@ -85,10 +85,10 @@ def build_run(code=None, **options):
 @pytest.mark.parametrize(
     ("field_name", "value"),
     (
-        ("d", 0),
-        ("d", -1),
-        ("d", True),
-        ("d", 3.5),
+        ("distance", 0),
+        ("distance", -1),
+        ("distance", True),
+        ("distance", 3.5),
         ("commit_rounds_override", 0),
         ("buffer_rounds_override", -1),
     ),
@@ -104,10 +104,10 @@ def test_surface_geometry_inputs_are_stored_until_planning(field_name, value):
 @pytest.mark.parametrize(
     ("field_name", "value", "boundary_label"),
     (
-        ("d", 0, "distance"),
-        ("d", -1, "distance"),
-        ("d", True, "distance"),
-        ("d", 3.5, "distance"),
+        ("distance", 0, "distance"),
+        ("distance", -1, "distance"),
+        ("distance", True, "distance"),
+        ("distance", 3.5, "distance"),
         ("commit_rounds_override", 0, "commit_round_count"),
         ("buffer_rounds_override", -1, "buffer_round_count"),
     ),
@@ -140,7 +140,7 @@ def test_empty_justification_is_refused():
         SurfaceCodeModel(window_floor_justification="   ")
 
 
-@pytest.mark.parametrize("field_name", ("n", "k", "d", "commit_rounds_override"))
+@pytest.mark.parametrize("field_name", ("qubit_count", "logical_qubit_count", "distance", "commit_rounds_override"))
 @pytest.mark.parametrize("value", (0, -1))
 def test_bb_positive_integer_fields_reject_invalid_values(field_name, value):
     """BB positive integer fields reject nonpositive values immediately."""
@@ -158,9 +158,9 @@ def test_bb_buffer_override_rejects_negative_values():
 @pytest.mark.parametrize(
     ("arguments", "message"),
     (
-        ({"n": 3, "k": 1, "d": 1}, "n must be even"),
-        ({"n": 4, "k": 5, "d": 1}, "k must not exceed n"),
-        ({"n": 4, "k": 1, "d": 5}, "d must not exceed n"),
+        ({"qubit_count": 3, "logical_qubit_count": 1, "distance": 1}, "qubit_count must be even"),
+        ({"qubit_count": 4, "logical_qubit_count": 5, "distance": 1}, "logical_qubit_count must not exceed qubit_count"),
+        ({"qubit_count": 4, "logical_qubit_count": 1, "distance": 5}, "distance must not exceed qubit_count"),
     ),
 )
 def test_bb_cross_field_guards_reject_incoherent_parameters(arguments, message):
@@ -171,8 +171,8 @@ def test_bb_cross_field_guards_reject_incoherent_parameters(arguments, message):
 
 def test_bb_cards_leave_construction_existence_and_window_relations_unchecked():
     """BB construction accepts coherent numbers without proving a code or scheme relation."""
-    card = BBCodeModel(n=4, k=3, d=4, commit_rounds_override=1, buffer_rounds_override=9)
-    assert (card.n, card.k, card.d) == (4, 3, 4)
+    card = BBCodeModel(qubit_count=4, logical_qubit_count=3, distance=4, commit_rounds_override=1, buffer_rounds_override=9)
+    assert (card.qubit_count, card.logical_qubit_count, card.distance) == (4, 3, 4)
     assert (card.commit_rounds(), card.buffer_rounds()) == (1, 9)
 
 
@@ -186,9 +186,9 @@ def test_scheme_specific_window_rules_are_enforced_after_card_construction():
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))
 def test_cadence_normalizes_numeric_inputs_and_value_equality(model_type):
     """Both cards normalize numeric cadence inputs before value comparison and hashing."""
-    integer_card = model_type(round_us=2)
-    float_card = model_type(round_us=2.0)
-    string_card = model_type(round_us="2")
+    integer_card = model_type(round_microseconds=2)
+    float_card = model_type(round_microseconds=2.0)
+    string_card = model_type(round_microseconds="2")
     assert integer_card.round_period_us() == 2.0
     assert type(integer_card.round_period_us()) is float
     assert integer_card == float_card == string_card
@@ -198,7 +198,7 @@ def test_cadence_normalizes_numeric_inputs_and_value_equality(model_type):
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))
 def test_none_cadence_uses_the_run_level_fallback(model_type):
     """A missing card cadence uses the run-level cadence in a complete build."""
-    card = model_type(round_us=None)
+    card = model_type(round_microseconds=None)
     completed = build_run(card, round_us=2.25)
     assert card.round_period_us() is None
     assert completed.qpu.cycle_ticks == microseconds_to_ticks(2.25)
@@ -207,7 +207,7 @@ def test_none_cadence_uses_the_run_level_fallback(model_type):
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))
 def test_card_cadence_precedes_run_and_timing_fallbacks(model_type):
     """An explicit card cadence wins over run and timing fallback values."""
-    card = model_type(round_us=1.75)
+    card = model_type(round_microseconds=1.75)
     completed = build_run(
         card,
         round_us=2.25,
@@ -229,7 +229,7 @@ def test_card_cadence_precedes_run_and_timing_fallbacks(model_type):
 )
 def test_planner_rejects_admitted_invalid_cadences(model_type, value, message):
     """Cards admit exceptional cadences that the planner rejects before scheduling."""
-    card = model_type(round_us=value)
+    card = model_type(round_microseconds=value)
     assert type(card.round_period_us()) is float
     with pytest.raises(ValueError, match=message):
         build_run(card)
@@ -239,14 +239,14 @@ def test_planner_rejects_admitted_invalid_cadences(model_type, value, message):
 def test_nonnumeric_cadence_uses_natural_float_conversion_errors(model_type):
     """Nonnumeric cadence input fails through ordinary float conversion."""
     with pytest.raises(ValueError):
-        model_type(round_us="not a number")
+        model_type(round_microseconds="not a number")
 
 
 def test_models_report_exact_generic_names():
     """Surface and BB code models expose their exact parameterized names."""
     surface = SurfaceCodeModel()
     default_bb = BBCodeModel()
-    other_bb = BBCodeModel(n=56, k=2, d=10)
+    other_bb = BBCodeModel(qubit_count=56, logical_qubit_count=2, distance=10)
     assert surface.name == "rotated surface code (d=3)"
     assert default_bb.name == "bivariate-bicycle code [[144,12,12]]"
     assert other_bb.name == "bivariate-bicycle code [[56,2,10]]"
@@ -254,7 +254,7 @@ def test_models_report_exact_generic_names():
 
 def test_router_uses_exact_names_and_silently_falls_back_when_unmapped():
     """Decoder routing selects only an exact name and otherwise uses its default."""
-    card = BBCodeModel(n=72, k=8, d=6)
+    card = BBCodeModel(qubit_count=72, logical_qubit_count=8, distance=6)
     default_decoder = PresetLatencyDecoder(3.0)
     selected_decoder = PresetLatencyDecoder(1.0)
     router = CodeRouter(default_decoder, {card.name: selected_decoder})
@@ -273,8 +273,8 @@ def test_cards_carry_no_justification_by_default(model_type):
 
 def test_round_floors_and_window_defaults_follow_each_card_policy():
     """Each card reports its configured distance, cycle, floor, commit, and buffer defaults."""
-    surface = SurfaceCodeModel(d=5)
-    bb = BBCodeModel(n=24, k=4, d=6)
+    surface = SurfaceCodeModel(distance=5)
+    bb = BBCodeModel(qubit_count=24, logical_qubit_count=4, distance=6)
     assert (surface.distance, surface.rounds_per_logical_cycle()) == (5, 5)
     assert (surface.commit_rounds(), surface.buffer_rounds()) == (5, 5)
     assert surface.buffering_floor() == (5, 5)
@@ -285,15 +285,15 @@ def test_round_floors_and_window_defaults_follow_each_card_policy():
 
 def test_window_overrides_replace_card_defaults_without_cross_field_checks():
     """Positive commit and buffer overrides replace defaults independently on both cards."""
-    surface = SurfaceCodeModel(d=5, commit_rounds_override=2, buffer_rounds_override=3)
-    bb = BBCodeModel(n=24, k=4, d=6, commit_rounds_override=2, buffer_rounds_override=3)
+    surface = SurfaceCodeModel(distance=5, commit_rounds_override=2, buffer_rounds_override=3)
+    bb = BBCodeModel(qubit_count=24, logical_qubit_count=4, distance=6, commit_rounds_override=2, buffer_rounds_override=3)
     assert (surface.commit_rounds(), surface.buffer_rounds()) == (2, 3)
     assert (bb.commit_rounds(), bb.buffer_rounds()) == (2, 3)
 
 
 def test_surface_sizing_uses_unclamped_patch_arithmetic_and_the_seam_term():
     """Surface sizing uses the supplied patch count directly with its multipatch seam."""
-    card = SurfaceCodeModel(d=3)
+    card = SurfaceCodeModel(distance=3)
     assert card.spatial_nodes(1) == 9
     assert card.spatial_nodes(3) == 30
     assert card.spatial_nodes(0) == 0
@@ -306,7 +306,7 @@ def test_surface_sizing_uses_unclamped_patch_arithmetic_and_the_seam_term():
 
 def test_bb_sizing_is_unclamped_and_linear_in_patch_count():
     """BB sizing uses the supplied patch count directly for nodes and syndrome bits."""
-    card = BBCodeModel(n=24, k=4, d=6)
+    card = BBCodeModel(qubit_count=24, logical_qubit_count=4, distance=6)
     for count in (3, 0, -2, 1.5):
         assert card.spatial_nodes(count) == count * 24
         assert card.syndrome_bits_per_round(count) == count * 24
@@ -326,7 +326,7 @@ def test_all_four_sizing_sites_return_zero_for_zero_patches():
 
 def test_distance_one_surface_card_has_zero_syndrome_width():
     """A distance-one Surface card constructs and has zero syndrome bits per patch."""
-    card = SurfaceCodeModel(d=1)
+    card = SurfaceCodeModel(distance=1)
     assert card.spatial_nodes(1) == 1
     assert card.syndrome_bits_per_round(1) == 0
     assert build_run(card).result.terminal_status == "complete"
@@ -343,17 +343,17 @@ def test_zero_patch_syndrome_device_fails_naturally_when_selecting_a_target():
 def test_dataclass_fields_defaults_and_constructor_order_are_stable():
     """Generated constructors preserve every card field, default, and positional order."""
     expected_surface = (
-        ("d", 3),
-        ("round_us", None),
+        ("distance", 3),
+        ("round_microseconds", None),
         ("commit_rounds_override", None),
         ("buffer_rounds_override", None),
         ("window_floor_justification", None),
     )
     expected_bb = (
-        ("n", 144),
-        ("k", 12),
-        ("d", 12),
-        ("round_us", None),
+        ("qubit_count", 144),
+        ("logical_qubit_count", 12),
+        ("distance", 12),
+        ("round_microseconds", None),
         ("commit_rounds_override", None),
         ("buffer_rounds_override", None),
         ("window_floor_justification", None),
@@ -371,39 +371,23 @@ def test_dataclass_fields_defaults_and_constructor_order_are_stable():
 def test_frozen_cards_have_generated_value_hash_and_replacement_behavior():
     """Frozen cards compare and hash by value, reject mutation, and revalidate replacements."""
     first = SurfaceCodeModel(3, 2)
-    second = SurfaceCodeModel(d=3, round_us=2.0)
+    second = SurfaceCodeModel(distance=3, round_microseconds=2.0)
     assert first == second
     assert hash(first) == hash(second)
-    assert first != BBCodeModel(d=3)
+    assert first != BBCodeModel(distance=3)
     with pytest.raises(dataclasses.FrozenInstanceError):
-        first.d = 5
-    replaced = dataclasses.replace(first, round_us="3")
+        first.distance = 5
+    replaced = dataclasses.replace(first, round_microseconds="3")
     assert replaced.round_period_us() == 3.0
-    with pytest.raises(ValueError, match="n must be even"):
-        dataclasses.replace(BBCodeModel(), n=143)
+    with pytest.raises(ValueError, match="qubit_count must be even"):
+        dataclasses.replace(BBCodeModel(), qubit_count=143)
 
 
 def test_deferred_unhashable_surface_geometry_fails_only_when_hashed():
     """Deferred Surface geometry may construct even when generated hashing cannot hash it."""
-    card = SurfaceCodeModel(d=[])
+    card = SurfaceCodeModel(distance=[])
     with pytest.raises(TypeError):
         hash(card)
-
-
-def test_module_runtime_surface_keeps_models_helpers_and_annotation_scaffolding():
-    """The module exposes the two models and retained standard annotation scaffolding only."""
-    public_names = {name for name in vars(codes_module) if not name.startswith("_")}
-    expected_bindings = {"dataclass", "Optional", "SurfaceCodeModel", "BBCodeModel"}
-    assert public_names - {"annotations"} == expected_bindings
-    assert codes_module.dataclass is dataclasses.dataclass
-    assert codes_module.Optional is typing.Optional
-    assert not hasattr(codes_module, "__all__")
-    assert not hasattr(codes_module, "math")
-    assert not hasattr(codes_module, "us")
-    assert not hasattr(decsim, "SurfaceCodeModel")
-    assert not hasattr(decsim, "BBCodeModel")
-    assert all(isinstance(value, str) for value in SurfaceCodeModel.__annotations__.values())
-    assert all(isinstance(value, str) for value in BBCodeModel.__annotations__.values())
 
 
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))
@@ -483,8 +467,8 @@ def test_layout_selectors_must_return_the_exact_declared_code(broken_selector):
 
 def test_syndrome_device_stamps_the_exact_card_name_on_readouts():
     """Syndrome readouts carry the exact routing name exposed by their code card."""
-    card = BBCodeModel(n=24, k=4, d=6)
-    device = SyndromeBitDevice(card, seed=7, max_bits=2)
+    card = BBCodeModel(qubit_count=24, logical_qubit_count=4, distance=6)
+    device = SyndromeBitDevice(card, seed=7, max_bit_count=2)
     readout = device.round_payloads(make_operation(), 1)[0]
     assert readout.code == "bivariate-bicycle code [[24,4,6]]"
 

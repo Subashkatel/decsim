@@ -196,7 +196,7 @@ def _select_code(distance, code, layout):
                 f"layout must declare exactly one code (got {len(codes)})")
         return codes[0], layout
     selected = code if code is not None else SurfaceCodeModel(
-        d=3 if distance is None else distance)
+        distance=3 if distance is None else distance)
     return selected, UniformLayout(selected)
 
 
@@ -256,7 +256,7 @@ def check_factory_decode_service(factory, decoder_manager):
     from .qpu.magic_state_factories import DistillationFactory, MultiLevelDistillationFactory
     if type(factory) not in (DistillationFactory, MultiLevelDistillationFactory):
         return
-    expected = decoder_manager if factory.n_corr > 0 else None
+    expected = decoder_manager if factory.correction_decode_count > 0 else None
     if factory.decode_service is not expected:
         raise ValueError(
             f"{type(factory).__name__} decode_service must be run-owned")

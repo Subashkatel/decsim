@@ -204,7 +204,7 @@ def direct_prediction(completed, circuit: stim.Circuit) -> tuple:
         circuit.detector_error_model(decompose_errors=True))
     operation_id = completed.result.operation_results[0].operation_id
     events = np.asarray(
-        completed.qpu.model.sampled_detection_events(operation_id), dtype=bool)
+        completed.qpu.syndrome_source.sampled_detection_events(operation_id), dtype=bool)
     predicted = matching.decode(events)
     return tuple(int(bit) for bit in predicted)
 

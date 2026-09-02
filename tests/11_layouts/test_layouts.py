@@ -61,8 +61,8 @@ def make_planning_view(*, qubits=(3, 5, 3)):
 
 def test_layout_stores_and_exposes_the_exact_mutable_code_object():
     """Construction stores the supplied code unchanged in a public field."""
-    first_code = SurfaceCodeModel(d=3)
-    second_code = SurfaceCodeModel(d=5)
+    first_code = SurfaceCodeModel(distance=3)
+    second_code = SurfaceCodeModel(distance=5)
     layout = UniformLayout(first_code)
 
     assert isinstance(first_code, CodeModel)
@@ -78,7 +78,7 @@ def test_layout_stores_and_exposes_the_exact_mutable_code_object():
 
 def test_layout_implements_all_six_structural_hooks():
     """The uniform adapter satisfies the complete structural layout seam."""
-    layout = UniformLayout(SurfaceCodeModel(d=3))
+    layout = UniformLayout(SurfaceCodeModel(distance=3))
     expected_hooks = {
         "code_for_op",
         "code_for_patch",
@@ -100,7 +100,7 @@ def test_layout_implements_all_six_structural_hooks():
 
 def test_code_selectors_ignore_arbitrary_operation_and_patch_identities():
     """Both selectors return the current code without validating their inputs."""
-    code = SurfaceCodeModel(d=3)
+    code = SurfaceCodeModel(distance=3)
     layout = UniformLayout(code)
 
     for arbitrary_input in (None, object(), "not an operation", -7):
@@ -110,7 +110,7 @@ def test_code_selectors_ignore_arbitrary_operation_and_patch_identities():
 
 def test_spatial_hooks_return_even_invalid_base_counts_unchanged():
     """Both spatial transforms silently pass every base count through unchanged."""
-    layout = UniformLayout(SurfaceCodeModel(d=3))
+    layout = UniformLayout(SurfaceCodeModel(distance=3))
     operation = make_planning_view()
 
     for invalid_count in (None, -1, 0, "invalid", math.nan, object()):
@@ -126,7 +126,7 @@ def test_spatial_hooks_return_even_invalid_base_counts_unchanged():
 
 def test_spatial_base_counts_remain_keyword_only():
     """Spatial base counts cannot be supplied positionally."""
-    layout = UniformLayout(SurfaceCodeModel(d=3))
+    layout = UniformLayout(SurfaceCodeModel(distance=3))
 
     with pytest.raises(TypeError):
         layout.spatial_nodes_for(None, 4)
@@ -136,7 +136,7 @@ def test_spatial_base_counts_remain_keyword_only():
 
 def test_resources_group_all_planning_qubits_in_one_immutable_claim():
     """Planning qubits become one qubit claim with a frozenset payload."""
-    layout = UniformLayout(SurfaceCodeModel(d=3))
+    layout = UniformLayout(SurfaceCodeModel(distance=3))
     operation = make_planning_view(qubits=(8, 2, 8, 5))
     original_qubits = operation.qubits
 
@@ -152,7 +152,7 @@ def test_resources_group_all_planning_qubits_in_one_immutable_claim():
 
 def test_resources_return_fresh_lists_and_allow_an_empty_declaration():
     """Each resource call returns a new singleton list even without qubits."""
-    layout = UniformLayout(SurfaceCodeModel(d=3))
+    layout = UniformLayout(SurfaceCodeModel(distance=3))
     operation = make_planning_view(qubits=())
 
     first_claims = layout.resources_for(operation)
@@ -165,7 +165,7 @@ def test_resources_return_fresh_lists_and_allow_an_empty_declaration():
 
 def test_resources_leave_ordinary_bad_inputs_to_python_failures():
     """Missing or unhashable qubits fail naturally rather than by local guards."""
-    layout = UniformLayout(SurfaceCodeModel(d=3))
+    layout = UniformLayout(SurfaceCodeModel(distance=3))
     unhashable_qubits = make_planning_view(qubits=([],))
 
     with pytest.raises(AttributeError):
@@ -176,7 +176,7 @@ def test_resources_leave_ordinary_bad_inputs_to_python_failures():
 
 def test_codes_returns_a_fresh_list_without_mutating_the_layout():
     """Changing a returned code list cannot change the stored code."""
-    code = SurfaceCodeModel(d=3)
+    code = SurfaceCodeModel(distance=3)
     layout = UniformLayout(code)
 
     first_codes = layout.codes()
@@ -192,7 +192,7 @@ def test_codes_returns_a_fresh_list_without_mutating_the_layout():
 
 def test_removed_aliases_and_operation_annotations_stay_absent():
     """Deleted aliases and concrete operation annotations do not return."""
-    layout = UniformLayout(SurfaceCodeModel(d=3))
+    layout = UniformLayout(SurfaceCodeModel(distance=3))
 
     assert not hasattr(UniformLayout, "name")
     assert not hasattr(UniformLayout, "distance")
@@ -200,9 +200,9 @@ def test_removed_aliases_and_operation_annotations_stay_absent():
     assert not hasattr(layout, "distance")
     assert not hasattr(layouts_module, "Operation")
     for method_name, parameter_name in (
-        ("code_for_op", "op"),
+        ("code_for_op", "operation"),
         ("spatial_nodes_for", "operation"),
-        ("resources_for", "op"),
+        ("resources_for", "operation"),
     ):
         parameter = inspect.signature(getattr(UniformLayout, method_name)).parameters[
             parameter_name
@@ -213,7 +213,7 @@ def test_removed_aliases_and_operation_annotations_stay_absent():
 
 def test_timing_build_dispatches_real_planning_views_through_layout_hooks():
     """A timing-only build supplies planning views through operation hooks."""
-    code = SurfaceCodeModel(d=3)
+    code = SurfaceCodeModel(distance=3)
     layout = RecordingLayout(code)
     operation = make_operation(qubits=(2, 6), patches=(13,))
 
@@ -238,13 +238,13 @@ def test_timing_build_dispatches_real_planning_views_through_layout_hooks():
 
 def test_run_spec_owns_code_source_and_declared_code_count_checks():
     """The composition root rejects conflicting or non-singleton code sources."""
-    code = SurfaceCodeModel(d=3)
+    code = SurfaceCodeModel(distance=3)
     operation = make_operation()
 
     with pytest.raises(ValueError, match="multiple code sources"):
         RunSpec(ops=[operation], code=code, layout=UniformLayout(code)).build()
 
-    for declared_codes in ([], [code, SurfaceCodeModel(d=5)]):
+    for declared_codes in ([], [code, SurfaceCodeModel(distance=5)]):
         layout = RecordingLayout(code)
         layout.codes = lambda values=declared_codes: values
         with pytest.raises(ValueError, match="exactly one code"):
@@ -253,9 +253,9 @@ def test_run_spec_owns_code_source_and_declared_code_count_checks():
 
 def test_planner_rejects_operation_selector_identity_changes():
     """Planning rejects a layout that selects a different operation code object."""
-    resolved_code = SurfaceCodeModel(d=3)
+    resolved_code = SurfaceCodeModel(distance=3)
     layout = RecordingLayout(resolved_code)
-    layout.code_for_op = lambda operation: SurfaceCodeModel(d=3)
+    layout.code_for_op = lambda operation: SurfaceCodeModel(distance=3)
 
     with pytest.raises(ValueError, match="selected a code different"):
         RunSpec(ops=[make_operation()], layout=layout).build()
@@ -263,9 +263,9 @@ def test_planner_rejects_operation_selector_identity_changes():
 
 def test_planner_rejects_patch_selector_identity_changes():
     """Planning rejects a layout that selects a different patch code object."""
-    resolved_code = SurfaceCodeModel(d=3)
+    resolved_code = SurfaceCodeModel(distance=3)
     layout = RecordingLayout(resolved_code)
-    layout.code_for_patch = lambda patch_identity: SurfaceCodeModel(d=3)
+    layout.code_for_patch = lambda patch_identity: SurfaceCodeModel(distance=3)
 
     with pytest.raises(ValueError, match="selected a code different"):
         RunSpec(ops=[make_operation()], layout=layout).build()

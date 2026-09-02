@@ -106,7 +106,7 @@ def test_a_command_starts_on_the_cycle_boundary_at_or_after_its_arrival():
     next round)."""
     from decsim.engine import Engine
     from decsim.message import Operation, RunOperationBody
-    from decsim.qpu.cycle_clock import QPUDevice
+    from decsim.qpu.cycle_clock import QPUDevice, _IdlePatch
 
     class SilentModel:
         def begin_operation(self, operation, rounds, source_rounds):
@@ -127,7 +127,7 @@ def test_a_command_starts_on_the_cycle_boundary_at_or_after_its_arrival():
         command = RunOperationBody(operation=operation, round_ticks=cycle, round_count=2,
                                    source_round_count=2, emits_detector_data=False,
                                    finalizes_stream_round=False)
-        qpu._idle[9] = [0, 0]                # an idle patch keeps the clock ticking
+        qpu._idle_by_patch[9] = _IdlePatch(0, 0)   # an idle patch keeps the clock ticking
         engine.schedule(arrival, lambda: qpu.issue(command))
         engine.schedule(arrival + 5 * cycle, qpu.finish)
         engine.run()

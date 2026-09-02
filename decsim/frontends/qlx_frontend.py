@@ -3,7 +3,7 @@
 Consumes the per-op schedule DAG that ``qlx.estimate.schedule()`` exposes via
 ``SpaceTimeDiagram.entries`` — op ids, fabric op names, dependencies, round
 durations, occupied (region, slot) fabric cells, resource produces/consumes,
-protocols — and emits decsim ``Operation``s plus a ``PerOpRounds`` map.
+protocols — and emits decsim ``Operation``s plus a ``PerOperationRounds`` map.
 
 An optional whole-program Stim circuit and detector metadata attach one
 single-patch physical stream. Payloads model detector events and wire sizes;
@@ -20,7 +20,7 @@ Mapping rules (partially asserted by the ``tests/09_qlx_workloads`` suite):
   * entry order is preserved; ``Operation.id`` = position; the original
     ``op_id`` string is kept in ``QLXProgram.op_ids``.
   * ``dependencies`` -> workload-only ``Operation.predecessors``.
-  * ``duration`` -> ``PerOpRounds`` without changing zero-duration tasks.
+  * ``duration`` -> ``PerOperationRounds`` without changing zero-duration tasks.
   * occupied cells become patches; no-cell transports stay claim-free.
   * ``fabric.mz``/``fabric.measure*`` -> OpKind.MEASURE; ``fabric.inject``
     -> OpKind.INJECT; ``fabric.merge*`` -> OpKind.MERGE; others GENERIC.
@@ -41,7 +41,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any, Optional
 
 from ..message import Operation, OpKind, ProtectedRegion
-from ..qpu.round_policies import PerOpRounds
+from ..qpu.round_policies import PerOperationRounds
 
 _KIND_BY_NAME = MappingProxyType({
     "mz": OpKind.MEASURE, "mx": OpKind.MEASURE, "measure": OpKind.MEASURE,
@@ -67,7 +67,7 @@ class QLXProgram:
     """Structural decsim view of one QLX schedule."""
 
     operations: list
-    rounds: PerOpRounds
+    rounds: PerOperationRounds
     op_ids: dict                 # decsim id -> original QLX op_id string
     patch_of_cell: dict          # (region, slot) -> patch int
     raw_durations: dict          # decsim id -> QLX duration (may be 0)
@@ -334,7 +334,7 @@ def _add_physical_stream(program, circuit, metadata, decode_operation_id):
         patches=(patch,),
     )
     program.decoder_operations = (owner,)
-    program.rounds.rounds_by_op[decode_operation_id] = len(measurements)
+    program.rounds.rounds_by_operation[decode_operation_id] = len(measurements)
     program.detector_rounds_by_stream = {
         decode_operation_id: detector_rounds
     }
@@ -575,7 +575,7 @@ def qlx_frontend(diagram: Any, *,
                                       (patch,), patches=(patch,)) for index, (patch, _, _) in enumerate(generations))
     streams = tuple(ProtectedRegion(patch, owner.id, start, end)
                     for owner, (patch, start, end) in zip(dynamic_streams, generations))
-    rounds = PerOpRounds({op.id: raw_durations[op.id]
+    rounds = PerOperationRounds({op.id: raw_durations[op.id]
                           for op in operations})
     program = QLXProgram(
         operations=operations, rounds=rounds,

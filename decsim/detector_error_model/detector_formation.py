@@ -109,22 +109,18 @@ def build_formation_table(
 
     `measurement_rounds` is the QPU's packet schedule as a front end
     declares it: one round per absolute measurement index.
-    `detector_rounds` is each detector's declared round; a detector can
-    only be formed once every bit it reads has arrived, so a declared
-    round may not precede them.
+    `detector_rounds` is each detector's declared round, inside
+    1..round_count as detector_chronology requires; a detector can only
+    be formed once every bit it reads has arrived, so a declared round
+    may not precede them either.
     """
     if round_count < 1:
         raise ValueError("round_count must be positive")
     packet_of_measurement, packet_width_by_round, readout_slot_start = (
         _measurement_packets(circuit, round_count, measurement_rounds)
     )
-    reference_sample = circuit.reference_sample()
-    coordinates = circuit.get_detector_coordinates()
-    tables = _CircuitTables(
-        packet_of_measurement=packet_of_measurement,
-        reference_sample=reference_sample,
-        coordinates=coordinates,
-        detector_rounds=detector_rounds,
+    tables = _circuit_tables(
+        circuit, packet_of_measurement, round_count, detector_rounds
     )
     detectors, observables = _read_recipes(circuit, tables)
     max_span = _max_record_span(detectors, observables, round_count)
@@ -241,6 +237,47 @@ class _CircuitTables:
     reference_sample: object
     coordinates: dict
     detector_rounds: Optional[dict]
+
+
+def _circuit_tables(
+    circuit: stim.Circuit,
+    packet_of_measurement: dict[int, tuple[int, int]],
+    round_count: int,
+    detector_rounds: Optional[dict[int, int]],
+) -> _CircuitTables:
+    """What the recipes are read against, with the declared rounds checked."""
+    declared_rounds = None
+    if detector_rounds is not None:
+        declared_rounds = _declared_detector_rounds(
+            detector_rounds, round_count
+        )
+    reference_sample = circuit.reference_sample()
+    coordinates = circuit.get_detector_coordinates()
+    return _CircuitTables(
+        packet_of_measurement=packet_of_measurement,
+        reference_sample=reference_sample,
+        coordinates=coordinates,
+        detector_rounds=declared_rounds,
+    )
+
+
+def _declared_detector_rounds(
+    detector_rounds: dict[int, int], round_count: int
+) -> dict[int, int]:
+    """The declared map, refused unless every round lies in 1..round_count.
+
+    The same law detector_chronology.resolve_detector_rounds applies: a
+    detector declared past the last round would never be formed.
+    """
+    declared = dict(detector_rounds)
+    after_last_round = round_count + 1
+    emitted_rounds = set(range(1, after_last_round))
+    declared_rounds = declared.values()
+    if not set(declared_rounds) <= emitted_rounds:
+        raise ValueError(
+            "detector-round map must lie inside the emitted rounds"
+        )
+    return declared
 
 
 class _MeasurementRoundReader:

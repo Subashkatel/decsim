@@ -164,7 +164,8 @@ def test_a_range_that_cuts_at_a_closed_seam_is_refused():
     # The fault-cut check of a closed window runs for every protocol, so
     # none is named. An excluded fault is owned by nobody and stays a
     # column of every window that sees it, so fault 22, which touches
-    # rounds 3 and 4, is a column of the seam and cut at its edge.
+    # rounds 2 and 3 and is excluded by the range through round 3, is a
+    # column of the seam and cut at its earlier edge.
     with pytest.raises(ValueError, match="window 1 truncates global fault 22"):
         window_model_builders.build_window_error_models(
             circuit,

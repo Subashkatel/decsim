@@ -499,7 +499,7 @@ def test_payload_admission_failures_leave_semantic_and_physical_state_untouched(
             now_ticks=20,
             attribution=valid_attribution(LinkPath.QC),
         )
-    with pytest.raises(TypeError):
+    with pytest.raises(RuntimeError):
         model.reserve(
             LinkPath.OC,
             payload_bits=None,

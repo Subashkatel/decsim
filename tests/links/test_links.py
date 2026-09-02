@@ -430,3 +430,31 @@ def test_a_rule_with_an_unknown_scope_is_a_loud_stop(monkeypatch):
         model.reserve(
             LinkPath.QC, payload_bits=8, now_ticks=0, attribution=attribution
         )
+
+
+def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():
+    channel = bounded_channel(1000.0, 0)
+    buffer_edge = edge_on(channel)
+    bounded_card = card(cwb=buffer_edge)
+    model = bounded_card.resolve()
+    attribution = round_attribution(1)
+    with pytest.raises(RuntimeError, match="bounded"):
+        model.reserve(
+            LinkPath.CWB,
+            payload_bits=None,
+            now_ticks=0,
+            attribution=attribution,
+        )
+    snapshot = model.snapshot()
+    assert snapshot.transfers == ()
+
+
+def test_an_unbounded_channel_carries_a_transfer_with_no_payload_size():
+    complete_card = card()
+    model = complete_card.resolve()
+    attribution = round_attribution(1)
+    reservation = model.reserve(
+        LinkPath.QC, payload_bits=None, now_ticks=7, attribution=attribution
+    )
+    assert reservation.payload_bits is None
+    assert reservation.total_delay_ticks == 0

@@ -553,3 +553,118 @@ def test_unsealed_streams_block_real_manager_workload_finality_until_seal():
     assert completions == ["complete"]
     assert manager.has_dynamic_stream("stream") is True
     assert manager.committed_stream_round_count("stream") == 0
+
+
+def _per_round_fold(contributions, lo, hi, policy):
+    """Brute-force oracle for the ledger: every round of the interval has
+    exactly one owner, owners fold once each by XOR (the Pauli frame rule),
+    a timing-only owner makes the interval timing-only, and an owner that
+    crosses the interval edge is refused (under stream_segment only when it
+    carries observables)."""
+    owners = []
+    for round_index in range(lo, hi + 1):
+        covering = [c for c in contributions if c.commit_lo <= round_index <= c.commit_hi]
+        if len(covering) != 1:
+            return "coverage"
+        if covering[0] not in owners:
+            owners.append(covering[0])
+    for owner in owners:
+        crosses = owner.commit_lo < lo or owner.commit_hi > hi
+        if crosses and (policy == "strict" or owner.logical_observables is not None):
+            return "crossing"
+    if any(owner.logical_observables is None for owner in owners):
+        return None
+    folded = [0] * len(owners[0].logical_observables)
+    for owner in owners:
+        for index, bit in enumerate(owner.logical_observables):
+            folded[index] ^= bit
+    return tuple(folded)
+
+
+def test_logical_ledger_folds_intervals_like_a_per_round_oracle():
+    import random
+    from decsim.message import LogicalContribution
+    from decsim.windows.committed_rounds import LogicalLedger
+
+    rng = random.Random(5)
+    for case in range(60):
+        ledger, accepted, cursor = LogicalLedger(), [], 1
+        arity = rng.randrange(1, 4)
+        for index in range(rng.randrange(1, 8)):
+            overlapping = bool(accepted) and rng.random() < 0.2
+            if overlapping:
+                victim = rng.choice(accepted)
+                lo = rng.randrange(victim.commit_lo, victim.commit_hi + 1)
+            else:
+                lo = cursor + rng.choice([0, 0, 1, 2])
+            hi = lo + rng.randrange(0, 5)
+            observables = None if rng.random() < 0.15 else tuple(rng.randrange(2) for _ in range(arity))
+            contribution = LogicalContribution(("s", index), lo, hi, "ordinary_window", observables)
+            if overlapping:
+                with pytest.raises(RuntimeError, match="overlaps"):
+                    ledger.install(contribution)
+                continue
+            ledger.install(contribution)
+            accepted.append(contribution)
+            cursor = hi + 1
+        for _ in range(10):
+            lo = rng.randrange(1, cursor + 1)
+            hi = lo + rng.randrange(0, 6)
+            policy = rng.choice(["strict", "stream_segment"])
+            expected = _per_round_fold(accepted, lo, hi, policy)
+            if expected == "coverage":
+                with pytest.raises(RuntimeError, match="coverage|gap|overlap"):
+                    ledger.observables_for_interval("s", lo, hi, boundary_policy=policy)
+            elif expected == "crossing":
+                with pytest.raises(RuntimeError, match="crosses"):
+                    ledger.observables_for_interval("s", lo, hi, boundary_policy=policy)
+            else:
+                assert ledger.observables_for_interval("s", lo, hi, boundary_policy=policy) == expected
+
+
+def test_courier_ignores_a_stale_delivery_and_releases_the_edge_once():
+    """Every send bumps the source version; a receiver accepts only the
+    latest (Skoric et al. 2209.08552 artificial defects travel with the
+    commit that produced them; qLDPC carries the latest net_error). A
+    version-1 boundary still in flight when the source is decoded again
+    lands as a no-op; version 2 releases the dependency exactly once, and
+    a repeated delivery of the current version releases nothing."""
+    from decsim.engine import Engine
+    from decsim.links.link_profiles import logical_reference_profile
+    from decsim.message import DecoderRequestKey, DecoderTier, Operation, Window
+    from decsim.windows.window_interactions import DefaultWindowInteraction
+
+    engine = Engine(verbose=False)
+    op = Operation(id=1, name="memory", qubits=(0,), patches=(0,))
+    source = Window(op_id=1, k=0, commit_lo=1, commit_hi=3, buffer_hi=5, n_rounds=5,
+                    dependents=[(1, 1)])
+    dependent = Window(op_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=8, n_rounds=8,
+                       deps=[(1, 0)], deps_remaining=1)
+    checks = []
+    manager = SimpleNamespace(
+        engine=engine, links=logical_reference_profile().resolve(),
+        windows={(1, 0): source, (1, 1): dependent}, absorbed_windows=set(),
+        window_interaction=DefaultWindowInteraction(), window_models={},
+        _ops={1: op}, rounds_for=lambda operation: 20, release_service=None,
+        check_window=lambda key: checks.append((engine.now, key)),
+        _window_attribution=WindowManager._window_attribution)
+    manager._window_infos = lambda: {key: __import__("decsim.message", fromlist=["WindowInfo"])
+                                     .WindowInfo.from_window(w) for key, w in manager.windows.items()}
+    courier = BoundaryCourier(manager)
+    key = DecoderRequestKey(1, 0, DecoderTier.WEAK, 0)
+    boundary_v1 = {4: [1, 0, 0]}
+    boundary_v2 = {4: [0, 1, 0]}
+
+    engine.schedule(0, lambda: courier.send(source, op, boundary_v1, source_request_key=key))
+    # decoded again one tick later, before version 1 could land
+    engine.schedule(1, lambda: (courier.invalidate(source),
+                                courier.send(source, op, boundary_v2, source_request_key=key)))
+    engine.run()
+
+    assert dependent.deps_remaining == 0
+    assert dict(dependent.boundary_in) == {4: [0, 1, 0]}          # version 2 only
+    assert len(checks) == 2                                       # both landings checked the window
+    # a repeat of the current version merges nothing new and releases nothing
+    courier._receive_boundary((1, 1), 1, boundary_v2, (1, 0), 2, 2)
+    assert dependent.deps_remaining == 0
+    assert dict(dependent.boundary_in) == {4: [0, 1, 0]}

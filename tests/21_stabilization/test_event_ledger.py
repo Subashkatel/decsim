@@ -319,3 +319,18 @@ def test_ledger_holds_over_randomized_configurations(fabric, seed):
                   if tick is not None]
         assert stamps == sorted(stamps), \
             f"{mode} seed {seed}: window stamps not monotone: {stamps}"
+
+
+def test_idle_rounds_reach_one_terminal_state_on_a_fabric_without_cwb(fabric):
+    """A feedback-memory round (an idle patch's round routed as memory) is
+    stored in Buffer 0 but never published to the window route; on a
+    fabric that publishes for free it must not carry a PUBLISHED event
+    beside its FEEDBACK_MEMORY_DELIVERED terminal."""
+    completed = fabric["weak_only_run"](
+        rounds=6, cwb=False,
+        ops=[fabric["memory_op"](1), fabric["memory_op"](2, blocked_by=1)])
+    ledger = event_ledger(completed)
+    ledger.check()
+    idle_terminals = [event.kind for event in ledger.events
+                      if event.status == "terminal" and event.op == ("idle", 1, 1)]
+    assert idle_terminals and set(idle_terminals) == {"FEEDBACK_MEMORY_DELIVERED"}

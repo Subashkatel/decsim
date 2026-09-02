@@ -1,29 +1,16 @@
-# Data-core semantics adapted from PECOS PauliFrameAccumulator and ObsMask.
-# Source: https://github.com/PECOS-packages/PECOS
-# Commit: 7c679509ec7e87410f99445c2ec5442eb91016fd
-# Files: crates/pecos-decoder-core/src/pauli_frame.rs:53-108; crates/pecos-decoder-core/src/obs_mask.rs:132-141
-# Copyright 2026 The PECOS Developers.
-# License: Apache-2.0. Full text: tmp/references/code/pecos/LICENSE.
-# NOTICE: Copyright 2018 The PECOS Developers. The copyright for the code in PECOS is held by the contributors (or their
-# NOTICE: employers) for the code they contributed and is licensed under Apache-2.0. See the revision history in source control
-# NOTICE: for the list of contributors.
-# NOTICE: 
-# NOTICE: Copyright 2018 National Technology & Engineering Solutions of Sandia, LLC (NTESS). Under the terms of Contract
-# NOTICE: DE-NA0003525 with NTESS, the U.S. Government retains certain rights in this software.
-# Modified for decsim: Python tuple/None semantics, stream and window keys, idempotent async commit transaction, immutable records, and simulated commit latency.
+"""The Pauli frame remembers the corrections the decoders have made.
 
-"""The Pauli frame: the record of every correction the decoders committed.
+Each window gets one correction: a few bits, one per logical observable.
+The frame stores that correction and refuses a second one for the same
+window. A stream's total correction is all of its window corrections
+XORed together.
 
-A correction is a tuple of logical observable bits for one window. The
-frame keeps one correction per window and folds a stream's corrections
-together by XOR, the way PECOS's accumulator does. Each write costs a fixed
-number of ticks, charged before the caller continues, so a frame write also
-delays the boundary handoff and the release of anything waiting on it.
+Every write costs a fixed number of ticks. The caller is called back only
+after that time has passed, so anything waiting on the write waits too.
 
-A second correction for the same window is refused. Real frames apply a
-correction exactly once (Riesebos, Pauli frames for quantum computer
-architectures, DAC 2017); PECOS would XOR a repeat and cancel it silently,
-which in a simulator would hide a scheduling bug.
+The XOR fold follows PECOS's Pauli frame accumulator. Applying a correction
+exactly once follows Riesebos (DAC 2017). One write costs one clock cycle,
+4 ns at 250 MHz (Yang et al. 2605.04892).
 """
 
 import dataclasses

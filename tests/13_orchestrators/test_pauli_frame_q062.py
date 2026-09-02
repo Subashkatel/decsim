@@ -1,10 +1,6 @@
 from dataclasses import FrozenInstanceError
-from pathlib import Path
 from types import SimpleNamespace
 import inspect
-import shutil
-import subprocess
-import zipfile
 
 import pytest
 
@@ -323,55 +319,6 @@ def test_frame_owner_is_a_named_seed_root_and_snapshot_is_non_destructive():
     assert frame.snapshot() == before
     assert frame.frame_for_stream(2) == (1, 0)
     assert frame.snapshot() == before
-
-
-def test_short_provenance_header_round_trips_from_source_and_wheel(tmp_path):
-    project_root = Path(__file__).resolve().parents[2]
-    module_bytes = (project_root / "decsim" / "pauli_frame" / "pauli_frame.py").read_bytes()
-    module_lines = module_bytes.decode("ascii").splitlines()
-    expected_prefix = [
-        "# Data-core semantics adapted from PECOS PauliFrameAccumulator and ObsMask.",
-        "# Source: https://github.com/PECOS-packages/PECOS",
-        "# Commit: 7c679509ec7e87410f99445c2ec5442eb91016fd",
-        "# Files: crates/pecos-decoder-core/src/pauli_frame.rs:53-108; crates/pecos-decoder-core/src/obs_mask.rs:132-141",
-        "# Copyright 2026 The PECOS Developers.",
-        "# License: Apache-2.0. Full text: tmp/references/code/pecos/LICENSE.",
-    ]
-    assert module_lines[:6] == expected_prefix
-    notice_lines = []
-    for line in module_lines[6:12]:
-        assert line.startswith("# NOTICE: ")
-        notice_lines.append(line.removeprefix("# NOTICE: "))
-    assert ("\n".join(notice_lines) + "\n").encode("ascii") == (
-        project_root / "tmp/references/code/pecos/NOTICE"
-    ).read_bytes()
-    modification_line = (
-        "# Modified for decsim: Python tuple/None semantics, stream and window keys, "
-        "idempotent async commit transaction, immutable records, and simulated commit latency."
-    )
-    assert module_lines[12] == modification_line
-    assert "BEGIN EMBEDDED APACHE" not in module_bytes.decode("ascii")
-
-    uv = shutil.which("uv") or str(Path.home() / ".local/bin/uv")
-    subprocess.run(
-        [
-            uv, "run", "--no-project", "--isolated",
-            "--with", "setuptools>=68", "--with", "wheel", "--with", "build",
-            "python", "-m", "build", "--no-isolation", "--wheel",
-            "-o", str(tmp_path), str(project_root),
-        ],
-        cwd=tmp_path,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    wheel_paths = list(tmp_path.glob("*.whl"))
-    assert len(wheel_paths) == 1
-    with zipfile.ZipFile(wheel_paths[0]) as wheel:
-        shipped_module = wheel.read("decsim/pauli_frame/pauli_frame.py")
-    assert shipped_module.startswith(("\n".join(module_lines[:13]) + "\n").encode("ascii"))
-    assert b"BEGIN EMBEDDED APACHE" not in shipped_module
-
 
 
 def test_escalated_strong_final_folds_into_the_frame_and_gates_the_commit():

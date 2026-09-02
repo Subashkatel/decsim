@@ -76,8 +76,8 @@ class WindowSlicer:
     ) -> fault_model_contracts.WindowErrorModel:
         """One window's model; advances ownership unless owners are given.
 
-        The explicit owner and prior maps come together or not at all; the
-        exclusion ranges arrive checked by the builder that received them.
+        The exclusion ranges are checked by the builders; a caller inside
+        the machine passes checked ranges or none.
         """
         _check_maps_come_together(
             explicitly_owned_faults, explicitly_prior_faults
@@ -327,7 +327,7 @@ def _check_maps_come_together(
     has_owners = explicitly_owned_faults is not None
     has_priors = explicitly_prior_faults is not None
     if has_owners != has_priors:
-        raise ValueError(
+        raise RuntimeError(
             "explicit owner and predecessor fault maps must be supplied "
             "together"
         )

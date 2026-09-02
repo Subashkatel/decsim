@@ -186,3 +186,12 @@ def test_a_physical_to_component_map_of_the_wrong_shape_is_refused():
             [[1]],
             location="window",
         )
+
+
+def test_a_matrix_that_is_not_rank_two_is_refused():
+    with pytest.raises(
+        ValueError, match="window check must be a rank-2 matrix"
+    ):
+        fault_identity_validation.validate_placed_fault_matrices(
+            [1, 0], [[0, 1]], location="window"
+        )

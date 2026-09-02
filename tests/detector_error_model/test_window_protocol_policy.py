@@ -149,3 +149,18 @@ def test_a_closed_window_with_no_dependency_edges_is_refused_with_a_sentence():
             fault_exclusion_ranges=(),
             closed_temporal_boundary_windows=(1,),
         )
+
+
+def test_a_sandwich_plan_with_no_closed_window_is_refused():
+    with pytest.raises(ValueError, match="must be temporally closed"):
+        window_protocol_policy.validate_window_protocol(
+            SANDWICH, TAN, SANDWICH_EDGES, (), GRAPHLIKE_REQUIRED
+        )
+
+
+def test_a_seam_with_buffer_rounds_around_its_one_layer_is_refused():
+    buffered_seam = ((1, 1, 2, 3), (2, 3, 3, 4), (3, 4, 5, 5))
+    with pytest.raises(ValueError, match="one detector layer"):
+        window_protocol_policy.validate_window_protocol(
+            buffered_seam, TAN, SANDWICH_EDGES, (1,), GRAPHLIKE_REQUIRED
+        )

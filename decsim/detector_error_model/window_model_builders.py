@@ -3,8 +3,7 @@
 build_window_error_models slices a whole plan: it checks the plan against
 its protocol, checks that the commit rounds run without gap or overlap,
 compiles fault ownership from the dependency graph when the plan has one
-(ownership advances in plan order otherwise), slices every window, and
-checks that the owners of a full-operation plan partition the catalog. A
+(ownership advances in plan order otherwise), and slices every window. A
 plan may cover part of the operation; a fault outside it stays unowned.
 The two single-window builders serve the runtime paths that decode one
 window on its own with faults it may see but must not commit.
@@ -12,6 +11,7 @@ window on its own with faults it may see but must not commit.
 Nothing inside the package imports this module.
 """
 
+from collections.abc import Container
 from typing import Optional
 
 import stim
@@ -128,6 +128,8 @@ def _checked_plan(
     The exclusion ranges are checked here too, once for the whole plan.
     """
     window_placement.validate_fault_exclusion_ranges(fault_exclusion_ranges)
+    if not plan:
+        raise ValueError("a window plan must hold at least one window")
     entries = tuple(
         window_placement.parse_window_entry(window_entry)
         for window_entry in plan
@@ -157,7 +159,7 @@ def _slice_checked_plan(
     slicing cut a fault of the circuit at its edge.
     """
     ownership, prior_faults = _compiled_ownership(
-        slicer, entries, dependency_edges, round_count
+        slicer, entries, dependency_edges
     )
     models = _slice_plan(
         slicer,
@@ -170,8 +172,6 @@ def _slice_checked_plan(
     window_protocol_policy.validate_closed_temporal_boundary_windows(
         slicer, models, dependency_edges, closed_temporal_boundary_windows
     )
-    if ownership is not None and not fault_exclusion_ranges:
-        _check_full_plan_ownership(slicer, models, entries, round_count)
     return models
 
 
@@ -194,8 +194,17 @@ def _compiled_ownership(
     slicer: window_slicer.WindowSlicer,
     entries: tuple[tuple[int, int, int, int], ...],
     dependency_edges: Optional[tuple[tuple[int, int], ...]],
-    round_count: int,
-) -> tuple[Optional[tuple], Optional[tuple]]:
+) -> tuple[
+    Optional[
+        tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
+    ],
+    Optional[
+        tuple[
+            dict[fault_model_contracts.FaultRepresentation, Container[int]],
+            ...,
+        ]
+    ],
+]:
     """Owner sets and prior sets per window, or (None, None) without edges."""
     if dependency_edges is None:
         return None, None
@@ -206,7 +215,7 @@ def _compiled_ownership(
         len(entries), dependency_edges, depths
     )
     ownership = window_ownership_dag.explicit_fault_ownership(
-        slicer, entries, depths, round_count=round_count
+        slicer, entries, depths
     )
     prior_faults = window_ownership_dag.explicit_prior_faults(
         ownership, ancestors
@@ -219,8 +228,15 @@ def _slice_plan(
     entries: tuple[tuple[int, int, int, int], ...],
     round_count: int,
     fault_exclusion_ranges: tuple[tuple[int, int], ...],
-    ownership: Optional[tuple],
-    prior_faults: Optional[tuple],
+    ownership: Optional[
+        tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
+    ],
+    prior_faults: Optional[
+        tuple[
+            dict[fault_model_contracts.FaultRepresentation, Container[int]],
+            ...,
+        ]
+    ],
 ) -> list[fault_model_contracts.WindowErrorModel]:
     """Every window of the plan, in plan order."""
     models = []
@@ -241,48 +257,18 @@ def _slice_plan(
     return models
 
 
-def _entry_of(per_window: Optional[tuple], window_index: int):
+def _entry_of(
+    per_window: Optional[
+        tuple[
+            dict[fault_model_contracts.FaultRepresentation, Container[int]],
+            ...,
+        ]
+    ],
+    window_index: int,
+) -> Optional[dict[fault_model_contracts.FaultRepresentation, Container[int]]]:
     if per_window is None:
         return None
     return per_window[window_index]
-
-
-def _check_full_plan_ownership(
-    slicer: window_slicer.WindowSlicer,
-    models: list[fault_model_contracts.WindowErrorModel],
-    entries: tuple[tuple[int, int, int, int], ...],
-    round_count: int,
-) -> None:
-    """Every catalog fault of a full plan must be owned by exactly one window.
-
-    A plan that does not cover the whole operation leaves faults unowned
-    by design. Compiled ownership gives each fault one owner by
-    construction, so a fault no window placed would be a slicer bug; that
-    raises RuntimeError.
-    """
-    covers_full_operation = entries[0][1] == 1 and entries[-1][2] == round_count
-    if not covers_full_operation:
-        return
-    for representation, catalog in slicer.catalogs.items():
-        owned = _owned_fault_ids(models, representation)
-        if owned != set(range(len(catalog.detector_sets))):
-            raise RuntimeError(
-                f"{representation.value} dependency ownership does not "
-                "partition the full fault catalog"
-            )
-
-
-def _owned_fault_ids(
-    models: list[fault_model_contracts.WindowErrorModel],
-    representation: fault_model_contracts.FaultRepresentation,
-) -> set[int]:
-    """The catalog faults the models own, in one representation."""
-    owned = set()
-    for model in models:
-        faults = model.require_faults(representation)
-        pairs = zip(faults.source_fault_ids, faults.owned)
-        owned.update(fault_id for fault_id, is_owned in pairs if is_owned)
-    return owned
 
 
 def _build_single_window_error_model(

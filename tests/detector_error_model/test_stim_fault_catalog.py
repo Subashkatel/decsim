@@ -37,8 +37,8 @@ def link_rows(link, column):
     return sorted(rows)
 
 
-class TwoDisagreeingModels:
-    """A stand-in circuit whose two Stim models describe different faults."""
+class StandInCircuit:
+    """A stand-in circuit whose two Stim models are given as text."""
 
     num_observables = 0
 
@@ -168,9 +168,7 @@ def test_a_linked_physical_column_is_the_parity_of_its_graphlike_columns():
 
 
 def test_two_stim_models_that_disagree_on_a_physical_fault_are_refused():
-    circuit = TwoDisagreeingModels(
-        "error(0.1) D0 D1 ^ D1 D2\n", "error(0.1) D0 D1\n"
-    )
+    circuit = StandInCircuit("error(0.1) D0 D1 ^ D1 D2\n", "error(0.1) D0 D1\n")
     with pytest.raises(ValueError, match="disagree on physical faults"):
         stim_fault_catalog.prepare_fault_catalogs(
             circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
@@ -178,10 +176,30 @@ def test_two_stim_models_that_disagree_on_a_physical_fault_are_refused():
 
 
 def test_two_stim_models_that_disagree_on_a_prior_are_refused():
-    circuit = TwoDisagreeingModels(
-        "error(0.1) D0 D1 ^ D1 D2\n", "error(0.2) D0 D2\n"
-    )
+    circuit = StandInCircuit("error(0.1) D0 D1 ^ D1 D2\n", "error(0.2) D0 D2\n")
     with pytest.raises(ValueError, match="disagree on physical faults"):
         stim_fault_catalog.prepare_fault_catalogs(
             circuit, fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
         )
+
+
+def test_a_graphlike_catalog_refuses_a_hyperedge():
+    circuit = StandInCircuit("error(0.1) D0 D1 D2\n", "error(0.1) D0 D1 D2\n")
+    with pytest.raises(
+        ValueError, match="graphlike catalog fault 0 is a detector hyperedge"
+    ):
+        stim_fault_catalog.prepare_fault_catalogs(
+            circuit, fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
+        )
+
+
+def test_two_physical_errors_with_the_same_identity_merge_as_independent():
+    circuit = StandInCircuit("", "error(0.1) D0 D1 D2\nerror(0.2) D2 D1 D0\n")
+    catalogs, link = stim_fault_catalog.prepare_fault_catalogs(
+        circuit, fault_model_contracts.PHYSICAL_FAULT_MODEL_REQUIRED
+    )
+    physical = catalogs[PHYSICAL]
+    assert link is None
+    assert physical.detector_sets == ((0, 1, 2),)
+    assert physical.observable_sets == ((),)
+    assert physical.priors == (pytest.approx(0.26),)

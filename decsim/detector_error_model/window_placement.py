@@ -5,7 +5,7 @@ rounds. Its columns are every catalog fault that flips one of its rows
 and that no earlier window has already committed; the decoder needs the
 uncommitted faults reaching in from outside to explain what it sees. That
 is the overlapping recovery of Dennis et al. as Skoric et al. (2209.08552,
-section II) and qLDPC's SlidingWindowDecoder apply it.
+section I.B) and qLDPC's SlidingWindowDecoder apply it.
 
 A window owns, and later commits, the faults that touch its commit
 rounds; the buffer rounds after the commit rounds are decoded but not
@@ -32,6 +32,14 @@ import scipy.sparse
 
 from decsim.detector_error_model import fault_model_contracts
 
+# The check matrix, the observable matrix, the owned mask, the handoff map.
+_WindowArrays = tuple[
+    scipy.sparse.csc_matrix,
+    scipy.sparse.csc_matrix,
+    numpy.ndarray,
+    dict[int, tuple[int, ...]],
+]
+
 
 @dataclasses.dataclass(frozen=True)
 class WindowPlacementContext:
@@ -57,6 +65,10 @@ def parse_window_entry(
     A three-value entry (first commit, last commit, last buffer) has no
     buffer before its commit rounds.
     """
+    if len(window_entry) not in (3, 4):
+        raise ValueError(
+            f"a window entry has three or four bounds, got {len(window_entry)}"
+        )
     for bound in window_entry:
         if type(bound) is not int:
             raise ValueError("window bounds must be built-in ints")
@@ -107,8 +119,8 @@ def validate_fault_exclusion_ranges(
 ) -> None:
     """Refuse an exclusion range that is not an ordered pair of ints."""
     for exclusion in fault_exclusion_ranges:
+        _check_range_is_a_pair_of_ints(exclusion)
         first_excluded, last_excluded = exclusion
-        _check_endpoints_are_ints(exclusion)
         if first_excluded > last_excluded:
             raise ValueError(
                 f"fault-exclusion range {first_excluded}-{last_excluded} "
@@ -158,11 +170,15 @@ def local_link_projection(
 ) -> scipy.sparse.csc_matrix:
     """The catalog link restricted to this window's columns, checked.
 
-    Only the detector rows are checked, and a mismatch is a slicer bug. A
-    physical fault can have a component whose detectors all lie outside
-    this window while that component carries a logical flip, so the
-    observable rows of a window need not add up; each decoder commits
-    observables from its own placed view, never through this link.
+    Only the detector rows are checked. They fail to add up when an
+    earlier window committed a component while an exclusion range kept
+    its physical parent uncommitted: the parent then reaches this window
+    without the component, and no consistent link exists, so the slice is
+    refused. A physical fault can have a component whose detectors all
+    lie outside this window while that component carries a logical flip,
+    so the observable rows of a window need not add up; each decoder
+    commits observables from its own placed view, never through this
+    link.
     """
     graphlike_rows = list(graphlike.source_fault_ids)
     physical_columns = list(physical.source_fault_ids)
@@ -183,13 +199,19 @@ def local_link_projection(
     return local_link
 
 
-def _check_endpoints_are_ints(exclusion: tuple[int, int]) -> None:
+def _check_range_is_a_pair_of_ints(exclusion: tuple[object, ...]) -> None:
+    if len(exclusion) != 2:
+        _refuse_exclusion_range(exclusion)
     for endpoint in exclusion:
         if type(endpoint) is not int:
-            raise ValueError(
-                "each fault-exclusion range must use built-in integer "
-                f"(lo, hi) pair, got {exclusion!r}"
-            )
+            _refuse_exclusion_range(exclusion)
+
+
+def _refuse_exclusion_range(exclusion: tuple[object, ...]) -> None:
+    raise ValueError(
+        "each fault-exclusion range must be a pair of built-in integers, "
+        f"got {exclusion!r}"
+    )
 
 
 def _prior_faults(
@@ -252,7 +274,7 @@ def _build_window_arrays(
     committed_elsewhere: set,
     unowned_faults: set,
     explicitly_owned_faults: Optional[set],
-) -> tuple:
+) -> _WindowArrays:
     """The check and observable matrices, the owned mask, the handoff map.
 
     Entries are collected as (row, column) pairs and assembled once, the
@@ -356,7 +378,9 @@ def _touches_excluded_round(
 
 
 def _placed_model(
-    catalog: fault_model_contracts.FaultCatalog, columns: list, arrays: tuple
+    catalog: fault_model_contracts.FaultCatalog,
+    columns: list,
+    arrays: _WindowArrays,
 ) -> fault_model_contracts.PlacedFaultModel:
     check, observables, owned, boundary_flips = arrays
     column_priors = [catalog.priors[fault_index] for fault_index in columns]

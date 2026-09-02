@@ -1,13 +1,16 @@
 """A window slice keeps the faults its rows can see and owns its commit rounds.
 
-Sources: Skoric et al. 2209.08552, section II (a window is a commit
+Sources: Skoric et al. 2209.08552, section I.B (a window is a commit
 region followed by a buffer region; only the commit region's corrections
 are final, and a chain cut at the boundary leaves an artificial defect
 for the next window) and Tan et al. 2209.09219 (a committed fault's flips
 are handed to the neighbouring window in either direction). The window
 rule itself is compared against qLDPC's SlidingWindowDecoder in
-test_window_model_builders; here every expected value is written out for
-the distance-3 rotated surface code.
+test_window_model_builders. Here the values are those of the distance-3
+rotated surface code: the helpers detectors_in_rounds, faults_touching,
+expected_check, expected_observables, expected_priors and
+expected_ownership restate the rule under test from the catalog, and
+every test that uses one also pins literal values beside it.
 """
 
 import pytest
@@ -96,11 +99,11 @@ def columns_reaching_outside(model):
     """How many owned columns flip a detector beyond the window's rows."""
     faults = model.require_faults(GRAPHLIKE)
     rows = set(model.detector_ids)
-    count = 0
+    reaching_count = 0
     for flips in faults.boundary_flips.values():
         if set(flips) - rows:
-            count += 1
-    return count
+            reaching_count += 1
+    return reaching_count
 
 
 def expected_check(catalog, model):
@@ -121,6 +124,14 @@ def expected_check(catalog, model):
         for row in local_rows:
             dense[row][column] = 1
     return dense
+
+
+def expected_priors(catalog, faults):
+    """The catalog prior of every column, in column order."""
+    priors = []
+    for fault_index in faults.source_fault_ids:
+        priors.append(catalog.priors[fault_index])
+    return priors
 
 
 def expected_observables(catalog, faults):
@@ -171,12 +182,13 @@ def test_the_window_matrices_agree_with_the_catalog_fault_by_fault():
     dense_check = faults.check.toarray()
     dense_observables = faults.observables.toarray()
     assert dense_check.tolist() == expected_check(catalog, model)
-    assert faults.priors.tolist() == [
-        catalog.priors[fault_index] for fault_index in faults.source_fault_ids
-    ]
+    assert faults.priors.tolist() == expected_priors(catalog, faults)
     assert dense_observables.tolist() == expected_observables(catalog, faults)
     assert catalog.detector_sets[0] == (0,)
     assert column_rows(faults.check, 0) == [0]
+    assert faults.priors[0] == pytest.approx(0.000533333333333148)
+    assert faults.source_fault_ids[79] == 86
+    assert faults.priors[79] == pytest.approx(0.001598471433531981)
     assert catalog.observable_sets[7] == (0,)
     assert dense_observables[0][7] == 1
     assert dense_observables[0][0] == 0
@@ -225,13 +237,17 @@ def test_the_last_window_owns_everything_it_sees():
 def test_every_fault_is_owned_by_exactly_one_window_of_a_sliding_plan():
     slicer = surface_code_slicer(6)
     catalog = slicer.catalogs[GRAPHLIKE]
-    models = [
-        slicer.slice_window(1, 1, 2, 3, is_last=False),
-        slicer.slice_window(3, 3, 4, 5, is_last=False),
-        slicer.slice_window(5, 5, 6, 6, is_last=True),
-    ]
-    owned_by_window = [owned_faults(model) for model in models]
-    all_owned = sorted(sum(owned_by_window, []))
+    first = slicer.slice_window(1, 1, 2, 3, is_last=False)
+    second = slicer.slice_window(3, 3, 4, 5, is_last=False)
+    last = slicer.slice_window(5, 5, 6, 6, is_last=True)
+    first_owns = owned_faults(first)
+    second_owns = owned_faults(second)
+    last_owns = owned_faults(last)
+    owned_together = first_owns + second_owns + last_owns
+    all_owned = sorted(owned_together)
+    assert len(first_owns) == 48
+    assert len(second_owns) == 64
+    assert len(last_owns) == 62
     assert len(catalog.detector_sets) == 174
     assert all_owned == list(range(174))
 
@@ -334,7 +350,7 @@ def test_a_window_has_no_coordinates_when_a_detector_has_none():
 
 def test_explicit_owner_and_prior_maps_must_come_together():
     slicer = surface_code_slicer(4)
-    with pytest.raises(ValueError, match="supplied together"):
+    with pytest.raises(RuntimeError, match="supplied together"):
         slicer.slice_window(
             1,
             1,

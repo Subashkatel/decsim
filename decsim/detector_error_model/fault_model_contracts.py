@@ -24,8 +24,10 @@ from_check_matrix read: one column per fault, a scipy csc_matrix of uint8,
 stored entries only. A window at d=7 over 1000 rounds is 48k rows by 1.5M
 columns with 3M ones; storing its zeros would not fit.
 
-This module imports nothing from the package and no numeric library at
-module scope, so a decoder that only reads the contract pays for neither.
+The module itself binds no numeric library: numpy and scipy are imported
+inside the two functions that need them, so loading this file on its own
+loads neither. Importing it through the package still runs
+decsim/__init__, which imports numpy.
 """
 
 import dataclasses
@@ -41,9 +43,11 @@ class FaultRepresentation(enum.Enum):
     PHYSICAL = "physical"
 
 
-_GRAPHLIKE_ONLY = frozenset({FaultRepresentation.GRAPHLIKE})
-_PHYSICAL_ONLY = frozenset({FaultRepresentation.PHYSICAL})
-_BOTH_REPRESENTATIONS = _GRAPHLIKE_ONLY | _PHYSICAL_ONLY
+# Public because a requirement and the protocol policy compare against
+# the same sets: window_protocol_policy holds a Tan plan to GRAPHLIKE_ONLY.
+GRAPHLIKE_ONLY = frozenset({FaultRepresentation.GRAPHLIKE})
+PHYSICAL_ONLY = frozenset({FaultRepresentation.PHYSICAL})
+BOTH_REPRESENTATIONS = GRAPHLIKE_ONLY | PHYSICAL_ONLY
 
 
 @dataclasses.dataclass(frozen=True)
@@ -54,7 +58,7 @@ class DecoderFaultModelRequirement:
     require_physical_to_graphlike_link: bool = False
 
     def __post_init__(self) -> None:
-        has_both = self.representations == _BOTH_REPRESENTATIONS
+        has_both = self.representations == BOTH_REPRESENTATIONS
         if self.require_physical_to_graphlike_link and not has_both:
             raise ValueError(
                 "a physical-to-graphlike link requires both fault "
@@ -74,10 +78,10 @@ class DecoderFaultModelRequirement:
 
 
 NO_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement()
-GRAPHLIKE_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(_GRAPHLIKE_ONLY)
-PHYSICAL_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(_PHYSICAL_ONLY)
+GRAPHLIKE_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(GRAPHLIKE_ONLY)
+PHYSICAL_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(PHYSICAL_ONLY)
 LINKED_FAULT_MODELS_REQUIRED = DecoderFaultModelRequirement(
-    _BOTH_REPRESENTATIONS, require_physical_to_graphlike_link=True
+    BOTH_REPRESENTATIONS, require_physical_to_graphlike_link=True
 )
 
 
@@ -160,7 +164,7 @@ class FaultCatalog:
 
 @dataclasses.dataclass(frozen=True)
 class WindowErrorModel:
-    """One window's detector rows, fault columns and handoff data.
+    """What a decoder is handed for one window.
 
     `detector_ids` lists the window's rows in row order.
     `detector_coordinates` holds Stim's coordinates for those rows, or None
@@ -195,7 +199,7 @@ class WindowErrorModel:
         elif representation is FaultRepresentation.PHYSICAL:
             faults = self.physical_faults
         else:
-            raise TypeError(
+            raise ValueError(
                 "representation must be a FaultRepresentation value"
             )
         if faults is None:
@@ -205,7 +209,7 @@ class WindowErrorModel:
         return faults
 
 
-def _frozen_array(value):
+def _frozen_array(value: object) -> object:
     """A read-only copy of `value`, so no decoder edits a shared window."""
     # Imported here so that reading the contract never loads numpy.
     import numpy

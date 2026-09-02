@@ -32,14 +32,6 @@ import scipy.sparse
 
 from decsim.detector_error_model import fault_model_contracts
 
-# The check matrix, the observable matrix, the owned mask, the handoff map.
-_WindowArrays = tuple[
-    scipy.sparse.csc_matrix,
-    scipy.sparse.csc_matrix,
-    numpy.ndarray,
-    dict[int, tuple[int, ...]],
-]
-
 
 @dataclasses.dataclass(frozen=True)
 class WindowPlacementContext:
@@ -115,9 +107,18 @@ def detectors_in_window(
 
 
 def validate_fault_exclusion_ranges(
-    fault_exclusion_ranges: tuple[tuple[int, int], ...],
+    fault_exclusion_ranges: tuple[tuple[int, int], ...], round_count: int
 ) -> None:
-    """Refuse an exclusion range that is not an ordered pair of ints."""
+    """Refuse a range that is not an ordered pair of ints inside the operation.
+
+    A round outside 1..round_count holds no detector, so a range reaching
+    there is a caller's mistake rather than an empty exclusion.
+    """
+    if not isinstance(fault_exclusion_ranges, tuple):
+        raise ValueError(
+            "fault_exclusion_ranges must be a tuple of ranges, got "
+            f"{fault_exclusion_ranges!r}"
+        )
     for exclusion in fault_exclusion_ranges:
         _check_range_is_a_pair_of_ints(exclusion)
         first_excluded, last_excluded = exclusion
@@ -125,6 +126,11 @@ def validate_fault_exclusion_ranges(
             raise ValueError(
                 f"fault-exclusion range {first_excluded}-{last_excluded} "
                 f"is inverted"
+            )
+        if first_excluded < 1 or last_excluded > round_count:
+            raise ValueError(
+                f"fault-exclusion range {first_excluded}-{last_excluded} "
+                f"lies outside rounds 1..{round_count}"
             )
 
 
@@ -174,11 +180,14 @@ def local_link_projection(
     earlier window committed a component while an exclusion range kept
     its physical parent uncommitted: the parent then reaches this window
     without the component, and no consistent link exists, so the slice is
-    refused. A physical fault can have a component whose detectors all
-    lie outside this window while that component carries a logical flip,
-    so the observable rows of a window need not add up; each decoder
-    commits observables from its own placed view, never through this
-    link.
+    refused. That is the contract between the slicer's per-representation
+    ownership and this projection; the builders refuse the input that
+    reaches it, a linked requirement with an exclusion range on a plan of
+    more than one window. A physical fault can have a component whose
+    detectors all lie outside this window while that component carries a
+    logical flip, so the observable rows of a window need not add up;
+    each decoder commits observables from its own placed view, never
+    through this link.
     """
     graphlike_rows = list(graphlike.source_fault_ids)
     physical_columns = list(physical.source_fault_ids)
@@ -199,7 +208,18 @@ def local_link_projection(
     return local_link
 
 
-def _check_range_is_a_pair_of_ints(exclusion: tuple[object, ...]) -> None:
+# The check matrix, the observable matrix, the owned mask, the handoff map.
+_WindowArrays = tuple[
+    scipy.sparse.csc_matrix,
+    scipy.sparse.csc_matrix,
+    numpy.ndarray,
+    dict[int, tuple[int, ...]],
+]
+
+
+def _check_range_is_a_pair_of_ints(exclusion: object) -> None:
+    if not isinstance(exclusion, tuple):
+        _refuse_exclusion_range(exclusion)
     if len(exclusion) != 2:
         _refuse_exclusion_range(exclusion)
     for endpoint in exclusion:
@@ -207,7 +227,7 @@ def _check_range_is_a_pair_of_ints(exclusion: tuple[object, ...]) -> None:
             _refuse_exclusion_range(exclusion)
 
 
-def _refuse_exclusion_range(exclusion: tuple[object, ...]) -> None:
+def _refuse_exclusion_range(exclusion: object) -> None:
     raise ValueError(
         "each fault-exclusion range must be a pair of built-in integers, "
         f"got {exclusion!r}"

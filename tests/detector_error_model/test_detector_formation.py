@@ -214,20 +214,52 @@ def test_a_declared_detector_round_may_not_precede_its_bits():
         )
 
 
-def test_a_declared_detector_round_outside_the_operation_is_refused():
+def test_a_declared_detector_round_just_past_the_last_round_is_refused():
     circuit = surface_code_circuit(4)
     in_time = detector_chronology.resolve_detector_rounds(circuit, None, 4)
     # Stim's last coordinate puts detectors 20..31 in round 4; declared
-    # in round 7 they would never be formed.
+    # in round 5 they would never be formed.
     assert in_time[20] == 4
     assert in_time[31] == 4
-    readout_past_the_end = dict.fromkeys(range(20, 32), 7)
+    readout_past_the_end = dict.fromkeys(range(20, 32), 5)
     past_the_end = dict(in_time)
     past_the_end.update(readout_past_the_end)
     with pytest.raises(ValueError, match="inside the emitted rounds"):
         detector_formation.build_formation_table(
             circuit, 4, detector_rounds=past_the_end
         )
+
+
+def test_a_declared_detector_round_of_zero_is_refused():
+    circuit = surface_code_circuit(4)
+    in_time = detector_chronology.resolve_detector_rounds(circuit, None, 4)
+    readout_before_the_start = dict.fromkeys(range(20, 32), 0)
+    before_the_start = dict(in_time)
+    before_the_start.update(readout_before_the_start)
+    with pytest.raises(ValueError, match="inside the emitted rounds"):
+        detector_formation.build_formation_table(
+            circuit, 4, detector_rounds=before_the_start
+        )
+
+
+def test_a_declared_detector_round_on_the_last_round_is_accepted():
+    circuit = surface_code_circuit(4)
+    in_time = detector_chronology.resolve_detector_rounds(circuit, None, 4)
+    # Detectors 12..19 arrive in round 3; declared in round 4, the last
+    # round, they are formed with the readout.
+    assert in_time[12] == 3
+    assert in_time[19] == 3
+    on_the_last_round = dict.fromkeys(range(12, 20), 4)
+    delayed = dict(in_time)
+    delayed.update(on_the_last_round)
+    table = detector_formation.build_formation_table(
+        circuit, 4, detector_rounds=delayed
+    )
+    third_round = table.detectors_of_round(3)
+    last_round = table.detectors_of_round(4)
+    assert table.detectors[12].round_index == 4
+    assert third_round == []
+    assert len(last_round) == 20
 
 
 def test_an_observables_reference_parity_is_the_noiseless_reading_of_its_bits():

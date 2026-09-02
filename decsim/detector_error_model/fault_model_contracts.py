@@ -37,17 +37,15 @@ from typing import Optional
 
 
 class FaultRepresentation(enum.Enum):
-    """The fault domain a decoder consumes and returns columns in."""
+    """The fault domain a decoder works in, for columns read or returned."""
 
     GRAPHLIKE = "graphlike"
     PHYSICAL = "physical"
 
 
 # Public because a requirement and the protocol policy compare against
-# the same sets: window_protocol_policy holds a Tan plan to GRAPHLIKE_ONLY.
+# the same set: window_protocol_policy holds a Tan plan to GRAPHLIKE_ONLY.
 GRAPHLIKE_ONLY = frozenset({FaultRepresentation.GRAPHLIKE})
-PHYSICAL_ONLY = frozenset({FaultRepresentation.PHYSICAL})
-BOTH_REPRESENTATIONS = GRAPHLIKE_ONLY | PHYSICAL_ONLY
 
 
 @dataclasses.dataclass(frozen=True)
@@ -58,7 +56,7 @@ class DecoderFaultModelRequirement:
     require_physical_to_graphlike_link: bool = False
 
     def __post_init__(self) -> None:
-        has_both = self.representations == BOTH_REPRESENTATIONS
+        has_both = self.representations == _BOTH_REPRESENTATIONS
         if self.require_physical_to_graphlike_link and not has_both:
             raise ValueError(
                 "a physical-to-graphlike link requires both fault "
@@ -75,14 +73,6 @@ class DecoderFaultModelRequirement:
             or other.require_physical_to_graphlike_link
         )
         return DecoderFaultModelRequirement(representations, needs_link)
-
-
-NO_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement()
-GRAPHLIKE_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(GRAPHLIKE_ONLY)
-PHYSICAL_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(PHYSICAL_ONLY)
-LINKED_FAULT_MODELS_REQUIRED = DecoderFaultModelRequirement(
-    BOTH_REPRESENTATIONS, require_physical_to_graphlike_link=True
-)
 
 
 def frozen_sparse_columns(value: object) -> object:
@@ -193,13 +183,17 @@ class WindowErrorModel:
     def require_faults(
         self, representation: FaultRepresentation
     ) -> PlacedFaultModel:
-        """The requested view, or a refusal when the window lacks it."""
+        """The requested view, or a refusal when the window lacks it.
+
+        Only the window decoders inside the machine call this, so a
+        non-member representation is a wrong caller.
+        """
         if representation is FaultRepresentation.GRAPHLIKE:
             faults = self.graphlike_faults
         elif representation is FaultRepresentation.PHYSICAL:
             faults = self.physical_faults
         else:
-            raise ValueError(
+            raise RuntimeError(
                 "representation must be a FaultRepresentation value"
             )
         if faults is None:
@@ -207,6 +201,18 @@ class WindowErrorModel:
                 f"window model does not contain {representation.value} faults"
             )
         return faults
+
+
+_PHYSICAL_ONLY = frozenset({FaultRepresentation.PHYSICAL})
+_BOTH_REPRESENTATIONS = GRAPHLIKE_ONLY | _PHYSICAL_ONLY
+
+# The named requirements follow the sets they are built from.
+NO_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement()
+GRAPHLIKE_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(GRAPHLIKE_ONLY)
+PHYSICAL_FAULT_MODEL_REQUIRED = DecoderFaultModelRequirement(_PHYSICAL_ONLY)
+LINKED_FAULT_MODELS_REQUIRED = DecoderFaultModelRequirement(
+    _BOTH_REPRESENTATIONS, require_physical_to_graphlike_link=True
+)
 
 
 def _frozen_array(value: object) -> object:

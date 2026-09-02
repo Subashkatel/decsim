@@ -148,8 +148,10 @@ def test_decode_jobs_are_priced_for_the_rounds_they_read(fabric):
     context clipped at round 1 reads 6 rounds, not commit + 2 buffer = 9,
     and the last lookahead window of a 9-round operation reads 3 rounds,
     not 6. Decoder work scales with the rounds actually fed (Skoric et al.
-    2209.08552, tau_W over n_W; SWIPER's window builder emits a shorter
-    tail window, swiper/window_builder.py)."""
+    2209.08552, tau_W over n_W); a final window may be smaller than a
+    regular one with the whole window as core (Tan et al. 2209.09219); no
+    window implementation feeds rounds beyond the data (Gong et al.
+    sliding-window decoder, cudaq-qec sliding_window)."""
     from decsim.message import DecoderTier
     from decsim.observe.run_views import switching_records_view
     completed = fabric["switching_run"](

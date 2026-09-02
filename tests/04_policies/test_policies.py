@@ -308,9 +308,10 @@ def test_separate_decode_jobs_submits_only_complete_idle_regions():
 def test_separate_decode_jobs_charges_the_trailing_idle_region_when_the_patch_is_claimed():
     """Idle rounds left over after the last complete commit region are
     still decoded: when an operation claims the patch, the remainder costs
-    one load-only job sized to those rounds plus the buffer. SWIPER's
-    window builder flushes dangling rounds into a shorter window rather
-    than dropping them (swiper/window_builder.py, flush)."""
+    one load-only job sized to those rounds plus the buffer. A final window
+    may be smaller than a regular one (Tan et al. 2209.09219, Skoric et al.
+    2209.08552), and no validated system leaves the end of a stream
+    undecoded (Google's streaming decoder, LILLIPUT's per-cycle decode)."""
     controller, _, _, window_manager = make_controller(SeparateDecodeJobs())
     operation = controller.runtime.operations[7]
 

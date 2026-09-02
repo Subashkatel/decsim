@@ -30,3 +30,36 @@ include = ["decsim*"]
 # test suites must not be collected by our `python -m pytest -q` entry point.
 [tool.pytest.ini_options]
 testpaths = ["tests", "experiments/tests"]
+
+# The rewrite's style gate (REWRITE.md rule 7): Google Python style, 80
+# columns, Google docstrings. The one-action rule is checked separately by
+# tools/check_one_action.py.
+[tool.ruff]
+line-length = 80
+target-version = "py39"
+extend-exclude = [".pydeps", ".venv", "tmp", "archive", "decsim/qpu/stimcircuits/surface_code.py"]
+
+[tool.ruff.lint]
+# SIM is off on purpose: it asks for inline conditionals and merged
+# conditions, the opposite of REWRITE.md rule 1.
+select = ["E", "W", "F", "N", "D", "B", "I", "UP", "ARG"]
+ignore = [
+  "D105",  # magic methods need no docstring
+  "D107",  # __init__ is described by the class docstring
+  "D203",  # no blank line before a class docstring
+  "D213",  # summary on the first line
+  "UP007", # Optional[X] stays readable and runs on 3.9
+  "UP045", # same
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = ["decsim", "experiments"]
+
+[tool.ruff.lint.per-file-ignores]
+# A test module keeps its docstring (it names the source it checks
+# against); test functions and helper classes need none.
+"tests/**" = ["D101", "D102", "D103", "D104"]
+"experiments/tests/**" = ["D101", "D102", "D103", "D104"]

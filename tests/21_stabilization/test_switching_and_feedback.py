@@ -8,7 +8,7 @@ deterministic; all times are exact arithmetic over the declared ticks.
 
 import pytest
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.decoders.strong_escalation import (HeldStrongCompletion,
                                                StrongRequestLedger)
 from decsim.message import (DecodeJob, DecodeResult, DecoderRequestKey,
@@ -41,12 +41,12 @@ def test_serial_escalation_timeline_is_exact(fabric):
     completed = fabric["switching_run"](escalation_probability=1.0, rounds=9,
                                         io_trace=True)
     lines = completed.engine.log_lines
-    assert fabric["log_tick"](lines, "START DECODE strong(mem1 W0)") == us(36)
+    assert fabric["log_tick"](lines, "START DECODE strong(mem1 W0)") == microseconds_to_ticks(36)
     records = completed.pauli_frame.snapshot().records
     first = next(r for r in records if r.window_key == (1, 0))
-    assert first.accepted_ticks == us(70)      # 66 + do 4
-    assert first.committed_ticks == us(71)     # + frame write 1
-    assert fabric["log_tick"](lines, "START DECODE mem1 W1") == us(71.5)
+    assert first.accepted_ticks == microseconds_to_ticks(70)      # 66 + do 4
+    assert first.committed_ticks == microseconds_to_ticks(71)     # + frame write 1
+    assert fabric["log_tick"](lines, "START DECODE mem1 W1") == microseconds_to_ticks(71.5)
 
 
 def test_provisional_weak_result_never_reaches_the_frame(fabric):
@@ -202,7 +202,7 @@ def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
         unit_pools={"default": 4, "strong": 1},
         links=fabric["declared_profile"](cwb=True, csb=True),
         timing=fabric["declared_timing"](),
-        pauli_frame=PauliFrameConfig(commit_us=declared["frame"]),
+        pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]),
         seed=0).build()
     log_lines = completed.engine.log_lines
     assert any("strong-batch x2" in line for line in log_lines)
@@ -305,8 +305,8 @@ def test_release_travels_oc_then_cq_with_exact_cost(fabric):
     blocker_commit = next(r.committed_ticks for r in frame_records
                           if r.window_key == (1, 0))
 
-    assert runtime.decode_release_time[2] == blocker_commit + us(2)
-    assert runtime.op_start_time[2] == blocker_commit + us(2 + 2)
+    assert runtime.decode_release_time[2] == blocker_commit + microseconds_to_ticks(2)
+    assert runtime.op_start_time[2] == blocker_commit + microseconds_to_ticks(2 + 2)
 
 
 def test_successor_cannot_start_before_its_release(fabric):

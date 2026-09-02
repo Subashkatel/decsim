@@ -17,8 +17,8 @@ import dataclasses
 import math
 from typing import Any, Callable, Optional
 
-from decsim.config import us
-from decsim.message import stable_identity_order_key
+import decsim.config as config
+import decsim.message as message
 
 ObservableBits = tuple[int, ...]
 
@@ -33,29 +33,34 @@ class PauliFrameConfig:
     charged in parallel, never queued behind each other.
     """
 
-    commit_us: float
+    commit_microseconds: float
     zero_commit_cost_justification: Optional[str] = None
 
     def __post_init__(self) -> None:
-        cost_is_a_number = math.isfinite(self.commit_us)
-        if not cost_is_a_number or self.commit_us < 0:
+        cost = self.commit_microseconds
+        if not math.isfinite(cost) or cost < 0:
             raise ValueError(
-                "commit_us must be a finite number that is not negative")
-        rounds_to_nothing = self.commit_us > 0 and us(self.commit_us) == 0
-        if rounds_to_nothing:
-            raise ValueError("commit_us is positive but rounds to zero ticks")
-        is_free = self.commit_us == 0
+                "commit_microseconds must be finite and not negative"
+            )
+        ticks = config.microseconds_to_ticks(cost)
+        if cost > 0 and ticks == 0:
+            raise ValueError(
+                "commit_microseconds is positive but rounds to zero ticks"
+            )
+        is_free = cost == 0
         has_justification = bool(self.zero_commit_cost_justification)
         if is_free and not has_justification:
             raise ValueError(
-                "a zero commit_us needs zero_commit_cost_justification")
+                "a free write needs zero_commit_cost_justification"
+            )
         if not is_free and has_justification:
             raise ValueError(
-                "zero_commit_cost_justification needs a zero commit_us")
+                "zero_commit_cost_justification needs a free write"
+            )
 
     def commit_ticks(self) -> int:
         """The write cost in ticks."""
-        return us(self.commit_us)
+        return config.microseconds_to_ticks(self.commit_microseconds)
 
     def resolve(self, engine) -> "PauliFrame":
         """Build the frame these settings describe, on the run's engine."""
@@ -89,14 +94,6 @@ class PauliFrameSnapshot:
     records: tuple
 
 
-@dataclasses.dataclass(frozen=True)
-class _PendingWrite:
-    """A correction whose write cost is still being charged."""
-
-    record: PauliFrameCommitRecord
-    on_committed: Callable[[], None]
-
-
 class PauliFrame:
     """Keeps every committed correction and charges each write once."""
 
@@ -106,43 +103,38 @@ class PauliFrame:
         self._records: list[PauliFrameCommitRecord] = []
         self._pending_by_window: dict[tuple, _PendingWrite] = {}
         self._committed_by_window: dict[tuple, PauliFrameCommitRecord] = {}
+        # A stream id is whatever the front end chose; the frame never
+        # looks inside it.
         self._windows_by_stream: dict[Any, list[tuple]] = {}
 
-    def commit_correction(self, *, window_key, logical_observables,
-                          request_key, on_committed) -> None:
+    def commit_correction(
+        self, *, window_key, logical_observables, request_key, on_committed
+    ) -> None:
         """Accept a window's correction, charge the write, then call back."""
         if self._has_accepted(window_key):
             earlier_tier = self._tier_of(window_key)
             raise RuntimeError(
                 f"window {window_key} already has a {earlier_tier} "
                 f"correction; the {request_key.tier.value} correction "
-                f"(request {request_key.run_sequence}) is a second write")
-
+                f"(request {request_key.run_sequence}) is a second write"
+            )
         observables = _as_observable_bits(logical_observables)
-        self.engine.log_io(
-            "PauliFrame",
-            lambda: f"received {request_key.tier.value} correction for "
-                    f"window {window_key}; logical observables {observables}")
+        tier = request_key.tier.value
+        self._log_received(tier, window_key, observables)
+        accepted_ticks = self.engine.now
+        committed_ticks = accepted_ticks + self.commit_ticks
         record = PauliFrameCommitRecord(
             window_key=window_key,
-            tier=request_key.tier.value,
+            tier=tier,
             run_sequence=request_key.run_sequence,
-            accepted_ticks=self.engine.now,
-            committed_ticks=self.engine.now + self.commit_ticks,
+            accepted_ticks=accepted_ticks,
+            committed_ticks=committed_ticks,
             logical_observables=observables,
         )
         self._records.append(record)
         pending = _PendingWrite(record, on_committed)
         self._pending_by_window[window_key] = pending
-
-        if self.commit_ticks == 0:
-            self._finish_write(window_key)
-            return
-        self.engine.schedule(
-            self.commit_ticks,
-            lambda: self._finish_write(window_key),
-            label=f"pauli frame commit {window_key}",
-        )
+        self._charge_write(window_key)
 
     def frame_for_stream(self, stream_id) -> Optional[ObservableBits]:
         """The XOR of every committed correction on one stream.
@@ -156,9 +148,11 @@ class PauliFrame:
         if not records:
             return ()
         observables_per_record = [
-            record.logical_observables for record in records]
+            record.logical_observables for record in records
+        ]
         has_unknown = any(
-            observables is None for observables in observables_per_record)
+            observables is None for observables in observables_per_record
+        )
         if has_unknown:
             return None
         return _fold_by_xor(observables_per_record, stream_id)
@@ -166,10 +160,12 @@ class PauliFrame:
     def snapshot(self) -> PauliFrameSnapshot:
         """A frozen copy of what the frame holds now."""
         stream_ids = sorted(
-            self._windows_by_stream, key=stable_identity_order_key)
-        frames = tuple(
-            (stream_id, self.frame_for_stream(stream_id))
-            for stream_id in stream_ids)
+            self._windows_by_stream, key=message.stable_identity_order_key
+        )
+        frames = []
+        for stream_id in stream_ids:
+            frame = self.frame_for_stream(stream_id)
+            frames.append((stream_id, frame))
         commit_ticks = [record.committed_ticks for record in self._records]
         commit_count = len(self._records)
         first_commit_ticks = None
@@ -177,15 +173,35 @@ class PauliFrame:
         if commit_ticks:
             first_commit_ticks = commit_ticks[0]
             last_commit_ticks = commit_ticks[-1]
+        charged_ticks = commit_count * self.commit_ticks
         return PauliFrameSnapshot(
             configured_commit_ticks=self.commit_ticks,
             commit_count=commit_count,
             pending_write_count=len(self._pending_by_window),
-            charged_ticks=commit_count * self.commit_ticks,
+            charged_ticks=charged_ticks,
             first_commit_ticks=first_commit_ticks,
             last_commit_ticks=last_commit_ticks,
-            frames=frames,
+            frames=tuple(frames),
             records=tuple(self._records),
+        )
+
+    def _log_received(self, tier, window_key, observables) -> None:
+        self.engine.log_io(
+            "PauliFrame",
+            lambda: (
+                f"received {tier} correction for window {window_key}; "
+                f"logical observables {observables}"
+            ),
+        )
+
+    def _charge_write(self, window_key) -> None:
+        if self.commit_ticks == 0:
+            self._finish_write(window_key)
+            return
+        self.engine.schedule(
+            self.commit_ticks,
+            lambda: self._finish_write(window_key),
+            label=f"pauli frame commit {window_key}",
         )
 
     def _has_accepted(self, window_key) -> bool:
@@ -197,21 +213,34 @@ class PauliFrame:
         pending = self._pending_by_window.get(window_key)
         if pending is not None:
             return pending.record.tier
-        return self._committed_by_window[window_key].tier
+        record = self._committed_by_window[window_key]
+        return record.tier
 
     def _finish_write(self, window_key) -> None:
         pending = self._pending_by_window.pop(window_key)
         record = pending.record
         self._committed_by_window[window_key] = record
+        # A window key starts with the stream it belongs to.
         stream_id = window_key[0]
         windows_on_stream = self._windows_by_stream.setdefault(stream_id, [])
         windows_on_stream.append(window_key)
+        held = len(self._committed_by_window)
         self.engine.log_io(
             "PauliFrame",
-            lambda: f"committed window {window_key}; logical observables "
-                    f"{record.logical_observables}; holds "
-                    f"{len(self._committed_by_window)} window corrections")
+            lambda: (
+                f"committed window {window_key}; logical observables "
+                f"{record.logical_observables}; holds {held} window corrections"
+            ),
+        )
         pending.on_committed()
+
+
+@dataclasses.dataclass(frozen=True)
+class _PendingWrite:
+    """A correction whose write cost is still being charged."""
+
+    record: PauliFrameCommitRecord
+    on_committed: Callable[[], None]
 
 
 def _as_observable_bits(logical_observables) -> Optional[ObservableBits]:
@@ -220,8 +249,9 @@ def _as_observable_bits(logical_observables) -> Optional[ObservableBits]:
     return tuple(logical_observables)
 
 
-def _fold_by_xor(observables_per_record: list[ObservableBits],
-                 stream_id) -> ObservableBits:
+def _fold_by_xor(
+    observables_per_record: list[ObservableBits], stream_id
+) -> ObservableBits:
     """XOR corrections bit by bit; every correction must have the same width."""
     width = len(observables_per_record[0])
     folded = [0] * width
@@ -229,7 +259,8 @@ def _fold_by_xor(observables_per_record: list[ObservableBits],
         if len(observables) != width:
             raise RuntimeError(
                 f"Pauli frame stream {stream_id!r} changed its number of "
-                f"observables mid-run")
+                f"observables mid-run"
+            )
         for index, bit in enumerate(observables):
             folded[index] ^= bit
     return tuple(folded)

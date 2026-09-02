@@ -7,7 +7,7 @@ adds its declared cost, so each assertion is exact arithmetic.
 
 import pytest
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.links.links import TrafficAttribution
@@ -21,23 +21,23 @@ def test_weak_only_pipeline_arithmetic(fabric):
     completed = fabric["weak_only_run"](rounds=6)
     window = completed.window_manager.windows[(1, 0)]
 
-    assert window.t_first_round == us(1 + 2 + 3 + 4)          # round 1 published
-    assert window.t_data_complete == us(6 + 2 + 3 + 4)        # round 6 published
+    assert window.t_first_round == microseconds_to_ticks(1 + 2 + 3 + 4)          # round 1 published
+    assert window.t_data_complete == microseconds_to_ticks(6 + 2 + 3 + 4)        # round 6 published
     assert window.t_queued == window.t_data_complete
     assert window.t_dispatch == window.t_data_complete
-    assert window.t_done == window.t_data_complete + us(5 + 10)
+    assert window.t_done == window.t_data_complete + microseconds_to_ticks(5 + 10)
     (record,) = completed.pauli_frame.snapshot().records
     assert record.tier == "weak"
-    assert record.accepted_ticks == window.t_done + us(2)     # wdo
-    assert record.committed_ticks == record.accepted_ticks + us(1)  # frame write
+    assert record.accepted_ticks == window.t_done + microseconds_to_ticks(2)     # wdo
+    assert record.committed_ticks == record.accepted_ticks + microseconds_to_ticks(1)  # frame write
 
 
 def test_unpriced_cwb_publishes_at_packing(fabric):
     """Without the CWB edge the round is public at packing completion."""
     completed = fabric["weak_only_run"](rounds=6, cwb=False)
     window = completed.window_manager.windows[(1, 0)]
-    assert window.t_first_round == us(1 + 2 + 3)
-    assert window.t_data_complete == us(6 + 2 + 3)
+    assert window.t_first_round == microseconds_to_ticks(1 + 2 + 3)
+    assert window.t_data_complete == microseconds_to_ticks(6 + 2 + 3)
 
 
 def test_notification_without_publication_refuses(fabric):
@@ -69,7 +69,7 @@ def test_weak_primary_readiness_is_buffer0_not_sb1(fabric):
                                         rounds=9, io_trace=True)
     first_window = completed.window_manager.windows[(1, 0)]
     # window (1,0) reads rounds 1..6: complete at 6 + qc 2 + binary 3 + cwb 4
-    assert first_window.t_data_complete == us(6 + 2 + 3 + 4)
+    assert first_window.t_data_complete == microseconds_to_ticks(6 + 2 + 3 + 4)
     buffer0_complete = fabric["log_index"](
         completed.engine.log_lines, "round 6 of mem1 arrived")
     sb1_landing = fabric["log_index"](
@@ -82,14 +82,14 @@ def test_strong_primary_readiness_is_sb1(fabric):
     ready at r + qc 2 + binary 3 + csb 7."""
     completed = fabric["strong_only_run"](rounds=6)
     window = completed.window_manager.windows[(1, 0)]
-    assert window.t_first_round == us(1 + 2 + 3 + 7)
-    assert window.t_data_complete == us(6 + 2 + 3 + 7)
+    assert window.t_first_round == microseconds_to_ticks(1 + 2 + 3 + 7)
+    assert window.t_data_complete == microseconds_to_ticks(6 + 2 + 3 + 7)
     # sbd 6 then the strong decode 30
-    assert window.t_done == window.t_data_complete + us(6 + 30)
+    assert window.t_done == window.t_data_complete + microseconds_to_ticks(6 + 30)
     (record,) = completed.pauli_frame.snapshot().records
     assert record.tier == "strong"
-    assert record.accepted_ticks == window.t_done + us(4)     # do
-    assert record.committed_ticks == record.accepted_ticks + us(1)
+    assert record.accepted_ticks == window.t_done + microseconds_to_ticks(4)     # do
+    assert record.committed_ticks == record.accepted_ticks + microseconds_to_ticks(1)
 
 
 def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
@@ -158,7 +158,7 @@ def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
         links=fabric["declared_profile"](cwb=True, csb=False),
         timing=fabric["declared_timing"](),
         syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=7),
-        pauli_frame=PauliFrameConfig(commit_us=declared["frame"]),
+        pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]),
         seed=0).build()
     packing = completed.syndrome_packing
     assert packing.packing_drops == 0
@@ -170,8 +170,8 @@ def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
     # round 8 finds the store full (rounds 1..7 are held for the first
     # window) and waits for the first window's input to land
     publication = dict(published)
-    assert publication[7] == us(7 + 2 + 3 + 4)
-    assert publication[8] > us(8 + 2 + 3 + 4)
+    assert publication[7] == microseconds_to_ticks(7 + 2 + 3 + 4)
+    assert publication[8] > microseconds_to_ticks(8 + 2 + 3 + 4)
     records = completed.pauli_frame.snapshot().records
     assert [record.tier for record in records] == ["weak"] * 3
 
@@ -197,7 +197,7 @@ def test_upstream_rounds_survive_until_the_input_transfer_lands(fabric):
     first_release_tick = next(
         tick for (tick, occupancy), (_, previous) in
         zip(timeline[1:], timeline) if occupancy < previous)
-    assert first_release_tick == us(15 + 5)
+    assert first_release_tick == microseconds_to_ticks(15 + 5)
 
 
 def test_room_side_rounds_survive_until_the_final_strong_commit(fabric):
@@ -216,4 +216,4 @@ def test_room_side_rounds_survive_until_the_final_strong_commit(fabric):
         zip(timeline[1:], timeline) if occupancy < previous)
     # strong committed at 71, held boundary and courier resolve after;
     # the empirically pinned release tick of this configuration
-    assert first_release_tick == us(87.5)
+    assert first_release_tick == microseconds_to_ticks(87.5)

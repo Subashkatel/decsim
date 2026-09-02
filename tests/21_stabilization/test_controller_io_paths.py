@@ -5,7 +5,7 @@ preserve the real data crossing each declared boundary and charge each
 online stage in causal order.
 """
 
-from decsim.config import TimingConfig, us
+from decsim.config import TimingConfig, microseconds_to_ticks
 from decsim.controller.controller import Controller
 from decsim.controller.syndrome_packing import SyndromePacking
 from decsim.decoders.decoders import PresetLatencyDecoder
@@ -36,7 +36,7 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
         window_input_receiver=receiver, feedback_memory_receiver=None)
     controller = Controller(
         engine, qpu=None, window_manager=None, syndrome_packing=packing,
-        measurement_signal_to_classical_bits_ticks=us(3), links=links,
+        measurement_signal_to_classical_bits_ticks=microseconds_to_ticks(3), links=links,
         resolved_operations=(), resolved_patches=(), idle_policy=None,
         feedback_streams=None)
 
@@ -47,8 +47,8 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
 
     assert [(event.kind, event.tick) for event in packing.round_events[:3]] == [
         ("EMITTED", 0),
-        ("BINARY_AVAILABLE", us(2 + 3)),
-        ("PACKED", us(2 + 3)),
+        ("BINARY_AVAILABLE", microseconds_to_ticks(2 + 3)),
+        ("PACKED", microseconds_to_ticks(2 + 3)),
     ]
     assert len(receiver.packets) == 1
     assert receiver.packets[0].fragments[0].bits == (1, 0, 1, 0)
@@ -68,11 +68,11 @@ def test_packing_charges_its_assembly_time_for_every_round(fabric):
     receiver = _WindowInputReceiver()
     links = fabric["declared_profile"](cwb=False, csb=False).resolve()
     packing = SyndromePacking(
-        engine, links=links, t_pack=us(1), packing_context_capacity=None,
+        engine, links=links, t_pack=microseconds_to_ticks(1), packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)
     controller = Controller(
         engine, qpu=None, window_manager=None, syndrome_packing=packing,
-        measurement_signal_to_classical_bits_ticks=us(3), links=links,
+        measurement_signal_to_classical_bits_ticks=microseconds_to_ticks(3), links=links,
         resolved_operations=(), resolved_patches=(), idle_policy=None,
         feedback_streams=None)
 
@@ -83,8 +83,8 @@ def test_packing_charges_its_assembly_time_for_every_round(fabric):
 
     assert [(event.kind, event.tick) for event in packing.round_events[:3]] == [
         ("EMITTED", 0),
-        ("BINARY_AVAILABLE", us(2 + 3)),
-        ("PACKED", us(2 + 3 + 1)),
+        ("BINARY_AVAILABLE", microseconds_to_ticks(2 + 3)),
+        ("PACKED", microseconds_to_ticks(2 + 3 + 1)),
     ]
     assert len(receiver.packets) == 1
 
@@ -105,7 +105,7 @@ def _feedback_run(fabric, *, controller_output_us):
         decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"]),
         links=fabric["declared_profile"](cwb=True, csb=False),
         timing=timing,
-        pauli_frame=PauliFrameConfig(commit_us=fabric["DECLARED_US"]["frame"]),
+        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
     ).build()
 
 
@@ -140,21 +140,21 @@ def test_feedback_operation_command_traverses_controller_output_and_cq(fabric):
         record.committed_ticks for record in completed.pauli_frame.snapshot().records
         if record.window_key == (1, 0))
 
-    assert runtime.decode_release_time[2] == blocker_commit + us(2)  # OC
-    assert runtime.op_start_time[2] == blocker_commit + us(2 + 3 + 2)
+    assert runtime.decode_release_time[2] == blocker_commit + microseconds_to_ticks(2)  # OC
+    assert runtime.op_start_time[2] == blocker_commit + microseconds_to_ticks(2 + 3 + 2)
 
     arrivals = [event for event in completed.qpu.command_events
                 if event.kind == "ARRIVED" and event.command.operation.id == 2]
     assert len(arrivals) == 1
-    assert arrivals[0].tick == blocker_commit + us(2 + 3 + 2)
+    assert arrivals[0].tick == blocker_commit + microseconds_to_ticks(2 + 3 + 2)
     assert isinstance(arrivals[0].command, RunOperationBody)
     assert arrivals[0].command.operation == runtime.operations[2]
 
     output = [event for event in completed.controller.output_events
               if event.operation_id == 2]
     assert [(event.kind, event.tick) for event in output] == [
-        ("DECISION_AVAILABLE", blocker_commit + us(2)),
-        ("CONTROL_PULSE_COMMAND_ISSUED", blocker_commit + us(2 + 3)),
+        ("DECISION_AVAILABLE", blocker_commit + microseconds_to_ticks(2)),
+        ("CONTROL_PULSE_COMMAND_ISSUED", blocker_commit + microseconds_to_ticks(2 + 3)),
     ]
     assert output[0].payload.target_operation_id == 2
     assert output[1].payload is arrivals[0].command
@@ -169,7 +169,7 @@ def test_output_latency_changes_arrival_but_not_decision_availability(fabric):
     assert (zero.execution_runtime.decode_release_time[2]
             == delayed.execution_runtime.decode_release_time[2])
     assert (delayed.execution_runtime.op_start_time[2]
-            - zero.execution_runtime.op_start_time[2]) == us(3)
+            - zero.execution_runtime.op_start_time[2]) == microseconds_to_ticks(3)
 
 
 def test_non_aligned_controller_arrival_waits_for_next_qec_boundary(fabric):
@@ -179,8 +179,8 @@ def test_non_aligned_controller_arrival_waits_for_next_qec_boundary(fabric):
                    if event.kind == "ARRIVED" and event.command.operation.id == 2)
     start = completed.execution_runtime.op_start_time[2]
 
-    assert arrival % us(1.0) == us(0.016)
-    assert start == ((arrival // us(1.0)) + 1) * us(1.0)
+    assert arrival % microseconds_to_ticks(1.0) == microseconds_to_ticks(0.016)
+    assert start == ((arrival // microseconds_to_ticks(1.0)) + 1) * microseconds_to_ticks(1.0)
 
 
 def test_preloaded_program_command_is_not_charged_as_online_feedback(fabric):
@@ -208,7 +208,7 @@ def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
         ops=(operation,), d=3, rounds_policy=FixedRounds(6),
         decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"]),
         links=fabric["declared_profile"](cwb=True, csb=False), timing=timing,
-        pauli_frame=PauliFrameConfig(commit_us=fabric["DECLARED_US"]["frame"]),
+        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
     ).build()
     completed.engine.run()
     commit = next(record.committed_ticks
@@ -217,12 +217,12 @@ def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
     output = [event for event in completed.controller.output_events
               if event.operation_id == 1 and event.kind != "PRELOADED_COMMAND"]
     assert [(event.kind, event.tick) for event in output] == [
-        ("DECISION_AVAILABLE", commit + us(2)),
-        ("CONTROL_DECISION_ISSUED", commit + us(2 + 3)),
+        ("DECISION_AVAILABLE", commit + microseconds_to_ticks(2)),
+        ("CONTROL_DECISION_ISSUED", commit + microseconds_to_ticks(2 + 3)),
     ]
     assert output[1].payload is output[0].payload
     assert completed.execution_runtime.result_return_time_by_operation[1] == \
-        commit + us(2 + 3 + 2)
+        commit + microseconds_to_ticks(2 + 3 + 2)
 
 
 def test_controller_output_without_a_link_still_pays_local_processing():
@@ -257,7 +257,7 @@ def test_qubic_500_mhz_eight_cycle_controller_fixture_is_parameter_driven():
         instruction_or_decision_to_analog_control_pulse_us=controller_output_us)
 
     assert controller_output_us == 0.016
-    assert timing.ticks("instruction_or_decision_to_analog_control_pulse") == us(0.016)
+    assert timing.ticks("instruction_or_decision_to_analog_control_pulse") == microseconds_to_ticks(0.016)
 
 
 def test_qubicml_500_mhz_27_cycle_discriminator_fixture_is_parameter_driven():
@@ -271,4 +271,4 @@ def test_qubicml_500_mhz_27_cycle_discriminator_fixture_is_parameter_driven():
         measurement_signal_to_classical_bits_us=classification_us)
 
     assert classification_us == 0.054
-    assert timing.ticks("measurement_signal_to_classical_bits") == us(0.054)
+    assert timing.ticks("measurement_signal_to_classical_bits") == microseconds_to_ticks(0.054)

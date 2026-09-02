@@ -13,7 +13,7 @@ at r+9; csb 7 stores at r+12).
 
 import pytest
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.observe.run_views import LedgerEvent, RunLedgerView, event_ledger
 
 
@@ -28,8 +28,8 @@ def test_weak_round_chain_is_exact(fabric):
     chain = ledger.chain(op=1, round=3)
 
     assert _kinds_and_ticks(chain) == [
-        ("EMITTED", us(3)), ("BINARY_AVAILABLE", us(8)), ("PACKED", us(8)),
-        ("CWB_SENT", us(8)), ("PUBLISHED", us(12))]
+        ("EMITTED", microseconds_to_ticks(3)), ("BINARY_AVAILABLE", microseconds_to_ticks(8)), ("PACKED", microseconds_to_ticks(8)),
+        ("CWB_SENT", microseconds_to_ticks(8)), ("PUBLISHED", microseconds_to_ticks(12))]
     for earlier, later in zip(chain, chain[1:]):
         assert later.prev_event_id == earlier.event_id
     assert chain[-1].status == "terminal"
@@ -43,12 +43,12 @@ def test_weak_window_chain_is_exact(fabric):
     chain = ledger.chain(op=1, window=0)
 
     assert _kinds_and_ticks(chain) == [
-        ("WINDOW_DATA_COMPLETE", us(15)), ("DECODE_QUEUED", us(15)),
-        ("UNIT_ASSIGNED", us(15)), ("DECODE_DONE", us(30)),
-        ("FRAME_ACCEPTED", us(32)), ("FRAME_COMMITTED", us(33))]
+        ("WINDOW_DATA_COMPLETE", microseconds_to_ticks(15)), ("DECODE_QUEUED", microseconds_to_ticks(15)),
+        ("UNIT_ASSIGNED", microseconds_to_ticks(15)), ("DECODE_DONE", microseconds_to_ticks(30)),
+        ("FRAME_ACCEPTED", microseconds_to_ticks(32)), ("FRAME_COMMITTED", microseconds_to_ticks(33))]
     events_by_id = {event.event_id: event for event in ledger.events}
     cause = events_by_id[chain[0].prev_event_id]
-    assert (cause.kind, cause.round, cause.tick) == ("PUBLISHED", 6, us(15))
+    assert (cause.kind, cause.round, cause.tick) == ("PUBLISHED", 6, microseconds_to_ticks(15))
 
 
 def test_every_emitted_round_reaches_exactly_one_terminal(fabric):
@@ -71,13 +71,13 @@ def test_strong_run_records_the_room_store_landing(fabric):
     ledger.check()
 
     assert _kinds_and_ticks(ledger.chain(op=1, round=3)) == [
-        ("EMITTED", us(3)), ("BINARY_AVAILABLE", us(8)), ("PACKED", us(8)),
-        ("STORED_SB1", us(15))]
+        ("EMITTED", microseconds_to_ticks(3)), ("BINARY_AVAILABLE", microseconds_to_ticks(8)), ("PACKED", microseconds_to_ticks(8)),
+        ("STORED_SB1", microseconds_to_ticks(15))]
     window_chain = ledger.chain(op=1, window=0)
     assert _kinds_and_ticks(window_chain) == [
-        ("WINDOW_DATA_COMPLETE", us(18)), ("DECODE_QUEUED", us(18)),
-        ("UNIT_ASSIGNED", us(18)), ("DECODE_DONE", us(54)),
-        ("FRAME_ACCEPTED", us(58)), ("FRAME_COMMITTED", us(59))]
+        ("WINDOW_DATA_COMPLETE", microseconds_to_ticks(18)), ("DECODE_QUEUED", microseconds_to_ticks(18)),
+        ("UNIT_ASSIGNED", microseconds_to_ticks(18)), ("DECODE_DONE", microseconds_to_ticks(54)),
+        ("FRAME_ACCEPTED", microseconds_to_ticks(58)), ("FRAME_COMMITTED", microseconds_to_ticks(59))]
     assert window_chain[-1].route == "strong"
 
 
@@ -112,10 +112,10 @@ def test_release_links_to_the_blocking_operations_commit(fabric):
     cause = events_by_id[decision.prev_event_id]
     assert release.op == 2
     assert (cause.kind, cause.op) == ("FRAME_COMMITTED", 1)
-    assert decision.tick == cause.tick + us(fabric["DECLARED_US"]["oc"])
+    assert decision.tick == cause.tick + microseconds_to_ticks(fabric["DECLARED_US"]["oc"])
     assert release.tick == decision.tick
     assert issued.tick == release.tick
-    assert arrived.tick == issued.tick + us(fabric["DECLARED_US"]["cq"])
+    assert arrived.tick == issued.tick + microseconds_to_ticks(fabric["DECLARED_US"]["cq"])
     assert started.tick == arrived.tick
     assert release.prev_event_id == decision.event_id
     assert issued.prev_event_id == release.event_id
@@ -125,8 +125,8 @@ def test_release_links_to_the_blocking_operations_commit(fabric):
 
 def test_check_detects_an_effect_before_its_cause():
     """The checker has teeth: an event stamped before its cause fails."""
-    cause = LedgerEvent(event_id=0, kind="EMITTED", tick=us(5), op=1, round=1)
-    effect = LedgerEvent(event_id=1, kind="PUBLISHED", tick=us(4), op=1,
+    cause = LedgerEvent(event_id=0, kind="EMITTED", tick=microseconds_to_ticks(5), op=1, round=1)
+    effect = LedgerEvent(event_id=1, kind="PUBLISHED", tick=microseconds_to_ticks(4), op=1,
                          round=1, prev_event_id=0, status="terminal")
     with pytest.raises(RuntimeError, match="precedes its cause"):
         RunLedgerView(events=(cause, effect)).check()
@@ -135,7 +135,7 @@ def test_check_detects_an_effect_before_its_cause():
 def test_check_detects_a_disappeared_round():
     """A round that was emitted but never reached a terminal state fails
     the conservation check (the packet-disappearance question)."""
-    orphan = LedgerEvent(event_id=0, kind="EMITTED", tick=us(1), op=1, round=1)
+    orphan = LedgerEvent(event_id=0, kind="EMITTED", tick=microseconds_to_ticks(1), op=1, round=1)
     with pytest.raises(RuntimeError, match="terminal states"):
         RunLedgerView(events=(orphan,)).check()
 
@@ -274,7 +274,7 @@ def test_ledger_holds_over_randomized_configurations(fabric, seed):
             links=fabric["declared_profile"](cwb=True, csb=False),
             timing=fabric["declared_timing"](),
             pauli_frame=PauliFrameConfig(
-                commit_us=fabric["DECLARED_US"]["frame"]),
+                commit_microseconds=fabric["DECLARED_US"]["frame"]),
             seed=seed)
         completed = spec.build()
     elif mode == "strong":

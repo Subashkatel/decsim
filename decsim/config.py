@@ -3,22 +3,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-TICKS_PER_US = 1_000_000
+TICKS_PER_MICROSECOND = 1_000_000
 
 
-def us(microseconds: float) -> int:
+def microseconds_to_ticks(microseconds: float) -> int:
     """Convert microseconds to integer ticks."""
-    return int(round(microseconds * TICKS_PER_US))
+    return int(round(microseconds * TICKS_PER_MICROSECOND))
 
 
 def microseconds(ticks: int) -> float:
     """Convert integer ticks to microseconds, three decimals."""
-    return round(ticks / TICKS_PER_US, 3)
+    return round(ticks / TICKS_PER_MICROSECOND, 3)
 
 
-def fmt(ticks: int) -> str:
+def format_ticks(ticks: int) -> str:
     """Format ticks as microseconds for readability in logs."""
-    return f"{ticks / TICKS_PER_US:7.3f} us"
+    return f"{ticks / TICKS_PER_MICROSECOND:7.3f} us"
 
 
 @dataclass(frozen=True)
@@ -57,7 +57,7 @@ class TimingConfig:
         ):
             if not math.isfinite(value) or value < 0:
                 raise ValueError(f"{name} must be a finite nonnegative number")
-            if value > 0 and us(value) == 0:
+            if value > 0 and microseconds_to_ticks(value) == 0:
                 raise ValueError(f"{name} is positive but rounds to zero ticks")
 
     def ticks(self, name: str) -> int:
@@ -69,4 +69,4 @@ class TimingConfig:
             "instruction_or_decision_to_analog_control_pulse":
                 self.instruction_or_decision_to_analog_control_pulse_us,
         }
-        return us(values[name])
+        return microseconds_to_ticks(values[name])

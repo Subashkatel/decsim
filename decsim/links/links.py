@@ -59,7 +59,7 @@ import math
 from types import MappingProxyType
 from typing import Optional, Union
 
-from ..config import TICKS_PER_US, us
+from ..config import TICKS_PER_MICROSECOND, microseconds_to_ticks
 from ..message import DecoderRequestKey
 
 
@@ -461,7 +461,7 @@ class Link:
             # exact Fraction arithmetic keeps representable rates exact, so
             # a whole-tick duration is never inflated by float error.
             serialization_ticks = math.ceil(
-                Fraction(payload_bits) * TICKS_PER_US
+                Fraction(payload_bits) * TICKS_PER_MICROSECOND
                 / Fraction(str(capacity.aggregate_bits_per_us)))
         serializer_end_ticks = serializer_start_ticks + serialization_ticks
         queue_wait_ticks = serializer_start_ticks - now_ticks

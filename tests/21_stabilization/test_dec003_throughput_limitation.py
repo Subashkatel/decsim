@@ -24,7 +24,7 @@ window's data complete at 12 us, one default unit, service 100 us.
 
 import pytest
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoders import PipelinedDecoder, PresetLatencyDecoder
 from decsim.decoders.weak_strong_switching import StrongOnly
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
@@ -44,7 +44,7 @@ def _backlog_run(fabric, *, decoder, n_ops=4, csb=False, escalation_policy=None)
         escalation_policy=escalation_policy,
         links=fabric["declared_profile"](cwb=True, csb=csb),
         timing=fabric["declared_timing"](),
-        pauli_frame=PauliFrameConfig(commit_us=fabric["DECLARED_US"]["frame"]),
+        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
         seed=0)
     return spec.build()
 
@@ -65,10 +65,10 @@ def test_unit_occupancy_equals_service_latency(fabric):
         fabric, decoder=PresetLatencyDecoder(SERVICE_US)))
     wbd = fabric["DECLARED_US"]["wbd"]
 
-    assert [window.t_data_complete for window in windows] == [us(12)] * 4
+    assert [window.t_data_complete for window in windows] == [microseconds_to_ticks(12)] * 4
     assert [window.t_done for window in windows] == \
-        [us(12 + wbd + SERVICE_US), us(12 + wbd + 2 * SERVICE_US),
-         us(12 + wbd + 3 * SERVICE_US), us(12 + wbd + 4 * SERVICE_US)]
+        [microseconds_to_ticks(12 + wbd + SERVICE_US), microseconds_to_ticks(12 + wbd + 2 * SERVICE_US),
+         microseconds_to_ticks(12 + wbd + 3 * SERVICE_US), microseconds_to_ticks(12 + wbd + 4 * SERVICE_US)]
 
 
 def test_input_slot_gives_one_window_of_lookahead_and_no_more(fabric):
@@ -77,8 +77,8 @@ def test_input_slot_gives_one_window_of_lookahead_and_no_more(fabric):
     windows = _windows(_backlog_run(
         fabric, decoder=PresetLatencyDecoder(SERVICE_US)))
 
-    assert windows[0].t_dispatch == us(12)
-    assert windows[1].t_dispatch == us(12)                  # DMA overlap only
+    assert windows[0].t_dispatch == microseconds_to_ticks(12)
+    assert windows[1].t_dispatch == microseconds_to_ticks(12)                  # DMA overlap only
     assert windows[2].t_dispatch == windows[0].t_done       # slot frees late
     assert windows[3].t_dispatch == windows[1].t_done
 
@@ -95,15 +95,15 @@ def test_pipelined_unit_starts_every_initiation_interval(fabric):
     completed = _backlog_run(fabric, decoder=decoder, n_ops=6)
     windows = _windows(completed, n_ops=6)
     wbd = fabric["DECLARED_US"]["wbd"]
-    landing = us(12 + wbd)                                  # inputs land at 17
+    landing = microseconds_to_ticks(12 + wbd)                                  # inputs land at 17
 
-    assert [window.t_dispatch for window in windows] == [us(12)] * 6
+    assert [window.t_dispatch for window in windows] == [microseconds_to_ticks(12)] * 6
     assert [window.t_done for window in windows] == [
-        landing + us(k * INITIATION_US + SERVICE_US) for k in range(6)]
-    service_starts = [window.t_done - us(SERVICE_US) for window in windows]
+        landing + microseconds_to_ticks(k * INITIATION_US + SERVICE_US) for k in range(6)]
+    service_starts = [window.t_done - microseconds_to_ticks(SERVICE_US) for window in windows]
     start_gaps = {later - earlier
                   for earlier, later in zip(service_starts, service_starts[1:])}
-    assert start_gaps == {us(INITIATION_US)}                # D: exact cadence
+    assert start_gaps == {microseconds_to_ticks(INITIATION_US)}                # D: exact cadence
     assert all(start >= landing for start in service_starts)  # F: never early
 
 
@@ -120,9 +120,9 @@ def test_initiation_interval_remains_a_lower_bound_when_latency_is_short(fabric)
         PresetLatencyDecoder(response_us), interval_us
     )
     windows = _windows(_backlog_run(fabric, decoder=decoder, n_ops=2), n_ops=2)
-    starts = [window.t_done - us(response_us) for window in windows]
+    starts = [window.t_done - microseconds_to_ticks(response_us) for window in windows]
 
-    assert starts[1] - starts[0] == us(interval_us)
+    assert starts[1] - starts[0] == microseconds_to_ticks(interval_us)
 
 
 def test_pipeline_depth_bounds_in_flight_work(fabric):
@@ -138,10 +138,10 @@ def test_pipeline_depth_bounds_in_flight_work(fabric):
     wbd = fabric["DECLARED_US"]["wbd"]
 
     assert [window.t_done for window in windows] == \
-        [us(117), us(118), us(217), us(222)]
-    assert windows[2].t_done - us(SERVICE_US) == windows[0].t_done  # 3rd start = 1st done
+        [microseconds_to_ticks(117), microseconds_to_ticks(118), microseconds_to_ticks(217), microseconds_to_ticks(222)]
+    assert windows[2].t_done - microseconds_to_ticks(SERVICE_US) == windows[0].t_done  # 3rd start = 1st done
     assert windows[3].t_dispatch == windows[0].t_done       # residency freed late
-    assert windows[3].t_done == windows[3].t_dispatch + us(wbd + SERVICE_US)
+    assert windows[3].t_done == windows[3].t_dispatch + microseconds_to_ticks(wbd + SERVICE_US)
 
 
 def test_pipelined_timeline_is_deterministic(fabric):
@@ -168,7 +168,7 @@ def test_pipelined_strong_primary_is_the_plain_path_and_works(fabric):
     completed = _backlog_run(fabric, decoder=decoder, n_ops=1, csb=True,
                              escalation_policy=StrongOnly())
     window = completed.window_manager.windows[(1, 0)]
-    assert window.t_done == us(21 + SERVICE_US)
+    assert window.t_done == microseconds_to_ticks(21 + SERVICE_US)
 
 
 def test_pipelined_escalation_route_refuses(fabric):
@@ -198,7 +198,7 @@ def test_pipelined_escalation_route_refuses(fabric):
         unit_pools={"default": 1, "strong": 1},
         links=fabric["declared_profile"](cwb=True, csb=True),
         timing=fabric["declared_timing"](),
-        pauli_frame=PauliFrameConfig(commit_us=fabric["DECLARED_US"]["frame"]),
+        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
         seed=0)
     with pytest.raises(RuntimeError, match="not pipelined yet"):
         spec.build()

@@ -5,7 +5,7 @@ import pytest
 
 import decsim
 from decsim.qpu.code_geometry import SurfaceCodeModel
-from decsim.config import TICKS_PER_US, TimingConfig, fmt, us
+from decsim.config import TICKS_PER_MICROSECOND, TimingConfig, format_ticks, microseconds_to_ticks
 from decsim.run_spec import RunSpec
 
 
@@ -26,37 +26,37 @@ def built_round_ticks(**overrides):
 
 def test_us_converts_with_fixed_resolution_and_half_even_rounding():
     """Microseconds convert at fixed resolution with half-even tie rounding."""
-    assert us(1.25) == 1_250_000
-    assert us(0) == 0
-    assert us(Decimal("0.0000005")) == 0
-    assert us(Decimal("0.0000015")) == 2
-    assert us(Decimal("0.0000025")) == 2
+    assert microseconds_to_ticks(1.25) == 1_250_000
+    assert microseconds_to_ticks(0) == 0
+    assert microseconds_to_ticks(Decimal("0.0000005")) == 0
+    assert microseconds_to_ticks(Decimal("0.0000015")) == 2
+    assert microseconds_to_ticks(Decimal("0.0000025")) == 2
 
 
 def test_us_performs_no_domain_validation():
     """The conversion helper leaves input-domain restrictions to its callers."""
-    assert us(-1.25) == -1_250_000
-    assert us(Decimal("0.00000025")) == 0
-    assert us(True) == TICKS_PER_US
+    assert microseconds_to_ticks(-1.25) == -1_250_000
+    assert microseconds_to_ticks(Decimal("0.00000025")) == 0
+    assert microseconds_to_ticks(True) == TICKS_PER_MICROSECOND
 
     with pytest.raises(ValueError):
-        us(float("nan"))
+        microseconds_to_ticks(float("nan"))
     with pytest.raises(OverflowError):
-        us(float("inf"))
+        microseconds_to_ticks(float("inf"))
     with pytest.raises(TypeError):
-        us("1.0")
+        microseconds_to_ticks("1.0")
 
 
 def test_fmt_renders_the_exact_log_format():
     """Tick formatting uses fixed padding, precision, sign, and units."""
-    assert decsim.fmt is fmt
-    assert fmt(0) == "  0.000 us"
-    assert fmt(1_234_567) == "  1.235 us"
-    assert fmt(-1_000_000) == " -1.000 us"
-    assert fmt(True) == "  0.000 us"
+    assert decsim.format_ticks is format_ticks
+    assert format_ticks(0) == "  0.000 us"
+    assert format_ticks(1_234_567) == "  1.235 us"
+    assert format_ticks(-1_000_000) == " -1.000 us"
+    assert format_ticks(True) == "  0.000 us"
 
     with pytest.raises(TypeError):
-        fmt("1000000")
+        format_ticks("1000000")
 
 
 def test_timing_config_defaults_field_order_and_public_exports():
@@ -78,7 +78,7 @@ def test_timing_config_defaults_field_order_and_public_exports():
     assert RunSpec(ops=[]).timing == config
     assert decsim.TimingConfig is TimingConfig
     assert decsim.us is us
-    assert not hasattr(decsim, "TICKS_PER_US")
+    assert not hasattr(decsim, "TICKS_PER_MICROSECOND")
 def test_timing_config_is_frozen_hashable_and_value_comparable():
     """Timing configurations compare by value, hash, and reject assignment."""
     first = TimingConfig(t_pack_us=0.25)
@@ -148,7 +148,7 @@ def test_timing_config_accepts_zero_and_one_tick_on_every_axis(field_name):
     """Every timing axis accepts exact zero and the smallest positive tick."""
     assert getattr(timing_with(field_name, 0), field_name) == 0
     one_tick = timing_with(field_name, Decimal("0.000001"))
-    assert us(getattr(one_tick, field_name)) == 1
+    assert microseconds_to_ticks(getattr(one_tick, field_name)) == 1
 
 
 def test_optional_timing_axes_are_independent():

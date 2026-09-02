@@ -45,7 +45,8 @@ def commit(frame, window_key, observables, tier=Tier.WEAK, on_committed=None):
         window_key=window_key,
         logical_observables=observables,
         request_key=request_key,
-        on_committed=on_committed)
+        on_committed=on_committed,
+    )
 
 
 def test_a_streams_frame_is_the_xor_of_its_corrections():
@@ -76,9 +77,14 @@ def test_a_second_correction_for_a_window_is_refused():
 def test_the_write_cost_is_charged_before_the_caller_continues():
     engine, frame = frame_with_commit_ticks(4)
     continued_at = []
-    engine.schedule(10, lambda: commit(
-        frame, ("stream", 0), (1,),
-        on_committed=lambda: continued_at.append(engine.now)))
+
+    def note_continuation():
+        continued_at.append(engine.now)
+
+    def commit_at_tick_ten():
+        commit(frame, ("stream", 0), (1,), on_committed=note_continuation)
+
+    engine.schedule(10, commit_at_tick_ten)
     engine.run()
     assert continued_at == [14]
     snapshot = frame.snapshot()
@@ -95,6 +101,6 @@ def test_a_correction_without_observables_makes_the_fold_unknown():
 
 def test_the_settings_refuse_a_free_write_without_a_reason():
     with pytest.raises(ValueError, match="justification"):
-        PauliFrameConfig(commit_us=0.0)
-    settings = PauliFrameConfig(commit_us=0.004)
+        PauliFrameConfig(commit_microseconds=0.0)
+    settings = PauliFrameConfig(commit_microseconds=0.004)
     assert settings.commit_ticks() == 4000

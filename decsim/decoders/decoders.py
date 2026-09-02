@@ -20,7 +20,7 @@ from ..message import (
     SoftOutput,
     SoftOutputSource,
 )
-from ..config import us
+from ..config import microseconds_to_ticks
 from ..seeding import _RandomSeedConsumer
 from ..detector_error_model.fault_model_contracts import (
     DecoderFaultModelRequirement,
@@ -121,7 +121,7 @@ class FunctionLatencyDecoder:
 
     def latency(self, job: DecodeJob) -> int:
         """Service time in ticks, priced by the caller's function."""
-        return us(self.latency_us_for(job))
+        return microseconds_to_ticks(self.latency_us_for(job))
 
     def decode(self, job: DecodeJob) -> DecodeResult:
         """Return an empty timing-only result."""
@@ -138,7 +138,7 @@ class PresetLatencyDecoder:
         self.latency_us = latency_us
 
     def latency(self, job: DecodeJob) -> int:
-        return us(self.latency_us)
+        return microseconds_to_ticks(self.latency_us)
 
     def decode(self, job: DecodeJob) -> DecodeResult:
         return DecodeResult(job.op_id, job.window_id)
@@ -154,7 +154,7 @@ class PerRoundDecoder:
         self.tau_us = tau_us
 
     def latency(self, job: DecodeJob) -> int:
-        return us(job.n_rounds * self.tau_us)
+        return microseconds_to_ticks(job.n_rounds * self.tau_us)
 
     def decode(self, job: DecodeJob) -> DecodeResult:
         return DecodeResult(job.op_id, job.window_id)
@@ -179,7 +179,7 @@ class PipelinedDecoder:
         if not math.isfinite(initiation_interval_us) \
                 or initiation_interval_us <= 0:
             raise ValueError("initiation_interval_us must be positive and finite")
-        if us(initiation_interval_us) == 0:
+        if microseconds_to_ticks(initiation_interval_us) == 0:
             raise ValueError("initiation_interval_us is positive but rounds to zero ticks")
         if pipeline_depth is not None and pipeline_depth < 1:
             raise ValueError("pipeline_depth must be at least 1")
@@ -205,7 +205,7 @@ class PipelinedDecoder:
 
     def initiation_interval(self, job: DecodeJob) -> int:
         """Minimum ticks between consecutive starts on one unit."""
-        return us(self.initiation_interval_us)
+        return microseconds_to_ticks(self.initiation_interval_us)
 
     def decode(self, job: DecodeJob) -> DecodeResult:
         return self.inner.decode(job)

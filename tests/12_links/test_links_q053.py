@@ -12,7 +12,7 @@ import pytest
 import decsim
 import decsim.links.link_profiles as link_profiles
 import decsim.links.links as links_module
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.links.link_profiles import bandwidth_limited_profile, logical_reference_profile
 
 # The bandwidth card is provisioned from a run's geometry; the tests use
@@ -305,15 +305,15 @@ def test_reference_cards_preserve_numeric_values_and_unicode_sources():
     logical = _topology(logical_reference_profile())
     bandwidth = _topology(bandwidth_limited_profile(**DISTANCE_5_GEOMETRY))
     expected_latency = {
-        "qc": us(0.15),
-        "wbd": us(2.0),
-        "wsd": us(0.5),
-        "sbd": us(2.0),
-        "wdo": us(1.0),
-        "dd": us(0.5),
-        "do": us(1.0),
-        "oc": us(4.0),
-        "cq": us(0.15),
+        "qc": microseconds_to_ticks(0.15),
+        "wbd": microseconds_to_ticks(2.0),
+        "wsd": microseconds_to_ticks(0.5),
+        "sbd": microseconds_to_ticks(2.0),
+        "wdo": microseconds_to_ticks(1.0),
+        "dd": microseconds_to_ticks(0.5),
+        "do": microseconds_to_ticks(1.0),
+        "oc": microseconds_to_ticks(4.0),
+        "cq": microseconds_to_ticks(0.15),
     }
     for topology in (logical, bandwidth):
         actual_latency = {

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import math
 from typing import Callable, Optional, TYPE_CHECKING
 
-from ..config import fmt
+from ..config import format_ticks
 from ..seeding import _RandomSeedConsumer
 from ..engine import Engine
 
@@ -263,7 +263,7 @@ class DistillationFactory(_RandomSeedConsumer):
             op_id, callback = self.waiting.pop(0)
             waited = self.engine.now - self._stall_start.pop(op_id, self.engine.now)
             self.total_stall += waited
-            tag = "" if waited == 0 else f"  (supply stall {fmt(waited).strip()})"
+            tag = "" if waited == 0 else f"  (supply stall {format_ticks(waited).strip()})"
             self.engine.log("Factory",
                             f"  -> delivered to op#{op_id} (store now {self.store}){tag}")
             callback()
@@ -414,7 +414,7 @@ class MultiLevelDistillationFactory(_RandomSeedConsumer):
             op_id, callback = self.waiting.pop(0)
             waited = self.engine.now - self._stall_start.pop(op_id, self.engine.now)
             self.total_stall += waited
-            tag = "" if waited == 0 else f"  (supply stall {fmt(waited).strip()})"
+            tag = "" if waited == 0 else f"  (supply stall {format_ticks(waited).strip()})"
             self.engine.log("Factory", f"  -> delivered final state to op#{op_id}{tag}")
             callback()
 

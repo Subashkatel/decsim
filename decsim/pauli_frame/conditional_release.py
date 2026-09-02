@@ -12,11 +12,9 @@ The value of the outcome never matters here. Timing does not branch on it
 fully decoded), so nothing in this file reads the result's bits.
 """
 
-from __future__ import annotations
-
 from typing import Callable, Optional
 
-from decsim.message import Decision, DecodeResult, Operation
+import decsim.message as message
 
 
 class ConditionalRelease:
@@ -26,23 +24,23 @@ class ConditionalRelease:
         self.engine = engine
         self.waiting_by_blocker: dict[int, list[int]] = {}
         self.controller = None
-        self.decision_sink: Optional[Callable] = None
+        self.deliver_decision: Optional[Callable] = None
 
-    def connect(self, controller, decision_sink: Callable) -> None:
-        """Wire the return path: decisions go via the controller to the sink."""
+    def connect(self, controller, deliver_decision: Callable) -> None:
+        """Wire the return path: the controller relays each decision."""
         self.controller = controller
-        self.decision_sink = decision_sink
+        self.deliver_decision = deliver_decision
 
-    def register_blocked_operation(self, blocked_operation_id: int,
-                                   blocking_operation_id: int) -> None:
+    def register_blocked_operation(
+        self, blocked_operation_id: int, blocking_operation_id: int
+    ) -> None:
         """Note that one operation waits on another's logical measurement."""
         waiting = self.waiting_by_blocker.setdefault(blocking_operation_id, [])
         waiting.append(blocked_operation_id)
 
-    def release_waiters(self, operation: Operation,
-                        result: DecodeResult) -> None:
+    def release_waiters(self, operation: message.Operation) -> None:
         """A final result arrived: send every decision it releases."""
-        for decision in self.decisions_for(operation, result):
+        for decision in self.decisions_for(operation):
             if decision.releases_operation:
                 instruction = "conditional release"
             else:
@@ -50,11 +48,13 @@ class ConditionalRelease:
             self.engine.log(
                 "PauliFrame",
                 f"DISPATCH {instruction} for op#{decision.target_operation_id} "
-                f"-> controller -> controller sequencer")
-            self.controller.relay_instruction(decision, self.decision_sink)
+                f"-> controller -> controller sequencer",
+            )
+            self.controller.relay_instruction(decision, self.deliver_decision)
 
-    def decisions_for(self, operation: Operation,
-                      result: DecodeResult) -> list[Decision]:
+    def decisions_for(
+        self, operation: message.Operation
+    ) -> list[message.Decision]:
         """The decisions one final result releases.
 
         One release per waiting operation; else a result return when the
@@ -62,7 +62,7 @@ class ConditionalRelease:
         """
         waiting = self.waiting_by_blocker.pop(operation.id, [])
         if waiting:
-            return [Decision(operation_id) for operation_id in waiting]
+            return [message.Decision(operation_id) for operation_id in waiting]
         if operation.requires_result_return_to_qpu:
-            return [Decision(operation.id, releases_operation=False)]
+            return [message.Decision(operation.id, releases_operation=False)]
         return []

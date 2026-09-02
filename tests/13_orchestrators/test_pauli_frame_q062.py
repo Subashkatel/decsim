@@ -173,23 +173,23 @@ def test_configuration_rejects_implicit_or_disappearing_costs():
         PauliFrameConfig()
     for invalid in (-1.0, float("inf"), float("-inf"), float("nan")):
         with pytest.raises(ValueError):
-            PauliFrameConfig(commit_us=invalid)
+            PauliFrameConfig(commit_microseconds=invalid)
     with pytest.raises(ValueError, match="rounds to zero ticks"):
-        PauliFrameConfig(commit_us=1e-12)
+        PauliFrameConfig(commit_microseconds=1e-12)
     with pytest.raises(ValueError, match="needs zero_commit_cost_justification"):
-        PauliFrameConfig(commit_us=0.0)
+        PauliFrameConfig(commit_microseconds=0.0)
     with pytest.raises(ValueError, match="needs zero_commit_cost_justification"):
-        PauliFrameConfig(commit_us=0.0, zero_commit_cost_justification="")
-    with pytest.raises(ValueError, match="needs a zero commit_us"):
-        PauliFrameConfig(commit_us=1.0, zero_commit_cost_justification="free")
+        PauliFrameConfig(commit_microseconds=0.0, zero_commit_cost_justification="")
+    with pytest.raises(ValueError, match="needs a free write"):
+        PauliFrameConfig(commit_microseconds=1.0, zero_commit_cost_justification="free")
 
     zero = PauliFrameConfig(
-        commit_us=0.0,
+        commit_microseconds=0.0,
         zero_commit_cost_justification="Idealized register write for this run.",
     )
     assert zero.commit_ticks() == 0
     assert zero.resolve(ManualEngine()).commit_ticks == 0
-    assert PauliFrameConfig(commit_us=1.0).commit_ticks() > 0
+    assert PauliFrameConfig(commit_microseconds=1.0).commit_ticks() > 0
 
 
 

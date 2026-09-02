@@ -23,7 +23,7 @@ import math
 import sys
 from pathlib import Path
 
-from decsim.config import TICKS_PER_US
+from decsim.config import TICKS_PER_MICROSECOND
 
 from experiments.build_run import build_run
 from experiments.experiment_config import ExperimentConfig
@@ -34,8 +34,8 @@ WINDOW_COLORS = ("tab:blue", "tab:orange", "tab:green", "tab:red",
 MAX_LEGEND_WINDOWS = 8
 
 
-def us(ticks) -> float:
-    return ticks / TICKS_PER_US
+def microseconds_to_ticks(ticks) -> float:
+    return ticks / TICKS_PER_MICROSECOND
 
 
 def card_label(algorithm) -> str:
@@ -99,18 +99,18 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
 
     figure, axis = plt.subplots(figsize=(11, 0.45 * len(rows) + 1.6))
     for round_number in sorted(qc):
-        sent = us(qc[round_number]["send_ticks"])
+        sent = microseconds_to_ticks(qc[round_number]["send_ticks"])
         shade = "0.55" if round_number % 2 else "0.75"
         axis.barh(row_index["qpu round"], round_period_us,
                   left=sent - round_period_us, color=shade, height=0.55)
         axis.barh(row_index["qc link"],
-                  us(qc[round_number]["delivery_ticks"]) - sent,
+                  microseconds_to_ticks(qc[round_number]["delivery_ticks"]) - sent,
                   left=sent, color=shade, height=0.55)
         if round_number in store:
             axis.barh(row_index[f"{store_name} link"],
-                      us(store[round_number]["delivery_ticks"])
-                      - us(store[round_number]["send_ticks"]),
-                      left=us(store[round_number]["send_ticks"]),
+                      microseconds_to_ticks(store[round_number]["delivery_ticks"])
+                      - microseconds_to_ticks(store[round_number]["send_ticks"]),
+                      left=microseconds_to_ticks(store[round_number]["send_ticks"]),
                       color=shade, height=0.55)
 
     # the round's landing tick in the store the windows read
@@ -131,37 +131,37 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
         stages = {record.stage: record
                   for record in engine.stage_records_for(1, window_id)}
         read_hi = min(window.buffer_hi, rounds)
-        stored_tick = us(stored_row[read_hi]["delivery_ticks"])
+        stored_tick = microseconds_to_ticks(stored_row[read_hi]["delivery_ticks"])
         window_ranges.append(
             f"window {window_id}: "
             f"commits {window.commit_lo}-{window.commit_hi}, "
             f"reads {window.start_round}-{read_hi}")
         # commit rounds land solid; the trailing buffer reads land lighter
-        commit_stored = us(
+        commit_stored = microseconds_to_ticks(
             stored_row[min(window.commit_hi, rounds)]["delivery_ticks"])
-        bar(f"{store_name} fill", us(window.t_first_round), commit_stored)
+        bar(f"{store_name} fill", microseconds_to_ticks(window.t_first_round), commit_stored)
         if read_hi > window.commit_hi:
             bar(f"{store_name} fill", commit_stored, stored_tick, alpha=0.45)
-        bar("wait", stored_tick, us(window.t_dispatch))
+        bar("wait", stored_tick, microseconds_to_ticks(window.t_dispatch))
         if window_id in input_link:
             bar(f"transfer ({input_path})",
-                us(input_link[window_id]["send_ticks"]),
-                us(input_link[window_id]["delivery_ticks"]))
+                microseconds_to_ticks(input_link[window_id]["send_ticks"]),
+                microseconds_to_ticks(input_link[window_id]["delivery_ticks"]))
         for stage in ("fetch", "algorithm", "release"):
             if stage in stages:
-                bar(stage, us(stages[stage].start_ticks),
-                    us(stages[stage].end_ticks))
+                bar(stage, microseconds_to_ticks(stages[stage].start_ticks),
+                    microseconds_to_ticks(stages[stage].end_ticks))
         if window_id in dd:
-            bar("dd handoff", us(dd[window_id]["send_ticks"]),
-                us(dd[window_id]["delivery_ticks"]))
+            bar("dd handoff", microseconds_to_ticks(dd[window_id]["send_ticks"]),
+                microseconds_to_ticks(dd[window_id]["delivery_ticks"]))
         if window_id in output_link:
             bar(f"{output_path} link",
-                us(output_link[window_id]["send_ticks"]),
-                us(output_link[window_id]["delivery_ticks"]))
+                microseconds_to_ticks(output_link[window_id]["send_ticks"]),
+                microseconds_to_ticks(output_link[window_id]["delivery_ticks"]))
         if window_id in frame_records:
             bar("frame commit",
-                us(frame_records[window_id].accepted_ticks),
-                us(frame_records[window_id].committed_ticks))
+                microseconds_to_ticks(frame_records[window_id].accepted_ticks),
+                microseconds_to_ticks(frame_records[window_id].committed_ticks))
 
     axis.set_yticks(range(len(rows)))
     axis.set_yticklabels(rows, fontsize=9)

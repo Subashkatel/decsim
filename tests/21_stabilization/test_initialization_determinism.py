@@ -6,7 +6,7 @@ The initialization contract these tests pin is
 
 import pytest
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.message import Operation, RetainedSyndromeFragment, SyndromeRoundPacket
 
 
@@ -87,7 +87,7 @@ def test_scheduled_start_round_delays_the_root(fabric):
     op = Operation(id=1, name="late", qubits=(1,), patches=(1,),
                    scheduled_start_round=4)
     completed = fabric["weak_only_run"](rounds=6, ops=[op])
-    assert completed.execution_runtime.op_start_time[1] == us(4 * fabric["ROUND_US"])
+    assert completed.execution_runtime.op_start_time[1] == microseconds_to_ticks(4 * fabric["ROUND_US"])
 
 
 def test_component_boundaries_are_structural(fabric):

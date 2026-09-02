@@ -18,7 +18,7 @@ import numpy as np
 import pymatching
 import stim
 
-from decsim.config import TICKS_PER_US
+from decsim.config import TICKS_PER_MICROSECOND
 
 from experiments.build_run import build_run
 from experiments.experiment_config import ExperimentConfig
@@ -87,8 +87,8 @@ class ShotMeasurement:
     sim_wall_seconds: float
 
 
-def us(ticks: int) -> float:
-    return ticks / TICKS_PER_US
+def microseconds_to_ticks(ticks: int) -> float:
+    return ticks / TICKS_PER_MICROSECOND
 
 
 def link_totals(traffic: dict) -> dict:
@@ -101,9 +101,9 @@ def link_totals(traffic: dict) -> dict:
             "payload_bits": counters["known_payload_bits"],
             "unknown_payload_transfers":
                 counters["unknown_payload_transfer_count"],
-            "queue_wait_us": us(counters["queue_wait_ticks"]),
-            "serialization_us": us(counters["serialization_ticks"]),
-            "propagation_us": us(counters["propagation_ticks"]),
+            "queue_wait_us": microseconds_to_ticks(counters["queue_wait_ticks"]),
+            "serialization_us": microseconds_to_ticks(counters["serialization_ticks"]),
+            "propagation_us": microseconds_to_ticks(counters["propagation_ticks"]),
         }
     return totals
 
@@ -124,7 +124,7 @@ def cwb_delays_us(transfers: list) -> list:
     for row in transfers:
         if row["path"] != "cwb":
             continue
-        delays.append(us(row["delivery_ticks"] - row["send_ticks"]))
+        delays.append(microseconds_to_ticks(row["delivery_ticks"] - row["send_ticks"]))
     return delays
 
 
@@ -148,27 +148,27 @@ def window_points_us(window, frame_record, stage_us: dict, link_delay: dict,
     last_emitted_round = max(qc_send)
     last_required_round = min(window.buffer_hi, last_emitted_round)
     return {
-        "buffer_fill": us(window.t_data_complete - window.t_first_round),
-        "dep_block": us(window.t_queued - window.t_data_complete),
-        "queue_wait": us(window.t_dispatch - window.t_queued),
-        "input_link_per_window": us(link_delay.get((input_path, window_id), 0)),
+        "buffer_fill": microseconds_to_ticks(window.t_data_complete - window.t_first_round),
+        "dep_block": microseconds_to_ticks(window.t_queued - window.t_data_complete),
+        "queue_wait": microseconds_to_ticks(window.t_dispatch - window.t_queued),
+        "input_link_per_window": microseconds_to_ticks(link_delay.get((input_path, window_id), 0)),
         "fetch": stage_us["fetch"],
         "algorithm": stage_us["algorithm"],
         "release": stage_us["release"],
-        "service": us(window.t_done - window.t_dispatch),
-        "dd_per_window": us(link_delay.get(("dd", window_id), 0)),
+        "service": microseconds_to_ticks(window.t_done - window.t_dispatch),
+        "dd_per_window": microseconds_to_ticks(link_delay.get(("dd", window_id), 0)),
         "output_link_per_window":
-            us(link_delay.get((output_path, window_id), 0)),
+            microseconds_to_ticks(link_delay.get((output_path, window_id), 0)),
         "frame_commit":
-            us(frame_record.committed_ticks - frame_record.accepted_ticks),
+            microseconds_to_ticks(frame_record.committed_ticks - frame_record.accepted_ticks),
         "buffer0_ready_to_frame":
-            us(frame_record.committed_ticks - window.t_data_complete),
+            microseconds_to_ticks(frame_record.committed_ticks - window.t_data_complete),
         "buffer0_first_round_to_frame":
-            us(frame_record.committed_ticks - window.t_first_round),
+            microseconds_to_ticks(frame_record.committed_ticks - window.t_first_round),
         "qpu_last_round_to_frame":
-            us(frame_record.committed_ticks - qc_send[last_required_round]),
+            microseconds_to_ticks(frame_record.committed_ticks - qc_send[last_required_round]),
         "qpu_first_round_to_frame":
-            us(frame_record.committed_ticks - qc_send[window.start_round]),
+            microseconds_to_ticks(frame_record.committed_ticks - qc_send[window.start_round]),
     }
 
 
@@ -188,7 +188,7 @@ def collect_samples(completed, engine, mode: str) -> dict:
         if not decoded:
             continue
         stage_records = engine.stage_records_for(op_id, window_id)
-        stage_us = {record.stage: us(record.end_ticks - record.start_ticks)
+        stage_us = {record.stage: microseconds_to_ticks(record.end_ticks - record.start_ticks)
                     for record in stage_records}
         points = window_points_us(window, frame_record, stage_us, link_delay,
                                   qc_send, INPUT_LINK[mode], OUTPUT_LINK[mode])
@@ -276,7 +276,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                            if window.t_first_round is not None)
     frame_records = completed.pauli_frame.snapshot().records
     last_commit_tick = max(record.committed_ticks for record in frame_records)
-    span_us = us(last_commit_tick - first_round_tick)
+    span_us = microseconds_to_ticks(last_commit_tick - first_round_tick)
     queue_depths = [depth for _, depth in completed.decoder_manager.queue_log]
     return ShotMeasurement(
         physical_error_probability=physical_error_probability,

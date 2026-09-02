@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from decsim.config import us
+from decsim.config import microseconds_to_ticks
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
 from decsim.links.links import LinkPath, TrafficAttribution
 from decsim.controller.syndrome_packing import SyndromePacketRouteKind, SyndromePacking, _PackingSlotState
@@ -84,7 +84,7 @@ def test_wired_cwb_card_preserves_positive_numbers_source_and_physical_topology(
 
     assert topology["path_order"].count("cwb") == 1
     assert channel["member_paths"] == ["cwb"]
-    assert channel["propagation_latency_ticks"] == us(0.25)
+    assert channel["propagation_latency_ticks"] == microseconds_to_ticks(0.25)
     assert channel["capacity"]["aggregate_bits_per_us"] == 120.0
     assert channel["configuration_source"] == source
     assert cwb_edge["actual_payload_source"] == "SyndromeRoundPacket.fragment_size_sum"
@@ -108,9 +108,9 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
     traffic = traffic_json_value(model.snapshot())
     rows = [row for row in traffic["transfers"] if row["path"] == "cwb"]
 
-    assert first.serialization_ticks == us(3.0)
-    assert first.propagation_ticks == us(0.25)
-    assert first.total_delay_ticks == us(3.25)
+    assert first.serialization_ticks == microseconds_to_ticks(3.0)
+    assert first.propagation_ticks == microseconds_to_ticks(0.25)
+    assert first.total_delay_ticks == microseconds_to_ticks(3.25)
     assert second.queue_wait_ticks == first.serialization_ticks
     assert [row["payload_bits"] for row in rows] == [300, 200]
     assert rows[0]["payload_source"] == "SyndromeRoundPacket.fragment_size_sum"
@@ -130,9 +130,9 @@ def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
         attribution=TrafficAttribution(
             operation_id=1, patch_ids=(0,), window_id=None, round_lo=1, round_hi=1))
 
-    assert reservation.serialization_ticks == us(0.5)   # 500 bits at 1000 bits/us
-    assert reservation.propagation_ticks == us(0.10)
-    assert reservation.total_delay_ticks == us(0.60)
+    assert reservation.serialization_ticks == microseconds_to_ticks(0.5)   # 500 bits at 1000 bits/us
+    assert reservation.propagation_ticks == microseconds_to_ticks(0.10)
+    assert reservation.total_delay_ticks == microseconds_to_ticks(0.60)
 
 
 def test_unbounded_cwb_bandwidth_charges_propagation_only():
@@ -148,9 +148,9 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
             operation_id=1, patch_ids=(0,), window_id=None, round_lo=2, round_hi=2))
 
     assert first.serialization_ticks == 0
-    assert first.total_delay_ticks == us(0.10)
+    assert first.total_delay_ticks == microseconds_to_ticks(0.10)
     assert second.queue_wait_ticks == 0                 # no serialization, so no FIFO wait
-    assert second.total_delay_ticks == us(0.10)
+    assert second.total_delay_ticks == microseconds_to_ticks(0.10)
 
 
 def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry():
@@ -190,7 +190,7 @@ def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry
     assert len(traffic_json_value(links.snapshot())["transfers"]) == 1
 
     engine.run_next()
-    arrival_tick = 1_000 + us(0.25) + us(3.0)
+    arrival_tick = 1_000 + microseconds_to_ticks(0.25) + microseconds_to_ticks(3.0)
     assert engine.now == arrival_tick
     assert receiver.received == [packet]
     assert publication.calls == [((17, 4), arrival_tick)]
@@ -237,7 +237,7 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
     latency: the link serializes them FIFO and propagation is pipelined."""
     stim = pytest.importorskip("stim")
     from decsim.qpu.stim_device import StimDevice
-    from decsim.config import TimingConfig, TICKS_PER_US
+    from decsim.config import TimingConfig, TICKS_PER_MICROSECOND
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
@@ -259,7 +259,7 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
     delivered = sorted(row["delivery_ticks"] for row in completed.result.link_traffic["transfers"]
                        if row["path"] == "cwb")
     assert len(delivered) == 8
-    gaps = [(b - a) / TICKS_PER_US for a, b in zip(delivered, delivered[1:])]
+    gaps = [(b - a) / TICKS_PER_MICROSECOND for a, b in zip(delivered, delivered[1:])]
     assert all(gap == pytest.approx(0.02, abs=1e-3) for gap in gaps), gaps   # first gap adds serialization
 
 

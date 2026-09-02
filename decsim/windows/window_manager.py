@@ -1282,7 +1282,7 @@ class WindowManager:
             self.window_count[op.id] - 1,
             logical_observables=logical_observables,
         )
-        self.conditional_release.release_waiters(op, result)
+        self.conditional_release.release_waiters(op)
 
     def release_stream_segments_at_commit(self, stream_id,
                                           committed_round_count: int) -> None:
@@ -1315,14 +1315,7 @@ class WindowManager:
             else:
                 self.op_results[operation.id] = logical_observables
             self.segment_results_sent.add(operation.id)
-            self.conditional_release.release_waiters(
-                operation,
-                DecodeResult(
-                    operation.id,
-                    -1,
-                    logical_observables=logical_observables,
-                ),
-            )
+            self.conditional_release.release_waiters(operation)
 
     def _segment_waits_for_strong(self, stream_id, segment_end: int) -> bool:
         for key in self._pending_strong_windows:

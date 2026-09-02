@@ -1,10 +1,14 @@
 """The simulation clock and the queue of actions scheduled on it.
 
 Time is a count of ticks; one microsecond is one million ticks
-(config.TICKS_PER_US). Time never runs backwards. When two actions are due
-at the same tick, the one with the lower priority number runs first; when
-they share a priority, the one scheduled first runs first. Metrics observe
-the run once before the first action and again after every action.
+(config.TICKS_PER_MICROSECOND). Time never runs backwards. When two
+actions are due at the same tick, the one with the lower priority number
+runs first; when they share a priority, the one scheduled first runs
+first. That is SimPy's ordering (simpy.core.Environment): time, then
+priority, then arrival.
+
+Metrics observe the run once before the first action and again after
+every action.
 """
 
 import dataclasses
@@ -12,7 +16,7 @@ import heapq
 import itertools
 from typing import Callable
 
-from decsim.config import fmt
+import decsim.config as config
 
 Action = Callable[[], None]
 
@@ -40,13 +44,15 @@ class Engine:
         self._event_queue: list[Event] = []
         self._sequence_numbers = itertools.count()
 
-    def schedule(self, delay: int, action: Action, label: str = "",
-                 priority: int = 0) -> None:
+    def schedule(
+        self, delay: int, action: Action, label: str = "", priority: int = 0
+    ) -> None:
         """Queue an action to run `delay` ticks from now."""
         if delay < 0:
             raise ValueError(
                 f"cannot schedule an action in the past: delay {delay} "
-                f"at tick {self.now}")
+                f"at tick {self.now}"
+            )
         due_time = self.now + delay
         sequence_number = next(self._sequence_numbers)
         event = Event(due_time, priority, sequence_number, action, label)
@@ -57,30 +63,34 @@ class Engine:
         """True when nothing is scheduled."""
         return not self._event_queue
 
-    def log(self, who: str, message: str) -> None:
+    def log(self, component_name: str, message: str) -> None:
         """Keep one timestamped line, and print it when verbose."""
-        line = f"[{fmt(self.now)}] {who}: {message}"
+        stamp = config.format_ticks(self.now)
+        line = f"[{stamp}] {component_name}: {message}"
         self.log_lines.append(line)
         if self.verbose:
             print(line)
 
-    def log_io(self, who: str, describe: Callable[[], str]) -> None:
+    def log_io(
+        self, component_name: str, describe_state: Callable[[], str]
+    ) -> None:
         """Log what a component received, holds, or emitted.
 
-        `describe` runs only when the I/O trace is on, so a store never
-        walks its contents for a line nobody records.
+        `describe_state` runs only when the I/O trace is on, so a store
+        never walks its contents for a line nobody records.
         """
         if not self.io_trace:
             return
-        message = describe()
-        self.log(who, message)
+        message = describe_state()
+        self.log(component_name, message)
 
     def add_metric(self, metric):
         """Register a metric under a name no other metric uses."""
         for existing in self.metrics:
             if existing.name == metric.name:
-                raise ValueError(
-                    f"metric name {metric.name!r} is already registered")
+                raise RuntimeError(
+                    f"metric name {metric.name!r} is already registered"
+                )
         metric.observe(self)
         self.metrics.append(metric)
         return metric

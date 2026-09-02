@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from ..config import us
+from ..config import microseconds_to_ticks
 from ..message import (
     Operation,
     OperationPlanningView,
@@ -241,7 +241,7 @@ def _plan_execution(
     round_us = float(round_us)
     if not math.isfinite(round_us):
         raise ValueError("resolved round_us must be a finite real number")
-    round_ticks = us(round_us)
+    round_ticks = microseconds_to_ticks(round_us)
     if round_ticks < 1:
         raise ValueError("resolved round cadence must be at least one tick")
 

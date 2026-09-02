@@ -6,7 +6,7 @@ from dataclasses import replace
 
 import pytest
 
-from decsim.config import TimingConfig, us
+from decsim.config import TimingConfig, microseconds_to_ticks
 from decsim.decoders.decoders import (SAMPLED_CONFIDENCE_SOURCE,
                                       PresetLatencyDecoder,
                                       SampledConfidenceDecoder,
@@ -42,7 +42,7 @@ ROUND_US = 1.0
 
 
 def _declared_edge(base_edge, latency_us):
-    channel = LinkConfig(us(latency_us), None, "stabilization declared tick")
+    channel = LinkConfig(microseconds_to_ticks(latency_us), None, "stabilization declared tick")
     return LinkEdgeConfig(channel, base_edge.default_payload,
                           base_edge.actual_payload_source)
 
@@ -99,7 +99,7 @@ def weak_only_run(*, rounds=6, ops=None, cwb=True, seed=0, io_trace=False,
         decoder=PresetLatencyDecoder(DECLARED_US["weak"]),
         links=declared_profile(cwb=cwb, csb=False),
         timing=declared_timing(),
-        pauli_frame=(PauliFrameConfig(commit_us=DECLARED_US["frame"])
+        pauli_frame=(PauliFrameConfig(commit_microseconds=DECLARED_US["frame"])
                      if frame else None),
         make_metrics=make_metrics,
         seed=seed)
@@ -116,7 +116,7 @@ def strong_only_run(*, rounds=6, ops=None, seed=0, io_trace=False,
         escalation_policy=StrongOnly(),
         links=declared_profile(cwb=True, csb=True),
         timing=declared_timing(),
-        pauli_frame=PauliFrameConfig(commit_us=DECLARED_US["frame"]),
+        pauli_frame=PauliFrameConfig(commit_microseconds=DECLARED_US["frame"]),
         record_switching_windows=record,
         seed=seed)
     return spec.build(io_trace=io_trace)
@@ -153,7 +153,7 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
                     else {"default": 1, "strong": 1}),
         links=declared_profile(cwb=True, csb=True, csb_us=csb_us),
         timing=declared_timing(round_us),
-        pauli_frame=PauliFrameConfig(commit_us=DECLARED_US["frame"]),
+        pauli_frame=PauliFrameConfig(commit_microseconds=DECLARED_US["frame"]),
         record_switching_windows=record,
         make_metrics=make_metrics,
         decoder_memory=(None if weak_memory_rounds is None else
@@ -207,7 +207,7 @@ def log_tick(log_lines, needle):
             stamp = line.split("]")[0].lstrip("[").strip()
             if not stamp.endswith("us"):
                 raise AssertionError(f"unparsable log stamp: {line!r}")
-            return us(float(stamp[:-2].strip()))
+            return microseconds_to_ticks(float(stamp[:-2].strip()))
     raise AssertionError(f"no log line contains {needle!r}")
 
 

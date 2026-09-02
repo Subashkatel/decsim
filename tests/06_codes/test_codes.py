@@ -8,7 +8,7 @@ import pytest
 import decsim
 import decsim.qpu.code_geometry as codes_module
 from decsim.qpu.code_geometry import BBCodeModel, SurfaceCodeModel
-from decsim.config import TimingConfig, us
+from decsim.config import TimingConfig, microseconds_to_ticks
 from decsim.decoders.decoders import CodeRouter, PresetLatencyDecoder
 from decsim.qpu.syndrome_devices import SyndromeBitDevice
 from decsim.qpu.layouts import UniformLayout
@@ -201,7 +201,7 @@ def test_none_cadence_uses_the_run_level_fallback(model_type):
     card = model_type(round_us=None)
     completed = build_run(card, round_us=2.25)
     assert card.round_period_us() is None
-    assert completed.qpu.cycle_ticks == us(2.25)
+    assert completed.qpu.cycle_ticks == microseconds_to_ticks(2.25)
 
 
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))
@@ -213,7 +213,7 @@ def test_card_cadence_precedes_run_and_timing_fallbacks(model_type):
         round_us=2.25,
         timing=TimingConfig(round_us=3.5),
     )
-    assert completed.qpu.cycle_ticks == us(1.75)
+    assert completed.qpu.cycle_ticks == microseconds_to_ticks(1.75)
 
 
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BBCodeModel))

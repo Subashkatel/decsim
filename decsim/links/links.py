@@ -87,9 +87,6 @@ class LinkQuantityBasis(str, enum.Enum):
     PER_CHANNEL = "per_channel"
 
 
-# Identity matters for the settings records below: two edges share one
-# wire only when they hold the same LinkConfig object, so equality by
-# value is off (eq=False).
 @dataclasses.dataclass(frozen=True, eq=False)
 class LinkCapacityConfig:
     """Bandwidth of one channel: bits per microsecond, aggregate or per channel.
@@ -171,6 +168,8 @@ class PayloadSizeConfig:
         }
 
 
+# LinkConfig is compared by identity: one channel object may back several
+# paths, and resolve() tells channels apart by the object, not its values.
 @dataclasses.dataclass(frozen=True, eq=False)
 class LinkConfig:
     """One physical channel: a propagation latency and an optional bandwidth.
@@ -518,9 +517,8 @@ class Link:
         serializer_end_ticks = serializer_start_ticks + serialization_ticks
         queue_wait_ticks = serializer_start_ticks - now_ticks
         propagation_ticks = self._channel_config.propagation_latency_ticks
-        total_delay_ticks = (
-            queue_wait_ticks + serialization_ticks + propagation_ticks
-        )
+        channel_ticks = queue_wait_ticks + serialization_ticks
+        total_delay_ticks = channel_ticks + propagation_ticks
         return LinkReservation(
             payload_bits=payload_bits,
             send_ticks=now_ticks,
@@ -629,9 +627,8 @@ class LinkModel:
         self._counters_by_path = {
             path: TrafficCounters() for path in self._paths
         }
-        # The tick at which a channel's last setup finishes: setups
-        # serialize per channel, not per path (module docstring).
-        self._setup_free_ticks_by_channel: dict[Link, int] = {}
+        # Setups serialize per channel, not per path (module docstring).
+        self._setup_queue_by_channel: dict[Link, _SetupQueue] = {}
         self._transfers: list[SemanticTransferRecord] = []
         self._alias_by_channel: dict[Link, str] = {}
         for path in self._paths:
@@ -639,6 +636,7 @@ class LinkModel:
             if channel not in self._alias_by_channel:
                 alias = f"channel-{len(self._alias_by_channel)}"
                 self._alias_by_channel[channel] = alias
+                self._setup_queue_by_channel[channel] = _SetupQueue()
 
     @property
     def paths(self) -> tuple:
@@ -666,12 +664,12 @@ class LinkModel:
         selected_bits, selection, payload_source = _select_payload(
             path, edge, payload_bits
         )
-        setup_ticks = self._queue_setup(channel, edge, now_ticks)
+        setup_ticks = self._queue_setup(path, channel, edge, now_ticks)
         wire_ticks = now_ticks + setup_ticks
         reservation = channel.reserve(
             payload_bits=selected_bits, now_ticks=wire_ticks
         )
-        if setup_ticks:
+        if setup_ticks > 0:
             total_delay_ticks = reservation.total_delay_ticks + setup_ticks
             reservation = dataclasses.replace(
                 reservation,
@@ -708,20 +706,36 @@ class LinkModel:
         )
 
     def _queue_setup(
-        self, channel: Link, edge: LinkEdgeConfig, now_ticks: int
+        self,
+        path: LinkPath,
+        channel: Link,
+        edge: LinkEdgeConfig,
+        now_ticks: int,
     ) -> int:
         """Ticks from the request to the wire.
 
         The setup waits for the channel's previous setup to finish, then
-        costs the edge's overhead; the channel's setup queue moves.
+        costs the edge's overhead; the channel's setup queue moves. A
+        request earlier than the channel's previous request is a broken
+        contract, because the engine clock never runs backwards, and it
+        is refused before the queue moves.
         """
+        queue = self._setup_queue_by_channel[channel]
+        has_earlier_request = queue.last_request_ticks is not None
+        if has_earlier_request and now_ticks < queue.last_request_ticks:
+            raise RuntimeError(
+                f"{path.value} requested at tick {now_ticks}, before the "
+                f"channel's previous request at tick "
+                f"{queue.last_request_ticks}; the engine clock never runs "
+                f"backwards"
+            )
         overhead_ticks = 0
         if edge.transfer_overhead is not None:
             overhead_ticks = edge.transfer_overhead.overhead_ticks
-        setup_free_ticks = self._setup_free_ticks_by_channel.get(channel, 0)
-        setup_start_ticks = max(now_ticks, setup_free_ticks)
+        setup_start_ticks = max(now_ticks, queue.free_ticks)
         wire_ticks = setup_start_ticks + overhead_ticks
-        self._setup_free_ticks_by_channel[channel] = wire_ticks
+        queue.free_ticks = wire_ticks
+        queue.last_request_ticks = now_ticks
         return wire_ticks - now_ticks
 
     def _record_transfer(
@@ -771,6 +785,14 @@ class LinkModel:
             if member_channel is channel:
                 member_paths.append(path)
         return tuple(member_paths)
+
+
+@dataclasses.dataclass
+class _SetupQueue:
+    """One channel's setup queue: when it frees, and when it was last asked."""
+
+    free_ticks: int = 0
+    last_request_ticks: Optional[int] = None
 
 
 _RULE_BY_PATH = {
@@ -882,7 +904,8 @@ def _serialization_ticks(payload_bits, capacity: LinkCapacityConfig) -> int:
     rate_text = str(capacity.aggregate_bits_per_microsecond)
     rate = fractions.Fraction(rate_text)
     payload = fractions.Fraction(payload_bits)
-    exact_ticks = payload * config.TICKS_PER_MICROSECOND / rate
+    bits_times_ticks = payload * config.TICKS_PER_MICROSECOND
+    exact_ticks = bits_times_ticks / rate
     return math.ceil(exact_ticks)
 
 
@@ -947,7 +970,12 @@ def _has_scope(
         return has_rounds
     if scope is LinkAttributionScope.WINDOW:
         return has_window and has_rounds
-    return not has_window and not has_rounds
+    if scope is LinkAttributionScope.OPERATION_ONLY:
+        return not has_window and not has_rounds
+    raise RuntimeError(
+        f"the path rule names an attribution scope the links do not know: "
+        f"{scope!r}"
+    )
 
 
 def _check_relation(

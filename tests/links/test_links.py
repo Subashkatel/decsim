@@ -17,6 +17,7 @@ import math
 
 import pytest
 
+import decsim.links.links as links
 from decsim.links.links import (
     Link,
     LinkCapacityConfig,
@@ -24,7 +25,9 @@ from decsim.links.links import (
     LinkEdgeConfig,
     LinkModelConfig,
     LinkPath,
+    LinkPathRule,
     LinkQuantityBasis,
+    LinkRelationRule,
     PayloadSizeConfig,
     RequestTransferRelation,
     TrafficAttribution,
@@ -215,7 +218,7 @@ def test_a_free_edge_costs_nothing():
 
 
 def test_the_snapshot_counts_every_transfer_per_path_and_per_channel():
-    shared_channel = bounded_channel(1000.0, 0)
+    shared_channel = bounded_channel(1000.0, 300)
     qpu_edge = edge_on(shared_channel)
     buffer_edge = edge_on(shared_channel)
     shared_card = card(qc=qpu_edge, cwb=buffer_edge)
@@ -230,13 +233,27 @@ def test_the_snapshot_counts_every_transfer_per_path_and_per_channel():
     )
     snapshot = model.snapshot()
     counters_by_path = {edge.path: edge.counters for edge in snapshot.edges}
-    shared = snapshot.channels[0]
-    assert shared.member_paths == (LinkPath.QC, LinkPath.CWB)
+    channel_by_members = {
+        channel.member_paths: channel for channel in snapshot.channels
+    }
+    shared = channel_by_members[(LinkPath.QC, LinkPath.CWB)]
     assert shared.counters.transfer_count == 2
     assert shared.counters.known_payload_bits == 12
+    assert shared.counters.serialization_ticks == 12000
+    assert shared.counters.propagation_ticks == 600
     assert shared.counters.queue_wait_ticks == 8000
-    assert counters_by_path[LinkPath.QC].transfer_count == 1
-    assert counters_by_path[LinkPath.CWB].queue_wait_ticks == 8000
+    qpu_counters = counters_by_path[LinkPath.QC]
+    buffer_counters = counters_by_path[LinkPath.CWB]
+    assert qpu_counters.transfer_count == 1
+    assert qpu_counters.serialization_ticks == 8000
+    assert qpu_counters.propagation_ticks == 300
+    assert qpu_counters.queue_wait_ticks == 0
+    assert buffer_counters.transfer_count == 1
+    assert buffer_counters.serialization_ticks == 4000
+    assert buffer_counters.propagation_ticks == 300
+    assert buffer_counters.queue_wait_ticks == 8000
+    summed_over_paths = qpu_counters.plus(buffer_counters)
+    assert summed_over_paths == shared.counters
     assert len(snapshot.transfers) == 2
 
 
@@ -323,3 +340,93 @@ def test_a_default_payload_on_another_basis_than_the_capacity_is_refused():
     )
     with pytest.raises(ValueError, match="bases must match"):
         LinkEdgeConfig(channel, aggregate_payload, None)
+
+
+def test_serialization_uses_the_decimal_rate_written_on_the_card():
+    channel = bounded_channel(0.20846, 0)
+    link = Link(channel)
+    reservation = link.reserve(payload_bits=400_310_292, now_ticks=0)
+    assert reservation.serialization_ticks == 1_920_321_845_917_683
+
+
+def test_setup_serialization_and_propagation_add_up_on_one_bounded_channel():
+    channel = bounded_channel(1000.0, 300)
+    qpu_edge = edge_on(channel, overhead_ticks=5)
+    bounded_card = card(qc=qpu_edge)
+    model = bounded_card.resolve()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    first = model.reserve(
+        LinkPath.QC, payload_bits=8, now_ticks=0, attribution=first_round
+    )
+    second = model.reserve(
+        LinkPath.QC, payload_bits=8, now_ticks=0, attribution=second_round
+    )
+    assert first.payload_bits == 8
+    assert first.setup_ticks == 5
+    assert first.send_ticks == 5
+    assert first.queue_wait_ticks == 0
+    assert first.serializer_start_ticks == 5
+    assert first.serialization_ticks == 8000
+    assert first.serializer_end_ticks == 8005
+    assert first.propagation_ticks == 300
+    assert first.total_delay_ticks == 5 + 8000 + 300
+    assert first.physical_sequence == 0
+    assert second.payload_bits == 8
+    assert second.setup_ticks == 10
+    assert second.send_ticks == 10
+    assert second.queue_wait_ticks == 7995
+    assert second.serializer_start_ticks == 8005
+    assert second.serialization_ticks == 8000
+    assert second.serializer_end_ticks == 16005
+    assert second.propagation_ticks == 300
+    assert second.total_delay_ticks == 10 + 7995 + 8000 + 300
+    assert second.physical_sequence == 1
+
+
+def test_a_bounded_channel_does_not_queue_after_an_idle_gap():
+    channel = bounded_channel(1000.0, 0)
+    link = Link(channel)
+    first = link.reserve(payload_bits=8, now_ticks=10)
+    second = link.reserve(payload_bits=8, now_ticks=9000)
+    assert first.serializer_end_ticks == 8010
+    assert second.queue_wait_ticks == 0
+    assert second.serializer_start_ticks == 9000
+
+
+def test_a_request_earlier_than_the_channels_previous_request_is_refused():
+    shared_channel = unbounded_channel(0)
+    qpu_edge = edge_on(shared_channel)
+    buffer_edge = edge_on(shared_channel)
+    shared_card = card(qc=qpu_edge, cwb=buffer_edge)
+    model = shared_card.resolve()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    third_round = round_attribution(3)
+    model.reserve(
+        LinkPath.QC, payload_bits=8, now_ticks=10, attribution=first_round
+    )
+    same_tick = model.reserve(
+        LinkPath.CWB, payload_bits=8, now_ticks=10, attribution=second_round
+    )
+    assert same_tick.send_ticks == 10
+    with pytest.raises(RuntimeError, match="never runs backwards"):
+        model.reserve(
+            LinkPath.CWB, payload_bits=8, now_ticks=9, attribution=third_round
+        )
+
+
+def test_a_rule_with_an_unknown_scope_is_a_loud_stop(monkeypatch):
+    bogus_rule = LinkPathRule(
+        "no such scope", LinkRelationRule.NONE, required=True
+    )
+    rules = dict(links._RULE_BY_PATH)
+    rules[LinkPath.QC] = bogus_rule
+    monkeypatch.setattr(links, "_RULE_BY_PATH", rules)
+    complete_card = card()
+    model = complete_card.resolve()
+    attribution = round_attribution(1)
+    with pytest.raises(RuntimeError, match="no such scope"):
+        model.reserve(
+            LinkPath.QC, payload_bits=8, now_ticks=0, attribution=attribution
+        )

@@ -358,8 +358,9 @@ def test_a_physical_fault_kept_uncommitted_past_its_component_is_refused():
     # round-3 detector) of physical fault 167, which flips detectors 12,
     # 13 and 20; excluding round 4 keeps the fault itself uncommitted, so
     # the second window holds the fault without that component. The
-    # builders refuse this input at entry; the slicer's own contract
-    # check is reached only this way.
+    # builders refuse this input at entry, but the slicer is a public
+    # component (stim_device.window_model_for_stream calls slice_window
+    # directly), so its contract check is its own and is pinned here.
     slicer.slice_window(
         1, 1, 3, 4, is_last=False, fault_exclusion_ranges=((4, 4),)
     )

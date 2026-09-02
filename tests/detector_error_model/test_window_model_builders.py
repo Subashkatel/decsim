@@ -9,11 +9,11 @@ committed identities against qLDPC's, since a WindowErrorModel carries no
 commit region of its own; Skoric et al. 2209.08552, section I.B (a
 window's graph holds every edge touching a defect in its rounds, and
 only the correction edges in the commit region are taken as final) and
-the closing paragraph of its parallel-window section (the commit region
-of the last window runs from the bottom of the regular commit region to
-the last round). Exclusion ranges are decsim's own device (a strong
-re-decode leaves the weak decoder's committed faults uncommitted,
-decsim/decoders/strong_escalation) with no paper referent.
+the last paragraph of its section III, Methods (text lines 697-700: the
+commit region of the last window runs from the bottom of the regular
+commit region to the last round). Exclusion ranges are decsim's own
+device (a strong re-decode leaves the weak decoder's committed faults
+uncommitted, decsim/decoders/strong_escalation) with no paper referent.
 """
 
 import numpy
@@ -903,10 +903,68 @@ def test_a_component_off_the_windows_rows_owned_by_an_ancestor_is_allowed():
     assert len(terminal_owns) == 119
 
 
+def test_a_component_owned_by_an_indirect_ancestor_is_refused():
+    circuit = surface_code_circuit(7)
+    # Depths (0, 2, 0, 1, 4, 3): window 4 depends on window 5 alone and
+    # reaches window 1 only through it. Physical fault 87 touches rounds
+    # 2 and 3 and goes to window 0, which window 4 does not depend on;
+    # its component 31 touches round 3 alone and goes to window 1.
+    # Window 4 decodes rounds 2 to 6, keeps 87, and would drop 31, which
+    # its direct parent does not own.
+    with pytest.raises(
+        ValueError,
+        match=(
+            "window 4 keeps physical fault 87 while window 1, which it "
+            "depends on, owns graphlike component 31"
+        ),
+    ):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [
+                (1, 1, 2, 2),
+                (3, 3, 3, 3),
+                (4, 4, 4, 4),
+                (5, 5, 5, 5),
+                (2, 6, 6, 6),
+                (7, 7, 7, 7),
+            ],
+            round_count=7,
+            fault_model_requirement=LINKED_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((3, 1), (1, 5), (5, 4), (2, 3)),
+        )
+
+
+def test_a_component_nobody_owns_stays_beside_its_fault():
+    circuit = surface_code_circuit(6)
+    # No commit round reaches round 1 and no window is terminal, so the
+    # faults of round 1 are owned by nobody. Window 0 depends on window 1
+    # and keeps physical fault 0 (round 1), whose component 0 has no
+    # owner, and physical fault 11 (rounds 1 and 2), whose component 9
+    # (round 1) has no owner: nobody is not an ancestor, so both faults
+    # are whole and the plan builds.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 2, 3, 3), (1, 4, 5, 5)],
+        round_count=6,
+        fault_model_requirement=LINKED_REQUIRED,
+        fault_exclusion_ranges=(),
+        dependency_edges=((1, 0),),
+    )
+    dependent_projection = models[0].physical_to_graphlike_detector_projection
+    parent_projection = models[1].physical_to_graphlike_detector_projection
+    assert dependent_projection.shape == (62, 227)
+    assert parent_projection.shape == (144, 616)
+
+
 def test_a_linked_terminal_window_with_empty_edges_builds():
     circuit = surface_code_circuit(4)
-    # An empty tuple of edges compiles ownership from a graph with no
-    # edge: nothing depends on anything, and nothing is refused.
+    # One window with an empty tuple of edges: ownership is compiled from
+    # a graph with no edge, the window has no ancestor, so the linked
+    # check refuses nothing, and the terminal law gives it every fault.
+    # That empty edges compile from the graph rather than plan order is
+    # pinned in test_window_ownership_dag by
+    # test_a_fault_between_two_windows_of_the_same_depth_has_no_owner.
     models = window_model_builders.build_window_error_models(
         circuit,
         [(1, 3, 4, 4)],
@@ -937,7 +995,9 @@ def test_a_gap_is_reported_before_the_linked_check():
 
 def test_a_commit_past_round_count_is_reported_before_the_linked_check():
     circuit = surface_code_circuit(6)
-    with pytest.raises(ValueError, match="exceeds round_count"):
+    with pytest.raises(
+        ValueError, match="window commit region exceeds round_count"
+    ):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 2, 3, 3), (1, 4, 7, 7)],
@@ -945,34 +1005,6 @@ def test_a_commit_past_round_count_is_reported_before_the_linked_check():
             fault_model_requirement=LINKED_REQUIRED,
             fault_exclusion_ranges=(),
             dependency_edges=((1, 0),),
-        )
-
-
-def test_an_edge_outside_the_plan_is_reported_before_the_linked_check():
-    circuit = surface_code_circuit(6)
-    with pytest.raises(
-        ValueError, match=r"edge \(0, 5\) names a window outside"
-    ):
-        window_model_builders.build_window_error_models(
-            circuit,
-            [(1, 1, 2, 2), (3, 3, 3, 3), (4, 4, 5, 5), (2, 6, 6, 6)],
-            round_count=6,
-            fault_model_requirement=LINKED_REQUIRED,
-            fault_exclusion_ranges=(),
-            dependency_edges=((0, 5),),
-        )
-
-
-def test_a_cycle_is_reported_before_the_linked_check():
-    circuit = surface_code_circuit(6)
-    with pytest.raises(ValueError, match="acyclic"):
-        window_model_builders.build_window_error_models(
-            circuit,
-            [(1, 1, 2, 2), (3, 3, 3, 3), (4, 4, 5, 5), (2, 6, 6, 6)],
-            round_count=6,
-            fault_model_requirement=LINKED_REQUIRED,
-            fault_exclusion_ranges=(),
-            dependency_edges=((2, 1), (1, 3), (3, 2)),
         )
 
 

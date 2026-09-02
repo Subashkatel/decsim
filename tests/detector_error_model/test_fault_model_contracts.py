@@ -74,7 +74,7 @@ def test_frozen_sparse_columns_never_freezes_the_callers_matrix():
     # frozen matrix from the caller's.
     original = scipy.sparse.csc_matrix([[1, 0], [0, 1]], dtype=numpy.uint8)
     frozen = fault_model_contracts.frozen_sparse_columns(original)
-    assert frozen is not original
+    original.data[0] = 0
     assert original.data.flags.writeable is True
     assert frozen.data.flags.writeable is False
     assert frozen.dtype == numpy.uint8
@@ -113,7 +113,9 @@ def test_a_window_hands_out_the_representation_it_holds():
         graphlike_faults=placed,
         physical_faults=None,
     )
-    assert window.require_faults(GRAPHLIKE) is placed
+    faults = window.require_faults(GRAPHLIKE)
+    assert faults.representation is GRAPHLIKE
+    assert faults.source_fault_ids == (4, 9)
 
 
 def test_a_window_refuses_a_representation_it_does_not_hold():

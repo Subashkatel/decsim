@@ -169,9 +169,10 @@ class StreamingDetectorFormer:
         self.packets[round_index] = packet
         newest_stale_round = round_index - self.kept_packet_count
         self._forget_through(newest_stale_round)
+        recipes = self.table.detectors_of_round(round_index)
         events = [
             (recipe.detector_index, self._form_parity(recipe))
-            for recipe in self.table.detectors_of_round(round_index)
+            for recipe in recipes
         ]
         observables = None
         if round_index == self.table.round_count:
@@ -285,7 +286,7 @@ class _MeasurementRoundReader:
         for instruction in _flat_instructions(circuit):
             self._note_instruction(instruction)
         self._fold_trailing_measurements()
-        if _decreases(self.rounds):
+        if _has_a_backward_step(self.rounds):
             raise ValueError(
                 "measurement blocks are not in round order; declare "
                 "measurement_rounds"
@@ -333,7 +334,8 @@ class _MeasurementRoundReader:
         # Only Stim's single post-readout layer may fold; anything more
         # means the declared round count does not fit the circuit.
         self.folded_group_count += 1
-        is_too_far = announced > self.round_count + 1
+        last_foldable_round = self.round_count + 1
+        is_too_far = announced > last_foldable_round
         if is_too_far or self.folded_group_count > 1:
             raise ValueError(
                 f"circuit announces round {announced}, "
@@ -383,7 +385,7 @@ def _flat_instructions(circuit):
             yield from _flat_instructions(body)
 
 
-def _decreases(values: list[int]) -> bool:
+def _has_a_backward_step(values: list[int]) -> bool:
     return any(later < earlier for earlier, later in zip(values, values[1:]))
 
 
@@ -413,7 +415,7 @@ def _round_of_each_measurement(
         raise ValueError(
             "declared measurement rounds must lie in 1..round_count"
         )
-    if _decreases(rounds):
+    if _has_a_backward_step(rounds):
         raise ValueError("declared measurement rounds must be non-decreasing")
     return rounds, None
 

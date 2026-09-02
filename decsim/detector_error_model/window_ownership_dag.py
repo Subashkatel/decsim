@@ -11,11 +11,11 @@ two windows of the same depth has no causal owner and is refused. The
 terminal window, whose commit rounds reach the last round, also owns
 every fault its rows see that no commit round of the plan reaches, the
 same law the slicer applies when it advances ownership itself (Skoric et
-al. 2209.08552, the closing paragraph of the parallel-window section:
-the commit region of the last window runs from the bottom of the regular
-commit region to the last round). An exclusion range is decsim's own
-device with no paper referent: a strong re-decode leaves the faults the
-weak decoder already committed uncommitted
+al. 2209.08552, the last paragraph of section III, Methods (text lines
+697-700): the commit region of the last window runs from the bottom of
+the regular commit region to the last round). An exclusion range is
+decsim's own device with no paper referent: a strong re-decode leaves
+the faults the weak decoder already committed uncommitted
 (decsim/decoders/strong_escalation). A fault a range keeps uncommitted
 has no owner at all, and a fault nobody has committed stays in the
 decoding graph of every window that sees it, because only that window
@@ -23,7 +23,7 @@ can explain a defect the fault causes. The module also answers, for each
 window, which faults its ancestors own, so the slicer can leave those
 out of the window's columns, and it refuses a linked plan in which a
 window would keep a physical fault while an ancestor owns one of its
-graphlike components.
+graphlike components on the window's rows.
 """
 
 from collections.abc import Container, Sequence
@@ -36,9 +36,6 @@ from decsim.detector_error_model import (
     window_placement,
     window_slicer,
 )
-
-GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
-PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL
 
 
 def dependency_depths(
@@ -160,22 +157,25 @@ def check_every_kept_physical_fault_keeps_its_components(
     ],
     ancestors: tuple[frozenset[int], ...],
 ) -> None:
-    """A window keeps every graphlike component of a physical fault it keeps.
+    """A kept physical fault keeps every component on the window's rows.
 
-    Ownership advances per representation, and a component's candidate
-    owners are a subset of its physical parent's, so the shallowest-window
-    rule can give the parent and the component to windows on different
-    branches. A window then keeps the parent, which no ancestor owns,
-    while an ancestor owns a component that touches the window's rows,
-    and the window's physical columns no longer add up to its graphlike
-    ones (window_placement.local_link_projection). Raises ValueError
-    naming the window, the fault, the component and the ancestor. A plan
-    without a physical-to-graphlike link has nothing to check.
+    A component's candidate owners are a subset of its physical parent's,
+    so the shallowest-window rule can give the parent and the component
+    to windows on different branches: a window keeps the parent while an
+    ancestor owns a component on the window's rows. This is the law of
+    the projection (window_placement.local_link_projection) when the
+    components of one fault share no detector, which Stim's decomposition
+    guarantees; a hand-written model whose components share a detector
+    may be refused here where the projection would still balance. Raises
+    ValueError naming the window, the fault, the component and the
+    ancestor; a plan without a link has nothing to check.
     """
     if slicer.catalog_link is None:
         return
-    owner_of_physical_fault = _owner_by_fault(ownership, PHYSICAL)
-    owner_of_component = _owner_by_fault(ownership, GRAPHLIKE)
+    physical = fault_model_contracts.FaultRepresentation.PHYSICAL
+    graphlike = fault_model_contracts.FaultRepresentation.GRAPHLIKE
+    owner_of_physical_fault = _owner_by_fault(ownership, physical)
+    owner_of_component = _owner_by_fault(ownership, graphlike)
     components_by_physical_fault = _components_by_physical_fault(
         slicer.catalog_link
     )
@@ -370,8 +370,9 @@ def _components_by_physical_fault(
     components = []
     physical_fault_count = catalog_link.shape[1]
     for physical_fault in range(physical_fault_count):
+        next_physical_fault = physical_fault + 1
         first_entry = column_starts[physical_fault]
-        after_last_entry = column_starts[physical_fault + 1]
+        after_last_entry = column_starts[next_physical_fault]
         rows = component_rows[first_entry:after_last_entry]
         components.append(tuple(sorted(rows)))
     return tuple(components)
@@ -387,8 +388,12 @@ def _check_a_window_keeps_whole_physical_faults(
     components_by_physical_fault: tuple[tuple[int, ...], ...],
 ) -> None:
     """Refuse the first kept physical fault whose component an ancestor owns."""
-    seen_physical_faults = _faults_seen_by_the_window(slicer, entry, PHYSICAL)
-    seen_components = _faults_seen_by_the_window(slicer, entry, GRAPHLIKE)
+    seen_physical_faults = _faults_seen_by_the_window(
+        slicer, entry, fault_model_contracts.FaultRepresentation.PHYSICAL
+    )
+    seen_components = _faults_seen_by_the_window(
+        slicer, entry, fault_model_contracts.FaultRepresentation.GRAPHLIKE
+    )
     for physical_fault in sorted(seen_physical_faults):
         physical_owner = owner_of_physical_fault.get(physical_fault)
         if physical_owner in ancestor_indices:

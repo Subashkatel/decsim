@@ -1037,7 +1037,7 @@ class WindowManager:
         if self.pauli_frame is None:
             self._commit_decode_done(job, res)
             return
-        self.pauli_frame.commit_weak_correction(
+        self.pauli_frame.commit_correction(
             window_key=(job.op_id, job.window_id),
             logical_observables=res.logical_observables,
             request_key=job.request_key,
@@ -1177,7 +1177,7 @@ class WindowManager:
         # the strong result is this window's FINAL correction: it folds into
         # the frame like any final result (the provisional weak bypassed it),
         # and the priced frame write gates the rest of the commit
-        self.pauli_frame.commit_weak_correction(
+        self.pauli_frame.commit_correction(
             window_key=key,
             logical_observables=result.logical_observables,
             request_key=completion.request_key,
@@ -1282,7 +1282,7 @@ class WindowManager:
             self.window_count[op.id] - 1,
             logical_observables=logical_observables,
         )
-        self.conditional_release.integrate(op, result)
+        self.conditional_release.release_waiters(op, result)
 
     def release_stream_segments_at_commit(self, stream_id,
                                           committed_round_count: int) -> None:
@@ -1315,7 +1315,7 @@ class WindowManager:
             else:
                 self.op_results[operation.id] = logical_observables
             self.segment_results_sent.add(operation.id)
-            self.conditional_release.integrate(
+            self.conditional_release.release_waiters(
                 operation,
                 DecodeResult(
                     operation.id,

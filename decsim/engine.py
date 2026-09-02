@@ -1,94 +1,104 @@
-"""Small discrete-event simulation engine: a clock plus a priority queue of
-events. Simulated time never moves backwards: a delay is nonnegative and the
-next event is never behind the clock. Metrics observe once before the first
-event and after every event."""
+"""The simulation clock and the queue of actions scheduled on it.
 
+Time is a count of ticks; one microsecond is one million ticks
+(config.TICKS_PER_US). Time never runs backwards. When two actions are due
+at the same tick, the one with the lower priority number runs first; when
+they share a priority, the one scheduled first runs first. Metrics observe
+the run once before the first action and again after every action.
+"""
+
+import dataclasses
 import heapq
 import itertools
-from dataclasses import dataclass, field
 from typing import Callable
 
-from .config import fmt
+from decsim.config import fmt
+
+Action = Callable[[], None]
 
 
-@dataclass(order=True)
+@dataclasses.dataclass(order=True)
 class Event:
-    """One scheduled action in the discrete-event queue."""
+    """One action waiting in the queue, ordered by time, priority, arrival."""
 
     time: int
     priority: int
-    seq: int
-    action: Callable[[], None] = field(compare=False)
-    label: str = field(compare=False, default="")
+    sequence_number: int
+    action: Action = dataclasses.field(compare=False)
+    label: str = dataclasses.field(compare=False, default="")
 
 
 class Engine:
+    """Runs scheduled actions in time order and keeps the run's log."""
+
     def __init__(self, verbose: bool = True, io_trace: bool = False):
-        """Create an empty simulator with the clock at zero."""
         self.now: int = 0
-        self._event_queue: list[Event] = []
-        self._seq = itertools.count()
         self.verbose = verbose
         self.io_trace = io_trace
         self.log_lines: list[str] = []
         self.metrics: list = []
+        self._event_queue: list[Event] = []
+        self._sequence_numbers = itertools.count()
 
-    def schedule(self, delay: int, action: Callable[[], None],
-                 label: str = "", priority: int = 0) -> None:
-        """Schedule an action `delay` ticks from now.
-
-        Same-tick events fire lowest priority first, then in insertion
-        order (the seq counter breaks ties)."""
+    def schedule(self, delay: int, action: Action, label: str = "",
+                 priority: int = 0) -> None:
+        """Queue an action to run `delay` ticks from now."""
         if delay < 0:
             raise ValueError(
-                f"Cannot schedule an event in the past delay={delay} "
-                f"(now={self.now})")
-        event = Event(self.now + delay, priority, next(self._seq), action, label)
+                f"cannot schedule an action in the past: delay {delay} "
+                f"at tick {self.now}")
+        due_time = self.now + delay
+        sequence_number = next(self._sequence_numbers)
+        event = Event(due_time, priority, sequence_number, action, label)
         heapq.heappush(self._event_queue, event)
 
     @property
     def idle(self) -> bool:
-        """No event is scheduled."""
+        """True when nothing is scheduled."""
         return not self._event_queue
 
-    def log(self, who: str, msg: str) -> None:
-        """Store one timestamped log line and print it when verbose."""
-        line = f"[{fmt(self.now)}] {who}: {msg}"
+    def log(self, who: str, message: str) -> None:
+        """Keep one timestamped line, and print it when verbose."""
+        line = f"[{fmt(self.now)}] {who}: {message}"
         self.log_lines.append(line)
         if self.verbose:
             print(line)
 
     def log_io(self, who: str, describe: Callable[[], str]) -> None:
-        """Component I/O narration: what a component received, holds, or
-        emitted. `describe` is called only when io_trace is on, so a store
-        never walks its contents for a line nobody records."""
-        if self.io_trace:
-            self.log(who, describe())
+        """Log what a component received, holds, or emitted.
+
+        `describe` runs only when the I/O trace is on, so a store never
+        walks its contents for a line nobody records.
+        """
+        if not self.io_trace:
+            return
+        message = describe()
+        self.log(who, message)
 
     def add_metric(self, metric):
-        """Register one observer under a unique name, sampling it first."""
-        if any(existing.name == metric.name for existing in self.metrics):
-            raise ValueError(f"metric name {metric.name!r} is already registered")
+        """Register a metric under a name no other metric uses."""
+        for existing in self.metrics:
+            if existing.name == metric.name:
+                raise ValueError(
+                    f"metric name {metric.name!r} is already registered")
         metric.observe(self)
         self.metrics.append(metric)
         return metric
 
-    def _observe_metrics(self) -> None:
-        for metric in tuple(self.metrics):
-            metric.observe(self)
-
     def metric_results(self) -> dict:
-        """Return final metric values keyed by metric name."""
+        """Final value of every metric, keyed by metric name."""
         return {metric.name: metric.result() for metric in self.metrics}
 
     def run(self) -> None:
-        """Run until the event queue is empty."""
+        """Run every scheduled action until the queue is empty."""
         self._observe_metrics()
         while self._event_queue:
             event = heapq.heappop(self._event_queue)
-            if event.time < self.now:
-                raise ValueError(f"Event scheduled in the past: {event} "
-                                 f"(now={self.now})")
             self.now = event.time
             event.action()
             self._observe_metrics()
+
+    def _observe_metrics(self) -> None:
+        metrics_now = tuple(self.metrics)
+        for metric in metrics_now:
+            metric.observe(self)

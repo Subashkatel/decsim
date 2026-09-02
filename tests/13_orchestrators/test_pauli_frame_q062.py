@@ -47,7 +47,7 @@ def request(run_sequence=0, *, tier="weak", operation_id=0, window_id=0):
 
 
 def accept(frame, window_key, observables, *, run_sequence=0, callback=lambda: None):
-    frame.commit_weak_correction(
+    frame.commit_correction(
         window_key=window_key,
         logical_observables=observables,
         request_key=request(run_sequence),
@@ -63,11 +63,11 @@ def test_wide_elementwise_xor_cancels_without_a_word_size_limit():
 
     accept(frame, (41, 0), left)
     accept(frame, (41, 1), right)
-    assert frame.frame_for(41) == tuple(a ^ b for a, b in zip(left, right))
+    assert frame.frame_for_stream(41) == tuple(a ^ b for a, b in zip(left, right))
 
     accept(frame, (41, 2), left)
     accept(frame, (41, 3), right)
-    assert frame.frame_for(41) == (0,) * 130
+    assert frame.frame_for_stream(41) == (0,) * 130
 
 
 def test_none_dominates_one_stream_without_affecting_other_streams():
@@ -76,9 +76,9 @@ def test_none_dominates_one_stream_without_affecting_other_streams():
     accept(frame, (8, 1), None)
     accept(frame, (9, 0), (0, 1, 1))
 
-    assert frame.frame_for(8) is None
-    assert frame.frame_for(9) == (0, 1, 1)
-    assert frame.frame_for(404) == ()
+    assert frame.frame_for_stream(8) is None
+    assert frame.frame_for_stream(9) == (0, 1, 1)
+    assert frame.frame_for_stream(404) == ()
 
 
 def test_changed_observable_arity_is_rejected_when_the_stream_is_read():
@@ -86,8 +86,8 @@ def test_changed_observable_arity_is_rejected_when_the_stream_is_read():
     accept(frame, (5, 0), (1, 0))
     accept(frame, (5, 1), (0, 1, 0))
 
-    with pytest.raises(RuntimeError, match="changed observable arity"):
-        frame.frame_for(5)
+    with pytest.raises(RuntimeError, match="changed its number of observables"):
+        frame.frame_for_stream(5)
 
 
 def test_a_second_correction_for_a_window_is_refused_loudly():
@@ -103,13 +103,13 @@ def test_a_second_correction_for_a_window_is_refused_loudly():
 
     accept(frame, (3, 7), [1, 0], run_sequence=2,
            callback=lambda: continuations.append(("accepted", engine.now)))
-    with pytest.raises(RuntimeError, match="already accepted"):
+    with pytest.raises(RuntimeError, match="already has a"):
         accept(frame, (3, 7), [0, 1], run_sequence=3,
                callback=lambda: continuations.append(("pending duplicate", engine.now)))
 
     engine.run_all()
     assert continuations == [("accepted", 28)]
-    with pytest.raises(RuntimeError, match="already accepted"):
+    with pytest.raises(RuntimeError, match="already has a"):
         accept(frame, (3, 7), [1, 1], run_sequence=4,
                callback=lambda: continuations.append(("installed duplicate", engine.now)))
     settled = frame.snapshot()
@@ -125,7 +125,7 @@ def test_positive_latency_installs_then_continues_exactly_once():
 
     accept(frame, (12, 4), (1, 1), callback=lambda: calls.append(engine.now))
     assert calls == []
-    assert frame.frame_for(12) == ()
+    assert frame.frame_for_stream(12) == ()
     assert frame.snapshot().pending_write_count == 1
     assert [(ticks, label) for ticks, _, label in engine.scheduled] == [
         (109, "pauli frame commit (12, 4)")
@@ -133,7 +133,7 @@ def test_positive_latency_installs_then_continues_exactly_once():
 
     engine.run_all()
     assert calls == [109]
-    assert frame.frame_for(12) == (1, 1)
+    assert frame.frame_for_stream(12) == (1, 1)
     assert frame.snapshot().pending_write_count == 0
 
 
@@ -146,7 +146,7 @@ def test_explicit_zero_installs_inline_and_schedules_nothing():
 
     assert calls == [23]
     assert engine.scheduled == []
-    assert frame.frame_for(6) == (1,)
+    assert frame.frame_for_stream(6) == (1,)
     snapshot = frame.snapshot()
     assert snapshot.records[0].accepted_ticks == 23
     assert snapshot.records[0].committed_ticks == 23
@@ -180,11 +180,11 @@ def test_configuration_rejects_implicit_or_disappearing_costs():
             PauliFrameConfig(commit_us=invalid)
     with pytest.raises(ValueError, match="rounds to zero ticks"):
         PauliFrameConfig(commit_us=1e-12)
-    with pytest.raises(ValueError, match="requires zero_commit_cost_justification"):
+    with pytest.raises(ValueError, match="needs zero_commit_cost_justification"):
         PauliFrameConfig(commit_us=0.0)
-    with pytest.raises(ValueError, match="requires zero_commit_cost_justification"):
+    with pytest.raises(ValueError, match="needs zero_commit_cost_justification"):
         PauliFrameConfig(commit_us=0.0, zero_commit_cost_justification="")
-    with pytest.raises(ValueError, match="only valid for zero"):
+    with pytest.raises(ValueError, match="only goes with a zero"):
         PauliFrameConfig(commit_us=1.0, zero_commit_cost_justification="free")
 
     zero = PauliFrameConfig(
@@ -232,7 +232,7 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     sink_calls = []
     weak_commits = []
     sink = SimpleNamespace(
-        commit_weak_correction=lambda **kwargs: sink_calls.append(kwargs)
+        commit_correction=lambda **kwargs: sink_calls.append(kwargs)
     )
     final_engine = ManualEngine(now=10)
     manager = object.__new__(WindowManager)
@@ -263,7 +263,7 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     provisional = object.__new__(WindowManager)
     provisional.engine = engine
     provisional.pauli_frame = SimpleNamespace(
-        commit_weak_correction=lambda **kwargs: pytest.fail("provisional weak reached sink")
+        commit_correction=lambda **kwargs: pytest.fail("provisional weak reached sink")
     )
     provisional.windows = {(4, 1): SimpleNamespace(t_done=None)}
     provisional._commit_decode_done = lambda actual_job, actual_result: weak_commits.append(
@@ -279,7 +279,7 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     strong = object.__new__(WindowManager)
     strong.engine = engine
     strong.pauli_frame = SimpleNamespace(
-        commit_weak_correction=lambda **kwargs: pytest.fail(
+        commit_correction=lambda **kwargs: pytest.fail(
             "the DO delivery leg must not touch the frame; the fold happens "
             "at the strong commit")
     )
@@ -299,7 +299,7 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
 def test_runtime_satisfies_the_declared_keyword_only_correction_seam():
     frame = RuntimePauliFrame(ManualEngine(), commit_ticks=0)
     assert isinstance(frame, PauliFramePort)
-    parameters = inspect.signature(PauliFramePort.commit_weak_correction).parameters
+    parameters = inspect.signature(PauliFramePort.commit_correction).parameters
     assert tuple(parameters) == (
         "self", "window_key", "logical_observables", "request_key", "on_committed"
     )
@@ -321,7 +321,7 @@ def test_frame_owner_is_a_named_seed_root_and_snapshot_is_non_destructive():
     accept(frame, (2, 0), (1, 0))
     before = frame.snapshot()
     assert frame.snapshot() == before
-    assert frame.frame_for(2) == (1, 0)
+    assert frame.frame_for_stream(2) == (1, 0)
     assert frame.snapshot() == before
 
 
@@ -383,7 +383,7 @@ def test_escalated_strong_final_folds_into_the_frame_and_gates_the_commit():
     manager.engine = engine
     frame_calls = []
     manager.pauli_frame = SimpleNamespace(
-        commit_weak_correction=lambda **kwargs: frame_calls.append(kwargs)
+        commit_correction=lambda **kwargs: frame_calls.append(kwargs)
     )
     manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
     manager._ops = {4: SimpleNamespace(id=4, name="logical")}

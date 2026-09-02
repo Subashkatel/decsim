@@ -3,10 +3,11 @@
 Sources: Stim's generated ``surface_code:rotated_memory_z`` circuit
 (src/stim/gen/gen_surface_code.cc) for the rotated surface code: a
 distance-d patch has d*d data qubits and d*d - 1 measure qubits, each
-measure qubit read out once per round; Bravyi et al. 2308.07915 for the
-[[144, 12, 12]] bivariate-bicycle code, whose round measures n/2 X checks
-and n/2 Z checks; Skoric 2209.08552 and Tan PRX Quantum 4, 040344 for the
-(d, d) window floor.
+measure qubit read out once per round; Bravyi et al. 2308.07915 (not on
+disk; from the abstract) for the [[144, 12, 12]] bivariate-bicycle code
+on 144 data and 144 check qubits, so n/2 X checks and n/2 Z checks per
+round; Skoric 2209.08552 and Tan PRX Quantum 4, 040344 for the (d, d)
+window floor.
 """
 
 import pytest
@@ -81,17 +82,59 @@ def test_the_surface_card_is_named_by_its_distance():
     assert card.name == "rotated surface code (d=5)"
 
 
-def test_the_gross_code_card_reads_out_all_144_checks_per_round():
+def test_the_bicycle_card_is_the_gross_code_by_default():
     card = code_geometry.BivariateBicycleCodeModel()
     assert (card.qubit_count, card.logical_qubit_count, card.distance) == (
         144,
         12,
         12,
     )
+
+
+def test_the_gross_code_card_reads_out_all_144_checks_per_round():
+    card = code_geometry.BivariateBicycleCodeModel()
     assert card.syndrome_bits_per_round(1) == 144
+
+
+def test_the_gross_code_card_has_144_decoding_graph_nodes_per_round():
+    card = code_geometry.BivariateBicycleCodeModel()
     assert card.spatial_nodes(1) == 144
+
+
+def test_the_bicycle_card_has_no_window_floor():
+    card = code_geometry.BivariateBicycleCodeModel()
     assert card.buffering_floor() == (0, 0)
+
+
+def test_the_bicycle_card_is_named_by_its_parameters():
+    card = code_geometry.BivariateBicycleCodeModel()
     assert card.name == "bivariate-bicycle code [[144,12,12]]"
+
+
+def test_the_bicycle_card_commits_d_rounds_and_buffers_none_by_default():
+    card = code_geometry.BivariateBicycleCodeModel()
+    assert card.commit_rounds() == 12
+    assert card.buffer_rounds() == 0
+
+
+def test_the_surface_card_commit_override_replaces_d():
+    card = code_geometry.SurfaceCodeModel(distance=5, commit_rounds_override=2)
+    assert card.commit_rounds() == 2
+
+
+def test_the_surface_card_buffer_override_replaces_d():
+    card = code_geometry.SurfaceCodeModel(distance=5, buffer_rounds_override=1)
+    assert card.buffer_rounds() == 1
+
+
+def test_the_bicycle_card_commit_override_replaces_d():
+    card = code_geometry.BivariateBicycleCodeModel(commit_rounds_override=4)
+    assert card.commit_rounds() == 4
+
+
+def test_the_bicycle_card_buffer_override_replaces_zero():
+    card = code_geometry.BivariateBicycleCodeModel(buffer_rounds_override=3)
+    assert card.buffer_rounds() == 3
 
 
 def test_a_card_cadence_is_kept_as_a_float():
@@ -99,6 +142,30 @@ def test_a_card_cadence_is_kept_as_a_float():
     period = card.round_period_us()
     assert period == 1.0
     assert type(period) is float
+
+
+def test_more_logical_than_physical_qubits_is_refused_for_a_bicycle_code():
+    with pytest.raises(ValueError, match="logical_qubit_count must not exceed"):
+        code_geometry.BivariateBicycleCodeModel(
+            qubit_count=24, logical_qubit_count=30, distance=6
+        )
+
+
+def test_a_distance_above_the_qubit_count_is_refused_for_a_bicycle_code():
+    with pytest.raises(ValueError, match="distance must not exceed"):
+        code_geometry.BivariateBicycleCodeModel(
+            qubit_count=24, logical_qubit_count=4, distance=30
+        )
+
+
+def test_a_bicycle_code_without_qubits_is_refused():
+    with pytest.raises(ValueError, match="qubit_count must be positive"):
+        code_geometry.BivariateBicycleCodeModel(qubit_count=0)
+
+
+def test_a_negative_buffer_override_is_refused_for_a_bicycle_code():
+    with pytest.raises(ValueError, match="must be nonnegative"):
+        code_geometry.BivariateBicycleCodeModel(buffer_rounds_override=-1)
 
 
 def test_an_odd_qubit_count_is_refused_for_a_bicycle_code():

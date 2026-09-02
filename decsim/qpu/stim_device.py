@@ -24,6 +24,7 @@ from collections.abc import Sequence
 from typing import Any, Optional
 
 import numpy
+import stim
 
 import decsim.detector_error_model.detector_chronology as detector_chronology
 import decsim.detector_error_model.detector_formation as detector_formation
@@ -131,11 +132,15 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             key, operation.circuit, source_round_count
         )
         is_stream = operation.stream_id is not None
-        if is_stream and operation.stream_offset:
-            if key not in self._shot_by_key:
-                raise KeyError(key)
-            self._sample_key_by_operation_id[operation.id] = key
+        is_later_segment = is_stream and operation.stream_offset > 0
+        if is_later_segment:
+            self._replay_stream_shot(operation, key)
             return
+        if key in self._shot_by_key:
+            raise RuntimeError(
+                f"{key!r} has already begun; beginning it again would replace "
+                "the shot its rounds are read from"
+            )
         self._sample_shot(key, operation, source_round_count, detector_rounds)
 
     def form_round(
@@ -273,7 +278,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             return []
         key = _sample_key_of(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
-        model_plan = [_window_span(window, round_count) for window in windows]
+        model_plan = [_window_span(window) for window in windows]
         index_by_key = {
             window.key: index for index, window in enumerate(windows)
         }
@@ -328,7 +333,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             return None
         key = _sample_key_of(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
-        span = _window_span(window, round_count)
+        span = _window_span(window)
         return window_models.build_single_window_error_model(
             operation.circuit,
             span,
@@ -352,7 +357,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             return None
         key = _sample_key_of(operation)
         detector_rounds = self._bind_source(key, operation.circuit, round_count)
-        span = _window_span(window, round_count)
+        span = _window_span(window)
         return window_models.build_single_window_error_model_with_exclusions(
             operation.circuit,
             span,
@@ -363,7 +368,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         )
 
     def _prepare_run_seed_state(self, effective_seed):
-        return (effective_seed, {}, {}, {}, {})
+        seed = _validated_seed(effective_seed)
+        return (seed, {}, {}, {}, {})
 
     def _install_run_seed_state(self, prepared_state) -> None:
         (
@@ -390,10 +396,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         digest = hasher.digest()
         return int.from_bytes(digest, "big")
 
-    def _sampler_for(self, key, circuit):
-        shot = self._shot_by_key.get(key)
-        if shot is not None:
-            return shot.sampler
+    def _sampler_for(
+        self, key, circuit: stim.Circuit
+    ) -> stim.CompiledMeasurementSampler:
         if self._seed is None:
             return circuit.compile_sampler()
         sample_seed = self._sample_seed_for(key)
@@ -426,13 +431,22 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             table, packets
         )
         former = detector_formation.StreamingDetectorFormer(table)
-        shot = _SampledShot(
-            sampler, packets, table, former, formed_events, formed_truth
-        )
+        shot = _SampledShot(packets, table, former, formed_events, formed_truth)
         self._shot_by_key[key] = shot
         self._sample_key_by_operation_id[operation.id] = key
 
-    def _measurement_row(self, sampler) -> tuple[int, ...]:
+    def _replay_stream_shot(self, operation: message.Operation, key) -> None:
+        """A later segment reads its stream's shot under its own id."""
+        if key not in self._shot_by_key:
+            raise RuntimeError(
+                f"segment {operation.id!r} of stream {key!r} begun before the "
+                "stream's head"
+            )
+        self._sample_key_by_operation_id[operation.id] = key
+
+    def _measurement_row(
+        self, sampler: stim.CompiledMeasurementSampler
+    ) -> tuple[int, ...]:
         """One shot of raw measurement bits in circuit measurement order."""
         shots = sampler.sample(shots=1)
         row = shots[0]
@@ -490,6 +504,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             raise ValueError(
                 "finalizer circuit differs from its source binding"
             )
+        if operation.stream_offset is None:
+            raise ValueError("a stream finalizer must carry its stream_offset")
         final_round = operation.stream_offset + 1
         if final_round != source_round_count:
             raise ValueError("finalizer is not at the final source round")
@@ -501,7 +517,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             raise ValueError("terminal finalizer has no folded readout bits")
         return table
 
-    def _bind_source(self, key, circuit, source_round_count: int) -> dict:
+    def _bind_source(
+        self, key, circuit: stim.Circuit, source_round_count: int
+    ) -> dict:
         """Bind one finite circuit, duration and detector chronology per key."""
         detector_rounds_override = self._detector_rounds_override.get(key)
         resolved = detector_chronology.resolve_detector_rounds(
@@ -534,14 +552,28 @@ class RecordedStimDevice(StimDevice):
     exactly as for sampled data.
     """
 
-    def __init__(self, measurements: numpy.ndarray, shot: int, **settings: Any):
-        StimDevice.__init__(self, **settings)
+    def __init__(
+        self,
+        measurements: numpy.ndarray,
+        shot: int,
+        seed: Optional[numbers.Integral] = None,
+        detector_rounds: Optional[dict] = None,
+        terminal_detector_ids: Optional[dict] = None,
+        measurement_rounds: Optional[dict] = None,
+    ):
+        StimDevice.__init__(
+            self,
+            seed=seed,
+            detector_rounds=detector_rounds,
+            terminal_detector_ids=terminal_detector_ids,
+            measurement_rounds=measurement_rounds,
+        )
         self.measurements = measurements
         self.shot = shot
 
     @staticmethod
     def detector_rounds_from_coordinates(
-        circuit: Any, round_count: int
+        circuit: stim.Circuit, round_count: int
     ) -> dict[int, int]:
         """The one-based emitted round of every detector of a hardware circuit.
 
@@ -558,7 +590,9 @@ class RecordedStimDevice(StimDevice):
                 rounds[detector_id] = layer + 1
         return rounds
 
-    def _measurement_row(self, sampler) -> tuple[int, ...]:
+    def _measurement_row(
+        self, sampler: stim.CompiledMeasurementSampler
+    ) -> tuple[int, ...]:
         del sampler
         row = self.measurements[self.shot]
         return _as_int_bits(row)
@@ -566,9 +600,8 @@ class RecordedStimDevice(StimDevice):
 
 @dataclasses.dataclass(frozen=True)
 class _SampledShot:
-    """One shot of a circuit: its sampler, packets and formed events."""
+    """One shot of a circuit: its packets and formed events."""
 
-    sampler: Any
     packets: dict
     table: detector_formation.FormationTable
     former: detector_formation.StreamingDetectorFormer
@@ -639,6 +672,8 @@ def _check_segment(
                 "standalone duration must equal its source duration"
             )
         return
+    if operation.stream_offset is None:
+        raise ValueError("a stream segment must carry its stream_offset")
     segment_end = operation.stream_offset + segment_round_count
     if segment_end > source_round_count:
         raise ValueError("stream segment extends beyond its finite source")
@@ -662,13 +697,12 @@ def _first_patch_or_zero(operation: message.Operation):
     return 0
 
 
-def _window_span(window: message.Window, round_count: int) -> tuple:
-    last_read_round = min(window.buffer_hi, round_count)
+def _window_span(window: message.Window) -> tuple:
     return (
         window.start_round,
         window.commit_lo,
         window.commit_hi,
-        last_read_round,
+        window.buffer_hi,
     )
 
 

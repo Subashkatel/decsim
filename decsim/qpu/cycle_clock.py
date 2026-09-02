@@ -129,8 +129,8 @@ class QPUDevice:
             raise ValueError("QPU boundary query tick must be nonnegative")
         if tick % self.cycle_ticks == 0:
             return tick
-        cycles_before = tick // self.cycle_ticks
-        return (cycles_before + 1) * self.cycle_ticks
+        whole_cycle_count = tick // self.cycle_ticks
+        return (whole_cycle_count + 1) * self.cycle_ticks
 
     def emit_idle_stream_round(
         self,

@@ -77,12 +77,12 @@ class SurfaceCodeModel:
 
         The seam strip is a heuristic for a multi-patch operation.
         """
-        nodes_per_patch = self.distance * self.distance
-        seam_nodes = 0
+        node_count_per_patch = self.distance * self.distance
+        seam_node_count = 0
         if num_patches > 1:
-            seam_nodes = self.distance
-        patch_nodes = num_patches * nodes_per_patch
-        return patch_nodes + seam_nodes
+            seam_node_count = self.distance
+        patch_node_count = num_patches * node_count_per_patch
+        return patch_node_count + seam_node_count
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Bits read out per round: the d*d - 1 stabilizers of every patch."""

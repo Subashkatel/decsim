@@ -50,6 +50,20 @@ class FinalizingSource(syndrome_devices.TimingOnlyDevice):
         return [readout]
 
 
+class RecordingSource(syndrome_devices.TimingOnlyDevice):
+    """A timing-only source that keeps every begin_operation call."""
+
+    def __init__(self):
+        self.begun = []
+
+    def begin_operation(
+        self, operation, segment_round_count, source_round_count
+    ):
+        self.begun.append(
+            (operation.id, segment_round_count, source_round_count)
+        )
+
+
 class SplitSource(syndrome_devices.TimingOnlyDevice):
     """A timing-only source that emits a fixed number of payloads."""
 
@@ -205,6 +219,17 @@ def test_two_operations_on_different_patches_run_in_the_same_cycles():
     assert log.round_ticks == [(10, 1), (10, 1), (20, 2)]
     assert log.idle_ticks == [(20, "B", 1)]
     assert log.completion_ticks == [(10, 2), (20, 1)]
+
+
+def test_a_running_body_begins_on_the_syndrome_source_when_it_starts():
+    source = RecordingSource()
+    engine, qpu, log = clocked_qpu(10, source)
+    body = memory_body(1, 2, 10)
+    qpu.issue(body)
+    engine.schedule(20, qpu.finish)
+    engine.run()
+    assert source.begun == [(1, 2, 2)]
+    assert log.round_ticks == [(10, 1), (20, 2)]
 
 
 def test_a_body_without_detector_data_holds_its_patch_silently():

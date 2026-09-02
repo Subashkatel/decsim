@@ -31,7 +31,7 @@ def matching_window_decoder():
             from ...detector_error_model.fault_identity_validation import (
                 validate_graphlike_matrices,
             )
-            from .weights import matching_weights
+            from .weights import finite_priors, matching_weights
 
             validate_graphlike_matrices(
                 faults.check,
@@ -39,7 +39,9 @@ def matching_window_decoder():
                 location="PyMatching window model",
             )
             matching = pymatching.Matching.from_check_matrix(
-                faults.check.copy(), weights=matching_weights(faults.priors))
+                faults.check.copy(), weights=matching_weights(faults.priors),
+                error_probabilities=finite_priors(faults.priors),
+                merge_strategy="independent")
             cache[id(faults)] = matching
             weakref.finalize(faults, cache.pop, id(faults), None)
         return matching.decode(syndrome)

@@ -6,6 +6,7 @@ import time
 
 from typing import TYPE_CHECKING, Optional
 
+from .weights import finite_priors
 from ..window_decode_results import (
     BackendDecodeStatus,
     check_syndrome_size,
@@ -111,9 +112,16 @@ class PyMatchingDecoder:
                 location="PyMatching window model",
             )
             # PyMatching normalises the matrix it is given in place; the placed
-            # matrix is frozen, so it gets a copy (one per model, cached)
+            # matrix is frozen, so it gets a copy (one per model, cached).
+            # Faults sharing the same detector endpoints are independent error
+            # mechanisms and merge into one edge with the combined probability,
+            # the convention of Stim detector error models and of PyMatching's
+            # DEM loader; a window restriction folds distinct faults onto the
+            # same in-window endpoints, so a window graph always has some
             matching = pymatching.Matching.from_check_matrix(
-                faults.check.copy(), weights=self._weights_for(faults))
+                faults.check.copy(), weights=self._weights_for(faults),
+                error_probabilities=finite_priors(faults.priors),
+                merge_strategy="independent")
             # PyMatching builds its internal graph lazily and finishes warming
             # only once it has matched real defects; a running software decoder
             # has the window graph prebuilt and warm, so decode a few defects

@@ -137,8 +137,8 @@ def test_quantity_basis_derives_aggregate_capacity_and_payload():
         9, LinkQuantityBasis.PER_CHANNEL, 4, "parallel"
     )
 
-    assert direct_capacity.aggregate_bits_per_us == 8.0
-    assert parallel_capacity.aggregate_bits_per_us == 32.0
+    assert direct_capacity.aggregate_bits_per_microsecond == 8.0
+    assert parallel_capacity.aggregate_bits_per_microsecond == 32.0
     assert direct_payload.aggregate_bits == 9
     assert parallel_payload.aggregate_bits == 36
     assert parallel_capacity.to_json_value() == {
@@ -221,7 +221,7 @@ def test_removed_provenance_checks_and_kept_whole_normalization():
     channel = LinkConfig(0, capacity, None)
     edge = LinkEdgeConfig(channel, payload, "")
 
-    assert capacity.aggregate_bits_per_us == 2
+    assert capacity.aggregate_bits_per_microsecond == 2
     assert payload.aggregate_bits == 1
     assert edge.actual_payload_source == ""
     with pytest.raises(TypeError):
@@ -617,7 +617,7 @@ def test_reconciliation_guard_rejects_silent_counter_divergence():
         now_ticks=0,
         attribution=valid_attribution(LinkPath.QC),
     )
-    model._semantic_counters[LinkPath.QC] = TrafficCounters()
+    model._counters_by_path[LinkPath.QC] = TrafficCounters()
     with pytest.raises(RuntimeError, match="do not reconcile"):
         traffic_json_value(model.snapshot())
 

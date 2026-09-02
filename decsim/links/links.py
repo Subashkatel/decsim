@@ -1,149 +1,140 @@
-"""The reaction-path links: how long each hop takes and what evidence it leaves.
+"""The links between the components on the reaction path.
 
-``LinkPath`` is the closed vocabulary of measured segments, one per pair of
-components on the reaction path:
+A link is one physical channel: a wire with a propagation latency and,
+optionally, a finite bandwidth. A transfer on a bounded channel waits for
+the previous transfer to leave the wire, is serialized at the channel's
+rate, then propagates. Delivery is the send time plus the wait plus the
+serialization plus the latency. That is the ns-3 point-to-point device
+(PointToPointNetDevice: one packet on the wire at a time, the receiver
+gets it one propagation delay after the last bit leaves). A fractional
+tick of serialization rounds up, because a transfer can never end before
+its exact time. An unbounded channel has no queue and no serialization;
+it charges its latency only.
 
-- ``QC``  QPU -> controller: syndrome readout leaving the QPU (t_qc).
-- ``CWB`` controller -> syndrome buffer 0: a completed binary round published
-  to the window-input route; optional, a card without it publishes for free.
-- ``WBD`` weak buffer -> weak decoder: syndrome data reaching the weak tier,
-  as one window assembled from Buffer 0 (``window_manager``) or as one
-  feedback-memory round straight off packing (``syndrome_packing``) (t_wbd).
-  The feedback-memory sends are controller-sourced traffic on the shared
-  channel: real-time stacks run one syndrome stream and classify downstream
-  rather than wiring idle or feedback data separately (Battistel 2303.00054
-  Fig. 3; Google 2408.13687; RT system stack 2605.30765).
-- ``WSD`` weak decoder -> strong decoder: the escalation selection that hands a
-  window to the strong tier (t_wsd).
-- ``SBD`` strong buffer -> strong decoder: the strong window's syndrome
-  input, assembled from syndrome buffer 1 (t_sbd).
-- ``WDO`` weak decoder -> Pauli frame: the weak correction leaving the weak
-  tier for the frame and the conditional release; the weak counterpart of ``DO``.
-- ``DD``  decoder -> decoder: a committed window boundary handed to a dependent
-  window (t_dd).
-- ``DO``  strong decoder -> Pauli frame: the strong correction leaving the
-  strong tier (t_do).
-- ``OC``  Pauli frame -> controller: the conditional release returning to the
-  controller (t_oc).
-- ``CQ``  controller -> QPU: the instruction delivered back to the QPU (t_cq).
-- ``CSB`` controller -> syndrome buffer 1: the packed round's second
+A path is one named hop between two components (LinkPath). A card
+(LinkModelConfig; the number cards are in link_profiles.py) gives every
+path an edge: the channel it rides, an optional default payload, and the
+name of the runtime quantity that supplies the actual payload. Two edges
+that hold the same LinkConfig object share one wire.
+
+An edge may carry a per-transfer setup overhead: the descriptor and
+doorbell work a processor does before the data mover starts, as in
+gem5-Aladdin's DMA model (Shao et al., MICRO 2016). Setups serialize on
+the one processor that programs the channel, while the wire keeps
+streaming during a setup. Every request on a channel, a free edge
+included, passes the channel's setup queue, so a channel sees its
+requests in request order whichever paths share it.
+
+LinkModel is one run's fabric. LinkModel.reserve is the one call the
+runtime makes: it checks the attribution against the path's rule, selects
+the payload, queues the setup, reserves the wire, and appends one transfer
+record to the ledger. Every reservation is counted per path and per
+channel; the traffic report refuses counts that do not reconcile.
+
+The paths, one per pair of components on the reaction path:
+
+- ``QC``, QPU to controller: syndrome readout leaving the QPU.
+- ``CWB``, controller to syndrome buffer 0: a completed round published
+  to the window-input route; optional, a card without it publishes for
+  free.
+- ``CSB``, controller to syndrome buffer 1: the packed round's second
   write, out of the fridge into the room-side store that feeds the strong
   tier; optional, a card without it stores for free.
+- ``WBD``, weak buffer to weak decoder: syndrome data reaching the weak
+  tier, as one window assembled from buffer 0 (window_manager) or as one
+  feedback-memory round straight off packing (syndrome_packing). The
+  feedback-memory sends are controller-sourced traffic on the shared
+  channel: real-time stacks run one syndrome stream and classify
+  downstream rather than wiring idle or feedback data separately
+  (Battistel 2303.00054 Fig. 3; Google 2408.13687; 2605.30765).
+- ``WSD``, weak decoder to strong decoder: the escalation that hands a
+  window to the strong tier.
+- ``SBD``, strong buffer to strong decoder: the strong window's syndrome
+  input, assembled from syndrome buffer 1.
+- ``WDO``, weak decoder to Pauli frame: the weak correction leaving the
+  weak tier for the frame and the conditional release.
+- ``DD``, decoder to decoder: a committed window boundary handed to a
+  dependent window.
+- ``DO``, strong decoder to Pauli frame: the strong correction leaving
+  the strong tier.
+- ``OC``, Pauli frame to controller: the conditional release returning to
+  the controller.
+- ``CQ``, controller to QPU: the instruction delivered back to the QPU.
 
-Each path's meaning is declared once, in ``_PATH_RULES``: what its transfers
-are attributed to (an operation, a round, a window), which provenance relation
-they carry (a decoder request, a boundary), and whether every card must wire
-it. Adding a segment: add the member to
-``LinkPath``, its row to ``_PATH_RULES`` (optional while adopted), and an
-``Optional[LinkEdgeConfig]`` field to ``LinkModelConfig``; nothing else changes
-because everything iterates the card's wired paths.
-
-A card (``LinkModelConfig``, see ``link_profiles.py`` for the number cards)
-gives each path an edge: the physical channel it rides (propagation latency,
-optional finite bandwidth), an optional default payload, and the name of the
-runtime quantity that supplies the actual payload. Two paths given the same
-``LinkConfig`` object share one physical FIFO. ``resolve()`` builds the
-run-owned ``LinkModel``; ``LinkModel.reserve`` is the one call the runtime
-makes: it checks the attribution against the path's rule, selects the payload,
-reserves the FIFO interval, and appends one transfer record. Every
-reservation is counted per path and per channel; the report refuses to emit
-counts that do not reconcile.
+Each path's meaning is declared once, in ``_RULE_BY_PATH``: what its
+transfers are attributed to (an operation, a round, a window), which
+provenance relation they carry (a decoder request, a boundary), and
+whether every card must wire it. Adding a path: add the member to
+``LinkPath``, its row to ``_RULE_BY_PATH``, and an
+``Optional[LinkEdgeConfig]`` field to ``LinkModelConfig``; everything
+else iterates the card's wired paths.
 """
 
-from __future__ import annotations
-
-from dataclasses import dataclass
-from enum import Enum
-from fractions import Fraction
+import dataclasses
+import enum
+import fractions
 import math
-from types import MappingProxyType
 from typing import Optional, Union
 
-from ..config import TICKS_PER_MICROSECOND, microseconds_to_ticks
-from ..message import DecoderRequestKey
+import decsim.config as config
+import decsim.message as message
 
 
-# ---- quantities on the cards -------------------------------------------------
-
-def _whole(value, name: str) -> int:
-    """A count or index as an exact int; 3.0 is fine, 3.5 and NaN are not."""
-    try:
-        normalized = int(value)
-    except (OverflowError, ValueError) as error:
-        raise ValueError(f"{name} must be a finite whole number") from error
-    if normalized != value:
-        raise ValueError(f"{name} must be a finite whole number")
-    return normalized
-
-
-def _finite(value, name: str):
-    """A rate; NaN and infinity are refused. A Python int of any size is finite:
-    math.isfinite overflows converting it to float, which reads as finite."""
-    try:
-        finite = math.isfinite(value)
-    except OverflowError:
-        finite = True
-    if not finite:
-        raise ValueError(f"{name} must be a finite number")
-    return value
-
-
-class LinkQuantityBasis(str, Enum):
+class LinkQuantityBasis(str, enum.Enum):
     """Whether one configured quantity is aggregate or per active channel."""
 
     DIRECT_AGGREGATE = "direct_aggregate"
     PER_CHANNEL = "per_channel"
 
 
-def _channel_count_for(basis, channel_count, name: str) -> Optional[int]:
-    """An aggregate quantity has no channel count; a per-channel one needs a
-    positive count. Returns the normalized count."""
-    if basis is not LinkQuantityBasis.DIRECT_AGGREGATE and basis is not LinkQuantityBasis.PER_CHANNEL:
-        raise ValueError(f"unknown link quantity basis {basis!r}")
-    if basis is LinkQuantityBasis.DIRECT_AGGREGATE:
-        if channel_count is not None:
-            raise ValueError(f"direct aggregate {name} requires channel_count=None")
-        return None
-    normalized = _whole(channel_count, f"per-channel {name} count")
-    if normalized <= 0:
-        raise ValueError(f"per-channel {name} count must be positive")
-    return normalized
-
-
-@dataclass(frozen=True, eq=False)
+# Identity matters for the settings records below: two edges share one
+# wire only when they hold the same LinkConfig object, so equality by
+# value is off (eq=False).
+@dataclasses.dataclass(frozen=True, eq=False)
 class LinkCapacityConfig:
-    """Bandwidth of one channel: bits per microsecond, aggregate or per channel."""
+    """Bandwidth of one channel: bits per microsecond, aggregate or per channel.
 
-    input_bits_per_us: float
+    The rate may be any finite real number, a Fraction included; it is
+    kept as given so the serialization arithmetic stays exact.
+    """
+
+    input_bits_per_microsecond: float
     basis: LinkQuantityBasis
     channel_count: Optional[int]
     source: str
 
     def __post_init__(self) -> None:
-        _finite(self.input_bits_per_us, "input_bits_per_us")
-        if self.input_bits_per_us <= 0:
-            raise ValueError("input_bits_per_us must be positive")
-        object.__setattr__(self, "channel_count",
-                           _channel_count_for(self.basis, self.channel_count, "capacity"))
-        _finite(self.aggregate_bits_per_us, "aggregate_bits_per_us")
+        _require_finite_number(
+            self.input_bits_per_microsecond, "input_bits_per_microsecond"
+        )
+        if self.input_bits_per_microsecond <= 0:
+            raise ValueError("input_bits_per_microsecond must be positive")
+        channel_count = _normalized_channel_count(
+            self.basis, self.channel_count, "capacity"
+        )
+        object.__setattr__(self, "channel_count", channel_count)
+        aggregate = self.aggregate_bits_per_microsecond
+        _require_finite_number(aggregate, "aggregate_bits_per_microsecond")
 
     @property
-    def aggregate_bits_per_us(self) -> float:
+    def aggregate_bits_per_microsecond(self) -> float:
+        """The whole channel's rate: the input rate times the channel count."""
         if self.basis is LinkQuantityBasis.DIRECT_AGGREGATE:
-            return self.input_bits_per_us
-        return self.input_bits_per_us * self.channel_count
+            return self.input_bits_per_microsecond
+        return self.input_bits_per_microsecond * self.channel_count
 
     def to_json_value(self) -> dict:
+        """The capacity as the topology report writes it."""
         return {
             "basis": self.basis.value,
-            "input_bits_per_us": self.input_bits_per_us,
+            "input_bits_per_us": self.input_bits_per_microsecond,
             "channel_count": self.channel_count,
             "source": self.source,
-            "aggregate_bits_per_us": self.aggregate_bits_per_us,
+            "aggregate_bits_per_us": self.aggregate_bits_per_microsecond,
         }
 
 
-@dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class PayloadSizeConfig:
     """Default payload of one path: bits, aggregate or per channel."""
 
@@ -153,19 +144,24 @@ class PayloadSizeConfig:
     source: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "input_bits", _whole(self.input_bits, "input_bits"))
+        input_bits = _as_whole_number(self.input_bits, "input_bits")
+        object.__setattr__(self, "input_bits", input_bits)
         if self.input_bits < 0:
             raise ValueError("input_bits must be nonnegative")
-        object.__setattr__(self, "channel_count",
-                           _channel_count_for(self.basis, self.channel_count, "payload"))
+        channel_count = _normalized_channel_count(
+            self.basis, self.channel_count, "payload"
+        )
+        object.__setattr__(self, "channel_count", channel_count)
 
     @property
     def aggregate_bits(self) -> int:
+        """The whole transfer's bits: the input bits times the channel count."""
         if self.basis is LinkQuantityBasis.DIRECT_AGGREGATE:
             return self.input_bits
         return self.input_bits * self.channel_count
 
     def to_json_value(self) -> dict:
+        """The payload as the topology report writes it."""
         return {
             "basis": self.basis.value,
             "input_bits": self.input_bits,
@@ -175,47 +171,60 @@ class PayloadSizeConfig:
         }
 
 
-@dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class LinkConfig:
-    """One physical channel: propagation latency and an optional finite bandwidth
-    (an aggregate FIFO). Two paths that share this object share the FIFO."""
+    """One physical channel: a propagation latency and an optional bandwidth.
+
+    No capacity means an unbounded wire. Two edges that hold the same
+    LinkConfig object share the wire.
+    """
 
     propagation_latency_ticks: int
     capacity: Optional[LinkCapacityConfig]
     configuration_source: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "propagation_latency_ticks",
-                           _whole(self.propagation_latency_ticks, "propagation_latency_ticks"))
+        propagation_latency_ticks = _as_whole_number(
+            self.propagation_latency_ticks, "propagation_latency_ticks"
+        )
+        object.__setattr__(
+            self, "propagation_latency_ticks", propagation_latency_ticks
+        )
         if self.propagation_latency_ticks < 0:
             raise ValueError("propagation_latency_ticks must be nonnegative")
 
 
-@dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class TransferOverheadConfig:
-    """Fixed per-transfer setup cost on one path: the descriptor programming
-    and doorbell work a CPU does before the data mover starts. gem5-Aladdin
-    charges this on the CPU while issued transfers keep streaming, and the
-    setups of successive transfers SERIALIZE on the one CPU doing them
-    (Shao et al., MICRO 2016: initiating a DMA from the CPU costs 17 cycles
-    plus housekeeping; the size-proportional cache flush and invalidate
-    they measure at 84 and 71 ns per line are not modeled separately at
-    this altitude)."""
+    """Fixed setup cost paid before each transfer on one path reaches the wire.
+
+    This is the descriptor programming and doorbell work a processor does
+    before the data mover starts. gem5-Aladdin charges it on the processor
+    while issued transfers keep streaming, and successive setups serialize
+    on the one processor doing them (Shao et al., MICRO 2016: initiating a
+    DMA from the CPU costs 17 cycles plus housekeeping). The
+    size-proportional cache flush and invalidate they measure are not
+    modeled at this altitude.
+    """
 
     overhead_ticks: int
     source: str
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "overhead_ticks",
-                           _whole(self.overhead_ticks, "overhead_ticks"))
+        overhead_ticks = _as_whole_number(self.overhead_ticks, "overhead_ticks")
+        object.__setattr__(self, "overhead_ticks", overhead_ticks)
         if self.overhead_ticks < 0:
             raise ValueError("overhead_ticks must be nonnegative")
 
 
-@dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True, eq=False)
 class LinkEdgeConfig:
-    """One path on a card: its channel, its default payload, and the name of the
-    runtime quantity that supplies the actual payload (at least one of the two)."""
+    """One path on a card: its channel, its default payload, its payload source.
+
+    At least one of the default payload and the actual payload source is
+    given. A default payload on a bounded channel is stated on the same
+    basis as the channel's capacity, so the two describe the same lanes.
+    """
 
     channel: LinkConfig
     default_payload: Optional[PayloadSizeConfig]
@@ -223,22 +232,24 @@ class LinkEdgeConfig:
     transfer_overhead: Optional[TransferOverheadConfig] = None
 
     def __post_init__(self) -> None:
-        if self.default_payload is None and self.actual_payload_source is None:
-            raise ValueError("an edge requires a configured default or actual payload source")
+        has_default = self.default_payload is not None
+        has_actual_source = self.actual_payload_source is not None
+        if not has_default and not has_actual_source:
+            raise ValueError(
+                "an edge requires a configured default or actual payload source"
+            )
         capacity = self.channel.capacity
-        default = self.default_payload
-        if capacity is None or default is None:
+        default_payload = self.default_payload
+        if capacity is None or default_payload is None:
             return
-        if capacity.basis is not default.basis:
+        if capacity.basis is not default_payload.basis:
             raise ValueError("capacity and payload bases must match")
-        if capacity.channel_count != default.channel_count:
+        if capacity.channel_count != default_payload.channel_count:
             raise ValueError("capacity and payload channel counts must match")
 
 
-# ---- the vocabulary and its rules ---------------------------------------------
-
-class LinkPath(str, Enum):
-    """The measured reaction-path segments; see the module docstring."""
+class LinkPath(str, enum.Enum):
+    """The hops of the reaction path; see the module docstring."""
 
     QC = "qc"
     CWB = "cwb"
@@ -253,7 +264,7 @@ class LinkPath(str, Enum):
     CSB = "csb"
 
 
-class LinkAttributionScope(str, Enum):
+class LinkAttributionScope(str, enum.Enum):
     """What one path's transfers are attributed to."""
 
     OPERATION_ONLY = "operation_only"
@@ -262,7 +273,7 @@ class LinkAttributionScope(str, Enum):
     WINDOW = "window"
 
 
-class LinkRelationRule(str, Enum):
+class LinkRelationRule(str, enum.Enum):
     """Which provenance record one path's transfers must carry."""
 
     NONE = "none"
@@ -271,68 +282,63 @@ class LinkRelationRule(str, Enum):
     BOUNDARY = "boundary"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LinkPathRule:
-    """The fixed meaning of one segment: what its transfers are attributed
-    to, which provenance they carry, and whether every card must wire it (the
-    original nine are required; a segment added later may be optional)."""
+    """The fixed meaning of one path.
+
+    What its transfers are attributed to, which provenance they carry, and
+    whether every card must wire it: the original nine paths are required,
+    a path added later may be optional.
+    """
 
     scope: LinkAttributionScope
     relation: LinkRelationRule
     required: bool
 
 
-_PATH_RULES = MappingProxyType({
-    LinkPath.QC: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, True),
-    LinkPath.CWB: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, False),
-    LinkPath.WBD: LinkPathRule(LinkAttributionScope.ROUND_OR_WINDOW,
-                               LinkRelationRule.REQUEST_WHEN_WINDOWED, True),
-    LinkPath.WSD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
-    LinkPath.SBD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
-    LinkPath.WDO: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
-    LinkPath.DD: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.BOUNDARY, True),
-    LinkPath.DO: LinkPathRule(LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, True),
-    LinkPath.OC: LinkPathRule(LinkAttributionScope.OPERATION_ONLY, LinkRelationRule.NONE, True),
-    LinkPath.CQ: LinkPathRule(LinkAttributionScope.OPERATION_ONLY, LinkRelationRule.NONE, True),
-    LinkPath.CSB: LinkPathRule(LinkAttributionScope.ROUND, LinkRelationRule.NONE, False),
-})
-
-
-# ---- what a transfer says about itself ---------------------------------------
-
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class RequestTransferRelation:
     """Provenance tying one transfer to the decoder request it serves."""
 
-    request_key: DecoderRequestKey
+    request_key: message.DecoderRequestKey
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class BoundaryTransferRelation:
-    """Provenance tying one DD transfer to the boundary it delivers: from which
-    window (and which request produced it) to which, and both revisions."""
+    """Provenance tying one DD transfer to the boundary it delivers.
 
-    source_request_key: DecoderRequestKey
+    From which window, produced by which request, to which window, and
+    both revisions.
+    """
+
+    source_request_key: message.DecoderRequestKey
     source_window_key: tuple
     destination_window_key: tuple
     source_revision: int
     delivery_revision: int
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TrafficAttribution:
-    """Whose transfer this is: the operation, its patches, and the window or the
-    inclusive round range the bits belong to; plus the relation the path rule asks for."""
+    """Whose transfer this is.
 
+    The operation, its patches, and the window or the inclusive round
+    range the bits belong to, plus the relation the path's rule asks for.
+    """
+
+    # An operation id is whatever the front end chose; the links never
+    # look inside it.
     operation_id: object
     patch_ids: tuple
     window_id: Optional[int]
-    round_lo: Optional[int]
-    round_hi: Optional[int]
-    relation: Optional[Union[RequestTransferRelation, BoundaryTransferRelation]] = None
+    first_round: Optional[int]
+    last_round: Optional[int]
+    relation: Optional[
+        Union[RequestTransferRelation, BoundaryTransferRelation]
+    ] = None
 
 
-class PayloadSelectionSource(str, Enum):
+class PayloadSelectionSource(str, enum.Enum):
     """How a transfer selected its aggregate payload size."""
 
     ACTUAL = "actual"
@@ -340,13 +346,14 @@ class PayloadSelectionSource(str, Enum):
     UNRESOLVED = "unresolved"
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LinkReservation:
-    """One FIFO interval on one channel: when it reached the wire, how long
-    it waited, serialized and propagated, its position in the channel's
-    order, and the engine-side setup that preceded the wire. ``send_ticks``
-    is the wire time; the transfer was requested ``setup_ticks`` earlier and
-    ``total_delay_ticks`` counts from that request."""
+    """One interval on one wire and the setup that preceded it.
+
+    send_ticks is the wire time. The transfer was requested setup_ticks
+    earlier, and total_delay_ticks counts from that request: setup, then
+    the queue wait, the serialization, and the propagation.
+    """
 
     payload_bits: Optional[int]
     send_ticks: int
@@ -360,10 +367,13 @@ class LinkReservation:
     setup_ticks: int = 0
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class SemanticTransferRecord:
-    """One entry of the ledger: which path, on which channel, for whom, with
-    which payload, and the reservation it got."""
+    """One entry of the ledger.
+
+    Which path, on which channel, for whom, with which payload, and the
+    reservation it got.
+    """
 
     path: LinkPath
     physical_alias: str
@@ -373,7 +383,7 @@ class SemanticTransferRecord:
     reservation: LinkReservation
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class TrafficCounters:
     """Additive counters kept per path and per channel."""
 
@@ -384,89 +394,134 @@ class TrafficCounters:
     propagation_ticks: int = 0
     queue_wait_ticks: int = 0
 
-    def plus_reservation(self, reservation: LinkReservation) -> "TrafficCounters":
-        payload_known = reservation.payload_bits is not None
+    def plus_reservation(
+        self, reservation: LinkReservation
+    ) -> "TrafficCounters":
+        """These counters with one more reservation added."""
+        known_payload_bits = self.known_payload_bits
+        unknown_payload_transfer_count = self.unknown_payload_transfer_count
+        if reservation.payload_bits is None:
+            unknown_payload_transfer_count += 1
+        else:
+            known_payload_bits += reservation.payload_bits
+        transfer_count = self.transfer_count + 1
+        serialization_ticks = (
+            self.serialization_ticks + reservation.serialization_ticks
+        )
+        propagation_ticks = (
+            self.propagation_ticks + reservation.propagation_ticks
+        )
+        queue_wait_ticks = self.queue_wait_ticks + reservation.queue_wait_ticks
         return TrafficCounters(
-            transfer_count=self.transfer_count + 1,
-            known_payload_bits=self.known_payload_bits + (reservation.payload_bits if payload_known else 0),
-            unknown_payload_transfer_count=self.unknown_payload_transfer_count + (not payload_known),
-            serialization_ticks=self.serialization_ticks + reservation.serialization_ticks,
-            propagation_ticks=self.propagation_ticks + reservation.propagation_ticks,
-            queue_wait_ticks=self.queue_wait_ticks + reservation.queue_wait_ticks,
+            transfer_count=transfer_count,
+            known_payload_bits=known_payload_bits,
+            unknown_payload_transfer_count=unknown_payload_transfer_count,
+            serialization_ticks=serialization_ticks,
+            propagation_ticks=propagation_ticks,
+            queue_wait_ticks=queue_wait_ticks,
         )
 
     def plus(self, other: "TrafficCounters") -> "TrafficCounters":
+        """The sum of these counters and another's."""
+        transfer_count = self.transfer_count + other.transfer_count
+        known_payload_bits = self.known_payload_bits + other.known_payload_bits
+        unknown_payload_transfer_count = (
+            self.unknown_payload_transfer_count
+            + other.unknown_payload_transfer_count
+        )
+        serialization_ticks = (
+            self.serialization_ticks + other.serialization_ticks
+        )
+        propagation_ticks = self.propagation_ticks + other.propagation_ticks
+        queue_wait_ticks = self.queue_wait_ticks + other.queue_wait_ticks
         return TrafficCounters(
-            transfer_count=self.transfer_count + other.transfer_count,
-            known_payload_bits=self.known_payload_bits + other.known_payload_bits,
-            unknown_payload_transfer_count=(self.unknown_payload_transfer_count
-                                            + other.unknown_payload_transfer_count),
-            serialization_ticks=self.serialization_ticks + other.serialization_ticks,
-            propagation_ticks=self.propagation_ticks + other.propagation_ticks,
-            queue_wait_ticks=self.queue_wait_ticks + other.queue_wait_ticks,
+            transfer_count=transfer_count,
+            known_payload_bits=known_payload_bits,
+            unknown_payload_transfer_count=unknown_payload_transfer_count,
+            serialization_ticks=serialization_ticks,
+            propagation_ticks=propagation_ticks,
+            queue_wait_ticks=queue_wait_ticks,
         )
 
     def to_json_value(self) -> dict:
+        """The counters as the traffic report writes them."""
+        unknown_payload_transfer_count = self.unknown_payload_transfer_count
         return {
             "transfer_count": self.transfer_count,
             "known_payload_bits": self.known_payload_bits,
-            "unknown_payload_transfer_count": self.unknown_payload_transfer_count,
+            "unknown_payload_transfer_count": unknown_payload_transfer_count,
             "serialization_ticks": self.serialization_ticks,
             "propagation_ticks": self.propagation_ticks,
             "queue_wait_ticks": self.queue_wait_ticks,
         }
 
 
-# ---- the runtime -------------------------------------------------------------
-
 class Link:
-    """One resolved physical channel: an aggregate FIFO. Sends are in order of
-    time; a payload waits for the serializer to be free, is serialized at the
-    channel's bandwidth, then propagates."""
+    """One physical channel at run time: a wire that sends in time order.
 
-    def __init__(self, config: LinkConfig):
-        self._config = config
+    A payload waits for the serializer to be free, is serialized at the
+    channel's rate, then propagates. An unbounded channel never queues.
+    """
+
+    def __init__(self, channel_config: LinkConfig):
+        self._channel_config = channel_config
         self._next_free_tick = 0
-        self._last_send_tick = None
+        self._last_send_tick: Optional[int] = None
         self._physical_sequence = 0
         self._counters = TrafficCounters()
 
     @property
     def config(self) -> LinkConfig:
-        return self._config
+        """The channel's settings."""
+        return self._channel_config
 
     def counters_snapshot(self) -> TrafficCounters:
+        """What the channel has carried so far."""
         return self._counters
 
-    def reserve(self, *, payload_bits: Optional[int], now_ticks: int) -> LinkReservation:
-        """Reserve one FIFO interval starting now and return its timing."""
-        if payload_bits is not None:
-            payload_bits = _whole(payload_bits, "payload_bits")
-            if payload_bits < 0:
-                raise ValueError("payload_bits must be nonnegative")
-        now_ticks = _whole(now_ticks, "now_ticks")
+    def reserve(
+        self, *, payload_bits: Optional[int], now_ticks: int
+    ) -> LinkReservation:
+        """Reserve one interval on the wire starting now and return its timing.
+
+        A send before the previous send is refused: the wire is a queue,
+        and requests reach it in time order.
+        """
+        payload_bits = _checked_payload_bits(payload_bits)
+        now_ticks = self._checked_send_ticks(now_ticks)
+        reservation = self._timing_from(payload_bits, now_ticks)
+        if self._channel_config.capacity is not None:
+            self._next_free_tick = reservation.serializer_end_ticks
+        self._last_send_tick = now_ticks
+        self._physical_sequence += 1
+        self._counters = self._counters.plus_reservation(reservation)
+        return reservation
+
+    def _checked_send_ticks(self, now_ticks) -> int:
+        now_ticks = _as_whole_number(now_ticks, "now_ticks")
         if now_ticks < 0:
             raise ValueError("now_ticks must be nonnegative")
-        if self._last_send_tick is not None and now_ticks < self._last_send_tick:
+        has_earlier_send = self._last_send_tick is not None
+        if has_earlier_send and now_ticks < self._last_send_tick:
             raise ValueError("now_ticks must not precede the prior reservation")
+        return now_ticks
 
-        capacity = self._config.capacity
-        if capacity is None:                     # unlimited bandwidth: no queue, no serialization
-            serializer_start_ticks = now_ticks
-            serialization_ticks = 0
-        else:
+    def _timing_from(
+        self, payload_bits: Optional[int], now_ticks: int
+    ) -> LinkReservation:
+        serializer_start_ticks = now_ticks
+        serialization_ticks = 0
+        capacity = self._channel_config.capacity
+        if capacity is not None:
             serializer_start_ticks = max(now_ticks, self._next_free_tick)
-            # Causality (LINK-002): serialization may never end before the
-            # exact transmission time, so a fractional tick rounds UP. The
-            # exact Fraction arithmetic keeps representable rates exact, so
-            # a whole-tick duration is never inflated by float error.
-            serialization_ticks = math.ceil(
-                Fraction(payload_bits) * TICKS_PER_MICROSECOND
-                / Fraction(str(capacity.aggregate_bits_per_us)))
+            serialization_ticks = _serialization_ticks(payload_bits, capacity)
         serializer_end_ticks = serializer_start_ticks + serialization_ticks
         queue_wait_ticks = serializer_start_ticks - now_ticks
-        propagation_ticks = self._config.propagation_latency_ticks
-        reservation = LinkReservation(
+        propagation_ticks = self._channel_config.propagation_latency_ticks
+        total_delay_ticks = (
+            queue_wait_ticks + serialization_ticks + propagation_ticks
+        )
+        return LinkReservation(
             payload_bits=payload_bits,
             send_ticks=now_ticks,
             queue_wait_ticks=queue_wait_ticks,
@@ -474,21 +529,17 @@ class Link:
             propagation_ticks=propagation_ticks,
             serializer_start_ticks=serializer_start_ticks,
             serializer_end_ticks=serializer_end_ticks,
-            total_delay_ticks=queue_wait_ticks + serialization_ticks + propagation_ticks,
+            total_delay_ticks=total_delay_ticks,
             physical_sequence=self._physical_sequence,
         )
-        if capacity is not None:
-            self._next_free_tick = serializer_end_ticks
-        self._last_send_tick = now_ticks
-        self._physical_sequence += 1
-        self._counters = self._counters.plus_reservation(reservation)
-        return reservation
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LinkModelConfig:
-    """A fabric card: one edge per path plus a profile name. The nine original
-    paths are required; ``cwb`` and ``csb`` are optional."""
+    """A fabric card: one edge per path plus a profile name.
+
+    The nine original paths are required; cwb and csb are optional.
+    """
 
     qc: LinkEdgeConfig
     wbd: LinkEdgeConfig
@@ -505,46 +556,58 @@ class LinkModelConfig:
     csb: Optional[LinkEdgeConfig] = None
 
     def wired_paths(self) -> tuple:
-        """The paths this card wires, in vocabulary order; a missing required path refuses."""
-        wired = []
+        """The paths this card wires, in vocabulary order.
+
+        A card that leaves out a required path is refused.
+        """
+        wired_paths = []
         for path in LinkPath:
-            if getattr(self, path.value, None) is not None:
-                wired.append(path)
-            elif _PATH_RULES[path].required:
+            edge = getattr(self, path.value)
+            if edge is not None:
+                wired_paths.append(path)
+                continue
+            rule = _RULE_BY_PATH[path]
+            if rule.required:
                 raise ValueError(f"{path.value} is a required link path")
-        return tuple(wired)
+        return tuple(wired_paths)
 
     def resolve(self) -> "LinkModel":
-        """Build the run-owned fabric: one Link per distinct channel object."""
+        """Build the run's fabric: one Link per distinct channel object."""
         channel_by_config_id = {}
-        bindings = {}
+        binding_by_path = {}
         for path in self.wired_paths():
             edge = getattr(self, path.value)
-            channel = channel_by_config_id.get(id(edge.channel))
+            channel_config = edge.channel
+            channel_config_id = id(channel_config)
+            channel = channel_by_config_id.get(channel_config_id)
             if channel is None:
-                channel = Link(edge.channel)
-                channel_by_config_id[id(edge.channel)] = channel
-            bindings[path] = (edge, channel)
-        return LinkModel(self, bindings)
+                channel = Link(channel_config)
+                channel_by_config_id[channel_config_id] = channel
+            binding_by_path[path] = (edge, channel)
+        return LinkModel(self, binding_by_path)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LinkEdgeSnapshot:
+    """One wired path, its channel's alias, its edge, and its counters."""
+
     path: LinkPath
     physical_alias: str
     edge: LinkEdgeConfig
     counters: TrafficCounters
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LinkChannelSnapshot:
+    """One channel, the paths that ride it, its settings, and its counters."""
+
     alias: str
     member_paths: tuple
     config: LinkConfig
     counters: TrafficCounters
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class LinkFabricSnapshot:
     """What a run's link fabric looked like and carried, frozen for reports."""
 
@@ -556,135 +619,358 @@ class LinkFabricSnapshot:
 
 
 class LinkModel:
-    """One run's fabric: the wired paths, their channels, and the transfer ledger."""
+    """One run's fabric: the wired paths, their channels, and the ledger."""
 
-    def __init__(self, config: LinkModelConfig, bindings: dict):
-        self._config = config
-        self._bindings = dict(bindings)                # path -> (edge, channel)
-        self._paths = tuple(self._bindings)
-        self._semantic_counters = {path: TrafficCounters() for path in self._paths}
-        # the one-server setup queue per channel: successive transfers'
-        # setups serialize (one CPU programs the engine), while the wire
-        # itself keeps streaming during a setup. The queue is per channel,
-        # not per path, so a channel's transfers reach the wire in request
-        # order whichever paths share it
-        self._setup_free_ticks = {}
-        self._transfers = []
-        self._alias_by_channel = {}
+    def __init__(self, model_config: LinkModelConfig, binding_by_path: dict):
+        self._model_config = model_config
+        # A binding is the pair (edge, channel) a path resolved to.
+        self._binding_by_path = dict(binding_by_path)
+        self._paths = tuple(self._binding_by_path)
+        self._counters_by_path = {
+            path: TrafficCounters() for path in self._paths
+        }
+        # The tick at which a channel's last setup finishes: setups
+        # serialize per channel, not per path (module docstring).
+        self._setup_free_ticks_by_channel: dict[Link, int] = {}
+        self._transfers: list[SemanticTransferRecord] = []
+        self._alias_by_channel: dict[Link, str] = {}
         for path in self._paths:
-            _edge, channel = self._bindings[path]
+            _edge, channel = self._binding_by_path[path]
             if channel not in self._alias_by_channel:
-                self._alias_by_channel[channel] = f"channel-{len(self._alias_by_channel)}"
+                alias = f"channel-{len(self._alias_by_channel)}"
+                self._alias_by_channel[channel] = alias
 
     @property
     def paths(self) -> tuple:
         """The paths this fabric wires, in vocabulary order."""
         return self._paths
 
-    def reserve(self, path: LinkPath, *, payload_bits: Optional[int], now_ticks: int,
-                attribution: TrafficAttribution) -> LinkReservation:
-        """Send one transfer on a path: check the attribution against the path's
-        rule, select the payload, reserve the channel, record the transfer."""
-        if path not in self._bindings:
+    def reserve(
+        self,
+        path: LinkPath,
+        *,
+        payload_bits: Optional[int],
+        now_ticks: int,
+        attribution: TrafficAttribution,
+    ) -> LinkReservation:
+        """Send one transfer on a path and return its timing.
+
+        The attribution is checked against the path's rule, the payload is
+        selected, the setup is queued on the channel, the wire is reserved,
+        and the transfer is recorded in the ledger.
+        """
+        if path not in self._binding_by_path:
             raise ValueError(f"{path.value} is not wired in this link fabric")
         _check_attribution(path, attribution)
-        edge, channel = self._bindings[path]
-        selected_bits, selection, payload_source = _select_payload(path, edge, payload_bits)
-        # every request on a channel passes its setup queue, a free edge
-        # included, so the channel sees requests in order behind a setup
-        # still in progress
-        overhead_ticks = (0 if edge.transfer_overhead is None
-                          else edge.transfer_overhead.overhead_ticks)
-        setup_start = max(now_ticks, self._setup_free_ticks.get(channel, 0))
-        wire_ticks = setup_start + overhead_ticks
-        self._setup_free_ticks[channel] = wire_ticks
-        setup_ticks = wire_ticks - now_ticks
-        reservation = channel.reserve(payload_bits=selected_bits, now_ticks=wire_ticks)
+        edge, channel = self._binding_by_path[path]
+        selected_bits, selection, payload_source = _select_payload(
+            path, edge, payload_bits
+        )
+        setup_ticks = self._queue_setup(channel, edge, now_ticks)
+        wire_ticks = now_ticks + setup_ticks
+        reservation = channel.reserve(
+            payload_bits=selected_bits, now_ticks=wire_ticks
+        )
         if setup_ticks:
-            from dataclasses import replace as _replace
-            reservation = _replace(
-                reservation, setup_ticks=setup_ticks,
-                total_delay_ticks=reservation.total_delay_ticks + setup_ticks)
-        self._semantic_counters[path] = self._semantic_counters[path].plus_reservation(reservation)
-        self._transfers.append(SemanticTransferRecord(
+            total_delay_ticks = reservation.total_delay_ticks + setup_ticks
+            reservation = dataclasses.replace(
+                reservation,
+                setup_ticks=setup_ticks,
+                total_delay_ticks=total_delay_ticks,
+            )
+        counters = self._counters_by_path[path]
+        self._counters_by_path[path] = counters.plus_reservation(reservation)
+        self._record_transfer(
+            path, channel, attribution, selection, payload_source, reservation
+        )
+        return reservation
+
+    def snapshot(self) -> LinkFabricSnapshot:
+        """A frozen view for reports.
+
+        The wiring, every channel's counters, every path's counters, and
+        the whole transfer ledger.
+        """
+        channels = []
+        for channel, alias in self._alias_by_channel.items():
+            channel_snapshot = self._channel_snapshot(channel, alias)
+            channels.append(channel_snapshot)
+        edges = []
+        for path in self._paths:
+            edge_snapshot = self._edge_snapshot(path)
+            edges.append(edge_snapshot)
+        return LinkFabricSnapshot(
+            profile_name=self._model_config.profile_name,
+            paths=self._paths,
+            edges=tuple(edges),
+            channels=tuple(channels),
+            transfers=tuple(self._transfers),
+        )
+
+    def _queue_setup(
+        self, channel: Link, edge: LinkEdgeConfig, now_ticks: int
+    ) -> int:
+        """Ticks from the request to the wire.
+
+        The setup waits for the channel's previous setup to finish, then
+        costs the edge's overhead; the channel's setup queue moves.
+        """
+        overhead_ticks = 0
+        if edge.transfer_overhead is not None:
+            overhead_ticks = edge.transfer_overhead.overhead_ticks
+        setup_free_ticks = self._setup_free_ticks_by_channel.get(channel, 0)
+        setup_start_ticks = max(now_ticks, setup_free_ticks)
+        wire_ticks = setup_start_ticks + overhead_ticks
+        self._setup_free_ticks_by_channel[channel] = wire_ticks
+        return wire_ticks - now_ticks
+
+    def _record_transfer(
+        self,
+        path: LinkPath,
+        channel: Link,
+        attribution: TrafficAttribution,
+        selection: PayloadSelectionSource,
+        payload_source: str,
+        reservation: LinkReservation,
+    ) -> None:
+        record = SemanticTransferRecord(
             path=path,
             physical_alias=self._alias_by_channel[channel],
             attribution=attribution,
             payload_selection=selection,
             payload_source=payload_source,
             reservation=reservation,
-        ))
-        return reservation
+        )
+        self._transfers.append(record)
+
+    def _channel_snapshot(
+        self, channel: Link, alias: str
+    ) -> LinkChannelSnapshot:
+        member_paths = self._member_paths(channel)
+        counters = channel.counters_snapshot()
+        return LinkChannelSnapshot(
+            alias=alias,
+            member_paths=member_paths,
+            config=channel.config,
+            counters=counters,
+        )
+
+    def _edge_snapshot(self, path: LinkPath) -> LinkEdgeSnapshot:
+        edge, channel = self._binding_by_path[path]
+        return LinkEdgeSnapshot(
+            path=path,
+            physical_alias=self._alias_by_channel[channel],
+            edge=edge,
+            counters=self._counters_by_path[path],
+        )
 
     def _member_paths(self, channel: Link) -> tuple:
-        return tuple(path for path in self._paths if self._bindings[path][1] is channel)
-
-    def snapshot(self) -> LinkFabricSnapshot:
-        """Frozen view for reports: the wiring, every channel's counters and
-        the whole transfer ledger."""
-        channels = []
-        for channel, alias in self._alias_by_channel.items():
-            channels.append(LinkChannelSnapshot(
-                alias=alias, member_paths=self._member_paths(channel),
-                config=channel.config, counters=channel.counters_snapshot()))
-        edges = []
+        member_paths = []
         for path in self._paths:
-            edge, channel = self._bindings[path]
-            edges.append(LinkEdgeSnapshot(
-                path=path, physical_alias=self._alias_by_channel[channel],
-                edge=edge, counters=self._semantic_counters[path]))
-        return LinkFabricSnapshot(
-            profile_name=self._config.profile_name, paths=self._paths,
-            edges=tuple(edges), channels=tuple(channels), transfers=tuple(self._transfers))
+            _edge, member_channel = self._binding_by_path[path]
+            if member_channel is channel:
+                member_paths.append(path)
+        return tuple(member_paths)
+
+
+_RULE_BY_PATH = {
+    LinkPath.QC: LinkPathRule(
+        LinkAttributionScope.ROUND, LinkRelationRule.NONE, required=True
+    ),
+    LinkPath.CWB: LinkPathRule(
+        LinkAttributionScope.ROUND, LinkRelationRule.NONE, required=False
+    ),
+    LinkPath.WBD: LinkPathRule(
+        LinkAttributionScope.ROUND_OR_WINDOW,
+        LinkRelationRule.REQUEST_WHEN_WINDOWED,
+        required=True,
+    ),
+    LinkPath.WSD: LinkPathRule(
+        LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, required=True
+    ),
+    LinkPath.SBD: LinkPathRule(
+        LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, required=True
+    ),
+    LinkPath.WDO: LinkPathRule(
+        LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, required=True
+    ),
+    LinkPath.DD: LinkPathRule(
+        LinkAttributionScope.WINDOW, LinkRelationRule.BOUNDARY, required=True
+    ),
+    LinkPath.DO: LinkPathRule(
+        LinkAttributionScope.WINDOW, LinkRelationRule.REQUEST, required=True
+    ),
+    LinkPath.OC: LinkPathRule(
+        LinkAttributionScope.OPERATION_ONLY,
+        LinkRelationRule.NONE,
+        required=True,
+    ),
+    LinkPath.CQ: LinkPathRule(
+        LinkAttributionScope.OPERATION_ONLY,
+        LinkRelationRule.NONE,
+        required=True,
+    ),
+    LinkPath.CSB: LinkPathRule(
+        LinkAttributionScope.ROUND, LinkRelationRule.NONE, required=False
+    ),
+}
+
+
+def _as_whole_number(value, name: str) -> int:
+    """A count or index as an exact int; 3.0 is fine, 3.5 and NaN are not."""
+    try:
+        whole = int(value)
+    except (OverflowError, ValueError) as error:
+        raise ValueError(f"{name} must be a finite whole number") from error
+    if whole != value:
+        raise ValueError(f"{name} must be a finite whole number")
+    return whole
+
+
+def _require_finite_number(value, name: str) -> None:
+    """Refuse NaN and infinity.
+
+    A Python int of any size is finite: math.isfinite overflows converting
+    it to float, and that overflow reads as finite.
+    """
+    try:
+        is_finite = math.isfinite(value)
+    except OverflowError:
+        is_finite = True
+    if not is_finite:
+        raise ValueError(f"{name} must be a finite number")
+
+
+def _normalized_channel_count(basis, channel_count, name: str) -> Optional[int]:
+    """The channel count a quantity's basis allows.
+
+    An aggregate quantity has no channel count; a per-channel one needs a
+    positive count.
+    """
+    is_aggregate = basis is LinkQuantityBasis.DIRECT_AGGREGATE
+    is_per_channel = basis is LinkQuantityBasis.PER_CHANNEL
+    if not is_aggregate and not is_per_channel:
+        raise ValueError(f"unknown link quantity basis {basis!r}")
+    if is_aggregate:
+        if channel_count is not None:
+            raise ValueError(
+                f"direct aggregate {name} requires channel_count=None"
+            )
+        return None
+    whole_count = _as_whole_number(channel_count, f"per-channel {name} count")
+    if whole_count <= 0:
+        raise ValueError(f"per-channel {name} count must be positive")
+    return whole_count
+
+
+def _checked_payload_bits(payload_bits) -> Optional[int]:
+    if payload_bits is None:
+        return None
+    payload_bits = _as_whole_number(payload_bits, "payload_bits")
+    if payload_bits < 0:
+        raise ValueError("payload_bits must be nonnegative")
+    return payload_bits
+
+
+def _serialization_ticks(payload_bits, capacity: LinkCapacityConfig) -> int:
+    """Whole ticks to put the payload on the wire at the channel's rate.
+
+    A fractional tick rounds up: serialization never ends before the exact
+    transmission time. Exact Fraction arithmetic keeps a representable
+    rate exact, so a whole-tick duration is never inflated by float error.
+    """
+    rate_text = str(capacity.aggregate_bits_per_microsecond)
+    rate = fractions.Fraction(rate_text)
+    payload = fractions.Fraction(payload_bits)
+    exact_ticks = payload * config.TICKS_PER_MICROSECOND / rate
+    return math.ceil(exact_ticks)
 
 
 def _select_payload(path: LinkPath, edge: LinkEdgeConfig, payload_bits):
-    """The bits a transfer is priced with: the actual payload when the caller
-    supplied one (the edge must name its source), else the card's default,
-    else unresolved (priced as zero bits)."""
+    """The bits a transfer is priced with, and where they came from.
+
+    The actual payload when the caller supplied one (the edge must name
+    its source), else the card's default, else unresolved, which a bounded
+    channel cannot price.
+    """
     if payload_bits is not None:
         if edge.actual_payload_source is None:
-            raise ValueError(f"{path.value} does not declare an actual payload source")
-        return payload_bits, PayloadSelectionSource.ACTUAL, edge.actual_payload_source
-    if edge.default_payload is not None:
-        return (edge.default_payload.aggregate_bits, PayloadSelectionSource.CONFIGURED_DEFAULT,
-                edge.default_payload.source)
-    return None, PayloadSelectionSource.UNRESOLVED, edge.actual_payload_source
+            raise ValueError(
+                f"{path.value} does not declare an actual payload source"
+            )
+        return (
+            payload_bits,
+            PayloadSelectionSource.ACTUAL,
+            edge.actual_payload_source,
+        )
+    default_payload = edge.default_payload
+    if default_payload is not None:
+        return (
+            default_payload.aggregate_bits,
+            PayloadSelectionSource.CONFIGURED_DEFAULT,
+            default_payload.source,
+        )
+    return (
+        None,
+        PayloadSelectionSource.UNRESOLVED,
+        edge.actual_payload_source,
+    )
 
 
 def _check_attribution(path: LinkPath, attribution: TrafficAttribution) -> None:
-    """The attribution has the shape the path's rule declares: the right scope
-    (round, window, operation), the right relation kind, and a relation that
-    names the same operation and window as the attribution."""
-    rule = _PATH_RULES[path]
-    has_window = attribution.window_id is not None
-    has_rounds = attribution.round_lo is not None
-    scope_ok = {
-        LinkAttributionScope.ROUND: not has_window and has_rounds,
-        LinkAttributionScope.ROUND_OR_WINDOW: has_rounds,
-        LinkAttributionScope.WINDOW: has_window and has_rounds,
-        LinkAttributionScope.OPERATION_ONLY: not has_window and not has_rounds,
-    }[rule.scope]
-    if not scope_ok:
-        raise ValueError(f"{path.value} requires {rule.scope.value} attribution")
+    """Refuse an attribution whose shape is not what the path's rule declares.
 
-    relation = attribution.relation
-    needs_request = (rule.relation is LinkRelationRule.REQUEST
-                     or (rule.relation is LinkRelationRule.REQUEST_WHEN_WINDOWED and has_window))
+    The rule fixes the scope (round, window, operation) and the relation
+    kind; the relation must name the same operation and window as the
+    attribution.
+    """
+    rule = _RULE_BY_PATH[path]
+    has_window = attribution.window_id is not None
+    has_rounds = attribution.first_round is not None
+    if not _has_scope(rule.scope, has_window, has_rounds):
+        raise ValueError(
+            f"{path.value} requires {rule.scope.value} attribution"
+        )
+    needs_request = rule.relation is LinkRelationRule.REQUEST
+    if rule.relation is LinkRelationRule.REQUEST_WHEN_WINDOWED:
+        needs_request = has_window
     needs_boundary = rule.relation is LinkRelationRule.BOUNDARY
+    _check_relation(path, attribution, needs_request, needs_boundary)
+
+
+def _has_scope(
+    scope: LinkAttributionScope, has_window: bool, has_rounds: bool
+) -> bool:
+    if scope is LinkAttributionScope.ROUND:
+        return has_rounds and not has_window
+    if scope is LinkAttributionScope.ROUND_OR_WINDOW:
+        return has_rounds
+    if scope is LinkAttributionScope.WINDOW:
+        return has_window and has_rounds
+    return not has_window and not has_rounds
+
+
+def _check_relation(
+    path: LinkPath,
+    attribution: TrafficAttribution,
+    needs_request: bool,
+    needs_boundary: bool,
+) -> None:
+    relation = attribution.relation
     if needs_request and type(relation) is not RequestTransferRelation:
         raise ValueError(f"{path.value} requires a request relation")
     if needs_boundary and type(relation) is not BoundaryTransferRelation:
         raise ValueError(f"{path.value} requires a boundary relation")
-    if not needs_request and not needs_boundary and relation is not None:
+    accepts_relation = needs_request or needs_boundary
+    if not accepts_relation and relation is not None:
         raise ValueError(f"{path.value} does not accept a relation")
-
     if needs_request:
         request_key = relation.request_key
     elif needs_boundary:
         request_key = relation.source_request_key
     else:
         return
-    if (request_key.operation_id != attribution.operation_id
-            or request_key.window_id != attribution.window_id):
+    is_same_operation = request_key.operation_id == attribution.operation_id
+    is_same_window = request_key.window_id == attribution.window_id
+    if not is_same_operation or not is_same_window:
         raise ValueError("transfer relation does not match attribution")

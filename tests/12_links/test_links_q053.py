@@ -112,7 +112,7 @@ def test_link_module_documents_every_segment_endpoint_and_extension_step():
     normalized = re.sub(r"\s+", " ", doc.lower())
     for phrase in (
         "add the member to ``linkpath``",
-        "``_path_rules``",
+        "``_rule_by_path``",
         "``optional[linkedgeconfig]`` field",
         "link_profiles.py",
     ):
@@ -121,12 +121,12 @@ def test_link_module_documents_every_segment_endpoint_and_extension_step():
 
 def test_rule_table_and_reference_cards_cover_the_closed_vocabulary():
     """One complete rule table; both cards wire the nine required paths."""
-    assert tuple(links_module._PATH_RULES) == tuple(LinkPath)
-    assert not links_module._PATH_RULES[LinkPath.CWB].required
-    assert not links_module._PATH_RULES[LinkPath.CSB].required
+    assert tuple(links_module._RULE_BY_PATH) == tuple(LinkPath)
+    assert not links_module._RULE_BY_PATH[LinkPath.CWB].required
+    assert not links_module._RULE_BY_PATH[LinkPath.CSB].required
     paths = tuple(p for p in LinkPath
                   if p is not LinkPath.CWB and p is not LinkPath.CSB)
-    assert all(links_module._PATH_RULES[path].required for path in paths)
+    assert all(links_module._RULE_BY_PATH[path].required for path in paths)
     for profile in (logical_reference_profile,
                     lambda: bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)):
         config = profile()
@@ -143,10 +143,10 @@ def test_rule_table_and_reference_cards_cover_the_closed_vocabulary():
 def test_unwired_optional_path_is_rejected_before_attribution(monkeypatch):
     """An unwired declared optional path fails before attribution is inspected."""
     path = LinkPath.CQ
-    rule = links_module._PATH_RULES[path]
+    rule = links_module._RULE_BY_PATH[path]
     monkeypatch.setattr(
-        links_module, "_PATH_RULES",
-        MappingProxyType({**links_module._PATH_RULES, path: replace(rule, required=False)}))
+        links_module, "_RULE_BY_PATH",
+        MappingProxyType({**links_module._RULE_BY_PATH, path: replace(rule, required=False)}))
     model = replace(logical_reference_profile(), cq=None).resolve()
     assert path not in model.paths
 
@@ -229,14 +229,14 @@ def test_capacity_preserves_finite_real_rates_and_huge_integers():
         capacity = LinkCapacityConfig(
             value, LinkQuantityBasis.DIRECT_AGGREGATE, None, "capacity"
         )
-        assert capacity.input_bits_per_us == value
-        assert type(capacity.input_bits_per_us) is type(value)
+        assert capacity.input_bits_per_microsecond == value
+        assert type(capacity.input_bits_per_microsecond) is type(value)
 
 
 @pytest.mark.parametrize("invalid", [math.nan, math.inf, -math.inf])
 def test_capacity_rejects_nonfinite_rates_with_field_context(invalid):
     """Nonfinite rates fail with the affected capacity field named."""
-    with pytest.raises(ValueError, match="input_bits_per_us"):
+    with pytest.raises(ValueError, match="input_bits_per_microsecond"):
         LinkCapacityConfig(
             invalid, LinkQuantityBasis.DIRECT_AGGREGATE, None, "capacity"
         )

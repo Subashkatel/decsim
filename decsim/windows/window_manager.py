@@ -909,12 +909,12 @@ class WindowManager:
             operation_id=job.op_id,
             patch_ids=patch_ids,
             window_id=job.window_id,
-            round_lo=(
+            first_round=(
                 window.commit_lo
                 if window.buffer_lo is None
                 else window.buffer_lo
             ),
-            round_hi=(
+            last_round=(
                 window.commit_hi
                 if window.buffer_hi is None
                 else window.buffer_hi
@@ -935,12 +935,12 @@ class WindowManager:
                 key=stable_identity_order_key,
             )),
             window_id=window.k,
-            round_lo=(
+            first_round=(
                 window.commit_lo
                 if window.buffer_lo is None
                 else window.buffer_lo
             ),
-            round_hi=(
+            last_round=(
                 window.commit_hi
                 if window.buffer_hi is None
                 else window.buffer_hi

@@ -145,7 +145,7 @@ class Controller:
                        self.instruction_or_decision_to_analog_control_pulse_ticks)
         attribution = TrafficAttribution(
             operation_id=operation_id, patch_ids=(), window_id=None,
-            round_lo=None, round_hi=None)
+            first_round=None, last_round=None)
         if self.links is None:
             arrival_tick = output_tick
         else:
@@ -280,7 +280,7 @@ class Controller:
         """
         attribution = TrafficAttribution(
             operation_id=decision.target_operation_id, patch_ids=(),
-            window_id=None, round_lo=None, round_hi=None)
+            window_id=None, first_round=None, last_round=None)
 
         def at_controller():
             self.output_events.append(ControllerOutputEvent(

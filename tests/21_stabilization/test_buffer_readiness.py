@@ -127,7 +127,7 @@ def test_sb1_gap_cannot_be_served(fabric):
                   packet_bits=1,
                   attribution=TrafficAttribution(
                       operation_id=1, patch_ids=(0,), window_id=None,
-                      round_lo=round_index, round_hi=round_index))
+                      first_round=round_index, last_round=round_index))
 
     write(1)
     write(3)

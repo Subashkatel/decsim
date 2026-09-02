@@ -25,8 +25,8 @@ def _write(sb1, packet):
     sb1.write(packet, packet_bits=packet.fragments[0].size_bits,
               attribution=TrafficAttribution(
                   operation_id=packet.operation_id, patch_ids=(0,),
-                  window_id=None, round_lo=packet.round_index,
-                  round_hi=packet.round_index))
+                  window_id=None, first_round=packet.round_index,
+                  last_round=packet.round_index))
 
 
 def _free_fabric():

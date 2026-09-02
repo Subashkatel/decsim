@@ -257,8 +257,12 @@ each in its own context, each seeing only the diff and told to assume it
 is wrong (owner directive 2026-09-02). A reviewer's only job is to find
 bugs and reasons the code does not work; a reviewer never implements,
 and the implementer never reviews. Every finding goes back to the
-implementer, who fixes it and resubmits; a slice is done when both
-reviewers find nothing. Beyond bugs, each reviewer answers this list
+implementer, who fixes it and resubmits. Each finding carries a severity:
+bug, a test that cannot fail, untested law, weak test, rule violation.
+A slice closes when no bug and no test-that-cannot-fail remains, every
+untested law has its test, and every other finding is either fixed or
+written on the file's checklist row with the slice that fixes it. A
+reviewer's report that lists only recorded items is an empty report. Beyond bugs, each reviewer answers this list
 with yes or no for every touched file:
 
 1. Does every line do one thing, and does `tools/check.sh` pass?

@@ -350,8 +350,9 @@ def _slice_plan(
     """Every window of the plan, in plan order."""
     models = []
     for window_index, window_entry in enumerate(entries):
-        # The contiguity check makes the window whose commit rounds reach
-        # the last round the last entry; only it is terminal.
+        # The contiguity and end-inside checks make the window whose
+        # commit rounds reach the last round the last entry; only it is
+        # terminal.
         is_last = window_entry[2] == round_count
         owned = _entry_of(ownership, window_index)
         prior = _entry_of(prior_faults, window_index)

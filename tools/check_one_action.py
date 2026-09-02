@@ -68,7 +68,6 @@ EXCLUDED_PARTS = frozenset(
         "tmp",
         "archive",
         "__pycache__",
-        "stimcircuits",
     }
 )
 MAX_FUNCTION_LINES = 40

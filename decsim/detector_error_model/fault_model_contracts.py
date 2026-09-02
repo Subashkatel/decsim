@@ -183,10 +183,11 @@ class WindowErrorModel:
     def require_faults(
         self, representation: FaultRepresentation
     ) -> PlacedFaultModel:
-        """The requested view, or a refusal when the window lacks it.
+        """The requested view; a wrong caller is refused.
 
-        Only the window decoders inside the machine call this, so a
-        non-member representation is a wrong caller.
+        Only the window decoders inside the machine call this, so asking
+        for a view the window does not hold, or for a representation that
+        is not a member, is a caller's bug.
         """
         if representation is FaultRepresentation.GRAPHLIKE:
             faults = self.graphlike_faults
@@ -197,7 +198,7 @@ class WindowErrorModel:
                 "representation must be a FaultRepresentation value"
             )
         if faults is None:
-            raise ValueError(
+            raise RuntimeError(
                 f"window model does not contain {representation.value} faults"
             )
         return faults

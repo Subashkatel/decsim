@@ -252,9 +252,11 @@ def test_every_fault_is_owned_by_exactly_one_window_of_a_sliding_plan():
     assert all_owned == list(range(174))
 
 
-def test_a_last_window_takes_every_round_from_its_start_and_owns_it_all():
+def test_a_terminal_window_owns_every_column_it_sees():
     slicer = surface_code_slicer(4)
-    model = slicer.slice_window(2, 2, 2, 2, is_last=True)
+    # Commit rounds 2 to 4 reach the last round, so the window is
+    # terminal; its rows are the detectors of rounds 2 to 4.
+    model = slicer.slice_window(2, 2, 4, 4, is_last=True)
     faults = model.require_faults(GRAPHLIKE)
     assert model.detector_ids == tuple(range(4, 32))
     assert len(faults.source_fault_ids) == 103

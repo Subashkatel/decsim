@@ -76,8 +76,9 @@ class WindowSlicer:
     ) -> fault_model_contracts.WindowErrorModel:
         """One window's model; advances ownership unless owners are given.
 
-        The exclusion ranges are checked by the builders; a caller inside
-        the machine passes checked ranges or none.
+        `is_last` is given only for a window whose commit rounds reach
+        round_count. The exclusion ranges are checked by the builders; a
+        caller inside the machine passes checked ranges or none.
         """
         _check_maps_come_together(
             explicitly_owned_faults, explicitly_prior_faults
@@ -110,7 +111,6 @@ class WindowSlicer:
             self.chronology.detectors_by_round,
             first_buffer_round,
             last_buffer_round,
-            is_last=is_last,
         )
         row_by_detector = {
             detector_id: row_number

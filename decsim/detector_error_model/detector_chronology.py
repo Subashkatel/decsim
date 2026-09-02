@@ -49,25 +49,26 @@ def resolve_detector_rounds(
 def checked_detector_round_map(
     detector_rounds: dict[int, int], detector_count: int, round_count: int
 ) -> dict[int, int]:
-    """A copy of the map, checked once against this module's law.
+    """The map itself, checked once against this module's law.
 
     Raises ValueError unless the map covers every detector exactly once
     with rounds inside 1..round_count. detector_formation holds a declared
     map to the same law through this function, so the check lives here
-    alone.
+    alone. Nothing that receives the map writes to it: the formation
+    table reads it into its recipes while it is built and does not keep
+    it, and the slicer's chronology keeps it and only reads it.
     """
-    checked = dict(detector_rounds)
     every_detector = set(range(detector_count))
-    if set(checked) != every_detector:
+    if set(detector_rounds) != every_detector:
         raise ValueError("detector-round map must cover every detector exactly")
     after_last_round = round_count + 1
     emitted_rounds = set(range(1, after_last_round))
-    declared_rounds = checked.values()
+    declared_rounds = detector_rounds.values()
     if not set(declared_rounds) <= emitted_rounds:
         raise ValueError(
             "detector-round map must lie inside the emitted rounds"
         )
-    return checked
+    return detector_rounds
 
 
 def detectors_by_round(

@@ -125,7 +125,7 @@ def test_a_window_refuses_a_representation_it_does_not_hold():
         graphlike_faults=placed,
         physical_faults=None,
     )
-    with pytest.raises(ValueError, match="does not contain physical faults"):
+    with pytest.raises(RuntimeError, match="does not contain physical faults"):
         window.require_faults(PHYSICAL)
 
 

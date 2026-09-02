@@ -371,8 +371,8 @@ def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():
 
 def test_a_request_earlier_than_the_channels_previous_request_is_refused():
     shared_channel = unbounded_channel(0)
-    qpu_edge = free_edge_on(shared_channel)
-    buffer_edge = free_edge_on(shared_channel)
+    qpu_edge = edge_with_setup_on(shared_channel, overhead_ticks=5)
+    buffer_edge = edge_with_setup_on(shared_channel, overhead_ticks=5)
     shared_card = card(qc=qpu_edge, cwb=buffer_edge)
     model = shared_card.build()
     first_round = round_attribution(1)
@@ -394,7 +394,7 @@ def test_a_request_earlier_than_the_channels_previous_request_is_refused():
     untouched = model.reserve(
         links.LinkPath.QC, payload_bits=8, now_ticks=10, attribution=third_round
     )
-    assert (untouched.setup_ticks, untouched.send_ticks) == (0, 10)
+    assert (untouched.setup_ticks, untouched.send_ticks) == (10, 20)
 
 
 def test_the_snapshot_counts_every_transfer_per_path():
@@ -574,7 +574,9 @@ def test_a_negative_payload_leaves_the_channel_untouched():
     model = setup_card.build()
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    with pytest.raises(RuntimeError, match="whole number"):
+    with pytest.raises(
+        RuntimeError, match="a payload is a whole number of bits, not negative"
+    ):
         model.reserve(
             links.LinkPath.QC,
             payload_bits=-1,
@@ -600,7 +602,9 @@ def test_a_fractional_payload_leaves_the_channel_untouched():
     model = setup_card.build()
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    with pytest.raises(RuntimeError, match="whole number"):
+    with pytest.raises(
+        RuntimeError, match="a payload is a whole number of bits, not negative"
+    ):
         model.reserve(
             links.LinkPath.QC,
             payload_bits=1.5,
@@ -626,7 +630,9 @@ def test_a_fractional_request_tick_leaves_the_channel_untouched():
     model = setup_card.build()
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    with pytest.raises(RuntimeError, match="whole number"):
+    with pytest.raises(
+        RuntimeError, match="a request tick is a whole number, not negative"
+    ):
         model.reserve(
             links.LinkPath.QC,
             payload_bits=8,
@@ -652,7 +658,9 @@ def test_a_request_tick_that_is_not_a_number_leaves_the_channel_untouched():
     model = setup_card.build()
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    with pytest.raises(RuntimeError, match="whole number"):
+    with pytest.raises(
+        RuntimeError, match="a request tick is a whole number, not negative"
+    ):
         model.reserve(
             links.LinkPath.QC,
             payload_bits=8,
@@ -678,7 +686,9 @@ def test_a_negative_first_request_tick_leaves_the_channel_untouched():
     model = setup_card.build()
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    with pytest.raises(RuntimeError, match="not negative"):
+    with pytest.raises(
+        RuntimeError, match="a request tick is a whole number, not negative"
+    ):
         model.reserve(
             links.LinkPath.QC,
             payload_bits=8,
@@ -695,3 +705,224 @@ def test_a_negative_first_request_tick_leaves_the_channel_untouched():
     assert accepted.physical_sequence == 0
     snapshot = model.snapshot()
     assert len(snapshot.transfers) == 1
+
+
+def operation_attribution():
+    return links.TrafficAttribution(
+        operation_id=1,
+        patch_ids=(0,),
+        window_id=None,
+        first_round=None,
+        last_round=None,
+    )
+
+
+def test_a_request_exactly_at_the_serializers_free_tick_waits_zero():
+    channel = bounded_channel(1000.0, 0)
+    link = links.Link(channel)
+    first = link.reserve(payload_bits=8, now_ticks=10)
+    second = link.reserve(payload_bits=8, now_ticks=8010)
+    assert first.serializer_end_ticks == 8010
+    assert second.queue_wait_ticks == 0
+    assert second.serializer_start_ticks == 8010
+
+
+def test_an_unbounded_channel_never_queues_on_back_to_back_sends():
+    channel = unbounded_channel(7)
+    link = links.Link(channel)
+    first = link.reserve(payload_bits=1000, now_ticks=10)
+    second = link.reserve(payload_bits=1000, now_ticks=10)
+    third = link.reserve(payload_bits=1000, now_ticks=10)
+    assert (first.queue_wait_ticks, first.serializer_start_ticks) == (0, 10)
+    assert (second.queue_wait_ticks, second.serializer_start_ticks) == (0, 10)
+    assert (third.queue_wait_ticks, third.serializer_start_ticks) == (0, 10)
+    assert third.total_delay_ticks == 7
+
+
+def test_an_empty_payload_on_a_bounded_channel_pays_setup_only():
+    channel = bounded_channel(1000.0, 0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    setup_card = card(qc=qpu_edge)
+    model = setup_card.build()
+    attribution = round_attribution(1)
+    reservation = model.reserve(
+        links.LinkPath.QC, payload_bits=0, now_ticks=10, attribution=attribution
+    )
+    assert reservation.serialization_ticks == 0
+    assert reservation.setup_ticks == 5
+    assert reservation.total_delay_ticks == 5
+
+
+def test_the_physical_sequence_counts_per_channel_across_paths():
+    shared_channel = unbounded_channel(0)
+    other_channel = unbounded_channel(0)
+    qpu_edge = free_edge_on(shared_channel)
+    buffer_edge = free_edge_on(shared_channel)
+    weak_edge = free_edge_on(other_channel)
+    two_channel_card = card(qc=qpu_edge, cwb=buffer_edge, wbd=weak_edge)
+    model = two_channel_card.build()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    third_round = round_attribution(3)
+    on_shared_first = model.reserve(
+        links.LinkPath.QC, payload_bits=8, now_ticks=0, attribution=first_round
+    )
+    on_shared_second = model.reserve(
+        links.LinkPath.CWB,
+        payload_bits=8,
+        now_ticks=0,
+        attribution=second_round,
+    )
+    on_other = model.reserve(
+        links.LinkPath.WBD,
+        payload_bits=8,
+        now_ticks=0,
+        attribution=third_round,
+    )
+    assert on_shared_first.physical_sequence == 0
+    assert on_shared_second.physical_sequence == 1
+    assert on_other.physical_sequence == 0
+
+
+def test_a_setup_after_the_queue_went_idle_costs_only_its_own_overhead():
+    channel = unbounded_channel(0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    setup_card = card(qc=qpu_edge)
+    model = setup_card.build()
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    first = model.reserve(
+        links.LinkPath.QC, payload_bits=8, now_ticks=10, attribution=first_round
+    )
+    later = model.reserve(
+        links.LinkPath.QC,
+        payload_bits=8,
+        now_ticks=100,
+        attribution=second_round,
+    )
+    assert first.send_ticks == 15
+    assert (later.setup_ticks, later.send_ticks) == (5, 105)
+
+
+def test_a_transfer_with_no_payload_size_counts_as_unknown():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = round_attribution(1)
+    model.reserve(
+        links.LinkPath.QC,
+        payload_bits=None,
+        now_ticks=0,
+        attribution=attribution,
+    )
+    snapshot = model.snapshot()
+    counters_by_path = {edge.path: edge.counters for edge in snapshot.edges}
+    qpu_counters = counters_by_path[links.LinkPath.QC]
+    assert qpu_counters.unknown_payload_transfer_count == 1
+    assert qpu_counters.known_payload_bits == 0
+    assert qpu_counters.transfer_count == 1
+
+
+def test_a_zero_capacity_is_refused():
+    with pytest.raises(ValueError, match="positive"):
+        links.LinkCapacityConfig(
+            0.0, links.LinkQuantityBasis.DIRECT_AGGREGATE, None, "test"
+        )
+
+
+def test_a_negative_capacity_is_refused():
+    with pytest.raises(ValueError, match="positive"):
+        links.LinkCapacityConfig(
+            -1.0, links.LinkQuantityBasis.DIRECT_AGGREGATE, None, "test"
+        )
+
+
+def test_a_round_or_window_path_refuses_an_attribution_without_rounds():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = operation_attribution()
+    with pytest.raises(ValueError, match="requires round_or_window"):
+        model.reserve(
+            links.LinkPath.WBD,
+            payload_bits=1,
+            now_ticks=0,
+            attribution=attribution,
+        )
+
+
+def test_a_windowed_transfer_on_the_weak_input_path_needs_its_request():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = links.TrafficAttribution(
+        operation_id=1,
+        patch_ids=(0,),
+        window_id=3,
+        first_round=3,
+        last_round=3,
+    )
+    with pytest.raises(ValueError, match="wbd requires a request relation"):
+        model.reserve(
+            links.LinkPath.WBD,
+            payload_bits=1,
+            now_ticks=0,
+            attribution=attribution,
+        )
+
+
+def test_a_window_path_refuses_an_attribution_without_a_window():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = round_attribution(1)
+    with pytest.raises(ValueError, match="sbd requires window attribution"):
+        model.reserve(
+            links.LinkPath.SBD,
+            payload_bits=1,
+            now_ticks=0,
+            attribution=attribution,
+        )
+
+
+def test_the_decoder_to_decoder_path_needs_a_boundary_relation():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = window_attribution(3)
+    with pytest.raises(ValueError, match="dd requires a boundary relation"):
+        model.reserve(
+            links.LinkPath.DD,
+            payload_bits=1,
+            now_ticks=0,
+            attribution=attribution,
+        )
+
+
+def test_an_operation_only_path_refuses_an_attribution_with_rounds():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = round_attribution(1)
+    with pytest.raises(ValueError, match="oc requires operation_only"):
+        model.reserve(
+            links.LinkPath.OC,
+            payload_bits=1,
+            now_ticks=0,
+            attribution=attribution,
+        )
+
+
+def test_an_operation_only_path_refuses_a_relation():
+    complete_card = card()
+    model = complete_card.build()
+    relation = request_relation_for(3)
+    attribution = links.TrafficAttribution(
+        operation_id=1,
+        patch_ids=(0,),
+        window_id=None,
+        first_round=None,
+        last_round=None,
+        relation=relation,
+    )
+    with pytest.raises(ValueError, match="oc does not accept a relation"):
+        model.reserve(
+            links.LinkPath.OC,
+            payload_bits=1,
+            now_ticks=0,
+            attribution=attribution,
+        )

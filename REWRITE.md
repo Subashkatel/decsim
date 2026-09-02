@@ -241,8 +241,10 @@ Every commit is one of three kinds, never two:
   reference.yaml, the parameter reference, the frozen suite configs and
   the golden move in the same commit, under a design note.
 
-A bug found on the way gets its own commit with a test and a referent. The
-golden is regenerated only under a design note.
+A bug found on the way gets its own commit with a test and a referent; an
+old test that pinned the bug is corrected or deleted in that same commit,
+and the message says so. The golden is regenerated only under a design
+note.
 
 Before a slice commit: gate green, component harnesses exact, old and new
 tests green, `tools/check.sh` clean on the touched files. The file

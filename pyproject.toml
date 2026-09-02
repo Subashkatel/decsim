@@ -40,7 +40,9 @@ target-version = "py39"
 extend-exclude = [".pydeps", ".venv", "tmp", "archive", "decsim/qpu/stimcircuits/surface_code.py"]
 
 [tool.ruff.lint]
-select = ["E", "W", "F", "N", "D", "B", "I", "UP", "SIM"]
+# SIM is off on purpose: it asks for inline conditionals and merged
+# conditions, the opposite of REWRITE.md rule 1.
+select = ["E", "W", "F", "N", "D", "B", "I", "UP", "ARG"]
 ignore = [
   "D105",  # magic methods need no docstring
   "D107",  # __init__ is described by the class docstring
@@ -54,9 +56,10 @@ ignore = [
 convention = "google"
 
 [tool.ruff.lint.isort]
-force-single-line = false
 known-first-party = ["decsim", "experiments"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D"]
-"experiments/tests/**" = ["D"]
+# A test module keeps its docstring (it names the source it checks
+# against); test functions and helper classes need none.
+"tests/**" = ["D101", "D102", "D103", "D104"]
+"experiments/tests/**" = ["D101", "D102", "D103", "D104"]

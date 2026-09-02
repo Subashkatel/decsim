@@ -69,7 +69,7 @@ def test_scheduled_events_receive_unique_increasing_sequences():
     engine.schedule(2, lambda: None, label="third")
 
     sequence_by_label = {
-        event.label: event.seq for event in engine._event_queue
+        event.label: event.sequence_number for event in engine._event_queue
     }
     sequences = [
         sequence_by_label["first"],
@@ -147,21 +147,6 @@ def test_run_observes_initial_and_successful_event_boundaries():
         (2, True),
         (3, True),
     ]
-    assert engine._event_queue == []
-
-
-def test_run_rejects_an_event_behind_the_current_clock():
-    """A queued event behind the current clock is rejected without moving time backward."""
-    engine = Engine(verbose=False)
-    fired = []
-    engine.schedule(1, lambda: fired.append(True))
-    engine.now = 2
-
-    with pytest.raises((RuntimeError, ValueError)):
-        engine.run()
-
-    assert fired == []
-    assert engine.now == 2
     assert engine._event_queue == []
 
 

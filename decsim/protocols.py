@@ -283,7 +283,7 @@ class PauliFrame(Protocol):
     mutate the frame.
     """
 
-    def commit_weak_correction(
+    def commit_correction(
         self,
         *,
         window_key,
@@ -388,7 +388,7 @@ class ConditionalReleasePort(Protocol):
     def register_blocked_operation(self, blocked_op_id: int,
                                    blocking_op_id: int) -> None: ...
 
-    def integrate(self, op, outcome) -> None: ...
+    def release_waiters(self, op, outcome) -> None: ...
 
 
 # ---------------------------------------------------------------- compile side

@@ -24,17 +24,16 @@ import decsim.message as message
 from decsim.detector_error_model import fault_model_contracts, window_slicer
 
 
-def validate_closed_temporal_boundary_windows(
-    slicer: window_slicer.WindowSlicer,
-    models: list[fault_model_contracts.WindowErrorModel],
+def validate_closed_windows_are_dependency_destinations(
     dependency_edges: Optional[tuple[tuple[int, int], ...]],
     closed_windows: tuple[int, ...],
 ) -> None:
-    """Refuse a closed time boundary that cuts a fault of the circuit."""
-    if not closed_windows:
-        return
-    # A closed window waits for the windows beside it, so it is always a
-    # dependency destination; a plan with no edges has none.
+    """A closed window waits for the windows beside it, so an edge ends there.
+
+    A plan with no edges has no destination, so it can have no closed
+    window. This is a check of the plan's shape and runs before any
+    window is built.
+    """
     edges = dependency_edges or ()
     destinations = {destination for _, destination in edges}
     for window_index in closed_windows:
@@ -43,6 +42,15 @@ def validate_closed_temporal_boundary_windows(
                 "closed temporal boundary window must be a dependency "
                 "destination"
             )
+
+
+def validate_closed_temporal_boundary_windows(
+    slicer: window_slicer.WindowSlicer,
+    models: list[fault_model_contracts.WindowErrorModel],
+    closed_windows: tuple[int, ...],
+) -> None:
+    """Refuse a closed time boundary that cuts a fault of the circuit."""
+    for window_index in closed_windows:
         _check_window_cuts_no_fault(slicer, models[window_index], window_index)
 
 

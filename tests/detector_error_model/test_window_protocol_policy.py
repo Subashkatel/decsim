@@ -16,6 +16,7 @@ from decsim.detector_error_model import (
     window_model_builders,
     window_protocol_policy,
 )
+from decsim.windows import windowing_schemes
 
 TAN = message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE
 GENERIC = message.WindowProtocol.GENERIC
@@ -148,6 +149,51 @@ def test_a_closed_window_with_no_dependency_edges_is_refused_with_a_sentence():
             fault_model_requirement=GRAPHLIKE_REQUIRED,
             fault_exclusion_ranges=(),
             closed_temporal_boundary_windows=(1,),
+        )
+
+
+def runtime_sandwich_entries(plan):
+    """The plan entries the runtime hands the builder for a scheme's plan."""
+    return [
+        (window.buffer_lo, window.commit_lo, window.commit_hi, window.buffer_hi)
+        for window in plan.windows
+    ]
+
+
+def test_a_range_that_cuts_at_a_closed_seam_is_refused():
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=3,
+        rounds=30,
+        after_clifford_depolarization=0.001,
+    )
+    # The runtime's thirty-round sandwich with step 2 and buffer 1: seam
+    # 1 is round 3. An excluded fault is owned by nobody and stays a
+    # column of every window that sees it, so fault 22, which touches
+    # rounds 3 and 4, is a column of the seam and cut at its edge.
+    scheme = windowing_schemes.TanSandwichScheme()
+    plan = scheme.plan_operation(
+        0, 30, commit_round_count=2, buffer_round_count=1
+    )
+    entries = runtime_sandwich_entries(plan)
+    seams = tuple(range(1, 26, 2))
+    assert entries[:4] == [
+        (1, 1, 2, 4),
+        (3, 3, 3, 3),
+        (3, 4, 4, 6),
+        (5, 5, 5, 5),
+    ]
+    assert len(entries) == 27
+    with pytest.raises(ValueError, match="window 1 truncates global fault 22"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            entries,
+            round_count=30,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            fault_exclusion_ranges=((3, 4),),
+            dependency_edges=plan.internal_dependencies,
+            closed_temporal_boundary_windows=seams,
+            window_protocol=TAN,
         )
 
 

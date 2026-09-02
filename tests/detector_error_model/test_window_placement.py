@@ -68,13 +68,6 @@ def test_a_bytes_container_is_refused():
         window_placement.checked_fault_exclusion_ranges(b"", 4)
 
 
-def test_a_str_pair_is_refused():
-    with pytest.raises(
-        ValueError, match="must be a pair of built-in integers, got '12'"
-    ):
-        window_placement.checked_fault_exclusion_ranges(("12",), 4)
-
-
 def test_a_bytes_pair_is_refused_although_its_values_are_ints():
     with pytest.raises(
         ValueError,

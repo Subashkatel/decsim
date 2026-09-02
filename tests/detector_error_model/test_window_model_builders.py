@@ -6,10 +6,14 @@ the region the next one starts after, and the last window commits
 everything it holds): qLDPC's detection regions are asserted against
 decsim's detector_ids, its commit regions against literals, and decsim's
 committed identities against qLDPC's, since a WindowErrorModel carries no
-commit region of its own; Skoric et al. 2209.08552, section I.B (a fault
-the decoder may use to explain the syndrome but may not commit stays
-outside the commit region; the last window commits its whole decoding
-region).
+commit region of its own; Skoric et al. 2209.08552, section I.B (a
+window's graph holds every edge touching a defect in its rounds, and
+only the correction edges in the commit region are taken as final) and
+the closing paragraph of its parallel-window section (the commit region
+of the last window runs from the bottom of the regular commit region to
+the last round). Exclusion ranges are decsim's own device (a strong
+re-decode leaves the weak decoder's committed faults uncommitted,
+decsim/decoders/strong_escalation) with no paper referent.
 """
 
 import numpy
@@ -17,6 +21,7 @@ import pytest
 import qldpc.decoders
 import stim
 
+import decsim.message as message
 from decsim.detector_error_model import (
     detector_chronology,
     fault_model_contracts,
@@ -26,6 +31,7 @@ from decsim.detector_error_model import (
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 GRAPHLIKE_REQUIRED = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
+LINKED_REQUIRED = fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
 
 
 def surface_code_circuit(rounds):
@@ -801,34 +807,36 @@ def test_a_window_short_of_the_last_round_is_not_terminal_with_edges_given():
     assert set(owned_together) == set(range(110)) - unowned
 
 
-def test_a_linked_plan_with_edges_committing_after_round_one_is_refused():
+def test_a_linked_window_depending_on_the_terminal_window_is_refused():
     circuit = surface_code_circuit(6)
-    # Window 1 is terminal and window 0 depends on it. A physical fault
-    # of rounds 1 and 2 belongs to window 0; a component of it that flips
-    # only round-1 detectors would go to the terminal window, and window
-    # 0 would drop the component while keeping the fault.
-    with pytest.raises(ValueError, match="first commit round is after round 1"):
+    # Window 1 is terminal and window 0 depends on it. Physical fault 11
+    # touches rounds 1 and 2 and goes to window 0; its component 9 flips
+    # a round-1 detector only, which no commit round reaches, so the
+    # terminal window owns it, and window 0 would keep 11 without 9.
+    with pytest.raises(
+        ValueError,
+        match=(
+            "window 0 keeps physical fault 11 while window 1, which it "
+            "depends on, owns graphlike component 9"
+        ),
+    ):
         window_model_builders.build_window_error_models(
             circuit,
             [(1, 2, 3, 3), (1, 4, 6, 6)],
             round_count=6,
-            fault_model_requirement=(
-                fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
-            ),
+            fault_model_requirement=LINKED_REQUIRED,
             fault_exclusion_ranges=(),
             dependency_edges=((1, 0),),
         )
 
 
-def test_a_linked_chain_whose_commits_start_at_round_one_builds():
+def test_a_linked_chain_builds_with_every_component_beside_its_fault():
     circuit = surface_code_circuit(6)
     models = window_model_builders.build_window_error_models(
         circuit,
         [(1, 1, 3, 3), (1, 4, 6, 6)],
         round_count=6,
-        fault_model_requirement=(
-            fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
-        ),
+        fault_model_requirement=LINKED_REQUIRED,
         fault_exclusion_ranges=(),
         dependency_edges=((0, 1),),
     )
@@ -841,6 +849,159 @@ def test_a_linked_chain_whose_commits_start_at_round_one_builds():
     assert second_projection.shape == (94, 367)
     assert len(first_owns) == 80
     assert len(last_owns) == 94
+
+
+def test_a_linked_sandwich_builds_with_every_component_beside_its_fault():
+    circuit = surface_code_circuit(5)
+    # Tan's edges under the generic protocol: the seam depends on both
+    # neighbours, and every fault it keeps is whole.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 2, 3), (3, 3, 3, 3), (3, 4, 5, 5)],
+        round_count=5,
+        fault_model_requirement=LINKED_REQUIRED,
+        fault_exclusion_ranges=(),
+        dependency_edges=((0, 1), (2, 1)),
+    )
+    before_projection = models[0].physical_to_graphlike_detector_projection
+    seam_projection = models[1].physical_to_graphlike_detector_projection
+    after_projection = models[2].physical_to_graphlike_detector_projection
+    before_owns = owned_faults(models[0])
+    seam_owns = owned_faults(models[1])
+    after_owns = owned_faults(models[2])
+    assert before_projection.shape == (80, 336)
+    assert seam_projection.shape == (14, 31)
+    assert after_projection.shape == (112, 476)
+    assert len(before_owns) == 48
+    assert len(seam_owns) == 14
+    assert len(after_owns) == 80
+
+
+def test_a_component_off_the_windows_rows_owned_by_an_ancestor_is_allowed():
+    circuit = surface_code_circuit(6)
+    # Window 0 decodes rounds 2 and 3 and depends on the terminal window.
+    # Physical fault 11 touches rounds 1 and 2 and belongs to window 0;
+    # its component 9 flips a round-1 detector only, which the terminal
+    # window owns. That component lands on no row of window 0, so the
+    # window's columns still add up and the plan builds.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(2, 2, 3, 3), (1, 4, 6, 6)],
+        round_count=6,
+        fault_model_requirement=LINKED_REQUIRED,
+        fault_exclusion_ranges=(),
+        dependency_edges=((1, 0),),
+    )
+    dependent_projection = models[0].physical_to_graphlike_detector_projection
+    terminal_projection = models[1].physical_to_graphlike_detector_projection
+    dependent_owns = owned_faults(models[0])
+    terminal_owns = owned_faults(models[1])
+    assert models[0].detector_ids == tuple(range(4, 20))
+    assert dependent_projection.shape == (55, 220)
+    assert terminal_projection.shape == (174, 703)
+    assert len(dependent_owns) == 55
+    assert len(terminal_owns) == 119
+
+
+def test_a_linked_terminal_window_with_empty_edges_builds():
+    circuit = surface_code_circuit(4)
+    # An empty tuple of edges compiles ownership from a graph with no
+    # edge: nothing depends on anything, and nothing is refused.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 3, 4, 4)],
+        round_count=4,
+        fault_model_requirement=LINKED_REQUIRED,
+        fault_exclusion_ranges=(),
+        dependency_edges=(),
+    )
+    projection = models[0].physical_to_graphlike_detector_projection
+    faults = models[0].require_faults(GRAPHLIKE)
+    assert projection.shape == (110, 423)
+    assert len(faults.source_fault_ids) == 110
+    assert faults.owned.all()
+
+
+def test_a_gap_is_reported_before_the_linked_check():
+    circuit = surface_code_circuit(6)
+    with pytest.raises(ValueError, match="contiguous"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 2, 3, 3), (1, 5, 6, 6)],
+            round_count=6,
+            fault_model_requirement=LINKED_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((1, 0),),
+        )
+
+
+def test_a_commit_past_round_count_is_reported_before_the_linked_check():
+    circuit = surface_code_circuit(6)
+    with pytest.raises(ValueError, match="exceeds round_count"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 2, 3, 3), (1, 4, 7, 7)],
+            round_count=6,
+            fault_model_requirement=LINKED_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((1, 0),),
+        )
+
+
+def test_an_edge_outside_the_plan_is_reported_before_the_linked_check():
+    circuit = surface_code_circuit(6)
+    with pytest.raises(
+        ValueError, match=r"edge \(0, 5\) names a window outside"
+    ):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 1, 2, 2), (3, 3, 3, 3), (4, 4, 5, 5), (2, 6, 6, 6)],
+            round_count=6,
+            fault_model_requirement=LINKED_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((0, 5),),
+        )
+
+
+def test_a_cycle_is_reported_before_the_linked_check():
+    circuit = surface_code_circuit(6)
+    with pytest.raises(ValueError, match="acyclic"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 1, 2, 2), (3, 3, 3, 3), (4, 4, 5, 5), (2, 6, 6, 6)],
+            round_count=6,
+            fault_model_requirement=LINKED_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((2, 1), (1, 3), (3, 2)),
+        )
+
+
+def test_a_protocol_defect_is_reported_before_the_linked_check():
+    circuit = surface_code_circuit(6)
+    with pytest.raises(ValueError, match="requires exactly the graphlike"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 1, 2, 2), (3, 3, 3, 3), (4, 4, 5, 5), (2, 6, 6, 6)],
+            round_count=6,
+            fault_model_requirement=LINKED_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((2, 1), (1, 3)),
+            window_protocol=message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
+        )
+
+
+def test_a_closed_window_defect_is_reported_before_the_linked_check():
+    circuit = surface_code_circuit(6)
+    with pytest.raises(ValueError, match="must be a dependency destination"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 1, 2, 2), (3, 3, 3, 3), (4, 4, 5, 5), (2, 6, 6, 6)],
+            round_count=6,
+            fault_model_requirement=LINKED_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((2, 1), (1, 3)),
+            closed_temporal_boundary_windows=(7,),
+        )
 
 
 def test_a_declared_detector_round_map_moves_a_fault_between_windows():

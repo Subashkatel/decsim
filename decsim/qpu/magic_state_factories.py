@@ -7,11 +7,15 @@ is the quantity the factories exist to measure.
 
 InfiniteFactory is the idealized supply with no stall. DistillationFactory
 is one 15-to-1 distillation stage: every unit attempts a distillation
-every attempt_ticks, a success submits the correction decodes of the
-protocol's 11 commuting rotations (Litinski, Magic state distillation:
-not as costly as you think, arXiv 1905.06903) to the run's decoder pool,
-where they compete with the core's windows, and the state reaches the
-store one return trip after the last decode. MultiLevelDistillationFactory
+every attempt_ticks, a success submits one correction decode per
+multi-qubit pi/8 rotation of the 15-to-1 circuit, 11 of them (rotations
+5 to 15 of Fig. 3; the first four are single-qubit rotations whose
+Clifford corrections are Pauli corrections and need no ancilla: Litinski,
+Magic state distillation: not as costly as you think, arXiv 1905.06903,
+Sec. 4, text lines 1038-1043; Silva 2411.04270 line 381 counts the same
+11 logical cycles for the T gates) to the run's decoder pool, where they
+compete with the core's windows, and the state reaches the store one
+return trip after the last decode. MultiLevelDistillationFactory
 is the pull-driven supply chain of Silva et al., Optimizing multi-level
 magic state factories for fault-tolerant quantum architectures (arXiv
 2411.04270, Sec. II B): level 0 prepares physical states, each level
@@ -344,9 +348,11 @@ class DistillLevel:
 
     unit_count: int
     distance: int
-    # Logical cycles per distillation round: 13 at the first level, 15
-    # above it (Silva et al. 2411.04270).
-    logical_cycles_per_round: int = 13
+    # None takes the paper's count for the level's place in the chain: 13
+    # logical cycles at the first level, 15 above it, where two more
+    # cycles load the inputs (Silva et al. 2411.04270, Fig. 2 caption,
+    # text lines 223-224 and 249-251).
+    logical_cycles_per_round: Optional[int] = None
     success_probability: float = 1.0
 
 
@@ -716,9 +722,12 @@ def _checked_levels(levels: list) -> tuple:
     for index, level in enumerate(levels):
         _check_count(f"levels[{index}].unit_count", level.unit_count, minimum=1)
         _check_count(f"levels[{index}].distance", level.distance, minimum=1)
+        logical_cycles = level.logical_cycles_per_round
+        if logical_cycles is None:
+            logical_cycles = _paper_logical_cycles(index)
         _check_count(
             f"levels[{index}].logical_cycles_per_round",
-            level.logical_cycles_per_round,
+            logical_cycles,
             minimum=0,
         )
         success_probability = _checked_probability(
@@ -727,11 +736,18 @@ def _checked_levels(levels: list) -> tuple:
         checked_level = DistillLevel(
             level.unit_count,
             level.distance,
-            level.logical_cycles_per_round,
+            logical_cycles,
             success_probability,
         )
         checked.append(checked_level)
     return tuple(checked)
+
+
+def _paper_logical_cycles(level_index: int) -> int:
+    """Silva 2411.04270: 13 logical cycles at the first level, 15 above it."""
+    if level_index == 0:
+        return 13
+    return 15
 
 
 def _checked_preparation_ticks(

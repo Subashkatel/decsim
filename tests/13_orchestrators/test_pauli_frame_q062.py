@@ -180,7 +180,7 @@ def test_configuration_rejects_implicit_or_disappearing_costs():
         PauliFrameConfig(commit_us=0.0)
     with pytest.raises(ValueError, match="needs zero_commit_cost_justification"):
         PauliFrameConfig(commit_us=0.0, zero_commit_cost_justification="")
-    with pytest.raises(ValueError, match="only goes with a zero"):
+    with pytest.raises(ValueError, match="needs a zero commit_us"):
         PauliFrameConfig(commit_us=1.0, zero_commit_cost_justification="free")
 
     zero = PauliFrameConfig(

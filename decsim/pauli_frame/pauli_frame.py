@@ -51,7 +51,7 @@ class PauliFrameConfig:
                 "a zero commit_us needs zero_commit_cost_justification")
         if not is_free and has_justification:
             raise ValueError(
-                "zero_commit_cost_justification only goes with a zero commit_us")
+                "zero_commit_cost_justification needs a zero commit_us")
 
     def commit_ticks(self) -> int:
         """The write cost in ticks."""

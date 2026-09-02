@@ -197,7 +197,16 @@ file's docstring names the paper, the reference code, or the closed form
 it checks against; ruff keeps the module docstring required under
 `tests/`. A test name is a sentence that states the behavior:
 `test_a_second_correction_for_a_window_is_refused`. One new test file per
-module, at `tests/<component>/test_<module>.py`. The old tests keep
+module, at `tests/<component>/test_<module>.py`.
+
+A test checks one behavior through the public surface, and checks the
+state it leaves, not the calls it made. The values that matter sit
+inside the test, even when that repeats a line; a helper builds only
+what the test does not care about. A test has no branches; a loop is
+allowed only in a property test that runs many random programs against
+an oracle, and the test says so in its name. A test that must change
+when the implementation changes, but the behavior does not, is a
+brittle test and is rewritten. The old tests keep
 running until the new ones cover the same behavior, then they are deleted
 in one commit per test directory.
 
@@ -245,6 +254,19 @@ with yes or no for every touched file:
 9. Is the gate green, are the harnesses exact, and are the tests green?
 
 A file the owner finds unreadable is not done.
+
+## Where these rules come from
+
+Google's own rules for rules (Software Engineering at Google, chapter 8,
+on disk under the sandbox tmp/resources/style_guides): a rule must pull
+its weight, favor the reader over the writer, keep the code consistent,
+and be enforced by a tool wherever a tool can. Chapter 20's bar for a
+checker is a false-positive rate under ten percent; when the one-action
+checker flags a line that reads well, the fix is to the checker's rules,
+recorded here, never a per-file exception. Chapter 22's rule for a
+large change: past a few hundred edits, write the tool that makes the
+edit (the tick-helper rename was one), and add a check so the old form
+cannot come back. Chapter 12 gives the test rules above.
 
 ## Where the tree stands
 

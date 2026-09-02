@@ -8,6 +8,8 @@ rotations, one correction decode each). The supply stall is the delay
 between a request and its delivery.
 """
 
+import pytest
+
 from decsim.engine import Engine
 from decsim.qpu.magic_state_factories import (
     DistillationFactory,
@@ -178,3 +180,31 @@ def test_a_second_level_round_takes_fifteen_logical_cycles_by_default():
     engine.run()
     assert factory.round_ticks_by_level == {1: 390, 2: 450}
     assert delivered == [6310]
+
+
+def test_continuous_production_refuses_an_empty_buffer_capacity():
+    engine = Engine(verbose=False)
+    with pytest.raises(ValueError, match="buffer_capacity >= 1"):
+        DistillationFactory(
+            engine,
+            unit_count=1,
+            attempt_ticks=100,
+            decode_service=None,
+            correction_round_count=0,
+            correction_decode_count=0,
+            production_mode="continuous",
+            buffer_capacity=0,
+        )
+
+
+def test_a_continuous_chain_refuses_an_empty_buffer_capacity():
+    engine = Engine(verbose=False)
+    level = DistillLevel(unit_count=1, distance=3)
+    with pytest.raises(ValueError, match="buffer_capacity >= 1"):
+        MultiLevelDistillationFactory(
+            engine,
+            [level],
+            round_ticks=10,
+            production_mode="continuous",
+            buffer_capacity=0,
+        )

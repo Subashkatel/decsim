@@ -192,14 +192,13 @@ class PayloadSizeConfig:
         }
 
 
-# LinkConfig is compared by identity: one channel object may back several
-# paths, and build() tells channels apart by the object, not its values.
-@dataclasses.dataclass(frozen=True, eq=False)
+@dataclasses.dataclass(frozen=True)
 class LinkConfig:
     """One physical channel: a propagation latency and an optional bandwidth.
 
     No capacity means an unbounded wire. Two edges that hold the same
-    LinkConfig object share the wire.
+    LinkConfig object share the wire; build() tells channels apart by the
+    object, so two equal cards on different objects are two wires.
     """
 
     propagation_latency_ticks: int
@@ -688,8 +687,8 @@ class LinkModel:
         selected_bits, selection, payload_source = _select_payload(
             path, edge, payload_bits
         )
-        selected_bits, now_ticks = _checked_request(
-            path, selected_bits, now_ticks
+        now_ticks, selected_bits = _checked_request(
+            path, now_ticks, selected_bits
         )
         setup_ticks = self._queue_setup(path, channel, edge, now_ticks)
         wire_ticks = now_ticks + setup_ticks
@@ -950,8 +949,10 @@ def _with_setup(
     )
 
 
-def _checked_request(path: LinkPath, payload_bits, now_ticks) -> tuple:
-    """The request's payload bits and tick as Python ints, or a refusal.
+def _checked_request(
+    path: LinkPath, now_ticks, payload_bits
+) -> tuple[int, Optional[int]]:
+    """The request's tick and payload bits as Python ints, or a refusal.
 
     A wrong caller is a bug; the refusal comes before any state moves,
     so the setup queue, the wire, the counters and the ledger stay as
@@ -965,14 +966,14 @@ def _checked_request(path: LinkPath, payload_bits, now_ticks) -> tuple:
             f"is a whole number, not negative"
         )
     if payload_bits is None:
-        return None, request_tick
+        return request_tick, None
     payload = _as_count(payload_bits)
     if payload is None:
         raise RuntimeError(
             f"{path.value} requested with {payload_bits!r} bits; a payload "
             f"is a whole number of bits, not negative"
         )
-    return payload, request_tick
+    return request_tick, payload
 
 
 def _as_count(value) -> Optional[int]:

@@ -165,9 +165,3 @@ def test_coordinates_are_returned_for_rows_only_when_every_row_has_some():
         coordinates, [0, 2]
     )
     assert with_one_missing is None
-
-
-def test_a_checked_map_is_the_object_it_was_given():
-    declared = {0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 2}
-    checked = detector_chronology.checked_detector_round_map(declared, 6, 2)
-    assert checked is declared

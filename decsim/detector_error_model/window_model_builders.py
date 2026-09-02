@@ -8,19 +8,25 @@ plan may cover part of the operation: a fault no window's rows reach
 stays unowned, while the terminal window owns every uncommitted fault it
 sees, front buffer rounds included, whether ownership advances in plan
 order or is compiled from the dependency graph (Skoric et al.
-2209.08552, section I.B; qLDPC's SlidingWindowDecoder, whose last window
-commits all it holds). The two single-window builders serve the runtime
-paths that decode one window on its own with faults it may see but must
-not commit; a window built alone is never terminal.
+2209.08552, the closing paragraph of the parallel-window section: the
+commit region of the last window runs from the bottom of the regular
+commit region to the last round; qLDPC's SlidingWindowDecoder, whose
+last window commits all it holds). The two single-window builders serve
+the runtime paths that decode one window on its own with faults it may
+see but must not commit; a window built alone is never terminal.
 
-The exclusion ranges arrive as any sequence of (first, last) round pairs
-and are checked once at entry. Ownership advances per representation, so
-two linked plans are refused at entry: an exclusion range on a plan of
-more than one window, where the machine cannot keep a physical fault
-uncommitted past its own component, and dependency edges on a plan whose
-first commit round is after round 1, where the terminal window would own
-a graphlike component of a physical fault that a window depending on it
-owns.
+The exclusion ranges are decsim's own device with no paper referent: a
+strong re-decode leaves the faults the weak decoder already committed
+uncommitted (decsim/decoders/strong_escalation). They arrive as any
+sequence of (first, last) round pairs and are checked once at entry.
+Ownership advances per representation, so two linked plans are refused
+at entry: an exclusion range on a plan of more than one window, where an
+earlier window would commit a graphlike component while the range kept
+its physical parent uncommitted; and a plan with dependency edges in
+which a window keeps a physical fault while an ancestor of it owns a
+component of that fault touching the window's rows. The second is
+checked on the compiled owner tables, after every check of the plan's
+shape and before any window is built (window_ownership_dag).
 
 Nothing inside the package imports this module.
 """
@@ -38,6 +44,18 @@ from decsim.detector_error_model import (
     window_protocol_policy,
     window_slicer,
 )
+
+# The faults each window owns, and the faults each window's ancestors
+# own, by representation; None when ownership advances in plan order.
+_OwnedFaultsPerWindow = Optional[
+    tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
+]
+_PriorFaultsPerWindow = Optional[
+    tuple[
+        dict[fault_model_contracts.FaultRepresentation, Container[int]],
+        ...,
+    ]
+]
 
 
 def build_window_error_models(
@@ -165,11 +183,8 @@ def _checked_plan(
         window_placement.parse_window_entry(window_entry)
         for window_entry in plan
     )
-    _check_the_plan_fits_a_linked_requirement(
-        entries,
-        fault_exclusion_ranges,
-        dependency_edges,
-        fault_model_requirement,
+    _check_exclusions_fit_a_linked_requirement(
+        entries, fault_exclusion_ranges, fault_model_requirement
     )
     window_protocol_policy.validate_window_protocol(
         entries,
@@ -177,6 +192,9 @@ def _checked_plan(
         dependency_edges,
         closed_temporal_boundary_windows,
         fault_model_requirement,
+    )
+    window_protocol_policy.validate_closed_windows_are_dependency_destinations(
+        dependency_edges, closed_temporal_boundary_windows
     )
     _check_commit_rounds_are_contiguous(entries, round_count)
     _check_windows_end_inside_the_operation(entries, round_count)
@@ -194,7 +212,9 @@ def _slice_checked_plan(
     """Every window of the plan, with its boundaries and ownership checked.
 
     A window listed in `closed_temporal_boundary_windows` is refused if
-    slicing cut a fault of the circuit at its edge.
+    slicing cut a fault of the circuit at its edge; an excluded fault
+    stays a column of the window that sees it, so a range that cuts at
+    the edge of a closed window is refused here too.
     """
     ownership, prior_faults = _compiled_ownership(
         slicer, entries, dependency_edges, round_count, fault_exclusion_ranges
@@ -208,26 +228,23 @@ def _slice_checked_plan(
         prior_faults,
     )
     window_protocol_policy.validate_closed_temporal_boundary_windows(
-        slicer, models, dependency_edges, closed_temporal_boundary_windows
+        slicer, models, closed_temporal_boundary_windows
     )
     return models
 
 
-def _check_the_plan_fits_a_linked_requirement(
+def _check_exclusions_fit_a_linked_requirement(
     entries: tuple[tuple[int, int, int, int], ...],
     fault_exclusion_ranges: tuple[tuple[int, int], ...],
-    dependency_edges: Optional[tuple[tuple[int, int], ...]],
     fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
 ) -> None:
-    """A linked plan keeps every physical fault beside its components.
+    """A linked plan of several windows takes no exclusion range.
 
-    Ownership advances per representation. With an exclusion range on
-    several windows, an earlier window would commit a graphlike component
-    while the range kept its physical parent uncommitted. With dependency
-    edges and a first commit round after round 1, the terminal window
-    would own a component that no commit round reaches while the physical
-    fault belongs to a window depending on it, and that window would drop
-    the component and keep the fault.
+    Ownership advances per representation: an earlier window would commit
+    a graphlike component while the range kept its physical parent
+    uncommitted, and a later window would hold the parent without the
+    component. The same invariant for dependency edges is checked on the
+    compiled owner tables, in _compiled_ownership.
     """
     if not fault_model_requirement.require_physical_to_graphlike_link:
         return
@@ -237,15 +254,6 @@ def _check_the_plan_fits_a_linked_requirement(
             "refused for a plan of more than one window, because the "
             "machine cannot keep a physical fault uncommitted past its own "
             "component"
-        )
-    first_commit_rounds = [entry[1] for entry in entries]
-    first_commit_round = min(first_commit_rounds)
-    if dependency_edges and first_commit_round > 1:
-        raise ValueError(
-            "a linked fault model requirement with dependency edges is "
-            "refused for a plan whose first commit round is after round 1, "
-            "because the terminal window would own a graphlike component "
-            "of a physical fault that a window depending on it owns"
         )
 
 
@@ -285,18 +293,13 @@ def _compiled_ownership(
     dependency_edges: Optional[tuple[tuple[int, int], ...]],
     round_count: int,
     fault_exclusion_ranges: tuple[tuple[int, int], ...],
-) -> tuple[
-    Optional[
-        tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
-    ],
-    Optional[
-        tuple[
-            dict[fault_model_contracts.FaultRepresentation, Container[int]],
-            ...,
-        ]
-    ],
-]:
-    """Owner sets and prior sets per window, or (None, None) without edges."""
+) -> tuple[_OwnedFaultsPerWindow, _PriorFaultsPerWindow]:
+    """Owner sets and prior sets per window, or (None, None) without edges.
+
+    The owner tables are checked for a linked requirement before any
+    window is built: a window that keeps a physical fault must keep every
+    component of it that touches its rows.
+    """
     if dependency_edges is None:
         return None, None
     depths = window_ownership_dag.dependency_depths(
@@ -307,6 +310,9 @@ def _compiled_ownership(
     )
     ownership = window_ownership_dag.explicit_fault_ownership(
         slicer, entries, depths, round_count, fault_exclusion_ranges
+    )
+    window_ownership_dag.check_every_kept_physical_fault_keeps_its_components(
+        slicer, entries, ownership, ancestors
     )
     prior_faults = window_ownership_dag.explicit_prior_faults(
         ownership, ancestors
@@ -319,15 +325,8 @@ def _slice_plan(
     entries: tuple[tuple[int, int, int, int], ...],
     round_count: int,
     fault_exclusion_ranges: tuple[tuple[int, int], ...],
-    ownership: Optional[
-        tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
-    ],
-    prior_faults: Optional[
-        tuple[
-            dict[fault_model_contracts.FaultRepresentation, Container[int]],
-            ...,
-        ]
-    ],
+    ownership: _OwnedFaultsPerWindow,
+    prior_faults: _PriorFaultsPerWindow,
 ) -> list[fault_model_contracts.WindowErrorModel]:
     """Every window of the plan, in plan order."""
     models = []
@@ -349,12 +348,7 @@ def _slice_plan(
 
 
 def _entry_of(
-    per_window: Optional[
-        tuple[
-            dict[fault_model_contracts.FaultRepresentation, Container[int]],
-            ...,
-        ]
-    ],
+    per_window: _PriorFaultsPerWindow,
     window_index: int,
 ) -> Optional[dict[fault_model_contracts.FaultRepresentation, Container[int]]]:
     if per_window is None:

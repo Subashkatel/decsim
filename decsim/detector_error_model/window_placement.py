@@ -195,14 +195,17 @@ def local_link_projection(
 ) -> scipy.sparse.csc_matrix:
     """The catalog link restricted to this window's columns, checked.
 
-    Only the detector rows are checked. They fail to add up when an
-    earlier window committed a component while an exclusion range kept
-    its physical parent uncommitted: the parent then reaches this window
-    without the component, and no consistent link exists, so the slice is
-    refused. That is the contract between the slicer's per-representation
-    ownership and this projection; the builders refuse the input that
-    reaches it, a linked requirement with an exclusion range on a plan of
-    more than one window. A physical fault can have a component whose
+    Only the detector rows are checked. They fail to add up when a window
+    keeps a physical fault while an earlier window, or an ancestor in the
+    dependency graph, owns a component of it that touches this window's
+    rows: the parent then reaches this window without the component, and
+    no consistent link exists, so the slice is refused. That is the
+    contract between the slicer's per-representation ownership and this
+    projection; the builders refuse the inputs that reach it, a linked
+    requirement with an exclusion range on a plan of more than one window
+    (window_model_builders) and a linked plan whose owner tables give a
+    kept fault's component to an ancestor (window_ownership_dag). A
+    physical fault can have a component whose
     detectors all lie outside this window while that component carries a
     logical flip, so the observable rows of a window need not add up;
     each decoder commits observables from its own placed view, never

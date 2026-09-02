@@ -30,7 +30,7 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
     from ..detector_error_model.fault_identity_validation import (
         validate_graphlike_fault,
     )
-    from ..detector_error_model.stim_dem_catalog import detector_error_model_to_faults
+    from ..detector_error_model.stim_fault_catalog import detector_error_model_to_faults
     num_det = dem.num_detectors
     num_obs = dem.num_observables
     h_cols: list = []

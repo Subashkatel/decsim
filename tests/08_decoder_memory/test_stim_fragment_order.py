@@ -139,7 +139,7 @@ def test_stim_round_packets_carry_raw_bits_that_form_the_model_row_block() -> No
     for round_index, detector_ids in rows_by_round.items():
         (payload,) = device.round_payloads(operation, round_index)
         raw_bits = tuple(int(bit) for bit in payload.bits)
-        assert len(raw_bits) == table.packet_width[round_index]
+        assert len(raw_bits) == table.packet_width_by_round[round_index]
         assert payload.round_index == round_index
         assert payload.size_bits == len(raw_bits)
         expected_block = tuple(int(detector_sample[row]) for row in detector_ids)

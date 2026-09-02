@@ -202,7 +202,7 @@ class RunSpec:
         conditional_release = (config.make_conditional_release(engine)
                                if config.make_conditional_release
                                else ConditionalRelease(engine))
-        links = config.link_config.resolve()
+        links = config.link_config.build()
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,
             memory_model=config.memory_model)

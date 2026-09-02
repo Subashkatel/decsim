@@ -116,7 +116,7 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
 def test_sb1_gap_cannot_be_served(fabric):
     """A missing interior round is never hidden by the stored-through
     counter: exact reads refuse."""
-    sb1 = SyndromeBuffer1(Engine(), logical_reference_profile().resolve())
+    sb1 = SyndromeBuffer1(Engine(), logical_reference_profile().build())
     sb1.register_hold("reader", [(1, 1), (1, 2), (1, 3)])
 
     def write(round_index):

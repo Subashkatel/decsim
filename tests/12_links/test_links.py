@@ -372,7 +372,7 @@ def test_counter_operations_are_exact_immutable_fieldwise_sums():
 @pytest.mark.parametrize("path", list(LinkPath))
 def test_every_semantic_path_accepts_its_real_attribution_shape(path):
     """Every semantic path accepts its documented real-record attribution shape."""
-    model = make_model_config().resolve()
+    model = make_model_config().build()
     reservation = model.reserve(
         path,
         payload_bits=4,
@@ -399,7 +399,7 @@ def test_every_semantic_path_accepts_its_real_attribution_shape(path):
 )
 def test_semantic_paths_reject_wrong_geometry(path, attribution):
     """Each semantic path rejects attribution with the wrong window-round geometry."""
-    model = make_model_config().resolve()
+    model = make_model_config().build()
     with pytest.raises(ValueError):
         model.reserve(path, payload_bits=1, now_ticks=0, attribution=attribution)
     assert counters_from(traffic_json_value(model.snapshot()), path)["transfer_count"] == 0
@@ -407,7 +407,7 @@ def test_semantic_paths_reject_wrong_geometry(path, attribution):
 
 def test_request_paths_enforce_relation_kind_and_identity():
     """Request routes need a request relation that names the attributed window."""
-    model = make_model_config().resolve()
+    model = make_model_config().build()
     missing = TrafficAttribution(OPERATION_ID, PATCH_IDS, 3, 1, 2)
     wrong_identity = TrafficAttribution(
         OPERATION_ID,
@@ -442,7 +442,7 @@ def test_payload_selection_records_actual_default_and_unresolved_sources():
         LinkPath.WBD: make_default_edge(bits=12, source="default"),
         LinkPath.OC: make_actual_edge(source="optional measurement"),
     }
-    model = make_model_config(edges).resolve()
+    model = make_model_config(edges).build()
     model.reserve(
         LinkPath.QC,
         payload_bits=7,
@@ -490,7 +490,7 @@ def test_payload_admission_failures_leave_semantic_and_physical_state_untouched(
     )
     model = make_model_config(
         {LinkPath.QC: default_only, LinkPath.OC: unresolved_finite}
-    ).resolve()
+    ).build()
 
     with pytest.raises(ValueError):
         model.reserve(
@@ -536,8 +536,8 @@ def test_config_identity_controls_sharing_and_each_resolve_is_run_owned():
             LinkPath.OC: make_actual_edge(channel=equal_but_distinct),
         }
     )
-    first_run = config.resolve()
-    second_run = config.resolve()
+    first_run = config.build()
+    second_run = config.build()
 
     qc = first_run.reserve(
         LinkPath.QC,
@@ -583,7 +583,7 @@ def test_shared_fifo_counters_reconcile_across_member_paths():
             LinkPath.QC: make_actual_edge(channel=shared),
             LinkPath.WBD: make_actual_edge(channel=shared),
         }
-    ).resolve()
+    ).build()
     model.reserve(
         LinkPath.QC,
         payload_bits=3,
@@ -610,7 +610,7 @@ def test_shared_fifo_counters_reconcile_across_member_paths():
 
 def test_reconciliation_guard_rejects_silent_counter_divergence():
     """Traffic reporting rejects divergence between semantic and physical totals."""
-    model = make_model_config().resolve()
+    model = make_model_config().build()
     model.reserve(
         LinkPath.QC,
         payload_bits=3,
@@ -632,7 +632,7 @@ def test_topology_json_reports_stable_fabric():
     )
     shared = make_channel(capacity=capacity, propagation_ticks=11, source="wire")
     edge = LinkEdgeConfig(shared, payload, "actual source")
-    model = make_model_config({LinkPath.QC: edge, LinkPath.WBD: edge}).resolve()
+    model = make_model_config({LinkPath.QC: edge, LinkPath.WBD: edge}).build()
 
     topology = topology_json_value(model.snapshot())
     assert topology["schema_version"] == 1
@@ -652,7 +652,7 @@ def test_topology_json_reports_stable_fabric():
 
 def test_traffic_json_preserves_typed_identity_and_timing_boundaries():
     """Traffic evidence serializes typed request and boundary identities with timing."""
-    model = make_model_config().resolve()
+    model = make_model_config().build()
     request = valid_attribution(LinkPath.WSD)
     boundary = valid_attribution(LinkPath.DD)
     first = model.reserve(
@@ -697,7 +697,7 @@ def test_traffic_json_preserves_typed_identity_and_timing_boundaries():
 def test_reference_profile_has_the_exact_timing_only_project_metadata():
     """The reference profile preserves its nine timing and payload configuration choices."""
     config = logical_reference_profile()
-    model = config.resolve()
+    model = config.build()
     topology = topology_json_value(model.snapshot())
     expected_propagation = {
         "qc": microseconds_to_ticks(0.15),
@@ -789,9 +789,9 @@ def test_deleted_helpers_factories_fields_and_shims_are_absent():
     """Removed construction conveniences, fields, and accessors have no shims."""
     assert not hasattr(links_module, "_require_nonempty_stable_string")
     assert not hasattr(LinkEdgeConfig, "from_per_channel_transaction")
-    assert not hasattr(make_model_config().resolve(), "config")
+    assert not hasattr(make_model_config().build(), "config")
     assert "payload_bits" not in {field.name for field in fields(SemanticTransferRecord)}
-    assert hasattr(Link, "config")
+    assert hasattr(Link, "channel_config")
 
 
 def test_links_expose_timing_only_without_scheduler_or_reclamation_ownership():
@@ -816,7 +816,7 @@ def test_links_expose_timing_only_without_scheduler_or_reclamation_ownership():
 def test_bandwidth_profile_declares_finite_calibrated_capacities():
     """The bandwidth profile exposes all calibrated capacities and fallback payloads."""
     config = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
-    topology = topology_json_value(config.resolve().snapshot())
+    topology = topology_json_value(config.build().snapshot())
     expected_capacities = {
         "qc": (24.0, "direct_aggregate", None, 24.0),
         "wbd": (48.0, "direct_aggregate", None, 48.0),
@@ -872,8 +872,8 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
     """The reference profile stays pure latency while shared semantic parameters match."""
     reference = logical_reference_profile()
     bandwidth = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)
-    reference_topology = topology_json_value(reference.resolve().snapshot())
-    bandwidth_topology = topology_json_value(bandwidth.resolve().snapshot())
+    reference_topology = topology_json_value(reference.build().snapshot())
+    bandwidth_topology = topology_json_value(bandwidth.build().snapshot())
 
     def propagation_by_path(topology):
         return {
@@ -921,7 +921,7 @@ def test_bandwidth_profile_preserves_reference_latency_and_semantic_parameters()
 
 def test_bandwidth_profile_serializes_and_queues_in_physical_fifo_order():
     """Finite QC transfers serialize FIFO and WSD uses its configured fallback."""
-    model = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY).resolve()
+    model = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY).build()
     first = model.reserve(
         LinkPath.QC,
         payload_bits=24,
@@ -998,7 +998,7 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
 
     def aggregate_capacities(scale):
         topology = topology_json_value(
-            bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=scale).resolve().snapshot())
+            bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=scale).build().snapshot())
         return {
             channel["member_paths"][0]: channel["capacity"][
                 "aggregate_bits_per_us"
@@ -1007,9 +1007,9 @@ def test_bandwidth_profile_capacity_scale_moves_the_contention_regime():
         }
 
     slow_model = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=0.5
-    ).resolve()
+    ).build()
     fast_model = bandwidth_limited_profile(**DISTANCE_5_GEOMETRY, capacity_scale=2.0
-    ).resolve()
+    ).build()
     slow = slow_model.reserve(
         LinkPath.QC,
         payload_bits=24,
@@ -1052,7 +1052,7 @@ def test_transfer_overhead_delays_delivery_without_occupying_the_wire():
         1.0, LinkQuantityBasis.DIRECT_AGGREGATE, None, "test rate")
     channel = make_channel(capacity=capacity, propagation_ticks=10)
     model = make_model_config({LinkPath.SBD: _overhead_edge(
-        50, channel=channel)}).resolve()
+        50, channel=channel)}).build()
     first = model.reserve(LinkPath.SBD, payload_bits=4, now_ticks=100,
                           attribution=valid_attribution(LinkPath.SBD))
     # setup 50 ticks (engine-side) + serialization 4 bits / 1 bit-per-us
@@ -1073,7 +1073,7 @@ def test_report_delivery_counts_the_setup_once():
         1.0, LinkQuantityBasis.DIRECT_AGGREGATE, None, "test rate")
     channel = make_channel(capacity=capacity, propagation_ticks=10)
     model = make_model_config({LinkPath.SBD: _overhead_edge(
-        50, channel=channel)}).resolve()
+        50, channel=channel)}).build()
     model.reserve(LinkPath.SBD, payload_bits=4, now_ticks=100,
                   attribution=valid_attribution(LinkPath.SBD))
     row = traffic_json_value(model.snapshot())["transfers"][0]
@@ -1089,7 +1089,7 @@ def test_report_delivery_counts_the_setup_once():
 
 def test_setups_serialize_like_aladdins_single_dma_event():
     model = make_model_config(
-        {LinkPath.SBD: _overhead_edge(50)}).resolve()
+        {LinkPath.SBD: _overhead_edge(50)}).build()
     first = model.reserve(LinkPath.SBD, payload_bits=1, now_ticks=100,
                           attribution=valid_attribution(LinkPath.SBD))
     second = model.reserve(LinkPath.SBD, payload_bits=1, now_ticks=100,
@@ -1100,9 +1100,9 @@ def test_setups_serialize_like_aladdins_single_dma_event():
 
 
 def test_zero_overhead_edges_reserve_identically_to_plain_edges():
-    plain = make_model_config().resolve()
+    plain = make_model_config().build()
     with_field = make_model_config(
-        {LinkPath.SBD: _overhead_edge(0)}).resolve()
+        {LinkPath.SBD: _overhead_edge(0)}).build()
     a = plain.reserve(LinkPath.SBD, payload_bits=4, now_ticks=10,
                       attribution=valid_attribution(LinkPath.SBD))
     b = with_field.reserve(LinkPath.SBD, payload_bits=4, now_ticks=10,
@@ -1118,7 +1118,7 @@ def test_paths_sharing_a_channel_reach_its_wire_in_request_order():
     shared = make_channel()
     overrides = {LinkPath.SBD: _overhead_edge(5, channel=shared),
                  LinkPath.WBD: _overhead_edge(5, channel=shared)}
-    model = make_model_config(overrides).resolve()
+    model = make_model_config(overrides).build()
     wires = []
     for path, now in ((LinkPath.WBD, 10), (LinkPath.WBD, 11), (LinkPath.SBD, 12)):
         reservation = model.reserve(path, payload_bits=1, now_ticks=now,
@@ -1131,7 +1131,7 @@ def test_paths_sharing_a_channel_may_declare_different_overheads():
     shared = make_channel()
     overrides = {LinkPath.SBD: _overhead_edge(50, channel=shared),
                  LinkPath.WBD: make_actual_edge(channel=shared)}
-    model = make_model_config(overrides).resolve()
+    model = make_model_config(overrides).build()
     first = model.reserve(LinkPath.SBD, payload_bits=1, now_ticks=0,
                           attribution=valid_attribution(LinkPath.SBD))
     second = model.reserve(LinkPath.WBD, payload_bits=1, now_ticks=1,

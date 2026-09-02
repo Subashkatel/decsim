@@ -92,7 +92,7 @@ def _valid_attribution(path):
 
 
 def _topology(config):
-    return topology_json_value(config.resolve().snapshot())
+    return topology_json_value(config.build().snapshot())
 
 
 def test_link_module_documents_every_segment_endpoint_and_extension_step():
@@ -131,13 +131,13 @@ def test_rule_table_and_reference_cards_cover_the_closed_vocabulary():
                     lambda: bandwidth_limited_profile(**DISTANCE_5_GEOMETRY)):
         config = profile()
         assert config.wired_paths() == paths
-        assert config.resolve().paths == paths
+        assert config.build().paths == paths
         for path in paths:
             incomplete = replace(config, **{path.value: None})
             with pytest.raises(ValueError, match=path.value):
                 incomplete.wired_paths()
             with pytest.raises(ValueError, match=path.value):
-                incomplete.resolve()
+                incomplete.build()
 
 
 def test_unwired_optional_path_is_rejected_before_attribution(monkeypatch):
@@ -147,7 +147,7 @@ def test_unwired_optional_path_is_rejected_before_attribution(monkeypatch):
     monkeypatch.setattr(
         links_module, "_RULE_BY_PATH",
         MappingProxyType({**links_module._RULE_BY_PATH, path: replace(rule, required=False)}))
-    model = replace(logical_reference_profile(), cq=None).resolve()
+    model = replace(logical_reference_profile(), cq=None).build()
     assert path not in model.paths
 
     class ExplodingAttribution:
@@ -259,7 +259,7 @@ def test_scientific_guards_and_relation_rules_remain_at_trust_boundaries():
     with pytest.raises(ValueError, match="prior reservation"):
         link.reserve(payload_bits=1, now_ticks=1)
 
-    model = logical_reference_profile().resolve()
+    model = logical_reference_profile().build()
     for path in logical_reference_profile().wired_paths():
         edge = getattr(logical_reference_profile(), path.value)
         payload_bits = 1 if edge.actual_payload_source is not None else None
@@ -282,7 +282,7 @@ def test_round_only_controller_to_weak_transfer_rejects_a_relation():
         _request_relation(DecoderTier.WEAK),
     )
     with pytest.raises(ValueError, match="does not accept a relation"):
-        logical_reference_profile().resolve().reserve(
+        logical_reference_profile().build().reserve(
             LinkPath.WBD,
             payload_bits=8,
             now_ticks=0,
@@ -373,7 +373,7 @@ def test_unknown_relation_kind_is_rejected_before_ledger_append():
     attribution = TrafficAttribution(
         _OPERATION_ID, _PATCH_IDS, 3, 1, 2, object()
     )
-    model = logical_reference_profile().resolve()
+    model = logical_reference_profile().build()
     with pytest.raises(ValueError, match="requires a request relation"):
         model.reserve(
             LinkPath.WSD,
@@ -405,7 +405,7 @@ def test_decoder_boundary_transfer_requires_boundary_provenance():
     attribution = TrafficAttribution(
         _OPERATION_ID, _PATCH_IDS, 3, 1, 2
     )
-    model = logical_reference_profile().resolve()
+    model = logical_reference_profile().build()
     with pytest.raises(ValueError, match="dd requires a boundary relation"):
         model.reserve(
             LinkPath.DD,

@@ -160,7 +160,7 @@ class SyndromePacking:
         # timing-only or synthetic sources
         self.detector_formation = detector_formation
         self.engine = engine
-        self.links = links if links is not None else logical_reference_profile().resolve()
+        self.links = links if links is not None else logical_reference_profile().build()
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes
         # assembly workspace: how many rounds may be in flight through this

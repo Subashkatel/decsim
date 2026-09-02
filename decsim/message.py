@@ -561,6 +561,7 @@ class DecodeJob:
     completed: bool = False                  # terminal flag; admission refuses reuse of a completed job
     submitted: bool = False                  # admitted once to one queue slot and unit
     input_landed: bool = False               # the input transfer deposited into unit memory
+    input_landing_ticks: Optional[int] = None    # tick the staged input lands (set at DMA start)
     service_started: bool = False            # the decode itself began (past the boundary gate)
     request_key: Optional[DecoderRequestKey] = None
     request_created_ticks: Optional[int] = None

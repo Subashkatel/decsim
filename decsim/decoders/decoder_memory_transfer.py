@@ -14,8 +14,9 @@ from ..message import DecodeJob
 
 
 class DecoderInputStaging:
-    def __init__(self, transport):
+    def __init__(self, transport, engine):
         self.transport = transport
+        self.engine = engine
 
     def stage(self, job: DecodeJob, memory, on_landed: Callable[[DecodeJob], None]) -> None:
         """Reserve the input link (the job's reserve_transfer), then after the
@@ -23,6 +24,7 @@ class DecoderInputStaging:
         Buffer 0 hold and report the landing."""
         delay_ticks = 0 if job.reserve_transfer is None else job.reserve_transfer()
         job.reserve_transfer = None
+        job.input_landing_ticks = self.engine.now + delay_ticks
 
         def land(_delivered: DecodeJob) -> None:
             job.decoder_input = memory.deposit(job)

@@ -39,7 +39,8 @@ class PauliFrameConfig:
     def __post_init__(self) -> None:
         cost_is_a_number = math.isfinite(self.commit_us)
         if not cost_is_a_number or self.commit_us < 0:
-            raise ValueError("commit_us must be a finite number, zero or more")
+            raise ValueError(
+                "commit_us must be a finite number, zero or more")
         rounds_to_nothing = self.commit_us > 0 and us(self.commit_us) == 0
         if rounds_to_nothing:
             raise ValueError("commit_us is positive but rounds to zero ticks")
@@ -131,7 +132,8 @@ class PauliFrame:
             logical_observables=observables,
         )
         self._records.append(record)
-        self._pending_by_window[window_key] = _PendingWrite(record, on_committed)
+        pending = _PendingWrite(record, on_committed)
+        self._pending_by_window[window_key] = pending
 
         if self.commit_ticks == 0:
             self._finish_write(window_key)
@@ -153,14 +155,18 @@ class PauliFrame:
         records = [self._committed_by_window[key] for key in window_keys]
         if not records:
             return ()
-        observables_per_record = [record.logical_observables for record in records]
-        if any(observables is None for observables in observables_per_record):
+        observables_per_record = [
+            record.logical_observables for record in records]
+        has_unknown = any(
+            observables is None for observables in observables_per_record)
+        if has_unknown:
             return None
         return _fold_by_xor(observables_per_record, stream_id)
 
     def snapshot(self) -> PauliFrameSnapshot:
         """A frozen copy of what the frame holds now."""
-        stream_ids = sorted(self._windows_by_stream, key=stable_identity_order_key)
+        stream_ids = sorted(
+            self._windows_by_stream, key=stable_identity_order_key)
         frames = tuple(
             (stream_id, self.frame_for_stream(stream_id))
             for stream_id in stream_ids)

@@ -29,7 +29,7 @@ class ConditionalRelease:
         self.decision_sink: Optional[Callable] = None
 
     def connect(self, controller, decision_sink: Callable) -> None:
-        """Wire the return path: decisions go through the controller to the sink."""
+        """Wire the return path: decisions go via the controller to the sink."""
         self.controller = controller
         self.decision_sink = decision_sink
 
@@ -39,7 +39,8 @@ class ConditionalRelease:
         waiting = self.waiting_by_blocker.setdefault(blocking_operation_id, [])
         waiting.append(blocked_operation_id)
 
-    def release_waiters(self, operation: Operation, result: DecodeResult) -> None:
+    def release_waiters(self, operation: Operation,
+                        result: DecodeResult) -> None:
         """A final result arrived: send every decision it releases."""
         for decision in self.decisions_for(operation, result):
             if decision.releases_operation:
@@ -54,8 +55,11 @@ class ConditionalRelease:
 
     def decisions_for(self, operation: Operation,
                       result: DecodeResult) -> list[Decision]:
-        """One release per waiting operation; else a result return if the
-        QPU needs the outcome; else nothing."""
+        """The decisions one final result releases.
+
+        One release per waiting operation; else a result return when the
+        QPU needs the outcome; else nothing.
+        """
         waiting = self.waiting_by_blocker.pop(operation.id, [])
         if waiting:
             return [Decision(operation_id) for operation_id in waiting]

@@ -190,8 +190,9 @@ def test_codes_returns_a_fresh_list_without_mutating_the_layout():
     assert layout.code is code
 
 
-def test_removed_aliases_and_operation_annotations_stay_absent():
-    """Deleted aliases do not return; the hooks take the planning view."""
+def test_the_hooks_take_the_planning_view_and_the_removed_aliases_stay_absent():
+    """The operation hooks are annotated with the planning view the planner
+    passes; layouts imports no Operation; deleted aliases do not return."""
     layout = UniformLayout(SurfaceCodeModel(distance=3))
 
     assert not hasattr(UniformLayout, "name")

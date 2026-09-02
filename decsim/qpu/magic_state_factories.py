@@ -214,15 +214,15 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             return False
         if self.busy_unit_count >= self.unit_count:
             return False
-        committed = self.busy_unit_count + self.in_flight_count
-        has_unmet_demand = len(self.waiting) > committed
+        committed_count = self.busy_unit_count + self.in_flight_count
+        has_unmet_demand = len(self.waiting) > committed_count
         if has_unmet_demand:
             return True
         if self.production_mode != "continuous":
             return False
-        pipeline = self.stored_state_count + committed
-        wanted = self.buffer_capacity + len(self.waiting)
-        return pipeline < wanted
+        pipeline_count = self.stored_state_count + committed_count
+        wanted_count = self.buffer_capacity + len(self.waiting)
+        return pipeline_count < wanted_count
 
     def _finish_attempt(self) -> None:
         """A success waits for its corrections; a failure retries."""
@@ -314,8 +314,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
                 f"(store now {self.stored_state_count}){tag}",
             )
             callback()
-            # Continuous mode refills the slot just taken.
-            self._start_attempts()
 
     def _stamp_delivered_trace(self) -> None:
         # A warm-start state has no trace.
@@ -460,8 +458,8 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def _reset_state(self, round_ticks: int) -> None:
         self.round_ticks_by_level = {}
-        above_top = len(self.levels) + 1
-        for level in range(1, above_top):
+        above_top_level = len(self.levels) + 1
+        for level in range(1, above_top_level):
             settings = self.levels[level - 1]
             self.round_ticks_by_level[level] = _round_ticks(
                 settings.logical_cycles_per_round,
@@ -470,7 +468,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             )
         # Level 0 is preparation; level l is self.levels[l - 1].
         self.counters_by_level = {}
-        for level in range(0, above_top):
+        for level in range(0, above_top_level):
             self.counters_by_level[level] = _LevelCounters()
         self.waiting: list[tuple[int, Callable[[], None]]] = []
         self.total_stall_ticks = 0
@@ -508,18 +506,20 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             has_started_preparation = self._start_preparation(demand_by_level)
             has_started_distillation = self._start_distillation(demand_by_level)
             has_progress = has_started_preparation or has_started_distillation
-        busy_total = 0
+        total_busy_unit_count = 0
         for counters in self.counters_by_level.values():
-            busy_total += counters.busy_unit_count
-        self.peak_in_flight_count = max(self.peak_in_flight_count, busy_total)
+            total_busy_unit_count += counters.busy_unit_count
+        self.peak_in_flight_count = max(
+            self.peak_in_flight_count, total_busy_unit_count
+        )
 
     def _demand_by_level(self) -> dict:
         """How many states each level must supply, top down."""
-        top = len(self.levels)
-        demand_by_level = {top: len(self.waiting)}
+        top_level = len(self.levels)
+        demand_by_level = {top_level: len(self.waiting)}
         if self.production_mode == "continuous":
-            demand_by_level[top] += self.buffer_capacity
-        for level in range(top, 0, -1):
+            demand_by_level[top_level] += self.buffer_capacity
+        for level in range(top_level, 0, -1):
             wanted_round_count = self._wanted_round_count(
                 level, demand_by_level[level]
             )
@@ -532,35 +532,35 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     def _wanted_round_count(self, level: int, demand: int) -> int:
         """Rounds a level must run to cover a demand for its outputs."""
         counters = self.counters_by_level[level]
-        in_progress = counters.busy_unit_count * self.outputs_per_round
-        committed = counters.stored_state_count + in_progress
-        deficit = demand - committed
-        if deficit <= 0:
+        in_progress_count = counters.busy_unit_count * self.outputs_per_round
+        committed_count = counters.stored_state_count + in_progress_count
+        deficit_count = demand - committed_count
+        if deficit_count <= 0:
             return 0
-        rounds = deficit / self.outputs_per_round
-        return math.ceil(rounds)
+        fractional_round_count = deficit_count / self.outputs_per_round
+        return math.ceil(fractional_round_count)
 
     def _start_preparation(self, demand_by_level: dict) -> bool:
         has_progress = False
         counters = self.counters_by_level[0]
         idle_unit_count = self.preparation_unit_count - counters.busy_unit_count
-        shortfall = demand_by_level[0] - counters.stored_state_count
-        shortfall -= counters.busy_unit_count
-        deficit = max(0, shortfall)
-        while deficit > 0 and idle_unit_count > 0:
+        shortfall_count = demand_by_level[0] - counters.stored_state_count
+        shortfall_count -= counters.busy_unit_count
+        deficit_count = max(0, shortfall_count)
+        while deficit_count > 0 and idle_unit_count > 0:
             counters.busy_unit_count += 1
             self.engine.schedule(
                 self.preparation_ticks, self._finish_preparation, label="prep"
             )
             idle_unit_count -= 1
-            deficit -= 1
+            deficit_count -= 1
             has_progress = True
         return has_progress
 
     def _start_distillation(self, demand_by_level: dict) -> bool:
         has_progress = False
-        above_top = len(self.levels) + 1
-        for level in range(1, above_top):
+        above_top_level = len(self.levels) + 1
+        for level in range(1, above_top_level):
             has_started_rounds = self._start_level_rounds(
                 level, demand_by_level[level]
             )
@@ -729,8 +729,17 @@ def _check_production_mode(
             f"(got {production_mode!r})"
         )
     if production_mode != "continuous":
+        if buffer_capacity is not None:
+            raise ValueError(
+                "buffer_capacity applies to continuous production only"
+            )
         return
-    if buffer_capacity is None or buffer_capacity < 1:
+    if type(buffer_capacity) is not int:
+        raise ValueError(
+            "continuous production needs an integer buffer_capacity "
+            f"(got {buffer_capacity!r})"
+        )
+    if buffer_capacity < 1:
         raise ValueError("continuous production needs buffer_capacity >= 1")
 
 
@@ -808,8 +817,8 @@ def _checked_preparation_ticks(
 
 def _round_ticks(logical_cycles: int, distance: int, round_ticks: int) -> int:
     """The ticks one distillation round lasts: cycles times distance rounds."""
-    rounds = logical_cycles * distance
-    return rounds * round_ticks
+    round_count = logical_cycles * distance
+    return round_count * round_ticks
 
 
 def _stall_tag(waited_ticks: int) -> str:

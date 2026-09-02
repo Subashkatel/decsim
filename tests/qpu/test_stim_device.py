@@ -180,6 +180,14 @@ def test_form_round_yields_each_rounds_slice_of_the_shots_events():
 
 
 def test_a_seeded_shot_is_stims_shot_under_the_hashed_substream_seed():
+    """The device's shot is Stim's shot under the substream seed.
+
+    The substream seed's blake2b framing (root seed, "stim_device", the
+    key's type tag and the key, NUL-separated, into an 8-byte big-endian
+    digest) is the pinned cross-process contract; the law is that the
+    device samples exactly what Stim's compiled sampler samples under
+    that seed.
+    """
     circuit = memory_circuit(3, 3)
     hasher = hashlib.blake2b(b"7\x00stim_device\x00int\x001", digest_size=8)
     digest = hasher.digest()
@@ -246,6 +254,23 @@ def test_a_seed_outside_stims_64_bit_range_is_refused():
 def test_a_seed_that_is_not_an_integer_is_refused():
     with pytest.raises(ValueError, match="64-bit unsigned"):
         stim_device.StimDevice(seed="7")
+
+
+def test_a_run_bound_seed_outside_stims_range_is_refused():
+    device = stim_device.StimDevice(seed=None)
+    with pytest.raises(ValueError, match="64-bit unsigned"):
+        device.reserve_run_seed(-5)
+
+
+def test_a_run_bound_seed_samples_stims_shot_under_that_root():
+    circuit = memory_circuit(3, 3)
+    operation = memory_operation(circuit)
+    device = stim_device.StimDevice(seed=None)
+    reservation = device.reserve_run_seed(3)
+    device.commit_run_seed(reservation)
+    device.begin_operation(operation, 3, 3)
+    first_round = round_payload(device, operation, 1)
+    assert first_round.bits == (0, 0, 0, 0, 0, 1, 0, 0)
 
 
 def test_a_seeded_device_refuses_an_identity_it_cannot_hash_stably():
@@ -358,6 +383,54 @@ def test_a_round_of_a_stream_that_has_not_begun_is_refused():
         device.round_payloads(other, 1)
 
 
+def test_a_later_segment_with_another_source_duration_is_refused():
+    # Seven rounds is a valid chronology for the six-round circuit, so
+    # the binding's duration is what refuses the segment.
+    circuit = memory_circuit(3, 6)
+    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
+    tail = memory_operation(circuit, 2, stream_id="s", stream_offset=1)
+    device = stim_device.StimDevice(seed=5)
+    device.begin_operation(head, 1, 6)
+    with pytest.raises(ValueError, match="source duration differs"):
+        device.begin_operation(tail, 1, 7)
+
+
+def test_a_stream_segment_without_an_offset_is_refused():
+    circuit = memory_circuit(3, 3)
+    segment = memory_operation(circuit, 1, stream_id="s")
+    device = stim_device.StimDevice(seed=5)
+    with pytest.raises(ValueError, match="must carry its stream_offset"):
+        device.begin_operation(segment, 3, 3)
+
+
+def test_a_segment_begun_before_its_head_is_refused():
+    circuit = memory_circuit(3, 6)
+    tail = memory_operation(circuit, 2, stream_id="s", stream_offset=3)
+    device = stim_device.StimDevice(seed=5)
+    with pytest.raises(RuntimeError, match="before the stream's head"):
+        device.begin_operation(tail, 3, 6)
+
+
+def test_beginning_a_stream_head_again_is_refused():
+    circuit = memory_circuit(3, 3)
+    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
+    device = stim_device.StimDevice(seed=5)
+    device.begin_operation(head, 3, 3)
+    first_round = round_payload(device, head, 1)
+    with pytest.raises(RuntimeError, match="has already begun"):
+        device.begin_operation(head, 3, 3)
+    assert round_payload(device, head, 1) == first_round
+
+
+def test_beginning_a_standalone_operation_again_is_refused():
+    circuit = memory_circuit(3, 3)
+    operation = memory_operation(circuit)
+    device = stim_device.StimDevice(seed=5)
+    device.begin_operation(operation, 3, 3)
+    with pytest.raises(RuntimeError, match="has already begun"):
+        device.begin_operation(operation, 3, 3)
+
+
 def test_a_segment_past_the_end_of_its_source_is_refused():
     circuit = memory_circuit(3, 3)
     operation = memory_operation(circuit, 1, stream_id="s", stream_offset=2)
@@ -447,6 +520,18 @@ def test_a_finalizer_before_the_stream_is_sampled_is_refused():
         THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
     )
     with pytest.raises(RuntimeError, match="requires a sampled stream"):
+        device.finalize_stream_round(finalizer, 3)
+
+
+def test_a_finalizer_without_an_offset_is_refused():
+    circuit = memory_circuit(3, 3)
+    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
+    finalizer = memory_operation(circuit, 2, stream_id="s")
+    device = recorded_device(
+        THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
+    )
+    device.begin_operation(head, 3, 3)
+    with pytest.raises(ValueError, match="must carry its stream_offset"):
         device.finalize_stream_round(finalizer, 3)
 
 
@@ -607,29 +692,42 @@ def test_dependent_windows_split_the_fault_ownership_between_them():
 
 
 def test_a_closed_boundary_needs_a_dependency_edge():
+    # One window commits every round, so every fault has one owner; its
+    # closed boundary is the plan's only defect.
     circuit = memory_circuit(3, 4)
     operation = memory_operation(circuit)
-    leading = window(1, 2, 3)
-    trailing = message.Window(
+    closed = message.Window(
         op_id=1,
-        k=1,
-        commit_lo=3,
+        k=0,
+        commit_lo=1,
         commit_hi=4,
         buffer_hi=4,
         n_rounds=4,
-        buffer_lo=1,
         closed_temporal_boundaries=True,
     )
     device = stim_device.StimDevice(seed=1)
-    with pytest.raises(ValueError, match="without a causal owner"):
+    with pytest.raises(ValueError, match="must be a dependency destination"):
         device.window_models_for_operation(
             operation,
-            [leading, trailing],
+            [closed],
             4,
             fault_model_requirement=GRAPHLIKE,
             fault_exclusion_ranges=(),
             window_protocol=message.WindowProtocol.GENERIC,
         )
+
+
+def test_a_window_declared_past_the_source_reads_to_its_last_round():
+    circuit = memory_circuit(3, 4)
+    operation = memory_operation(circuit)
+    past_the_end = message.Window(
+        op_id=1, k=0, commit_lo=3, commit_hi=4, buffer_hi=9, n_rounds=4
+    )
+    device = stim_device.StimDevice(seed=1)
+    model = device.strong_window_model_for_operation(
+        operation, past_the_end, 4, fault_model_requirement=GRAPHLIKE
+    )
+    assert model.detector_ids == tuple(range(12, 32))
 
 
 def test_a_hardware_detector_belongs_to_its_latest_layer_up_to_the_end():

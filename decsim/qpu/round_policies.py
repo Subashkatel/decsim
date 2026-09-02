@@ -23,7 +23,9 @@ class FixedRounds:
         self.round_count = _at_least_one_round(round_count, "FixedRounds")
 
     def rounds_for(
-        self, operation: message.Operation, code: protocols.CodeModel
+        self,
+        operation: message.OperationPlanningView,
+        code: protocols.CodeModel,
     ) -> int:
         """The fixed count."""
         del operation, code
@@ -55,7 +57,9 @@ class PerOperationRounds:
             self.fallback = CodeRounds()
 
     def rounds_for(
-        self, operation: message.Operation, code: protocols.CodeModel
+        self,
+        operation: message.OperationPlanningView,
+        code: protocols.CodeModel,
     ) -> int:
         """The operation's own count, or the fallback policy's."""
         if operation.id in self.rounds_by_operation:
@@ -70,7 +74,9 @@ class CodeRounds:
         self.scale = scale
 
     def rounds_for(
-        self, operation: message.Operation, code: protocols.CodeModel
+        self,
+        operation: message.OperationPlanningView,
+        code: protocols.CodeModel,
     ) -> int:
         """The scaled logical cycle, rounded, never below one."""
         del operation
@@ -98,11 +104,13 @@ class GateRounds:
         )
 
     def rounds_for(
-        self, operation: message.Operation, code: protocols.CodeModel
+        self,
+        operation: message.OperationPlanningView,
+        code: protocols.CodeModel,
     ) -> int:
         """The kind's cost in rounds of the code's distance."""
         distance = code.distance
-        kind = getattr(operation, "kind", message.OpKind.GENERIC)
+        kind = operation.kind
         if kind is message.OpKind.MEASURE or kind is message.OpKind.INJECT:
             return 1
         if kind is message.OpKind.MERGE:
@@ -136,10 +144,12 @@ class TemporalRounds:
             self.base = GateRounds()
 
     def rounds_for(
-        self, operation: message.Operation, code: protocols.CodeModel
+        self,
+        operation: message.OperationPlanningView,
+        code: protocols.CodeModel,
     ) -> int:
         """The temporal distance for surgery, else the base policy's count."""
-        kind = getattr(operation, "kind", message.OpKind.GENERIC)
+        kind = operation.kind
         is_merge = kind is message.OpKind.MERGE
         is_generic = kind is message.OpKind.GENERIC
         is_multi_qubit = len(operation.qubits) >= 2

@@ -1,10 +1,13 @@
 """A round policy yields the documented round count for an operation.
 
-Sources: Horsman et al. 1111.4022v3 (Sec. 3.1, 3.2 and 6: one lattice
-surgery step is d rounds of error correction) and Litinski 1808.02892v3
-("Translation to surface codes": a multi-patch measurement is one time
-step of d code cycles). The experiment configs' "10d" rounds-per-shot rule
-is resolved by the experiments themselves (experiments/experiment_config.py,
+Sources: the lattice-surgery unit of d rounds per step that
+decsim/qpu/round_policies.py takes from Horsman et al. 1111.4022 and
+Litinski 1808.02892; neither paper is on disk in the sandbox, so the
+section citations live in that module and are not verified here. The
+policies receive the OperationPlanningView the planner builds
+(decsim/frontends/planner.py). The experiment configs' "10d"
+rounds-per-shot rule is resolved by the experiments themselves
+(experiments/experiment_config.py,
 RoundsCard.rounds_for: ten times the distance) and handed to the run as
 FixedRounds(config.rounds_per_shot.rounds_for(distance))
 (experiments/build_run.py); CodeRounds(scale=10) gives the same count from
@@ -19,9 +22,10 @@ import decsim.qpu.round_policies as round_policies
 
 
 def operation(operation_id, qubits=(0,), kind=message.OpKind.GENERIC):
-    return message.Operation(
+    workload_operation = message.Operation(
         id=operation_id, name="op", qubits=qubits, kind=kind
     )
+    return message.OperationPlanningView.from_operation(workload_operation)
 
 
 def test_a_fixed_policy_gives_every_operation_the_same_count():
@@ -75,6 +79,20 @@ def test_memory_costs_d_rounds():
     code = code_geometry.SurfaceCodeModel(distance=5)
     memory = operation(4, kind=message.OpKind.MEMORY)
     assert policy.rounds_for(memory, code) == 5
+
+
+def test_memory_on_two_qubits_still_costs_d_rounds():
+    policy = round_policies.GateRounds()
+    code = code_geometry.SurfaceCodeModel(distance=5)
+    memory = operation(4, qubits=(0, 1), kind=message.OpKind.MEMORY)
+    assert policy.rounds_for(memory, code) == 5
+
+
+def test_idle_costs_d_rounds():
+    policy = round_policies.GateRounds()
+    code = code_geometry.SurfaceCodeModel(distance=5)
+    idle = operation(4, qubits=(0, 1), kind=message.OpKind.IDLE)
+    assert policy.rounds_for(idle, code) == 5
 
 
 def test_a_generic_two_qubit_operation_costs_a_merge():

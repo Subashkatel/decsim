@@ -137,7 +137,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         self.one_payload_per_patch = one_payload_per_patch
         self._initialize_run_seed_state(seed)
 
-    def run_seed_children(self):
+    def run_seed_children(self) -> tuple[message.RunSeedChild, ...]:
         """The code card, which shapes every payload."""
         segment = message.RunSeedPathSegment("field", "code")
         return (message.RunSeedChild((segment,), self.code),)

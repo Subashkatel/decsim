@@ -15,9 +15,11 @@ al., Fig. 2). A fault a window owns is never offered to a later window
 again (qLDPC's `d_errors[addressed] = False`). The terminal window of an
 operation, the one whose commit rounds reach the last round, owns every
 fault it sees that nothing committed before, because nothing comes after
-it. When a plan compiled from a dependency graph supplies the owner sets
-explicitly, they replace the incremental rule and already carry the
-terminal law (window_ownership_dag).
+it. A fault touching an excluded round is owned by nobody and stays a
+column in every window that sees it. When a plan compiled from a
+dependency graph supplies the owner sets explicitly, they replace the
+incremental rule and already carry the terminal law and the exclusions
+(window_ownership_dag).
 
 Every owned column keeps its whole detector effect in boundary_flips, so
 the window that receives the handoff can intersect it with its own rows
@@ -127,6 +129,27 @@ def checked_fault_exclusion_ranges(
     return tuple(checked)
 
 
+def faults_touching_excluded_rounds(
+    fault_rounds: tuple[tuple[int, ...], ...],
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
+    candidate_faults: list[int],
+) -> set[int]:
+    """The candidate faults that touch an excluded round.
+
+    Such a fault is owned by nobody: the window that sees it decodes it
+    and never commits it, on either ownership path.
+    """
+    if not fault_exclusion_ranges:
+        return set()
+    unowned = set()
+    for fault_index in candidate_faults:
+        if _touches_excluded_round(
+            fault_rounds[fault_index], fault_exclusion_ranges
+        ):
+            unowned.add(fault_index)
+    return unowned
+
+
 def placed_faults_for_window(
     *,
     catalog: fault_model_contracts.FaultCatalog,
@@ -146,7 +169,7 @@ def placed_faults_for_window(
     """
     prior_faults = _prior_faults(committed_elsewhere, explicitly_prior_faults)
     columns = _fault_columns_for_window(candidate_faults, prior_faults)
-    unowned_faults = _unowned_faults(
+    unowned_faults = faults_touching_excluded_rounds(
         fault_rounds, fault_exclusion_ranges, candidate_faults
     )
     arrays = _build_window_arrays(
@@ -259,10 +282,10 @@ def _fault_owned_by_window(
     """Whether this window commits the fault.
 
     Precedence: an excluded fault is never owned; an explicit owner set
-    decides next, and it already names the terminal window for every
-    fault no window's commit rounds reach; a fault committed elsewhere is
-    not owned; the terminal window owns the rest; any other window owns
-    what touches its commit rounds.
+    decides next, and it already leaves out the excluded faults and names
+    the terminal window for every fault no window's commit rounds reach;
+    a fault committed elsewhere is not owned; the terminal window owns
+    the rest; any other window owns what touches its commit rounds.
     """
     if fault_index in unowned_faults:
         return False
@@ -362,21 +385,6 @@ def _observable_matrix(
         (ones, (rows, entry_columns)),
         shape=(context.observable_count, len(columns)),
     )
-
-
-def _unowned_faults(
-    fault_rounds: tuple, fault_exclusion_ranges: tuple, candidate_faults: list
-) -> set[int]:
-    """The candidate faults that touch an excluded round."""
-    if not fault_exclusion_ranges:
-        return set()
-    unowned = set()
-    for fault_index in candidate_faults:
-        if _touches_excluded_round(
-            fault_rounds[fault_index], fault_exclusion_ranges
-        ):
-            unowned.add(fault_index)
-    return unowned
 
 
 def _touches_excluded_round(

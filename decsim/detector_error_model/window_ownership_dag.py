@@ -11,15 +11,22 @@ two windows of the same depth has no causal owner and is refused. The
 terminal window, whose commit rounds reach the last round, also owns
 every fault its rows see that no commit round of the plan reaches, the
 same law the slicer applies when it advances ownership itself (Skoric et
-al. 2209.08552, section I.B: the last window commits all it decodes). It
-also answers, for each window, which faults its ancestors own, so the
-slicer can leave those out of the window's columns.
+al. 2209.08552, section I.B: the last window commits all it decodes). A
+fault an exclusion range keeps uncommitted has no owner at all, and a
+fault nobody has committed stays in the decoding graph of every window
+that sees it (Skoric et al., section I.B). The module also answers, for
+each window, which faults its ancestors own, so the slicer can leave
+those out of the window's columns.
 """
 
 from collections.abc import Container, Sequence
 from typing import Optional
 
-from decsim.detector_error_model import fault_model_contracts, window_slicer
+from decsim.detector_error_model import (
+    fault_model_contracts,
+    window_placement,
+    window_slicer,
+)
 
 
 def dependency_depths(
@@ -74,32 +81,32 @@ def explicit_fault_ownership(
     entries: tuple[tuple[int, int, int, int], ...],
     depths: tuple[int, ...],
     round_count: int,
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
 ) -> tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]:
     """The faults each window owns: the shallowest window it touches.
 
     A fault outside every commit round of the plan has no owner, which is
     how a plan covers part of an operation; the terminal window still
-    owns every such fault its rows see. Raises ValueError for a fault
-    with two owners of the same depth.
+    owns every such fault its rows see. A fault touching an excluded
+    round has no owner in any window. Raises ValueError for a fault with
+    two owners of the same depth.
     """
     ownership = [
         {representation: set() for representation in slicer.catalogs}
         for _ in entries
     ]
-    windows_by_commit_round = _windows_by_commit_round(entries)
-    for representation, catalog in slicer.catalogs.items():
-        _assign_owners(
-            ownership,
-            representation,
-            len(catalog.detector_sets),
-            slicer.fault_index.fault_rounds[representation],
-            windows_by_commit_round,
-            depths,
-        )
+    excluded_faults = _excluded_faults(slicer, fault_exclusion_ranges)
+    _assign_commit_round_owners(
+        ownership, slicer, entries, depths, excluded_faults
+    )
     terminal_window = _terminal_window(entries, round_count)
     if terminal_window is not None:
         _assign_unowned_faults_to_the_terminal_window(
-            ownership, slicer, entries[terminal_window], terminal_window
+            ownership,
+            slicer,
+            entries[terminal_window],
+            terminal_window,
+            excluded_faults,
         )
     return tuple(ownership)
 
@@ -185,6 +192,27 @@ def _windows_by_commit_round(entries: tuple) -> dict[int, list[int]]:
     return windows_by_round
 
 
+def _assign_commit_round_owners(
+    ownership: list,
+    slicer: window_slicer.WindowSlicer,
+    entries: tuple[tuple[int, int, int, int], ...],
+    depths: tuple[int, ...],
+    excluded_faults: dict[fault_model_contracts.FaultRepresentation, set[int]],
+) -> None:
+    """Give every fault of every representation its commit-round owner."""
+    windows_by_commit_round = _windows_by_commit_round(entries)
+    for representation, catalog in slicer.catalogs.items():
+        _assign_owners(
+            ownership,
+            representation,
+            len(catalog.detector_sets),
+            slicer.fault_index.fault_rounds[representation],
+            windows_by_commit_round,
+            depths,
+            excluded_faults[representation],
+        )
+
+
 def _assign_owners(
     ownership: list,
     representation: fault_model_contracts.FaultRepresentation,
@@ -192,9 +220,12 @@ def _assign_owners(
     fault_rounds: tuple,
     windows_by_commit_round: dict,
     depths: tuple,
+    excluded_faults: set[int],
 ) -> None:
     """Record the owner of every fault of one representation."""
     for fault_index in range(fault_count):
+        if fault_index in excluded_faults:
+            continue
         owner = _owner_window(
             fault_index,
             fault_rounds[fault_index],
@@ -249,6 +280,7 @@ def _assign_unowned_faults_to_the_terminal_window(
     slicer: window_slicer.WindowSlicer,
     terminal_entry: tuple[int, int, int, int],
     terminal_window: int,
+    excluded_faults: dict[fault_model_contracts.FaultRepresentation, set[int]],
 ) -> None:
     """Every fault the terminal window's rows see and no window owns."""
     first_buffer_round, _, _, last_buffer_round = terminal_entry
@@ -262,7 +294,26 @@ def _assign_unowned_faults_to_the_terminal_window(
             faults = faults_by_round.get(round_index, ())
             seen_faults.update(faults)
         unowned_faults = seen_faults - set(owner_by_fault)
+        unowned_faults -= excluded_faults[representation]
         ownership[terminal_window][representation].update(unowned_faults)
+
+
+def _excluded_faults(
+    slicer: window_slicer.WindowSlicer,
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
+) -> dict[fault_model_contracts.FaultRepresentation, set[int]]:
+    """The faults of each representation that touch an excluded round."""
+    excluded_faults = {}
+    for representation, catalog in slicer.catalogs.items():
+        every_fault = list(range(len(catalog.detector_sets)))
+        excluded_faults[representation] = (
+            window_placement.faults_touching_excluded_rounds(
+                slicer.fault_index.fault_rounds[representation],
+                fault_exclusion_ranges,
+                every_fault,
+            )
+        )
+    return excluded_faults
 
 
 def _owner_by_fault(ownership: Sequence, representation) -> dict[int, int]:

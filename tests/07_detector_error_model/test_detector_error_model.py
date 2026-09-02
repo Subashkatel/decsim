@@ -1573,9 +1573,9 @@ def test_valid_exclusion_ranges_pass():
 def test_unowned_faults_are_those_touching_an_exclusion_range():
     """A fault is excluded from commitment when any of its detectors falls in an exclusion range."""
     fault_rounds = ((1,), (2, 3), (4,))
-    assert window_placement._unowned_faults(fault_rounds, ((3, 3),), [0, 1, 2]) == {1}
-    assert window_placement._unowned_faults(fault_rounds, ((1, 1), (4, 9)), [0, 1, 2]) == {0, 2}
-    assert window_placement._unowned_faults(fault_rounds, (), [0, 1, 2]) == set()
+    assert window_placement.faults_touching_excluded_rounds(fault_rounds, ((3, 3),), [0, 1, 2]) == {1}
+    assert window_placement.faults_touching_excluded_rounds(fault_rounds, ((1, 1), (4, 9)), [0, 1, 2]) == {0, 2}
+    assert window_placement.faults_touching_excluded_rounds(fault_rounds, (), [0, 1, 2]) == set()
 
 
 def test_exclusion_keeps_a_fault_available_but_uncommittable():
@@ -1952,7 +1952,7 @@ def test_uncovered_fault_is_left_unowned_by_a_partial_plan():
     """A fault touching no commit region of a partial plan is left unowned."""
     partial_entries = ((3, 3, 3, 3), (4, 4, 4, 4))
     ownership = window_ownership_dag.explicit_fault_ownership(
-        isolated_slicer(), partial_entries, (0, 1), CHAIN_ROUND_COUNT
+        isolated_slicer(), partial_entries, (0, 1), CHAIN_ROUND_COUNT, ()
     )
     assert ownership == ({GRAPHLIKE: {1}}, {GRAPHLIKE: set()})
 
@@ -2161,7 +2161,7 @@ def test_optional_capabilities_are_inert_when_unused():
     """Every optional capability stays inert when it is not requested."""
     models = chain_models([(1, 2, 2), (3, 4, 4)])
     assert models[0].physical_to_graphlike_detector_projection is None
-    assert window_placement._unowned_faults(((1,), (2,)), (), [0, 1]) == set()
+    assert window_placement.faults_touching_excluded_rounds(((1,), (2,)), (), [0, 1]) == set()
     assert (
         window_protocol_policy.validate_window_protocol(
             ((1, 1, 2, 2),), WindowProtocol.GENERIC, None, (), NO_REQUIREMENT

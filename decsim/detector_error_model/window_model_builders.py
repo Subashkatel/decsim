@@ -191,7 +191,7 @@ def _slice_checked_plan(
     slicing cut a fault of the circuit at its edge.
     """
     ownership, prior_faults = _compiled_ownership(
-        slicer, entries, dependency_edges, round_count
+        slicer, entries, dependency_edges, round_count, fault_exclusion_ranges
     )
     models = _slice_plan(
         slicer,
@@ -266,6 +266,7 @@ def _compiled_ownership(
     entries: tuple[tuple[int, int, int, int], ...],
     dependency_edges: Optional[tuple[tuple[int, int], ...]],
     round_count: int,
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
 ) -> tuple[
     Optional[
         tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
@@ -287,7 +288,7 @@ def _compiled_ownership(
         len(entries), dependency_edges, depths
     )
     ownership = window_ownership_dag.explicit_fault_ownership(
-        slicer, entries, depths, round_count
+        slicer, entries, depths, round_count, fault_exclusion_ranges
     )
     prior_faults = window_ownership_dag.explicit_prior_faults(
         ownership, ancestors

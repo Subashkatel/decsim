@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 
-def matching_weights(priors):
-    """Return finite log-odds while preserving strict-interior priors.
+def finite_priors(priors):
+    """Priors moved strictly inside (0, 1) so their log-odds are finite.
 
     Malformed priors (NaN/inf or outside [0, 1]) are model-construction bugs
     and raise. Exact 0/1 priors are legitimate degenerate inputs (e.g. a
@@ -18,7 +18,15 @@ def matching_weights(priors):
         raise ValueError(
             "window error model priors must be finite probabilities in "
             f"[0, 1]; got range [{priors.min()}, {priors.max()}]")
-    finite_priors = priors.copy()
-    finite_priors[priors == 0] = 1e-12
-    finite_priors[priors == 1] = 1 - 1e-12
-    return np.log1p(-finite_priors) - np.log(finite_priors)
+    interior = priors.copy()
+    interior[priors == 0] = 1e-12
+    interior[priors == 1] = 1 - 1e-12
+    return interior
+
+
+def matching_weights(priors):
+    """Finite log-odds log((1 - p) / p) of the priors, PyMatching's weight."""
+    import numpy as np
+
+    interior = finite_priors(priors)
+    return np.log1p(-interior) - np.log(interior)

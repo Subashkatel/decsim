@@ -14,10 +14,13 @@ paths that decode one window on its own with faults it may see but must
 not commit; a window built alone is never terminal.
 
 The exclusion ranges arrive as any sequence of (first, last) round pairs
-and are checked once at entry. A linked requirement with an exclusion
-range on a plan of more than one window is refused there: ownership
-advances per representation, and the machine cannot keep a physical
-fault uncommitted past its own component.
+and are checked once at entry. Ownership advances per representation, so
+two linked plans are refused at entry: an exclusion range on a plan of
+more than one window, where the machine cannot keep a physical fault
+uncommitted past its own component, and dependency edges on a plan whose
+first commit round is after round 1, where the terminal window would own
+a graphlike component of a physical fault that a window depending on it
+owns.
 
 Nothing inside the package imports this module.
 """
@@ -49,11 +52,7 @@ def build_window_error_models(
     closed_temporal_boundary_windows: tuple[int, ...] = (),
     window_protocol: message.WindowProtocol = message.WindowProtocol.GENERIC,
 ) -> list[fault_model_contracts.WindowErrorModel]:
-    """One window model per plan entry, in plan order.
-
-    Only a window whose commit rounds reach `round_count` is terminal,
-    and it owns every uncommitted fault it sees, with or without edges.
-    """
+    """One window model per plan entry, in plan order."""
     exclusion_ranges = window_placement.checked_fault_exclusion_ranges(
         fault_exclusion_ranges, round_count
     )
@@ -67,7 +66,10 @@ def build_window_error_models(
         fault_model_requirement,
     )
     slicer = _new_slicer(
-        circuit, round_count, detector_rounds, fault_model_requirement
+        circuit,
+        round_count=round_count,
+        detector_rounds=detector_rounds,
+        fault_model_requirement=fault_model_requirement,
     )
     return _slice_checked_plan(
         slicer,
@@ -134,6 +136,7 @@ def build_single_window_error_model_with_exclusions(
 
 def _new_slicer(
     circuit: stim.Circuit,
+    *,
     round_count: int,
     detector_rounds: Optional[dict[int, int]],
     fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
@@ -158,12 +161,15 @@ def _checked_plan(
     """The plan's entries, checked against the protocol and for contiguity."""
     if not plan:
         raise ValueError("a window plan must hold at least one window")
-    _check_exclusions_fit_the_requirement(
-        plan, fault_exclusion_ranges, fault_model_requirement
-    )
     entries = tuple(
         window_placement.parse_window_entry(window_entry)
         for window_entry in plan
+    )
+    _check_the_plan_fits_a_linked_requirement(
+        entries,
+        fault_exclusion_ranges,
+        dependency_edges,
+        fault_model_requirement,
     )
     window_protocol_policy.validate_window_protocol(
         entries,
@@ -207,27 +213,39 @@ def _slice_checked_plan(
     return models
 
 
-def _check_exclusions_fit_the_requirement(
-    plan: list[tuple[int, ...]],
+def _check_the_plan_fits_a_linked_requirement(
+    entries: tuple[tuple[int, int, int, int], ...],
     fault_exclusion_ranges: tuple[tuple[int, int], ...],
+    dependency_edges: Optional[tuple[tuple[int, int], ...]],
     fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
 ) -> None:
-    """A linked plan of several windows cannot carry an exclusion range.
+    """A linked plan keeps every physical fault beside its components.
 
-    Ownership advances per representation: an earlier window would commit
-    a graphlike component while the range kept its physical parent
-    uncommitted, and no later window could hold both consistently.
+    Ownership advances per representation. With an exclusion range on
+    several windows, an earlier window would commit a graphlike component
+    while the range kept its physical parent uncommitted. With dependency
+    edges and a first commit round after round 1, the terminal window
+    would own a component that no commit round reaches while the physical
+    fault belongs to a window depending on it, and that window would drop
+    the component and keep the fault.
     """
     if not fault_model_requirement.require_physical_to_graphlike_link:
         return
-    if not fault_exclusion_ranges:
-        return
-    if len(plan) > 1:
+    if fault_exclusion_ranges and len(entries) > 1:
         raise ValueError(
             "a linked fault model requirement with fault_exclusion_ranges is "
             "refused for a plan of more than one window, because the "
             "machine cannot keep a physical fault uncommitted past its own "
             "component"
+        )
+    first_commit_rounds = [entry[1] for entry in entries]
+    first_commit_round = min(first_commit_rounds)
+    if dependency_edges and first_commit_round > 1:
+        raise ValueError(
+            "a linked fault model requirement with dependency edges is "
+            "refused for a plan whose first commit round is after round 1, "
+            "because the terminal window would own a graphlike component "
+            "of a physical fault that a window depending on it owns"
         )
 
 
@@ -359,7 +377,10 @@ def _build_single_window_error_model(
     bounds = window_placement.parse_window_entry(window_entry)
     _check_windows_end_inside_the_operation((bounds,), round_count)
     slicer = _new_slicer(
-        circuit, round_count, detector_rounds, fault_model_requirement
+        circuit,
+        round_count=round_count,
+        detector_rounds=detector_rounds,
+        fault_model_requirement=fault_model_requirement,
     )
     return slicer.slice_window(
         *bounds,

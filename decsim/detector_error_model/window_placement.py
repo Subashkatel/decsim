@@ -102,16 +102,19 @@ def checked_fault_exclusion_ranges(
 ) -> tuple[tuple[int, int], ...]:
     """The ranges as a tuple of pairs, each checked against the operation.
 
-    Any sequence of pairs is accepted. A round outside 1..round_count
-    holds no detector, so a range reaching there is a caller's mistake
-    rather than an empty exclusion.
+    Any sequence of pairs is accepted; a str or bytes is not, since its
+    items are characters or byte values, not ranges. A round outside
+    1..round_count holds no detector, so a range reaching there is a
+    caller's mistake rather than an empty exclusion.
     """
-    if not isinstance(fault_exclusion_ranges, Sequence):
+    if _is_text(fault_exclusion_ranges) or not isinstance(
+        fault_exclusion_ranges, Sequence
+    ):
         raise ValueError(
             "fault_exclusion_ranges must be a sequence of ranges, got "
             f"{fault_exclusion_ranges!r}"
         )
-    checked = []
+    checked_ranges = []
     for exclusion in fault_exclusion_ranges:
         _check_range_is_a_pair_of_ints(exclusion)
         first_excluded, last_excluded = exclusion
@@ -125,8 +128,8 @@ def checked_fault_exclusion_ranges(
                 f"fault-exclusion range {first_excluded}-{last_excluded} "
                 f"lies outside rounds 1..{round_count}"
             )
-        checked.append((first_excluded, last_excluded))
-    return tuple(checked)
+        checked_ranges.append((first_excluded, last_excluded))
+    return tuple(checked_ranges)
 
 
 def faults_touching_excluded_rounds(
@@ -233,8 +236,12 @@ _WindowArrays = tuple[
 ]
 
 
+def _is_text(value: object) -> bool:
+    return isinstance(value, (str, bytes))
+
+
 def _check_range_is_a_pair_of_ints(exclusion: object) -> None:
-    if not isinstance(exclusion, Sequence):
+    if _is_text(exclusion) or not isinstance(exclusion, Sequence):
         _refuse_exclusion_range(exclusion)
     if len(exclusion) != 2:
         _refuse_exclusion_range(exclusion)

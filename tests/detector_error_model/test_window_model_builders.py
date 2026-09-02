@@ -158,9 +158,11 @@ def test_the_windows_match_qldpcs_sliding_window_rule_window_by_window():
 
 def test_a_partial_plan_is_not_terminal_and_leaves_faults_unowned():
     circuit = surface_code_circuit(4)
+    # The second window's buffer reaches round 4 and its commit rounds
+    # stop at 3: it sees the round-4 faults and owns none of them.
     models = window_model_builders.build_window_error_models(
         circuit,
-        [(1, 1, 2, 2), (3, 3, 3, 3)],
+        [(1, 1, 2, 2), (3, 3, 3, 4)],
         round_count=4,
         fault_model_requirement=GRAPHLIKE_REQUIRED,
         fault_exclusion_ranges=(),
@@ -170,7 +172,7 @@ def test_a_partial_plan_is_not_terminal_and_leaves_faults_unowned():
     owned_together = first_owns + second_owns
     every_owned = sorted(owned_together)
     unowned = {60, 65, 71, 78, 80, 81, 84} | set(range(87, 110))
-    assert models[1].detector_ids == tuple(range(12, 20))
+    assert models[1].detector_ids == tuple(range(12, 32))
     assert len(first_owns) == 48
     assert len(second_owns) == 32
     assert len(every_owned) == 80
@@ -774,3 +776,153 @@ def test_an_exclusion_endpoint_that_is_a_float_in_second_place_is_refused():
             fault_model_requirement=GRAPHLIKE_REQUIRED,
             exclude_faults_touching=(2, 1.0),
         )
+
+
+def test_a_window_short_of_the_last_round_is_not_terminal_with_edges_given():
+    circuit = surface_code_circuit(4)
+    # The second window's buffer reaches round 4 and its commit rounds
+    # stop at 3; ownership is compiled from the graph.
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 2, 3), (3, 3, 3, 4)],
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+        dependency_edges=((0, 1),),
+    )
+    first_owns = owned_faults(models[0])
+    second_owns = owned_faults(models[1])
+    owned_together = first_owns + second_owns
+    # The 30 faults that flip only round-4 detectors.
+    unowned = {60, 65, 71, 78, 80, 81, 84} | set(range(87, 110))
+    assert models[1].detector_ids == tuple(range(12, 32))
+    assert len(first_owns) == 48
+    assert len(second_owns) == 32
+    assert set(owned_together) == set(range(110)) - unowned
+
+
+def test_a_linked_plan_with_edges_committing_after_round_one_is_refused():
+    circuit = surface_code_circuit(6)
+    # Window 1 is terminal and window 0 depends on it. A physical fault
+    # of rounds 1 and 2 belongs to window 0; a component of it that flips
+    # only round-1 detectors would go to the terminal window, and window
+    # 0 would drop the component while keeping the fault.
+    with pytest.raises(ValueError, match="first commit round is after round 1"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 2, 3, 3), (1, 4, 6, 6)],
+            round_count=6,
+            fault_model_requirement=(
+                fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
+            ),
+            fault_exclusion_ranges=(),
+            dependency_edges=((1, 0),),
+        )
+
+
+def test_a_linked_chain_whose_commits_start_at_round_one_builds():
+    circuit = surface_code_circuit(6)
+    models = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 3, 3), (1, 4, 6, 6)],
+        round_count=6,
+        fault_model_requirement=(
+            fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
+        ),
+        fault_exclusion_ranges=(),
+        dependency_edges=((0, 1),),
+    )
+    first_projection = models[0].physical_to_graphlike_detector_projection
+    second_projection = models[1].physical_to_graphlike_detector_projection
+    first_owns = owned_faults(models[0])
+    last_owns = owned_faults(models[1])
+    assert len(models) == 2
+    assert first_projection.shape == (80, 336)
+    assert second_projection.shape == (94, 367)
+    assert len(first_owns) == 80
+    assert len(last_owns) == 94
+
+
+def test_a_declared_detector_round_map_moves_a_fault_between_windows():
+    circuit = stim.Circuit.generated(
+        "repetition_code:memory",
+        distance=3,
+        rounds=2,
+        before_round_data_depolarization=0.01,
+        before_measure_flip_probability=0.01,
+    )
+    # Stim's coordinates put detectors 2 and 3 in round 2; the declared
+    # map puts them in round 1. Fault 5 flips detector 2 only.
+    from_coordinates = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 1, 1), (2, 2, 2, 2)],
+        round_count=2,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+    )
+    declared = window_model_builders.build_window_error_models(
+        circuit,
+        [(1, 1, 1, 1), (2, 2, 2, 2)],
+        round_count=2,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=(),
+        detector_rounds={0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 2},
+    )
+    assert from_coordinates[0].detector_ids == (0, 1)
+    assert from_coordinates[1].detector_ids == (2, 3, 4, 5)
+    assert owned_faults(from_coordinates[0]) == [0, 1, 2, 3, 4]
+    assert owned_faults(from_coordinates[1]) == [5, 6, 7, 8, 9, 10, 11, 12]
+    assert declared[0].detector_ids == (0, 1, 2, 3)
+    assert declared[1].detector_ids == (4, 5)
+    assert owned_faults(declared[0]) == [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    assert owned_faults(declared[1]) == [10, 11, 12]
+
+
+def test_a_single_window_excluding_a_list_pair_builds_the_same_model():
+    circuit = surface_code_circuit(4)
+    from_tuple = window_model_builders.build_single_window_error_model(
+        circuit,
+        (1, 1, 2, 3),
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        exclude_faults_touching=(1, 1),
+    )
+    from_list = window_model_builders.build_single_window_error_model(
+        circuit,
+        (1, 1, 2, 3),
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        exclude_faults_touching=[1, 1],
+    )
+    tuple_faults = from_tuple.require_faults(GRAPHLIKE)
+    list_faults = from_list.require_faults(GRAPHLIKE)
+    assert list_faults.source_fault_ids == tuple_faults.source_fault_ids
+    assert list_faults.owned.tolist() == tuple_faults.owned.tolist()
+    assert list_faults.owned.sum() == 32
+
+
+def test_a_single_window_with_list_ranges_builds_the_same_model():
+    circuit = surface_code_circuit(4)
+    builder = (
+        window_model_builders.build_single_window_error_model_with_exclusions
+    )
+    from_tuple = builder(
+        circuit,
+        (1, 1, 2, 3),
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=((1, 1), (3, 3)),
+    )
+    from_list = builder(
+        circuit,
+        (1, 1, 2, 3),
+        round_count=4,
+        fault_model_requirement=GRAPHLIKE_REQUIRED,
+        fault_exclusion_ranges=[[1, 1], [3, 3]],
+    )
+    tuple_faults = from_tuple.require_faults(GRAPHLIKE)
+    list_faults = from_list.require_faults(GRAPHLIKE)
+    assert list_faults.source_fault_ids == tuple_faults.source_fault_ids
+    assert list_faults.owned.tolist() == tuple_faults.owned.tolist()
+    # Only the 14 faults that flip round-2 detectors alone stay owned.
+    assert list_faults.owned.sum() == 14

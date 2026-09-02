@@ -19,9 +19,23 @@ the same event.
 """
 
 import dataclasses
+from typing import Any, Callable, Optional, Protocol
 
 import decsim.engine
 import decsim.message as message
+import decsim.protocols as protocols
+
+# Patches and operation ids are opaque identities chosen by the workload;
+# Any stands for them in every signature below.
+
+
+class ReadoutReceiver(Protocol):
+    """The component every readout is handed to: the controller."""
+
+    def accept_qpu_readout(
+        self, readout: message.QPUReadout, route: message.SyndromePacketRoute
+    ) -> None:
+        """Take one readout on its route."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -35,16 +49,22 @@ class QPUCommandEvent:
 
 
 class QPUDevice:
-    """Runs issued operation bodies on one cycle clock and emits rounds."""
+    """Runs issued operation bodies on one QEC cycle clock.
+
+    Every cycle emits one syndrome round per running operation and per
+    idle patch. The receivers may arrive later through connect_*.
+    """
 
     def __init__(
         self,
         engine: decsim.engine.Engine,
-        syndrome_source,
+        syndrome_source: protocols.SyndromeDevice,
         cycle_ticks: int,
-        readout_receiver=None,
-        completion_receiver=None,
-        idle_receiver=None,
+        readout_receiver: Optional[ReadoutReceiver] = None,
+        completion_receiver: Optional[
+            Callable[[message.Operation], None]
+        ] = None,
+        idle_receiver: Optional[Callable[[Any, Any, int], None]] = None,
     ):
         self.engine = engine
         self.syndrome_source = syndrome_source
@@ -60,15 +80,19 @@ class QPUDevice:
         self._last_emitted_boundary = 0
         self._is_finished = False
 
-    def connect_readout_receiver(self, receiver) -> None:
+    def connect_readout_receiver(self, receiver: ReadoutReceiver) -> None:
         """Wire the component that accepts every readout."""
         self.readout_receiver = receiver
 
-    def connect_completion_receiver(self, receiver) -> None:
+    def connect_completion_receiver(
+        self, receiver: Callable[[message.Operation], None]
+    ) -> None:
         """Wire the callback for a completed operation body."""
         self.completion_receiver = receiver
 
-    def connect_idle_receiver(self, receiver) -> None:
+    def connect_idle_receiver(
+        self, receiver: Callable[[Any, Any, int], None]
+    ) -> None:
         """Wire the callback for an idle patch's round."""
         self.idle_receiver = receiver
 
@@ -96,7 +120,8 @@ class QPUDevice:
 
     def next_boundary(self) -> int:
         """The cycle boundary at or after now, where issued operations start."""
-        return self.boundary_at_or_after(self.engine.now)
+        now = self.engine.now
+        return self.boundary_at_or_after(now)
 
     def boundary_at_or_after(self, tick: int) -> int:
         """The first cycle boundary not earlier than the tick."""
@@ -108,7 +133,11 @@ class QPUDevice:
         return (cycles_before + 1) * self.cycle_ticks
 
     def emit_idle_stream_round(
-        self, operation, stream_id, global_round: int, patch
+        self,
+        operation: message.Operation,
+        stream_id: Any,
+        global_round: int,
+        patch: Any,
     ) -> None:
         """Produce and deliver one idle round of a live stream."""
         payloads = self.syndrome_source.idle_round_payloads(
@@ -117,7 +146,7 @@ class QPUDevice:
         self._deliver(payloads, operation)
 
     def emit_feedback_memory_round(
-        self, operation_id, patch, round_index: int
+        self, operation_id: Any, patch: Any, round_index: int
     ) -> None:
         """Deliver the timing-only round of an idle patch."""
         payload = message.QPUReadout(
@@ -158,26 +187,28 @@ class QPUDevice:
     def _emit_idle_rounds(self) -> None:
         idle_patches = self._idle_by_patch.items()
         for patch, idle in list(idle_patches):
-            idle.rounds_emitted += 1
-            self.idle_receiver(idle.operation_id, patch, idle.rounds_emitted)
+            idle.emitted_round_count += 1
+            self.idle_receiver(
+                idle.operation_id, patch, idle.emitted_round_count
+            )
 
     def _emit_operation_rounds(self) -> None:
         running_operations = self._running_by_operation_id.items()
         for operation_id, running in list(running_operations):
-            running.rounds_emitted += 1
+            running.emitted_round_count += 1
             command = running.command
             operation = command.operation
             if command.emits_detector_data:
                 self.engine.log(
                     "QPU",
                     f"{operation.name} fires round "
-                    f"{running.rounds_emitted}/{command.round_count}",
+                    f"{running.emitted_round_count}/{command.round_count}",
                 )
                 payloads = self.syndrome_source.round_payloads(
-                    operation, running.rounds_emitted
+                    operation, running.emitted_round_count
                 )
                 self._deliver(payloads, operation)
-            if running.rounds_emitted == command.round_count:
+            if running.emitted_round_count == command.round_count:
                 del self._running_by_operation_id[operation_id]
                 self._finish_command(command)
 
@@ -220,7 +251,9 @@ class QPUDevice:
             self._idle_by_patch.setdefault(patch, idle)
         self.completion_receiver(operation)
 
-    def _deliver(self, payloads: list, operation) -> None:
+    def _deliver(
+        self, payloads: list[message.QPUReadout], operation: message.Operation
+    ) -> None:
         """Stamp every payload with its fragment slot and hand it on."""
         if not payloads:
             raise ValueError(
@@ -251,7 +284,7 @@ class QPUDevice:
             )
 
 
-def patches_of(operation) -> tuple:
+def patches_of(operation: message.Operation) -> tuple:
     """The patches an operation occupies; its first qubit stands in for none."""
     if operation.patches:
         return tuple(operation.patches)
@@ -265,7 +298,7 @@ class _RunningOperation:
     """An operation body on the QPU and how many rounds it has emitted."""
 
     command: message.RunOperationBody
-    rounds_emitted: int
+    emitted_round_count: int
 
 
 @dataclasses.dataclass
@@ -273,4 +306,4 @@ class _IdlePatch:
     """A patch between operations and how many idle rounds it has emitted."""
 
     operation_id: object
-    rounds_emitted: int
+    emitted_round_count: int

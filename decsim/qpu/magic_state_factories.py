@@ -30,7 +30,7 @@ import collections
 import dataclasses
 import functools
 import math
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol
 
 import decsim.config as config
 import decsim.engine
@@ -57,7 +57,7 @@ class Ticket:
 
     operation_id: int
     request: tuple
-    factory: object
+    factory: "_CancellingFactory"
 
     def cancel(self) -> bool:
         """Withdraw the request; False when it was already delivered."""
@@ -118,12 +118,12 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self.correction_round_count = correction_round_count
         self.correction_decode_count = correction_decode_count
         self.return_ticks = return_ticks
-        self.success_probability = _checked_probability(
-            "success_probability", success_probability
-        )
         self.production_mode = production_mode
         self.buffer_capacity = buffer_capacity
         self._check_settings(initial_store)
+        self.success_probability = _checked_probability(
+            "success_probability", success_probability
+        )
         self._initialize_run_seed_state(seed)
         self._reset_state(initial_store)
         if production_mode == "continuous":
@@ -140,7 +140,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self.engine.log(
             "Factory",
             f"op#{operation_id} requests a magic state "
-            f"(store {self.store}, waiting {waiting_count})",
+            f"(store {self.stored_state_count}, waiting {waiting_count})",
         )
         self._deliver_to_waiting()
         self._start_attempts()
@@ -161,15 +161,17 @@ class DistillationFactory(seeding._RandomSeedConsumer):
     def latency_aggregate_snapshot(self) -> dict:
         """Exact totals over every delivery, whatever traces were evicted."""
         snapshot = {}
-        for stage, total in self._latency_sum_by_stage.items():
+        totals = self._latency_totals
+        for stage, total in totals.sum_by_stage.items():
             snapshot[stage] = {
                 "sum": total,
-                "max": self._latency_max_by_stage[stage],
-                "n": self._delivered_latency_count,
+                "max": totals.max_by_stage[stage],
+                "n": totals.delivered_count,
             }
         return snapshot
 
     def _check_settings(self, initial_store: int) -> None:
+        """The mode and the decode service are checked before every count."""
         _check_production_mode(self.production_mode, self.buffer_capacity)
         _check_decode_service(self.decode_service, self.correction_decode_count)
         _check_count("unit_count", self.unit_count, minimum=1)
@@ -181,19 +183,19 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         _check_count("initial_store", initial_store, minimum=0)
 
     def _reset_state(self, initial_store: int) -> None:
-        self.store = initial_store
+        self.stored_state_count = initial_store
         self.waiting: list[tuple[int, Callable[[], None]]] = []
-        self.produced = 0
-        self.in_flight = 0
+        self.produced_count = 0
+        self.in_flight_count = 0
         self.busy_unit_count = 0
-        self.peak_in_flight = 0
+        self.peak_in_flight_count = 0
         self.total_stall_ticks = 0
         self._stall_start_by_operation_id: dict[int, int] = {}
         self._is_shut_down = False
         self.traces: collections.deque = collections.deque(maxlen=4096)
-        self._delivered_latency_count = 0
-        self._latency_sum_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
-        self._latency_max_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
+        sum_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
+        max_by_stage = dict.fromkeys(_LATENCY_STAGES, 0)
+        self._latency_totals = _LatencyTotals(0, sum_by_stage, max_by_stage)
         self._ready_traces: list[StateTrace] = []
         self._next_state_id = 0
 
@@ -212,13 +214,13 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             return False
         if self.busy_unit_count >= self.unit_count:
             return False
-        committed = self.busy_unit_count + self.in_flight
+        committed = self.busy_unit_count + self.in_flight_count
         has_unmet_demand = len(self.waiting) > committed
         if has_unmet_demand:
             return True
         if self.production_mode != "continuous":
             return False
-        pipeline = self.store + self.in_flight + self.busy_unit_count
+        pipeline = self.stored_state_count + committed
         wanted = self.buffer_capacity + len(self.waiting)
         return pipeline < wanted
 
@@ -236,8 +238,10 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         self._start_attempts()
 
     def _submit_corrections(self) -> None:
-        self.in_flight += 1
-        self.peak_in_flight = max(self.peak_in_flight, self.in_flight)
+        self.in_flight_count += 1
+        self.peak_in_flight_count = max(
+            self.peak_in_flight_count, self.in_flight_count
+        )
         now = self.engine.now
         distill_start_tick = now - self.attempt_ticks
         trace = StateTrace(
@@ -284,20 +288,21 @@ class DistillationFactory(seeding._RandomSeedConsumer):
 
     def _release(self, trace: StateTrace) -> None:
         """A corrected state reaches the store and serves the oldest request."""
-        self.in_flight -= 1
-        self.store += 1
-        self.produced += 1
+        self.in_flight_count -= 1
+        self.stored_state_count += 1
+        self.produced_count += 1
         trace.released_tick = self.engine.now
         self._ready_traces.append(trace)
         self.engine.log(
-            "Factory", f"magic state ready (store now {self.store})"
+            "Factory",
+            f"magic state ready (store now {self.stored_state_count})",
         )
         self._deliver_to_waiting()
         self._start_attempts()
 
     def _deliver_to_waiting(self) -> None:
-        while self.store > 0 and self.waiting:
-            self.store -= 1
+        while self.stored_state_count > 0 and self.waiting:
+            self.stored_state_count -= 1
             self._stamp_delivered_trace()
             operation_id, callback = self.waiting.pop(0)
             waited_ticks = self._stall_ticks_of(operation_id)
@@ -306,7 +311,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             self.engine.log(
                 "Factory",
                 f"  -> delivered to op#{operation_id} "
-                f"(store now {self.store}){tag}",
+                f"(store now {self.stored_state_count}){tag}",
             )
             callback()
             # Continuous mode refills the slot just taken.
@@ -334,12 +339,11 @@ class DistillationFactory(seeding._RandomSeedConsumer):
             "deliver": trace.delivered_tick - trace.correction_done_tick,
             "total": trace.delivered_tick - trace.distill_start_tick,
         }
-        self._delivered_latency_count += 1
+        totals = self._latency_totals
+        totals.delivered_count += 1
         for stage, ticks in ticks_by_stage.items():
-            self._latency_sum_by_stage[stage] += ticks
-            self._latency_max_by_stage[stage] = max(
-                self._latency_max_by_stage[stage], ticks
-            )
+            totals.sum_by_stage[stage] += ticks
+            totals.max_by_stage[stage] = max(totals.max_by_stage[stage], ticks)
 
 
 @dataclasses.dataclass
@@ -370,7 +374,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     def __init__(
         self,
         engine: decsim.engine.Engine,
-        levels: list,
+        levels: list[DistillLevel],
         *,
         round_ticks: int,
         inputs_per_round: int = 15,
@@ -387,23 +391,22 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         buffer_capacity: Optional[int] = None,
     ):
         self.engine = engine
-        self.levels = _checked_levels(levels)
-        self.level_count = len(self.levels)
         self.inputs_per_round = inputs_per_round
         self.outputs_per_round = outputs_per_round
         self.preparation_unit_count = preparation_unit_count
-        self.preparation_ticks = _checked_preparation_ticks(
-            preparation_logical_cycles, preparation_distance, round_ticks
-        )
-        self.preparation_success_probability = _checked_probability(
-            "preparation_success_probability", preparation_success_probability
-        )
         self.decode_service = decode_service
         self.correction_round_count = correction_round_count
         self.correction_decode_count = correction_decode_count
         self.production_mode = production_mode
         self.buffer_capacity = buffer_capacity
         self._check_settings()
+        self.levels = _checked_levels(levels)
+        self.preparation_ticks = _checked_preparation_ticks(
+            preparation_logical_cycles, preparation_distance, round_ticks
+        )
+        self.preparation_success_probability = _checked_probability(
+            "preparation_success_probability", preparation_success_probability
+        )
         self._initialize_run_seed_state(seed)
         self._reset_state(round_ticks)
         self._schedule_continuous_start()
@@ -415,7 +418,8 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         request = (operation_id, callback)
         self.waiting.append(request)
         self._stall_start_by_operation_id[operation_id] = self.engine.now
-        top_store = self.store_by_level[self.level_count]
+        top_counters = self.counters_by_level[len(self.levels)]
+        top_store = top_counters.stored_state_count
         waiting_count = len(self.waiting)
         self.engine.log(
             "Factory",
@@ -438,6 +442,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self._is_shut_down = True
 
     def _check_settings(self) -> None:
+        """The mode and the decode service are checked before every count."""
         _check_production_mode(self.production_mode, self.buffer_capacity)
         _check_decode_service(self.decode_service, self.correction_decode_count)
         _check_count("inputs_per_round", self.inputs_per_round, minimum=1)
@@ -455,7 +460,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
 
     def _reset_state(self, round_ticks: int) -> None:
         self.round_ticks_by_level = {}
-        above_top = self.level_count + 1
+        above_top = len(self.levels) + 1
         for level in range(1, above_top):
             settings = self.levels[level - 1]
             self.round_ticks_by_level[level] = _round_ticks(
@@ -463,21 +468,20 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
                 settings.distance,
                 round_ticks,
             )
-        every_level = range(0, above_top)
-        self.store_by_level = {level: 0 for level in every_level}
-        self.busy_by_level = {level: 0 for level in every_level}
-        self.produced_by_level = {level: 0 for level in every_level}
-        self.failures_by_level = {level: 0 for level in every_level}
+        # Level 0 is preparation; level l is self.levels[l - 1].
+        self.counters_by_level = {}
+        for level in range(0, above_top):
+            self.counters_by_level[level] = _LevelCounters()
         self.waiting: list[tuple[int, Callable[[], None]]] = []
         self.total_stall_ticks = 0
         self._stall_start_by_operation_id: dict[int, int] = {}
-        self.peak_in_flight = 0
+        self.peak_in_flight_count = 0
         self._is_shut_down = False
 
     def _deliver_to_waiting(self) -> None:
-        top = self.level_count
-        while self.store_by_level[top] > 0 and self.waiting:
-            self.store_by_level[top] -= 1
+        top_counters = self.counters_by_level[len(self.levels)]
+        while top_counters.stored_state_count > 0 and self.waiting:
+            top_counters.stored_state_count -= 1
             operation_id, callback = self.waiting.pop(0)
             waited_ticks = self._stall_ticks_of(operation_id)
             self.total_stall_ticks += waited_ticks
@@ -498,77 +502,89 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         if self._is_shut_down:
             return
         self._deliver_to_waiting()
-        progress = True
-        while progress:
+        has_progress = True
+        while has_progress:
             demand_by_level = self._demand_by_level()
-            started_preparation = self._start_preparation(demand_by_level)
-            started_distillation = self._start_distillation(demand_by_level)
-            progress = started_preparation or started_distillation
-        busy_counts = self.busy_by_level.values()
-        busy_total = sum(busy_counts)
-        self.peak_in_flight = max(self.peak_in_flight, busy_total)
+            has_started_preparation = self._start_preparation(demand_by_level)
+            has_started_distillation = self._start_distillation(demand_by_level)
+            has_progress = has_started_preparation or has_started_distillation
+        busy_total = 0
+        for counters in self.counters_by_level.values():
+            busy_total += counters.busy_unit_count
+        self.peak_in_flight_count = max(self.peak_in_flight_count, busy_total)
 
     def _demand_by_level(self) -> dict:
         """How many states each level must supply, top down."""
-        top = self.level_count
+        top = len(self.levels)
         demand_by_level = {top: len(self.waiting)}
         if self.production_mode == "continuous":
             demand_by_level[top] += self.buffer_capacity
         for level in range(top, 0, -1):
-            rounds_wanted = self._rounds_wanted(level, demand_by_level[level])
-            demand_by_level[level - 1] = self.inputs_per_round * rounds_wanted
+            wanted_round_count = self._wanted_round_count(
+                level, demand_by_level[level]
+            )
+            input_level = level - 1
+            demand_by_level[input_level] = (
+                self.inputs_per_round * wanted_round_count
+            )
         return demand_by_level
 
-    def _rounds_wanted(self, level: int, demand: int) -> int:
+    def _wanted_round_count(self, level: int, demand: int) -> int:
         """Rounds a level must run to cover a demand for its outputs."""
-        in_progress = self.busy_by_level[level] * self.outputs_per_round
-        deficit = demand - self.store_by_level[level] - in_progress
+        counters = self.counters_by_level[level]
+        in_progress = counters.busy_unit_count * self.outputs_per_round
+        committed = counters.stored_state_count + in_progress
+        deficit = demand - committed
         if deficit <= 0:
             return 0
         rounds = deficit / self.outputs_per_round
         return math.ceil(rounds)
 
     def _start_preparation(self, demand_by_level: dict) -> bool:
-        progress = False
-        idle_units = self.preparation_unit_count - self.busy_by_level[0]
-        shortfall = demand_by_level[0] - self.store_by_level[0]
-        shortfall -= self.busy_by_level[0]
+        has_progress = False
+        counters = self.counters_by_level[0]
+        idle_unit_count = self.preparation_unit_count - counters.busy_unit_count
+        shortfall = demand_by_level[0] - counters.stored_state_count
+        shortfall -= counters.busy_unit_count
         deficit = max(0, shortfall)
-        while deficit > 0 and idle_units > 0:
-            self.busy_by_level[0] += 1
+        while deficit > 0 and idle_unit_count > 0:
+            counters.busy_unit_count += 1
             self.engine.schedule(
                 self.preparation_ticks, self._finish_preparation, label="prep"
             )
-            idle_units -= 1
+            idle_unit_count -= 1
             deficit -= 1
-            progress = True
-        return progress
+            has_progress = True
+        return has_progress
 
     def _start_distillation(self, demand_by_level: dict) -> bool:
-        progress = False
-        above_top = self.level_count + 1
+        has_progress = False
+        above_top = len(self.levels) + 1
         for level in range(1, above_top):
-            started = self._start_level_rounds(level, demand_by_level[level])
-            if started:
-                progress = True
-        return progress
+            has_started_rounds = self._start_level_rounds(
+                level, demand_by_level[level]
+            )
+            if has_started_rounds:
+                has_progress = True
+        return has_progress
 
     def _start_level_rounds(self, level: int, demand: int) -> bool:
-        progress = False
-        rounds_wanted = self._rounds_wanted(level, demand)
+        has_progress = False
+        wanted_round_count = self._wanted_round_count(level, demand)
         settings = self.levels[level - 1]
-        idle_units = settings.unit_count - self.busy_by_level[level]
-        input_level = level - 1
-        while rounds_wanted > 0 and idle_units > 0:
-            if self.store_by_level[input_level] < self.inputs_per_round:
+        counters = self.counters_by_level[level]
+        idle_unit_count = settings.unit_count - counters.busy_unit_count
+        input_counters = self.counters_by_level[level - 1]
+        while wanted_round_count > 0 and idle_unit_count > 0:
+            if input_counters.stored_state_count < self.inputs_per_round:
                 break
-            self.store_by_level[input_level] -= self.inputs_per_round
-            self.busy_by_level[level] += 1
+            input_counters.stored_state_count -= self.inputs_per_round
+            counters.busy_unit_count += 1
             self._start_round(level)
-            idle_units -= 1
-            rounds_wanted -= 1
-            progress = True
-        return progress
+            idle_unit_count -= 1
+            wanted_round_count -= 1
+            has_progress = True
+        return has_progress
 
     def _start_round(self, level: int) -> None:
         distillation_round = _DistillationRound(level)
@@ -583,9 +599,10 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     ) -> None:
         """Submit the correction decodes; measurement data exists only now."""
         distillation_round.is_physically_done = True
-        has_decode_service = self.decode_service is not None
-        if has_decode_service and self.correction_decode_count:
-            distillation_round.decodes_left = self.correction_decode_count
+        if self.correction_decode_count:
+            distillation_round.remaining_decode_count = (
+                self.correction_decode_count
+            )
             level = distillation_round.level
             on_done = functools.partial(
                 self._finish_correction_decode, distillation_round
@@ -601,7 +618,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
     def _finish_correction_decode(
         self, distillation_round: "_DistillationRound"
     ) -> None:
-        distillation_round.decodes_left -= 1
+        distillation_round.remaining_decode_count -= 1
         self._finish_round(distillation_round)
 
     def _finish_round(self, distillation_round: "_DistillationRound") -> None:
@@ -610,18 +627,19 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
             return
         if not distillation_round.is_physically_done:
             return
-        if distillation_round.decodes_left > 0:
+        if distillation_round.remaining_decode_count > 0:
             return
         distillation_round.is_done = True
         level = distillation_round.level
-        self.busy_by_level[level] -= 1
+        counters = self.counters_by_level[level]
+        counters.busy_unit_count -= 1
         self._mark_stochastic_use()
         settings = self.levels[level - 1]
         is_success = self._rng.random() < settings.success_probability
         if is_success:
             self._add_outputs(level)
         else:
-            self.failures_by_level[level] += 1
+            counters.failure_count += 1
             self.engine.log(
                 "Factory",
                 f"level {level} distillation failed (inputs discarded), "
@@ -630,10 +648,11 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self._start_work()
 
     def _add_outputs(self, level: int) -> None:
-        self.store_by_level[level] += self.outputs_per_round
-        self.produced_by_level[level] += self.outputs_per_round
+        counters = self.counters_by_level[level]
+        counters.stored_state_count += self.outputs_per_round
+        counters.produced_count += self.outputs_per_round
         destination = f"level-{level} state to buffer"
-        if level == self.level_count:
+        if level == len(self.levels):
             destination = "final state to core buffer"
         input_level = level - 1
         self.engine.log(
@@ -643,18 +662,44 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         )
 
     def _finish_preparation(self) -> None:
-        self.busy_by_level[0] -= 1
+        counters = self.counters_by_level[0]
+        counters.busy_unit_count -= 1
         self._mark_stochastic_use()
         is_success = self._rng.random() < self.preparation_success_probability
         if is_success:
-            self.store_by_level[0] += 1
-            self.produced_by_level[0] += 1
+            counters.stored_state_count += 1
+            counters.produced_count += 1
         else:
-            self.failures_by_level[0] += 1
+            counters.failure_count += 1
         self._start_work()
 
 
 _LATENCY_STAGES = ("distill", "corr_decode", "deliver", "total")
+
+
+class _CancellingFactory(Protocol):
+    """A factory a Ticket can withdraw its request from."""
+
+    def cancel(self, ticket: Ticket) -> bool: ...
+
+
+@dataclasses.dataclass
+class _LatencyTotals:
+    """Exact sums and maxima per latency stage over every delivery."""
+
+    delivered_count: int
+    sum_by_stage: dict
+    max_by_stage: dict
+
+
+@dataclasses.dataclass
+class _LevelCounters:
+    """The states in store, units busy, states made and rounds failed."""
+
+    stored_state_count: int = 0
+    busy_unit_count: int = 0
+    produced_count: int = 0
+    failure_count: int = 0
 
 
 @dataclasses.dataclass
@@ -671,7 +716,7 @@ class _DistillationRound:
 
     level: int
     is_physically_done: bool = False
-    decodes_left: int = 0
+    remaining_decode_count: int = 0
     is_done: bool = False
 
 

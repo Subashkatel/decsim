@@ -7,9 +7,9 @@ src/stim/gen/gen_surface_code.cc).
 
 import pytest
 
-from decsim.message import Operation
-from decsim.qpu.code_geometry import SurfaceCodeModel
-from decsim.qpu.syndrome_devices import SyndromeBitDevice, TimingOnlyDevice
+import decsim.message as message
+import decsim.qpu.code_geometry as code_geometry
+import decsim.qpu.syndrome_devices as syndrome_devices
 
 
 def first_payload(device, operation, round_index):
@@ -18,55 +18,68 @@ def first_payload(device, operation, round_index):
 
 
 def test_a_timing_only_round_carries_no_bits_and_names_its_patch():
-    device = TimingOnlyDevice()
-    operation = Operation(id=4, name="memory", qubits=(2,), patches=(7,))
-    payload = first_payload(device, operation, 3)
-    assert (payload.operation_id, payload.patch_id, payload.round_index) == (
-        4,
-        7,
-        3,
+    device = syndrome_devices.TimingOnlyDevice()
+    operation = message.Operation(
+        id=4, name="memory", qubits=(2,), patches=(7,)
     )
-    assert payload.bits is None
+    payload = first_payload(device, operation, 3)
+    assert payload == message.QPUReadout(4, 7, 3)
 
 
 def test_a_stream_segment_reports_its_stream_and_global_round():
-    device = TimingOnlyDevice()
-    operation = Operation(
+    device = syndrome_devices.TimingOnlyDevice()
+    operation = message.Operation(
         id=4, name="tail", qubits=(2,), stream_id="s", stream_offset=6
     )
     payload = first_payload(device, operation, 2)
-    assert (payload.operation_id, payload.round_index) == ("s", 8)
+    assert payload == message.QPUReadout("s", 2, 8)
 
 
 def test_fake_bits_are_as_wide_as_the_syndrome_up_to_the_cap():
-    code = SurfaceCodeModel(distance=3)
-    device = SyndromeBitDevice(code, seed=1)
-    operation = Operation(id=1, name="memory", qubits=(0,))
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.SyndromeBitDevice(code, seed=1)
+    operation = message.Operation(id=1, name="memory", qubits=(0,))
     payload = first_payload(device, operation, 1)
     assert len(payload.bits) == 8
     assert payload.size_bits == 8
     assert payload.code == "rotated surface code (d=3)"
-    wide_code = SurfaceCodeModel(distance=5)
-    capped = SyndromeBitDevice(wide_code, seed=1, max_bit_count=10)
+    wide_code = code_geometry.SurfaceCodeModel(distance=5)
+    capped = syndrome_devices.SyndromeBitDevice(
+        wide_code, seed=1, max_bit_count=10
+    )
     capped_payload = first_payload(capped, operation, 1)
     assert len(capped_payload.bits) == 10
+    roomy = syndrome_devices.SyndromeBitDevice(code, seed=1, max_bit_count=100)
+    roomy_payload = first_payload(roomy, operation, 1)
+    assert len(roomy_payload.bits) == 8
 
 
 def test_one_payload_per_patch_when_asked():
-    code = SurfaceCodeModel(distance=3)
-    device = SyndromeBitDevice(code, seed=1, one_payload_per_patch=True)
-    operation = Operation(id=1, name="merge", qubits=(0, 1), patches=(5, 6))
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    device = syndrome_devices.SyndromeBitDevice(
+        code, seed=1, one_payload_per_patch=True
+    )
+    operation = message.Operation(
+        id=1, name="merge", qubits=(0, 1), patches=(5, 6)
+    )
     payloads = device.round_payloads(operation, 1)
-    patches = [payload.patch_id for payload in payloads]
-    assert patches == [5, 6]
+    assert len(payloads) == 2
+    assert payloads[0].patch_id == 5
+    assert payloads[1].patch_id == 6
+    assert payloads[0].operation_id == 1
+    assert payloads[1].operation_id == 1
 
 
-def test_neither_source_can_finalize_a_stream_round():
-    operation = Operation(id=1, name="tail", qubits=(0,))
-    timing_only = TimingOnlyDevice()
+def test_the_timing_only_source_cannot_finalize_a_stream_round():
+    operation = message.Operation(id=1, name="tail", qubits=(0,))
+    timing_only = syndrome_devices.TimingOnlyDevice()
     with pytest.raises(ValueError, match="finalize"):
         timing_only.finalize_stream_round(operation, 3)
-    code = SurfaceCodeModel(distance=3)
-    fake_bits = SyndromeBitDevice(code, seed=1)
+
+
+def test_the_fake_bit_source_cannot_finalize_a_stream_round():
+    operation = message.Operation(id=1, name="tail", qubits=(0,))
+    code = code_geometry.SurfaceCodeModel(distance=3)
+    fake_bits = syndrome_devices.SyndromeBitDevice(code, seed=1)
     with pytest.raises(ValueError, match="finalize"):
         fake_bits.finalize_stream_round(operation, 3)

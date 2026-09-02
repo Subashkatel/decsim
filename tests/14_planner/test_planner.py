@@ -449,7 +449,7 @@ def test_code_rounds_scale_with_python_rounding_and_clamp_to_one():
 def test_gate_rounds_apply_operation_kind_and_qubit_arity_costs():
     """Gate rounds distinguish constant, distance, merge, and multi-qubit costs."""
     code = SimpleNamespace(distance=5)
-    policy = GateRounds(merge_steps=3)
+    policy = GateRounds(merge_step_count=3)
     expected = {
         OpKind.MEASURE: 1,
         OpKind.INJECT: 1,
@@ -461,7 +461,7 @@ def test_gate_rounds_apply_operation_kind_and_qubit_arity_costs():
         assert policy.rounds_for(operation(1, kind=kind), code) == round_count
     assert policy.rounds_for(operation(2, qubits=(0, 1)), code) == 15
     assert policy.rounds_for(operation(3, qubits=(0,)), code) == 5
-    assert GateRounds(True).merge_steps == 1
+    assert GateRounds(True).merge_step_count == 1
     with pytest.raises(ValueError):
         GateRounds(0)
 

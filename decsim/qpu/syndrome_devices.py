@@ -11,11 +11,15 @@ seeded random bits sized by the code card's syndrome width, to exercise
 the payload path end to end without Stim.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
+import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 import decsim.protocols as protocols
 import decsim.seeding as seeding
+
+# Stream ids and patches are opaque identities chosen by the workload; Any
+# stands for them in every signature below.
 
 
 class TimingOnlyDevice:
@@ -33,7 +37,7 @@ class TimingOnlyDevice:
 
     def round_payloads(
         self, operation: message.Operation, round_index: int
-    ) -> list:
+    ) -> list[message.QPUReadout]:
         """One bitless payload on the operation's first patch."""
         target, global_round = _stream_target_and_global_round(
             operation, round_index
@@ -44,73 +48,75 @@ class TimingOnlyDevice:
     def idle_round_payloads(
         self,
         operation: message.Operation,
-        stream_id,
+        stream_id: Any,
         global_round: int,
-        patch,
-    ) -> list:
+        patch: Any,
+    ) -> list[message.QPUReadout]:
         """One bitless payload for the idle stream round."""
         del operation
         return [message.QPUReadout(stream_id, patch, global_round)]
 
     def finalize_stream_round(
         self, operation: message.Operation, source_round_count: int
-    ) -> list:
+    ) -> list[message.QPUReadout]:
         """Refused: a stream without a circuit has no final readout."""
         del operation, source_round_count
         raise ValueError("TimingOnlyDevice cannot finalize a physical stream")
 
     def register_dynamic_stream(
         self,
-        stream_op: message.Operation,
+        stream_operation: message.Operation,
         round_count: int,
         *,
-        fault_model_requirement,
-    ):
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
+    ) -> None:
         """No circuit, so no fixed stream length."""
 
     def validate_stream_length(
-        self, stream_op: message.Operation, stream_round_count: int
+        self, stream_operation: message.Operation, stream_round_count: int
     ) -> None:
         """No circuit, so any length is fine."""
 
     def window_models_for_operation(
         self,
         operation: message.Operation,
-        windows: list,
+        windows: list[message.Window],
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
-        window_protocol,
-    ) -> list:
+        window_protocol: message.WindowProtocol,
+    ) -> list[fault_models.WindowErrorModel]:
         """No circuit, so no window has an error model."""
         del operation, windows, round_count
         del fault_model_requirement, fault_exclusion_ranges, window_protocol
         return []
 
-    def window_model_for_stream(self, stream_id, window):
+    def window_model_for_stream(
+        self, stream_id: Any, window: message.Window
+    ) -> None:
         """No circuit, so no stream window has an error model."""
 
     def strong_window_model_for_operation(
         self,
         operation: message.Operation,
-        window,
+        window: message.Window,
         round_count: int,
         *,
-        fault_model_requirement,
-        exclude_faults_touching=None,
-    ):
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
+        exclude_faults_touching: Optional[tuple] = None,
+    ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
     def strong_window_model_for_operation_with_exclusions(
         self,
         operation: message.Operation,
-        window,
+        window: message.Window,
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
-    ):
+    ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
 
@@ -163,9 +169,9 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
     def idle_round_payloads(
         self,
         operation: message.Operation,
-        stream_id,
+        stream_id: Any,
         global_round: int,
-        patch,
+        patch: Any,
     ) -> list[message.QPUReadout]:
         """One fake-bit payload for the idle stream round."""
         del operation
@@ -181,56 +187,58 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def register_dynamic_stream(
         self,
-        stream_op: message.Operation,
+        stream_operation: message.Operation,
         round_count: int,
         *,
-        fault_model_requirement,
-    ):
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
+    ) -> None:
         """No circuit, so no fixed stream length."""
 
     def validate_stream_length(
-        self, stream_op: message.Operation, stream_round_count: int
+        self, stream_operation: message.Operation, stream_round_count: int
     ) -> None:
         """No circuit, so any length is fine."""
 
     def window_models_for_operation(
         self,
         operation: message.Operation,
-        windows: list,
+        windows: list[message.Window],
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
-        window_protocol,
-    ) -> list:
+        window_protocol: message.WindowProtocol,
+    ) -> list[fault_models.WindowErrorModel]:
         """No circuit, so no window has an error model."""
         del operation, windows, round_count
         del fault_model_requirement, fault_exclusion_ranges, window_protocol
         return []
 
-    def window_model_for_stream(self, stream_id, window):
+    def window_model_for_stream(
+        self, stream_id: Any, window: message.Window
+    ) -> None:
         """No circuit, so no stream window has an error model."""
 
     def strong_window_model_for_operation(
         self,
         operation: message.Operation,
-        window,
+        window: message.Window,
         round_count: int,
         *,
-        fault_model_requirement,
-        exclude_faults_touching=None,
-    ):
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
+        exclude_faults_touching: Optional[tuple] = None,
+    ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
     def strong_window_model_for_operation_with_exclusions(
         self,
         operation: message.Operation,
-        window,
+        window: message.Window,
         round_count: int,
         *,
-        fault_model_requirement,
+        fault_model_requirement: fault_models.DecoderFaultModelRequirement,
         fault_exclusion_ranges: tuple,
-    ):
+    ) -> None:
         """No circuit, so no strong re-decode has an error model."""
 
     def _fake_bits(self, patch_count: int) -> list:
@@ -240,7 +248,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         return [self._rng.randint(0, 1) for _ in range(bit_count)]
 
     def _payload(
-        self, target, patch, global_round: int, bits: list
+        self, target: Any, patch: Any, global_round: int, bits: list
     ) -> message.QPUReadout:
         return message.QPUReadout(
             target,
@@ -252,7 +260,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
         )
 
     def _payload_per_patch(
-        self, operation: message.Operation, target, global_round: int
+        self, operation: message.Operation, target: Any, global_round: int
     ) -> list[message.QPUReadout]:
         patches = operation.patches
         if not patches:
@@ -276,11 +284,14 @@ def _stream_target_and_global_round(
     target = operation.id
     if operation.stream_id is not None:
         target = operation.stream_id
-    global_round = round_index + (operation.stream_offset or 0)
+    stream_offset = 0
+    if operation.stream_offset is not None:
+        stream_offset = operation.stream_offset
+    global_round = round_index + stream_offset
     return target, global_round
 
 
-def _first_patch_of(operation: message.Operation):
+def _first_patch_of(operation: message.Operation) -> Any:
     if operation.patches:
         return operation.patches[0]
     return operation.qubits[0]

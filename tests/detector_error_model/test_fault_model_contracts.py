@@ -105,17 +105,31 @@ def test_a_placed_model_keeps_its_matrices_as_uint8_columns():
 
 
 def test_a_window_hands_out_the_representation_it_holds():
-    placed = placed_model()
+    graphlike = placed_model()
+    check = scipy.sparse.csc_matrix([[1, 1], [0, 1]], dtype=numpy.uint8)
+    observables = scipy.sparse.csc_matrix([[1, 0]], dtype=numpy.uint8)
+    physical = fault_model_contracts.PlacedFaultModel(
+        representation=PHYSICAL,
+        check=check,
+        priors=[0.3, 0.4],
+        observables=observables,
+        owned=[False, True],
+        source_fault_ids=[2, 5],
+        boundary_flips={1: [1]},
+    )
     window = fault_model_contracts.WindowErrorModel(
         detector_ids=(0, 1),
         detector_coordinates=None,
         defect_positions={0: (1, 0), 1: (1, 1)},
-        graphlike_faults=placed,
-        physical_faults=None,
+        graphlike_faults=graphlike,
+        physical_faults=physical,
     )
-    faults = window.require_faults(GRAPHLIKE)
-    assert faults.representation is GRAPHLIKE
-    assert faults.source_fault_ids == (4, 9)
+    physical_faults = window.require_faults(PHYSICAL)
+    graphlike_faults = window.require_faults(GRAPHLIKE)
+    assert physical_faults.representation is PHYSICAL
+    assert physical_faults.source_fault_ids == (2, 5)
+    assert graphlike_faults.representation is GRAPHLIKE
+    assert graphlike_faults.source_fault_ids == (4, 9)
 
 
 def test_a_window_refuses_a_representation_it_does_not_hold():

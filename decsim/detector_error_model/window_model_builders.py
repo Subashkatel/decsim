@@ -9,12 +9,13 @@ stays unowned, while the terminal window owns every uncommitted fault it
 sees, front buffer rounds included, whether ownership advances in plan
 order or is compiled from the dependency graph (Skoric et al.
 2209.08552, the last paragraph of section III, Methods (text lines
-697-700): the commit region of the last window runs from the bottom of
-the regular commit region to the last round; qLDPC's
-SlidingWindowDecoder, whose last window commits all it holds). The two
-single-window builders serve the runtime paths that decode one window on
-its own with faults it may see but must not commit; a window built alone
-is never terminal.
+693-700): in both branches the last window commits through the last
+round, the last B window of reduced size, or the last A window whose
+commit region runs from the bottom of the regular commit region to the
+last round; qLDPC's SlidingWindowDecoder, whose last window commits all
+it holds). The two single-window builders serve the runtime paths that
+decode one window on its own with faults it may see but must not commit;
+a window built alone is never terminal.
 
 The exclusion ranges are decsim's own device with no paper referent: a
 strong re-decode leaves the faults the weak decoder already committed
@@ -149,9 +150,11 @@ def build_single_window_error_model_with_exclusions(
     )
 
 
-# The faults each window owns, and the faults each window's ancestors
-# own, by representation; None when ownership advances in plan order.
-# Both are read the same way, one window's table at a time.
+# Per-window fault tables by representation; None when ownership advances
+# in plan order. _OwnedFaultsPerWindow holds the faults each window owns
+# and _PriorFaultsPerWindow the faults each window's ancestors own;
+# _FaultsPerWindow is what _entry_of reads, one window's table at a time,
+# and both of the others satisfy it.
 _OwnedFaultsPerWindow = Optional[
     tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
 ]
@@ -213,7 +216,7 @@ def _checked_plan(
     window_protocol_policy.validate_closed_windows_are_dependency_destinations(
         dependency_edges, closed_temporal_boundary_windows
     )
-    _check_commit_rounds_are_contiguous(entries, round_count)
+    _check_commit_rounds_are_contiguous(entries)
     _check_windows_end_inside_the_operation(entries, round_count)
     return entries
 
@@ -275,7 +278,7 @@ def _check_exclusions_fit_a_linked_requirement(
 
 
 def _check_commit_rounds_are_contiguous(
-    entries: tuple[tuple[int, int, int, int], ...], round_count: int
+    entries: tuple[tuple[int, int, int, int], ...],
 ) -> None:
     next_commit_round = entries[0][1]
     for _, first_commit_round, last_commit_round, _ in entries:
@@ -284,8 +287,6 @@ def _check_commit_rounds_are_contiguous(
                 "window commit regions must be contiguous in plan order "
                 "without gaps or overlaps"
             )
-        if last_commit_round > round_count:
-            raise ValueError("window commit region exceeds round_count")
         next_commit_round = last_commit_round + 1
 
 
@@ -294,8 +295,9 @@ def _check_windows_end_inside_the_operation(
 ) -> None:
     """The runtime clamps a buffer at the last round before calling.
 
-    A window built alone runs only this check, and its commit rounds end
-    inside its buffer, so a commit past round_count is caught here too.
+    parse_window_entry keeps the commit rounds inside the buffer rounds,
+    so a commit past round_count is caught here, for a plan and for a
+    window built alone.
     """
     for _, _, _, last_buffer_round in entries:
         if last_buffer_round > round_count:

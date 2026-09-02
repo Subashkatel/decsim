@@ -2121,7 +2121,7 @@ def test_build_window_error_models_returns_one_model_per_entry_in_plan_order():
     [
         ([(1, 2, 2), (4, 4, 4)], "must be contiguous in plan order"),
         ([(1, 2, 2), (2, 4, 4)], "must be contiguous in plan order"),
-        ([(1, 5, 5)], "window commit region exceeds round_count"),
+        ([(1, 5, 5)], "window commit or buffer region exceeds round_count"),
     ],
 )
 def test_commit_regions_must_tile_the_plan(plan, expected):

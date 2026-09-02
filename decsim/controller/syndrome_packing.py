@@ -340,8 +340,14 @@ class SyndromePacking:
             self.syndrome_buffer.open_operation(packet.operation_id)
         if self.syndrome_buffer_1 is not None and not self.syndrome_buffer_1.has_room():
             return self._store_is_full(context)
+        # publication is the window-input route's arrival in Buffer 0: now
+        # on a fabric without CWB, at CWB delivery otherwise; a
+        # feedback-memory round is stored but never published, its
+        # terminal is FEEDBACK_MEMORY_DELIVERED
         cwb_is_priced = LinkPath.CWB in self.links.paths
-        publication_tick = None if cwb_is_priced else self.engine.now
+        on_window_route = context.route.kind is SyndromePacketRouteKind.WINDOW_INPUT
+        publication_tick = (self.engine.now if on_window_route and not cwb_is_priced
+                            else None)
         admission = self.syndrome_buffer.accept_packed_round(
             packet, publication_tick=publication_tick)
         if admission.refused:

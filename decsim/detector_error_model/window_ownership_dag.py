@@ -22,12 +22,17 @@ def dependency_depths(
 ) -> tuple[int, ...]:
     """Each window's depth in the dependency graph.
 
-    Raises ValueError for a negative index or a cycle.
+    Raises ValueError for an index outside the plan or a cycle.
     """
     predecessors = [set() for _ in range(window_count)]
     for source, destination in dependency_edges:
         if source < 0 or destination < 0:
             raise ValueError("window dependency indices must be nonnegative")
+        if source >= window_count or destination >= window_count:
+            raise ValueError(
+                f"window dependency edge ({source}, {destination}) names a "
+                f"window outside the plan of {window_count} windows"
+            )
         predecessors[destination].add(source)
     depths: list[Optional[int]] = [None] * window_count
     while any(depth is None for depth in depths):

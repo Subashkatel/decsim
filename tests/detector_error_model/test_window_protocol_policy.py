@@ -68,6 +68,26 @@ def test_a_seam_wider_than_one_layer_is_refused():
         )
 
 
+def test_a_sandwich_with_an_even_number_of_windows_is_refused():
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=3,
+        rounds=4,
+        after_clifford_depolarization=0.001,
+    )
+    with pytest.raises(ValueError, match="window 2 is outside the plan"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 1, 3, 4), (4, 4, 4, 4)],
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((0, 1), (2, 1)),
+            closed_temporal_boundary_windows=(1,),
+            window_protocol=TAN,
+        )
+
+
 def test_a_seam_must_depend_on_exactly_its_two_neighbours():
     with pytest.raises(ValueError, match="two adjacent type-1 tasks"):
         window_protocol_policy.validate_window_protocol(

@@ -1110,12 +1110,33 @@ def test_zero_overhead_edges_reserve_identically_to_plain_edges():
     assert a == b
 
 
-def test_shared_channel_with_mixed_overhead_is_refused():
+def test_paths_sharing_a_channel_reach_its_wire_in_request_order():
+    """Setups serialize per channel, not per path: two paths' transfers on
+    one channel keep the channel's FIFO order whatever their overheads.
+    With a per-path setup queue the third request below would reach the
+    wire (12 + 5 = 17) before the second (20) and the FIFO would refuse it."""
+    shared = make_channel()
+    overrides = {LinkPath.SBD: _overhead_edge(5, channel=shared),
+                 LinkPath.WBD: _overhead_edge(5, channel=shared)}
+    model = make_model_config(overrides).resolve()
+    wires = []
+    for path, now in ((LinkPath.WBD, 10), (LinkPath.WBD, 11), (LinkPath.SBD, 12)):
+        reservation = model.reserve(path, payload_bits=1, now_ticks=now,
+                                    attribution=valid_attribution(path))
+        wires.append(now + reservation.setup_ticks)
+    assert wires == [15, 20, 25]
+
+
+def test_paths_sharing_a_channel_may_declare_different_overheads():
     shared = make_channel()
     overrides = {LinkPath.SBD: _overhead_edge(50, channel=shared),
                  LinkPath.WBD: make_actual_edge(channel=shared)}
-    with pytest.raises(ValueError, match="transfer overhead differs"):
-        make_model_config(overrides).resolve()
+    model = make_model_config(overrides).resolve()
+    first = model.reserve(LinkPath.SBD, payload_bits=1, now_ticks=0,
+                          attribution=valid_attribution(LinkPath.SBD))
+    second = model.reserve(LinkPath.WBD, payload_bits=1, now_ticks=1,
+                           attribution=valid_attribution(LinkPath.WBD))
+    assert (first.setup_ticks, second.setup_ticks) == (50, 49)
 
 
 def test_with_transfer_overhead_helper_covers_the_dma_paths():

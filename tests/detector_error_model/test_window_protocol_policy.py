@@ -111,3 +111,21 @@ def test_a_closed_window_must_be_a_dependency_destination():
             dependency_edges=((0, 1),),
             closed_temporal_boundary_windows=(0,),
         )
+
+
+def test_a_closed_window_with_no_dependency_edges_is_refused_with_a_sentence():
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=3,
+        rounds=4,
+        after_clifford_depolarization=0.001,
+    )
+    with pytest.raises(ValueError, match="must be a dependency destination"):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 1, 2, 2), (3, 3, 4, 4)],
+            round_count=4,
+            fault_model_requirement=GRAPHLIKE_REQUIRED,
+            fault_exclusion_ranges=(),
+            closed_temporal_boundary_windows=(1,),
+        )

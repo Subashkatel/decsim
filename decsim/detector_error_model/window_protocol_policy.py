@@ -32,7 +32,10 @@ def validate_closed_temporal_boundary_windows(
     """Refuse a closed time boundary that cuts a fault of the circuit."""
     if not closed_windows:
         return
-    destinations = {destination for _, destination in dependency_edges}
+    # A plan without dependency edges has no destinations, so every closed
+    # window is refused by the check below rather than by a crash here.
+    edges = dependency_edges or ()
+    destinations = {destination for _, destination in edges}
     for window_index in closed_windows:
         if window_index not in destinations:
             raise ValueError(

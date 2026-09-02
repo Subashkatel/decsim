@@ -77,6 +77,7 @@ def validate_window_protocol(
         )
     for seam_index in seam_indices:
         _check_seam_is_one_layer(entries[seam_index])
+        _check_seam_has_a_task_after_it(seam_index, len(entries))
     expected_edges = _seam_edges(seam_indices)
     declared_edges = dependency_edges or ()
     if set(declared_edges) != set(expected_edges):
@@ -124,6 +125,17 @@ def _check_seam_is_one_layer(entry: tuple) -> None:
     if not first_buffer == first_commit == last_commit == last_buffer:
         raise ValueError(
             "a zero-offset Tan type-2 seam must be one detector layer"
+        )
+
+
+def _check_seam_has_a_task_after_it(seam_index: int, window_count: int) -> None:
+    """A sandwich ends on a type-1 task, so its window count is odd."""
+    window_after = seam_index + 1
+    if window_after >= window_count:
+        raise ValueError(
+            f"Tan type-2 seam {seam_index} has no type-1 task after it: "
+            f"window {window_after} is outside the plan of {window_count} "
+            "windows"
         )
 
 

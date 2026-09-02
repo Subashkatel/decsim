@@ -59,6 +59,28 @@ def test_a_negative_window_index_is_refused():
         window_ownership_dag.dependency_depths(2, ((-1, 0),))
 
 
+def test_an_edge_to_a_window_outside_the_plan_is_refused():
+    with pytest.raises(
+        ValueError, match=r"edge \(0, 7\) names a window outside"
+    ):
+        window_ownership_dag.dependency_depths(2, ((0, 7),))
+
+
+def test_a_plan_whose_edge_names_a_missing_window_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(
+        ValueError, match=r"edge \(5, 1\) names a window outside"
+    ):
+        window_model_builders.build_window_error_models(
+            circuit,
+            [(1, 1, 2, 2), (3, 3, 4, 4)],
+            round_count=4,
+            fault_model_requirement=fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED,
+            fault_exclusion_ranges=(),
+            dependency_edges=((5, 1),),
+        )
+
+
 def test_ancestors_include_indirect_predecessors():
     depths = window_ownership_dag.dependency_depths(3, ((0, 1), (1, 2)))
     ancestors = window_ownership_dag.dependency_ancestors(

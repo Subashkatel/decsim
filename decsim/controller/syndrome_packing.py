@@ -613,7 +613,7 @@ class SyndromePacking:
         return TrafficAttribution(
             operation_id=operation_id,
             patch_ids=tuple(sorted(patch_ids, key=stable_identity_order_key)),
-            window_id=None, round_lo=round_index, round_hi=round_index)
+            window_id=None, first_round=round_index, last_round=round_index)
 
 
 def _fragment_bits(fragments) -> Optional[int]:

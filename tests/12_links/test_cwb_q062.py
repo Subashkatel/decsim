@@ -93,7 +93,7 @@ def test_wired_cwb_card_preserves_positive_numbers_source_and_physical_topology(
 def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
     model = _wired_profile(latency_us=0.25, bandwidth=100.0).resolve()
     attribution = TrafficAttribution(
-        operation_id=7, patch_ids=(2, 9), window_id=None, round_lo=11, round_hi=11)
+        operation_id=7, patch_ids=(2, 9), window_id=None, first_round=11, last_round=11)
 
     first = model.reserve(
         LinkPath.CWB, payload_bits=300, now_ticks=10,
@@ -103,7 +103,7 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
         LinkPath.CWB, payload_bits=200, now_ticks=10,
         attribution=TrafficAttribution(
             operation_id=7, patch_ids=(2, 9), window_id=None,
-            round_lo=12, round_hi=12),
+            first_round=12, last_round=12),
     )
     traffic = traffic_json_value(model.snapshot())
     rows = [row for row in traffic["transfers"] if row["path"] == "cwb"]
@@ -128,7 +128,7 @@ def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
     reservation = model.reserve(
         LinkPath.CWB, payload_bits=500, now_ticks=0,
         attribution=TrafficAttribution(
-            operation_id=1, patch_ids=(0,), window_id=None, round_lo=1, round_hi=1))
+            operation_id=1, patch_ids=(0,), window_id=None, first_round=1, last_round=1))
 
     assert reservation.serialization_ticks == microseconds_to_ticks(0.5)   # 500 bits at 1000 bits/us
     assert reservation.propagation_ticks == microseconds_to_ticks(0.10)
@@ -141,11 +141,11 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
     first = model.reserve(
         LinkPath.CWB, payload_bits=500, now_ticks=0,
         attribution=TrafficAttribution(
-            operation_id=1, patch_ids=(0,), window_id=None, round_lo=1, round_hi=1))
+            operation_id=1, patch_ids=(0,), window_id=None, first_round=1, last_round=1))
     second = model.reserve(
         LinkPath.CWB, payload_bits=500, now_ticks=0,
         attribution=TrafficAttribution(
-            operation_id=1, patch_ids=(0,), window_id=None, round_lo=2, round_hi=2))
+            operation_id=1, patch_ids=(0,), window_id=None, first_round=2, last_round=2))
 
     assert first.serialization_ticks == 0
     assert first.total_delay_ticks == microseconds_to_ticks(0.10)

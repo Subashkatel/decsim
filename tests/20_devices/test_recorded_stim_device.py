@@ -96,7 +96,7 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
     bits_by_round = defaultdict(int)
     for transfer in completed.window_manager.links.snapshot().transfers:
         if transfer.path is LinkPath.QC:
-            bits_by_round[transfer.attribution.round_lo] += transfer.reservation.payload_bits
+            bits_by_round[transfer.attribution.first_round] += transfer.reservation.payload_bits
     stabilizers, data = distance * distance - 1, distance * distance
     assert bits_by_round == {**{r: stabilizers for r in range(1, rounds)}, rounds: stabilizers + data}
     assert sum(bits_by_round.values()) == circuit.num_measurements

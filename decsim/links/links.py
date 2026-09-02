@@ -93,8 +93,12 @@ class LinkQuantityBasis(str, enum.Enum):
 class LinkCapacityConfig:
     """Bandwidth of one channel: bits per microsecond, aggregate or per channel.
 
-    The rate may be any finite real number, a Fraction included; it is
-    kept as given so the serialization arithmetic stays exact.
+    The rate may be any finite real number, a Fraction included. It is
+    kept as given, and the aggregate reported to the topology is the
+    input times the channel count in the input's own arithmetic. Only
+    the serialization arithmetic is exact: it reads the rate as the
+    decimal written on the card and multiplies by the count as a
+    Fraction (exact_aggregate_bits_per_microsecond).
     """
 
     input_bits_per_microsecond: float
@@ -118,18 +122,10 @@ class LinkCapacityConfig:
 
     @property
     def aggregate_bits_per_microsecond(self) -> float:
-        """The whole channel's rate as a number, for reports.
-
-        A per-channel product beyond the float range reads as infinite,
-        which the entry check refuses.
-        """
+        """The whole channel's rate as reported: input times channel count."""
         if self.basis is LinkQuantityBasis.DIRECT_AGGREGATE:
             return self.input_bits_per_microsecond
-        exact_rate = self.exact_aggregate_bits_per_microsecond()
-        try:
-            return float(exact_rate)
-        except OverflowError:
-            return math.inf
+        return self.input_bits_per_microsecond * self.channel_count
 
     def exact_aggregate_bits_per_microsecond(self) -> fractions.Fraction:
         """The whole channel's rate, exact, for the serialization arithmetic.

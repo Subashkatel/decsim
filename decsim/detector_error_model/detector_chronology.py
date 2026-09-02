@@ -17,9 +17,13 @@ rows follow that order.
 import math
 from typing import Optional
 
+import stim
+
 
 def resolve_detector_rounds(
-    circuit, detector_rounds: Optional[dict], round_count: int
+    circuit: stim.Circuit,
+    detector_rounds: Optional[dict[int, int]],
+    round_count: int,
 ) -> dict[int, int]:
     """The round of every detector, declared or read off the coordinates.
 
@@ -52,7 +56,9 @@ def resolve_detector_rounds(
     return resolved
 
 
-def detectors_by_round(round_by_detector: dict) -> dict[int, list[int]]:
+def detectors_by_round(
+    round_by_detector: dict[int, int],
+) -> dict[int, list[int]]:
     """Each round's detectors in Stim index order."""
     grouped: dict[int, list[int]] = {}
     for detector_id in sorted(round_by_detector):
@@ -62,7 +68,9 @@ def detectors_by_round(round_by_detector: dict) -> dict[int, list[int]]:
     return grouped
 
 
-def detector_position_in_round(round_by_detector: dict) -> dict[int, int]:
+def detector_position_in_round(
+    round_by_detector: dict[int, int],
+) -> dict[int, int]:
     """Each detector's position among its round's detectors."""
     grouped = detectors_by_round(round_by_detector)
     position_by_detector = {}
@@ -73,8 +81,8 @@ def detector_position_in_round(round_by_detector: dict) -> dict[int, int]:
 
 
 def coordinates_for_rows(
-    detector_coordinates: dict, rows: list[int]
-) -> Optional[tuple]:
+    detector_coordinates: dict[int, list[float]], rows: list[int]
+) -> Optional[tuple[tuple[float, ...], ...]]:
     """Stim's coordinates for `rows`, or None when any row has none."""
     for detector_id in rows:
         if not detector_coordinates.get(detector_id):

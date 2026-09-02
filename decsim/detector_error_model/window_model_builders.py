@@ -2,16 +2,19 @@
 
 build_window_error_models slices a whole plan: it checks the plan against
 its protocol, checks that the commit rounds run without gap or overlap,
-compiles fault ownership from the dependency graph when the plan has one,
-slices every window, and checks that the owners of a full-operation plan
-partition the catalog. The two single-window builders serve the runtime
-paths that decode one window on its own with faults it may see but must
-not commit.
+compiles fault ownership from the dependency graph when the plan has one
+(ownership advances in plan order otherwise), slices every window, and
+checks that the owners of a full-operation plan partition the catalog. A
+plan may cover part of the operation; a fault outside it stays unowned.
+The two single-window builders serve the runtime paths that decode one
+window on its own with faults it may see but must not commit.
 
 Nothing inside the package imports this module.
 """
 
 from typing import Optional
+
+import stim
 
 import decsim.message as message
 from decsim.detector_error_model import (
@@ -24,30 +27,25 @@ from decsim.detector_error_model import (
 
 
 def build_window_error_models(
-    circuit,
-    plan: list,
+    circuit: stim.Circuit,
+    plan: list[tuple[int, ...]],
     *,
     round_count: int,
-    detector_rounds: Optional[dict] = None,
-    fault_model_requirement: (
-        fault_model_contracts.DecoderFaultModelRequirement
-    ),
-    fault_exclusion_ranges: tuple,
-    dependency_edges: Optional[tuple] = None,
+    detector_rounds: Optional[dict[int, int]] = None,
+    fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
+    dependency_edges: Optional[tuple[tuple[int, int], ...]] = None,
     closed_temporal_boundary_windows: tuple[int, ...] = (),
     window_protocol: message.WindowProtocol = message.WindowProtocol.GENERIC,
-) -> list:
+) -> list[fault_model_contracts.WindowErrorModel]:
     """One window model per plan entry, in plan order.
 
-    With `dependency_edges`, ownership is compiled from the dependency
-    graph and a window leaves out what its ancestors own; without them
-    ownership advances in list order. A plan may cover any contiguous run
-    of the operation; only a window whose commit rounds reach
-    `round_count` is terminal, and a fault outside the plan stays unowned.
+    Only a window whose commit rounds reach `round_count` is terminal.
     """
-    entries = _checked_entries(
+    entries = _checked_plan(
         plan,
         round_count,
+        fault_exclusion_ranges,
         window_protocol,
         dependency_edges,
         closed_temporal_boundary_windows,
@@ -70,15 +68,13 @@ def build_window_error_models(
 
 
 def build_single_window_error_model(
-    circuit,
-    window_entry: tuple,
+    circuit: stim.Circuit,
+    window_entry: tuple[int, ...],
     *,
     round_count: int,
-    detector_rounds: Optional[dict] = None,
-    fault_model_requirement: (
-        fault_model_contracts.DecoderFaultModelRequirement
-    ),
-    exclude_faults_touching: Optional[tuple] = None,
+    detector_rounds: Optional[dict[int, int]] = None,
+    fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
+    exclude_faults_touching: Optional[tuple[int, int]] = None,
 ) -> fault_model_contracts.WindowErrorModel:
     """One window on its own, with one inclusive round range it may not commit.
 
@@ -99,15 +95,13 @@ def build_single_window_error_model(
 
 
 def build_single_window_error_model_with_exclusions(
-    circuit,
-    window_entry: tuple,
+    circuit: stim.Circuit,
+    window_entry: tuple[int, ...],
     *,
     round_count: int,
-    detector_rounds: Optional[dict] = None,
-    fault_model_requirement: (
-        fault_model_contracts.DecoderFaultModelRequirement
-    ),
-    fault_exclusion_ranges: tuple,
+    detector_rounds: Optional[dict[int, int]] = None,
+    fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
 ) -> fault_model_contracts.WindowErrorModel:
     """One window on its own, with several round ranges it may not commit."""
     return _build_single_window_error_model(
@@ -120,17 +114,20 @@ def build_single_window_error_model_with_exclusions(
     )
 
 
-def _checked_entries(
-    plan: list,
+def _checked_plan(
+    plan: list[tuple[int, ...]],
     round_count: int,
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
     window_protocol: message.WindowProtocol,
-    dependency_edges: Optional[tuple],
-    closed_temporal_boundary_windows: tuple,
-    fault_model_requirement: (
-        fault_model_contracts.DecoderFaultModelRequirement
-    ),
-) -> tuple:
-    """The plan's entries, checked against the protocol and for contiguity."""
+    dependency_edges: Optional[tuple[tuple[int, int], ...]],
+    closed_temporal_boundary_windows: tuple[int, ...],
+    fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
+) -> tuple[tuple[int, int, int, int], ...]:
+    """The plan's entries, checked against the protocol and for contiguity.
+
+    The exclusion ranges are checked here too, once for the whole plan.
+    """
+    window_placement.validate_fault_exclusion_ranges(fault_exclusion_ranges)
     entries = tuple(
         window_placement.parse_window_entry(window_entry)
         for window_entry in plan
@@ -148,12 +145,12 @@ def _checked_entries(
 
 def _slice_checked_plan(
     slicer: window_slicer.WindowSlicer,
-    entries: tuple,
+    entries: tuple[tuple[int, int, int, int], ...],
     round_count: int,
-    fault_exclusion_ranges: tuple,
-    dependency_edges: Optional[tuple],
-    closed_temporal_boundary_windows: tuple,
-) -> list:
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
+    dependency_edges: Optional[tuple[tuple[int, int], ...]],
+    closed_temporal_boundary_windows: tuple[int, ...],
+) -> list[fault_model_contracts.WindowErrorModel]:
     """Every window of the plan, with its boundaries and ownership checked.
 
     A window listed in `closed_temporal_boundary_windows` is refused if
@@ -179,7 +176,7 @@ def _slice_checked_plan(
 
 
 def _check_commit_rounds_are_contiguous(
-    entries: tuple, round_count: int
+    entries: tuple[tuple[int, int, int, int], ...], round_count: int
 ) -> None:
     next_commit_round = entries[0][1]
     for _, first_commit_round, last_commit_round, _ in entries:
@@ -195,8 +192,8 @@ def _check_commit_rounds_are_contiguous(
 
 def _compiled_ownership(
     slicer: window_slicer.WindowSlicer,
-    entries: tuple,
-    dependency_edges: Optional[tuple],
+    entries: tuple[tuple[int, int, int, int], ...],
+    dependency_edges: Optional[tuple[tuple[int, int], ...]],
     round_count: int,
 ) -> tuple[Optional[tuple], Optional[tuple]]:
     """Owner sets and prior sets per window, or (None, None) without edges."""
@@ -219,12 +216,12 @@ def _compiled_ownership(
 
 def _slice_plan(
     slicer: window_slicer.WindowSlicer,
-    entries: tuple,
+    entries: tuple[tuple[int, int, int, int], ...],
     round_count: int,
-    fault_exclusion_ranges: tuple,
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
     ownership: Optional[tuple],
     prior_faults: Optional[tuple],
-) -> list:
+) -> list[fault_model_contracts.WindowErrorModel]:
     """Every window of the plan, in plan order."""
     models = []
     for window_index, window_entry in enumerate(entries):
@@ -252,8 +249,8 @@ def _entry_of(per_window: Optional[tuple], window_index: int):
 
 def _check_full_plan_ownership(
     slicer: window_slicer.WindowSlicer,
-    models: list,
-    entries: tuple,
+    models: list[fault_model_contracts.WindowErrorModel],
+    entries: tuple[tuple[int, int, int, int], ...],
     round_count: int,
 ) -> None:
     """Every catalog fault of a full plan must be owned by exactly one window.
@@ -275,7 +272,10 @@ def _check_full_plan_ownership(
             )
 
 
-def _owned_fault_ids(models: list, representation) -> set:
+def _owned_fault_ids(
+    models: list[fault_model_contracts.WindowErrorModel],
+    representation: fault_model_contracts.FaultRepresentation,
+) -> set[int]:
     """The catalog faults the models own, in one representation."""
     owned = set()
     for model in models:
@@ -286,16 +286,15 @@ def _owned_fault_ids(models: list, representation) -> set:
 
 
 def _build_single_window_error_model(
-    circuit,
-    window_entry: tuple,
+    circuit: stim.Circuit,
+    window_entry: tuple[int, ...],
     *,
     round_count: int,
-    detector_rounds: Optional[dict],
-    fault_model_requirement: (
-        fault_model_contracts.DecoderFaultModelRequirement
-    ),
-    fault_exclusion_ranges: tuple,
+    detector_rounds: Optional[dict[int, int]],
+    fault_model_requirement: fault_model_contracts.DecoderFaultModelRequirement,
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
 ) -> fault_model_contracts.WindowErrorModel:
+    window_placement.validate_fault_exclusion_ranges(fault_exclusion_ranges)
     slicer = window_slicer.WindowSlicer(
         circuit,
         round_count=round_count,

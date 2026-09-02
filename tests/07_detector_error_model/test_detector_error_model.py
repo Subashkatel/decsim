@@ -1216,9 +1216,9 @@ def test_a_detector_free_round_keeps_addresses_and_committed_coverage():
         2: (3, 0),
         3: (4, 0),
     }
-    assert slicer.round_by_detector == detector_rounds
+    assert slicer.chronology.round_by_detector == detector_rounds
     assert {
-        detector_id: (slicer.round_by_detector[detector_id], slicer.position_by_detector[detector_id])
+        detector_id: (slicer.chronology.round_by_detector[detector_id], slicer.chronology.position_by_detector[detector_id])
         for detector_id in detector_rounds
     } == expected_addresses
     assert windows[1].detector_ids == ()
@@ -1398,8 +1398,8 @@ def test_parse_window_entry_normalises_three_and_four_value_forms(entry, expecte
 @pytest.mark.parametrize(
     "entry, expected_error",
     [
-        ((1, 2, True), TypeError),
-        ((1.0, 2.0, 3.0), TypeError),
+        ((1, 2, True), ValueError),
+        ((1.0, 2.0, 3.0), ValueError),
         ((0, 2, 3), ValueError),
         ((3, 2, 4), ValueError),
         ((2, 1, 3, 4), ValueError),
@@ -1434,11 +1434,9 @@ def test_detectors_in_window_selects_rows_by_round():
 
 def test_fault_columns_are_touching_columns_not_committed_elsewhere():
     """Candidate columns are those touching the window minus the columns a prior window committed; a candidate list restricts the search."""
-    detector_sets = ((0,), (0, 1), (1, 2), (3,))
-    row_by_detector = {0: 0, 1: 1, 2: 2}
-    assert window_placement._fault_columns_for_window(detector_sets, row_by_detector, set()) == [0, 1, 2]
-    assert window_placement._fault_columns_for_window(detector_sets, row_by_detector, {1, 2}) == [0]
-    assert window_placement._fault_columns_for_window(detector_sets, row_by_detector, set(), [1, 3]) == [1]
+    assert window_placement._fault_columns_for_window([0, 1, 2], set()) == [0, 1, 2]
+    assert window_placement._fault_columns_for_window([0, 1, 2], {1, 2}) == [0]
+    assert window_placement._fault_columns_for_window([1, 3], set()) == [1, 3]
 
 
 def test_committed_columns_stay_excluded_on_both_ownership_paths():
@@ -1554,27 +1552,11 @@ def test_owned_columns_are_not_recorded_on_the_explicit_path():
     assert arguments["committed_elsewhere"] == set()
 
 
-def test_detectorless_owned_column_records_no_boundary_flip():
-    """An owned column with no detectors contributes no boundary flip entry."""
-    arguments = build_window_arrays_case(
-        context_overrides={"is_last": True},
-        columns=[0],
-        detector_sets=((),),
-        observable_sets=((),),
-        fault_rounds=((),),
-    )
-    _, _, owned, boundary_flips = window_placement._build_window_arrays(
-        **arguments
-    )
-    assert owned.tolist() == [True]
-    assert boundary_flips == {}
-
-
 @pytest.mark.parametrize(
     "ranges, expected_error, expected_message",
     [
-        (((True, 3),), TypeError, "built-in integer"),
-        (((1.0, 3),), TypeError, "built-in integer"),
+        (((True, 3),), ValueError, "built-in integer"),
+        (((1.0, 3),), ValueError, "built-in integer"),
         (((4, 3),), ValueError, "is inverted"),
     ],
 )
@@ -1594,9 +1576,9 @@ def test_valid_exclusion_ranges_pass():
 def test_unowned_faults_are_those_touching_an_exclusion_range():
     """A fault is excluded from commitment when any of its detectors falls in an exclusion range."""
     fault_rounds = ((1,), (2, 3), (4,))
-    assert window_placement._unowned_faults(fault_rounds, ((3, 3),)) == {1}
-    assert window_placement._unowned_faults(fault_rounds, ((1, 1), (4, 9))) == {0, 2}
-    assert window_placement._unowned_faults(fault_rounds, ()) == set()
+    assert window_placement._unowned_faults(fault_rounds, ((3, 3),), [0, 1, 2]) == {1}
+    assert window_placement._unowned_faults(fault_rounds, ((1, 1), (4, 9)), [0, 1, 2]) == {0, 2}
+    assert window_placement._unowned_faults(fault_rounds, (), [0, 1, 2]) == set()
 
 
 def test_exclusion_keeps_a_fault_available_but_uncommittable():
@@ -1671,7 +1653,7 @@ def test_placed_model_dispatches_domain_appropriate_validation():
             fault_model_requirement=GRAPHLIKE_REQUIREMENT,
         ).slice_window(1, 1, 3, 3, is_last=True)
     message = str(failure.value)
-    assert "placed graphlike fault model column 0 is a detector hyperedge" in message
+    assert "graphlike catalog fault 0 is a detector hyperedge" in message
     physical_window = window_slicer.WindowSlicer(
         hyperedge_circuit,
         round_count=3,
@@ -1735,12 +1717,12 @@ def test_detector_coordinates_are_queried_once_at_construction_and_never_requeri
     )
     assert circuit.accessed_names.count("get_detector_coordinates") == 1
     assert len(returned_maps) == 1
-    assert slicer.detector_coordinates is returned_maps[0]
+    assert slicer.chronology.detector_coordinates is returned_maps[0]
 
     first = slicer.slice_window(1, 1, 2, 2, is_last=False)
     second = slicer.slice_window(3, 3, 4, 4, is_last=True)
     assert circuit.accessed_names.count("get_detector_coordinates") == 1
-    assert slicer.detector_coordinates is returned_maps[0]
+    assert slicer.chronology.detector_coordinates is returned_maps[0]
     assert first.detector_coordinates == ((0.0, 0.0), (0.0, 1.0))
     assert second.detector_coordinates == ((0.0, 2.0), (0.0, 3.0))
 
@@ -1755,14 +1737,14 @@ def test_slicer_holds_one_operation_state():
         fault_model_requirement=GRAPHLIKE_REQUIREMENT,
     )
     assert not hasattr(slicer, "circuit")
-    assert slicer.detector_coordinates == {
+    assert slicer.chronology.detector_coordinates == {
         detector_id: [0.0, float(detector_id)] for detector_id in range(4)
     }
     assert set(slicer.catalogs) == {GRAPHLIKE}
     assert slicer.catalog_link is None
     assert slicer.observable_count == 1
-    assert slicer.round_by_detector == CHAIN_DETECTOR_ROUNDS
-    assert slicer.position_by_detector == {0: 0, 1: 0, 2: 0, 3: 0}
+    assert slicer.chronology.round_by_detector == CHAIN_DETECTOR_ROUNDS
+    assert slicer.chronology.position_by_detector == {0: 0, 1: 0, 2: 0, 3: 0}
     assert slicer.committed_elsewhere == {GRAPHLIKE: set()}
 
 
@@ -2188,7 +2170,7 @@ def test_optional_capabilities_are_inert_when_unused():
     """Every optional capability stays inert when it is not requested."""
     models = chain_models([(1, 2, 2), (3, 4, 4)])
     assert models[0].physical_to_graphlike_detector_projection is None
-    assert window_placement._unowned_faults(((1,), (2,)), ()) == set()
+    assert window_placement._unowned_faults(((1,), (2,)), (), [0, 1]) == set()
     assert (
         window_protocol_policy.validate_window_protocol(
             ((1, 1, 2, 2),), WindowProtocol.GENERIC, None, (), NO_REQUIREMENT

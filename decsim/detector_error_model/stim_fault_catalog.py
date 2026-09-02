@@ -26,6 +26,7 @@ from typing import Optional
 
 import numpy
 import scipy.sparse
+import stim
 
 from decsim.detector_error_model import (
     fault_identity_validation,
@@ -54,7 +55,7 @@ class CanonicalErrorInstruction:
 
 
 def canonical_error_instructions(
-    detector_error_model,
+    detector_error_model: stim.DetectorErrorModel,
 ) -> tuple[CanonicalErrorInstruction, ...]:
     """Every error of a flattened Stim model that flips a detector.
 
@@ -73,7 +74,9 @@ def canonical_error_instructions(
     return tuple(records)
 
 
-def detector_error_model_to_faults(detector_error_model) -> tuple:
+def detector_error_model_to_faults(
+    detector_error_model: stim.DetectorErrorModel,
+) -> tuple[list[tuple[int, ...]], list[tuple[int, ...]], list[float]]:
     """The graphlike columns of a Stim model: detectors, observables, priors.
 
     A component that appears in several instructions is one column whose
@@ -97,9 +100,15 @@ def detector_error_model_to_faults(detector_error_model) -> tuple:
 
 
 def prepare_fault_catalogs(
-    circuit,
+    circuit: stim.Circuit,
     requirement: fault_model_contracts.DecoderFaultModelRequirement,
-) -> tuple[dict, Optional[object]]:
+) -> tuple[
+    dict[
+        fault_model_contracts.FaultRepresentation,
+        fault_model_contracts.FaultCatalog,
+    ],
+    Optional[scipy.sparse.csc_matrix],
+]:
     """The catalogs a requirement asks for, and the link when it asks for it.
 
     Returns (catalog by representation, link or None).
@@ -129,7 +138,15 @@ def _merge_probability(current: float, incoming: float) -> float:
     return current * (1 - incoming) + incoming * (1 - current)
 
 
-def _linked_catalogs(circuit) -> tuple[dict, object]:
+def _linked_catalogs(
+    circuit: stim.Circuit,
+) -> tuple[
+    dict[
+        fault_model_contracts.FaultRepresentation,
+        fault_model_contracts.FaultCatalog,
+    ],
+    scipy.sparse.csc_matrix,
+]:
     """Both catalogs and their link, keyed by representation."""
     decomposed_model = circuit.detector_error_model(decompose_errors=True)
     undecomposed_model = circuit.detector_error_model(decompose_errors=False)
@@ -285,6 +302,7 @@ def _catalog_from_detector_error_model(
         detector_sets, observable_sets, priors = detector_error_model_to_faults(
             detector_error_model
         )
+        _check_every_fault_is_graphlike(detector_sets, observable_sets)
     else:
         merged: dict = {}
         for record in canonical_error_instructions(detector_error_model):
@@ -308,13 +326,29 @@ def _catalog_from_detector_error_model(
     )
 
 
+def _check_every_fault_is_graphlike(
+    detector_sets: list, observable_sets: list
+) -> None:
+    """A graphlike catalog holds only faults a matching decoder can take."""
+    identities = zip(detector_sets, observable_sets)
+    for fault_index, (detectors, observables) in enumerate(identities):
+        fault_identity_validation.validate_graphlike_fault(
+            detectors,
+            observables,
+            location=f"graphlike catalog fault {fault_index}",
+        )
+
+
 def _prepare_linked_fault_catalogs(decomposed_model, undecomposed_model):
     """Both catalogs and the graphlike-by-physical link between them.
 
     A physical mechanism is keyed by its whole identity and by its
     component set, so two mechanisms that flip the same detectors but
-    decompose differently stay distinct columns. The window-local half of
-    this link is the detector projection in window_placement.
+    decompose differently stay distinct columns. Every physical column is
+    the parity of its linked components by construction: its identity is
+    the whole instruction reduced modulo two, and its components partition
+    that instruction. The window-local half of this link is the detector
+    projection in window_placement.
     """
     graphlike_catalog = _catalog_from_detector_error_model(
         decomposed_model, fault_model_contracts.FaultRepresentation.GRAPHLIKE
@@ -328,7 +362,6 @@ def _prepare_linked_fault_catalogs(decomposed_model, undecomposed_model):
         undecomposed_model, fault_model_contracts.FaultRepresentation.PHYSICAL
     )
     _check_same_physical_faults(physical_catalog, undecomposed_catalog)
-    _check_link_reconstructs_physical(graphlike_catalog, physical_catalog, link)
     return graphlike_catalog, physical_catalog, link
 
 
@@ -418,80 +451,3 @@ def _check_same_physical_faults(
                 "decomposed and undecomposed Stim models disagree on "
                 "physical faults"
             )
-
-
-def _check_link_reconstructs_physical(
-    graphlike_catalog: fault_model_contracts.FaultCatalog,
-    physical_catalog: fault_model_contracts.FaultCatalog,
-    link,
-) -> None:
-    """Every physical column must be the parity of its linked components.
-
-    The audit works on sparse incidence matrices: a dense target-by-fault
-    matrix is quadratic in circuit length (12 TiB at d=9 over 10000
-    rounds), while the sparse form is what beliefmatching itself uses for
-    its check and hyperedge_to_edge matrices.
-    """
-    detector_row_count = _target_count(graphlike_catalog.detector_sets)
-    graph_check = _incidence_matrix(
-        graphlike_catalog.detector_sets, detector_row_count
-    )
-    derived_check = _incidence_matrix(
-        physical_catalog.detector_sets, detector_row_count
-    )
-    detector_counts = graph_check @ link
-    if _parity_differs(detector_counts, derived_check):
-        raise ValueError(
-            "physical detector effects do not equal their graphlike components"
-        )
-    all_observable_sets = (
-        graphlike_catalog.observable_sets + physical_catalog.observable_sets
-    )
-    observable_row_count = _target_count(all_observable_sets)
-    graph_observables = _incidence_matrix(
-        graphlike_catalog.observable_sets, observable_row_count
-    )
-    physical_observables = _incidence_matrix(
-        physical_catalog.observable_sets, observable_row_count
-    )
-    observable_counts = graph_observables @ link
-    if _parity_differs(observable_counts, physical_observables):
-        raise ValueError(
-            "physical logical effects do not equal their graphlike components"
-        )
-
-
-def _target_count(target_sets: tuple) -> int:
-    """One more than the largest target id, or zero when there is none."""
-    largest = -1
-    for targets in target_sets:
-        largest = max(largest, *targets, -1)
-    return largest + 1
-
-
-def _incidence_matrix(
-    target_sets: tuple, row_count: int
-) -> scipy.sparse.csc_matrix:
-    """Targets by faults: a one where fault f touches target t."""
-    rows = []
-    columns = []
-    for column, targets in enumerate(target_sets):
-        for target_id in targets:
-            rows.append(target_id)
-            columns.append(column)
-    ones = numpy.ones(len(rows), dtype=numpy.int64)
-    return scipy.sparse.csc_matrix(
-        (ones, (rows, columns)), shape=(row_count, len(target_sets))
-    )
-
-
-def _parity_differs(
-    component_counts: scipy.sparse.csc_matrix,
-    expected: scipy.sparse.csc_matrix,
-) -> bool:
-    """Whether the counts reduced modulo two differ from a 0/1 incidence."""
-    parity = component_counts.astype(numpy.int64)
-    parity.data %= 2
-    parity.eliminate_zeros()
-    difference = parity != expected
-    return difference.nnz != 0

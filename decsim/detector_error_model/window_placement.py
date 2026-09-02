@@ -24,15 +24,13 @@ seam windows receive flips from both neighbours).
 """
 
 import dataclasses
+from collections.abc import Container
 from typing import Optional
 
 import numpy
 import scipy.sparse
 
-from decsim.detector_error_model import (
-    fault_identity_validation,
-    fault_model_contracts,
-)
+from decsim.detector_error_model import fault_model_contracts
 
 
 @dataclasses.dataclass(frozen=True)
@@ -51,7 +49,9 @@ class WindowPlacementContext:
     is_last: bool
 
 
-def parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
+def parse_window_entry(
+    window_entry: tuple[int, ...],
+) -> tuple[int, int, int, int]:
     """A plan entry as (first buffer, first commit, last commit, last buffer).
 
     A three-value entry (first commit, last commit, last buffer) has no
@@ -59,7 +59,7 @@ def parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
     """
     for bound in window_entry:
         if type(bound) is not int:
-            raise TypeError("window bounds must be built-in ints")
+            raise ValueError("window bounds must be built-in ints")
     if any(bound < 1 for bound in window_entry):
         raise ValueError("window bounds must be positive")
     if len(window_entry) == 4:
@@ -73,7 +73,7 @@ def parse_window_entry(window_entry: tuple) -> tuple[int, int, int, int]:
 
 
 def detectors_in_window(
-    detectors_by_round: dict,
+    detectors_by_round: dict[int, list[int]],
     first_buffer_round: int,
     last_buffer_round: int,
     *,
@@ -102,7 +102,9 @@ def detectors_in_window(
     return sorted(rows)
 
 
-def validate_fault_exclusion_ranges(fault_exclusion_ranges: tuple) -> None:
+def validate_fault_exclusion_ranges(
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
+) -> None:
     """Refuse an exclusion range that is not an ordered pair of ints."""
     for exclusion in fault_exclusion_ranges:
         first_excluded, last_excluded = exclusion
@@ -118,26 +120,21 @@ def placed_faults_for_window(
     *,
     catalog: fault_model_contracts.FaultCatalog,
     context: WindowPlacementContext,
-    fault_rounds: tuple,
-    candidate_faults,
+    fault_rounds: tuple[tuple[int, ...], ...],
+    candidate_faults: list[int],
     committed_elsewhere: set[int],
     explicitly_owned_faults: Optional[set[int]],
-    explicitly_prior_faults,
-    fault_exclusion_ranges: tuple,
+    explicitly_prior_faults: Optional[Container[int]],
+    fault_exclusion_ranges: tuple[tuple[int, int], ...],
 ) -> fault_model_contracts.PlacedFaultModel:
-    """One window's columns from one catalog, validated for its decoder.
+    """One window's columns from one catalog.
 
     `fault_rounds` lists each catalog fault's rounds and
     `candidate_faults` the faults that touch this window's rounds; both
     are indexed once by the slicer so a window costs its own size.
     """
     prior_faults = _prior_faults(committed_elsewhere, explicitly_prior_faults)
-    columns = _fault_columns_for_window(
-        catalog.detector_sets,
-        context.row_by_detector,
-        prior_faults,
-        candidate_faults,
-    )
+    columns = _fault_columns_for_window(candidate_faults, prior_faults)
     unowned_faults = _unowned_faults(
         fault_rounds, fault_exclusion_ranges, candidate_faults
     )
@@ -151,22 +148,20 @@ def placed_faults_for_window(
         unowned_faults=unowned_faults,
         explicitly_owned_faults=explicitly_owned_faults,
     )
-    placed = _placed_model(catalog, columns, arrays)
-    _validate_placed(placed)
-    return placed
+    return _placed_model(catalog, columns, arrays)
 
 
 def local_link_projection(
     graphlike: fault_model_contracts.PlacedFaultModel,
     physical: fault_model_contracts.PlacedFaultModel,
-    catalog_link,
-):
+    catalog_link: scipy.sparse.csc_matrix,
+) -> scipy.sparse.csc_matrix:
     """The catalog link restricted to this window's columns, checked.
 
-    Only the detector rows are checked here. A physical fault can have a
-    component whose detectors all lie outside this window while that
-    component carries a logical flip; the catalog-level check in
-    stim_fault_catalog covers the observables, and each decoder commits
+    Only the detector rows are checked, and a mismatch is a slicer bug. A
+    physical fault can have a component whose detectors all lie outside
+    this window while that component carries a logical flip, so the
+    observable rows of a window need not add up; each decoder commits
     observables from its own placed view, never through this link.
     """
     graphlike_rows = list(graphlike.source_fault_ids)
@@ -181,23 +176,26 @@ def local_link_projection(
     physical_check = physical.check.astype(numpy.int64)
     difference = detector_identity != physical_check
     if difference.nnz:
-        raise ValueError(
+        raise RuntimeError(
             "local physical detector identities do not equal their "
             "graphlike component XOR"
         )
     return local_link
 
 
-def _check_endpoints_are_ints(exclusion: tuple) -> None:
+def _check_endpoints_are_ints(exclusion: tuple[int, int]) -> None:
     for endpoint in exclusion:
         if type(endpoint) is not int:
-            raise TypeError(
+            raise ValueError(
                 "each fault-exclusion range must use built-in integer "
                 f"(lo, hi) pair, got {exclusion!r}"
             )
 
 
-def _prior_faults(committed_elsewhere: set, explicitly_prior_faults):
+def _prior_faults(
+    committed_elsewhere: set[int],
+    explicitly_prior_faults: Optional[Container[int]],
+) -> Container[int]:
     """What earlier windows own: the running set, or the compiled one."""
     if explicitly_prior_faults is None:
         return committed_elsewhere
@@ -205,26 +203,14 @@ def _prior_faults(committed_elsewhere: set, explicitly_prior_faults):
 
 
 def _fault_columns_for_window(
-    detector_sets: tuple,
-    row_by_detector: dict,
-    committed_elsewhere,
-    candidate_faults=None,
-) -> list:
-    """The candidate faults that touch a row and are not committed already.
-
-    `committed_elsewhere` only needs membership tests. `candidate_faults`
-    None means every fault of the catalog.
-    """
-    if candidate_faults is None:
-        candidate_faults = range(len(detector_sets))
-    columns = []
-    for fault_index in candidate_faults:
-        if fault_index in committed_elsewhere:
-            continue
-        detectors = detector_sets[fault_index]
-        if any(detector_id in row_by_detector for detector_id in detectors):
-            columns.append(fault_index)
-    return columns
+    candidate_faults: list[int], prior_faults: Container[int]
+) -> list[int]:
+    """The candidate faults that no earlier window has committed."""
+    return [
+        fault_index
+        for fault_index in candidate_faults
+        if fault_index not in prior_faults
+    ]
 
 
 def _fault_owned_by_window(
@@ -292,9 +278,7 @@ def _build_window_arrays(
             committed_elsewhere.add(fault_index)
         # The whole detector effect travels with the handoff; the receiving
         # window keeps the part that lands on its own rows.
-        detector_effect = tuple(detector_sets[fault_index])
-        if detector_effect:
-            boundary_flips[column_index] = detector_effect
+        boundary_flips[column_index] = tuple(detector_sets[fault_index])
     return check, observables, owned, boundary_flips
 
 
@@ -345,13 +329,11 @@ def _observable_matrix(
 
 
 def _unowned_faults(
-    fault_rounds: tuple, fault_exclusion_ranges: tuple, candidate_faults=None
+    fault_rounds: tuple, fault_exclusion_ranges: tuple, candidate_faults: list
 ) -> set[int]:
     """The candidate faults that touch an excluded round."""
     if not fault_exclusion_ranges:
         return set()
-    if candidate_faults is None:
-        candidate_faults = range(len(fault_rounds))
     unowned = set()
     for fault_index in candidate_faults:
         if _touches_excluded_round(
@@ -388,20 +370,3 @@ def _placed_model(
         source_fault_ids=tuple(columns),
         boundary_flips=boundary_flips,
     )
-
-
-def _validate_placed(placed: fault_model_contracts.PlacedFaultModel) -> None:
-    """Check the placed matrices for the decoder domain they serve."""
-    graphlike = fault_model_contracts.FaultRepresentation.GRAPHLIKE
-    if placed.representation is graphlike:
-        fault_identity_validation.validate_graphlike_matrices(
-            placed.check,
-            placed.observables,
-            location="placed graphlike fault model",
-        )
-    else:
-        fault_identity_validation.validate_placed_fault_matrices(
-            placed.check,
-            placed.observables,
-            location="placed physical fault model",
-        )

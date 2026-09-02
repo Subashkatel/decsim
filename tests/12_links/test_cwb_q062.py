@@ -65,7 +65,7 @@ def test_legacy_cards_leave_optional_cwb_absent_without_changing_edge_identity()
 
     assert legacy.cwb is None
     assert LinkPath.CWB not in legacy.wired_paths()
-    assert LinkPath.CWB not in legacy.resolve().paths
+    assert LinkPath.CWB not in legacy.build().paths
     assert extended.cwb is not None
     assert LinkPath.CWB in extended.wired_paths()
     for path_name, edge in legacy_edges.items():
@@ -74,7 +74,7 @@ def test_legacy_cards_leave_optional_cwb_absent_without_changing_edge_identity()
 
 def test_wired_cwb_card_preserves_positive_numbers_source_and_physical_topology():
     source = "explicit Q-062 PROJECT_DESIGN latency and bandwidth"
-    model = _wired_profile(latency_us=0.25, bandwidth=120.0, source=source).resolve()
+    model = _wired_profile(latency_us=0.25, bandwidth=120.0, source=source).build()
     topology = topology_json_value(model.snapshot())
     cwb_edge = next(edge for edge in topology["edges"] if edge["path"] == "cwb")
     channel = next(
@@ -91,7 +91,7 @@ def test_wired_cwb_card_preserves_positive_numbers_source_and_physical_topology(
 
 
 def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
-    model = _wired_profile(latency_us=0.25, bandwidth=100.0).resolve()
+    model = _wired_profile(latency_us=0.25, bandwidth=100.0).build()
     attribution = TrafficAttribution(
         operation_id=7, patch_ids=(2, 9), window_id=None, first_round=11, last_round=11)
 
@@ -123,7 +123,7 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
 
 
 def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
-    model = _wired_profile(latency_us=0.10, bandwidth=1000.0).resolve()
+    model = _wired_profile(latency_us=0.10, bandwidth=1000.0).build()
 
     reservation = model.reserve(
         LinkPath.CWB, payload_bits=500, now_ticks=0,
@@ -136,7 +136,7 @@ def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
 
 
 def test_unbounded_cwb_bandwidth_charges_propagation_only():
-    model = _wired_profile(latency_us=0.10, bandwidth=None).resolve()
+    model = _wired_profile(latency_us=0.10, bandwidth=None).build()
 
     first = model.reserve(
         LinkPath.CWB, payload_bits=500, now_ticks=0,
@@ -155,7 +155,7 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
 
 def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry():
     engine = _Engine(now=1_000)
-    links = _wired_profile(latency_us=0.25, bandwidth=100.0).resolve()
+    links = _wired_profile(latency_us=0.25, bandwidth=100.0).build()
     receiver = _Receiver([False, True])
     publication = _PublicationSpy()
     packet = SimpleNamespace(
@@ -204,7 +204,7 @@ def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry
 
 def test_unwired_legacy_packing_delivery_is_immediate_and_has_no_cwb_publication():
     engine = _Engine(now=321)
-    links = logical_reference_profile().resolve()
+    links = logical_reference_profile().build()
     receiver = _Receiver([True])
     publication = _PublicationSpy()
     packet = SimpleNamespace(

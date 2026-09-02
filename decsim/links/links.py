@@ -87,6 +87,8 @@ class LinkQuantityBasis(str, enum.Enum):
     PER_CHANNEL = "per_channel"
 
 
+# Identity comparison kept from the original file; the reshape decides
+# value equality.
 @dataclasses.dataclass(frozen=True, eq=False)
 class LinkCapacityConfig:
     """Bandwidth of one channel: bits per microsecond, aggregate or per channel.
@@ -110,8 +112,9 @@ class LinkCapacityConfig:
             self.basis, self.channel_count, "capacity"
         )
         object.__setattr__(self, "channel_count", channel_count)
-        aggregate = self.aggregate_bits_per_microsecond
-        _require_finite_number(aggregate, "aggregate_bits_per_microsecond")
+        if self.basis is LinkQuantityBasis.PER_CHANNEL:
+            aggregate = self.aggregate_bits_per_microsecond
+            _require_finite_number(aggregate, "aggregate_bits_per_microsecond")
 
     @property
     def aggregate_bits_per_microsecond(self) -> float:
@@ -153,6 +156,8 @@ class LinkCapacityConfig:
         }
 
 
+# Identity comparison kept from the original file; the reshape decides
+# value equality.
 @dataclasses.dataclass(frozen=True, eq=False)
 class PayloadSizeConfig:
     """Default payload of one path: bits, aggregate or per channel."""
@@ -191,7 +196,7 @@ class PayloadSizeConfig:
 
 
 # LinkConfig is compared by identity: one channel object may back several
-# paths, and resolve() tells channels apart by the object, not its values.
+# paths, and build() tells channels apart by the object, not its values.
 @dataclasses.dataclass(frozen=True, eq=False)
 class LinkConfig:
     """One physical channel: a propagation latency and an optional bandwidth.
@@ -215,6 +220,8 @@ class LinkConfig:
             raise ValueError("propagation_latency_ticks must be nonnegative")
 
 
+# Identity comparison kept from the original file; the reshape decides
+# value equality.
 @dataclasses.dataclass(frozen=True, eq=False)
 class TransferOverheadConfig:
     """Fixed setup cost paid before each transfer on one path reaches the wire.
@@ -492,7 +499,7 @@ class Link:
         self._counters = TrafficCounters()
 
     @property
-    def config(self) -> LinkConfig:
+    def channel_config(self) -> LinkConfig:
         """The channel's settings."""
         return self._channel_config
 
@@ -591,7 +598,7 @@ class LinkModelConfig:
                 raise ValueError(f"{path.value} is a required link path")
         return tuple(wired_paths)
 
-    def resolve(self) -> "LinkModel":
+    def build(self) -> "LinkModel":
         """Build the run's fabric: one Link per distinct channel object."""
         channel_by_config_id = {}
         binding_by_path = {}
@@ -737,9 +744,9 @@ class LinkModel:
         """Ticks from the request to the wire.
 
         The setup waits for the channel's previous setup to finish, then
-        costs the edge's overhead; the channel's setup queue moves. A
-        request earlier than the channel's previous request is a broken
-        contract, because the engine clock never runs backwards, and it
+        costs the edge's overhead; the channel's setup queue moves.
+        Requests on one channel arrive in nondecreasing order; a request
+        earlier than the channel's previous one is a broken contract and
         is refused before the queue moves.
         """
         queue = self._setup_queue_by_channel[channel]
@@ -748,8 +755,8 @@ class LinkModel:
             raise RuntimeError(
                 f"{path.value} requested at tick {now_ticks}, before the "
                 f"channel's previous request at tick "
-                f"{queue.last_request_ticks}; the engine clock never runs "
-                f"backwards"
+                f"{queue.last_request_ticks}; requests on one channel arrive "
+                f"in nondecreasing order"
             )
         overhead_ticks = 0
         if edge.transfer_overhead is not None:
@@ -787,7 +794,7 @@ class LinkModel:
         return LinkChannelSnapshot(
             alias=alias,
             member_paths=member_paths,
-            config=channel.config,
+            config=channel.channel_config,
             counters=counters,
         )
 
@@ -811,7 +818,12 @@ class LinkModel:
 
 @dataclasses.dataclass
 class _SetupQueue:
-    """One channel's setup queue: when it frees, and when it was last asked."""
+    """Why a channel keeps its own setup state.
+
+    Setups serialize per channel, not per path, so the tick at which the
+    queue frees belongs to the channel; the last request tick lets a
+    refusal check the request order before the queue moves.
+    """
 
     free_ticks: int = 0
     last_request_ticks: Optional[int] = None
@@ -997,12 +1009,7 @@ def _has_scope(
         return has_rounds
     if scope is LinkAttributionScope.WINDOW:
         return has_window and has_rounds
-    if scope is LinkAttributionScope.OPERATION_ONLY:
-        return not has_window and not has_rounds
-    raise RuntimeError(
-        f"the path rule names an attribution scope the links do not know: "
-        f"{scope!r}"
-    )
+    return not has_window and not has_rounds
 
 
 def _check_relation(

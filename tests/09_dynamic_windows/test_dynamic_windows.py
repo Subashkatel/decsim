@@ -642,7 +642,7 @@ def test_courier_ignores_a_stale_delivery_and_releases_the_edge_once():
                        deps=[(1, 0)], deps_remaining=1)
     checks = []
     manager = SimpleNamespace(
-        engine=engine, links=logical_reference_profile().resolve(),
+        engine=engine, links=logical_reference_profile().build(),
         windows={(1, 0): source, (1, 1): dependent}, absorbed_windows=set(),
         window_interaction=DefaultWindowInteraction(), window_models={},
         _ops={1: op}, rounds_for=lambda operation: 20, release_service=None,

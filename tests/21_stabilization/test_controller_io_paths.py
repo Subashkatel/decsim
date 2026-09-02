@@ -30,7 +30,7 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
     produces the same bit values, neither early nor altered."""
     engine = Engine(verbose=False)
     receiver = _WindowInputReceiver()
-    links = fabric["declared_profile"](cwb=False, csb=False).resolve()
+    links = fabric["declared_profile"](cwb=False, csb=False).build()
     packing = SyndromePacking(
         engine, links=links, t_pack=0, packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)
@@ -66,7 +66,7 @@ def test_packing_charges_its_assembly_time_for_every_round(fabric):
     packetization, bus transfer, result return and the conditional)."""
     engine = Engine(verbose=False)
     receiver = _WindowInputReceiver()
-    links = fabric["declared_profile"](cwb=False, csb=False).resolve()
+    links = fabric["declared_profile"](cwb=False, csb=False).build()
     packing = SyndromePacking(
         engine, links=links, t_pack=microseconds_to_ticks(1), packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)

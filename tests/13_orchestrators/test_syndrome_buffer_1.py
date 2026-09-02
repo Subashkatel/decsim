@@ -30,13 +30,13 @@ def _write(sb1, packet):
 
 
 def _free_fabric():
-    return logical_reference_profile().resolve()
+    return logical_reference_profile().build()
 
 
 def _priced_fabric(latency_us=0.5):
     return with_csb_edge(
         logical_reference_profile(), latency_us=latency_us,
-        aggregate_bits_per_us=None, source="test csb").resolve()
+        aggregate_bits_per_us=None, source="test csb").build()
 
 
 def _csb_transfer_count(links):

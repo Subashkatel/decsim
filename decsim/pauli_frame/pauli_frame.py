@@ -58,7 +58,8 @@ class PauliFrameConfig:
 
     def resolve(self, engine) -> "PauliFrame":
         """Build the frame these settings describe, on the run's engine."""
-        return PauliFrame(engine, commit_ticks=self.commit_ticks())
+        commit_ticks = self.commit_ticks()
+        return PauliFrame(engine, commit_ticks=commit_ticks)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -165,13 +166,18 @@ class PauliFrame:
             for stream_id in stream_ids)
         commit_ticks = [record.committed_ticks for record in self._records]
         commit_count = len(self._records)
+        first_commit_ticks = None
+        last_commit_ticks = None
+        if commit_ticks:
+            first_commit_ticks = commit_ticks[0]
+            last_commit_ticks = commit_ticks[-1]
         return PauliFrameSnapshot(
             configured_commit_ticks=self.commit_ticks,
             commit_count=commit_count,
             pending_write_count=len(self._pending_by_window),
             charged_ticks=commit_count * self.commit_ticks,
-            first_commit_ticks=commit_ticks[0] if commit_ticks else None,
-            last_commit_ticks=commit_ticks[-1] if commit_ticks else None,
+            first_commit_ticks=first_commit_ticks,
+            last_commit_ticks=last_commit_ticks,
             frames=frames,
             records=tuple(self._records),
         )

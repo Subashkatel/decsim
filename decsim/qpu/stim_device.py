@@ -74,10 +74,11 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             key: dict(rounds_map)
             for key, rounds_map in measurement_rounds.items()
         }
-        # A shot sits under its sample key (the stream id, or the operation
-        # id of a standalone operation) and under every operation id that
-        # replays it.
+        # A shot sits under its sample key: the stream id, or the operation
+        # id of a standalone operation. An operation that replays a stream's
+        # shot is known by its own id, which maps to the sample key.
         self._shot_by_key: dict = {}
+        self._sample_key_by_operation_id: dict = {}
         self._stream_model_by_id: dict = {}
         self._source_binding_by_key: dict = {}
 
@@ -86,20 +87,26 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         truth_by_key = {}
         for key, shot in self._shot_by_key.items():
             truth_by_key[key] = _as_int_bits(shot.truth)
+        operation_ids = self._sample_key_by_operation_id.items()
+        for operation_id, key in operation_ids:
+            if operation_id in truth_by_key:
+                continue
+            shot = self._shot_by_key[key]
+            truth_by_key[operation_id] = _as_int_bits(shot.truth)
         return truth_by_key
 
     def logical_observable_truth(
         self, operation_id: Any
     ) -> Optional[tuple[int, ...]]:
         """Stim's sampled observable-flip vector, when the shot exists."""
-        shot = self._shot_by_key.get(operation_id)
+        shot = self._shot_for(operation_id)
         if shot is None:
             return None
         return _as_int_bits(shot.truth)
 
     def sampled_detection_events(self, operation_id: Any) -> tuple[bool, ...]:
         """The shot's detection events, in the circuit's detector order."""
-        shot = self._shot_by_key.get(operation_id)
+        shot = self._shot_for(operation_id)
         if shot is None:
             raise KeyError(
                 f"no sampled detection events for identity {operation_id!r}; "
@@ -125,7 +132,9 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         )
         is_stream = operation.stream_id is not None
         if is_stream and operation.stream_offset:
-            self._shot_by_key[operation.id] = self._shot_by_key[key]
+            if key not in self._shot_by_key:
+                raise KeyError(key)
+            self._sample_key_by_operation_id[operation.id] = key
             return
         self._sample_shot(key, operation, source_round_count, detector_rounds)
 
@@ -136,7 +145,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
 
         Formed at the decoder input from the round's raw packet.
         """
-        shot = self._shot_by_key.get(operation_id)
+        shot = self._shot_for(operation_id)
         if shot is None:
             raise KeyError(
                 f"no detector formation state for identity {operation_id!r}; "
@@ -150,6 +159,10 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     ) -> list[message.QPUReadout]:
         """This operation round as one raw measurement packet."""
         key = _sample_key_of(operation)
+        if key not in self._shot_by_key:
+            raise RuntimeError(
+                f"no shot is sampled under {key!r}; the operation has not begun"
+            )
         stream_offset = 0
         if operation.stream_offset is not None:
             stream_offset = operation.stream_offset
@@ -350,12 +363,13 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         )
 
     def _prepare_run_seed_state(self, effective_seed):
-        return (effective_seed, {}, {}, {})
+        return (effective_seed, {}, {}, {}, {})
 
     def _install_run_seed_state(self, prepared_state) -> None:
         (
             self._seed,
             self._shot_by_key,
+            self._sample_key_by_operation_id,
             self._stream_model_by_id,
             self._source_binding_by_key,
         ) = prepared_state
@@ -416,13 +430,29 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
             sampler, packets, table, former, formed_events, formed_truth
         )
         self._shot_by_key[key] = shot
-        self._shot_by_key[operation.id] = shot
+        self._sample_key_by_operation_id[operation.id] = key
 
     def _measurement_row(self, sampler) -> tuple[int, ...]:
         """One shot of raw measurement bits in circuit measurement order."""
         shots = sampler.sample(shots=1)
         row = shots[0]
         return _as_int_bits(row)
+
+    def _shot_for(self, identity):
+        """The shot behind an operation id, or behind a sample key.
+
+        An identity that is both a replaying operation id and another
+        stream's sample key is refused, since either reading could be the
+        wrong one.
+        """
+        key = self._sample_key_by_operation_id.get(identity, identity)
+        is_sample_key = identity in self._shot_by_key
+        if is_sample_key and key != identity:
+            raise RuntimeError(
+                f"identity {identity!r} is both a sample key and a replaying "
+                "operation id; the lookup is ambiguous"
+            )
+        return self._shot_by_key.get(key)
 
     def _round_packet_bits(self, key, global_round: int) -> tuple[int, ...]:
         """The raw bits the QPU emits for one round.

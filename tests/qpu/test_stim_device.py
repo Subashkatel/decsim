@@ -273,6 +273,91 @@ def test_a_later_stream_segment_reuses_the_streams_shot():
     assert tail_first.operation_id == "s"
 
 
+def test_a_segments_observable_truth_is_its_streams_truth():
+    circuit = memory_circuit(3, 6)
+    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
+    tail = memory_operation(circuit, 2, stream_id="s", stream_offset=3)
+    device = stim_device.StimDevice(seed=5)
+    device.begin_operation(head, 3, 6)
+    device.begin_operation(tail, 3, 6)
+    assert device.logical_observable_truth("s") == (0,)
+    assert device.logical_observable_truth(1) == (0,)
+    assert device.logical_observable_truth(2) == (0,)
+    assert device.logical_observable_truth(3) is None
+    assert device.sampled_truth() == {"s": (0,), 1: (0,), 2: (0,)}
+
+
+def test_a_stream_whose_id_equals_a_segments_operation_id_samples_afresh():
+    # Stream "a" replays its shot under operation ids 1 and 2; a stream
+    # whose id is 2 is another identity with its own substream, so its
+    # first round is what a device that only ever saw it samples.
+    six_rounds = memory_circuit(3, 6)
+    three_rounds = memory_circuit(3, 3)
+    head = memory_operation(six_rounds, 1, stream_id="a", stream_offset=0)
+    tail = memory_operation(six_rounds, 2, stream_id="a", stream_offset=3)
+    other = memory_operation(three_rounds, 3, stream_id=2, stream_offset=0)
+    device = stim_device.StimDevice(seed=0)
+    device.begin_operation(head, 3, 6)
+    device.begin_operation(tail, 3, 6)
+    device.begin_operation(other, 3, 3)
+    alone = stim_device.StimDevice(seed=0)
+    alone.begin_operation(other, 3, 3)
+    other_first = round_payload(device, other, 1)
+    alone_first = round_payload(alone, other, 1)
+    assert other_first.bits == (1, 0, 0, 0, 0, 1, 0, 0)
+    assert alone_first.bits == (1, 0, 0, 0, 0, 1, 0, 0)
+
+
+def test_a_lookup_by_an_identity_that_is_a_stream_and_a_segment_is_refused():
+    six_rounds = memory_circuit(3, 6)
+    three_rounds = memory_circuit(3, 3)
+    head = memory_operation(six_rounds, 1, stream_id="a", stream_offset=0)
+    tail = memory_operation(six_rounds, 2, stream_id="a", stream_offset=3)
+    other = memory_operation(three_rounds, 3, stream_id=2, stream_offset=0)
+    device = stim_device.StimDevice(seed=0)
+    device.begin_operation(head, 3, 6)
+    device.begin_operation(tail, 3, 6)
+    device.begin_operation(other, 3, 3)
+    with pytest.raises(RuntimeError, match="ambiguous"):
+        device.sampled_detection_events(2)
+
+
+def test_an_idle_round_under_a_segments_operation_id_is_refused():
+    circuit = memory_circuit(3, 6)
+    head = memory_operation(circuit, 1, stream_id="a", stream_offset=0)
+    tail = memory_operation(circuit, 2, stream_id="a", stream_offset=3)
+    device = stim_device.StimDevice(seed=5)
+    device.begin_operation(head, 3, 6)
+    device.begin_operation(tail, 3, 6)
+    with pytest.raises(RuntimeError, match="requires a sampled bound stream"):
+        device.idle_round_payloads(tail, 2, 4, 0)
+
+
+def test_a_finalizer_under_a_segments_operation_id_is_refused():
+    circuit = memory_circuit(3, 6)
+    head = memory_operation(circuit, 1, stream_id="a", stream_offset=0)
+    tail = memory_operation(circuit, 2, stream_id="a", stream_offset=3)
+    finalizer = memory_operation(circuit, 3, stream_id=2, stream_offset=5)
+    device = stim_device.StimDevice(seed=5, terminal_detector_ids={2: (36,)})
+    device.begin_operation(head, 3, 6)
+    device.begin_operation(tail, 3, 6)
+    with pytest.raises(RuntimeError, match="requires a sampled stream"):
+        device.finalize_stream_round(finalizer, 6)
+
+
+def test_a_round_of_a_stream_that_has_not_begun_is_refused():
+    six_rounds = memory_circuit(3, 6)
+    three_rounds = memory_circuit(3, 3)
+    head = memory_operation(six_rounds, 1, stream_id="a", stream_offset=0)
+    tail = memory_operation(six_rounds, 2, stream_id="a", stream_offset=3)
+    other = memory_operation(three_rounds, 3, stream_id=2, stream_offset=0)
+    device = stim_device.StimDevice(seed=0)
+    device.begin_operation(head, 3, 6)
+    device.begin_operation(tail, 3, 6)
+    with pytest.raises(RuntimeError, match="has not begun"):
+        device.round_payloads(other, 1)
+
+
 def test_a_segment_past_the_end_of_its_source_is_refused():
     circuit = memory_circuit(3, 3)
     operation = memory_operation(circuit, 1, stream_id="s", stream_offset=2)

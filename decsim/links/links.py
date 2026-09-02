@@ -913,8 +913,9 @@ def _select_payload(path: LinkPath, edge: LinkEdgeConfig, payload_bits):
     """The bits a transfer is priced with, and where they came from.
 
     The actual payload when the caller supplied one (the edge must name
-    its source), else the card's default, else unresolved, which a bounded
-    channel cannot price.
+    its source), else the card's default, else unresolved. An unresolved
+    payload rides an unbounded channel for its latency alone; a bounded
+    wire needs a size to serialize, so it refuses the transfer.
     """
     if payload_bits is not None:
         if edge.actual_payload_source is None:
@@ -932,6 +933,11 @@ def _select_payload(path: LinkPath, edge: LinkEdgeConfig, payload_bits):
             default_payload.aggregate_bits,
             PayloadSelectionSource.CONFIGURED_DEFAULT,
             default_payload.source,
+        )
+    if edge.channel.capacity is not None:
+        raise RuntimeError(
+            f"{path.value} has no payload size and its channel is bounded; "
+            f"a bounded wire needs a size to serialize"
         )
     return (
         None,

@@ -77,7 +77,7 @@ def test_timing_config_defaults_field_order_and_public_exports():
     ) == (1.1, 0.0, 0.0, 0.0)
     assert RunSpec(ops=[]).timing == config
     assert decsim.TimingConfig is TimingConfig
-    assert decsim.us is us
+    assert decsim.microseconds_to_ticks is microseconds_to_ticks
     assert not hasattr(decsim, "TICKS_PER_MICROSECOND")
 def test_timing_config_is_frozen_hashable_and_value_comparable():
     """Timing configurations compare by value, hash, and reject assignment."""

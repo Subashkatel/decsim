@@ -694,19 +694,15 @@ class LinkModel:
         selected_bits, selection, payload_source = _select_payload(
             path, edge, payload_bits
         )
-        _check_request(path, selected_bits, now_ticks)
+        selected_bits, now_ticks = _checked_request(
+            path, selected_bits, now_ticks
+        )
         setup_ticks = self._queue_setup(path, channel, edge, now_ticks)
         wire_ticks = now_ticks + setup_ticks
         reservation = channel.reserve(
             payload_bits=selected_bits, now_ticks=wire_ticks
         )
-        if setup_ticks > 0:
-            total_delay_ticks = reservation.total_delay_ticks + setup_ticks
-            reservation = dataclasses.replace(
-                reservation,
-                setup_ticks=setup_ticks,
-                total_delay_ticks=total_delay_ticks,
-            )
+        reservation = _with_setup(reservation, setup_ticks)
         counters = self._counters_by_path[path]
         self._counters_by_path[path] = counters.plus_reservation(reservation)
         self._record_transfer(
@@ -946,32 +942,59 @@ def _serialization_ticks(payload_bits, capacity: LinkCapacityConfig) -> int:
     return math.ceil(exact_ticks)
 
 
-def _check_request(path: LinkPath, payload_bits, now_ticks) -> None:
-    """Refuse a malformed request before any state moves.
+def _with_setup(
+    reservation: LinkReservation, setup_ticks: int
+) -> LinkReservation:
+    """The wire reservation with the setup that preceded it counted in."""
+    if setup_ticks == 0:
+        return reservation
+    total_delay_ticks = reservation.total_delay_ticks + setup_ticks
+    return dataclasses.replace(
+        reservation,
+        setup_ticks=setup_ticks,
+        total_delay_ticks=total_delay_ticks,
+    )
 
-    A wrong caller is a bug; the setup queue, the wire, the counters and
-    the ledger stay as they were.
+
+def _checked_request(path: LinkPath, payload_bits, now_ticks) -> tuple:
+    """The request's payload bits and tick as Python ints, or a refusal.
+
+    A wrong caller is a bug; the refusal comes before any state moves,
+    so the setup queue, the wire, the counters and the ledger stay as
+    they were. From here on every tick and size the fabric stores is a
+    Python int, whatever numeric type the caller passed.
     """
-    if not _is_whole_number(now_ticks) or now_ticks < 0:
+    request_tick = _as_count(now_ticks)
+    if request_tick is None:
         raise RuntimeError(
             f"{path.value} requested at tick {now_ticks!r}; a request tick "
             f"is a whole number, not negative"
         )
     if payload_bits is None:
-        return
-    if not _is_whole_number(payload_bits) or payload_bits < 0:
+        return None, request_tick
+    payload = _as_count(payload_bits)
+    if payload is None:
         raise RuntimeError(
             f"{path.value} requested with {payload_bits!r} bits; a payload "
             f"is a whole number of bits, not negative"
         )
+    return payload, request_tick
 
 
-def _is_whole_number(value) -> bool:
+def _as_count(value) -> Optional[int]:
+    """The value as a Python int when it is whole and not negative, else None.
+
+    A bool is not a count.
+    """
+    if isinstance(value, bool):
+        return None
     try:
-        whole = int(value)
-    except (OverflowError, ValueError, TypeError):
-        return False
-    return whole == value
+        whole = _as_whole_number(value, "count")
+    except ValueError:
+        return None
+    if whole < 0:
+        return None
+    return whole
 
 
 def _select_payload(path: LinkPath, edge: LinkEdgeConfig, payload_bits):

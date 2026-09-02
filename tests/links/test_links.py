@@ -926,3 +926,75 @@ def test_an_operation_only_path_refuses_a_relation():
             now_ticks=0,
             attribution=attribution,
         )
+
+
+def test_a_whole_float_tick_is_stored_as_the_same_python_int():
+    channel = bounded_channel(1000.0, 0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    float_card = card(qc=qpu_edge)
+    int_card = card(qc=qpu_edge)
+    from_float = float_card.build()
+    from_int = int_card.build()
+    attribution = round_attribution(1)
+    float_run = from_float.reserve(
+        links.LinkPath.QC,
+        payload_bits=8.0,
+        now_ticks=10.0,
+        attribution=attribution,
+    )
+    int_run = from_int.reserve(
+        links.LinkPath.QC, payload_bits=8, now_ticks=10, attribution=attribution
+    )
+    assert float_run == int_run
+    assert type(float_run.setup_ticks) is int
+    assert type(float_run.send_ticks) is int
+    assert type(float_run.payload_bits) is int
+    assert type(float_run.total_delay_ticks) is int
+    assert (float_run.setup_ticks, float_run.total_delay_ticks) == (5, 8005)
+
+
+def test_a_bool_is_not_a_request_tick():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = round_attribution(1)
+    with pytest.raises(RuntimeError, match="a request tick is a whole number"):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=8,
+            now_ticks=True,
+            attribution=attribution,
+        )
+
+
+def test_a_bool_is_not_a_payload_size():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = round_attribution(1)
+    with pytest.raises(RuntimeError, match="a payload is a whole number"):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=True,
+            now_ticks=0,
+            attribution=attribution,
+        )
+
+
+def test_a_numpy_tick_near_the_int64_limit_is_stored_as_a_python_int():
+    import numpy
+
+    channel = bounded_channel(1000.0, 0)
+    qpu_edge = edge_with_setup_on(channel, overhead_ticks=5)
+    setup_card = card(qc=qpu_edge)
+    model = setup_card.build()
+    attribution = round_attribution(1)
+    eight_below_the_limit = 2**63 - 8
+    near_limit = numpy.int64(eight_below_the_limit)
+    reservation = model.reserve(
+        links.LinkPath.QC,
+        payload_bits=8,
+        now_ticks=near_limit,
+        attribution=attribution,
+    )
+    assert type(reservation.send_ticks) is int
+    assert reservation.send_ticks == 2**63 - 3
+    assert reservation.setup_ticks == 5

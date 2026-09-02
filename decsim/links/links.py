@@ -115,10 +115,32 @@ class LinkCapacityConfig:
 
     @property
     def aggregate_bits_per_microsecond(self) -> float:
-        """The whole channel's rate: the input rate times the channel count."""
+        """The whole channel's rate as a number, for reports.
+
+        A per-channel product beyond the float range reads as infinite,
+        which the entry check refuses.
+        """
         if self.basis is LinkQuantityBasis.DIRECT_AGGREGATE:
             return self.input_bits_per_microsecond
-        return self.input_bits_per_microsecond * self.channel_count
+        exact_rate = self.exact_aggregate_bits_per_microsecond()
+        try:
+            return float(exact_rate)
+        except OverflowError:
+            return math.inf
+
+    def exact_aggregate_bits_per_microsecond(self) -> fractions.Fraction:
+        """The whole channel's rate, exact, for the serialization arithmetic.
+
+        The rate written on the card is read as the decimal it shows (the
+        Fraction of its text), never as the binary float's hidden
+        expansion, and multiplied by the channel count exactly. ns-3's
+        DataRate does the same arithmetic in integers.
+        """
+        rate_text = str(self.input_bits_per_microsecond)
+        rate = fractions.Fraction(rate_text)
+        if self.basis is LinkQuantityBasis.DIRECT_AGGREGATE:
+            return rate
+        return rate * self.channel_count
 
     def to_json_value(self) -> dict:
         """The capacity as the topology report writes it."""
@@ -898,11 +920,10 @@ def _serialization_ticks(payload_bits, capacity: LinkCapacityConfig) -> int:
     """Whole ticks to put the payload on the wire at the channel's rate.
 
     A fractional tick rounds up: serialization never ends before the exact
-    transmission time. Exact Fraction arithmetic keeps a representable
-    rate exact, so a whole-tick duration is never inflated by float error.
+    transmission time. Exact Fraction arithmetic keeps the card's rate
+    exact, so a whole-tick duration is never inflated by float error.
     """
-    rate_text = str(capacity.aggregate_bits_per_microsecond)
-    rate = fractions.Fraction(rate_text)
+    rate = capacity.exact_aggregate_bits_per_microsecond()
     payload = fractions.Fraction(payload_bits)
     bits_times_ticks = payload * config.TICKS_PER_MICROSECOND
     exact_ticks = bits_times_ticks / rate

@@ -458,3 +458,12 @@ def test_an_unbounded_channel_carries_a_transfer_with_no_payload_size():
     )
     assert reservation.payload_bits is None
     assert reservation.total_delay_ticks == 0
+
+
+def test_a_per_channel_rate_is_multiplied_exactly():
+    capacity = LinkCapacityConfig(0.7, LinkQuantityBasis.PER_CHANNEL, 3, "t")
+    channel = LinkConfig(0, capacity, "test")
+    link = Link(channel)
+    reservation = link.reserve(payload_bits=21, now_ticks=0)
+    assert reservation.serialization_ticks == 10_000_000
+    assert capacity.aggregate_bits_per_microsecond == 2.1

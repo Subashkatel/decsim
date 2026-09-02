@@ -94,10 +94,19 @@ class ComplementaryGapMetric:
                 "the complementary gap is defined for one observable; got "
                 f"{self.obs.shape[0]}. Decode each logical operator with its own "
                 "metric.")
-        self._base = pymatching.Matching.from_check_matrix(self.check, weights=self.weights)
+        # parallel faults (a window restriction folds distinct faults onto
+        # one edge) combine as independent errors, the convention of
+        # PyMatching's detector-error-model loader and of the window
+        # decoder, so w_min here is the window decoder's minimum weight
+        priors = 1 / (1 + np.exp(self.weights))
+        self._base = pymatching.Matching.from_check_matrix(
+            self.check.copy(), weights=self.weights, error_probabilities=priors,
+            merge_strategy="independent")
         from scipy.sparse import csc_matrix, vstack
         check_aug = vstack([self.check, csc_matrix(self.obs[0:1, :])]).tocsc()
-        self._aug = pymatching.Matching.from_check_matrix(check_aug, weights=self.weights)
+        self._aug = pymatching.Matching.from_check_matrix(
+            check_aug.copy(), weights=self.weights, error_probabilities=priors,
+            merge_strategy="independent")
         self._warm_matchings()
 
     def _warm_matchings(self) -> None:

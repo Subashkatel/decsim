@@ -4,6 +4,7 @@ on syndromes every graph can satisfy."""
 import gc
 
 import numpy as np
+import pytest
 
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
@@ -72,3 +73,34 @@ def test_parallel_fault_columns_combine_as_independent_errors():
     selected = matching.decode(np.array([1, 1, 0], dtype=np.uint8))
     assert selected[2] == 0 and selected[3] == 0
     assert selected[0] + selected[1] == 1
+
+
+def test_gap_metric_minimum_weight_equals_the_window_decoders():
+    """The complementary gap is measured from the window decoder's own
+    minimum: its base matching merges parallel faults as independent errors
+    exactly as the decoder does, so w_min is the decoder's weight and the
+    gap is the decoder's confidence, not a differently built graph's.
+    Faults that flip the observable are boundary faults here, as they are
+    for a logical operator supported on the code boundary (Stim's memory
+    circuits), which the augmented-detector solve requires."""
+    from decsim.confidence.complementary import ComplementaryGapMetric
+    from decsim.decoders.mwpm.weights import matching_weights
+    # A: two parallel boundary faults flipping the observable (0.05 each,
+    # combined 0.095, weight 2.254); A-B and B's boundary at 0.2 (2.773)
+    check = np.asarray([[1, 1, 1, 0],
+                        [0, 0, 1, 1]], dtype=np.uint8)
+    priors = np.asarray([0.05, 0.05, 0.2, 0.2])
+    observables = np.asarray([[1, 1, 0, 0]], dtype=np.uint8)
+    faults = PlacedFaultModel(
+        representation=FaultRepresentation.GRAPHLIKE, check=check, priors=priors,
+        observables=observables, owned=np.ones(4, dtype=bool),
+        source_fault_ids=(0, 1, 2, 3), boundary_flips={})
+    decoder_matching = PyMatchingDecoder(PresetLatencyDecoder(0.0))._matching_for_model(faults)
+    metric = ComplementaryGapMetric(check, observables, matching_weights(priors))
+    syndrome = np.array([1, 0], dtype=np.uint8)
+    _, decoder_weight = decoder_matching.decode(syndrome, return_weight=True)
+    soft = metric.evaluate(syndrome)
+    assert decoder_weight == pytest.approx(np.log((1 - 0.095) / 0.095))
+    assert soft.w_min == pytest.approx(decoder_weight)
+    assert soft.w_comp == pytest.approx(2 * np.log(0.8 / 0.2))
+    assert soft.gap == pytest.approx(soft.w_comp - soft.w_min)

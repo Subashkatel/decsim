@@ -683,7 +683,9 @@ def _check_production_mode(
             "production_mode must be 'demand' or 'continuous' "
             f"(got {production_mode!r})"
         )
-    if production_mode == "continuous" and buffer_capacity is None:
+    if production_mode != "continuous":
+        return
+    if buffer_capacity is None or buffer_capacity < 1:
         raise ValueError("continuous production needs buffer_capacity >= 1")
 
 

@@ -142,9 +142,10 @@ def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
     its packing workspace and publishes it once a slot frees, in round
     order; nothing is dropped and the run completes. Real-time decoders
     apply backpressure to the source rather than discarding syndromes:
-    Riverlane's sequencer stalls on the decoder's status register (Barber
-    et al. 2025) and QubiC's cores block in WAIT_MEAS until readout data
-    is consumed (arXiv 2404.15260)."""
+    the Rigetti sequencer polls the decoder's status register and stalls
+    (Caune et al. 2410.05202), Helios asserts input ready only when it can
+    take data, and QubiC's cores block in WAIT_MEAS until readout data is
+    consumed."""
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.pauli_frame.pauli_frame import PauliFrameConfig
     from decsim.qpu.round_policies import FixedRounds

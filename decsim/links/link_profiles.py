@@ -30,16 +30,20 @@ from .links import (
 )
 
 
-# A decoder result reaches the frame as one bit per logical observable, a
-# Pauli frame update (LILLIPUT's decoder output register, Das et al. ASPLOS
-# 2022); the window manager supplies the count from the result itself.
+# A decoder result reaches the frame as one bit per logical observable, the
+# logical-frame convention: Caune et al. 2410.05202 return one Boolean per
+# decode, Google 2408.13687 an observable bitmask per block, and PECOS's
+# frame XORs an observable mask per cycle. A decoder that feeds a physical
+# frame instead emits a per-qubit or per-edge correction vector (LILLIPUT's
+# error log, Helios's correction port); that is a different card. The
+# window manager supplies the count from the result itself.
 RESULT_PAYLOAD_SOURCE = "DecodeResult.logical_observables bits"
 
 # A decision or command crosses the control fabric as one bus word: the
-# decoder sequencer's 32-bit WISHBONE interface (Barber et al., Nature
-# Electronics 2025, arXiv 2410.05202 Methods).
+# decoder sequencer's 32-bit WISHBONE interface (Caune et al., arXiv
+# 2410.05202, Methods).
 BUS_WORD_BITS = 32
-BUS_WORD_SOURCE = "one 32-bit control bus word (Barber et al. 2025, WISHBONE)"
+BUS_WORD_SOURCE = "one 32-bit control bus word (Caune et al. 2410.05202, WISHBONE)"
 
 
 def _aggregate_payload(bits: int, source: str) -> PayloadSizeConfig:

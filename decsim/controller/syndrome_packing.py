@@ -37,10 +37,14 @@ class ReassemblyQueueAdmission(Enum):
 class PackingOverflowPolicy(Enum):
     """What the controller does with a finished round when its store is
     full. STALL holds the round in the packing workspace until a slot frees
-    and publishes it in order, the backpressure real-time decoders apply to
-    their source (Riverlane's sequencer stalls on the decoder's status
-    register, Barber et al. 2025; QubiC's cores block in WAIT_MEAS,
-    arXiv 2404.15260). DROP_ROUND and FAIL_STOP are study knobs."""
+    and publishes it in order, the backpressure real-time systems apply to
+    their source: the Rigetti sequencer polls the decoder's status register
+    and stalls (Caune et al. 2410.05202), Helios's input port is valid/ready
+    and asserts ready only when it can take data, QubiC's cores block in
+    WAIT_MEAS, and credit-based flow control never loses a flit. LILLIPUT's
+    readout buffer and QubiC's measurement register instead overwrite the
+    latest value, a storage choice this policy does not model. DROP_ROUND
+    and FAIL_STOP are study knobs."""
 
     STALL = "stall"
     FAIL_STOP = "fail_stop"
@@ -237,8 +241,9 @@ class SyndromePacking:
             return
         # every completed round pays the assembly time once: packetization
         # and framing cost the controller per syndrome word, however many
-        # fragments the word arrived in (Riverlane's pipeline charges 250 to
-        # 370 FPGA cycles per round, Barber et al. Nature Electronics 2025)
+        # fragments the word arrived in. Caune et al. 2410.05202 measure
+        # 250 to 370 FPGA cycles for packetization, bus transfer, result
+        # return and the conditional together, an upper bound for this term
         if self.t_pack > 0:
             self.engine.schedule(self.t_pack, lambda: self._finish_packing(context),
                                  label="controller pack")

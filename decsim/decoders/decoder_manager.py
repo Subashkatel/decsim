@@ -111,7 +111,7 @@ class DecoderManager:
         transport_engine = getattr(self.decoder_memory_transfer, "engine", engine)
         if transport_engine is not engine:
             raise ValueError("decoder_memory_transfer uses a different engine")
-        self.staging = DecoderInputStaging(self.decoder_memory_transfer)
+        self.staging = DecoderInputStaging(self.decoder_memory_transfer, engine)
         self.scheduler = scheduler
         self.lane_policy = lane_policy
         self.bulk_strong = bulk_strong
@@ -150,6 +150,11 @@ class DecoderManager:
         # initiation interval ends, even when the response finishes first.
         # This is distinct from an in-flight result and from a depth stall.
         self._pipeline_intake_busy: dict = {}
+        # (pool, unit) -> the tick its compute is expected to free, from the
+        # running decode's declared latency (or initiation interval); the
+        # staging choice among busy units reads it. A decoder measured on
+        # the host clock declares none.
+        self._compute_free_ticks: dict = {}
         self.log_name = log_name
         self._terminal_request_records = [] if capture_enabled else None
         self._terminal_service_records = [] if capture_enabled else None
@@ -460,6 +465,7 @@ class DecoderManager:
                 continue
             if not resident.input_landed and self._startable(resident):
                 self._computing[slot] = resident   # starts at its landing
+                self._predict_compute_free(resident)
                 return
         self.pool_free[pool] += 1
         self._free_units[pool].append(unit)
@@ -520,7 +526,14 @@ class DecoderManager:
         takes an input slot only (its DMA overlaps other work, Tomasulo's
         reservation station), and only once the window manager's
         stage_admission says its release is already resolving, so parked
-        work can never squat a slot against the decode that must free it."""
+        work can never squat a slot against the decode that must free it.
+
+        When every unit is computing, a job with input to move is staged
+        on the unit whose compute frees earliest among those with a free
+        slot: least work left, which starts each job when a central FIFO
+        queue over the pool would (Harchol-Balter, Performance Modeling
+        and Design of Computer Systems, 2013, Ch. 24). A job with no input
+        has nothing to prefetch and waits in the queue for free compute."""
         startable = self._startable(job)
         if not startable and (self.stage_admission is not None
                               and not self.stage_admission(job)):
@@ -532,13 +545,21 @@ class DecoderManager:
             if len(self._residents(slot)) < resident_capacity \
                     and self._slot_memory_ok(slot, job):
                 return unit, startable
-        for unit in range(self.unit_totals[pool]):
-            slot = (pool, unit)
-            if unit in free or len(self._residents(slot)) >= resident_capacity:
-                continue
-            if self._slot_memory_ok(slot, job):
-                return unit, False
-        return None
+        if not self._carries_input(job):
+            return None
+        busy_with_room = [
+            unit for unit in range(self.unit_totals[pool])
+            if unit not in free
+            and len(self._residents((pool, unit))) < resident_capacity
+            and self._slot_memory_ok((pool, unit), job)]
+        if not busy_with_room:
+            return None
+        return min(busy_with_room, key=lambda unit: self._compute_free_ticks.get(
+            (pool, unit), math.inf)), False
+
+    def _carries_input(self, job: DecodeJob) -> bool:
+        """The job moves syndrome data into a unit's memory."""
+        return job.reserve_transfer is not None or self._memory_demand(job) > 0
 
     def _resident_capacity(self, job: DecodeJob) -> int:
         """Two residents per unit (the depth-1 access-execute machine)
@@ -772,6 +793,8 @@ class DecoderManager:
                                       f"({staged.n_rounds} rounds from the "
                                       f"round store)")
             self.staging.stage(member, memory, landed)
+        if claim_compute:
+            self._predict_compute_free(job)
 
     def _begin_service(self, job: DecodeJob, gated: bool = True) -> None:
         """The unit's memory holds the input: start the decode."""
@@ -794,6 +817,7 @@ class DecoderManager:
         self._spawn_gap_sibling(job)
         decoder = self.router.route(job)
         self.engine.log(self.log_name, f"START DECODE {job.label}")
+        self._predict_compute_free(job)
         run = getattr(decoder, "run", None)
         if run is not None:                 # staged decoder reads memory itself
             run(job, self.engine,
@@ -841,6 +865,23 @@ class DecoderManager:
                 lambda s=slot, j=job, d=pipeline_depth:
                     self._initiation_complete(s, j, d),
                 label=f"initiation_complete({job.label})")
+
+    def _predict_compute_free(self, job: DecodeJob) -> None:
+        """Record when the compute this job holds frees: the decode starts
+        once its input has landed and runs for the declared latency (the
+        initiation interval on a pipelined unit). A decoder measured on
+        the host clock declares no latency, so its unit stays unpredicted."""
+        slot = (job.pool, job.unit)
+        decoder = self.router.route(job)
+        if getattr(decoder, "measures_wall_clock", False):
+            self._compute_free_ticks.pop(slot, None)
+            return
+        interval_of = getattr(decoder, "initiation_interval", None)
+        occupancy = (decoder.latency(job) if interval_of is None
+                     else interval_of(job))
+        landing = job.input_landing_ticks
+        start = self.engine.now if landing is None else max(self.engine.now, landing)
+        self._compute_free_ticks[slot] = start + occupancy
 
     def _spawn_gap_sibling(self, job: DecodeJob) -> None:
         """Submit the other forced-class solve to the gap pool.

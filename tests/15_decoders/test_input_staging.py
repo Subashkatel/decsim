@@ -109,3 +109,83 @@ def test_tight_memory_degrades_to_serial_residency_where_pairs_do_not_fit():
 def test_an_oversized_single_window_still_stops_loudly():
     with pytest.raises(DecoderMemoryCapacityExhaustion):
         _run(capacity=8)
+
+
+def _standalone_pool(units, transfer_us, compute_us):
+    """A decoder manager fed window jobs directly: (engine, manager,
+    submit(index, arrival), compute start ticks by window)."""
+    from decsim.decoders.decoder_manager import DecoderManager
+    from decsim.decoders.decoders import CodeRouter
+    from decsim.decoders.schedulers import FifoScheduler
+    from decsim.decoders.weak_strong_switching import Baseline
+    from decsim.engine import Engine
+    from decsim.message import (DecodeJob, DecoderRequestKey, DecoderTier,
+                                RetainedSyndromeFragment)
+
+    engine = Engine(verbose=False)
+    manager = DecoderManager(
+        engine, router=CodeRouter(PresetLatencyDecoder(compute_us)),
+        scheduler=FifoScheduler(), num_units=units,
+        escalation_policy=Baseline(), services=None,
+        on_window_decoded=lambda job, result: None,
+        on_strong_window_decoded=None)
+    compute_start = {}
+    original_begin = manager._begin_service
+
+    def recording_begin(job, gated=True):
+        compute_start[job.label] = engine.now
+        original_begin(job, gated)
+
+    manager._begin_service = recording_begin
+
+    def submit(index, arrival_us):
+        payload = RetainedSyndromeFragment(operation_id=1, patch_id="p", round_index=index,
+                                           bits=(0, 1), size_bits=2, fragment_index=0)
+        job = DecodeJob(op_id=1, window_id=index, n_rounds=1, payloads=[payload],
+                        label=f"w{index}",
+                        request_key=DecoderRequestKey(1, index, DecoderTier.WEAK, index))
+        engine.schedule(us(arrival_us),
+                        lambda: manager.enqueue(job, lambda: us(transfer_us)))
+
+    return engine, manager, submit, compute_start
+
+
+def test_a_full_pool_stages_the_next_window_on_the_unit_that_frees_first():
+    """Least work left (Harchol-Balter 2013, Ch. 24): with every unit
+    computing, the next window's input goes to the unit whose compute
+    ends first, counting a claimed unit's decode from its input's landing,
+    so it starts when a central FIFO queue over the pool would."""
+    engine, manager, submit, compute_start = _standalone_pool(2, 3.5, 4.0)
+    for index, arrival in enumerate((2.0, 4.0, 8.5, 15.0, 16.5, 19.0)):
+        submit(index, arrival)
+    engine.run()
+    manager.check_decode_work_settled()
+    # unit 0: w0 5.5..9.5, w2 12.0..16.0, w4 20.0..24.0 (claimed at 16.5,
+    # input lands 20.0); unit 1: w1 7.5..11.5, w3 18.5..22.5
+    assert compute_start["w3"] == us(18.5) and compute_start["w4"] == us(20.0)
+    # w5's input lands at 22.5: unit 1 frees at 22.5, unit 0 not before 24.0
+    assert compute_start["w5"] == us(22.5)
+
+
+def test_a_job_without_input_waits_in_the_queue_for_free_compute():
+    """submit_decode carries no syndrome data, so there is nothing to
+    prefetch into a busy unit's second slot; the job waits centrally and
+    takes the first unit that frees (G/D/k FIFO)."""
+    from decsim.decoders.decoder_manager import DecoderManager
+    from decsim.decoders.decoders import CodeRouter
+    from decsim.decoders.schedulers import FifoScheduler
+    from decsim.engine import Engine
+
+    engine = Engine(verbose=False)
+    manager = DecoderManager(
+        engine, router=CodeRouter(PresetLatencyDecoder(4.0)),
+        scheduler=FifoScheduler(), num_units=2,
+        escalation_policy=None, services=None,
+        on_window_decoded=None, on_strong_window_decoded=None)
+    done = {}
+    for label, arrival in (("a", 0.0), ("b", 1.0), ("c", 2.0)):
+        engine.schedule(us(arrival), lambda label=label: manager.submit_decode(
+            1, lambda label=label: done.__setitem__(label, engine.now), label=label))
+    engine.run()
+    # a on unit 0 (0..4), b on unit 1 (1..5); c waits for unit 0 at 4
+    assert done == {"a": us(4.0), "b": us(5.0), "c": us(8.0)}

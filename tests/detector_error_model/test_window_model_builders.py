@@ -9,11 +9,13 @@ committed identities against qLDPC's, since a WindowErrorModel carries no
 commit region of its own; Skoric et al. 2209.08552, section I.B (a
 window's graph holds every edge touching a defect in its rounds, and
 only the correction edges in the commit region are taken as final) and
-the last paragraph of its section III, Methods (text lines 697-700: the
-commit region of the last window runs from the bottom of the regular
-commit region to the last round). Exclusion ranges are decsim's own
-device (a strong re-decode leaves the weak decoder's committed faults
-uncommitted, decsim/decoders/strong_escalation) with no paper referent.
+the last paragraph of its section III, Methods (text lines 693-700: in
+both branches the last window commits through the last round, the last
+B window of reduced size, or the last A window whose commit region runs
+from the bottom of the regular commit region to the last round).
+Exclusion ranges are decsim's own device (a strong re-decode leaves the
+weak decoder's committed faults uncommitted,
+decsim/decoders/strong_escalation) with no paper referent.
 """
 
 import numpy
@@ -30,6 +32,7 @@ from decsim.detector_error_model import (
 )
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
+PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL
 GRAPHLIKE_REQUIRED = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
 LINKED_REQUIRED = fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
 
@@ -953,8 +956,18 @@ def test_a_component_nobody_owns_stays_beside_its_fault():
     )
     dependent_projection = models[0].physical_to_graphlike_detector_projection
     parent_projection = models[1].physical_to_graphlike_detector_projection
+    physical = models[0].require_faults(PHYSICAL)
+    graphlike = models[0].require_faults(GRAPHLIKE)
+    fault_0_column = physical.source_fault_ids.index(0)
+    fault_11_column = physical.source_fault_ids.index(11)
+    component_0_column = graphlike.source_fault_ids.index(0)
+    component_9_column = graphlike.source_fault_ids.index(9)
     assert dependent_projection.shape == (62, 227)
     assert parent_projection.shape == (144, 616)
+    assert not physical.owned[fault_0_column]
+    assert physical.owned[fault_11_column]
+    assert not graphlike.owned[component_0_column]
+    assert not graphlike.owned[component_9_column]
 
 
 def test_a_linked_terminal_window_with_empty_edges_builds():
@@ -996,7 +1009,7 @@ def test_a_gap_is_reported_before_the_linked_check():
 def test_a_commit_past_round_count_is_reported_before_the_linked_check():
     circuit = surface_code_circuit(6)
     with pytest.raises(
-        ValueError, match="window commit region exceeds round_count"
+        ValueError, match="window commit or buffer region exceeds round_count"
     ):
         window_model_builders.build_window_error_models(
             circuit,

@@ -159,11 +159,12 @@ def test_a_range_that_cuts_at_a_closed_seam_is_refused():
         after_clifford_depolarization=0.001,
     )
     # The first three windows of the runtime's thirty-round sandwich with
-    # step 2 and buffer 1, as it hands them to the builder: the seam is
-    # round 3 and depends on both neighbours. An excluded fault is owned
-    # by nobody and stays a column of every window that sees it, so fault
-    # 22, which touches rounds 3 and 4, is a column of the seam and cut
-    # at its edge.
+    # step 2 and buffer 1, as of this commit (nothing here reads the
+    # runtime's plan): the seam is round 3 and depends on both neighbours.
+    # The fault-cut check of a closed window runs for every protocol, so
+    # none is named. An excluded fault is owned by nobody and stays a
+    # column of every window that sees it, so fault 22, which touches
+    # rounds 3 and 4, is a column of the seam and cut at its edge.
     with pytest.raises(ValueError, match="window 1 truncates global fault 22"):
         window_model_builders.build_window_error_models(
             circuit,
@@ -173,7 +174,6 @@ def test_a_range_that_cuts_at_a_closed_seam_is_refused():
             fault_exclusion_ranges=((3, 4),),
             dependency_edges=((0, 1), (2, 1)),
             closed_temporal_boundary_windows=(1,),
-            window_protocol=TAN,
         )
 
 

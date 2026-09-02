@@ -160,11 +160,11 @@ class StreamingDetectorFormer:
         round and None before it.
         """
         packet = tuple(int(bit) for bit in bits)
-        expected = self.table.packet_width_by_round[round_index]
-        if len(packet) != expected:
+        expected_bit_count = self.table.packet_width_by_round[round_index]
+        if len(packet) != expected_bit_count:
             raise ValueError(
                 f"round {round_index}: packet has {len(packet)} bits, "
-                f"the formation table expects {expected}"
+                f"the formation table expects {expected_bit_count}"
             )
         self.packets[round_index] = packet
         newest_stale_round = round_index - self.kept_packet_count

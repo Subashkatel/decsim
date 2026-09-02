@@ -12,8 +12,10 @@ terminal window, whose commit rounds reach the last round, also owns
 every fault its rows see that no commit round of the plan reaches, the
 same law the slicer applies when it advances ownership itself (Skoric et
 al. 2209.08552, the last paragraph of section III, Methods (text lines
-697-700): the commit region of the last window runs from the bottom of
-the regular commit region to the last round). An exclusion range is
+693-700): in both branches the last window commits through the last
+round, the last B window of reduced size, or the last A window whose
+commit region runs from the bottom of the regular commit region to the
+last round). An exclusion range is
 decsim's own device with no paper referent: a strong re-decode leaves
 the faults the weak decoder already committed uncommitted
 (decsim/decoders/strong_escalation). A fault a range keeps uncommitted

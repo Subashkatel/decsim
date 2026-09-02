@@ -179,6 +179,26 @@ def test_a_second_group_past_the_last_round_is_refused():
         detector_formation.build_formation_table(circuit, 1)
 
 
+def test_a_readout_announced_two_rounds_past_the_end_is_refused():
+    circuit = stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=3,
+        rounds=4,
+        after_clifford_depolarization=0.001,
+    )
+    # Stim's readout detectors announce round 5, the one layer past the
+    # last round that folds into it. One more SHIFT_COORDS after the
+    # REPEAT block makes them announce round 6, which does not fold.
+    text = str(circuit)
+    shifted_text = text.replace("}", "}\nSHIFT_COORDS(0, 0, 1)")
+    shifted = stim.Circuit(shifted_text)
+    with pytest.raises(
+        ValueError,
+        match="circuit announces round 6, formation table was asked for 4",
+    ):
+        detector_formation.build_formation_table(shifted, 4)
+
+
 def test_measurement_blocks_out_of_round_order_are_refused():
     circuit = stim.Circuit(
         "R 0 1\nM 0\nDETECTOR(0,1) rec[-1]\nM 1\nDETECTOR(0,0) rec[-1]\n"

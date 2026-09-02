@@ -121,8 +121,13 @@ class LinkCapacityConfig:
             _require_finite_number(aggregate, "aggregate_bits_per_microsecond")
 
     @property
-    def aggregate_bits_per_microsecond(self) -> float:
-        """The whole channel's rate as reported: input times channel count."""
+    def aggregate_bits_per_microsecond(
+        self,
+    ) -> Union[int, float, fractions.Fraction]:
+        """The whole channel's rate as reported: input times channel count.
+
+        The result has the input's own type, a Fraction included.
+        """
         if self.basis is LinkQuantityBasis.DIRECT_AGGREGATE:
             return self.input_bits_per_microsecond
         return self.input_bits_per_microsecond * self.channel_count
@@ -817,7 +822,7 @@ class LinkModel:
 
 @dataclasses.dataclass
 class _SetupQueue:
-    """Why a channel keeps its own setup state.
+    """A channel's setup engine: its last setup's end and its last request tick.
 
     Setups serialize per channel, not per path, so the tick at which the
     queue frees belongs to the channel; the last request tick lets a

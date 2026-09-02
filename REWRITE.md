@@ -100,8 +100,16 @@ or `_ticks`; a count ends in `_count`.
 
 Link paths and yaml keys are renamed to plain words too. The owner chooses
 the final names; the list lives on the sample page and in PLAN.md. So
-far: `qc` becomes `qpu_to_controller`, and every path is named source to
-destination by component.
+far, accepted by the owner on 2026-09-02: qpu_to_controller,
+controller_to_weak_buffer, controller_to_strong_buffer,
+weak_buffer_to_weak_decoder, strong_buffer_to_strong_decoder,
+weak_decoder_to_strong_decoder, decoder_to_decoder, weak_decoder_to_frame,
+strong_decoder_to_frame, frame_to_controller, controller_to_qpu; and the
+config keys readout_to_bits_cycles, decision_to_pulse_cycles,
+packing_cycles_per_round, weak_buffer_rounds, strong_buffer_rounds,
+packing_rounds_in_flight, unit_memory_rounds, write_cycles,
+setup_cycles_per_transfer, circuit, log_component_io, check_windows_with,
+decode_path. They land in the surface commit of the links slice.
 
 ## Rule 3. Comments say why, in the present tense
 
@@ -136,6 +144,13 @@ the state by hand.
 A rename is a rename. Nothing keeps an old name alive: no alias, no
 wrapper, no deprecated path. Callers move in the same commit. Old tests
 are edited for renames only, never for behavior, until they are deleted.
+
+Dead code goes with the rewrite of the file that holds it. When a file is
+rewritten, every function, class, branch, field and parameter that
+nothing calls or reads is deleted, and the commit message lists what was
+removed. Git remembers it; nothing is kept "in case". A decoder or a
+study knob that is unused today but has research value is not dead
+code; it stays, with the reason on its checklist row.
 
 ## Rule 6. One reason per component
 

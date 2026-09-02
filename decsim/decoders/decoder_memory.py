@@ -185,9 +185,11 @@ def count_decoder_input_round_demand(payloads) -> int:
     ``(operation_id, round_index)`` identities, which is exactly the number
     of rounds ``materialize_decoder_input`` groups them into. A decode job
     is priced and admitted for this count, the rounds the decoder actually
-    reads, the way a sliding-window decoder's work scales with the rounds
-    in its window (Skoric et al. 2209.08552) and a fixed-depth syndrome
-    FIFO holds only rounds that were measured (LILLIPUT, Das et al. 2022).
+    reads: a sliding-window decoder's work scales with the rounds in its
+    window (Skoric et al. 2209.08552, tau_W over n_W), a final window can be
+    smaller than a regular one with the whole window as core (Tan et al.
+    2209.09219), and no window implementation feeds rounds beyond the data
+    (Gong et al. sliding-window decoder; cudaq-qec sliding_window).
     """
     round_identities = {(payload.operation_id, payload.round_index)
                         for payload in payloads}

@@ -46,6 +46,8 @@ ignore = [
   "D107",  # __init__ is described by the class docstring
   "D203",  # no blank line before a class docstring
   "D213",  # summary on the first line
+  "UP007", # Optional[X] stays readable and runs on 3.9
+  "UP045", # same
 ]
 
 [tool.ruff.lint.pydocstyle]

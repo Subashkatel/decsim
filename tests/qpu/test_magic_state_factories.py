@@ -155,3 +155,26 @@ def test_a_second_request_waits_for_a_second_round():
     factory.request(2, note_second)
     engine.run()
     assert delivered == [(1, 400), (2, 790)]
+
+
+def test_a_second_level_round_takes_fifteen_logical_cycles_by_default():
+    # Silva 2411.04270, text lines 223-224: a first-level unit distills
+    # every 13 logical cycles, a higher-level unit only every 15, because
+    # loading its inputs takes two more. With round_ticks=10 and d=3 a
+    # first-level round is 390 ticks and a second-level round 450; the
+    # fifteen first-level rounds end at 10 + 15 * 390 = 5860.
+    engine = Engine(verbose=False)
+    levels = [DistillLevel(unit_count=1, distance=3), DistillLevel(1, 3)]
+    factory = MultiLevelDistillationFactory(
+        engine,
+        levels,
+        round_ticks=10,
+        preparation_unit_count=15,
+        preparation_logical_cycles=1,
+        preparation_distance=1,
+    )
+    delivered = []
+    factory.request(1, lambda: delivered.append(engine.now))
+    engine.run()
+    assert factory.round_ticks_by_level == {1: 390, 2: 450}
+    assert delivered == [6310]

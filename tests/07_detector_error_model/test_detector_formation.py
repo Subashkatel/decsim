@@ -37,10 +37,10 @@ def with_x_after_prep(circuit, qubits):
 def test_table_reads_the_caps_off_a_d3_memory_circuit():
     table = build_formation_table(memory_circuit("surface_code:rotated_memory_z", 3, 12), 12)
 
-    assert [table.packet_width[r] for r in range(1, 13)] == [8] * 11 + [17]
+    assert [table.packet_width_by_round[r] for r in range(1, 13)] == [8] * 11 + [17]
     assert table.readout_slot_start == 8
     assert table.max_record_span == 1
-    assert {recipe.kind for recipe in table.detectors_of_round(1)} == {LayerKind.PREP}
+    assert {recipe.kind for recipe in table.detectors_of_round(1)} == {LayerKind.PREPARATION}
     assert {recipe.kind for recipe in table.detectors_of_round(6)} == {LayerKind.BULK}
     assert {recipe.kind for recipe in table.detectors_of_round(12)} == {LayerKind.BULK, LayerKind.READOUT}
     assert [len(table.detectors_of_round(r)) for r in (1, 2, 11, 12)] == [4, 8, 8, 12]
@@ -121,7 +121,7 @@ def test_declared_measurement_rounds_describe_a_two_block_round_layout():
                           for index in range(measurement_count)}
     table = build_formation_table(circuit, rounds, measurement_rounds=measurement_rounds)
 
-    assert [table.packet_width[r] for r in range(1, 9)] == [8] * 7 + [17]
+    assert [table.packet_width_by_round[r] for r in range(1, 9)] == [8] * 7 + [17]
     assert table.readout_slot_start is None
     assert table.detectors_of_round(1) == []
     assert [len(table.detectors_of_round(r)) for r in range(2, 9)] == [8] * 7
@@ -152,7 +152,7 @@ def test_lattice_surgery_cnot_circuit_forms_like_stim():
     rounds = 12
     table = build_formation_table(circuit, rounds)
     assert table.readout_slot_start is None
-    assert [table.packet_width[r] for r in range(1, 13)] == [16, 16, 16, 28, 28, 31, 28, 28, 40, 16, 16, 34]
+    assert [table.packet_width_by_round[r] for r in range(1, 13)] == [16, 16, 16, 28, 28, 31, 28, 28, 40, 16, 16, 34]
     assert [len(table.detectors_of_round(r)) for r in range(1, 13)] == [8, 16, 16, 20, 28, 28, 24, 28, 32, 16, 16, 24]
     assert table.detector_rounds() == resolve_detector_rounds(circuit, None, rounds)
     assert len(table.observables) == 2

@@ -8,12 +8,13 @@ plan may cover part of the operation: a fault no window's rows reach
 stays unowned, while the terminal window owns every uncommitted fault it
 sees, front buffer rounds included, whether ownership advances in plan
 order or is compiled from the dependency graph (Skoric et al.
-2209.08552, the closing paragraph of the parallel-window section: the
-commit region of the last window runs from the bottom of the regular
-commit region to the last round; qLDPC's SlidingWindowDecoder, whose
-last window commits all it holds). The two single-window builders serve
-the runtime paths that decode one window on its own with faults it may
-see but must not commit; a window built alone is never terminal.
+2209.08552, the last paragraph of section III, Methods (text lines
+697-700): the commit region of the last window runs from the bottom of
+the regular commit region to the last round; qLDPC's
+SlidingWindowDecoder, whose last window commits all it holds). The two
+single-window builders serve the runtime paths that decode one window on
+its own with faults it may see but must not commit; a window built alone
+is never terminal.
 
 The exclusion ranges are decsim's own device with no paper referent: a
 strong re-decode leaves the faults the weak decoder already committed
@@ -24,14 +25,22 @@ at entry: an exclusion range on a plan of more than one window, where an
 earlier window would commit a graphlike component while the range kept
 its physical parent uncommitted; and a plan with dependency edges in
 which a window keeps a physical fault while an ancestor of it owns a
-component of that fault touching the window's rows. The second is
-checked on the compiled owner tables, after every check of the plan's
-shape and before any window is built (window_ownership_dag).
+component of that fault touching the window's rows.
+
+The checks run in this order, and the first to fail names the defect:
+the exclusion ranges are parsed; the plan entries are parsed; the ranges
+guard for a linked plan; the protocol; a closed window is a dependency
+destination; the commit rounds are contiguous; every window ends inside
+the operation; then the slicer is built and, with dependency edges, the
+edges are checked to name plan windows and to form an acyclic graph, the
+owner tables are compiled, and the linked check runs on them
+(window_ownership_dag), before any window is built; the fault-cut check
+of a closed window runs on the built windows.
 
 Nothing inside the package imports this module.
 """
 
-from collections.abc import Container, Sequence
+from collections.abc import Container, Mapping, Sequence
 from typing import Optional
 
 import stim
@@ -44,18 +53,6 @@ from decsim.detector_error_model import (
     window_protocol_policy,
     window_slicer,
 )
-
-# The faults each window owns, and the faults each window's ancestors
-# own, by representation; None when ownership advances in plan order.
-_OwnedFaultsPerWindow = Optional[
-    tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
-]
-_PriorFaultsPerWindow = Optional[
-    tuple[
-        dict[fault_model_contracts.FaultRepresentation, Container[int]],
-        ...,
-    ]
-]
 
 
 def build_window_error_models(
@@ -150,6 +147,26 @@ def build_single_window_error_model_with_exclusions(
         fault_model_requirement=fault_model_requirement,
         fault_exclusion_ranges=fault_exclusion_ranges,
     )
+
+
+# The faults each window owns, and the faults each window's ancestors
+# own, by representation; None when ownership advances in plan order.
+# Both are read the same way, one window's table at a time.
+_OwnedFaultsPerWindow = Optional[
+    tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]
+]
+_PriorFaultsPerWindow = Optional[
+    tuple[
+        dict[fault_model_contracts.FaultRepresentation, Container[int]],
+        ...,
+    ]
+]
+_FaultsPerWindow = Optional[
+    tuple[
+        Mapping[fault_model_contracts.FaultRepresentation, Container[int]],
+        ...,
+    ]
+]
 
 
 def _new_slicer(
@@ -348,9 +365,11 @@ def _slice_plan(
 
 
 def _entry_of(
-    per_window: _PriorFaultsPerWindow,
+    per_window: _FaultsPerWindow,
     window_index: int,
-) -> Optional[dict[fault_model_contracts.FaultRepresentation, Container[int]]]:
+) -> Optional[
+    Mapping[fault_model_contracts.FaultRepresentation, Container[int]]
+]:
     if per_window is None:
         return None
     return per_window[window_index]

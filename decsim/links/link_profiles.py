@@ -189,10 +189,9 @@ def with_transfer_overhead(
     paths (default: the two decoder-input DMA paths).
 
     Engine-side: the wire keeps streaming during a setup, but successive
-    setups on one path serialize (gem5-Aladdin's one delayed-DMA event; see
-    ``TransferOverheadConfig`` for the measured numbers). Each listed path
-    must own its channel; ``resolve()`` refuses a shared channel whose
-    edges disagree about the shift.
+    setups on one channel serialize (gem5-Aladdin's one delayed-DMA event;
+    see ``TransferOverheadConfig`` for the measured numbers), so paths
+    sharing a channel reach its wire in request order.
     """
     overhead = TransferOverheadConfig(us(overhead_us), source)
     replacements = {}

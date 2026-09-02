@@ -518,23 +518,12 @@ class LinkModelConfig:
         """Build the run-owned fabric: one Link per distinct channel object."""
         channel_by_config_id = {}
         bindings = {}
-        overhead_by_channel = {}
         for path in self.wired_paths():
             edge = getattr(self, path.value)
             channel = channel_by_config_id.get(id(edge.channel))
             if channel is None:
                 channel = Link(edge.channel)
                 channel_by_config_id[id(edge.channel)] = channel
-            # a channel's in-order send guard cannot hold if edges sharing
-            # it disagree about the setup shift, so refuse the mix
-            overhead_ticks = (0 if edge.transfer_overhead is None
-                              else edge.transfer_overhead.overhead_ticks)
-            seen = overhead_by_channel.setdefault(id(edge.channel),
-                                                  overhead_ticks)
-            if seen != overhead_ticks:
-                raise ValueError(
-                    f"{path.value} shares a channel with an edge whose "
-                    f"transfer overhead differs; give each its own channel")
             bindings[path] = (edge, channel)
         return LinkModel(self, bindings)
 
@@ -574,10 +563,12 @@ class LinkModel:
         self._bindings = dict(bindings)                # path -> (edge, channel)
         self._paths = tuple(self._bindings)
         self._semantic_counters = {path: TrafficCounters() for path in self._paths}
-        # the one-server setup queue per path: successive transfers' setups
-        # serialize (one CPU programs the engine), while the wire itself
-        # keeps streaming during a setup
-        self._setup_free_ticks = {path: 0 for path in self._paths}
+        # the one-server setup queue per channel: successive transfers'
+        # setups serialize (one CPU programs the engine), while the wire
+        # itself keeps streaming during a setup. The queue is per channel,
+        # not per path, so a channel's transfers reach the wire in request
+        # order whichever paths share it
+        self._setup_free_ticks = {}
         self._transfers = []
         self._alias_by_channel = {}
         for path in self._paths:
@@ -599,14 +590,16 @@ class LinkModel:
         _check_attribution(path, attribution)
         edge, channel = self._bindings[path]
         selected_bits, selection, payload_source = _select_payload(path, edge, payload_bits)
-        setup_ticks = 0
-        if edge.transfer_overhead is not None:
-            setup_start = max(now_ticks, self._setup_free_ticks[path])
-            wire_ticks = setup_start + edge.transfer_overhead.overhead_ticks
-            self._setup_free_ticks[path] = wire_ticks
-            setup_ticks = wire_ticks - now_ticks
-            now_ticks = wire_ticks
-        reservation = channel.reserve(payload_bits=selected_bits, now_ticks=now_ticks)
+        # every request on a channel passes its setup queue, a free edge
+        # included, so the channel sees requests in order behind a setup
+        # still in progress
+        overhead_ticks = (0 if edge.transfer_overhead is None
+                          else edge.transfer_overhead.overhead_ticks)
+        setup_start = max(now_ticks, self._setup_free_ticks.get(channel, 0))
+        wire_ticks = setup_start + overhead_ticks
+        self._setup_free_ticks[channel] = wire_ticks
+        setup_ticks = wire_ticks - now_ticks
+        reservation = channel.reserve(payload_bits=selected_bits, now_ticks=wire_ticks)
         if setup_ticks:
             from dataclasses import replace as _replace
             reservation = _replace(

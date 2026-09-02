@@ -250,8 +250,13 @@ checklist in docs/rewrite/PLAN.md moves in the same commit.
 
 ## Review
 
-Each slice has an implementer, a reviewer who sees only the diff and is
-told to assume it is wrong, and a fixer. The reviewer answers this list
+Each slice has one implementer and at least two adversarial reviewers,
+each in its own context, each seeing only the diff and told to assume it
+is wrong (owner directive 2026-09-02). A reviewer's only job is to find
+bugs and reasons the code does not work; a reviewer never implements,
+and the implementer never reviews. Every finding goes back to the
+implementer, who fixes it and resubmits; a slice is done when both
+reviewers find nothing. Beyond bugs, each reviewer answers this list
 with yes or no for every touched file:
 
 1. Does every line do one thing, and does `tools/check.sh` pass?

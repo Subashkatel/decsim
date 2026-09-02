@@ -8,10 +8,11 @@ closed time boundary. The construction is validated for the graphlike
 (matching) representation only, so a plan that has seams and asks for
 anything else is refused.
 
-A closed time boundary is a smooth boundary in Tan's sense: the decoder
-must not invent an artificial boundary edge there. So a fault that flips a
-detector inside such a window and another outside it is refused, because
-slicing it to the window would create exactly that edge.
+A closed time boundary (Tan's word; Skoric et al. 2209.08552 call the
+same boundary smooth) is one where the decoder must not invent an
+artificial boundary edge. So a fault that flips a detector inside such a
+window and another outside it is refused, because slicing it to the
+window would create exactly that edge.
 
 The protocol seam is closed: the dispatch accepts these two members and
 rejects every other, and a third protocol needs an edit here.
@@ -25,15 +26,15 @@ from decsim.detector_error_model import fault_model_contracts, window_slicer
 
 def validate_closed_temporal_boundary_windows(
     slicer: window_slicer.WindowSlicer,
-    models: list,
-    dependency_edges: Optional[tuple],
+    models: list[fault_model_contracts.WindowErrorModel],
+    dependency_edges: Optional[tuple[tuple[int, int], ...]],
     closed_windows: tuple[int, ...],
 ) -> None:
     """Refuse a closed time boundary that cuts a fault of the circuit."""
     if not closed_windows:
         return
-    # A plan without dependency edges has no destinations, so every closed
-    # window is refused by the check below rather than by a crash here.
+    # A closed window waits for the windows beside it, so it is always a
+    # dependency destination; a plan with no edges has none.
     edges = dependency_edges or ()
     destinations = {destination for _, destination in edges}
     for window_index in closed_windows:
@@ -46,9 +47,9 @@ def validate_closed_temporal_boundary_windows(
 
 
 def validate_window_protocol(
-    entries: tuple,
+    entries: tuple[tuple[int, int, int, int], ...],
     window_protocol: message.WindowProtocol,
-    dependency_edges: Optional[tuple],
+    dependency_edges: Optional[tuple[tuple[int, int], ...]],
     closed_windows: tuple[int, ...],
     fault_model_requirement: (
         fault_model_contracts.DecoderFaultModelRequirement
@@ -87,7 +88,9 @@ def validate_window_protocol(
 
 
 def _check_window_cuts_no_fault(
-    slicer: window_slicer.WindowSlicer, model, window_index: int
+    slicer: window_slicer.WindowSlicer,
+    model: fault_model_contracts.WindowErrorModel,
+    window_index: int,
 ) -> None:
     local_detector_ids = set(model.detector_ids)
     for representation, catalog in slicer.catalogs.items():
@@ -104,9 +107,9 @@ def _check_window_cuts_no_fault(
 
 
 def _check_fault_not_truncated(
-    global_detector_ids: set,
-    local_detector_ids: set,
-    representation,
+    global_detector_ids: set[int],
+    local_detector_ids: set[int],
+    representation: fault_model_contracts.FaultRepresentation,
     window_index: int,
     source_fault_id: int,
 ) -> None:
@@ -120,7 +123,7 @@ def _check_fault_not_truncated(
         )
 
 
-def _check_seam_is_one_layer(entry: tuple) -> None:
+def _check_seam_is_one_layer(entry: tuple[int, int, int, int]) -> None:
     first_buffer, first_commit, last_commit, last_buffer = entry
     if not first_buffer == first_commit == last_commit == last_buffer:
         raise ValueError(
@@ -139,7 +142,7 @@ def _check_seam_has_a_task_after_it(seam_index: int, window_count: int) -> None:
         )
 
 
-def _seam_edges(seam_indices: tuple) -> tuple:
+def _seam_edges(seam_indices: tuple[int, ...]) -> tuple[tuple[int, int], ...]:
     """Each seam depends on the window before it and the window after it."""
     edges = []
     for seam_index in seam_indices:

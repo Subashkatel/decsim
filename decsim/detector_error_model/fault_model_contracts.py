@@ -50,7 +50,7 @@ _BOTH_REPRESENTATIONS = _GRAPHLIKE_ONLY | _PHYSICAL_ONLY
 class DecoderFaultModelRequirement:
     """The fault representations a decoder needs for one operation's code."""
 
-    representations: frozenset = frozenset()
+    representations: frozenset[FaultRepresentation] = frozenset()
     require_physical_to_graphlike_link: bool = False
 
     def __post_init__(self) -> None:
@@ -81,7 +81,7 @@ LINKED_FAULT_MODELS_REQUIRED = DecoderFaultModelRequirement(
 )
 
 
-def frozen_sparse_columns(value):
+def frozen_sparse_columns(value: object) -> object:
     """`value` as a read-only uint8 csc_matrix with sorted indices.
 
     A dense matrix is converted once; a sparse one is copied so the
@@ -122,8 +122,8 @@ class PlacedFaultModel:
     priors: object
     observables: object
     owned: object
-    source_fault_ids: tuple
-    boundary_flips: dict
+    source_fault_ids: tuple[int, ...]
+    boundary_flips: dict[int, tuple[int, ...]]
 
     def __post_init__(self) -> None:
         frozen_priors = _frozen_array(self.priors)
@@ -153,9 +153,9 @@ class FaultCatalog:
     """
 
     representation: FaultRepresentation
-    detector_sets: tuple
-    observable_sets: tuple
-    priors: tuple
+    detector_sets: tuple[tuple[int, ...], ...]
+    observable_sets: tuple[tuple[int, ...], ...]
+    priors: tuple[float, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -168,9 +168,9 @@ class WindowErrorModel:
     window can see or hand off to its (round, position in round).
     """
 
-    detector_ids: tuple
-    detector_coordinates: Optional[tuple]
-    defect_positions: dict
+    detector_ids: tuple[int, ...]
+    detector_coordinates: Optional[tuple[tuple[float, ...], ...]]
+    defect_positions: dict[int, tuple[int, int]]
     graphlike_faults: Optional[PlacedFaultModel]
     physical_faults: Optional[PlacedFaultModel]
     physical_to_graphlike_detector_projection: Optional[object] = None

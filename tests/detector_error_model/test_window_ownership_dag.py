@@ -106,7 +106,8 @@ def test_no_fault_is_owned_twice_in_a_sandwich_plan():
     assert len(every_owned) == len(set(every_owned))
     first_faults = models[0].require_faults(GRAPHLIKE)
     assert first_faults.check.shape[0] == 20
-    assert sorted(every_owned) == list(range(len(set(every_owned))))
+    # The graphlike catalog of the distance-3, five-round circuit.
+    assert sorted(every_owned) == list(range(142))
 
 
 def test_the_seam_leaves_out_what_its_neighbours_own():

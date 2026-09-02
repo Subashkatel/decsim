@@ -20,13 +20,14 @@ This module reads no Stim object and no window; a decoder outside the
 package can check its own matrices with it.
 """
 
+from collections.abc import Iterable
 from typing import Optional
 
 import numpy
 import scipy.sparse
 
 
-def xor_target_ids(target_ids) -> tuple[int, ...]:
+def xor_target_ids(target_ids: Iterable[int]) -> tuple[int, ...]:
     """The sorted ids that occur an odd number of times."""
     odd_ids: set[int] = set()
     for target_id in target_ids:
@@ -38,7 +39,10 @@ def xor_target_ids(target_ids) -> tuple[int, ...]:
 
 
 def validate_fault_identity(
-    detector_ids, logical_observable_ids, *, location: str
+    detector_ids: Iterable[int],
+    logical_observable_ids: Iterable[int],
+    *,
+    location: str,
 ) -> Optional[tuple[tuple[int, ...], tuple[int, ...]]]:
     """Reduce one fault modulo two; None when it flips nothing.
 
@@ -57,7 +61,10 @@ def validate_fault_identity(
 
 
 def validate_graphlike_fault(
-    detector_ids, logical_observable_ids, *, location: str
+    detector_ids: Iterable[int],
+    logical_observable_ids: Iterable[int],
+    *,
+    location: str,
 ) -> Optional[tuple[tuple[int, ...], tuple[int, ...]]]:
     """Reduce one fault and require at most two detectors."""
     fault = validate_fault_identity(
@@ -75,7 +82,7 @@ def validate_graphlike_fault(
 
 
 def validate_placed_fault_matrices(
-    check, observables, *, location: str
+    check: object, observables: object, *, location: str
 ) -> None:
     """Refuse a column that has lost its logical identity."""
     faults = _placed_matrix_faults(check, observables, location=location)
@@ -87,7 +94,9 @@ def validate_placed_fault_matrices(
         )
 
 
-def validate_graphlike_matrices(check, observables, *, location: str) -> None:
+def validate_graphlike_matrices(
+    check: object, observables: object, *, location: str
+) -> None:
     """Refuse a column a matching decoder cannot represent."""
     faults = _placed_matrix_faults(check, observables, location=location)
     for fault_index, detector_ids, logical_ids in faults:
@@ -99,11 +108,11 @@ def validate_graphlike_matrices(check, observables, *, location: str) -> None:
 
 
 def validate_belief_matching_matrices(
-    check,
-    observables,
-    hyperedge_check,
-    hyperedge_priors,
-    hyperedge_to_edge,
+    check: object,
+    observables: object,
+    hyperedge_check: object,
+    hyperedge_priors: object,
+    hyperedge_to_edge: object,
     *,
     location: str,
 ) -> None:
@@ -298,4 +307,5 @@ def _column_parity(matrix, column_indices):
     chosen = matrix[:, column_indices]
     column_sums = chosen.sum(axis=1)
     flat_sums = numpy.asarray(column_sums)
-    return flat_sums.ravel() % 2
+    flat = flat_sums.ravel()
+    return flat % 2

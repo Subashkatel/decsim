@@ -12,13 +12,14 @@ answers, for each window, which faults its ancestors own, so the slicer
 can leave those out of the window's columns.
 """
 
+from collections.abc import Container
 from typing import Optional
 
-from decsim.detector_error_model import window_slicer
+from decsim.detector_error_model import fault_model_contracts, window_slicer
 
 
 def dependency_depths(
-    window_count: int, dependency_edges: tuple
+    window_count: int, dependency_edges: tuple[tuple[int, int], ...]
 ) -> tuple[int, ...]:
     """Each window's depth in the dependency graph.
 
@@ -43,14 +44,20 @@ def dependency_depths(
 
 
 def dependency_ancestors(
-    window_count: int, dependency_edges: tuple, depths: tuple[int, ...]
+    window_count: int,
+    dependency_edges: tuple[tuple[int, int], ...],
+    depths: tuple[int, ...],
 ) -> tuple[frozenset[int], ...]:
     """Every direct and indirect predecessor of each window."""
     incoming = [set() for _ in range(window_count)]
     for source, destination in dependency_edges:
         incoming[destination].add(source)
     ancestors = [set() for _ in range(window_count)]
-    by_depth = sorted(range(window_count), key=depths.__getitem__)
+
+    def depth_of(window_index: int) -> int:
+        return depths[window_index]
+
+    by_depth = sorted(range(window_count), key=depth_of)
     for destination in by_depth:
         for source in incoming[destination]:
             ancestors[destination].add(source)
@@ -60,11 +67,11 @@ def dependency_ancestors(
 
 def explicit_fault_ownership(
     slicer: window_slicer.WindowSlicer,
-    entries: tuple,
+    entries: tuple[tuple[int, int, int, int], ...],
     depths: tuple[int, ...],
     *,
     round_count: int,
-) -> tuple[dict, ...]:
+) -> tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]:
     """The faults each window owns: the shallowest window it touches.
 
     A plan that covers the whole operation must give every fault an owner.
@@ -86,7 +93,7 @@ def explicit_fault_ownership(
             ownership,
             representation,
             len(catalog.detector_sets),
-            slicer.fault_rounds[representation],
+            slicer.fault_index.fault_rounds[representation],
             windows_by_commit_round,
             depths,
             covers_full_operation,
@@ -95,9 +102,17 @@ def explicit_fault_ownership(
 
 
 def explicit_prior_faults(
-    ownership: tuple, ancestors: tuple[frozenset[int], ...]
-) -> tuple[dict, ...]:
-    """For each window, the faults its ancestors own, by representation."""
+    ownership: tuple[
+        dict[fault_model_contracts.FaultRepresentation, set[int]], ...
+    ],
+    ancestors: tuple[frozenset[int], ...],
+) -> tuple[
+    dict[fault_model_contracts.FaultRepresentation, Container[int]], ...
+]:
+    """For each window, the faults its ancestors own, by representation.
+
+    Each map answers membership only; it holds the owner map, not a set.
+    """
     representations = tuple(ownership[0])
     owner_of_fault = {}
     for representation in representations:

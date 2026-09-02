@@ -1,10 +1,15 @@
 """The decoder-facing records hold what they say and refuse the rest.
 
-Source: PyMatching's from_check_matrix and qLDPC's DetectorErrorModelArrays
-read one column per fault from a check matrix and an observable matrix;
-the records here hand a decoder exactly that, frozen, so a window shared
-between decoders cannot be edited by one of them.
+These tests check the module's own contract: a placed model and a window
+model hand a decoder one column per fault as frozen uint8 csc matrices,
+so a window shared between decoders cannot be edited by one of them; a
+requirement joins with another; the module is a leaf that loads no
+numeric library when it is imported on its own.
 """
+
+import pathlib
+import subprocess
+import sys
 
 import numpy
 import pytest
@@ -14,6 +19,17 @@ from decsim.detector_error_model import fault_model_contracts
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 PHYSICAL = fault_model_contracts.FaultRepresentation.PHYSICAL
+
+LEAF_IMPORT_PROBE = """
+import importlib.util
+import sys
+
+specification = importlib.util.spec_from_file_location("leaf", sys.argv[1])
+module = importlib.util.module_from_spec(specification)
+specification.loader.exec_module(module)
+loaded = sorted(name for name in sys.modules if name in ("numpy", "scipy"))
+print(loaded)
+"""
 
 
 def placed_model():
@@ -51,6 +67,16 @@ def test_a_link_needs_both_representations():
         fault_model_contracts.DecoderFaultModelRequirement(
             only_graphlike, require_physical_to_graphlike_link=True
         )
+
+
+def test_frozen_sparse_columns_never_freezes_the_callers_matrix():
+    original = scipy.sparse.csc_matrix([[1, 0], [0, 1]])
+    frozen = fault_model_contracts.frozen_sparse_columns(original)
+    assert original.data.flags.writeable is True
+    assert frozen.data.flags.writeable is False
+    assert frozen.dtype == numpy.uint8
+    dense = frozen.toarray()
+    assert dense.tolist() == [[1, 0], [0, 1]]
 
 
 def test_a_placed_model_is_frozen_for_every_reader():
@@ -98,6 +124,17 @@ def test_a_window_refuses_a_representation_it_does_not_hold():
     )
     with pytest.raises(ValueError, match="does not contain physical faults"):
         window.require_faults(PHYSICAL)
+
+
+def test_a_window_refuses_a_representation_that_is_not_a_member():
+    placed = placed_model()
+    window = fault_model_contracts.WindowErrorModel(
+        detector_ids=(0, 1),
+        detector_coordinates=None,
+        defect_positions={},
+        graphlike_faults=placed,
+        physical_faults=None,
+    )
     with pytest.raises(TypeError, match="FaultRepresentation"):
         window.require_faults("physical")
 
@@ -119,3 +156,14 @@ def test_a_windows_link_projection_is_frozen_too():
     assert frozen.data.flags.writeable is False
     dense = frozen.toarray()
     assert dense.tolist() == [[1, 1], [0, 1]]
+
+
+def test_importing_the_contract_alone_loads_no_numeric_library():
+    module_path = pathlib.Path(fault_model_contracts.__file__)
+    probe = subprocess.run(
+        [sys.executable, "-c", LEAF_IMPORT_PROBE, str(module_path)],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert probe.stdout.strip() == "[]"

@@ -58,6 +58,14 @@ def kinds_of_round(table, round_index):
     return {recipe.kind for recipe in table.detectors_of_round(round_index)}
 
 
+def empty_packets(table):
+    """One all-zero packet per round, keyed by round."""
+    packets = {}
+    for round_index, width in table.packet_width_by_round.items():
+        packets[round_index] = [0] * width
+    return packets
+
+
 def test_the_table_reads_the_packet_layout_off_a_generated_circuit():
     table = formation_table(4)
     assert table.packet_width_by_round == {1: 8, 2: 8, 3: 8, 4: 17}
@@ -107,6 +115,36 @@ def test_the_reference_parity_is_used_when_the_expected_reading_is_one():
     assert observables == ()
 
 
+def test_observables_come_out_with_the_last_round_and_are_none_before():
+    table = formation_table(4)
+    former = detector_formation.StreamingDetectorFormer(table)
+    packets = empty_packets(table)
+    _, after_first = former.feed_packet(1, packets[1])
+    _, after_second = former.feed_packet(2, packets[2])
+    _, after_third = former.feed_packet(3, packets[3])
+    _, after_last = former.feed_packet(4, packets[4])
+    assert after_first is None
+    assert after_second is None
+    assert after_third is None
+    assert after_last == [(0, 0)]
+
+
+def test_the_record_span_reaches_back_as_far_as_an_observable_reads():
+    circuit = stim.Circuit(
+        "R 0 1\n"
+        "M 0\nDETECTOR(0,0) rec[-1]\n"
+        "M 1\nDETECTOR(0,1) rec[-1]\n"
+        "M 0\nDETECTOR(0,2) rec[-1]\n"
+        "OBSERVABLE_INCLUDE(0) rec[-3] rec[-1]\n"
+    )
+    table = detector_formation.build_formation_table(circuit, 3)
+    former = detector_formation.StreamingDetectorFormer(table)
+    assert table.detectors[2].records == ((3, 0),)
+    assert table.observables[0].records == ((1, 0), (3, 0))
+    assert table.max_record_span == 2
+    assert former.kept_packet_count == 3
+
+
 def test_a_packet_of_the_wrong_width_is_refused():
     table = formation_table(4)
     former = detector_formation.StreamingDetectorFormer(table)
@@ -128,6 +166,43 @@ def test_a_round_count_the_circuit_does_not_announce_is_refused():
     circuit = surface_code_circuit(4)
     with pytest.raises(ValueError, match="asked for 3"):
         detector_formation.build_formation_table(circuit, 3)
+
+
+def test_a_second_group_past_the_last_round_is_refused():
+    circuit = stim.Circuit(
+        "R 0 1 2\n"
+        "M 0\nDETECTOR(0,0) rec[-1]\n"
+        "M 1\nDETECTOR(0,1) rec[-1]\n"
+        "M 2\nDETECTOR(0,1) rec[-1]\n"
+    )
+    with pytest.raises(ValueError, match="announces round 2, .* asked for 1"):
+        detector_formation.build_formation_table(circuit, 1)
+
+
+def test_measurement_blocks_out_of_round_order_are_refused():
+    circuit = stim.Circuit(
+        "R 0 1\nM 0\nDETECTOR(0,1) rec[-1]\nM 1\nDETECTOR(0,0) rec[-1]\n"
+    )
+    with pytest.raises(ValueError, match="not in round order"):
+        detector_formation.build_formation_table(circuit, 2)
+
+
+def test_a_declared_measurement_round_outside_the_operation_is_refused():
+    circuit = stim.Circuit("R 0\nM 0\nDETECTOR(0,0) rec[-1]\n")
+    with pytest.raises(ValueError, match="must lie in 1..round_count"):
+        detector_formation.build_formation_table(
+            circuit, 1, measurement_rounds={0: 2}
+        )
+
+
+def test_declared_measurement_rounds_that_decrease_are_refused():
+    circuit = stim.Circuit(
+        "R 0 1\nM 0\nDETECTOR(0,0) rec[-1]\nM 1\nDETECTOR(0,1) rec[-1]\n"
+    )
+    with pytest.raises(ValueError, match="must be non-decreasing"):
+        detector_formation.build_formation_table(
+            circuit, 2, measurement_rounds={0: 2, 1: 1}
+        )
 
 
 def test_a_declared_detector_round_may_not_precede_its_bits():

@@ -62,11 +62,18 @@ def test_a_declared_map_replaces_the_coordinates():
     circuit = stim.Circuit.generated(
         "repetition_code:memory", distance=3, rounds=2
     )
-    declared = {0: 1, 1: 1, 2: 2, 3: 2, 4: 2, 5: 2}
+    from_coordinates = detector_chronology.resolve_detector_rounds(
+        circuit, None, 2
+    )
+    assert from_coordinates[2] == 2
+    assert from_coordinates[3] == 2
+    declared = {0: 1, 1: 1, 2: 1, 3: 1, 4: 2, 5: 2}
     round_by_detector = detector_chronology.resolve_detector_rounds(
         circuit, declared, 2
     )
     assert round_by_detector == declared
+    by_round = detector_chronology.detectors_by_round(round_by_detector)
+    assert by_round == {1: [0, 1, 2, 3], 2: [4, 5]}
 
 
 def test_a_declared_map_that_misses_a_detector_is_refused():
@@ -88,6 +95,40 @@ def test_a_zero_round_count_is_refused():
     circuit = surface_code_circuit(2)
     with pytest.raises(ValueError, match="round_count must be positive"):
         detector_chronology.resolve_detector_rounds(circuit, None, 0)
+
+
+def test_a_circuit_without_a_detector_is_refused():
+    circuit = stim.Circuit("R 0\nM 0\n")
+    with pytest.raises(ValueError, match="at least one detector"):
+        detector_chronology.resolve_detector_rounds(circuit, None, 1)
+
+
+def test_detectors_with_different_coordinate_arities_are_refused():
+    circuit = stim.Circuit(
+        "R 0 1\nM 0 1\nDETECTOR(0,0,0) rec[-1]\nDETECTOR(0,0) rec[-2]\n"
+    )
+    with pytest.raises(ValueError, match="need one arity"):
+        detector_chronology.resolve_detector_rounds(circuit, None, 1)
+
+
+def test_a_single_coordinate_carries_no_layer_and_is_refused():
+    circuit = stim.Circuit(
+        "R 0 1\nM 0 1\nDETECTOR(0) rec[-1]\nDETECTOR(0) rec[-2]\n"
+    )
+    with pytest.raises(ValueError, match="explicit detector_rounds"):
+        detector_chronology.resolve_detector_rounds(circuit, None, 1)
+
+
+def test_a_layer_that_is_not_an_integer_is_refused():
+    circuit = stim.Circuit("R 0\nM 0\nDETECTOR(0,0.5) rec[-1]\n")
+    with pytest.raises(ValueError, match="must be finite integers"):
+        detector_chronology.resolve_detector_rounds(circuit, None, 1)
+
+
+def test_a_layer_past_the_declared_duration_is_refused():
+    circuit = stim.Circuit("R 0\nM 0\nDETECTOR(0,5) rec[-1]\n")
+    with pytest.raises(ValueError, match="inside the declared source duration"):
+        detector_chronology.resolve_detector_rounds(circuit, None, 1)
 
 
 def test_the_detectors_of_a_round_keep_stims_index_order():

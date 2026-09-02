@@ -27,6 +27,7 @@ side and the whole-shot check.
 
 import dataclasses
 import enum
+from collections.abc import Iterable, Sequence
 from typing import Optional
 
 import stim
@@ -50,9 +51,9 @@ class DetectorRecipe:
     detector_index: int
     round_index: int
     kind: LayerKind
-    records: tuple
+    records: tuple[tuple[int, int], ...]
     reference_parity: int
-    coordinates: tuple
+    coordinates: tuple[float, ...]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -60,7 +61,7 @@ class ObservableRecipe:
     """The bits one logical observable XORs, and their reference parity."""
 
     observable_index: int
-    records: tuple
+    records: tuple[tuple[int, int], ...]
     reference_parity: int
 
 
@@ -77,8 +78,8 @@ class FormationTable:
     round_count: int
     packet_width_by_round: dict[int, int]
     readout_slot_start: Optional[int]
-    detectors: tuple
-    observables: tuple
+    detectors: tuple[DetectorRecipe, ...]
+    observables: tuple[ObservableRecipe, ...]
     max_record_span: int
 
     def detectors_of_round(self, round_index: int) -> list[DetectorRecipe]:
@@ -98,11 +99,11 @@ class FormationTable:
 
 
 def build_formation_table(
-    circuit,
+    circuit: stim.Circuit,
     round_count: int,
     *,
-    measurement_rounds=None,
-    detector_rounds=None,
+    measurement_rounds: Optional[dict[int, int]] = None,
+    detector_rounds: Optional[dict[int, int]] = None,
 ) -> FormationTable:
     """Read the recipe of every detector and observable off the circuit.
 
@@ -148,10 +149,12 @@ class StreamingDetectorFormer:
 
     def __init__(self, table: FormationTable):
         self.table = table
-        self.depth = table.max_record_span + 1
+        self.kept_packet_count = table.max_record_span + 1
         self.packets: dict[int, tuple[int, ...]] = {}
 
-    def feed_packet(self, round_index: int, bits):
+    def feed_packet(
+        self, round_index: int, bits: Iterable[int]
+    ) -> tuple[list[tuple[int, int]], Optional[list[tuple[int, int]]]]:
         """Store one round's packet and form the detectors it completes.
 
         Returns (events, observables): events as (detector index, bit)
@@ -166,7 +169,7 @@ class StreamingDetectorFormer:
                 f"the formation table expects {expected}"
             )
         self.packets[round_index] = packet
-        newest_stale_round = round_index - self.depth
+        newest_stale_round = round_index - self.kept_packet_count
         self._forget_through(newest_stale_round)
         events = [
             (recipe.detector_index, self._form_parity(recipe))
@@ -197,8 +200,8 @@ class StreamingDetectorFormer:
 
 
 def split_measurements_into_packets(
-    table: FormationTable, measurement_row
-) -> dict:
+    table: FormationTable, measurement_row: Sequence[int]
+) -> dict[int, tuple[int, ...]]:
     """Cut one shot's measurement row into per-round packets (the QPU side)."""
     packets = {}
     cursor = 0
@@ -212,7 +215,9 @@ def split_measurements_into_packets(
     return packets
 
 
-def form_shot(table: FormationTable, packets_by_round) -> tuple:
+def form_shot(
+    table: FormationTable, packets_by_round: dict[int, Sequence[int]]
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """Every detector and observable bit of one shot, in index order."""
     former = StreamingDetectorFormer(table)
     detector_bits = [0] * len(table.detectors)
@@ -239,7 +244,7 @@ class _CircuitTables:
 
 
 class _MeasurementRoundReader:
-    """Walks a circuit once and gives each measurement its round.
+    """Gives each measurement its round from one walk over the circuit.
 
     The measurement blocks between two DETECTOR groups belong to the round
     the following group announces (its time coordinate plus one). Blocks
@@ -274,8 +279,9 @@ class _MeasurementRoundReader:
         return self.rounds, self.readout_start
 
     def _note_instruction(self, instruction) -> None:
-        if _measurement_count(instruction):
-            self.pending_count += _measurement_count(instruction)
+        measurement_count = _measurement_count(instruction)
+        if measurement_count:
+            self.pending_count += measurement_count
             return
         if instruction.name == "SHIFT_COORDS":
             self._note_shift(instruction)
@@ -499,7 +505,8 @@ def _note_observable(
     parity_so_far = observable_parity.get(observable_index, 0)
     reference_sum = reference_bits.sum()
     added_parity = int(reference_sum)
-    observable_parity[observable_index] = (parity_so_far + added_parity) % 2
+    total_parity = parity_so_far + added_parity
+    observable_parity[observable_index] = total_parity % 2
 
 
 def _layer_kind_for(record_count: int) -> LayerKind:

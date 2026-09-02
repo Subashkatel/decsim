@@ -1,0 +1,139 @@
+"""Streaming detector formation equals Stim's measurement-to-detector rule.
+
+Source: stim.Circuit.compile_m2d_converter (measurements_to_detection_events):
+a detector is the XOR of the measurement records it names, compared
+against the noiseless reference sample; an observable is the XOR of its
+records the same way. The packet layout follows Stim's generated
+circuits: one measurement block per round, and the final data readout
+folded into the last round's packet after that round's own bits.
+"""
+
+import numpy
+import pytest
+import stim
+
+from decsim.detector_error_model import detector_chronology, detector_formation
+
+
+def surface_code_circuit(rounds):
+    return stim.Circuit.generated(
+        "surface_code:rotated_memory_z",
+        distance=3,
+        rounds=rounds,
+        after_clifford_depolarization=0.01,
+        before_measure_flip_probability=0.01,
+    )
+
+
+def formed_by_decsim(table, measurements):
+    """Every shot formed packet by packet, as uint8 rows."""
+    events = []
+    observables = []
+    for row in measurements:
+        packets = detector_formation.split_measurements_into_packets(table, row)
+        shot_events, shot_observables = detector_formation.form_shot(
+            table, packets
+        )
+        events.append(shot_events)
+        observables.append(shot_observables)
+    return numpy.array(events, dtype=numpy.uint8), numpy.array(
+        observables, dtype=numpy.uint8
+    )
+
+
+def formed_by_stim(circuit, measurements):
+    converter = circuit.compile_m2d_converter()
+    events, observables = converter.convert(
+        measurements=measurements, separate_observables=True
+    )
+    return events.astype(numpy.uint8), observables.astype(numpy.uint8)
+
+
+def formation_table(rounds):
+    circuit = surface_code_circuit(rounds)
+    return detector_formation.build_formation_table(circuit, rounds)
+
+
+def kinds_of_round(table, round_index):
+    return {recipe.kind for recipe in table.detectors_of_round(round_index)}
+
+
+def test_the_table_reads_the_packet_layout_off_a_generated_circuit():
+    table = formation_table(4)
+    assert table.packet_width_by_round == {1: 8, 2: 8, 3: 8, 4: 17}
+    assert table.readout_slot_start == 8
+    assert table.max_record_span == 1
+    assert len(table.detectors) == 32
+    assert len(table.observables) == 1
+
+
+def test_detector_kinds_follow_how_many_records_they_read():
+    table = formation_table(4)
+    assert kinds_of_round(table, 1) == {
+        detector_formation.LayerKind.PREPARATION
+    }
+    assert kinds_of_round(table, 2) == {detector_formation.LayerKind.BULK}
+    assert kinds_of_round(table, 4) == {
+        detector_formation.LayerKind.BULK,
+        detector_formation.LayerKind.READOUT,
+    }
+
+
+def test_the_tables_rounds_are_the_chronologys_rounds():
+    circuit = surface_code_circuit(4)
+    table = detector_formation.build_formation_table(circuit, 4)
+    resolved = detector_chronology.resolve_detector_rounds(circuit, None, 4)
+    assert table.detector_rounds() == resolved
+
+
+def test_streaming_formation_equals_stims_converter_on_sampled_shots():
+    circuit = surface_code_circuit(4)
+    table = detector_formation.build_formation_table(circuit, 4)
+    sampler = circuit.compile_sampler(seed=7)
+    measurements = sampler.sample(64)
+    decsim_events, decsim_observables = formed_by_decsim(table, measurements)
+    stim_events, stim_observables = formed_by_stim(circuit, measurements)
+    assert numpy.array_equal(decsim_events, stim_events)
+    assert numpy.array_equal(decsim_observables, stim_observables)
+    assert decsim_events.any()
+
+
+def test_the_reference_parity_is_used_when_the_expected_reading_is_one():
+    circuit = stim.Circuit("R 0\nX 0\nM 0\nDETECTOR rec[-1]\n")
+    table = detector_formation.build_formation_table(circuit, 1)
+    assert table.detectors[0].reference_parity == 1
+    events, observables = detector_formation.form_shot(table, {1: (1,)})
+    assert events == (0,)
+    assert observables == ()
+
+
+def test_a_packet_of_the_wrong_width_is_refused():
+    table = formation_table(4)
+    former = detector_formation.StreamingDetectorFormer(table)
+    with pytest.raises(ValueError, match="packet has 3 bits"):
+        former.feed_packet(1, [0, 1, 0])
+
+
+def test_the_former_keeps_only_the_packets_a_recipe_can_reach():
+    table = formation_table(4)
+    former = detector_formation.StreamingDetectorFormer(table)
+    empty_packet = [0] * 8
+    former.feed_packet(1, empty_packet)
+    former.feed_packet(2, empty_packet)
+    former.feed_packet(3, empty_packet)
+    assert set(former.packets) == {2, 3}
+
+
+def test_a_round_count_the_circuit_does_not_announce_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(ValueError, match="asked for 3"):
+        detector_formation.build_formation_table(circuit, 3)
+
+
+def test_a_declared_detector_round_may_not_precede_its_bits():
+    circuit = surface_code_circuit(4)
+    too_early = dict.fromkeys(range(32), 1)
+    with pytest.raises(ValueError, match="arrives in round"):
+        detector_formation.build_formation_table(
+            circuit, 4, detector_rounds=too_early
+        )

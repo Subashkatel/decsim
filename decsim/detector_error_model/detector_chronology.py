@@ -1,90 +1,137 @@
-"""Detector chronology and addressing.
+"""Which round each detector belongs to, and where it sits in that round.
 
-Resolves one-based emitted rounds from a circuit or a supplied mapping, assigns
-stable within-round positions, and projects all-or-nothing row coordinates.
+decsim numbers rounds from one. A detector belongs to the round whose
+measurement packet completes it. Stim's generated circuits carry the round
+in the last detector coordinate (Stim, doc/file_format_stim_circuit.md,
+DETECTOR and SHIFT_COORDS): layer 0 holds the detectors compared against
+the prepared state, layer t the ones formed after round t, and the final
+data readout adds one more layer. Layer t therefore becomes round t + 1,
+and the readout layer folds into the last round, which is where the
+formation table and the window slicer expect it. A front end whose
+schedule differs declares the map itself.
 
-Leaf module: it imports nothing from this package.
-
-Package-internal seams: _detector_position_in_round and _coordinates_for_rows
-are imported by window_slicer.
+Inside a round, detectors keep Stim's index order; the decoders' syndrome
+rows follow that order.
 """
-
-from __future__ import annotations
 
 import math
 from typing import Optional
 
 
-def resolve_detector_rounds(circuit, detector_rounds: Optional[dict],
-                            round_count: int) -> dict[int, int]:
-    """Resolve one finite source into decsim's one-based emitted rounds.
+def resolve_detector_rounds(
+    circuit, detector_rounds: Optional[dict], round_count: int
+) -> dict[int, int]:
+    """The round of every detector, declared or read off the coordinates.
 
-    Without a map, accept Stim repetition or decsim surface/toric coordinates.
+    Raises ValueError unless the map covers every detector exactly once
+    with rounds inside 1..round_count.
     """
     if round_count < 1:
         raise ValueError("round_count must be positive")
     detector_count = circuit.num_detectors
     if detector_count < 1:
-        raise ValueError("finite-memory chronology requires at least one detector")
-
+        raise ValueError(
+            "finite-memory chronology requires at least one detector"
+        )
     if detector_rounds is None:
-        coordinates = circuit.get_detector_coordinates()
-        arities = {len(coordinates.get(detector_id, ()))
-                   for detector_id in range(detector_count)}
-        if len(arities) != 1:
-            raise ValueError("finite-memory detector coordinates need one arity")
-        coordinate_arity = next(iter(arities))
-        # Stim repetition coordinates have arity 2; surface/toric
-        # coordinates have arity >= 3.
-        if coordinate_arity < 2:
-            raise ValueError(
-                "finite-memory chronology requires supported coordinates or "
-                "explicit detector_rounds"
-            )
-        raw_layers = {}
-        for detector_id in range(detector_count):
-            raw_value = coordinates[detector_id][-1]
-            if not math.isfinite(raw_value) or raw_value != int(raw_value):
-                raise ValueError("finite-memory detector layers must be finite integers")
-            raw_layer = int(raw_value)
-            raw_layers[detector_id] = raw_layer
-        allowed_layers = set(range(round_count + 1))
-        if not set(raw_layers.values()) <= allowed_layers:
-            raise ValueError(
-                "raw detector layers must lie inside the declared source duration"
-            )
-        resolved = {
-            detector_id: (
-                round_count if raw_layer == round_count else raw_layer + 1
-            )
-            for detector_id, raw_layer in raw_layers.items()
-        }
+        resolved = _rounds_from_coordinates(
+            circuit, detector_count, round_count
+        )
     else:
         resolved = dict(detector_rounds)
-
-    if set(resolved) != set(range(detector_count)):
+    every_detector = set(range(detector_count))
+    if set(resolved) != every_detector:
         raise ValueError("detector-round map must cover every detector exactly")
-    if not set(resolved.values()) <= set(range(1, round_count + 1)):
-        raise ValueError("detector-round map must lie inside the emitted rounds")
+    after_last_round = round_count + 1
+    emitted_rounds = set(range(1, after_last_round))
+    resolved_rounds = resolved.values()
+    if not set(resolved_rounds) <= emitted_rounds:
+        raise ValueError(
+            "detector-round map must lie inside the emitted rounds"
+        )
     return resolved
 
 
-def _detector_position_in_round(round_of: dict) -> dict:
-    """Return detector id -> index within its round, using Stim detector order."""
-    detectors_by_round: dict = {}
-    for detector_id in sorted(round_of):
-        round_index = round_of[detector_id]
-        detectors_by_round.setdefault(round_index, []).append(detector_id)
-    return {detector_id: index
-            for detectors in detectors_by_round.values()
-            for index, detector_id in enumerate(detectors)}
+def detectors_by_round(round_by_detector: dict) -> dict[int, list[int]]:
+    """Each round's detectors in Stim index order."""
+    grouped: dict[int, list[int]] = {}
+    for detector_id in sorted(round_by_detector):
+        round_index = round_by_detector[detector_id]
+        detectors = grouped.setdefault(round_index, [])
+        detectors.append(detector_id)
+    return grouped
 
 
-def _coordinates_for_rows(detector_coordinates: dict, rows: list[int]):
-    """Return real circuit coordinates only when every local row has them."""
-    if any(not detector_coordinates.get(detector_id) for detector_id in rows):
-        return None
-    return tuple(
-        tuple(float(value) for value in detector_coordinates[detector_id])
-        for detector_id in rows
-    )
+def detector_position_in_round(round_by_detector: dict) -> dict[int, int]:
+    """Each detector's position among its round's detectors."""
+    grouped = detectors_by_round(round_by_detector)
+    position_by_detector = {}
+    for detectors in grouped.values():
+        for position, detector_id in enumerate(detectors):
+            position_by_detector[detector_id] = position
+    return position_by_detector
+
+
+def coordinates_for_rows(
+    detector_coordinates: dict, rows: list[int]
+) -> Optional[tuple]:
+    """Stim's coordinates for `rows`, or None when any row has none."""
+    for detector_id in rows:
+        if not detector_coordinates.get(detector_id):
+            return None
+    coordinates = []
+    for detector_id in rows:
+        row_coordinates = detector_coordinates[detector_id]
+        coordinates.append(tuple(float(value) for value in row_coordinates))
+    return tuple(coordinates)
+
+
+def _rounds_from_coordinates(
+    circuit, detector_count: int, round_count: int
+) -> dict[int, int]:
+    coordinates = circuit.get_detector_coordinates()
+    arities = set()
+    for detector_id in range(detector_count):
+        detector_coordinates = coordinates.get(detector_id, ())
+        arities.add(len(detector_coordinates))
+    if len(arities) != 1:
+        raise ValueError("finite-memory detector coordinates need one arity")
+    coordinate_arity = next(iter(arities))
+    # Stim's repetition code writes two coordinates, the surface and toric
+    # codes three or more; the round is the last one either way.
+    if coordinate_arity < 2:
+        raise ValueError(
+            "finite-memory chronology requires supported coordinates or "
+            "explicit detector_rounds"
+        )
+    layer_by_detector = {}
+    for detector_id in range(detector_count):
+        layer_by_detector[detector_id] = _layer_of(coordinates[detector_id])
+    after_last_round = round_count + 1
+    allowed_layers = set(range(after_last_round))
+    layers = layer_by_detector.values()
+    if not set(layers) <= allowed_layers:
+        raise ValueError(
+            "raw detector layers must lie inside the declared source duration"
+        )
+    resolved = {}
+    for detector_id, layer in layer_by_detector.items():
+        resolved[detector_id] = _round_of_layer(layer, round_count)
+    return resolved
+
+
+def _layer_of(detector_coordinates) -> int:
+    raw_value = detector_coordinates[-1]
+    if not math.isfinite(raw_value) or raw_value != int(raw_value):
+        raise ValueError(
+            "finite-memory detector layers must be finite integers"
+        )
+    return int(raw_value)
+
+
+def _round_of_layer(layer: int, round_count: int) -> int:
+    # Layer t is formed after round t; the readout layer, one past the
+    # last round, folds into the last round.
+    if layer == round_count:
+        return round_count
+    return layer + 1

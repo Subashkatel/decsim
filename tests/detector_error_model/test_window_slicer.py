@@ -380,3 +380,29 @@ def test_explicit_owner_and_prior_maps_must_come_together():
             is_last=False,
             explicitly_owned_faults={GRAPHLIKE: set()},
         )
+
+
+def test_the_terminal_window_owns_the_front_buffer_faults_nobody_committed():
+    slicer = surface_code_slicer(4)
+    slicer.slice_window(1, 1, 1, 1, is_last=False)
+    # Commit rounds 3 and 4 reach the last round; the front buffer at
+    # round 2 holds faults no window committed, and nothing comes after.
+    last = slicer.slice_window(2, 3, 4, 4, is_last=True)
+    faults = last.require_faults(GRAPHLIKE)
+    assert last.detector_ids == tuple(range(4, 32))
+    assert len(faults.source_fault_ids) == 94
+    assert faults.owned.sum() == 94
+    # Fault 5 flips detector 4 only, a round-2 detector.
+    assert faults.source_fault_ids[0] == 5
+    assert faults.owned[0]
+
+
+def test_a_window_not_marked_terminal_leaves_its_front_buffer_unowned():
+    slicer = surface_code_slicer(4)
+    slicer.slice_window(1, 1, 1, 1, is_last=False)
+    last = slicer.slice_window(2, 3, 4, 4, is_last=False)
+    faults = last.require_faults(GRAPHLIKE)
+    assert len(faults.source_fault_ids) == 94
+    assert faults.owned.sum() == 80
+    assert faults.source_fault_ids[0] == 5
+    assert not faults.owned[0]

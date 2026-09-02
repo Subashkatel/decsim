@@ -316,7 +316,10 @@ def _excluded_faults(
     return excluded_faults
 
 
-def _owner_by_fault(ownership: Sequence, representation) -> dict[int, int]:
+def _owner_by_fault(
+    ownership: Sequence,
+    representation: fault_model_contracts.FaultRepresentation,
+) -> dict[int, int]:
     """Which window owns each fault of one representation."""
     owner_by_fault = {}
     for window_index, owned in enumerate(ownership):

@@ -866,13 +866,31 @@ _RULE_BY_PATH = {
 
 
 def _as_whole_number(value, name: str) -> int:
-    """A count or index as an exact int; 3.0 is fine, 3.5 and NaN are not."""
+    """A count or index as an exact int, or a ValueError naming the field.
+
+    3.0 is fine; 3.5, NaN, None, a list and a bool are not.
+    """
+    whole = _whole_number_or_none(value)
+    if whole is None:
+        raise ValueError(f"{name} must be a finite whole number")
+    return whole
+
+
+def _whole_number_or_none(value) -> Optional[int]:
+    """The value as an exact Python int, or None when it is not one.
+
+    A bool (Python's or numpy's) is not a count, whatever int() makes
+    of it.
+    """
+    value_type = type(value)
+    if value_type.__name__ in ("bool", "bool_"):
+        return None
     try:
         whole = int(value)
-    except (OverflowError, ValueError) as error:
-        raise ValueError(f"{name} must be a finite whole number") from error
+    except (OverflowError, ValueError, TypeError):
+        return None
     if whole != value:
-        raise ValueError(f"{name} must be a finite whole number")
+        return None
     return whole
 
 
@@ -979,15 +997,10 @@ def _checked_request(
 def _as_count(value) -> Optional[int]:
     """The value as a Python int when it is whole and not negative, else None.
 
-    A bool is not a count.
+    None is the answer, not a refusal; the caller phrases the refusal.
     """
-    if isinstance(value, bool):
-        return None
-    try:
-        whole = _as_whole_number(value, "count")
-    except ValueError:
-        return None
-    if whole < 0:
+    whole = _whole_number_or_none(value)
+    if whole is None or whole < 0:
         return None
     return whole
 

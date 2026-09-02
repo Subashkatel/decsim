@@ -358,7 +358,9 @@ def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():
     bounded_card = card(cwb=buffer_edge)
     model = bounded_card.build()
     attribution = round_attribution(1)
-    with pytest.raises(RuntimeError, match="bounded"):
+    with pytest.raises(
+        RuntimeError, match="a bounded wire needs a size to serialize"
+    ):
         model.reserve(
             links.LinkPath.CWB,
             payload_bits=None,
@@ -1225,3 +1227,47 @@ def test_the_controller_to_strong_buffer_path_accepts_a_round():
     assert (reservation.send_ticks, reservation.total_delay_ticks) == (80, 3)
     snapshot = model.snapshot()
     assert snapshot.transfers[0].path is links.LinkPath.CSB
+
+
+def test_an_unset_tick_is_refused_with_the_request_tick_sentence():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = round_attribution(1)
+    with pytest.raises(
+        RuntimeError, match="a request tick is a whole number, not negative"
+    ):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=8,
+            now_ticks=None,
+            attribution=attribution,
+        )
+
+
+def test_a_list_payload_is_refused_with_the_payload_sentence():
+    complete_card = card()
+    model = complete_card.build()
+    attribution = round_attribution(1)
+    with pytest.raises(
+        RuntimeError, match="a payload is a whole number of bits, not negative"
+    ):
+        model.reserve(
+            links.LinkPath.QC,
+            payload_bits=[8],
+            now_ticks=0,
+            attribution=attribution,
+        )
+
+
+def test_an_unset_latency_is_refused_with_the_field_named():
+    with pytest.raises(
+        ValueError, match="propagation_latency_ticks must be a finite whole"
+    ):
+        links.LinkConfig(None, None, "test")
+
+
+def test_the_wire_refuses_a_bool_payload():
+    channel = unbounded_channel(0)
+    link = links.Link(channel)
+    with pytest.raises(ValueError, match="payload_bits must be a finite whole"):
+        link.reserve(payload_bits=True, now_ticks=0)

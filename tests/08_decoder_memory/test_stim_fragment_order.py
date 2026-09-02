@@ -134,7 +134,7 @@ def test_stim_round_packets_carry_raw_bits_that_form_the_model_row_block() -> No
     device = StimDevice(detector_rounds={operation.id: detector_rounds}, seed=11)
 
     device.begin_operation(operation, ROUND_COUNT, ROUND_COUNT)
-    table = device._tables[operation.id]
+    table = device._table_by_key[operation.id]
 
     for round_index, detector_ids in rows_by_round.items():
         (payload,) = device.round_payloads(operation, round_index)
@@ -175,8 +175,8 @@ def test_terminal_fragment_carries_the_readout_bits_after_the_ancilla_bits() -> 
 
     ordinary_bits = tuple(int(bit) for bit in ordinary_payload.bits)
     terminal_bits = tuple(int(bit) for bit in terminal_payload.bits)
-    table = device._tables[STREAM_ID]
-    last_packet = tuple(int(bit) for bit in device._packets[STREAM_ID][ROUND_COUNT])
+    table = device._table_by_key[STREAM_ID]
+    last_packet = tuple(int(bit) for bit in device._packets_by_key[STREAM_ID][ROUND_COUNT])
     assert ordinary_bits == last_packet[:table.readout_slot_start]
     assert terminal_bits == last_packet[table.readout_slot_start:]
     assert len(ordinary_bits) == DISTANCE - 1      # ancilla qubits of the repetition code
@@ -263,8 +263,8 @@ def test_qpu_stamps_fragment_slots_in_detector_row_order_end_to_end() -> None:
         for readout in reversed(final_round_readouts)
         for bit in readout.bits
     )
-    device = qpu.model
-    last_packet = tuple(int(bit) for bit in device._packets[STREAM_ID][ROUND_COUNT])
+    device = qpu.syndrome_source
+    last_packet = tuple(int(bit) for bit in device._packets_by_key[STREAM_ID][ROUND_COUNT])
     assert ordered_bits == last_packet
     assert swapped_bits != last_packet
     for round_index in range(1, ROUND_COUNT):

@@ -253,7 +253,7 @@ def link_model(config: ExperimentConfig):
 
 def code_model(config: ExperimentConfig, distance: int) -> SurfaceCodeModel:
     return SurfaceCodeModel(
-        d=distance,
+        distance=distance,
         commit_rounds_override=config.windowing.commit_rounds,
         buffer_rounds_override=config.windowing.buffer_rounds)
 

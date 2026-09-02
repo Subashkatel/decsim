@@ -1,18 +1,8 @@
-"""Stim circuit generators for surface, toric, and repetition codes.
+"""Stim circuit generators vendored from Oscar Higgott's stimcircuits.
 
-Vendored third-party code, not decsim's own authorship:
-  Copyright 2022 Oscar Higgott. Licensed under the Apache License, Version 2.0 (see LICENSE).
-  Source: https://github.com/oscarhiggott/stimcircuits.
-  Full provenance and local packaging notes are in NOTICE.md.
-
-Exposes ``generate_circuit(code_task, distance=..., rounds=..., ...)`` returning a
-``stim.Circuit`` for tasks such as "surface_code:rotated_memory_x",
-"toric_code:unrotated_memory_x", or "repetition_code:memory". stim circuits are a clean,
-well-tested substrate, so decsim uses them directly for code/noise generation.
-
-Requires the optional ``stim`` dependency.
+Copyright 2022 Oscar Higgott, Apache License 2.0; the license and the
+provenance notes are LICENSE and NOTICE.md in this folder. surface_code.py
+is the vendored generator; noise.py holds decsim's noise presets on top
+of it. Nothing in decsim calls either: every caller builds its circuit
+with stim.Circuit.generated.
 """
-from .surface_code import generate_circuit
-from .noise import NoiseModel
-
-__all__ = ["generate_circuit", "NoiseModel"]

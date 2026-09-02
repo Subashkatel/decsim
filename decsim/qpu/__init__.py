@@ -1,5 +1,10 @@
-"""The QPU: the QEC cycle clock that produces one syndrome round per cycle on
-every live patch (cycle_clock), the syndrome sources (syndrome_devices,
-stim_device), the code cards and layouts (code_geometry, layouts), how long
-each operation occupies the QPU (round_policies), the magic-state factories
-(magic_state_factories) and the surface-code circuit generators (stimcircuits)."""
+"""The QPU: its cycle clock, syndrome sources, code cards and factories.
+
+cycle_clock runs one QEC cycle clock and emits one syndrome round per
+cycle on every live patch; syndrome_devices and stim_device are the
+syndrome sources it drives; code_geometry holds the code cards and
+layouts the patch-to-code map; round_policies say how many rounds an
+operation occupies; magic_state_factories supply the magic states that
+non-Clifford operations wait for; stimcircuits is a vendored copy of
+Oscar Higgott's surface-code circuit generator.
+"""

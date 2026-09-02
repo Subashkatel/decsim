@@ -11,7 +11,7 @@ and n/2 Z checks; Skoric 2209.08552 and Tan PRX Quantum 4, 040344 for the
 
 import pytest
 
-from decsim.qpu.code_geometry import BBCodeModel, SurfaceCodeModel
+import decsim.qpu.code_geometry as code_geometry
 
 stim = pytest.importorskip("stim")
 
@@ -32,37 +32,57 @@ def stim_counts(distance):
 
 
 def test_a_distance_three_patch_has_eight_stabilizers_and_nine_data_qubits():
-    card = SurfaceCodeModel(distance=3)
+    card = code_geometry.SurfaceCodeModel(distance=3)
     assert stim_counts(3) == (8, 9)
     assert card.syndrome_bits_per_round(1) == 8
     assert card.spatial_nodes(1) == 9
 
 
 def test_a_distance_five_patch_has_24_stabilizers_and_25_data_qubits():
-    card = SurfaceCodeModel(distance=5)
+    card = code_geometry.SurfaceCodeModel(distance=5)
     assert stim_counts(5) == (24, 25)
     assert card.syndrome_bits_per_round(1) == 24
     assert card.spatial_nodes(1) == 25
 
 
 def test_two_patches_add_a_seam_of_d_nodes_and_double_the_syndrome():
-    card = SurfaceCodeModel(distance=3)
+    card = code_geometry.SurfaceCodeModel(distance=3)
     assert card.spatial_nodes(2) == 21
     assert card.syndrome_bits_per_round(2) == 16
 
 
-def test_the_surface_card_windows_default_to_the_distance():
-    card = SurfaceCodeModel(distance=5)
+def test_the_surface_card_logical_cycle_is_d_rounds():
+    card = code_geometry.SurfaceCodeModel(distance=5)
     assert card.rounds_per_logical_cycle() == 5
+
+
+def test_the_surface_card_commits_d_rounds_per_window():
+    card = code_geometry.SurfaceCodeModel(distance=5)
     assert card.commit_rounds() == 5
+
+
+def test_the_surface_card_buffers_d_rounds_per_window():
+    card = code_geometry.SurfaceCodeModel(distance=5)
     assert card.buffer_rounds() == 5
+
+
+def test_the_surface_card_window_floor_is_d_by_d():
+    card = code_geometry.SurfaceCodeModel(distance=5)
     assert card.buffering_floor() == (5, 5)
+
+
+def test_the_surface_card_has_no_cadence_of_its_own_by_default():
+    card = code_geometry.SurfaceCodeModel(distance=5)
     assert card.round_period_us() is None
+
+
+def test_the_surface_card_is_named_by_its_distance():
+    card = code_geometry.SurfaceCodeModel(distance=5)
     assert card.name == "rotated surface code (d=5)"
 
 
 def test_the_gross_code_card_reads_out_all_144_checks_per_round():
-    card = BBCodeModel()
+    card = code_geometry.BivariateBicycleCodeModel()
     assert (card.qubit_count, card.logical_qubit_count, card.distance) == (
         144,
         12,
@@ -75,7 +95,7 @@ def test_the_gross_code_card_reads_out_all_144_checks_per_round():
 
 
 def test_a_card_cadence_is_kept_as_a_float():
-    card = SurfaceCodeModel(distance=3, round_microseconds=1)
+    card = code_geometry.SurfaceCodeModel(distance=3, round_microseconds=1)
     period = card.round_period_us()
     assert period == 1.0
     assert type(period) is float
@@ -83,9 +103,11 @@ def test_a_card_cadence_is_kept_as_a_float():
 
 def test_an_odd_qubit_count_is_refused_for_a_bicycle_code():
     with pytest.raises(ValueError, match="qubit_count must be even"):
-        BBCodeModel(qubit_count=143)
+        code_geometry.BivariateBicycleCodeModel(qubit_count=143)
 
 
 def test_a_blank_window_floor_justification_is_refused():
     with pytest.raises(ValueError, match="non-empty"):
-        SurfaceCodeModel(distance=3, window_floor_justification=" ")
+        code_geometry.SurfaceCodeModel(
+            distance=3, window_floor_justification=" "
+        )

@@ -9,7 +9,10 @@ merge, per split, and per operation) and Litinski (arXiv 1808.02892v3,
 one time step of d code cycles).
 """
 
+from typing import Optional
+
 import decsim.message as message
+import decsim.protocols as protocols
 
 
 class FixedRounds:
@@ -19,7 +22,9 @@ class FixedRounds:
         round_count = int(round_count)
         self.round_count = _at_least_one_round(round_count, "FixedRounds")
 
-    def rounds_for(self, operation, code) -> int:
+    def rounds_for(
+        self, operation: message.Operation, code: protocols.CodeModel
+    ) -> int:
         """The fixed count."""
         del operation, code
         return self.round_count
@@ -33,7 +38,11 @@ class PerOperationRounds:
     without occupying the QPU.
     """
 
-    def __init__(self, rounds_by_operation: dict, fallback=None):
+    def __init__(
+        self,
+        rounds_by_operation: dict,
+        fallback: Optional[protocols.RoundsPolicy] = None,
+    ):
         self.rounds_by_operation = {}
         rounds_by_operation = dict(rounds_by_operation)
         for operation_id, round_count in rounds_by_operation.items():
@@ -45,7 +54,9 @@ class PerOperationRounds:
         if fallback is None:
             self.fallback = CodeRounds()
 
-    def rounds_for(self, operation, code) -> int:
+    def rounds_for(
+        self, operation: message.Operation, code: protocols.CodeModel
+    ) -> int:
         """The operation's own count, or the fallback policy's."""
         if operation.id in self.rounds_by_operation:
             return self.rounds_by_operation[operation.id]
@@ -58,7 +69,9 @@ class CodeRounds:
     def __init__(self, scale: float = 1.0):
         self.scale = scale
 
-    def rounds_for(self, operation, code) -> int:
+    def rounds_for(
+        self, operation: message.Operation, code: protocols.CodeModel
+    ) -> int:
         """The scaled logical cycle, rounded, never below one."""
         del operation
         base_rounds = code.rounds_per_logical_cycle()
@@ -71,31 +84,33 @@ class GateRounds:
     """Lattice-surgery round counts by operation kind, proportional to d.
 
     A measurement or an injection costs one round; a merge costs
-    merge_steps steps of d rounds; idle and memory cost d rounds; a generic
-    operation on two or more qubits counts as a merge, on one qubit as
-    memory. The default merge_steps of two, the qubit-count convention for
-    GENERIC, and the one-round MEASURE and INJECT cost are project
-    coefficients that the cited sections do not establish.
+    merge_step_count steps of d rounds; idle and memory cost d rounds; a
+    generic operation on two or more qubits counts as a merge, on one qubit
+    as memory. The default merge_step_count of two, the qubit-count
+    convention for GENERIC, and the one-round MEASURE and INJECT cost are
+    project coefficients that the cited sections do not establish.
     """
 
-    def __init__(self, merge_steps: int = 2):
-        merge_steps = int(merge_steps)
-        self.merge_steps = _at_least_one_round(
-            merge_steps, "GateRounds.merge_steps"
+    def __init__(self, merge_step_count: int = 2):
+        merge_step_count = int(merge_step_count)
+        self.merge_step_count = _at_least_one_round(
+            merge_step_count, "GateRounds.merge_step_count"
         )
 
-    def rounds_for(self, operation, code) -> int:
+    def rounds_for(
+        self, operation: message.Operation, code: protocols.CodeModel
+    ) -> int:
         """The kind's cost in rounds of the code's distance."""
         distance = code.distance
         kind = getattr(operation, "kind", message.OpKind.GENERIC)
         if kind is message.OpKind.MEASURE or kind is message.OpKind.INJECT:
             return 1
         if kind is message.OpKind.MERGE:
-            return self.merge_steps * distance
+            return self.merge_step_count * distance
         if kind in (message.OpKind.IDLE, message.OpKind.MEMORY):
             return distance
         if len(operation.qubits) >= 2:
-            return self.merge_steps * distance
+            return self.merge_step_count * distance
         return distance
 
 
@@ -107,7 +122,11 @@ class TemporalRounds:
     says (GateRounds by default).
     """
 
-    def __init__(self, temporal_distance: int, base=None):
+    def __init__(
+        self,
+        temporal_distance: int,
+        base: Optional[protocols.RoundsPolicy] = None,
+    ):
         temporal_distance = int(temporal_distance)
         self.temporal_distance = _at_least_one_round(
             temporal_distance, "TemporalRounds.temporal_distance"
@@ -116,7 +135,9 @@ class TemporalRounds:
         if base is None:
             self.base = GateRounds()
 
-    def rounds_for(self, operation, code) -> int:
+    def rounds_for(
+        self, operation: message.Operation, code: protocols.CodeModel
+    ) -> int:
         """The temporal distance for surgery, else the base policy's count."""
         kind = getattr(operation, "kind", message.OpKind.GENERIC)
         is_merge = kind is message.OpKind.MERGE

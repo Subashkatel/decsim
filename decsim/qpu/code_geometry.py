@@ -81,16 +81,18 @@ class SurfaceCodeModel:
         seam_nodes = 0
         if num_patches > 1:
             seam_nodes = self.distance
-        return num_patches * nodes_per_patch + seam_nodes
+        patch_nodes = num_patches * nodes_per_patch
+        return patch_nodes + seam_nodes
 
     def syndrome_bits_per_round(self, num_patches: int) -> int:
         """Bits read out per round: the d*d - 1 stabilizers of every patch."""
-        stabilizer_count = self.distance * self.distance - 1
+        qubit_count = self.distance * self.distance
+        stabilizer_count = qubit_count - 1
         return num_patches * stabilizer_count
 
 
 @dataclasses.dataclass(frozen=True)
-class BBCodeModel:
+class BivariateBicycleCodeModel:
     """Timing and sizing card of one bivariate-bicycle CSS code.
 
     One modeled round is one complete extraction cycle: n/2 X checks and

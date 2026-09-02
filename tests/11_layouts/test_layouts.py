@@ -191,7 +191,7 @@ def test_codes_returns_a_fresh_list_without_mutating_the_layout():
 
 
 def test_removed_aliases_and_operation_annotations_stay_absent():
-    """Deleted aliases and concrete operation annotations do not return."""
+    """Deleted aliases do not return; the hooks take the planning view."""
     layout = UniformLayout(SurfaceCodeModel(distance=3))
 
     assert not hasattr(UniformLayout, "name")
@@ -207,7 +207,7 @@ def test_removed_aliases_and_operation_annotations_stay_absent():
         parameter = inspect.signature(getattr(UniformLayout, method_name)).parameters[
             parameter_name
         ]
-        assert parameter.annotation is inspect.Parameter.empty
+        assert parameter.annotation is OperationPlanningView
     assert UniformLayout.resources_for.__doc__ == "Return one qubit exclusivity claim."
 
 

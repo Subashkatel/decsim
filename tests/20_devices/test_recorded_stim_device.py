@@ -51,3 +51,31 @@ def test_detector_rounds_from_concatenated_coordinates():
     """)
     rounds = RecordedStimDevice.detector_rounds_from_coordinates(circuit, 3)
     assert rounds == {0: 1, 1: 2, 2: 3, 3: 3}
+
+
+def test_sliding_windows_match_qldpc_shot_for_shot(recorded):
+    """decsim's sliding windows and qLDPC's SlidingWindowDecoder are two
+    implementations of the overlapping-recovery rule (Dennis et al.
+    quant-ph/0110143; Skoric et al. 2209.08552). Fed the same shots, the
+    same geometry (window = commit + buffer, stride = commit), the same round
+    grouping and PyMatching with parallel faults merged as independent
+    errors, they must predict identically on every shot."""
+    qldpc_decoders = pytest.importorskip("qldpc.decoders")
+    import numpy as np
+    from decsim.detector_error_model.detector_chronology import resolve_detector_rounds
+    circuit, measurements, dets, obs, _ = recorded
+    rounds, distance = 9, 3
+    round_of_detector = resolve_detector_rounds(circuit, None, rounds)
+    reference = qldpc_decoders.SlidingWindowDecoder(
+        window_size=2 * distance, stride=distance,
+        detector_to_time=lambda detector: int(round_of_detector[detector]),
+        decompose_errors=True, with_MWPM=True, merge_strategy="independent",
+    ).compile_decoder_for_dem(circuit.detector_error_model(decompose_errors=True))
+    reference_predictions = reference.decode_shots(dets.astype(np.uint8))
+    op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
+    for shot in range(len(dets)):
+        result = RunSpec(ops=[op], d=distance, rounds_policy=FixedRounds(rounds),
+                         device=RecordedStimDevice(measurements, shot),
+                         decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)),
+                         seed=shot).build().result.operation_results[0]
+        assert result.logical_observables == tuple(int(b) for b in reference_predictions[shot])

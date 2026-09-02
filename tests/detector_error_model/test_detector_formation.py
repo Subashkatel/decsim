@@ -228,3 +228,77 @@ def test_a_declared_detector_round_outside_the_operation_is_refused():
         detector_formation.build_formation_table(
             circuit, 4, detector_rounds=past_the_end
         )
+
+
+def test_an_observables_reference_parity_is_the_noiseless_reading_of_its_bits():
+    circuit = stim.Circuit(
+        "R 0\nX 0\nM 0\nDETECTOR rec[-1]\nOBSERVABLE_INCLUDE(0) rec[-1]\n"
+    )
+    table = detector_formation.build_formation_table(circuit, 1)
+    assert table.observables[0].reference_parity == 1
+    events, observables = detector_formation.form_shot(table, {1: (1,)})
+    assert events == (0,)
+    assert observables == (0,)
+
+
+def test_a_declared_detector_round_equal_to_its_arrival_round_is_accepted():
+    circuit = surface_code_circuit(4)
+    from_the_circuit = detector_formation.build_formation_table(circuit, 4)
+    arrival_rounds = from_the_circuit.detector_rounds()
+    declared = detector_formation.build_formation_table(
+        circuit, 4, detector_rounds=arrival_rounds
+    )
+    assert arrival_rounds[4] == 2
+    assert declared.detectors[4].round_index == 2
+    assert declared.detector_rounds() == arrival_rounds
+
+
+def test_a_declared_detector_round_after_its_bits_is_what_the_recipe_uses():
+    circuit = surface_code_circuit(4)
+    from_the_circuit = detector_formation.build_formation_table(circuit, 4)
+    later = from_the_circuit.detector_rounds()
+    later[4] = 3
+    later[12] = 4
+    table = detector_formation.build_formation_table(
+        circuit, 4, detector_rounds=later
+    )
+    third_round = table.detectors_of_round(3)
+    assert table.detectors[4].round_index == 3
+    assert table.detectors[4].records == ((2, 0), (1, 0))
+    assert table.detectors[12].round_index == 4
+    assert len(third_round) == 8
+    assert third_round[0].detector_index == 4
+    assert third_round[1].detector_index == 13
+    assert table.max_record_span == 2
+
+
+def test_a_round_count_past_the_rounds_the_circuit_announces_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(
+        ValueError,
+        match=r"announces rounds \[1, 2, 3, 4, 5\], formation table was "
+        "asked for 6",
+    ):
+        detector_formation.build_formation_table(circuit, 6)
+
+
+def test_a_zero_round_count_is_refused():
+    circuit = surface_code_circuit(4)
+    with pytest.raises(ValueError, match="round_count must be positive"):
+        detector_formation.build_formation_table(circuit, 0)
+
+
+def test_a_measurement_round_map_that_misses_a_measurement_is_refused():
+    circuit = stim.Circuit("R 0 1\nM 0 1\nDETECTOR(0,0) rec[-1] rec[-2]\n")
+    with pytest.raises(ValueError, match="cover every measurement exactly"):
+        detector_formation.build_formation_table(
+            circuit, 1, measurement_rounds={0: 1}
+        )
+
+
+def test_a_detector_round_map_that_misses_a_detector_is_refused():
+    circuit = surface_code_circuit(2)
+    with pytest.raises(ValueError, match="cover every detector exactly"):
+        detector_formation.build_formation_table(
+            circuit, 2, detector_rounds={0: 1}
+        )

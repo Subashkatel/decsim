@@ -1377,7 +1377,7 @@ def test_require_faults_returns_or_fails_at_the_consuming_boundary():
     with pytest.raises(ValueError) as missing:
         window.require_faults(PHYSICAL)
     assert "window model does not contain physical faults" in str(missing.value)
-    with pytest.raises(TypeError) as wrong_type:
+    with pytest.raises(ValueError) as wrong_type:
         window.require_faults("graphlike")
     assert "representation must be a FaultRepresentation value" in str(wrong_type.value)
 
@@ -1433,7 +1433,7 @@ def test_detectors_in_window_selects_rows_by_round():
 
 
 def test_fault_columns_are_touching_columns_not_committed_elsewhere():
-    """Candidate columns are those touching the window minus the columns a prior window committed; a candidate list restricts the search."""
+    """The window's columns are the candidate faults the slicer found touching its rows, minus the columns a prior window committed."""
     assert window_placement._fault_columns_for_window([0, 1, 2], set()) == [0, 1, 2]
     assert window_placement._fault_columns_for_window([0, 1, 2], {1, 2}) == [0]
     assert window_placement._fault_columns_for_window([1, 3], set()) == [1, 3]
@@ -1859,12 +1859,12 @@ def test_explicit_owner_and_predecessor_maps_come_together():
         detector_rounds=dict(CHAIN_DETECTOR_ROUNDS),
         fault_model_requirement=GRAPHLIKE_REQUIREMENT,
     )
-    with pytest.raises(ValueError) as failure:
+    with pytest.raises(RuntimeError) as failure:
         slicer.slice_window(
             1, 1, 2, 2, is_last=False, explicitly_owned_faults={GRAPHLIKE: set()}
         )
     assert "must be supplied together" in str(failure.value)
-    with pytest.raises(ValueError):
+    with pytest.raises(RuntimeError):
         slicer.slice_window(
             1, 1, 2, 2, is_last=False, explicitly_prior_faults={GRAPHLIKE: set()}
         )
@@ -1951,17 +1951,11 @@ def isolated_slicer():
     )
 
 
-def test_uncovered_fault_raises_only_when_the_plan_covers_the_operation():
-    """A fault touching no commit region raises for a full plan and is left unowned for a partial one."""
-    full_entries = ((1, 1, 1, 1), (3, 4, 4, 4))
-    with pytest.raises(ValueError) as failure:
-        window_ownership_dag.explicit_fault_ownership(
-            isolated_slicer(), full_entries, (0, 1), round_count=CHAIN_ROUND_COUNT
-        )
-    assert "touches no window commit region" in str(failure.value)
+def test_uncovered_fault_is_left_unowned_by_a_partial_plan():
+    """A fault touching no commit region of a partial plan is left unowned."""
     partial_entries = ((3, 3, 3, 3), (4, 4, 4, 4))
     ownership = window_ownership_dag.explicit_fault_ownership(
-        isolated_slicer(), partial_entries, (0, 1), round_count=CHAIN_ROUND_COUNT
+        isolated_slicer(), partial_entries, (0, 1)
     )
     assert ownership == ({GRAPHLIKE: {1}}, {GRAPHLIKE: set()})
 

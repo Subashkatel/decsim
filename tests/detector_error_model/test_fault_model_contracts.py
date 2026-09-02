@@ -70,8 +70,11 @@ def test_a_link_needs_both_representations():
 
 
 def test_frozen_sparse_columns_never_freezes_the_callers_matrix():
-    original = scipy.sparse.csc_matrix([[1, 0], [0, 1]])
+    # Already uint8 csc, so nothing but an explicit copy separates the
+    # frozen matrix from the caller's.
+    original = scipy.sparse.csc_matrix([[1, 0], [0, 1]], dtype=numpy.uint8)
     frozen = fault_model_contracts.frozen_sparse_columns(original)
+    assert frozen is not original
     assert original.data.flags.writeable is True
     assert frozen.data.flags.writeable is False
     assert frozen.dtype == numpy.uint8
@@ -135,7 +138,7 @@ def test_a_window_refuses_a_representation_that_is_not_a_member():
         graphlike_faults=placed,
         physical_faults=None,
     )
-    with pytest.raises(TypeError, match="FaultRepresentation"):
+    with pytest.raises(ValueError, match="FaultRepresentation"):
         window.require_faults("physical")
 
 

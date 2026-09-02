@@ -45,7 +45,7 @@ class CanonicalErrorComponent:
 
 @dataclasses.dataclass(frozen=True)
 class CanonicalErrorInstruction:
-    """One Stim error: its whole identity and its components."""
+    """One Stim error: its whole identity, then its components."""
 
     error_ordinal: int
     probability: float
@@ -207,7 +207,7 @@ class _TargetSplitter:
         self.all_detectors: list[int] = []
         self.all_logicals: list[int] = []
 
-    def note(self, target) -> None:
+    def note(self, target: stim.DemTarget) -> None:
         """Place one target in the current component."""
         if target.is_separator():
             self._close_component()
@@ -339,7 +339,14 @@ def _check_every_fault_is_graphlike(
         )
 
 
-def _prepare_linked_fault_catalogs(decomposed_model, undecomposed_model):
+def _prepare_linked_fault_catalogs(
+    decomposed_model: stim.DetectorErrorModel,
+    undecomposed_model: stim.DetectorErrorModel,
+) -> tuple[
+    fault_model_contracts.FaultCatalog,
+    fault_model_contracts.FaultCatalog,
+    scipy.sparse.csc_matrix,
+]:
     """Both catalogs and the graphlike-by-physical link between them.
 
     A physical mechanism is keyed by its whole identity and by its
@@ -392,7 +399,7 @@ def _mechanisms_by_key(decomposed_model) -> dict:
 
 def _physical_catalog_and_link(
     mechanisms: dict, column_by_identity: dict, graphlike_count: int
-) -> tuple:
+) -> tuple[fault_model_contracts.FaultCatalog, scipy.sparse.csc_matrix]:
     """The physical catalog and its link: a one per graphlike component."""
     physical_detector_sets = []
     physical_observable_sets = []

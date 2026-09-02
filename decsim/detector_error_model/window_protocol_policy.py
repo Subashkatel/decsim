@@ -61,11 +61,9 @@ def validate_window_protocol(
     if window_protocol is not message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE:
         raise ValueError("unsupported window protocol")
     seam_indices = tuple(range(1, len(entries), 2))
-    graphlike_only = frozenset(
-        {fault_model_contracts.FaultRepresentation.GRAPHLIKE}
-    )
     is_graphlike_only = (
-        fault_model_requirement.representations == graphlike_only
+        fault_model_requirement.representations
+        == fault_model_contracts.GRAPHLIKE_ONLY
     )
     if seam_indices and not is_graphlike_only:
         raise ValueError(

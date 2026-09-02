@@ -1,7 +1,7 @@
 """Decides which window owns each fault when windows form a dependency graph.
 
 A parallel window plan (Tan et al. 2209.09219; Skoric et al. 2209.08552,
-section III) decodes some windows first and lets the windows between them
+section I.C) decodes some windows first and lets the windows between them
 wait for both neighbours' committed corrections. The plan says so with
 edges from a window to the windows that depend on it. This module checks
 that those edges form an acyclic graph, gives every window a depth (zero
@@ -69,24 +69,17 @@ def explicit_fault_ownership(
     slicer: window_slicer.WindowSlicer,
     entries: tuple[tuple[int, int, int, int], ...],
     depths: tuple[int, ...],
-    *,
-    round_count: int,
 ) -> tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]:
     """The faults each window owns: the shallowest window it touches.
 
-    A plan that covers the whole operation must give every fault an owner.
-    Raises ValueError for a fault with no owner or with two owners of the
-    same depth.
+    A fault outside every commit round of the plan has no owner, which is
+    how a plan covers part of an operation. Raises ValueError for a fault
+    with two owners of the same depth.
     """
     ownership = [
         {representation: set() for representation in slicer.catalogs}
         for _ in entries
     ]
-    first_commit_round = entries[0][1]
-    last_commit_round = entries[-1][2]
-    covers_full_operation = (
-        first_commit_round == 1 and last_commit_round == round_count
-    )
     windows_by_commit_round = _windows_by_commit_round(entries)
     for representation, catalog in slicer.catalogs.items():
         _assign_owners(
@@ -96,7 +89,6 @@ def explicit_fault_ownership(
             slicer.fault_index.fault_rounds[representation],
             windows_by_commit_round,
             depths,
-            covers_full_operation,
         )
     return tuple(ownership)
 
@@ -143,7 +135,7 @@ class _AncestorOwnedFaults:
         self.owner_of_fault = owner_of_fault
         self.ancestor_indices = ancestor_indices
 
-    def __contains__(self, fault_index) -> bool:
+    def __contains__(self, fault_index: object) -> bool:
         owner = self.owner_of_fault.get(fault_index)
         return owner in self.ancestor_indices
 
@@ -184,12 +176,11 @@ def _windows_by_commit_round(entries: tuple) -> dict[int, list[int]]:
 
 def _assign_owners(
     ownership: list,
-    representation,
+    representation: fault_model_contracts.FaultRepresentation,
     fault_count: int,
     fault_rounds: tuple,
     windows_by_commit_round: dict,
     depths: tuple,
-    covers_full_operation: bool,
 ) -> None:
     """Record the owner of every fault of one representation."""
     for fault_index in range(fault_count):
@@ -199,7 +190,6 @@ def _assign_owners(
             windows_by_commit_round,
             depths,
             representation,
-            covers_full_operation,
         )
         if owner is None:
             continue
@@ -211,8 +201,7 @@ def _owner_window(
     rounds: tuple,
     windows_by_commit_round: dict,
     depths: tuple,
-    representation,
-    covers_full_operation: bool,
+    representation: fault_model_contracts.FaultRepresentation,
 ) -> Optional[int]:
     """The shallowest window whose commit rounds the fault touches."""
     candidates = set()
@@ -220,11 +209,6 @@ def _owner_window(
         windows = windows_by_commit_round.get(round_index, ())
         candidates.update(windows)
     if not candidates:
-        if covers_full_operation:
-            raise ValueError(
-                f"{representation.value} fault {fault_index} touches no "
-                "window commit region"
-            )
         return None
     earliest_depth = min(depths[index] for index in candidates)
     earliest = [

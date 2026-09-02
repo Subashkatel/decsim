@@ -46,7 +46,7 @@ class LayerKind(enum.Enum):
 
 @dataclasses.dataclass(frozen=True)
 class DetectorRecipe:
-    """The bits one detector XORs, and the parity they should give."""
+    """What one detector XORs, starting from its reference parity."""
 
     detector_index: int
     round_index: int
@@ -58,7 +58,7 @@ class DetectorRecipe:
 
 @dataclasses.dataclass(frozen=True)
 class ObservableRecipe:
-    """The bits one logical observable XORs, and their reference parity."""
+    """What one logical observable XORs, starting from its reference parity."""
 
     observable_index: int
     records: tuple[tuple[int, int], ...]
@@ -67,7 +67,7 @@ class ObservableRecipe:
 
 @dataclasses.dataclass(frozen=True)
 class FormationTable:
-    """Every recipe of one circuit, and the packet layout they read.
+    """Every recipe read off one circuit, over its packet layout.
 
     `packet_width_by_round` is the raw bit count of each round's packet.
     `readout_slot_start` is the slot where the folded data readout begins
@@ -249,7 +249,7 @@ def _circuit_tables(
     declared_rounds = None
     if detector_rounds is not None:
         declared_rounds = _declared_detector_rounds(
-            detector_rounds, round_count
+            detector_rounds, circuit.num_detectors, round_count
         )
     reference_sample = circuit.reference_sample()
     coordinates = circuit.get_detector_coordinates()
@@ -262,14 +262,17 @@ def _circuit_tables(
 
 
 def _declared_detector_rounds(
-    detector_rounds: dict[int, int], round_count: int
+    detector_rounds: dict[int, int], detector_count: int, round_count: int
 ) -> dict[int, int]:
-    """The declared map, refused unless every round lies in 1..round_count.
+    """The declared map, checked as detector_chronology checks it.
 
-    The same law detector_chronology.resolve_detector_rounds applies: a
-    detector declared past the last round would never be formed.
+    It covers every detector exactly once, with every round inside
+    1..round_count; a detector declared past the last round would never
+    be formed.
     """
     declared = dict(detector_rounds)
+    if set(declared) != set(range(detector_count)):
+        raise ValueError("detector-round map must cover every detector exactly")
     after_last_round = round_count + 1
     emitted_rounds = set(range(1, after_last_round))
     declared_rounds = declared.values()
@@ -297,7 +300,7 @@ class _MeasurementRoundReader:
         self.readout_start: Optional[int] = None
         self.folded_group_count = 0
 
-    def read(self, circuit) -> tuple[list[int], Optional[int]]:
+    def read(self, circuit: stim.Circuit) -> tuple[list[int], Optional[int]]:
         """The round of every measurement, and where the readout starts."""
         for instruction in _flat_instructions(circuit):
             self._note_instruction(instruction)
@@ -405,7 +408,9 @@ def _decreases(values: list[int]) -> bool:
 
 
 def _round_of_each_measurement(
-    circuit, round_count: int, measurement_rounds
+    circuit: stim.Circuit,
+    round_count: int,
+    measurement_rounds: Optional[dict[int, int]],
 ) -> tuple[list[int], Optional[int]]:
     """One round per absolute measurement index, and the readout start.
 
@@ -417,6 +422,10 @@ def _round_of_each_measurement(
     measurement_count = 0
     for instruction in _flat_instructions(circuit):
         measurement_count += _measurement_count(instruction)
+    if set(measurement_rounds) != set(range(measurement_count)):
+        raise ValueError(
+            "measurement-round map must cover every measurement exactly"
+        )
     rounds = [
         int(measurement_rounds[index]) for index in range(measurement_count)
     ]
@@ -429,7 +438,11 @@ def _round_of_each_measurement(
     return rounds, None
 
 
-def _measurement_packets(circuit, round_count: int, measurement_rounds):
+def _measurement_packets(
+    circuit: stim.Circuit,
+    round_count: int,
+    measurement_rounds: Optional[dict[int, int]],
+) -> tuple[dict[int, tuple[int, int]], dict[int, int], Optional[int]]:
     """Each measurement's (round, slot), each packet's width, readout start."""
     rounds, readout_start = _round_of_each_measurement(
         circuit, round_count, measurement_rounds
@@ -454,11 +467,11 @@ def _read_recipes(circuit, tables: _CircuitTables) -> tuple[list, list]:
     detectors: list[DetectorRecipe] = []
     observable_records: dict[int, list] = {}
     observable_parity: dict[int, int] = {}
-    measurements_so_far = 0
+    measurement_count_so_far = 0
     for instruction in _flat_instructions(circuit):
         if instruction.name == "DETECTOR":
             recipe = _detector_recipe(
-                tables, instruction, len(detectors), measurements_so_far
+                tables, instruction, len(detectors), measurement_count_so_far
             )
             detectors.append(recipe)
             continue
@@ -466,12 +479,12 @@ def _read_recipes(circuit, tables: _CircuitTables) -> tuple[list, list]:
             _note_observable(
                 tables,
                 instruction,
-                measurements_so_far,
+                measurement_count_so_far,
                 observable_records,
                 observable_parity,
             )
             continue
-        measurements_so_far += _measurement_count(instruction)
+        measurement_count_so_far += _measurement_count(instruction)
     observables = []
     for index in sorted(observable_records):
         records = tuple(observable_records[index])
@@ -481,10 +494,11 @@ def _read_recipes(circuit, tables: _CircuitTables) -> tuple[list, list]:
     return detectors, observables
 
 
-def _absolute_indices(instruction, measurements_so_far: int) -> list[int]:
+def _absolute_indices(instruction, measurement_count_so_far: int) -> list[int]:
     """The absolute measurement indices an instruction's lookbacks name."""
     return [
-        measurements_so_far + offset for offset in _record_offsets(instruction)
+        measurement_count_so_far + offset
+        for offset in _record_offsets(instruction)
     ]
 
 
@@ -492,9 +506,9 @@ def _detector_recipe(
     tables: _CircuitTables,
     instruction,
     detector_index: int,
-    measurements_so_far: int,
+    measurement_count_so_far: int,
 ) -> DetectorRecipe:
-    absolute_indices = _absolute_indices(instruction, measurements_so_far)
+    absolute_indices = _absolute_indices(instruction, measurement_count_so_far)
     records = tuple(
         tables.packet_of_measurement[index] for index in absolute_indices
     )
@@ -527,14 +541,14 @@ def _detector_recipe(
 def _note_observable(
     tables: _CircuitTables,
     instruction,
-    measurements_so_far: int,
+    measurement_count_so_far: int,
     observable_records: dict,
     observable_parity: dict,
 ) -> None:
     """Add one OBSERVABLE_INCLUDE's bits to its observable's recipe."""
     arguments = instruction.gate_args_copy()
     observable_index = int(arguments[0])
-    absolute_indices = _absolute_indices(instruction, measurements_so_far)
+    absolute_indices = _absolute_indices(instruction, measurement_count_so_far)
     records = observable_records.setdefault(observable_index, [])
     for index in absolute_indices:
         records.append(tables.packet_of_measurement[index])

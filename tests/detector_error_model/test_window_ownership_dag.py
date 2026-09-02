@@ -2,7 +2,7 @@
 
 Sources: Tan et al. 2209.09219 (the sandwich decoder: type-1 windows
 decode first, a type-2 seam between two of them waits for both) and
-Skoric et al. 2209.08552, section III (layer A windows commit first,
+Skoric et al. 2209.08552, section I.C (layer A windows commit first,
 layer B windows are decoded once their neighbours have committed). The
 owner of a fault is the shallowest window whose commit rounds it touches;
 two candidates of the same depth leave the fault without a causal owner.
@@ -89,6 +89,15 @@ def test_ancestors_include_indirect_predecessors():
     assert ancestors == (frozenset(), frozenset({0}), frozenset({0, 1}))
 
 
+def test_ancestors_are_found_when_the_deeper_window_has_the_lower_index():
+    depths = window_ownership_dag.dependency_depths(3, ((2, 1), (1, 0)))
+    ancestors = window_ownership_dag.dependency_ancestors(
+        3, ((2, 1), (1, 0)), depths
+    )
+    assert depths == (2, 1, 0)
+    assert ancestors == (frozenset({1, 2}), frozenset({2}), frozenset())
+
+
 def test_no_fault_is_owned_twice_in_a_sandwich_plan():
     circuit = surface_code_circuit(5)
     models = window_model_builders.build_window_error_models(
@@ -101,8 +110,13 @@ def test_no_fault_is_owned_twice_in_a_sandwich_plan():
         closed_temporal_boundary_windows=(1,),
         window_protocol=message.WindowProtocol.TAN_ZERO_SEAM_GRAPHLIKE,
     )
-    owners = [owned_faults(model) for model in models]
-    every_owned = sum(owners, [])
+    before_owns = owned_faults(models[0])
+    seam_owns = owned_faults(models[1])
+    after_owns = owned_faults(models[2])
+    every_owned = before_owns + seam_owns + after_owns
+    assert len(before_owns) == 48
+    assert len(seam_owns) == 14
+    assert len(after_owns) == 80
     assert len(every_owned) == len(set(every_owned))
     first_faults = models[0].require_faults(GRAPHLIKE)
     assert first_faults.check.shape[0] == 20

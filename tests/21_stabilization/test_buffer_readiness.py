@@ -10,8 +10,8 @@ import pytest
 from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
 from decsim.links.link_profiles import logical_reference_profile
-from decsim.links.links import TrafficAttribution
-from decsim.message import DecoderTier, RetainedSyndromeFragment, SyndromeRoundPacket
+from decsim.message import (DecoderTier, RetainedSyndromeFragment,
+                            SyndromeRoundPacket, TransferAttribution)
 from decsim.syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
 
 
@@ -116,7 +116,8 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
 def test_sb1_gap_cannot_be_served(fabric):
     """A missing interior round is never hidden by the stored-through
     counter: exact reads refuse."""
-    sb1 = SyndromeBuffer1(Engine(), logical_reference_profile().build())
+    engine = Engine()
+    sb1 = SyndromeBuffer1(engine, logical_reference_profile().build(engine))
     sb1.register_hold("reader", [(1, 1), (1, 2), (1, 3)])
 
     def write(round_index):
@@ -125,7 +126,7 @@ def test_sb1_gap_cannot_be_served(fabric):
             bits=(1,), size_bits=1, fragment_index=0)
         sb1.write(SyndromeRoundPacket(1, round_index, (fragment,)),
                   packet_bits=1,
-                  attribution=TrafficAttribution(
+                  attribution=TransferAttribution(
                       operation_id=1, patch_ids=(0,), window_id=None,
                       first_round=round_index, last_round=round_index))
 
@@ -134,7 +135,7 @@ def test_sb1_gap_cannot_be_served(fabric):
     assert sb1.rounds_arrived[1] == 3          # the max counter reads 3
     assert sb1.retained_fragments((1, 2)) is None
     with pytest.raises(RuntimeError, match="not stored in syndrome buffer 1"):
-        sb1.ready_tick([(1, 2)])
+        sb1.check_rounds_stored([(1, 2)])
 
 
 def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):

@@ -130,7 +130,7 @@ def test_real_manager_constructs_with_segment_delivery_state_in_its_owner():
         retain_strong_context=False,
         escalation_policy=SimpleNamespace(
             primary_tier=DecoderTier.WEAK),
-        submit_fn=lambda job, reserve_transfer=None: None,
+        submit_fn=lambda job, send_input=None: None,
         check_strong_route=lambda weak_job, strong_job: None,
         on_workload_complete=lambda: None,
     )
@@ -642,7 +642,7 @@ def test_courier_ignores_a_stale_delivery_and_releases_the_edge_once():
                        deps=[(1, 0)], deps_remaining=1)
     checks = []
     manager = SimpleNamespace(
-        engine=engine, links=logical_reference_profile().build(),
+        engine=engine, links=logical_reference_profile().build(engine),
         windows={(1, 0): source, (1, 1): dependent}, absorbed_windows=set(),
         window_interaction=DefaultWindowInteraction(), window_models={},
         _ops={1: op}, rounds_for=lambda operation: 20, release_service=None,

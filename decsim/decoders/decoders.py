@@ -1,6 +1,6 @@
 """Decoder models and routing helpers.
 
-Every decoder here implements the Decoder protocol (protocols.py):
+Every decoder here implements the Decoder port (ports.py):
 ``latency(job)`` prices one window-job's compute as a service time in ticks
 (the manager dispatches the job to a free unit and schedules completion that
 many ticks later), and ``decode(job)`` produces the DecodeResult. Timing-only
@@ -38,7 +38,7 @@ SAMPLED_CONFIDENCE_SOURCE = SoftOutputSource(
 )
 
 if TYPE_CHECKING:
-    from ..protocols import Decoder
+    from ..ports import Decoder
 
 
 def _check_probability(value, field_name: str) -> float:

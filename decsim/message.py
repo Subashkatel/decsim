@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
 
 def is_stable_string(value: Any) -> bool:
@@ -541,7 +541,7 @@ class DecodeJob:
     payloads: list = field(default_factory=list)   # transfer-source view; cleared after materialization
     decoder_input: Optional[Any] = None             # materialized decoder memory value
     input_hold: Optional[Any] = None                # upstream hold released at transfer completion
-    reserve_transfer: Optional[Callable[[], int]] = None   # called at dispatch: reserve the input link, return its delay in ticks
+    send_input: Optional[Callable[[Callable[[], None]], int]] = None   # called at dispatch: send the input link, call back at the landing, return the expected delay in ticks
     unit: Optional[int] = None                     # decoder unit assigned at dispatch
     memory: Optional[Any] = None                   # that unit's DecoderMemory while it holds this job's input
     ready_time: int = 0                      # tick the job was enqueued (queue-wait accounting)
@@ -645,6 +645,112 @@ class DecodeOutcome:
 
     job: DecodeJob
     result: DecodeResult
+
+
+# -------------------------------------------------------------------- links
+
+
+class LinkPath(str, Enum):
+    """The hops of the reaction path, one per pair of components, in the
+    order the reports list them."""
+
+    QC = "qc"      # QPU to controller: syndrome readout leaving the QPU
+    CWB = "cwb"    # controller to syndrome buffer 0, a published round (optional)
+    WBD = "wbd"    # weak buffer to weak decoder: a window, or a feedback-memory round
+    WSD = "wsd"    # weak decoder to strong decoder: the escalation of a window
+    SBD = "sbd"    # strong buffer to strong decoder: the strong window's input
+    WDO = "wdo"    # weak decoder to Pauli frame: the weak correction
+    DD = "dd"      # decoder to decoder: a committed window boundary
+    DO = "do"      # strong decoder to Pauli frame: the strong correction
+    OC = "oc"      # Pauli frame to controller: the conditional release
+    CQ = "cq"      # controller to QPU: the instruction back to the QPU
+    CSB = "csb"    # controller to syndrome buffer 1, the room-side write (optional)
+
+
+@dataclass(frozen=True)
+class RequestTransferRelation:
+    """Provenance tying one transfer to the decoder request it serves."""
+
+    request_key: DecoderRequestKey
+
+
+@dataclass(frozen=True)
+class BoundaryTransferRelation:
+    """Provenance tying one decoder-to-decoder transfer to the boundary it
+    delivers: from which window, produced by which request, to which
+    window, and both revisions."""
+
+    source_request_key: DecoderRequestKey
+    source_window_key: tuple
+    destination_window_key: tuple
+    source_revision: int
+    delivery_revision: int
+
+
+@dataclass(frozen=True)
+class TransferAttribution:
+    """Whose transfer this is: the operation, its patches, the window or
+    the inclusive round range the bits belong to, and the relation the
+    path's rule asks for."""
+
+    # An operation id is whatever the front end chose; the links never
+    # look inside it.
+    operation_id: Any
+    patch_ids: tuple
+    window_id: Optional[int]
+    first_round: Optional[int]
+    last_round: Optional[int]
+    relation: Optional[
+        Union[RequestTransferRelation, BoundaryTransferRelation]
+    ] = None
+
+
+class PayloadSelection(Enum):
+    """Where a transfer's payload size came from."""
+
+    ACTUAL = "actual"
+    CONFIGURED_DEFAULT = "configured_default"
+    UNRESOLVED = "unresolved"
+
+
+@dataclass(frozen=True)
+class Transfer:
+    """One transfer's timing on its channel, complete at delivery.
+
+    The sender asked at request_ticks. The setup ended at send_ticks, when
+    the transfer reached the wire's queue; the wire took it at
+    serializer_start_ticks and let its last bit go at
+    serializer_end_ticks; the receiver has it at delivery_ticks, one
+    propagation later. total_delay_ticks counts from the request.
+    """
+
+    payload_bits: Optional[int]
+    request_ticks: int
+    setup_ticks: int
+    send_ticks: int
+    queue_wait_ticks: int
+    serialization_ticks: int
+    propagation_ticks: int
+    serializer_start_ticks: int
+    serializer_end_ticks: int
+    delivery_ticks: int
+    total_delay_ticks: int
+    physical_sequence: int
+
+
+@dataclass(frozen=True)
+class TransferRecord:
+    """One ledger entry: which path, on which channel, for whom, with
+    which payload, and the transfer it got. request_sequence orders the
+    ledger by request, whatever order the wires delivered."""
+
+    request_sequence: int
+    path: LinkPath
+    channel: str
+    attribution: TransferAttribution
+    payload_selection: PayloadSelection
+    payload_source: Optional[str]
+    transfer: Transfer
 
 
 # ---------------------------------------------------------------- resources

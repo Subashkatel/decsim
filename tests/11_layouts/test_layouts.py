@@ -10,7 +10,7 @@ from decsim.qpu.code_geometry import SurfaceCodeModel
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.qpu.layouts import UniformLayout
 from decsim.message import Operation, OperationPlanningView, ResourceClaim
-from decsim.protocols import CodeModel, LayoutModel
+from decsim.ports import CodeModel, LayoutModel
 from decsim.run_spec import RunSpec
 
 

@@ -17,8 +17,7 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from ..links.links import LinkPath, TrafficAttribution
-from ..message import SyndromeRoundPacket
+from ..message import LinkPath, SyndromeRoundPacket, TransferAttribution
 from .syndrome_buffer import SyndromeBuffer
 
 
@@ -55,12 +54,12 @@ class SyndromeBuffer1:
     # ------------------------------------------------------------- writes
 
     def write(self, packet: SyndromeRoundPacket, *, packet_bits: Optional[int],
-              attribution: TrafficAttribution) -> None:
+              attribution: TransferAttribution) -> None:
         """The dual write: one csb crossing, then the round is stored.
 
-        Capacity is checked before the link reservation, counting writes
-        still in flight, so a refused write leaves no trace on the
-        serializer or the store."""
+        Capacity is checked before the send, counting writes still in
+        flight, so a refused write leaves no trace on the wire or the
+        store."""
         operation_id = packet.operation_id
         identity = (operation_id, packet.round_index)
         if identity in self._written:
@@ -75,27 +74,18 @@ class SyndromeBuffer1:
                     f"{occupied + self._in_flight_writes + 1} rounds exceed "
                     f"{self.capacity_rounds}")
         self._written.add(identity)
-        csb_is_priced = LinkPath.CSB in self.links.paths
-        if not csb_is_priced:
-            self.copied_bits_total += packet_bits or 0
-            self._store(packet)
-            return
-        reservation = self.links.reserve(
-            LinkPath.CSB, payload_bits=packet_bits,
-            now_ticks=self.engine.now, attribution=attribution)
-        self.copied_bits_total += reservation.payload_bits or 0
-        delay_ticks = reservation.total_delay_ticks
-        if delay_ticks == 0:
+        self.copied_bits_total += packet_bits or 0
+        if not self.links.is_wired(LinkPath.CSB):
             self._store(packet)
             return
         self._in_flight_writes += 1
 
-        def land() -> None:
+        def land(_transfer) -> None:
             self._in_flight_writes -= 1
             self._store(packet)
 
-        self.engine.schedule(delay_ticks, land,
-                             label="csb -> syndrome buffer 1")
+        self.links.send(LinkPath.CSB, packet_bits, self.engine.now,
+                        attribution, land)
 
     def _store(self, packet: SyndromeRoundPacket) -> None:
         admission = self.store.accept_packed_round(
@@ -128,17 +118,14 @@ class SyndromeBuffer1:
     def publication_tick(self, round_identity) -> Optional[int]:
         return self.store.publication_tick(round_identity)
 
-    def ready_tick(self, round_identities) -> int:
-        """Latest room-side arrival of the listed rounds; a round not stored
-        raises, it is never silently served early."""
-        latest = 0
+    def check_rounds_stored(self, round_identities) -> None:
+        """A strong input reads only rounds that have landed here; a round
+        not stored raises, it is never silently served early."""
         for identity in round_identities:
             tick = self.store.publication_tick(identity)
             if tick is None:
                 raise RuntimeError(
                     f"round {identity!r} is not stored in syndrome buffer 1")
-            latest = max(latest, tick)
-        return latest
 
     # -------------------------------------------------------------- holds
 

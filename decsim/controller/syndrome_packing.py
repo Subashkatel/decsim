@@ -11,16 +11,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
-from typing import Optional
+from typing import Callable, Optional
 
+from ..links.fabric import LinkFabric
 from ..links.link_profiles import logical_reference_profile
-from ..links.links import LinkModel, LinkPath, TrafficAttribution
 from ..syndrome_buffer.syndrome_buffer import SyndromeBuffer
 from ..message import (
+    LinkPath,
     RetainedSyndromeFragment,
     SyndromePacketRoute,
     SyndromePacketRouteKind,
     SyndromeRoundPacket,
+    TransferAttribution,
     same_stable_identity,
     stable_identity_order_key,
 )
@@ -145,7 +147,7 @@ class _PackingContext:
 
 class SyndromePacking:
     def __init__(
-        self, engine, links: Optional[LinkModel] = None, t_pack: int = 0,
+        self, engine, links: Optional[LinkFabric] = None, t_pack: int = 0,
         log_syndromes: bool = True, *, packing_context_capacity: Optional[int],
         window_input_receiver, feedback_memory_receiver,
         syndrome_buffer: Optional[SyndromeBuffer] = None,
@@ -160,7 +162,9 @@ class SyndromePacking:
         # timing-only or synthetic sources
         self.detector_formation = detector_formation
         self.engine = engine
-        self.links = links if links is not None else logical_reference_profile().build()
+        self.links = links
+        if links is None:
+            self.links = logical_reference_profile().build(engine)
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes
         # assembly workspace: how many rounds may be in flight through this
@@ -210,8 +214,6 @@ class SyndromePacking:
             fragment.round_index, fragment.patch_id, route.kind.name))
         attribution = self._round_attribution(
             fragment.operation_id, (fragment.patch_id,), fragment.round_index)
-        qc_delay = self._reserve(LinkPath.QC, payload_bits=payload.size_bits,
-                                 attribution=attribution)
 
         def receive():
             self._receive_fragment(fragment, fragment_count, route)
@@ -223,7 +225,8 @@ class SyndromePacking:
                 self.engine.schedule(processing_ticks, receive,
                                      label="controller-binary-availability")
 
-        self.engine.schedule(qc_delay, at_controller, label="qpu->controller-readout")
+        self._send(LinkPath.QC, payload_bits=payload.size_bits,
+                   attribution=attribution, on_delivered=at_controller)
 
     def _receive_fragment(self, fragment: RetainedSyndromeFragment, fragment_count: int,
                           route: SyndromePacketRoute) -> None:
@@ -344,7 +347,7 @@ class SyndromePacking:
         # on a fabric without CWB, at CWB delivery otherwise; a
         # feedback-memory round is stored but never published, its
         # terminal is FEEDBACK_MEMORY_DELIVERED
-        cwb_is_priced = LinkPath.CWB in self.links.paths
+        cwb_is_priced = self.links.is_wired(LinkPath.CWB)
         on_window_route = context.route.kind is SyndromePacketRouteKind.WINDOW_INPUT
         publication_tick = (self.engine.now if on_window_route and not cwb_is_priced
                             else None)
@@ -487,25 +490,24 @@ class SyndromePacking:
     # ---- window input: CWB to Buffer 0
 
     def _transmit_window_input_round(self, context: _PackingContext) -> bool:
-        """Reserve CWB once; a packet delivered but backpressured is retried
-        without a second reservation, as is every packet on a fabric without CWB."""
-        cwb_is_priced = LinkPath.CWB in self.links.paths
+        """Send on CWB once; a packet delivered but backpressured is retried
+        without a second send, as is every packet on a fabric without CWB."""
+        cwb_is_priced = self.links.is_wired(LinkPath.CWB)
         if context.cwb_reserved or not cwb_is_priced:
             return self._deliver_window_input_round(context)
         packet = context.packet
-        delay_ticks = self._reserve(LinkPath.CWB, payload_bits=context.packet_bits,
-                                    attribution=self._packet_attribution(packet))
         context.cwb_reserved = True
         self.round_events.append(SyndromeRoundEvent(
             "CWB_SENT", self.engine.now, context.round_key[0],
             context.round_key[1], None, context.route.kind.name))
         context.state = _PackingSlotState.DRAINING
-        self.engine.schedule(delay_ticks, lambda: self._deliver_window_input_round(context),
-                             label="controller->syndrome buffer 0")
+        self._send(LinkPath.CWB, payload_bits=context.packet_bits,
+                   attribution=self._packet_attribution(packet),
+                   on_delivered=lambda: self._deliver_window_input_round(context))
         return True
 
     def _deliver_window_input_round(self, context: _PackingContext) -> bool:
-        cwb_is_priced = LinkPath.CWB in self.links.paths
+        cwb_is_priced = self.links.is_wired(LinkPath.CWB)
         if cwb_is_priced and not context.cwb_delivered:
             self.syndrome_buffer.mark_publication_tick(context.round_key, self.engine.now)
             context.cwb_delivered = True
@@ -539,12 +541,11 @@ class SyndromePacking:
     def _transmit_feedback_memory_round(self, context: _PackingContext) -> None:
         packet = context.packet
         source_operation_id = context.route.source_operation_id
-        delay_ticks = self._reserve(LinkPath.WBD, payload_bits=context.packet_bits,
-                                    attribution=self._packet_attribution(packet))
-        self.engine.schedule(
-            delay_ticks,
-            lambda: self._deliver_feedback_memory_round(context, source_operation_id),
-            label="controller->feedback memory")
+        self._send(
+            LinkPath.WBD, payload_bits=context.packet_bits,
+            attribution=self._packet_attribution(packet),
+            on_delivered=lambda: self._deliver_feedback_memory_round(
+                context, source_operation_id))
 
     def _deliver_feedback_memory_round(self, context: _PackingContext,
                                        source_operation_id) -> None:
@@ -599,18 +600,24 @@ class SyndromePacking:
 
     # ---- links
 
-    def _reserve(self, path: LinkPath, *, payload_bits, attribution: TrafficAttribution) -> int:
-        reservation = self.links.reserve(path, payload_bits=payload_bits,
-                                         now_ticks=self.engine.now, attribution=attribution)
-        return reservation.total_delay_ticks
+    def _send(self, path: LinkPath, *, payload_bits,
+              attribution: TransferAttribution,
+              on_delivered: Callable[[], None]) -> None:
+        """Send one packet on a path; on_delivered runs at its delivery."""
 
-    def _packet_attribution(self, packet: SyndromeRoundPacket) -> TrafficAttribution:
+        def delivered(_transfer) -> None:
+            on_delivered()
+
+        self.links.send(path, payload_bits, self.engine.now, attribution,
+                        delivered)
+
+    def _packet_attribution(self, packet: SyndromeRoundPacket) -> TransferAttribution:
         patch_ids = tuple(fragment.patch_id for fragment in packet.fragments)
         return self._round_attribution(packet.operation_id, patch_ids, packet.round_index)
 
     @staticmethod
     def _round_attribution(operation_id, patch_ids: tuple, round_index: int):
-        return TrafficAttribution(
+        return TransferAttribution(
             operation_id=operation_id,
             patch_ids=tuple(sorted(patch_ids, key=stable_identity_order_key)),
             window_id=None, first_round=round_index, last_round=round_index)

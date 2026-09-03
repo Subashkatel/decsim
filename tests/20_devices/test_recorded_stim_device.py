@@ -86,7 +86,7 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
     d*d - 1 stabilizer bits per round, plus the d*d data-qubit readout on
     the final round, exactly the measurement counts of Stim's circuit."""
     from collections import defaultdict
-    from decsim.links.links import LinkPath
+    from decsim.message import LinkPath
     circuit, measurements, _, _, _ = recorded
     rounds, distance = 9, 3
     op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
@@ -94,9 +94,9 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
                         device=RecordedStimDevice(measurements, 0),
                         decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)), seed=0).build()
     bits_by_round = defaultdict(int)
-    for transfer in completed.window_manager.links.snapshot().transfers:
-        if transfer.path is LinkPath.QC:
-            bits_by_round[transfer.attribution.first_round] += transfer.reservation.payload_bits
+    for record in completed.traffic_ledger.snapshot().transfers:
+        if record.path is LinkPath.QC:
+            bits_by_round[record.attribution.first_round] += record.transfer.payload_bits
     stabilizers, data = distance * distance - 1, distance * distance
     assert bits_by_round == {**{r: stabilizers for r in range(1, rounds)}, rounds: stabilizers + data}
     assert sum(bits_by_round.values()) == circuit.num_measurements

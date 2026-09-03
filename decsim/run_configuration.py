@@ -141,7 +141,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
 
     link_config = spec.links if spec.links is not None else logical_reference_profile()
     if (spec.timing.ticks("measurement_signal_to_classical_bits") > 0
-            and not link_config.qc_excludes_controller_processing):
+            and not link_config.is_controller_processing_outside_qpu_to_controller):
         raise ValueError("a separate controller readout cost requires a link "
                          "profile whose QC latency excludes that cost")
     if spec.make_syndrome_packing is not None and spec.syndrome_packing_policy is not None:

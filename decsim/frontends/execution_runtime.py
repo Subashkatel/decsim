@@ -155,10 +155,14 @@ class ExecutionRuntime:
         # the provisional stamp marks the operation as started before
         # issue_operation runs: issuing can retry ready operations, and a
         # reentrant _maybe_begin must not issue this one twice; the QPU's
-        # actual start boundary then replaces the stamp
+        # actual start boundary then replaces the stamp (operation_started)
         self.op_start_time[operation.id] = self.engine.now
         idle_rounds = self.consume_idle_rounds(operation)
-        self.op_start_time[operation.id] = self.controller.issue_operation(operation, idle_rounds)
+        self.controller.issue_operation(operation, idle_rounds)
+
+    def operation_started(self, operation, boundary_tick: int) -> None:
+        """The QPU has the operation's command: it starts at this boundary."""
+        self.op_start_time[operation.id] = boundary_tick
 
     def body_done(self, operation):
         """The QPU finished a body: record it, release successors, free resources."""

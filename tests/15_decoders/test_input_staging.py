@@ -111,6 +111,17 @@ def test_an_oversized_single_window_still_stops_loudly():
         _run(capacity=8)
 
 
+def _fixed_input(engine, transfer_us):
+    """A send_input that lands after a fixed delay, no link in the way."""
+    delay_ticks = microseconds_to_ticks(transfer_us)
+
+    def send_input(on_landed):
+        engine.schedule(delay_ticks, on_landed)
+        return delay_ticks
+
+    return send_input
+
+
 def _standalone_pool(units, transfer_us, compute_us, decoder=None):
     """A decoder manager fed window jobs directly: (engine, manager,
     submit(index, arrival), compute start ticks by window)."""
@@ -145,7 +156,7 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
                         label=f"w{index}",
                         request_key=DecoderRequestKey(1, index, DecoderTier.WEAK, index))
         engine.schedule(microseconds_to_ticks(arrival_us),
-                        lambda: manager.enqueue(job, lambda: microseconds_to_ticks(transfer_us)))
+                        lambda: manager.enqueue(job, _fixed_input(engine, transfer_us)))
 
     return engine, manager, submit, compute_start
 

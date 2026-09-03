@@ -14,7 +14,7 @@ from ..message import (
 from ..detector_error_model.fault_model_contracts import DecoderFaultModelRequirement
 
 if TYPE_CHECKING:
-    from ..protocols import Decoder
+    from ..ports import Decoder
 
 # cache value meaning "this model was inspected and has no usable
 # observable"; distinct from a missing key, which means "not built yet"

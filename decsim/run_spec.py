@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from .config import TimingConfig
 from .message import (DecoderTier, ExecutionProgram,
                       RunSeedPathSegment)
-from .links.link_traffic_report import traffic_json_value
+from .observe.link_traffic import TrafficLedger
 from .seeding import bind_run_seed
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ class PrimaryRunResult:
 
 
 def capture_primary_result(engine, execution_runtime, window_manager, operations,
-                           metric_bindings, links, syndrome_source):
+                           metric_bindings, traffic_ledger, syndrome_source):
     """Project terminal runtime owners into the immutable run result."""
     operation_by_id = {operation.id: operation for operation in operations}
     truth_for = getattr(syndrome_source, "logical_observable_truth", None)
@@ -105,7 +105,7 @@ def capture_primary_result(engine, execution_runtime, window_manager, operations
         raise RuntimeError("primary run ended before workload completed")
     return PrimaryRunResult(
         "complete", True, True, True, execution_runtime.last_finish_time, engine.now,
-        tuple(rows), copy.deepcopy(traffic_json_value(links.snapshot())), metric_rows)
+        tuple(rows), traffic_ledger.traffic_json_value(), metric_rows)
 
 
 @dataclass(frozen=True)
@@ -125,6 +125,7 @@ class CompletedRun:
     syndrome_packing: Any
     pauli_frame: Any = None
     syndrome_buffer_1: Any = None
+    traffic_ledger: Any = None
 
 
 @dataclass
@@ -202,7 +203,8 @@ class RunSpec:
         conditional_release = (config.make_conditional_release(engine)
                                if config.make_conditional_release
                                else ConditionalRelease(engine))
-        links = config.link_config.build()
+        traffic_ledger = TrafficLedger(config.link_config)
+        links = config.link_config.build(engine, traffic_ledger)
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,
             memory_model=config.memory_model)
@@ -234,8 +236,8 @@ class RunSpec:
             retain_strong_context=escalation_policy.requires_strong_context,
             capture_enabled=config.capture_switching_windows,
             escalation_policy=escalation_policy,
-            submit_fn=lambda job, reserve_transfer=None:
-                decoder_manager.enqueue(job, reserve_transfer),
+            submit_fn=lambda job, send_input=None:
+                decoder_manager.enqueue(job, send_input),
             check_strong_route=lambda weak_job, strong_job:
                 decoder_manager.check_strong_route(weak_job, strong_job),
             on_workload_complete=lambda: factory.shutdown())
@@ -359,12 +361,12 @@ class RunSpec:
             syndrome_buffer_1.check_settled()
         result = capture_primary_result(
             engine, execution_runtime, window_manager, config.all_operations,
-            metric_bindings, links, config.device)
+            metric_bindings, traffic_ledger, config.device)
         return CompletedRun(
             result, engine, window_manager, decoder_manager, execution_runtime,
             controller, qpu, conditional_release, factory,
             syndrome_buffer, syndrome_packing, pauli_frame=pauli_frame,
-            syndrome_buffer_1=syndrome_buffer_1)
+            syndrome_buffer_1=syndrome_buffer_1, traffic_ledger=traffic_ledger)
 
 
 def _metric_bindings(metrics):

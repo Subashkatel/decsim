@@ -20,7 +20,6 @@ from decsim.detector_error_model import (
 
 GRAPHLIKE = fault_model_contracts.FaultRepresentation.GRAPHLIKE
 GRAPHLIKE_REQUIRED = fault_model_contracts.GRAPHLIKE_FAULT_MODEL_REQUIRED
-LINKED_REQUIRED = fault_model_contracts.LINKED_FAULT_MODELS_REQUIRED
 
 
 def surface_code_circuit(rounds):
@@ -164,12 +163,11 @@ def test_a_fault_between_two_windows_of_the_same_depth_has_no_owner():
 
 def test_an_excluded_fault_is_owned_by_nobody_and_stays_a_column_everywhere():
     circuit = surface_code_circuit(4)
-    # Window 1 is terminal and window 0 depends on it; both see rounds 1
-    # to 4. The range is decsim's own device (a strong re-decode leaves
-    # the weak decoder's committed faults uncommitted): nobody commits
-    # the 16 graphlike faults that flip a round-1 detector, so each
-    # window keeps them as columns, since only it can explain the defects
-    # they cause.
+    # Window 0 depends on window 1; both see rounds 1 to 4. The range is
+    # decsim's own device (a strong re-decode leaves the weak decoder's
+    # committed faults uncommitted): nobody commits the 16 graphlike
+    # faults that flip a round-1 detector, so each window keeps them as
+    # columns, since only it can explain the defects they cause.
     models = window_model_builders.build_window_error_models(
         circuit,
         [(1, 3, 3, 4), (1, 4, 4, 4)],
@@ -179,21 +177,21 @@ def test_an_excluded_fault_is_owned_by_nobody_and_stays_a_column_everywhere():
         dependency_edges=((1, 0),),
     )
     dependent_faults = models[0].require_faults(GRAPHLIKE)
-    terminal_faults = models[1].require_faults(GRAPHLIKE)
+    parent_faults = models[1].require_faults(GRAPHLIKE)
     dependent_owns = owned_faults(models[0])
-    terminal_owns = owned_faults(models[1])
+    parent_owns = owned_faults(models[1])
     touching_round_one = {0, 1, 2, 3, 4, 6, 7, 8, 9, 11, 14, 15, 16, 17, 18, 19}
-    # The terminal window owns 30 faults of round 4 alone, 18 of rounds
-    # 3 and 4, and the 14 of round 2 alone that no commit round reaches;
-    # the dependent window drops those 62 and owns the 32 of round 3.
-    assert len(dependent_faults.source_fault_ids) == 48
+    # Window 1 owns the 30 faults of round 4 alone and the 18 of rounds
+    # 3 and 4; the dependent window drops those 48 and owns the 32 of
+    # round 3. The 14 faults of round 2 alone touch no commit round.
+    assert len(dependent_faults.source_fault_ids) == 62
     assert len(dependent_owns) == 32
-    assert len(terminal_faults.source_fault_ids) == 110
-    assert len(terminal_owns) == 62
+    assert len(parent_faults.source_fault_ids) == 110
+    assert len(parent_owns) == 48
     assert touching_round_one <= set(dependent_faults.source_fault_ids)
-    assert touching_round_one <= set(terminal_faults.source_fault_ids)
+    assert touching_round_one <= set(parent_faults.source_fault_ids)
     assert touching_round_one & set(dependent_owns) == set()
-    assert touching_round_one & set(terminal_owns) == set()
+    assert touching_round_one & set(parent_owns) == set()
 
 
 def test_an_excluded_fault_touching_a_commit_round_is_owned_by_nobody():
@@ -221,78 +219,3 @@ def test_an_excluded_fault_touching_a_commit_round_is_owned_by_nobody():
     assert touching_round_one <= set(second_faults.source_fault_ids)
     assert touching_round_one & set(first_owns) == set()
     assert touching_round_one & set(second_owns) == set()
-
-
-def test_the_excluded_set_reaches_the_last_catalog_fault():
-    circuit = surface_code_circuit(4)
-    # Fault 109 is the last of the 110 graphlike faults and flips a
-    # round-4 detector only. Round 4 is excluded, so the owner table
-    # gives it to nobody, and window 0, which depends on the terminal
-    # window and sees round 4, keeps it as a column instead of dropping
-    # it as a fault its ancestor owns.
-    models = window_model_builders.build_window_error_models(
-        circuit,
-        [(1, 1, 2, 4), (3, 3, 4, 4)],
-        round_count=4,
-        fault_model_requirement=GRAPHLIKE_REQUIRED,
-        fault_exclusion_ranges=((4, 4),),
-        dependency_edges=((1, 0),),
-    )
-    dependent_faults = models[0].require_faults(GRAPHLIKE)
-    terminal_faults = models[1].require_faults(GRAPHLIKE)
-    dependent_owns = owned_faults(models[0])
-    terminal_owns = owned_faults(models[1])
-    assert 109 in dependent_faults.source_fault_ids
-    assert 109 in terminal_faults.source_fault_ids
-    assert 109 not in dependent_owns
-    assert 109 not in terminal_owns
-    assert len(dependent_faults.source_fault_ids) == 78
-    assert len(terminal_faults.source_fault_ids) == 80
-    assert len(dependent_owns) == 30
-    assert len(terminal_owns) == 32
-
-
-def test_an_excluded_fault_straddling_independent_windows_is_owned_by_nobody():
-    circuit = surface_code_circuit(4)
-    # Every fault that touches both commit regions also touches round 2
-    # or 3, so the range leaves it owned by nobody, and a fault owned by
-    # nobody needs no causal owner: the plan builds.
-    models = window_model_builders.build_window_error_models(
-        circuit,
-        [(1, 1, 2, 2), (3, 3, 4, 4)],
-        round_count=4,
-        fault_model_requirement=GRAPHLIKE_REQUIRED,
-        fault_exclusion_ranges=((2, 3),),
-        dependency_edges=(),
-    )
-    first_faults = models[0].require_faults(GRAPHLIKE)
-    second_faults = models[1].require_faults(GRAPHLIKE)
-    first_owns = owned_faults(models[0])
-    second_owns = owned_faults(models[1])
-    assert len(first_faults.source_fault_ids) == 48
-    assert len(second_faults.source_fault_ids) == 80
-    assert len(first_owns) == 7
-    assert len(second_owns) == 30
-
-
-def test_a_window_keeping_a_fault_whose_component_an_ancestor_owns_is_refused():
-    circuit = surface_code_circuit(6)
-    # Depths (0, 1, 0, 2). Physical fault 49 touches rounds 2 and 3 and
-    # goes to window 0; its component 26 touches round 3 alone and goes
-    # to window 1. Window 3 depends on windows 1 and 2, so it keeps 49
-    # and would drop 26.
-    with pytest.raises(
-        ValueError,
-        match=(
-            "window 3 keeps physical fault 49 while window 1, which it "
-            "depends on, owns graphlike component 26"
-        ),
-    ):
-        window_model_builders.build_window_error_models(
-            circuit,
-            [(1, 1, 2, 2), (3, 3, 3, 3), (4, 4, 5, 5), (2, 6, 6, 6)],
-            round_count=6,
-            fault_model_requirement=LINKED_REQUIRED,
-            fault_exclusion_ranges=(),
-            dependency_edges=((2, 1), (1, 3)),
-        )

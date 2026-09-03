@@ -1,33 +1,13 @@
 """What a decoder is handed: fault representations, requirements, windows.
 
-A fault is one error mechanism of Stim's detector error model: the
-detectors it flips, the logical observables it flips, and its probability.
-A decoder reads faults in one of two representations. GRAPHLIKE faults
-flip one or two detectors each; they are the components Stim writes with
-decompose_errors=True and the edges PyMatching matches on. PHYSICAL faults
-are the undecomposed mechanisms and may flip any number of detectors; they
-are what Stim writes with decompose_errors=False and what belief
-propagation and Tesseract read.
-
-A decoder says which representations it needs with a
-DecoderFaultModelRequirement. The slicer answers with one WindowErrorModel
-per window: the window's detector rows, one PlacedFaultModel per requested
-representation, and, when both are requested, the link that says which
-graphlike columns each physical column is made of.
-
-The two representations are the only ones. require_faults dispatches on
-exactly these two members, so a third cannot be declared without editing
-this file.
-
-The matrices are what qLDPC's DetectorErrorModelArrays and PyMatching's
-from_check_matrix read: one column per fault, a scipy csc_matrix of uint8,
-stored entries only. A window at d=7 over 1000 rounds is 48k rows by 1.5M
-columns with 3M ones; storing its zeros would not fit.
-
-The module itself binds no numeric library: numpy and scipy are imported
-inside the two functions that need them, so loading this file on its own
-loads neither. Importing it through the package still runs
-decsim/__init__, which imports numpy.
+A fault is one error mechanism of Stim's detector error model, read
+either as GRAPHLIKE components of one or two detectors
+(decompose_errors=True, the edges PyMatching matches on) or as the
+PHYSICAL undecomposed mechanism (decompose_errors=False, what belief
+propagation and Tesseract read); a decoder states which it needs, and
+the slicer answers with one WindowErrorModel per window. The matrices
+are one uint8 csc column per fault, what qLDPC's DetectorErrorModelArrays
+and PyMatching's from_check_matrix read.
 """
 
 import dataclasses
@@ -183,12 +163,7 @@ class WindowErrorModel:
     def require_faults(
         self, representation: FaultRepresentation
     ) -> PlacedFaultModel:
-        """The requested view; a wrong caller is refused.
-
-        Only the window decoders inside the machine call this, so asking
-        for a view the window does not hold, or for a representation that
-        is not a member, is a caller's bug.
-        """
+        """The requested view; asking for one the window lacks is a bug."""
         if representation is FaultRepresentation.GRAPHLIKE:
             faults = self.graphlike_faults
         elif representation is FaultRepresentation.PHYSICAL:

@@ -1,18 +1,10 @@
 """Slices one circuit's fault catalog into window models, window by window.
 
-The slicer builds the catalog once, in every representation the decoder
-asked for, and indexes it by round: which detectors each round holds,
-which rounds each fault touches, which faults touch each round. Slicing a
-window then costs the window's own size, not the circuit's. That is the
-shape of qLDPC's SlidingWindowDecoder, which cuts one whole-circuit
-detector error model into (detection region, commit region) windows and
-removes each committed error from the windows after it.
-
-Called window after window in time order, the slicer advances ownership
-itself: a fault one window commits is left out of every later window. A
-plan compiled from a dependency graph supplies the owner sets instead, so
-the order windows are built in cannot change which window commits a
-fault.
+The catalog is built once and indexed by round, so a window costs its
+own size; called in time order the slicer advances ownership itself, and
+a plan compiled from a dependency graph supplies the owner sets instead
+(the shape of qLDPC's SlidingWindowDecoder, which cuts one detector error
+model into windows and removes each committed error from the later ones).
 """
 
 import dataclasses
@@ -77,12 +69,11 @@ class WindowSlicer:
         """One window's model; advances ownership unless owners are given.
 
         `is_last` is given only for a window whose commit rounds reach
-        round_count. The exclusion ranges are checked by the builders; a
-        caller inside the machine passes checked ranges or none.
+        round_count.
         """
-        _check_maps_come_together(
-            explicitly_owned_faults, explicitly_prior_faults
-        )
+        has_owners = explicitly_owned_faults is not None
+        has_priors = explicitly_prior_faults is not None
+        assert has_owners == has_priors, "owner and prior maps come together"
         context = self._placement_context(
             first_buffer_round,
             first_commit_round,
@@ -314,23 +305,6 @@ def _faults_by_round(
             faults = by_round.setdefault(round_index, [])
             faults.append(fault_index)
     return by_round
-
-
-def _check_maps_come_together(
-    explicitly_owned_faults: Optional[
-        dict[fault_model_contracts.FaultRepresentation, set[int]]
-    ],
-    explicitly_prior_faults: Optional[
-        dict[fault_model_contracts.FaultRepresentation, Container[int]]
-    ],
-) -> None:
-    has_owners = explicitly_owned_faults is not None
-    has_priors = explicitly_prior_faults is not None
-    if has_owners != has_priors:
-        raise RuntimeError(
-            "explicit owner and predecessor fault maps must be supplied "
-            "together"
-        )
 
 
 def _for_representation(

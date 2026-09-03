@@ -101,10 +101,10 @@ def _feedback_run(fabric, *, controller_output_us):
         fabric["memory_op"](2, blocked_by=1),
     )
     timing = TimingConfig(
-        round_us=1.0,
-        measurement_signal_to_classical_bits_us=fabric["DECLARED_US"]["binary"],
-        instruction_or_decision_to_analog_control_pulse_us=controller_output_us,
-        t_pack_us=fabric["DECLARED_US"]["pack"],
+        round_period_microseconds=1.0,
+        readout_to_bits_microseconds=fabric["DECLARED_US"]["binary"],
+        decision_to_pulse_microseconds=controller_output_us,
+        packing_microseconds_per_round=fabric["DECLARED_US"]["pack"],
     )
     return RunSpec(
         ops=operations, d=3, rounds_policy=FixedRounds(6),
@@ -206,10 +206,10 @@ def test_preloaded_program_command_is_not_charged_as_online_feedback(fabric):
 def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
     operation = fabric["memory_op"](1, requires_result_return=True)
     timing = TimingConfig(
-        round_us=1.0,
-        measurement_signal_to_classical_bits_us=fabric["DECLARED_US"]["binary"],
-        t_pack_us=fabric["DECLARED_US"]["pack"],
-        instruction_or_decision_to_analog_control_pulse_us=3.0)
+        round_period_microseconds=1.0,
+        readout_to_bits_microseconds=fabric["DECLARED_US"]["binary"],
+        packing_microseconds_per_round=fabric["DECLARED_US"]["pack"],
+        decision_to_pulse_microseconds=3.0)
     completed = RunSpec(
         ops=(operation,), d=3, rounds_policy=FixedRounds(6),
         decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"]),
@@ -260,10 +260,10 @@ def test_qubic_500_mhz_eight_cycle_controller_fixture_is_parameter_driven():
     cycles = 8
     controller_output_us = cycles / clock_hz * 1_000_000
     timing = TimingConfig(
-        instruction_or_decision_to_analog_control_pulse_us=controller_output_us)
+        decision_to_pulse_microseconds=controller_output_us)
 
     assert controller_output_us == 0.016
-    assert timing.ticks("instruction_or_decision_to_analog_control_pulse") == microseconds_to_ticks(0.016)
+    assert timing.ticks("decision_to_pulse") == microseconds_to_ticks(0.016)
 
 
 def test_qubicml_500_mhz_27_cycle_discriminator_fixture_is_parameter_driven():
@@ -274,7 +274,7 @@ def test_qubicml_500_mhz_27_cycle_discriminator_fixture_is_parameter_driven():
     inference_cycles = 27
     classification_us = inference_cycles / clock_hz * 1_000_000
     timing = TimingConfig(
-        measurement_signal_to_classical_bits_us=classification_us)
+        readout_to_bits_microseconds=classification_us)
 
     assert classification_us == 0.054
-    assert timing.ticks("measurement_signal_to_classical_bits") == microseconds_to_ticks(0.054)
+    assert timing.ticks("readout_to_bits") == microseconds_to_ticks(0.054)

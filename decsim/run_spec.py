@@ -246,7 +246,7 @@ class RunSpec:
             config.make_syndrome_packing(engine, links, config.buffering,
                                          window_manager, syndrome_buffer)
             if config.make_syndrome_packing else SyndromePacking(
-                engine, links=links, t_pack=timing.ticks("t_pack"),
+                engine, links=links, t_pack=timing.ticks("packing"),
                 packing_context_capacity=config.buffering.packing_assembly_slots,
                 window_input_receiver=window_manager,
                 feedback_memory_receiver=window_manager,
@@ -297,9 +297,9 @@ class RunSpec:
             engine, qpu=qpu, window_manager=window_manager,
             syndrome_packing=syndrome_packing,
             measurement_signal_to_classical_bits_ticks=timing.ticks(
-                "measurement_signal_to_classical_bits"),
+                "readout_to_bits"),
             instruction_or_decision_to_analog_control_pulse_ticks=timing.ticks(
-                "instruction_or_decision_to_analog_control_pulse"),
+                "decision_to_pulse"),
             links=links,
             resolved_operations=plan.resolved_operations,
             resolved_patches=plan.resolved_patches, idle_policy=config.idle_policy,

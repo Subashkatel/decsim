@@ -78,9 +78,9 @@ def declared_profile(*, controller_to_weak_buffer=True, controller_to_strong_buf
 
 
 def declared_timing(round_us=ROUND_US):
-    return TimingConfig(round_us=round_us,
-                        measurement_signal_to_classical_bits_us=DECLARED_US["binary"],
-                        t_pack_us=DECLARED_US["pack"])
+    return TimingConfig(round_period_microseconds=round_us,
+                        readout_to_bits_microseconds=DECLARED_US["binary"],
+                        packing_microseconds_per_round=DECLARED_US["pack"])
 
 
 def memory_op(op_id=1, *, name=None, blocked_by=None, predecessors=(),

@@ -11,10 +11,10 @@ from decsim.run_spec import RunSpec
 
 def timing_with(field_name, value):
     values = {
-        "round_us": 1.1,
-        "measurement_signal_to_classical_bits_us": 0.0,
-        "t_pack_us": 0.0,
-        "instruction_or_decision_to_analog_control_pulse_us": 0.0,
+        "round_period_microseconds": 1.1,
+        "readout_to_bits_microseconds": 0.0,
+        "packing_microseconds_per_round": 0.0,
+        "decision_to_pulse_microseconds": 0.0,
     }
     values[field_name] = value
     return TimingConfig(**values)
@@ -64,16 +64,16 @@ def test_timing_config_defaults_field_order_and_public_exports():
     config = TimingConfig()
 
     assert [field.name for field in fields(TimingConfig)] == [
-        "round_us",
-        "measurement_signal_to_classical_bits_us",
-        "t_pack_us",
-        "instruction_or_decision_to_analog_control_pulse_us",
+        "round_period_microseconds",
+        "readout_to_bits_microseconds",
+        "packing_microseconds_per_round",
+        "decision_to_pulse_microseconds",
     ]
     assert (
-        config.round_us,
-        config.measurement_signal_to_classical_bits_us,
-        config.t_pack_us,
-        config.instruction_or_decision_to_analog_control_pulse_us,
+        config.round_period_microseconds,
+        config.readout_to_bits_microseconds,
+        config.packing_microseconds_per_round,
+        config.decision_to_pulse_microseconds,
     ) == (1.1, 0.0, 0.0, 0.0)
     assert RunSpec(ops=[]).timing == config
     assert decsim.TimingConfig is TimingConfig
@@ -81,37 +81,37 @@ def test_timing_config_defaults_field_order_and_public_exports():
     assert not hasattr(decsim, "TICKS_PER_MICROSECOND")
 def test_timing_config_is_frozen_hashable_and_value_comparable():
     """Timing configurations compare by value, hash, and reject assignment."""
-    first = TimingConfig(t_pack_us=0.25)
-    second = TimingConfig(t_pack_us=0.25)
+    first = TimingConfig(packing_microseconds_per_round=0.25)
+    second = TimingConfig(packing_microseconds_per_round=0.25)
 
     assert first == second
     assert hash(first) == hash(second)
     with pytest.raises(FrozenInstanceError):
-        first.t_pack_us = 0.5
+        first.packing_microseconds_per_round = 0.5
 
 
 def test_timing_config_accepts_natural_numeric_and_bool_values():
     """Numeric scalars and bools follow their natural arithmetic behavior."""
     config = TimingConfig(
-        round_us=True,
-        measurement_signal_to_classical_bits_us=False,
-        t_pack_us=Decimal("0.000001"),
+        round_period_microseconds=True,
+        readout_to_bits_microseconds=False,
+        packing_microseconds_per_round=Decimal("0.000001"),
     )
 
-    assert config.round_us is True
-    assert config.measurement_signal_to_classical_bits_us is False
-    assert config.ticks("measurement_signal_to_classical_bits") == 0
-    assert config.ticks("t_pack") == 1
+    assert config.round_period_microseconds is True
+    assert config.readout_to_bits_microseconds is False
+    assert config.ticks("readout_to_bits") == 0
+    assert config.ticks("packing") == 1
 
-    assert TimingConfig(round_us=False).round_us is False
+    assert TimingConfig(round_period_microseconds=False).round_period_microseconds is False
     with pytest.raises(TypeError):
-        TimingConfig(round_us="1.0")
+        TimingConfig(round_period_microseconds="1.0")
 
 
 @pytest.mark.parametrize(
     "field_name",
-    ["round_us", "measurement_signal_to_classical_bits_us", "t_pack_us",
-     "instruction_or_decision_to_analog_control_pulse_us"],
+    ["round_period_microseconds", "readout_to_bits_microseconds",
+     "packing_microseconds_per_round", "decision_to_pulse_microseconds"],
 )
 @pytest.mark.parametrize(
     "invalid_value",
@@ -128,8 +128,8 @@ def test_timing_config_rejects_nonfinite_or_negative_fields(
 
 @pytest.mark.parametrize(
     "field_name",
-    ["round_us", "measurement_signal_to_classical_bits_us", "t_pack_us",
-     "instruction_or_decision_to_analog_control_pulse_us"],
+    ["round_period_microseconds", "readout_to_bits_microseconds",
+     "packing_microseconds_per_round", "decision_to_pulse_microseconds"],
 )
 def test_timing_config_rejects_positive_values_that_collapse_to_zero_ticks(
     field_name,
@@ -141,8 +141,8 @@ def test_timing_config_rejects_positive_values_that_collapse_to_zero_ticks(
 
 @pytest.mark.parametrize(
     "field_name",
-    ["round_us", "measurement_signal_to_classical_bits_us", "t_pack_us",
-     "instruction_or_decision_to_analog_control_pulse_us"],
+    ["round_period_microseconds", "readout_to_bits_microseconds",
+     "packing_microseconds_per_round", "decision_to_pulse_microseconds"],
 )
 def test_timing_config_accepts_zero_and_one_tick_on_every_axis(field_name):
     """Every timing axis accepts exact zero and the smallest positive tick."""
@@ -154,37 +154,37 @@ def test_timing_config_accepts_zero_and_one_tick_on_every_axis(field_name):
 def test_optional_timing_axes_are_independent():
     """Either optional stage can be enabled without changing the other stage."""
     binary_only = TimingConfig(
-        measurement_signal_to_classical_bits_us=Decimal("0.000002"))
-    pack_only = TimingConfig(t_pack_us=Decimal("0.000003"))
+        readout_to_bits_microseconds=Decimal("0.000002"))
+    pack_only = TimingConfig(packing_microseconds_per_round=Decimal("0.000003"))
     both = TimingConfig(
-        measurement_signal_to_classical_bits_us=Decimal("0.000002"),
-        t_pack_us=Decimal("0.000003"),
+        readout_to_bits_microseconds=Decimal("0.000002"),
+        packing_microseconds_per_round=Decimal("0.000003"),
     )
 
     assert (
-        binary_only.ticks("measurement_signal_to_classical_bits"),
-        binary_only.ticks("t_pack"),
+        binary_only.ticks("readout_to_bits"),
+        binary_only.ticks("packing"),
     ) == (2, 0)
     assert (
-        pack_only.ticks("measurement_signal_to_classical_bits"),
-        pack_only.ticks("t_pack"),
+        pack_only.ticks("readout_to_bits"),
+        pack_only.ticks("packing"),
     ) == (0, 3)
     assert (
-        both.ticks("measurement_signal_to_classical_bits"),
-        both.ticks("t_pack"),
+        both.ticks("readout_to_bits"),
+        both.ticks("packing"),
     ) == (2, 3)
 
 
 def test_ticks_accepts_only_optional_names_and_preserves_key_error():
     """Named tick lookup accepts two stages and preserves natural missing-key errors."""
     config = TimingConfig(
-        measurement_signal_to_classical_bits_us=0.25,
-        t_pack_us=0.5,
+        readout_to_bits_microseconds=0.25,
+        packing_microseconds_per_round=0.5,
     )
 
-    assert config.ticks("measurement_signal_to_classical_bits") == 250_000
-    assert config.ticks("t_pack") == 500_000
-    for missing_name in ("round_us", "unknown"):
+    assert config.ticks("readout_to_bits") == 250_000
+    assert config.ticks("packing") == 500_000
+    for missing_name in ("round_period_microseconds", "unknown"):
         with pytest.raises(KeyError) as error:
             config.ticks(missing_name)
         assert error.value.args == (missing_name,)
@@ -197,8 +197,8 @@ def test_round_ticks_is_absent():
 
 def test_planner_rejects_zero_cadence_only_when_selected():
     """Planning rejects a selected zero cadence but ignores an overridden fallback."""
-    zero_timing = TimingConfig(round_us=0.0)
-    assert TimingConfig(round_us=False).round_us is False
+    zero_timing = TimingConfig(round_period_microseconds=0.0)
+    assert TimingConfig(round_period_microseconds=False).round_period_microseconds is False
 
     with pytest.raises(
         ValueError, match="resolved round cadence must be at least one tick"
@@ -210,7 +210,7 @@ def test_planner_rejects_zero_cadence_only_when_selected():
 
 def test_run_cadence_uses_code_then_run_spec_then_timing_precedence():
     """Cadence resolves from code, run override, then timing fallback."""
-    timing = TimingConfig(round_us=0.75)
+    timing = TimingConfig(round_period_microseconds=0.75)
 
     assert built_round_ticks(timing=timing) == 750_000
     assert built_round_ticks(timing=timing, round_us=1.25) == 1_250_000

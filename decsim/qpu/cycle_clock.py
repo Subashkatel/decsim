@@ -14,7 +14,7 @@ only; program dependencies, windows and decoder state live elsewhere.
 """
 
 import dataclasses
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Callable, Optional
 
 import decsim.engine
 import decsim.message as message
@@ -22,15 +22,6 @@ import decsim.ports as ports
 
 # Patches and operation ids are opaque identities chosen by the workload;
 # Any stands for them in every signature below.
-
-
-class ReadoutReceiver(Protocol):
-    """The component every readout is handed to: the controller."""
-
-    def accept_qpu_readout(
-        self, readout: message.QPUReadout, route: message.SyndromePacketRoute
-    ) -> None:
-        """Take one readout on its route."""
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,9 +44,9 @@ class QPUDevice:
     def __init__(
         self,
         engine: decsim.engine.Engine,
-        syndrome_source: ports.SyndromeDevice,
+        syndrome_source: ports.SyndromeSource,
         cycle_ticks: int,
-        readout_receiver: Optional[ReadoutReceiver] = None,
+        readout_receiver: Optional[ports.ReadoutReceiver] = None,
         completion_receiver: Optional[
             Callable[[message.Operation], None]
         ] = None,
@@ -75,7 +66,7 @@ class QPUDevice:
         self._last_emitted_boundary = 0
         self._is_finished = False
 
-    def connect_readout_receiver(self, receiver: ReadoutReceiver) -> None:
+    def connect_readout_receiver(self, receiver: ports.ReadoutReceiver) -> None:
         """Wire the component that accepts every readout."""
         self.readout_receiver = receiver
 

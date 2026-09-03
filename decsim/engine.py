@@ -14,11 +14,25 @@ every action.
 import dataclasses
 import heapq
 import itertools
-from typing import Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 import decsim.config as config
 
 Action = Callable[[], None]
+
+
+@runtime_checkable
+class Metric(Protocol):
+    """An observer of the run: it reads the engine and reports one result."""
+
+    name: str
+    result_schema_version: int
+
+    def observe(self, engine) -> None:
+        """Look at the run before the first action and after every action."""
+
+    def result(self) -> Any:
+        """The metric's final value."""
 
 
 @dataclasses.dataclass(order=True)

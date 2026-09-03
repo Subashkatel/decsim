@@ -6,7 +6,7 @@ import pytest
 
 from decsim.pauli_frame.pauli_frame import PauliFrame as RuntimePauliFrame
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
-from decsim.ports import PauliFrame as PauliFramePort
+from decsim.ports import Frame as PauliFramePort
 import decsim.run_spec as run_spec_module
 from decsim.run_spec import RunSpec
 from decsim.windows.window_manager import WindowManager

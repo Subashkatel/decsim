@@ -6,7 +6,8 @@ from decsim.controller import policies
 from decsim.controller.controller import Controller
 from decsim.message import RunSeedReservation, SoftOutputSource
 from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
-from decsim.ports import BoundaryPolicy, IdlePolicy
+from decsim.ports import IdlePolicy
+from decsim.windows.window_manager import BoundaryPolicy
 from decsim.run_spec import RunSpec
 from decsim.windows.windowing_schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.decoders.weak_strong_switching import Baseline, Switching

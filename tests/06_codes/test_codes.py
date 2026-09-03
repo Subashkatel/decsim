@@ -9,7 +9,7 @@ from decsim.decoders.decoders import CodeRouter, PresetLatencyDecoder
 from decsim.qpu.syndrome_devices import SyndromeBitDevice
 from decsim.qpu.layouts import UniformLayout
 from decsim.message import DecodeJob, Operation
-from decsim.ports import CodeModel
+from decsim.qpu.code_geometry import CodeModel
 from decsim.run_spec import RunSpec
 from decsim.windows.windowing_schemes import ParallelWindowScheme
 

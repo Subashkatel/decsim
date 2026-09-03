@@ -8,12 +8,33 @@ transport cannot bypass decoder memory.
 
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Protocol, runtime_checkable
 
 from ..message import DecodeJob
 
 SendInput = Callable[[Callable[[], None]], int]
 
+
+@runtime_checkable
+class DecoderMemoryTransfer(Protocol):
+    """Carries one admitted job to the decoder side when its link delivers.
+
+    send_input(on_landed) sends the job's input over its link, calls
+    on_landed once at delivery, and returns the delay the link expects;
+    None means the job carries no input and lands now. receiver(job) runs
+    exactly once at the landing unless the request is cancelled first;
+    cancel is idempotent.
+    """
+
+    def deliver(
+        self, job: DecodeJob,
+        send_input: Optional[Callable[[Callable[[], None]], int]],
+        receiver: Callable[[DecodeJob], None],
+    ) -> int:
+        """Send the input and land the job at delivery; the expected delay."""
+
+    def cancel(self, job: DecodeJob) -> None:
+        """Suppress the landing of a request that has not landed yet."""
 
 class DecoderInputStaging:
     def __init__(self, transport, engine):

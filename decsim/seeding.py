@@ -10,10 +10,10 @@ commits, and a failed reservation cancels the ones before it.
 import hashlib
 import random
 import threading
-from typing import Any, Optional
+from collections.abc import Iterable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
-import decsim.ports as ports
 
 _NAMESPACE = b"decsim.run-seed.v1"
 _UNSEEDED_SOURCES = ("explicit_local", "entropy")
@@ -51,6 +51,35 @@ def bind_run_seed(root_seed: Optional[int], roots) -> None:
         raise
     for component, reservation in acquired:
         component.commit_run_seed(reservation)
+
+
+@runtime_checkable
+class RunSeedConsumer(Protocol):
+    """A stochastic component bound in two phases: reserve, then commit.
+
+    Every consumer is reserved before any is committed, so preparation
+    that can fail belongs in reserve_run_seed; commit_run_seed installs
+    the prepared state and never fails.
+    """
+
+    def reserve_run_seed(
+        self, seed: Optional[int]
+    ) -> message.RunSeedReservation:
+        """Prepare the state a commit installs, leaving the active one."""
+
+    def commit_run_seed(self, reservation: message.RunSeedReservation) -> None:
+        """Install the prepared state and close the binding."""
+
+    def cancel_run_seed(self, reservation: message.RunSeedReservation) -> None:
+        """Drop the pending reservation without touching the active state."""
+
+
+@runtime_checkable
+class RunSeedComposite(Protocol):
+    """A component whose stochastic children are bound under its path."""
+
+    def run_seed_children(self) -> Iterable[message.RunSeedChild]:
+        """The children, each with its path relative to this component."""
 
 
 class _AtomicRunSeedConsumer:
@@ -201,7 +230,7 @@ class _SeedWalk:
         self._encoded_paths.add(encoded)
 
     def _plan_leaf(self, path, component) -> None:
-        if not isinstance(component, ports.RunSeedConsumer):
+        if not isinstance(component, RunSeedConsumer):
             return
         seed = None
         if self._root_seed is not None:
@@ -209,7 +238,7 @@ class _SeedWalk:
         self.leaves.append((path, component, seed))
 
     def _visit_children(self, path, component) -> None:
-        if not isinstance(component, ports.RunSeedComposite):
+        if not isinstance(component, RunSeedComposite):
             return
         children = component.run_seed_children()
         pairs = []

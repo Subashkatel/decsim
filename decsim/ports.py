@@ -1,122 +1,349 @@
-"""The ports: what one component needs from another, and nothing more.
+"""The ports: the map of a readout's path through the machine.
 
-Each port is a small Protocol with the methods one component calls on
-its neighbour, named for what they do; a component depends on ports,
+One Protocol per handoff between neighbours, one method per handoff, and
+the record that crosses it in message.py. A component depends on ports,
 never on another component's class, so a new implementation plugs in as
-one class that fills the port. Runtime state and the implementations
-live in the component modules.
+one class that fills the port and one row in the root's table
+(decsim/machine.py). Read top to bottom, this file is the pipeline: the
+QPU emits a readout, the controller receives it, the store holds the
+packed round, the window manager closes a window, the decoder manager
+schedules a decode, the decoder returns a result, the frame commits the
+correction, the frame releases the controller, the controller instructs
+the QPU, and every hop between components rides a link.
+
+The pluggable parts (SyndromeSource, RoundStore, Decoder, Link,
+EscalationPolicy, WindowingScheme, IdlePolicy, Workload) have their
+abstract class here, sinter's Decoder shape
+(sinter/_decoding/_decoding_decoder_class.py, one class with the methods
+a row of the table must offer), written as a Protocol because the
+implementations fill it without inheriting. Observation (metrics, the
+traffic ledger, the trace) reaches a component through callbacks it
+fires, never through a port, so every component runs with no observer.
 """
 
-from __future__ import annotations
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Optional,
+    Protocol,
+    runtime_checkable,
+)
 
-from dataclasses import dataclass
-from enum import Enum, auto
-from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
-                    runtime_checkable)
+import decsim.message as message
 
-from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecoderTier, Directive, OutcomeDirective, Submission,
-                      DecoderRequestKey,
-                      DecodeOutcome, DecodeResult, LinkPath, OperationPlanningView,
-                      ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
-                      QPUReadout, StrongRegionPlan, SyndromePacketRoute,
-                      SyndromePayload, Transfer, TransferAttribution,
-                      Window, WindowInfo, WindowReadiness)
+if TYPE_CHECKING:
+    import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer
 
+# ------------------------------------------------ the QPU emits a readout
 
-# ------------------------------------------------------ run seed capabilities
 
 @runtime_checkable
-class RunSeedConsumer(Protocol):
-    """A stochastic runtime owner with a two-phase seed transaction.
+class ReadoutReceiver(Protocol):
+    """The controller, as the QPU sees it: it takes every readout."""
 
-    The root reserves every consumer before committing any consumer.  A
-    successful reservation therefore establishes a failure-free commit phase:
-    preparation that can fail belongs in ``reserve_run_seed``, not in
-    ``commit_run_seed``.
+    def accept_qpu_readout(
+        self, readout: message.QPUReadout, route: message.SyndromePacketRoute
+    ) -> None:
+        """Take one readout on its route (window input or feedback memory)."""
+
+
+# --------------------------------------- the store holds the packed round
+
+
+@runtime_checkable
+class RoundStore(Protocol):
+    """The upstream round store (Buffer 0), as syndrome packing sees it.
+
+    Table row: round_store. A packed round is written once and kept
+    until every consumer releases it.
     """
 
-    def reserve_run_seed(
+    def accept_packed_round(
         self,
-        seed: Optional[int],
-    ) -> RunSeedReservation:
-        """Prepare replacement state under an exclusive reversible claim.
+        packet: message.SyndromeRoundPacket,
+        *,
+        publication_tick: Optional[int],
+    ) -> "syndrome_buffer.FragmentAdmission":
+        """Give one finished round a slot; refused, not stored, when full."""
 
-        This method may fail, but it must not change the active random state or
-        draw from it.  It performs all potentially failing preparation and
-        returns the exact pending reservation that commit or cancel consumes.
-        """
-        ...
-
-    def commit_run_seed(
-        self,
-        reservation: RunSeedReservation,
-    ) -> None:
-        """Install an exact reservation in the failure-free commit phase.
-
-        For a reservation returned successfully by this consumer, commit must
-        be total and must not fail, allocate, draw randomness, invoke a
-        callback, or perform validation that can reject.  It may acquire the
-        consumer's private lock and install the already-prepared state.
-        """
-        ...
-
-    def cancel_run_seed(
-        self,
-        reservation: RunSeedReservation,
-    ) -> None:
-        """Release the exact pending reservation without changing RNG state.
-
-        Cancellation must be total for the exact pending reservation returned
-        by this consumer.
-        """
-        ...
+    def release_round(self, round_identity: tuple) -> None:
+        """Free the round's slot; its consumers are done with it."""
 
 
 @runtime_checkable
-class RunSeedComposite(Protocol):
-    """A runtime owner that exposes semantic stochastic child edges."""
+class StrongRoundStore(Protocol):
+    """The room-side store (syndrome buffer 1), as syndrome packing sees it."""
 
-    def run_seed_children(self) -> Iterable[RunSeedChild]: ...
+    def write(
+        self,
+        packet: message.SyndromeRoundPacket,
+        *,
+        packet_bits: Optional[int],
+        attribution: message.TransferAttribution,
+    ) -> None:
+        """Carry the round over the store's link and keep it on arrival."""
 
 
-# ------------------------------------------------------ escalation policy seam
+# ------------------------------------------- the window manager closes a window
+
+
+@runtime_checkable
+class WindowInput(Protocol):
+    """The window manager, as syndrome packing sees it."""
+
+    def accept_window_input(self, packet: message.SyndromeRoundPacket) -> bool:
+        """Publish one retained round to window readiness."""
+
+
+# ----------------------------------- the decoder manager schedules a decode
+
+
+@runtime_checkable
+class DecodeQueue(Protocol):
+    """The decoder manager, as the window manager sees it."""
+
+    def enqueue(
+        self,
+        job: message.DecodeJob,
+        send_input: Optional[Callable[[Callable[[], None]], int]] = None,
+    ) -> None:
+        """Admit a job once; send_input(on_landed) moves its input later."""
+
+    def withdraw_window(self, window_key: tuple) -> None:
+        """Take back a window's not-yet-started decode; it is superseded."""
+
+    def release_parked(self, window_key: tuple) -> None:
+        """The window's last boundary arrived: start its parked decode."""
+
+
+# ------------------------------------------- the decoder returns a result
+
+
+@runtime_checkable
+class Decoder(Protocol):
+    """One decoder: correctness and timing from one object.
+
+    Table rows: pymatching, belief_matching, or a number (a preset
+    latency on the MWPM path). The manager calls latency(job) once at
+    dispatch and decode(job) that many ticks later; latency never
+    changes the job.
+    """
+
+    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+        """The window's correction and its logical observables."""
+
+    def latency(self, job: message.DecodeJob) -> int:
+        """The whole job's service time in ticks, known at dispatch."""
+
+
+@runtime_checkable
+class DecoderUnit(Protocol):
+    """A decoder that walks its own stages as engine events on its unit."""
+
+    def run(
+        self,
+        job: message.DecodeJob,
+        engine,
+        on_result: Callable[[Optional[message.DecodeResult]], None],
+    ) -> None:
+        """Start the job on the unit; on_result runs once at its output."""
+
+
+@runtime_checkable
+class DecodedWindowReceiver(Protocol):
+    """The window manager, as the decoder manager sees it."""
+
+    def on_decode_done(
+        self, job: message.DecodeJob, result: message.DecodeResult
+    ) -> None:
+        """A weak decode finished; the result reaches the window."""
+
+    def on_strong_decode_done(
+        self, completion: message.StrongDecodeCompletion
+    ) -> None:
+        """A strong decode finished; the completion names its request."""
+
+
+# ------------------------------------------- the frame commits the correction
+
+
+@runtime_checkable
+class Frame(Protocol):
+    """The Pauli frame, as the window manager sees it."""
+
+    def commit_correction(
+        self,
+        *,
+        window_key: tuple,
+        logical_observables,
+        request_key: message.DecoderRequestKey,
+        on_committed: Callable[[], None],
+    ) -> None:
+        """Accept a window's correction once, charge the write, call back."""
+
+
+# ------------------------------------- the frame releases the controller
+
+
+@runtime_checkable
+class ReleaseReceiver(Protocol):
+    """The conditional release, as the window manager sees it."""
+
+    def release_waiters(self, operation: message.Operation) -> None:
+        """A final result is in: send every decision it releases."""
+
+
+@runtime_checkable
+class InstructionReceiver(Protocol):
+    """The controller, as the conditional release sees it."""
+
+    def relay_instruction(
+        self,
+        decision: message.Decision,
+        deliver: Callable[[message.Decision], None],
+    ) -> None:
+        """Carry one decision to the controller; deliver runs on arrival."""
+
+
+# ------------------------------------------ the controller instructs the QPU
+
+
+@runtime_checkable
+class Qpu(Protocol):
+    """The QPU, as the controller sees it."""
+
+    def issue(self, command: message.RunOperationBody) -> None:
+        """Queue one operation body; it starts on the next cycle boundary."""
+
+
+@runtime_checkable
+class SyndromeSource(Protocol):
+    """What the QPU reads out each round for an operation.
+
+    Table rows: stim_device, timing_only, syndrome_bits, recorded_stim.
+    Payload bits are raw measurement bits per round; a source with a
+    detector formation table also offers form_round, which syndrome
+    packing calls once per complete round.
+    """
+
+    operation_circuit_scope: str
+
+    def begin_operation(
+        self,
+        operation: message.Operation,
+        segment_round_count: int,
+        source_round_count: int,
+    ) -> None:
+        """Prepare the operation's rounds (a Stim source samples its shot)."""
+
+    def round_payloads(
+        self, operation: message.Operation, round_index: int
+    ) -> list[message.QPUReadout]:
+        """The readouts of one round, one per patch or fragment."""
+
+    def finalize_stream_round(
+        self, operation: message.Operation, source_round_count: int
+    ) -> list[message.QPUReadout]:
+        """The stream's final data readout, as its own fragment."""
+
+    def idle_round_payloads(
+        self,
+        operation: message.Operation,
+        stream_id: Any,
+        global_round: int,
+        patch: Any,
+    ) -> list[message.QPUReadout]:
+        """The readouts of one idle round on a patch of a live stream."""
+
+
+# -------------------------------------------------- every hop rides a link
+
+
+@runtime_checkable
+class Link(Protocol):
+    """The link fabric as every sender sees it.
+
+    Table rows: logical_reference, bandwidth_limited (link_profiles.py),
+    and the yaml's cards. A path is wired or free; a send on a wired path
+    delivers by callback with every tick of the transfer on the record.
+    """
+
+    def is_wired(self, path: message.LinkPath) -> bool:
+        """Whether the card prices this path; an unwired path is a free hop."""
+
+    def expected_delay_ticks(
+        self,
+        path: message.LinkPath,
+        payload_bits: Optional[int],
+        now_ticks: int,
+    ) -> int:
+        """What a send now would pay if nothing else reached its channel."""
+
+    def send(
+        self,
+        path: message.LinkPath,
+        payload_bits: Optional[int],
+        now_ticks: int,
+        attribution: message.TransferAttribution,
+        on_delivered: Callable[[message.Transfer], None],
+    ) -> None:
+        """Send one transfer on the path; on_delivered runs at delivery."""
+
+
+# ------------------------------------ the pluggable policies off the path
+
 
 @runtime_checkable
 class EscalationServices(Protocol):
-    """Strong-job construction and strong-result selection offered to an escalation policy."""
+    """What the window manager offers an escalation policy."""
 
-    def make_strong_job(self, weak_job: DecodeJob, label: str) -> DecodeJob: ...
+    def make_strong_job(
+        self, weak_job: message.DecodeJob, label: str
+    ) -> message.DecodeJob:
+        """The strong job that re-decodes the weak job's window."""
 
     def defer_strong_escalation(
-        self, weak_job: DecodeJob,
-    ) -> DecoderRequestKey: ...
+        self, weak_job: message.DecodeJob
+    ) -> message.DecoderRequestKey:
+        """Reserve a strong request for later, once its boundaries exist."""
 
     def check_strong_route(
-        self, weak_job: DecodeJob, strong_job: DecodeJob,
-    ) -> None: ...
+        self, weak_job: message.DecodeJob, strong_job: message.DecodeJob
+    ) -> None:
+        """Refuse a strong job the decoder manager cannot route."""
 
     def prepare_strong_selection(
-        self, weak_job: DecodeJob, strong_request_key: DecoderRequestKey,
-        serial_strong_job: Optional[DecodeJob], *, deferred: bool,
+        self,
+        weak_job: message.DecodeJob,
+        strong_request_key: message.DecoderRequestKey,
+        serial_strong_job: Optional[message.DecodeJob],
+        *,
+        deferred: bool,
         on_selection_delivered: Callable[[], None],
-    ) -> None: ...
+    ) -> None:
+        """Send the escalation and call back when the strong side has it."""
 
 
 @runtime_checkable
 class EscalationPolicy(Protocol):
-    """Whether and when a window is decoded again by the strong tier: which
-    jobs to submit when a window is ready (Baseline: the weak job only), and
-    what to do with each outcome (accept it, escalate it, hold it). For a weak
-    job, on_decode_outcome runs BEFORE the core's commit bookkeeping, so its
-    directive decides whether the result is held awaiting a strong redo."""
+    """Whether and when a window is decoded again by the strong tier.
+
+    Table rows: weak_baseline, strong_only, switching. on_window_ready
+    says which jobs to submit when a window is ready; on_decode_outcome
+    says what to do with each outcome (accept, escalate, hold). For a
+    weak job, on_decode_outcome runs before the core's commit
+    bookkeeping, so its directive decides whether the result waits for a
+    strong redo.
+    """
 
     requires_strong_context: bool
     bulk_strong: bool
     double_window: bool
-    # the tier that decodes the plan's windows; every tier-dependent site
+    # The tier that decodes the plan's windows; every tier-dependent site
     # (arrival authority, input store and link, request-key tier, output
-    # link) derives from this one declaration
-    primary_tier: DecoderTier
+    # link) follows from this one declaration.
+    primary_tier: message.DecoderTier
 
     def validate_declared_run(
         self,
@@ -126,383 +353,41 @@ class EscalationPolicy(Protocol):
         has_dynamic_streams: bool,
         static_decode_plan_selected: bool,
         has_frontend: bool,
-    ) -> None: ...
+    ) -> None:
+        """Refuse a run shape the policy does not support."""
 
     def validate_operations(
-        self,
-        operations: tuple[OperationPlanningView, ...],
-    ) -> None: ...
+        self, operations: tuple[message.OperationPlanningView, ...]
+    ) -> None:
+        """Refuse a workload the policy does not support."""
 
     def validate_code_geometry(
-        self,
-        geometry: ResolvedCodeGeometry,
-    ) -> None: ...
-
-    def on_window_ready(self, window: Window, weak_job: DecodeJob,
-                        services: EscalationServices) -> list[Submission]: ...
-
-    def on_decode_outcome(self, outcome: DecodeOutcome,
-                          services: EscalationServices) -> OutcomeDirective: ...
-
-
-# ----------------------------------------------------------- runtime policies
-
-@runtime_checkable
-class BoundaryPolicy(Protocol):
-    """Port 16. Decides when a committed window may ship its boundary
-    defects to dependent windows: True = ship now. Eager ships at every
-    weak commit (the default); Held ships only once the result is final.
-    A provisional boundary that ships is never revised, so serial
-    switching (which can revise a result) requires Held."""
-
-    def on_commit(self, window: Window, *, final: bool) -> bool: ...
-
-
-@runtime_checkable
-class WindowInteraction(Protocol):
-    """Port 21. Decisions relating adjacent or replaced windows.
-
-    Implementations return data and immutable decisions; the window manager
-    remains the sole owner of event ordering, lifecycle mutation, retention,
-    logical accounting, and finality.
-    """
-
-    def initial_boundary_state(self, window: WindowInfo) -> Any: ...
-
-    def boundary_from_result(
-        self, result: Optional[DecodeResult], fallback: Any,
-    ) -> Any: ...
-
-    def boundaries_equal(self, left: Any, right: Any) -> bool: ...
-
-    def boundary_targets(
-        self, source: WindowInfo, windows: Mapping[tuple, WindowInfo],
-    ) -> list:
-        """Select unstarted destinations from the source's declared edges."""
-        ...
-
-    def merge_boundary(
-        self,
-        delivery: BoundaryDelivery,
-        destination: WindowInfo,
-        current_state: Any,
-    ) -> BoundaryUpdate: ...
-
-    def apply_boundary(
-        self,
-        state: Any,
-        window: WindowInfo,
-        payload,
-        round_key: int,
-    ): ...
-
-    def invalidated_windows(
-        self, source_key: tuple, windows: Mapping[tuple, WindowInfo],
-    ) -> list:
-        """Select replay roots; the runtime adds their dependent closure."""
-        ...
-
-    def plan_strong_region(
-        self,
-        weak_window: WindowInfo,
-        later_windows: list[WindowInfo],
-        operation_round_count: int,
-    ) -> Optional[StrongRegionPlan]: ...
-
-
-@runtime_checkable
-class IdlePolicy(Protocol):
-    """How idle rounds travel while an op waits for feedback (see
-    controller/policies.py for the three built-in policies). relay() carries
-    one idle round through the controller it is given; end_idle_period()
-    runs when an operation claims the patch, so rounds the policy has not
-    charged yet can be settled."""
-
-    def relay(self, controller, operation, patch, round_index: int) -> None: ...
-
-    def end_idle_period(self, controller, operation, patch) -> None: ...
-
-
-# -------------------------------------------------------------- decode stage
-
-@runtime_checkable
-class Decoder(Protocol):
-    """Port 8. Joint decode+latency: correctness and timing from one call.
-
-    Contract (decoder_manager): ``latency(job)`` is called ONCE, at
-    dispatch, and returns the whole job's service time in ticks; the
-    manager schedules completion that many ticks later and then calls
-    ``decode(job)`` for the result. Timing evaluation must not mutate routing
-    or accuracy-bearing job state; functional decisions belong to decode and
-    escalation policy owners.
-
-    A decoder that simulates its own internal stages also offers
-    ``run(job, engine, on_done)``: the manager calls it instead of scheduling
-    ``latency(job)``, the decoder walks its stages as engine events on the
-    unit the manager granted, calls ``on_done`` once when its output is
-    released, and ``decode(job)`` then returns the released result."""
-
-    def decode(self, job: DecodeJob) -> DecodeResult: ...
-
-    def latency(self, job: DecodeJob) -> int: ...
-
-
-@runtime_checkable
-class Scheduler(Protocol):
-    """Port 11. Select the next ready job from one decoder-pool queue."""
-
-    def pop(self, queue: list[DecodeJob]) -> DecodeJob: ...
-
-
-@runtime_checkable
-class DecoderMemoryTransfer(Protocol):
-    """Port 22. Carry one admitted job to the decoder side when its link delivers.
-
-    ``send_input(on_landed)`` sends the job's input over its link, calls
-    ``on_landed()`` once at delivery, and returns the delay the link expects;
-    ``None`` means the job carries no input and lands now. Implementations call
-    ``receiver(job)`` exactly once at the landing, unless the request is
-    cancelled first, and return the expected delay. ``cancel(job)`` is
-    idempotent: the receiver is never invoked for a request cancelled before its
-    landing, and cancelling an unknown or already landed request does nothing.
-    Storage admission, materialization, stored-input lifetime, admission,
-    service, and result handling belong elsewhere.
-    """
-
-    def deliver(
-        self, job: DecodeJob,
-        send_input: Optional[Callable[[Callable[[], None]], int]],
-        receiver: Callable[[DecodeJob], None],
-    ) -> int: ...
-
-    def cancel(self, job: DecodeJob) -> None: ...
-
-
-@runtime_checkable
-class PauliFrame(Protocol):
-    """Port 23. Optional final-weak correction sink, inert when absent.
-
-    The caller supplies a stable ``(op_id, window_id)`` identity, the delivered
-    logical observables, their decoder-request provenance, and a zero-argument
-    continuation. Implementations call the continuation at most once per call
-    and exactly once per accepted write, never before the configured write cost
-    has elapsed. They never mutate caller-owned values or call the conditional release,
-    controller, or execution runtime. ``snapshot`` is immutable and does not
-    mutate the frame.
-    """
-
-    def commit_correction(
-        self,
-        *,
-        window_key,
-        logical_observables,
-        request_key,
-        on_committed: Callable[[], None],
-    ) -> None: ...
-
-    def snapshot(self): ...
-
-
-@runtime_checkable
-class ResourcePool(Protocol):
-    """Port 12. Admit decoder jobs and own decoder queues and service units.
-
-    A job may be submitted once. The pool also owns strong-request cancellation
-    and the final check that no decoder work is stranded.
-    """
-
-    def enqueue(self, job: DecodeJob, send_input=None) -> None: ...   # send_input(on_landed) at dispatch sends the input link
-
-    def submit_decode(self, round_count: int, on_done: Callable[[], None],
-                      label: str = "") -> None: ...
-
-    def cancel_strong(self, key: tuple) -> None: ...
-
-    def check_decode_work_settled(self) -> None: ...
-
-
-# ------------------------------------------------------------------ dataflow
-
-
-@runtime_checkable
-class SyndromeDevice(Protocol):
-    """Unclocked physical source used only by ``QPUDevice``.
-
-    Payload bits are raw measurement bits per round. A source that carries a
-    detector formation table also offers ``form_round(operation_id, round_index,
-    raw_bits)``, which Buffer 0 intake calls once per complete round.
-    """
-
-    operation_circuit_scope: str
-    def begin_operation(
-        self, op, segment_round_count: int, source_round_count: int,
-    ) -> None: ...
-    def round_payloads(self, op, round_index: int) -> list[QPUReadout]: ...
-    def finalize_stream_round(
-        self, op, source_round_count: int,
-    ) -> list[QPUReadout]: ...
-    def idle_round_payloads(
-        self, op, stream_id, global_round: int, patch,
-    ) -> list[QPUReadout]: ...
-
-
-@runtime_checkable
-class ErrorModelProvider(Protocol):
-    """Build decoder-facing models without owning physical QPU cadence."""
-
-    def register_dynamic_stream(
-        self, stream_op, round_count: int, *, fault_model_requirement,
-    ): ...
-    def validate_stream_length(
-        self, stream_op, stream_round_count: int,
-    ) -> None: ...
-    def window_models_for_operation(
-        self, op, windows: list, round_count: int, *,
-        fault_model_requirement, fault_exclusion_ranges: tuple,
-        window_protocol,
-    ) -> list: ...
-    def window_model_for_stream(self, stream_id, window): ...
-    def strong_window_model_for_operation(
-        self, op, window, round_count: int, *,
-        fault_model_requirement, exclude_faults_touching=None,
-    ): ...
-
-
-@runtime_checkable
-class MultiFaultExclusionSyndromeDevice(Protocol):
-    """Optional device capability for disjoint fault-exclusion ranges."""
-
-    def strong_window_model_for_operation_with_exclusions(
-        self, op, window, round_count: int, *,
-        fault_model_requirement, fault_exclusion_ranges: tuple,
-    ): ...
-
-
-@runtime_checkable
-class Link(Protocol):
-    """The link fabric as every sender sees it.
-
-    A path is wired or free; a send on a wired path delivers by callback,
-    ``on_delivered(transfer)`` at the delivery tick with every tick of the
-    transfer on the record; ``expected_delay_ticks`` is what a send now would
-    pay if nothing else reached its channel first, a scheduler's estimate.
-    """
-
-    def is_wired(self, path: LinkPath) -> bool:
-        """Whether the card prices this path; an unwired path is a free hop."""
-
-    def expected_delay_ticks(
-        self, path: LinkPath, payload_bits: Optional[int], now_ticks: int,
-    ) -> int:
-        """What a send now would pay if nothing else reached its channel."""
-
-    def send(
-        self, path: LinkPath, payload_bits: Optional[int], now_ticks: int,
-        attribution: TransferAttribution,
-        on_delivered: Callable[[Transfer], None],
+        self, geometry: message.ResolvedCodeGeometry
     ) -> None:
-        """Send one transfer on the path; on_delivered(transfer) runs at delivery."""
+        """Refuse a window geometry the policy does not support."""
 
-
-@runtime_checkable
-class SyndromeTransport(Protocol):
-    """Port 14. Reassembles and forwards transient syndrome packets."""
-    def relay_qpu_readout(
-        self, payload: SyndromePayload, route: SyndromePacketRoute, *,
-        processing_ticks: int,
-    ) -> None: ...
-
-
-@runtime_checkable
-class ConditionalReleasePort(Protocol):
-    """Receives each operation's final result and releases the operations
-    conditioned on it (the OC hop). pauli_frame/conditional_release.py."""
-    def connect(self, controller, deliver_decision: Callable) -> None: ...
-
-    def register_blocked_operation(self, blocked_op_id: int,
-                                   blocking_op_id: int) -> None: ...
-
-    def release_waiters(self, op) -> None: ...
-
-
-# ---------------------------------------------------------------- compile side
-
-@runtime_checkable
-class InputFrontend(Protocol):
-    """Port 1 (compile-time). Builds the list of Operations to simulate."""
-
-    def build(self) -> list: ...
-
-
-@runtime_checkable
-class CodeModel(Protocol):
-    """Port 3. Window sizes, cycle length, graph size, and syndrome width."""
-
-    name: str
-    distance: int
-
-    def rounds_per_logical_cycle(self) -> int: ...
-
-    def round_period_us(self) -> Optional[float]: ...
-
-    def commit_rounds(self) -> int: ...
-
-    def buffer_rounds(self) -> int: ...
-
-    def buffering_floor(self) -> tuple[int, int]: ...
-
-    window_floor_justification: Optional[str]
-
-    def spatial_nodes(self, num_patches: int) -> int: ...
-
-    def syndrome_bits_per_round(self, num_patches: int) -> int: ...
-
-
-@runtime_checkable
-class LayoutModel(Protocol):
-    """Port 4. Maps operations and patches to their codes, decoding-graph
-    sizes, and resource claims.
-
-    ``codes()``, ``code_for_op()``, and ``code_for_patch()`` must remain stable
-    for a build. The current runtime accepts one declared planning/runtime code,
-    and every reachable selector must return that exact object.
-    """
-
-    def code_for_op(self, op): ...
-
-    def code_for_patch(self, patch_id): ...
-
-    def codes(self) -> list: ...
-
-    def spatial_nodes_for(
+    def on_window_ready(
         self,
-        operation,
-        *,
-        base_spatial_node_count: int,
-    ) -> int: ...
+        window: message.Window,
+        weak_job: message.DecodeJob,
+        services: EscalationServices,
+    ) -> list[message.Submission]:
+        """The jobs to submit for a window whose data is complete."""
 
-    def patch_spatial_nodes_for(
-        self,
-        patch_identity,
-        *,
-        base_spatial_node_count: int,
-    ) -> int: ...
-
-    def resources_for(self, op) -> list: ...
-
-
-@runtime_checkable
-class RoundsPolicy(Protocol):
-    """Port 5. How many syndrome rounds an op runs for. Must return >= 1."""
-
-    def rounds_for(self, op, code) -> int: ...
+    def on_decode_outcome(
+        self, outcome: message.DecodeOutcome, services: EscalationServices
+    ) -> message.OutcomeDirective:
+        """Accept, escalate or hold one decode outcome."""
 
 
 @runtime_checkable
 class WindowingScheme(Protocol):
-    """How an operation's rounds are cut into windows: the static window
-    graph of an operation, when a window has its data, and the buffer floor
-    the scheme needs."""
+    """How an operation's rounds are cut into windows.
+
+    Table rows: sliding, parallel, sandwich, naive_online. The static
+    window graph of an operation, when a window has its data, and the
+    buffer floor the scheme needs.
+    """
 
     def plan_operation(
         self,
@@ -511,47 +396,46 @@ class WindowingScheme(Protocol):
         *,
         commit_round_count: int,
         buffer_round_count: int,
-    ): ...
+    ):
+        """The operation's windows and their internal dependencies."""
 
-    def data_complete(self, window: Window, *, readiness: WindowReadiness,
-                      operation: OperationPlanningView) -> bool: ...
+    def data_complete(
+        self,
+        window: message.Window,
+        *,
+        readiness: message.WindowReadiness,
+        operation: message.OperationPlanningView,
+    ) -> bool:
+        """Whether the window has every round it reads."""
 
-    def validate_buffer(self, geometry: ResolvedCodeGeometry) -> None: ...
-
-
-# ----------------------------------------------------------------- resources
-
-@runtime_checkable
-class MagicStateFactory(Protocol):
-    """Port 19. Async magic-state supply: request() calls back once a
-    distilled state is ready for the op on its declared event engine."""
-
-    engine: Any
-
-    def request(self, op_id: int, callback: Callable[[], None]): ...
-
-    def shutdown(self) -> None: ...
+    def validate_buffer(self, geometry: message.ResolvedCodeGeometry) -> None:
+        """Refuse a buffer below the scheme's floor."""
 
 
 @runtime_checkable
-class Metric(Protocol):
-    """Port 20. Observes typed views of the run and reports one result;
-    never mutates what it observes."""
+class IdlePolicy(Protocol):
+    """How idle rounds travel while an operation waits for feedback.
 
-    name: str
-    result_schema_version: int
+    Table rows: separate_decode_jobs, ignore, extend_stream
+    (controller/policies.py). relay carries one idle round through the
+    controller it is given; end_idle_period runs when an operation
+    claims the patch, so rounds the policy has not charged yet can be
+    settled.
+    """
 
-    def observe(self, view) -> None: ...
+    def relay(self, controller, operation, patch, round_index: int) -> None:
+        """Carry one idle round of the patch through the controller."""
 
-    def result(self) -> Any: ...
+    def end_idle_period(self, controller, operation, patch) -> None:
+        """Settle the uncharged rounds when an operation claims the patch."""
 
 
 @runtime_checkable
-class MemoryModel(Protocol):
-    """Port 18. Observes retained payload storage inside SyndromeBuffer:
-    store()/evict() fire on exactly the fragments held. Optional; when
-    absent, storage is unbounded."""
+class Workload(Protocol):
+    """What the machine runs: the operations, wired in program order.
 
-    def store(self, key, payload) -> None: ...
+    Table rows: memory_circuit, circuit_list, surgery_ir, qlx.
+    """
 
-    def evict(self, key) -> None: ...
+    def build(self) -> list[message.Operation]:
+        """The operations, each with its patches and its predecessors."""

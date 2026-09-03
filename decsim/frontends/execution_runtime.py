@@ -10,10 +10,23 @@ them. The timestamp maps are the run's record of every operation's life.
 
 import functools
 import types
-from typing import Callable
+from typing import Any, Callable, Protocol, runtime_checkable
 
 import decsim.engine
 import decsim.message as message
+
+
+@runtime_checkable
+class MagicStateFactory(Protocol):
+    """Where a non-Clifford operation gets its magic state."""
+
+    engine: Any
+
+    def request(self, op_id: int, callback: Callable[[], None]):
+        """Ask for one state; callback runs once it is ready."""
+
+    def shutdown(self) -> None:
+        """Stop producing; the workload is complete."""
 
 
 class ResourceLedger:

@@ -12,13 +12,24 @@ events, model links, or manage decoder queues.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 from ..message import (
     SyndromeRoundPacket,
     same_stable_identity,
     stable_identity_order_key,
 )
+
+
+@runtime_checkable
+class MemoryModel(Protocol):
+    """An observer of retained payload storage: store and evict per fragment."""
+
+    def store(self, key, payload) -> None:
+        """One fragment was retained under the key."""
+
+    def evict(self, key) -> None:
+        """The fragment under the key was released."""
 
 
 @dataclass(frozen=True)

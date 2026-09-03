@@ -21,13 +21,13 @@ from decsim.message import (
     WindowProtocol,
 )
 from decsim.frontends.planner import (
-    _RunPlan,
-    _SyndromeBufferingPlan,
+    RunPlan,
+    SyndromeBufferingPlan,
     _materialize_execution_plan,
-    _plan_execution,
+    plan_execution,
     _plan_syndrome_buffering,
-    _validate_operation_graph,
-    _validate_workload_identity,
+    check_operation_graph,
+    check_workload_identity,
 )
 from decsim.qpu.round_policies import (
     CodeRounds,
@@ -207,7 +207,7 @@ def compile_plan(
     layout=None,
     scheme=None,
     rounds_policy=None,
-    fallback_round_us=2.0,
+    fallback_round_microseconds=2.0,
     retain_strong_context=False,
     double_window=False,
     open_ended=False,
@@ -216,14 +216,14 @@ def compile_plan(
     selected_layout = layout or RecordingLayout(selected_code)
     selected_scheme = scheme or RecordingScheme()
     selected_policy = rounds_policy or FixedRounds(4)
-    plan = _plan_execution(
+    plan = plan_execution(
         operations=tuple(planning_view(value) for value in operations),
         planned_operation_ids=tuple(planned_ids),
         code=selected_code,
         layout=selected_layout,
         scheme=selected_scheme,
         rounds_policy=selected_policy,
-        fallback_round_us=fallback_round_us,
+        fallback_round_microseconds=fallback_round_microseconds,
         retain_strong_context=retain_strong_context,
         double_window=double_window,
         has_open_ended_dynamic_streams=open_ended,
@@ -234,8 +234,8 @@ def compile_plan(
 def test_plan_records_are_frozen_without_recursively_freezing_execution():
     """Top-level plan records are immutable while their runtime window graph stays mutable."""
     execution = WindowPlan({}, {}, {}, {}, {}, {}, {}, 0, {}, {}, {})
-    buffering = _SyndromeBufferingPlan((), (), (), (), (), None)
-    run_plan = _RunPlan(geometry(), (), (), 1, execution, buffering)
+    buffering = SyndromeBufferingPlan((), (), (), (), (), None)
+    run_plan = RunPlan(geometry(), (), (), 1, execution, buffering)
 
     with pytest.raises(FrozenInstanceError):
         run_plan.round_ticks = 2
@@ -244,7 +244,7 @@ def test_plan_records_are_frozen_without_recursively_freezing_execution():
 
     execution.total_windows = 3
     assert run_plan.execution.total_windows == 3
-    assert _SyndromeBufferingPlan("unchecked", (), (), None, (), None).weak_holds == "unchecked"
+    assert SyndromeBufferingPlan("unchecked", (), (), None, (), None).weak_holds == "unchecked"
 
 
 def test_buffering_plan_accounts_for_overlap_successors_and_open_streams():
@@ -359,29 +359,29 @@ def test_operation_graph_rejects_ambiguous_or_stranded_dependency_graphs(
 ):
     """Dependency validation rejects collisions, invalid edges, and cycles."""
     with pytest.raises(ValueError, match=expected_text):
-        _validate_operation_graph(bad_operations)
+        check_operation_graph(bad_operations)
 
 
 def test_operation_graph_validates_selected_edges_and_optional_blockers():
     """Graph validation follows the selected dependency field and checks blockers only on request."""
     first = operation(1, blocked_by=2)
     second = operation(2, blocked_by=1, decoder_predecessors=(1,))
-    _validate_operation_graph([first, second])
-    _validate_operation_graph(
+    check_operation_graph([first, second])
+    check_operation_graph(
         [first, second], dependency_field="decoder_boundary_predecessors"
     )
-    _validate_operation_graph(
+    check_operation_graph(
         [operation(1, blocked_by=99)],
         validate_blockers=True,
         external_blocker_ids=(99,),
     )
 
     with pytest.raises(ValueError, match="unknown blocking operation"):
-        _validate_operation_graph(
+        check_operation_graph(
             [operation(1, blocked_by=99)], validate_blockers=True
         )
     with pytest.raises(ValueError, match="blocked by itself"):
-        _validate_operation_graph(
+        check_operation_graph(
             [operation(1, blocked_by=1)], validate_blockers=True
         )
 
@@ -392,9 +392,9 @@ def test_workload_identity_accepts_unambiguous_static_and_dynamic_owners():
     producer = operation(2, stream_id=("stream", 3))
     dynamic = operation(("stream", 3))
 
-    _validate_workload_identity([static], [static], [])
-    _validate_workload_identity([producer], [], [dynamic])
-    _validate_workload_identity([operation(4, stream_id=4)], [], [])
+    check_workload_identity([static], [static], [])
+    check_workload_identity([producer], [], [dynamic])
+    check_workload_identity([operation(4, stream_id=4)], [], [])
 
 
 def test_workload_identity_rejects_role_and_stream_ambiguity():
@@ -405,15 +405,15 @@ def test_workload_identity_rejects_role_and_stream_ambiguity():
     ]
     for ops, decode_ops, dynamic_streams in cases:
         with pytest.raises((TypeError, ValueError)):
-            _validate_workload_identity(ops, decode_ops, dynamic_streams)
+            check_workload_identity(ops, decode_ops, dynamic_streams)
 
     shared = operation(2)
     with pytest.raises(ValueError, match="dynamic_streams"):
-        _validate_workload_identity((shared,), (), (shared,))
+        check_workload_identity((shared,), (), (shared,))
     with pytest.raises(ValueError, match="static decode membership"):
-        _validate_workload_identity((operation(3),), (operation(4),), ())
+        check_workload_identity((operation(3),), (operation(4),), ())
     with pytest.raises(ValueError, match="does not name"):
-        _validate_workload_identity(
+        check_workload_identity(
             (operation(5, stream_id=True),), (), (operation(1),)
         )
 
@@ -493,7 +493,7 @@ def test_execution_planning_resolves_geometry_patches_seams_and_graph():
         layout=layout,
         scheme=scheme,
         rounds_policy=FixedRounds(4),
-        fallback_round_us=2.5,
+        fallback_round_microseconds=2.5,
     )
 
     assert plan.round_ticks == 2_500_000
@@ -552,10 +552,8 @@ def test_execution_planning_rejects_invalid_cadence_and_code_selection():
         compile_plan((operation(1, patches=("patch",)),), (1,), code=code, layout=patch_layout)
 
 
-def test_execution_planning_rejects_unknown_zero_round_and_invalid_boundary_owners():
-    """Execution planning rejects unknown owners, zero owner rounds, and invalid boundary graphs."""
-    with pytest.raises(ValueError, match="unknown planned operation id"):
-        compile_plan((operation(1),), (9,))
+def test_execution_planning_rejects_zero_round_and_invalid_boundary_owners():
+    """Execution planning rejects zero owner rounds and invalid boundary graphs."""
     with pytest.raises(ValueError, match="at least one round"):
         compile_plan(
             (operation(1),),

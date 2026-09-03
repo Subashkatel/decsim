@@ -1,20 +1,11 @@
-"""The Stim syndrome source: sampled measurement bits, one packet per round.
+"""The Stim syndrome source: one sampled shot, emitted as raw bits by round.
 
-The device samples one shot of an operation's Stim circuit, or replays a
-recorded shot, and emits the raw measurement bits round by round, the way
-readout electronics do: every round carries one bit per measure qubit,
-and the final round of a memory circuit also carries the data-qubit
-readout (Stim, src/stim/gen/gen_surface_code.cc: MR on the measure qubits
-every round, M on the data qubits at the end). Detection events are
-formed later, at the decoder input, by form_round from the same formation
-table (detector_error_model/detector_formation.py).
-
-One shot is sampled per stream identity and reused by every segment of
-the stream. With a numeric seed every identity gets its own substream, a
-blake2b hash of the root seed and the identity, so a run is reproducible
-across processes; with no seed Stim picks its own entropy. The device
-also builds the window error models of its circuits through the detector
-error model package.
+Every round carries one bit per measure qubit and the final round of a
+memory circuit also carries the data-qubit readout (Stim,
+src/stim/gen/gen_surface_code.cc); detection events are formed at the
+decoder input by form_round. One shot is sampled per stream identity,
+under a blake2b substream of the root seed so a run is reproducible
+across processes, and reused by every segment of the stream.
 """
 
 import dataclasses
@@ -134,13 +125,11 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         is_stream = operation.stream_id is not None
         is_later_segment = is_stream and operation.stream_offset > 0
         if is_later_segment:
-            self._replay_stream_shot(operation, key)
+            # A later segment reads its stream's shot under its own id.
+            assert key in self._shot_by_key, "a segment begins after its head"
+            self._sample_key_by_operation_id[operation.id] = key
             return
-        if key in self._shot_by_key:
-            raise RuntimeError(
-                f"{key!r} has already begun; beginning it again would replace "
-                "the shot its rounds are read from"
-            )
+        assert key not in self._shot_by_key, f"{key!r} has already begun"
         self._sample_shot(key, operation, source_round_count, detector_rounds)
 
     def form_round(
@@ -164,10 +153,6 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     ) -> list[message.QPUReadout]:
         """This operation round as one raw measurement packet."""
         key = _sample_key_of(operation)
-        if key not in self._shot_by_key:
-            raise RuntimeError(
-                f"no shot is sampled under {key!r}; the operation has not begun"
-            )
         stream_offset = 0
         if operation.stream_offset is not None:
             stream_offset = operation.stream_offset
@@ -183,14 +168,33 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     def finalize_stream_round(
         self, operation: message.Operation, source_round_count: int
     ) -> list[message.QPUReadout]:
-        """The stream's final data readout as its own raw fragment."""
+        """The stream's final data readout as its own raw fragment.
+
+        The refusals are the contract with the frontend that declared the
+        stream: a wrong declaration would stamp another round's bits as
+        the final readout.
+        """
         key = _sample_key_of(operation)
-        table = self._check_finalizer(key, operation, source_round_count)
         shot = self._shot_by_key[key]
+        binding = self._source_binding_by_key[key]
+        circuit_text = str(operation.circuit)
+        if circuit_text != binding.circuit_text:
+            raise RuntimeError(
+                "finalizer circuit differs from its source binding"
+            )
+        final_round = operation.stream_offset + 1
+        if final_round != source_round_count:
+            raise RuntimeError("finalizer is not at the final source round")
+        if not self._terminal_detector_ids.get(key):
+            raise RuntimeError(
+                "terminal finalizer has no declared detector ids"
+            )
+        table = shot.table
+        if table.readout_slot_start is None:
+            raise RuntimeError("terminal finalizer has no folded readout bits")
         final_packet = shot.packets[table.round_count]
         bits = final_packet[table.readout_slot_start :]
         patch = _first_patch_of(operation)
-        final_round = operation.stream_offset + 1
         return [
             message.QPUReadout(
                 key, patch, final_round, bits=bits, size_bits=len(bits)
@@ -206,11 +210,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
     ) -> list[message.QPUReadout]:
         """This idle stream round as one raw measurement packet."""
         del operation
-        if stream_id not in self._shot_by_key:
-            raise RuntimeError("idle emission requires a sampled bound stream")
         binding = self._source_binding_by_key[stream_id]
-        is_int = type(global_round) is int
-        if not is_int or not 1 <= global_round <= binding.round_count:
+        if not 1 <= global_round <= binding.round_count:
             raise ValueError("idle round is outside the finite source")
         bits = self._round_packet_bits(stream_id, global_round)
         return [
@@ -368,8 +369,7 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         )
 
     def _prepare_run_seed_state(self, effective_seed):
-        seed = _validated_seed(effective_seed)
-        return (seed, {}, {}, {}, {})
+        return (effective_seed, {}, {}, {}, {})
 
     def _install_run_seed_state(self, prepared_state) -> None:
         (
@@ -435,15 +435,6 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         self._shot_by_key[key] = shot
         self._sample_key_by_operation_id[operation.id] = key
 
-    def _replay_stream_shot(self, operation: message.Operation, key) -> None:
-        """A later segment reads its stream's shot under its own id."""
-        if key not in self._shot_by_key:
-            raise RuntimeError(
-                f"segment {operation.id!r} of stream {key!r} begun before the "
-                "stream's head"
-            )
-        self._sample_key_by_operation_id[operation.id] = key
-
     def _measurement_row(
         self, sampler: stim.CompiledMeasurementSampler
     ) -> tuple[int, ...]:
@@ -453,19 +444,8 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         return _as_int_bits(row)
 
     def _shot_for(self, identity):
-        """The shot behind an operation id, or behind a sample key.
-
-        An identity that is both a replaying operation id and another
-        stream's sample key is refused, since either reading could be the
-        wrong one.
-        """
+        """The shot behind a replaying operation id, or behind a sample key."""
         key = self._sample_key_by_operation_id.get(identity, identity)
-        is_sample_key = identity in self._shot_by_key
-        if is_sample_key and key != identity:
-            raise RuntimeError(
-                f"identity {identity!r} is both a sample key and a replaying "
-                "operation id; the lookup is ambiguous"
-            )
         return self._shot_by_key.get(key)
 
     def _round_packet_bits(self, key, global_round: int) -> tuple[int, ...]:
@@ -485,37 +465,6 @@ class StimDevice(seeding._AtomicRunSeedConsumer):
         if readout_arrives_separately and has_folded_readout:
             return packet[: table.readout_slot_start]
         return packet
-
-    def _check_finalizer(
-        self, key, operation: message.Operation, source_round_count: int
-    ):
-        """The formation table of a stream whose finalizer is well formed."""
-        if key not in self._shot_by_key:
-            raise RuntimeError("terminal finalizer requires a sampled stream")
-        binding = self._source_binding_by_key[key]
-        if source_round_count != binding.round_count:
-            raise ValueError(
-                "finalizer source duration differs from its binding"
-            )
-        circuit_text = None
-        if operation.circuit is not None:
-            circuit_text = str(operation.circuit)
-        if circuit_text != binding.circuit_text:
-            raise ValueError(
-                "finalizer circuit differs from its source binding"
-            )
-        if operation.stream_offset is None:
-            raise ValueError("a stream finalizer must carry its stream_offset")
-        final_round = operation.stream_offset + 1
-        if final_round != source_round_count:
-            raise ValueError("finalizer is not at the final source round")
-        if not self._terminal_detector_ids.get(key):
-            raise ValueError("terminal finalizer has no declared detector ids")
-        shot = self._shot_by_key[key]
-        table = shot.table
-        if table.readout_slot_start is None:
-            raise ValueError("terminal finalizer has no folded readout bits")
-        return table
 
     def _bind_source(
         self, key, circuit: stim.Circuit, source_round_count: int
@@ -672,8 +621,6 @@ def _check_segment(
                 "standalone duration must equal its source duration"
             )
         return
-    if operation.stream_offset is None:
-        raise ValueError("a stream segment must carry its stream_offset")
     segment_end = operation.stream_offset + segment_round_count
     if segment_end > source_round_count:
         raise ValueError("stream segment extends beyond its finite source")

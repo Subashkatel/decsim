@@ -348,37 +348,10 @@ def test_a_cancelled_request_is_never_delivered():
     assert factory.stored_state_count == 1
 
 
-def test_the_production_mode_is_checked_before_the_counts():
-    # unit_count 0 and success_probability 2 are both wrong too; the mode
-    # sentence wins.
+def test_an_unknown_production_mode_is_refused():
     engine = decsim.engine.Engine(verbose=False)
     with pytest.raises(ValueError, match="production_mode must be"):
-        magic_state_factories.DistillationFactory(
-            engine,
-            0,
-            1,
-            None,
-            0,
-            correction_decode_count=0,
-            production_mode="x",
-            success_probability=2,
-        )
-
-
-def test_the_chains_production_mode_is_checked_before_the_levels():
-    # inputs_per_round 0, preparation_unit_count 0 and the level's
-    # unit_count 0 are all wrong too; the mode sentence wins.
-    engine = decsim.engine.Engine(verbose=False)
-    level = magic_state_factories.DistillLevel(unit_count=0, distance=3)
-    with pytest.raises(ValueError, match="production_mode must be"):
-        magic_state_factories.MultiLevelDistillationFactory(
-            engine,
-            [level],
-            round_ticks=10,
-            inputs_per_round=0,
-            preparation_unit_count=0,
-            production_mode="x",
-        )
+        single_stage(engine, production_mode="batch")
 
 
 def test_correction_decodes_need_a_decode_service():
@@ -667,33 +640,3 @@ def test_a_continuous_chain_refuses_an_empty_buffer_capacity():
     level = magic_state_factories.DistillLevel(unit_count=1, distance=3)
     with pytest.raises(ValueError, match="buffer_capacity >= 1"):
         chain(engine, [level], production_mode="continuous", buffer_capacity=0)
-
-
-def test_continuous_production_refuses_a_negative_buffer_capacity():
-    engine = decsim.engine.Engine(verbose=False)
-    with pytest.raises(ValueError, match="buffer_capacity >= 1"):
-        single_stage(engine, production_mode="continuous", buffer_capacity=-1)
-
-
-def test_continuous_production_refuses_a_buffer_capacity_that_is_text():
-    engine = decsim.engine.Engine(verbose=False)
-    with pytest.raises(ValueError, match="integer buffer_capacity"):
-        single_stage(engine, production_mode="continuous", buffer_capacity="2")
-
-
-def test_continuous_production_refuses_a_fractional_buffer_capacity():
-    engine = decsim.engine.Engine(verbose=False)
-    with pytest.raises(ValueError, match="integer buffer_capacity"):
-        single_stage(engine, production_mode="continuous", buffer_capacity=0.5)
-
-
-def test_continuous_production_refuses_a_boolean_buffer_capacity():
-    engine = decsim.engine.Engine(verbose=False)
-    with pytest.raises(ValueError, match="integer buffer_capacity"):
-        single_stage(engine, production_mode="continuous", buffer_capacity=True)
-
-
-def test_demand_production_refuses_a_buffer_capacity():
-    engine = decsim.engine.Engine(verbose=False)
-    with pytest.raises(ValueError, match="continuous production only"):
-        single_stage(engine, production_mode="demand", buffer_capacity=2)

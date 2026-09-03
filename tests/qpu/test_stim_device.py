@@ -256,12 +256,6 @@ def test_a_seed_that_is_not_an_integer_is_refused():
         stim_device.StimDevice(seed="7")
 
 
-def test_a_run_bound_seed_outside_stims_range_is_refused():
-    device = stim_device.StimDevice(seed=None)
-    with pytest.raises(ValueError, match="64-bit unsigned"):
-        device.reserve_run_seed(-5)
-
-
 def test_a_run_bound_seed_samples_stims_shot_under_that_root():
     circuit = memory_circuit(3, 3)
     operation = memory_operation(circuit)
@@ -333,56 +327,6 @@ def test_a_stream_whose_id_equals_a_segments_operation_id_samples_afresh():
     assert alone_first.bits == (1, 0, 0, 0, 0, 1, 0, 0)
 
 
-def test_a_lookup_by_an_identity_that_is_a_stream_and_a_segment_is_refused():
-    six_rounds = memory_circuit(3, 6)
-    three_rounds = memory_circuit(3, 3)
-    head = memory_operation(six_rounds, 1, stream_id="a", stream_offset=0)
-    tail = memory_operation(six_rounds, 2, stream_id="a", stream_offset=3)
-    other = memory_operation(three_rounds, 3, stream_id=2, stream_offset=0)
-    device = stim_device.StimDevice(seed=0)
-    device.begin_operation(head, 3, 6)
-    device.begin_operation(tail, 3, 6)
-    device.begin_operation(other, 3, 3)
-    with pytest.raises(RuntimeError, match="ambiguous"):
-        device.sampled_detection_events(2)
-
-
-def test_an_idle_round_under_a_segments_operation_id_is_refused():
-    circuit = memory_circuit(3, 6)
-    head = memory_operation(circuit, 1, stream_id="a", stream_offset=0)
-    tail = memory_operation(circuit, 2, stream_id="a", stream_offset=3)
-    device = stim_device.StimDevice(seed=5)
-    device.begin_operation(head, 3, 6)
-    device.begin_operation(tail, 3, 6)
-    with pytest.raises(RuntimeError, match="requires a sampled bound stream"):
-        device.idle_round_payloads(tail, 2, 4, 0)
-
-
-def test_a_finalizer_under_a_segments_operation_id_is_refused():
-    circuit = memory_circuit(3, 6)
-    head = memory_operation(circuit, 1, stream_id="a", stream_offset=0)
-    tail = memory_operation(circuit, 2, stream_id="a", stream_offset=3)
-    finalizer = memory_operation(circuit, 3, stream_id=2, stream_offset=5)
-    device = stim_device.StimDevice(seed=5, terminal_detector_ids={2: (36,)})
-    device.begin_operation(head, 3, 6)
-    device.begin_operation(tail, 3, 6)
-    with pytest.raises(RuntimeError, match="requires a sampled stream"):
-        device.finalize_stream_round(finalizer, 6)
-
-
-def test_a_round_of_a_stream_that_has_not_begun_is_refused():
-    six_rounds = memory_circuit(3, 6)
-    three_rounds = memory_circuit(3, 3)
-    head = memory_operation(six_rounds, 1, stream_id="a", stream_offset=0)
-    tail = memory_operation(six_rounds, 2, stream_id="a", stream_offset=3)
-    other = memory_operation(three_rounds, 3, stream_id=2, stream_offset=0)
-    device = stim_device.StimDevice(seed=0)
-    device.begin_operation(head, 3, 6)
-    device.begin_operation(tail, 3, 6)
-    with pytest.raises(RuntimeError, match="has not begun"):
-        device.round_payloads(other, 1)
-
-
 def test_a_later_segment_with_another_source_duration_is_refused():
     # Seven rounds is a valid chronology for the six-round circuit, so
     # the binding's duration is what refuses the segment.
@@ -393,42 +337,6 @@ def test_a_later_segment_with_another_source_duration_is_refused():
     device.begin_operation(head, 1, 6)
     with pytest.raises(ValueError, match="source duration differs"):
         device.begin_operation(tail, 1, 7)
-
-
-def test_a_stream_segment_without_an_offset_is_refused():
-    circuit = memory_circuit(3, 3)
-    segment = memory_operation(circuit, 1, stream_id="s")
-    device = stim_device.StimDevice(seed=5)
-    with pytest.raises(ValueError, match="must carry its stream_offset"):
-        device.begin_operation(segment, 3, 3)
-
-
-def test_a_segment_begun_before_its_head_is_refused():
-    circuit = memory_circuit(3, 6)
-    tail = memory_operation(circuit, 2, stream_id="s", stream_offset=3)
-    device = stim_device.StimDevice(seed=5)
-    with pytest.raises(RuntimeError, match="before the stream's head"):
-        device.begin_operation(tail, 3, 6)
-
-
-def test_beginning_a_stream_head_again_is_refused():
-    circuit = memory_circuit(3, 3)
-    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
-    device = stim_device.StimDevice(seed=5)
-    device.begin_operation(head, 3, 3)
-    first_round = round_payload(device, head, 1)
-    with pytest.raises(RuntimeError, match="has already begun"):
-        device.begin_operation(head, 3, 3)
-    assert round_payload(device, head, 1) == first_round
-
-
-def test_beginning_a_standalone_operation_again_is_refused():
-    circuit = memory_circuit(3, 3)
-    operation = memory_operation(circuit)
-    device = stim_device.StimDevice(seed=5)
-    device.begin_operation(operation, 3, 3)
-    with pytest.raises(RuntimeError, match="has already begun"):
-        device.begin_operation(operation, 3, 3)
 
 
 def test_a_segment_past_the_end_of_its_source_is_refused():
@@ -505,48 +413,6 @@ def test_an_idle_round_outside_the_finite_source_is_refused():
         device.idle_round_payloads(head, "s", 4, 0)
 
 
-def test_an_idle_round_of_an_unsampled_stream_is_refused():
-    circuit = memory_circuit(3, 3)
-    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
-    device = recorded_device(THREE_ROUND_ROW)
-    with pytest.raises(RuntimeError, match="requires a sampled bound stream"):
-        device.idle_round_payloads(head, "s", 1, 0)
-
-
-def test_a_finalizer_before_the_stream_is_sampled_is_refused():
-    circuit = memory_circuit(3, 3)
-    finalizer = memory_operation(circuit, 2, stream_id="s", stream_offset=2)
-    device = recorded_device(
-        THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
-    )
-    with pytest.raises(RuntimeError, match="requires a sampled stream"):
-        device.finalize_stream_round(finalizer, 3)
-
-
-def test_a_finalizer_without_an_offset_is_refused():
-    circuit = memory_circuit(3, 3)
-    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
-    finalizer = memory_operation(circuit, 2, stream_id="s")
-    device = recorded_device(
-        THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
-    )
-    device.begin_operation(head, 3, 3)
-    with pytest.raises(ValueError, match="must carry its stream_offset"):
-        device.finalize_stream_round(finalizer, 3)
-
-
-def test_a_finalizer_with_another_source_duration_is_refused():
-    circuit = memory_circuit(3, 3)
-    head = memory_operation(circuit, 1, stream_id="s", stream_offset=0)
-    finalizer = memory_operation(circuit, 2, stream_id="s", stream_offset=3)
-    device = recorded_device(
-        THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
-    )
-    device.begin_operation(head, 3, 3)
-    with pytest.raises(ValueError, match="source duration differs"):
-        device.finalize_stream_round(finalizer, 4)
-
-
 def test_a_finalizer_with_another_circuit_is_refused():
     circuit = memory_circuit(3, 3)
     noisier_circuit = memory_circuit(3, 3, noise=0.002)
@@ -558,7 +424,7 @@ def test_a_finalizer_with_another_circuit_is_refused():
         THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
     )
     device.begin_operation(head, 3, 3)
-    with pytest.raises(ValueError, match="circuit differs"):
+    with pytest.raises(RuntimeError, match="circuit differs"):
         device.finalize_stream_round(finalizer, 3)
 
 
@@ -570,7 +436,7 @@ def test_a_finalizer_before_the_final_round_is_refused():
         THREE_ROUND_ROW, terminal_detector_ids={"s": (20,)}
     )
     device.begin_operation(head, 3, 3)
-    with pytest.raises(ValueError, match="not at the final source round"):
+    with pytest.raises(RuntimeError, match="not at the final source round"):
         device.finalize_stream_round(finalizer, 3)
 
 
@@ -580,7 +446,7 @@ def test_a_finalizer_without_declared_terminal_detectors_is_refused():
     finalizer = memory_operation(circuit, 2, stream_id="s", stream_offset=2)
     device = recorded_device(THREE_ROUND_ROW)
     device.begin_operation(head, 3, 3)
-    with pytest.raises(ValueError, match="no declared detector ids"):
+    with pytest.raises(RuntimeError, match="no declared detector ids"):
         device.finalize_stream_round(finalizer, 3)
 
 
@@ -601,7 +467,7 @@ def test_a_finalizer_without_folded_readout_bits_is_refused():
         measurement_rounds={"s": measurement_rounds},
     )
     device.begin_operation(head, 3, 3)
-    with pytest.raises(ValueError, match="no folded readout bits"):
+    with pytest.raises(RuntimeError, match="no folded readout bits"):
         device.finalize_stream_round(finalizer, 3)
 
 

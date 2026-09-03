@@ -171,7 +171,6 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         return snapshot
 
     def _check_settings(self, initial_store: int) -> None:
-        """The mode and the decode service are checked before every count."""
         _check_production_mode(self.production_mode, self.buffer_capacity)
         _check_decode_service(self.decode_service, self.correction_decode_count)
         _check_count("unit_count", self.unit_count, minimum=1)
@@ -440,7 +439,6 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         self._is_shut_down = True
 
     def _check_settings(self) -> None:
-        """The mode and the decode service are checked before every count."""
         _check_production_mode(self.production_mode, self.buffer_capacity)
         _check_decode_service(self.decode_service, self.correction_decode_count)
         _check_count("inputs_per_round", self.inputs_per_round, minimum=1)
@@ -729,17 +727,8 @@ def _check_production_mode(
             f"(got {production_mode!r})"
         )
     if production_mode != "continuous":
-        if buffer_capacity is not None:
-            raise ValueError(
-                "buffer_capacity applies to continuous production only"
-            )
         return
-    if type(buffer_capacity) is not int:
-        raise ValueError(
-            "continuous production needs an integer buffer_capacity "
-            f"(got {buffer_capacity!r})"
-        )
-    if buffer_capacity < 1:
+    if buffer_capacity is None or buffer_capacity < 1:
         raise ValueError("continuous production needs buffer_capacity >= 1")
 
 

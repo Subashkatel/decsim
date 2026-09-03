@@ -92,8 +92,12 @@ A function longer than 40 lines is split where its meaning splits: each
 piece has a name a reader would look for. A helper that exists only to
 get a function under the cap, with a name like `_second_half`, is worse
 than the long function; then the function stays long and the checklist
-row records it. A block nested deeper than two levels is hoisted into a
-named method.
+row says why. The 40 comes from Google's Python and C++ guides, where it
+is a prompt to think, not a limit; the checker lists functions over it
+and classes over six attributes as reports, not failures. The six is
+ours. A block nested deeper than two levels is hoisted into a named
+method (LLVM's early exits and predicate functions); that one is a
+failure.
 
 ## Rule 2. Names are full words that say what the thing is
 
@@ -167,7 +171,14 @@ Where a silent wrong answer would corrupt a result: a component refuses a
 call that breaks its own contract (a negative delay, a second correction
 for the same window, a physical fault kept past its own component) and
 raises RuntimeError, because a wrong caller is a bug and a loud stop is
-better than a wrong number.
+better than a wrong number. This is gem5's split: `fatal` for the
+user's mistake, `panic` for the machine's.
+
+An invariant a component keeps for itself (a queue that is never empty
+here, a tick that never goes backwards) is a bare `assert` with a
+message. It costs one line, it carries no test, and no reviewer asks
+for one; LLVM's "assert liberally" and Google's rule that an assert is
+never application logic both apply.
 
 Everything else is not necessary and is deleted, with its test. Inside
 the machine a function trusts what its callers send. A function in a
@@ -212,27 +223,43 @@ says so.
 
 ## Rule 7. Components plug in through ports
 
-This is the target shape, taken from gem5 (a SimObject has params, state
-and named ports; a Python config wires them) and applied to every
-component the structural slices produce.
+This is the target shape. The ownership and the name table are gem5's
+(a SimObject's Python class is its params; `allClasses` maps a name to
+a class); the table plus one abstract class per pluggable part is
+sinter's (`BUILT_IN_DECODERS` and `Decoder`); the wiring is by
+constructor, not gem5's late port bind, because Python needs no second
+step. It applies to every component the structural slices produce.
 
-A port is a small Protocol in `decsim/ports.py` with the methods one
-component needs from another, named for what they do:
+A port is a small Protocol in `decsim/ports.py` (today's
+`decsim/protocols.py`, renamed and trimmed under rule 5) with the
+methods one component needs from another, named for what they do:
 `SyndromeSource.begin_operation`, `SyndromeSource.round_payloads`,
 `Decoder.decode`, `Link.send`, `Frame.commit_correction`. A component
-depends on ports, never on another component's class. The methods on a
-port are the handoffs of "The target", point 2, so the port file is also
-the map of the pipeline.
+depends on ports, never on another component's class.
+
+Which ports exist is decided by the pipeline, not by taste: one port per
+neighbour in the list under "The target", point 2, one method per
+handoff, and the record that crosses it defined in `message.py`.
+Observation (metrics, ledgers, the traffic report) is reached through
+callbacks a component fires, never through a port, so a component can
+run with no observer at all. The port file is therefore the map of the
+pipeline, and a reader who wants to follow a readout starts there.
 
 One root object, `Machine`, builds every component from its settings and
-wires them; no component builds or looks up another. The yaml selects an
-implementation by name (`qpu: stim_device`, `weak_decoder:
-union_find`), and a table in the root maps the name to the class.
+wires them by constructor; no component builds or looks up another. The
+yaml has one section per component, each section builds one settings
+dataclass, and a pluggable component's section carries one `kind` key
+naming a row in the root's table (`qpu: {kind: stim_device, ...}`,
+`weak_decoder: {kind: union_find, ...}`). That surface does not exist
+today (the decoder algorithm is fixed on a card); it arrives as a
+surface commit under the root slice's design note.
 
 Adding a component means: write one class that implements the port, add
-one row to that table, add its settings to the yaml reference. Nothing
+one row to that table, add its section to the yaml reference. Nothing
 else changes. A slice that makes adding a component take more than that
-is not done.
+is not done. The port also lets an old and a new implementation coexist
+while callers move (Fowler's branch by abstraction), so a structural
+slice never needs a long-lived branch.
 
 A mechanical rewrite keeps a file's current shape, including a `connect`
 step that exists today, and only makes it read well; a structural slice
@@ -306,15 +333,26 @@ docstring names the paper, the reference code, or the closed form it
 checks against, and cites only what is on disk. One test file per
 module, at `tests/<component>/test_<module>.py`.
 
-Tests are not written for inputs nothing produces. A test of a check
-that rule 4 deletes goes with it. A test that must change when the
+At a boundary the refusal is tested, with the sentence asserted, because
+a user will send that input. Inside the machine, tests are not written
+for inputs nothing produces, and a test of a check that rule 4 deletes
+goes with it. A test that must change when the
 implementation changes, but the behavior does not, is brittle and is
 rewritten. The old tests keep running until the new ones cover the same
 behavior, then they are deleted in one commit per test directory.
 
-Log lines are part of the pinned behavior: the gate hashes the full log
-of every strict point. A change to a log line's text or source name is a
-surface change (below), never part of a mechanical slice.
+The gate is a characterization test (Feathers; also called a golden
+master): it pins what the code does, not what it should do. Its three
+known failure modes are handled in this order. It pins bugs, so a bug
+found on the way gets a referent and its own commit rather than a
+golden move. It is blind beyond its points, so "reachable" in this
+document means reachable by the sixteen gate points, the harnesses, or
+a yaml key. It is brittle to incidental text, so the golden carries two
+hashes, one over results and one over the log; a surface commit
+regenerates only the log hash and states that the results hash is
+unchanged (the verify tool gains the split in the next gate commit). A
+change to a log line's text or source name is a surface change (below),
+never part of a mechanical slice.
 
 ## Size
 
@@ -328,6 +366,13 @@ shape nothing runs, a helper that exists to dodge the line cap, a
 docstring that repeats the code, a record or alias that has one reader.
 A file may end larger than it began when all of its growth is the right
 kind; it may not end larger for the wrong kind.
+
+The row also carries the gate's wall time before and after. One action
+per line adds loads and stores, and a sweep multiplies the engine, the
+buffers, the links and the decoder unit by shots and points. A hot path
+may keep a dense line when the row shows the cost and says so in a
+comment; that is Google's "concede to practicalities", and it is the
+only exception to rule 1.
 
 ## Slices and commits
 
@@ -352,8 +397,11 @@ tests green, `tools/check.sh` clean on the touched files. The file
 checklist in docs/rewrite/PLAN.md moves in the same commit, with the
 size numbers.
 
-Each remaining mechanical pass happens inside the structural slice that
-touches the file, so a file is rewritten once, not twice.
+A file is touched in one slice, in two commits: the mechanical commit
+first, with the gate unchanged, then the structural commit under the
+design note. Mixing the two in one diff hides the move behind the
+re-wording, and neither a reviewer's differential nor a reader can
+separate them (Fowler's two hats; Google's one-thing-per-change).
 
 ## Review
 
@@ -375,11 +423,15 @@ matters, and it is not fixed. A reviewer does not ask for a check, a
 test or a law for such an input.
 
 Each finding carries a severity: bug, a test that cannot fail, untested
-law, weak test, rule violation. A slice has at most two rounds. Round one
-fixes every in-scope bug and every test that cannot fail. Round two is
-reviewer A's differential on the fix. Anything left after round two is
-written on the checklist row, and the slice closes. Beyond bugs, each
-reviewer answers this list with yes or no for every touched file:
+law, weak test, rule violation, nit. A slice closes when reviewer A's
+differential is exact and no in-scope bug and no test-that-cannot-fail
+remains; everything else is a nit and goes on the checklist row. That is
+Google's standard: approve when the change improves the code's health,
+not when it is perfect, and "nit" for what need not block. Two rounds is
+the backstop, not the target; a third round needs the coordinator to
+say why. For a structural slice reviewer B also reads the design note
+against the code. Beyond bugs, each reviewer answers this list with yes
+or no for every touched file:
 
 1. Does every line do one thing, and does `tools/check.sh` pass?
 2. Is every name a full word that says what the thing is, with no
@@ -411,8 +463,12 @@ checker flags a line that reads well, the fix is to the checker's rules,
 recorded here, never a per-file exception. Chapter 22's rule for a
 large change: past a few hundred edits, write the tool that makes the
 edit (the tick-helper rename was one), and add a check so the old form
-cannot come back. Chapter 12 gives the test rules above: test behaviors
-through the public surface, and do not chase every conceivable input.
+cannot come back. Chapters 11 to 14 give the test rules above: test behaviors through the
+public surface, keep tests obvious and unchanging, prefer real
+implementations, and use A/B diffs across a migration (reviewer A's
+differential is chapter 14's). The scope sentence in "Review" is
+Google's code-review guidance: solve the problem that needs solving
+now, not one the developer speculates might come.
 The component shape is gem5's (src/sim/sim_object.hh and the Python
 params), the front is sinter's, the engine is SimPy's.
 
@@ -424,9 +480,18 @@ detector-model lane took eight review rounds and grew the package from
 three to eight found inputs no yaml or runtime path produces, and each
 was fixed with a check, a law or a test. That growth was the wrong kind
 under "Size", the review had no scope bound, and the loop had no round
-cap. Rule 4, the scope sentence in "Review", and the two-round cap are
+cap. Rule 4, the scope sentence in "Review", and the round backstop are
 the corrections. The lane's mechanical rewrite, its four bug fixes and
 its referent tests are kept.
+
+A research pass on 2026-09-03 checked this document against Google's
+guides, the Software Engineering at Google chapters, LLVM, gem5, ns-3,
+sinter, SimPy, Fowler and Feathers. It found the approach recognized in
+every part and changed five things: the line and attribute caps are
+prompts with their origin stated; internal invariants are bare asserts;
+the port rule says which ports exist and how the yaml names a
+component; a slice is two commits, mechanical then structural, never
+one; and a review closes on the differential with nits on the row.
 
 ## Where the tree stands
 

@@ -502,13 +502,14 @@ def test_a_stream_window_reads_the_detectors_of_its_buffer_rounds():
 
 
 def test_the_terminal_stream_window_reads_to_the_last_round():
-    # The window whose commit region reaches round 4 is the terminal one
-    # and reads every round from its start, past its declared buffer.
+    # The window whose commit region reaches round 4 is the terminal one;
+    # the window manager clamps its buffer to the last round before the
+    # call, so it reads rounds 3 and 4 and owns everything it sees.
     circuit = memory_circuit(3, 4)
     stream = memory_operation(circuit, 5)
     device = stim_device.StimDevice(seed=1)
     device.register_dynamic_stream(stream, 4, fault_model_requirement=GRAPHLIKE)
-    terminal = window(3, 4, 3)
+    terminal = window(3, 4, 4)
     model = device.window_model_for_stream(5, terminal)
     assert model.detector_ids == tuple(range(12, 32))
 

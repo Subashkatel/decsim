@@ -64,8 +64,8 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     from .decoders.decoders import CodeRouter
     from .qpu.syndrome_devices import SyndromeBitDevice, TimingOnlyDevice
     from .links.link_profiles import logical_reference_profile
-    from .frontends.planner import (_plan_execution, _validate_operation_graph,
-                          _validate_workload_identity)
+    from .frontends.planner import (plan_execution, check_operation_graph,
+                          check_workload_identity)
     from .controller.policies import Eager, SeparateDecodeJobs
     from .qpu.round_policies import GateRounds
     from .decoders.schedulers import FifoScheduler
@@ -85,11 +85,11 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     ops, decode_ops, dynamic_streams = _copy_workload(
         source_ops, spec.decode_ops or (), spec.dynamic_streams or (),
         spec.feedback_boundary_mode)
-    _validate_workload_identity(ops, decode_ops, dynamic_streams)
+    check_workload_identity(ops, decode_ops, dynamic_streams)
     all_operations = _unique_operations(ops + decode_ops + dynamic_streams)
     views = tuple(OperationPlanningView.from_operation(op) for op in all_operations)
     view_by_id = {view.id: view for view in views}
-    _validate_operation_graph(
+    check_operation_graph(
         list(ops), validate_blockers=True,
         external_blocker_ids=(op.id for op in decode_ops + dynamic_streams))
 
@@ -110,11 +110,11 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     planned_operations = _decode_plan_operations(
         ops, decode_ops, dynamic_streams,
         static_decode_selected=spec.decode_ops is not None)
-    plan = _plan_execution(
+    plan = plan_execution(
         operations=views,
         planned_operation_ids=tuple(op.id for op in planned_operations),
         code=code, layout=layout, scheme=scheme, rounds_policy=rounds_policy,
-        fallback_round_us=(spec.round_us if spec.round_us is not None
+        fallback_round_microseconds=(spec.round_us if spec.round_us is not None
                            else spec.timing.round_period_microseconds),
         retain_strong_context=escalation_policy.requires_strong_context,
         double_window=escalation_policy.double_window,

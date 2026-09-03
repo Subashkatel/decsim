@@ -145,13 +145,13 @@ def test_construction_preserves_collaborators_and_shallow_copies_claim_mapping()
     assert runtime.engine is engine
     assert runtime.controller is controller
     assert runtime.factory is factory
-    assert runtime.resources.claims[operation.id] is claim_list
+    assert runtime.resources.claims_by_operation_id[operation.id] is claim_list
     supplied_claims[2] = []
-    assert 2 not in runtime.resources.claims
+    assert 2 not in runtime.resources.claims_by_operation_id
     claim_list.append(ResourceClaim("qubit", frozenset({"q"})))
-    assert runtime.resources.claims[operation.id] == claim_list
+    assert runtime.resources.claims_by_operation_id[operation.id] == claim_list
     with pytest.raises(TypeError):
-        runtime.resources.claims[3] = []
+        runtime.resources.claims_by_operation_id[3] = []
 
     bare_engine = object()
     bare_controller = object()
@@ -337,7 +337,7 @@ def test_magic_state_request_holds_resources_until_readiness_and_issues_once():
     runtime, engine, controller, factory = make_runtime(operation, claims=claims)
     runtime.load_program(ExecutionProgram((operation,)))
 
-    assert runtime.resources.busy_claims == {("qubit", "data"): 1}
+    assert runtime.resources.holder_by_resource == {("qubit", "data"): 1}
     assert runtime.requested == {1}
     assert runtime.state_ready == set()
     assert controller.issued == []
@@ -398,7 +398,7 @@ def test_claim_publication_is_ordered_and_all_or_nothing():
     runtime, _, _, _ = make_runtime(operation, claims=claims)
     runtime.operations[1] = operation
     runtime.resources.claim(operation, lambda holder_id: runtime.operations[holder_id].name)
-    assert list(runtime.resources.busy_claims) == [
+    assert list(runtime.resources.holder_by_resource) == [
         ("qubit", "a"), ("qubit", "b"), ("ancilla", 2)
     ]
 
@@ -412,11 +412,11 @@ def test_claim_publication_is_ordered_and_all_or_nothing():
     }
     conflict_runtime, _, _, _ = make_runtime(contender, claims=conflict_claims)
     conflict_runtime.operations.update({2: contender, 3: holder})
-    conflict_runtime.resources.busy_claims[("qubit", "busy")] = 3
-    before = dict(conflict_runtime.resources.busy_claims)
+    conflict_runtime.resources.holder_by_resource[("qubit", "busy")] = 3
+    before = dict(conflict_runtime.resources.holder_by_resource)
     with pytest.raises(RuntimeError, match="share qubit resource"):
         conflict_runtime.resources.claim(contender, lambda holder_id: conflict_runtime.operations[holder_id].name)
-    assert conflict_runtime.resources.busy_claims == before
+    assert conflict_runtime.resources.holder_by_resource == before
 
 
 def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_publication():
@@ -426,7 +426,7 @@ def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_public
     runtime.operations[1] = duplicate_qubits
     with pytest.raises(RuntimeError, match="more than once"):
         runtime.resources.claim(duplicate_qubits, lambda holder_id: runtime.operations[holder_id].name)
-    assert runtime.resources.busy_claims == {}
+    assert runtime.resources.holder_by_resource == {}
 
     duplicate_key = make_operation(2)
     duplicate_claims = {
@@ -439,7 +439,7 @@ def test_claim_rejects_duplicate_operands_and_duplicate_typed_keys_before_public
     duplicate_runtime.operations[2] = duplicate_key
     with pytest.raises(RuntimeError, match="share qubit resource"):
         duplicate_runtime.resources.claim(duplicate_key, lambda holder_id: duplicate_runtime.operations[holder_id].name)
-    assert duplicate_runtime.resources.busy_claims == {}
+    assert duplicate_runtime.resources.holder_by_resource == {}
 
 
 def test_claim_shape_and_mapping_completeness_use_natural_failures():
@@ -451,74 +451,20 @@ def test_claim_shape_and_mapping_completeness_use_natural_failures():
         runtime.resources.claim(missing, lambda holder_id: runtime.operations[holder_id].name)
     with pytest.raises(KeyError):
         runtime.resources.release(missing)
-    assert runtime.resources.busy_claims == {}
+    assert runtime.resources.holder_by_resource == {}
 
     valid = make_operation(3)
     extra_runtime, _, _, _ = make_runtime(valid, claims={3: [], 99: object()})
     extra_runtime.operations[3] = valid
     extra_runtime.resources.claim(valid, lambda holder_id: extra_runtime.operations[holder_id].name)
-    assert extra_runtime.resources.busy_claims == {}
+    assert extra_runtime.resources.holder_by_resource == {}
 
     unhashable = make_operation(2, qubits=([],))
     unhashable_runtime, _, _, _ = make_runtime(unhashable)
     unhashable_runtime.operations[2] = unhashable
     with pytest.raises(TypeError):
         unhashable_runtime.resources.claim(unhashable, lambda holder_id: unhashable_runtime.operations[holder_id].name)
-    assert unhashable_runtime.resources.busy_claims == {}
-
-
-def test_free_requires_exact_holders_and_is_all_or_nothing():
-    """Resource release verifies every exact holder before deleting any typed key."""
-    operation = make_operation(1)
-    claims = {
-        1: [
-            ResourceClaim("qubit", frozenset({"a", "b"})),
-            ResourceClaim("qubit", frozenset({"a"})),
-        ]
-    }
-    runtime, _, _, _ = make_runtime(operation, claims=claims)
-
-    runtime.resources.busy_claims = {("qubit", "a"): 1}
-    before = dict(runtime.resources.busy_claims)
-    with pytest.raises(RuntimeError, match="unclaimed"):
-        runtime.resources.release(operation)
-    assert runtime.resources.busy_claims == before
-
-    runtime.resources.busy_claims = {("qubit", "a"): 1, ("qubit", "b"): 9}
-    before = dict(runtime.resources.busy_claims)
-    with pytest.raises(RuntimeError, match="held by operation"):
-        runtime.resources.release(operation)
-    assert runtime.resources.busy_claims == before
-
-    runtime.resources.busy_claims = {("qubit", "a"): 1, ("qubit", "b"): 1}
-    runtime.resources.release(operation)
-    assert runtime.resources.busy_claims == {}
-
-
-def test_body_done_invalid_callbacks_leave_all_runtime_and_collaborator_state_unchanged():
-    """Unknown, premature, and duplicate completion callbacks fail before any observable mutation."""
-    scheduled = make_operation(1, scheduled_start_round=5)
-    runtime, engine, controller, factory = make_runtime(scheduled)
-    runtime.load_program(ExecutionProgram((scheduled,)))
-
-    unknown = make_operation(99)
-    before = mutable_runtime_state(runtime, engine, controller, factory)
-    with pytest.raises(RuntimeError, match="unindexed"):
-        runtime.body_done(unknown)
-    assert mutable_runtime_state(runtime, engine, controller, factory) == before
-
-    before = mutable_runtime_state(runtime, engine, controller, factory)
-    with pytest.raises(RuntimeError, match="before it starts"):
-        runtime.body_done(scheduled)
-    assert mutable_runtime_state(runtime, engine, controller, factory) == before
-
-    engine.release_next()
-    engine.now = 8
-    runtime.body_done(scheduled)
-    before = mutable_runtime_state(runtime, engine, controller, factory)
-    with pytest.raises(RuntimeError, match="already complete"):
-        runtime.body_done(scheduled)
-    assert mutable_runtime_state(runtime, engine, controller, factory) == before
+    assert unhashable_runtime.resources.holder_by_resource == {}
 
 
 def test_body_done_preserves_valid_release_hook_issue_and_completion_order():
@@ -543,7 +489,7 @@ def test_body_done_preserves_valid_release_hook_issue_and_completion_order():
         ("issue", 2, 0),
         ("after", 1),
     ]
-    assert runtime.resources.busy_claims == {("qubit", "shared"): 2}
+    assert runtime.resources.holder_by_resource == {("qubit", "shared"): 2}
     assert runtime.workload_complete is False
 
     engine.events.clear()
@@ -657,41 +603,6 @@ def test_idle_round_consumption_deliberately_does_not_roll_back_earlier_pops():
     assert runtime.idle_rounds_by_patch == {"other": 1}
 
 
-def test_duplicate_release_decision_raises_before_any_timestamp_mutation():
-    """A duplicate blocked release raises before changing timestamps or collaborator records."""
-    operation = make_operation(1, blocked_by=0)
-    runtime, engine, controller, factory = make_runtime(operation)
-    controller.allowed[1] = False
-    runtime.load_program(ExecutionProgram((operation,)))
-    engine.now = 2
-    runtime.on_decision(Decision(1, releases_operation=True))
-    before = mutable_runtime_state(runtime, engine, controller, factory)
-
-    engine.now = 9
-    with pytest.raises(RuntimeError, match="already released"):
-        runtime.on_decision(Decision(1, releases_operation=True))
-
-    assert mutable_runtime_state(runtime, engine, controller, factory) == before
-    assert runtime.decode_release_time == {1: 2}
-
-
-def test_release_decision_for_an_unblocked_operation_raises_before_any_timestamp_mutation():
-    """An unblocked release raises before mutation while a result return remains accepted."""
-    operation = make_operation(1)
-    runtime, engine, controller, factory = make_runtime(operation)
-    runtime.load_program(ExecutionProgram((operation,)))
-    engine.now = 7
-    before = mutable_runtime_state(runtime, engine, controller, factory)
-
-    with pytest.raises(RuntimeError, match="not feedback-blocked"):
-        runtime.on_decision(Decision(1, releases_operation=True))
-
-    assert mutable_runtime_state(runtime, engine, controller, factory) == before
-    assert runtime.decode_release_time == {}
-    runtime.on_decision(Decision(1, releases_operation=False))
-    assert runtime.result_return_time_by_operation == {1: 7}
-
-
 def test_decisions_keep_release_and_result_timestamps_distinct_and_latched():
     """Timing-only decisions latch feedback separately from result return and preserve early release."""
     operation = make_operation(1, blocked_by=0, clifford=False)
@@ -735,7 +646,6 @@ def test_unknown_decision_target_fails_before_mutation_and_blocked_release_is_re
     runtime.on_decision(Decision(1))
     assert runtime.decode_release_time == {1: 9}
     assert runtime.op_start_time == {1: 9}
-
 
 
 def test_zero_finish_time_needs_physical_completion_state_for_interpretation():

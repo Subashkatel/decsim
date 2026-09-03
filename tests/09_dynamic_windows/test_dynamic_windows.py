@@ -630,6 +630,7 @@ def test_courier_ignores_a_stale_delivery_and_releases_the_edge_once():
     lands as a no-op; version 2 releases the dependency exactly once, and
     a repeated delivery of the current version releases nothing."""
     from decsim.engine import Engine
+    from decsim.links.fabric import LinkFabric
     from decsim.links.link_profiles import logical_reference_profile
     from decsim.message import DecoderRequestKey, DecoderTier, Operation, Window
     from decsim.windows.window_interactions import DefaultWindowInteraction
@@ -642,7 +643,7 @@ def test_courier_ignores_a_stale_delivery_and_releases_the_edge_once():
                        deps=[(1, 0)], deps_remaining=1)
     checks = []
     manager = SimpleNamespace(
-        engine=engine, links=logical_reference_profile().build(engine),
+        engine=engine, links=LinkFabric(logical_reference_profile(), engine),
         windows={(1, 0): source, (1, 1): dependent}, absorbed_windows=set(),
         window_interaction=DefaultWindowInteraction(), window_models={},
         _ops={1: op}, rounds_for=lambda operation: 20, release_service=None,

@@ -45,11 +45,6 @@ class Channel:
         self._last_request_ticks = 0
         self._transfer_count = 0
 
-    @property
-    def settings(self) -> link_settings.ChannelSettings:
-        """The channel's settings."""
-        return self._settings
-
     def send(
         self,
         payload_bits: Optional[int],

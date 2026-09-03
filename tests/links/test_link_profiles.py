@@ -17,7 +17,10 @@ import decsim.run_spec as run_spec
 # One distance-5 patch: 24 syndrome bits per 1.0 us round, commit and
 # buffer regions of 5 rounds.
 DISTANCE_5_GEOMETRY = dict(
-    syndrome_bits_per_round=24, round_us=1.0, commit_rounds=5, buffer_rounds=5
+    syndrome_bits_per_round=24,
+    round_microseconds=1.0,
+    commit_rounds=5,
+    buffer_rounds=5,
 )
 
 
@@ -64,11 +67,15 @@ def test_the_reference_card_carries_khalids_latencies():
 
 def test_the_reference_card_is_unbounded_on_every_path():
     profile = link_profiles.logical_reference_profile()
-    capacities = []
-    for path in profile.wired_paths():
-        path_settings = profile.path_settings(path)
-        capacities.append(path_settings.channel.capacity)
-    assert capacities == [None] * 9
+    assert profile.qpu_to_controller.channel.capacity is None
+    assert profile.weak_buffer_to_weak_decoder.channel.capacity is None
+    assert profile.weak_decoder_to_strong_decoder.channel.capacity is None
+    assert profile.strong_buffer_to_strong_decoder.channel.capacity is None
+    assert profile.weak_decoder_to_frame.channel.capacity is None
+    assert profile.decoder_to_decoder.channel.capacity is None
+    assert profile.strong_decoder_to_frame.channel.capacity is None
+    assert profile.frame_to_controller.channel.capacity is None
+    assert profile.controller_to_qpu.channel.capacity is None
     assert profile.profile_name == "logical_reference"
     assert profile.is_controller_processing_outside_qpu_to_controller is False
 
@@ -177,7 +184,9 @@ def test_a_capacity_scale_of_zero_is_refused():
 
 def test_the_setup_cost_lands_on_the_two_decoder_input_paths():
     reference = link_profiles.logical_reference_profile()
-    profile = link_profiles.with_transfer_overhead(reference, overhead_us=0.4)
+    profile = link_profiles.with_transfer_overhead(
+        reference, overhead_microseconds=0.4
+    )
     assert (
         profile.weak_buffer_to_weak_decoder.setup_ticks
         == config.microseconds_to_ticks(0.4)
@@ -197,7 +206,9 @@ def test_a_setup_cost_on_an_unwired_path_is_refused():
         match="controller_to_strong_buffer is not wired on this card",
     ):
         link_profiles.with_transfer_overhead(
-            reference, overhead_us=0.4, paths=("controller_to_strong_buffer",)
+            reference,
+            overhead_microseconds=0.4,
+            paths=("controller_to_strong_buffer",),
         )
 
 
@@ -205,8 +216,8 @@ def test_the_priced_strong_store_hop_is_added_with_its_numbers():
     reference = link_profiles.logical_reference_profile()
     profile = link_profiles.with_controller_to_strong_buffer_path(
         reference,
-        latency_us=0.5,
-        aggregate_bits_per_us=100.0,
+        latency_microseconds=0.5,
+        aggregate_bits_per_microsecond=100.0,
         source="test card",
     )
     assert (
@@ -235,8 +246,8 @@ def test_the_priced_weak_store_hop_is_unbounded_when_no_rate_is_given():
     reference = link_profiles.logical_reference_profile()
     profile = link_profiles.with_controller_to_weak_buffer_path(
         reference,
-        latency_us=0.25,
-        aggregate_bits_per_us=None,
+        latency_microseconds=0.25,
+        aggregate_bits_per_microsecond=None,
         source="test card",
     )
     assert profile.controller_to_weak_buffer.channel.capacity is None

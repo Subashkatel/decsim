@@ -13,8 +13,7 @@ from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 from typing import Callable, Optional
 
-from ..links.fabric import LinkFabric
-from ..links.link_profiles import logical_reference_profile
+from ..ports import Link
 from ..syndrome_buffer.syndrome_buffer import SyndromeBuffer
 from ..message import (
     LinkPath,
@@ -147,7 +146,7 @@ class _PackingContext:
 
 class SyndromePacking:
     def __init__(
-        self, engine, links: Optional[LinkFabric] = None, t_pack: int = 0,
+        self, engine, links: Link, t_pack: int = 0,
         log_syndromes: bool = True, *, packing_context_capacity: Optional[int],
         window_input_receiver, feedback_memory_receiver,
         syndrome_buffer: Optional[SyndromeBuffer] = None,
@@ -163,8 +162,6 @@ class SyndromePacking:
         self.detector_formation = detector_formation
         self.engine = engine
         self.links = links
-        if links is None:
-            self.links = logical_reference_profile().build(engine)
         self.t_pack = t_pack
         self.log_syndromes = log_syndromes
         # assembly workspace: how many rounds may be in flight through this

@@ -85,6 +85,13 @@ def test_a_zero_capacity_is_refused():
         capacity(0.0)
 
 
+def test_a_negative_capacity_is_refused():
+    with pytest.raises(
+        ValueError, match="input_bits_per_microsecond must be positive"
+    ):
+        capacity(-1.0)
+
+
 def test_a_capacity_that_is_not_finite_is_refused():
     with pytest.raises(ValueError, match="must be a finite number"):
         capacity(math.inf)
@@ -136,6 +143,13 @@ def test_an_unset_latency_is_refused_with_the_field_named():
 def test_a_negative_setup_cost_is_refused():
     with pytest.raises(ValueError, match="setup_ticks must be nonnegative"):
         actual_path(FREE_CHANNEL, setup_ticks=-5)
+
+
+def test_a_fractional_setup_cost_is_refused():
+    with pytest.raises(
+        ValueError, match="setup_ticks must be a finite whole number"
+    ):
+        actual_path(FREE_CHANNEL, setup_ticks=2.5)
 
 
 def test_a_path_without_a_payload_rule_is_refused():

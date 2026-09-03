@@ -11,6 +11,7 @@ from decsim.controller.controller import Controller
 from decsim.controller.syndrome_packing import SyndromePacking
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.engine import Engine
+from decsim.links.fabric import LinkFabric
 from decsim.message import Decision, QPUReadout, RunOperationBody, WINDOW_INPUT_ROUTE
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
@@ -33,7 +34,7 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
     receiver = _WindowInputReceiver()
     settings = fabric["declared_profile"](controller_to_weak_buffer=False, controller_to_strong_buffer=False)
     ledger = TrafficLedger(settings)
-    links = settings.build(engine, ledger)
+    links = LinkFabric(settings, engine, ledger)
     packing = SyndromePacking(
         engine, links=links, t_pack=0, packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)
@@ -69,7 +70,9 @@ def test_packing_charges_its_assembly_time_for_every_round(fabric):
     packetization, bus transfer, result return and the conditional)."""
     engine = Engine(verbose=False)
     receiver = _WindowInputReceiver()
-    links = fabric["declared_profile"](controller_to_weak_buffer=False, controller_to_strong_buffer=False).build(engine)
+    settings = fabric["declared_profile"](
+        controller_to_weak_buffer=False, controller_to_strong_buffer=False)
+    links = LinkFabric(settings, engine)
     packing = SyndromePacking(
         engine, links=links, t_pack=microseconds_to_ticks(1), packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)

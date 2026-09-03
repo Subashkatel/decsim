@@ -5,7 +5,7 @@ non-negative score, smaller = less confident. The confidence mechanism is paired
 with the weak decoder that produces the hard result.
 
 ## The seam
-`decsim.protocols.SoftOutputMetric` (a `typing.Protocol`):
+`decsim.confidence.SoftOutputMetric` (a `typing.Protocol`):
 ```python
 class SoftOutputMetric(Protocol):
     name: str
@@ -57,7 +57,7 @@ has one owner: `DecodeResult.logical_observables`.
 
 ## Landing it in the data path
 `SoftOutputDecoder(base, metric_cls)` (`decoder.py`) wraps an MWPM-family
-`decsim.protocols.Decoder` with a configured metric builder. The builder
+`decsim.ports.Decoder` with a configured metric builder. The builder
 declares one `source`, one `fault_model_requirement`, and
 `from_window_model(model)`. `SoftOutputDecoder` sets
 `DecodeResult.soft_output` to typed confidence from the same placed window

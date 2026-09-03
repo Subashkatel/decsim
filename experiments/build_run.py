@@ -221,13 +221,13 @@ def link_model(config: ExperimentConfig):
     cwb = cards.pop("controller_to_weak_buffer")
     if cwb is not None:
         profile = with_controller_to_weak_buffer_path(
-            profile, latency_us=cwb.latency_us,
-            aggregate_bits_per_us=cwb.bits_per_us, source=source)
+            profile, latency_microseconds=cwb.latency_us,
+            aggregate_bits_per_microsecond=cwb.bits_per_us, source=source)
     csb = cards.pop("controller_to_strong_buffer")
     if csb is not None:
         profile = with_controller_to_strong_buffer_path(
-            profile, latency_us=csb.latency_us,
-            aggregate_bits_per_us=csb.bits_per_us, source=source)
+            profile, latency_microseconds=csb.latency_us,
+            aggregate_bits_per_microsecond=csb.bits_per_us, source=source)
     edge_overrides = {}
     for path, card in cards.items():
         if card is None:

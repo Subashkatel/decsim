@@ -86,11 +86,10 @@ class TrafficCounters:
 
 @dataclasses.dataclass(frozen=True)
 class PathSnapshot:
-    """One wired path, its channel's alias, its settings, its counters."""
+    """One wired path, its channel's alias, its counters."""
 
     path: message.LinkPath
     physical_alias: str
-    settings: link_settings.PathSettings
     counters: TrafficCounters
 
 
@@ -108,7 +107,6 @@ class ChannelSnapshot:
 class FabricSnapshot:
     """What a run's fabric looked like and carried, frozen for reports."""
 
-    profile_name: str
     paths: tuple
     channels: tuple
     transfers: tuple
@@ -162,7 +160,6 @@ class TrafficLedger:
             channels.append(channel_snapshot)
         transfers = sorted(self._records, key=_request_sequence)
         return FabricSnapshot(
-            profile_name=self._settings.profile_name,
             paths=tuple(paths),
             channels=tuple(channels),
             transfers=tuple(transfers),
@@ -214,7 +211,6 @@ class TrafficLedger:
         return PathSnapshot(
             path=path,
             physical_alias=alias,
-            settings=path_settings,
             counters=self._counters_by_path[path],
         )
 

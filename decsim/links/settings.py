@@ -171,11 +171,11 @@ class PathSettings:
 class FabricSettings:
     """A fabric card: one path setting per hop plus a profile name.
 
-    The nine original paths are required; the two controller-to-buffer
-    hops are optional. A
-    card whose QPU-to-controller latency leaves out the controller's
-    readout processing says so, because the timing card prices that
-    processing on its own line.
+    The nine original paths are required and the two controller-to-buffer
+    hops are optional. A card whose QPU-to-controller latency leaves out
+    the controller's readout processing says so, because the timing card
+    prices that processing on its own line. The root builds the run's
+    fabric from the card: LinkFabric(settings, engine, listener).
     """
 
     qpu_to_controller: PathSettings
@@ -222,16 +222,6 @@ class FabricSettings:
     def path_settings(self, path: message.LinkPath) -> PathSettings:
         """The setting of one wired path."""
         return getattr(self, path.value)
-
-    def build(self, engine, listener=None):
-        """The run's fabric: one channel per channel name, wired by name.
-
-        The listener, when given, receives every finished transfer
-        (LinkFabric.on_transfer); the traffic ledger is one.
-        """
-        import decsim.links.fabric as fabric
-
-        return fabric.LinkFabric(self, engine, listener)
 
 
 _REQUIRED_PATH_VALUES = frozenset(

@@ -68,12 +68,12 @@ def declared_profile(*, controller_to_weak_buffer=True, controller_to_strong_buf
     )
     if controller_to_weak_buffer:
         profile = with_controller_to_weak_buffer_path(
-            profile, latency_us=DECLARED_US["controller_to_weak_buffer"],
-            aggregate_bits_per_us=None, source="stabilization declared tick")
+            profile, latency_microseconds=DECLARED_US["controller_to_weak_buffer"],
+            aggregate_bits_per_microsecond=None, source="stabilization declared tick")
     if controller_to_strong_buffer:
         profile = with_controller_to_strong_buffer_path(
-            profile, latency_us=(DECLARED_US["controller_to_strong_buffer"] if strong_buffer_us is None else strong_buffer_us),
-            aggregate_bits_per_us=None, source="stabilization declared tick")
+            profile, latency_microseconds=(DECLARED_US["controller_to_strong_buffer"] if strong_buffer_us is None else strong_buffer_us),
+            aggregate_bits_per_microsecond=None, source="stabilization declared tick")
     return profile
 
 

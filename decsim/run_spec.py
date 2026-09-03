@@ -189,6 +189,7 @@ class RunSpec:
         from .controller.feedback_streams import FeedbackStreams, NoFeedbackStreams
         from .decoders.decoder_manager import DecoderManager
         from .frontends.execution_runtime import ExecutionRuntime
+        from .links.fabric import LinkFabric
         from .pauli_frame.conditional_release import ConditionalRelease
         from .qpu.cycle_clock import QPUDevice
         from .run_configuration import (check_factory_decode_service,
@@ -204,7 +205,7 @@ class RunSpec:
                                if config.make_conditional_release
                                else ConditionalRelease(engine))
         traffic_ledger = TrafficLedger(config.link_config)
-        links = config.link_config.build(engine, traffic_ledger)
+        links = LinkFabric(config.link_config, engine, traffic_ledger)
         syndrome_buffer = SyndromeBuffer(
             capacity=config.buffering.upstream_packet_slots,
             memory_model=config.memory_model)

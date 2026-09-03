@@ -396,11 +396,11 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
                           circuit=circuit)
     engine = decoder_engine(config)
     timing = TimingConfig(
-        round_us=round_period_us,
-        measurement_signal_to_classical_bits_us=
+        round_period_microseconds=round_period_us,
+        readout_to_bits_microseconds=
             config.controller.readout_to_bits_us,
-        t_pack_us=config.controller.packing_us_per_round,
-        instruction_or_decision_to_analog_control_pulse_us=
+        packing_microseconds_per_round=config.controller.packing_us_per_round,
+        decision_to_pulse_microseconds=
             config.controller.decision_to_pulse_us)
     scheme = WINDOWING_SCHEMES[config.windowing.scheme]()
     routing = {"decoder": engine, "num_units": config.active_decoder.units}

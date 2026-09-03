@@ -284,7 +284,7 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
     completed = RunSpec(
         ops=[op], d=3, rounds_policy=FixedRounds(8), device=StimDevice(),
         decoder=PresetLatencyDecoder(0.01),
-        timing=TimingConfig(round_us=0.02),
+        timing=TimingConfig(round_period_microseconds=0.02),
         links=with_controller_to_weak_buffer_path(
             logical_reference_profile(), latency_microseconds=0.25,
             aggregate_bits_per_microsecond=10_000.0, source="test"),

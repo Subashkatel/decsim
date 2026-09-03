@@ -207,7 +207,7 @@ def test_card_cadence_precedes_run_and_timing_fallbacks(model_type):
     completed = build_run(
         card,
         round_us=2.25,
-        timing=TimingConfig(round_us=3.5),
+        timing=TimingConfig(round_period_microseconds=3.5),
     )
     assert completed.qpu.cycle_ticks == microseconds_to_ticks(1.75)
 

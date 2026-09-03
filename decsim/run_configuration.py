@@ -115,7 +115,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
         planned_operation_ids=tuple(op.id for op in planned_operations),
         code=code, layout=layout, scheme=scheme, rounds_policy=rounds_policy,
         fallback_round_us=(spec.round_us if spec.round_us is not None
-                           else spec.timing.round_us),
+                           else spec.timing.round_period_microseconds),
         retain_strong_context=escalation_policy.requires_strong_context,
         double_window=escalation_policy.double_window,
         has_open_ended_dynamic_streams=bool(dynamic_streams))
@@ -140,7 +140,7 @@ def resolve_run_configuration(spec, root_seed) -> ResolvedRunConfiguration:
     router = spec.router or CodeRouter(default=spec.decoder, by_code=dict(spec.decoders))
 
     link_config = spec.links if spec.links is not None else logical_reference_profile()
-    if (spec.timing.ticks("measurement_signal_to_classical_bits") > 0
+    if (spec.timing.ticks("readout_to_bits") > 0
             and not link_config.is_controller_processing_outside_qpu_to_controller):
         raise ValueError("a separate controller readout cost requires a link "
                          "profile whose QC latency excludes that cost")

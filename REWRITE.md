@@ -4,10 +4,30 @@ This is the contract for the rewrite and for every line written after it.
 The plan that schedules the work is in the sandbox at docs/rewrite/PLAN.md.
 The behavior gate every change must pass is described there.
 
-## The one sentence
+## The target
 
-A reader opens any file and understands it without decoding a name,
-unpacking a line, or guessing what happens somewhere else.
+Three things, in this order, and a file is done only when all three hold.
+
+1. A reader opens any file and understands it without decoding a name,
+   unpacking a line, or guessing what happens somewhere else.
+2. A reader follows one readout through the whole machine by reading
+   named calls: the QPU emits it, the controller receives it, the buffer
+   holds it, the window manager closes a window, the decoder manager
+   schedules a decode, the decoder returns a correction, the frame
+   commits it, the frame releases the controller, the controller
+   instructs the QPU. Each handoff is one method with a plain name, and
+   the reader can say, at every step, which component holds the data and
+   where it is stored.
+3. A new component plugs in. A better QPU model, another decoder, a
+   different buffer or link, arrives as one class that implements the
+   port the machine already has, is named in the yaml, and nothing else
+   changes. That is gem5's shape: a component owns its settings and its
+   state, talks to other components only through named ports, and one
+   root object wires them.
+
+The old code was correct. The rewrite keeps it correct, proven by the
+gate at every commit, and makes it read, flow and plug in as above. It
+is not a rewrite of what decsim computes.
 
 ## Rule 1. One line does one thing
 
@@ -43,6 +63,10 @@ When the value that would be hoisted has no honest name, keep the call in
 the condition: `if not math.isfinite(cost) or cost < 0:` is one decision
 and needs no `cost_is_a_number`.
 
+This rule makes dense code longer. That is intended. A file that grows
+because its lines were unpacked is right; a file that grows for the
+reasons listed under "Size" is wrong.
+
 `tools/check_one_action.py` enforces the rule. It reports: a call inside
 another call's arguments; arithmetic, a comparison or a boolean inside a
 call's arguments; an attribute, index or call taken from a call's result;
@@ -64,8 +88,12 @@ A lambda passed to `schedule` or `log_io` is one call on plain values, or
 one f-string of names and attribute walks. Anything more becomes a named
 method. A lambda is never built inside a loop.
 
-A function longer than 40 lines is split. A block nested deeper than two
-levels is hoisted into a named method.
+A function longer than 40 lines is split where its meaning splits: each
+piece has a name a reader would look for. A helper that exists only to
+get a function under the cap, with a name like `_second_half`, is worse
+than the long function; then the function stays long and the checklist
+row records it. A block nested deeper than two levels is hoisted into a
+named method.
 
 ## Rule 2. Names are full words that say what the thing is
 
@@ -98,14 +126,13 @@ starts with `is_`, `has_`, `can_`, or reads as a question (`verbose` and
 `idle` are fine; `flag` is not). A duration field ends in `_microseconds`
 or `_ticks`; a count ends in `_count`.
 
-Link paths and yaml keys are renamed to plain words too. The owner chooses
-the final names; the list lives on the sample page and in PLAN.md. So
-far, accepted by the owner on 2026-09-02: qpu_to_controller,
-controller_to_weak_buffer, controller_to_strong_buffer,
-weak_buffer_to_weak_decoder, strong_buffer_to_strong_decoder,
-weak_decoder_to_strong_decoder, decoder_to_decoder, weak_decoder_to_frame,
-strong_decoder_to_frame, frame_to_controller, controller_to_qpu; and the
-config keys readout_to_bits_cycles, decision_to_pulse_cycles,
+Link paths and yaml keys are renamed to plain words too. Accepted by the
+owner on 2026-09-02: qpu_to_controller, controller_to_weak_buffer,
+controller_to_strong_buffer, weak_buffer_to_weak_decoder,
+strong_buffer_to_strong_decoder, weak_decoder_to_strong_decoder,
+decoder_to_decoder, weak_decoder_to_frame, strong_decoder_to_frame,
+frame_to_controller, controller_to_qpu; and the config keys
+readout_to_bits_cycles, decision_to_pulse_cycles,
 packing_cycles_per_round, weak_buffer_rounds, strong_buffer_rounds,
 packing_rounds_in_flight, unit_memory_rounds, write_cycles,
 setup_cycles_per_transfer, circuit, log_component_io, check_windows_with,
@@ -118,26 +145,38 @@ narrates the syntax below it, never tells a defect story, never cites a
 finding number. If a workaround needs a paragraph to justify it, the code
 is wrong; fix the code.
 
-Every module starts with a docstring that says, in plain words, what the
-component is and what it does. When the component follows a paper or a
-reference implementation, the docstring names it. Docstrings follow the
-Google style: a one-line summary, a blank line, then the detail; Args,
-Returns and Raises only when the signature does not already say it.
-Review checks this; no tool can.
+Every module starts with a docstring that says, in one or two sentences,
+what the component is and what it does. When the component follows a
+paper or a reference implementation, the docstring names it, with the
+section or the file. A docstring never repeats what the code below it
+already says; a function whose name and signature say everything has no
+docstring at all. Google style for the rest: a one-line summary, a blank
+line, then the detail; Args, Returns and Raises only when the signature
+does not already say it. Review checks this; no tool can.
 
-## Rule 4. Checks live where input enters, and where a contract would break
+## Rule 4. Only the checks that are necessary
 
-An entry point is where something from outside the machine arrives: a
-yaml file, a data file, a device reading. It is checked once, loudly, with
-a message that reads as a sentence, and raises ValueError.
+A check is necessary in exactly two places.
 
-Inside the machine a component trusts what a collaborator already
-guaranteed and never re-checks it. It does refuse a call that breaks its
-own contract (a negative delay, a second correction for the same window,
-a duplicate metric name), because a wrong caller is a bug and a silent
-wrong answer is worse than a loud stop; that raises RuntimeError. A check
-that no caller can trigger is deleted, together with the test that forced
-the state by hand.
+Where input enters decsim: a yaml file, a call on the front, a Stim
+circuit, a QLX program, a data file, a device reading. That input is
+checked once, at that boundary, loudly, with a message that reads as a
+sentence, and raises ValueError.
+
+Where a silent wrong answer would corrupt a result: a component refuses a
+call that breaks its own contract (a negative delay, a second correction
+for the same window, a physical fault kept past its own component) and
+raises RuntimeError, because a wrong caller is a bug and a loud stop is
+better than a wrong number.
+
+Everything else is not necessary and is deleted, with its test. Inside
+the machine a function trusts what its callers send. A function in a
+package that only decsim's own components call refuses nothing that
+those components cannot send; whether a hand-written call could break it
+is not a reason for a check. A check no caller can trigger is deleted
+together with the test that forced the state by hand. A reviewer does
+not ask for a check on an input that no yaml, no front call and no
+runtime path produces; such a finding is out of scope, not a defect.
 
 ## Rule 5. No compatibility layer
 
@@ -167,18 +206,55 @@ public one in the module and carry a leading underscore. A package's
 A record used by one component lives next to it. A record shared by two
 or more components lives in `message.py`.
 
-The target shape, taken from gem5: a component owns its settings and its
-state, exposes a few named methods other components call, and is wired by
-one root object. A mechanical rewrite keeps a file's current shape,
-including a `connect` step that exists today, and only makes it read
-well; a structural change moves toward the target shape and is planned
-and gated on its own.
-
 Every public signature is annotated. An `engine` parameter is typed
 `Engine`. `Any` is used only for an opaque identity, with a comment that
 says so.
 
-## Rule 7. Google Python style, enforced
+## Rule 7. Components plug in through ports
+
+This is the target shape, taken from gem5 (a SimObject has params, state
+and named ports; a Python config wires them) and applied to every
+component the structural slices produce.
+
+A port is a small Protocol in `decsim/ports.py` with the methods one
+component needs from another, named for what they do:
+`SyndromeSource.begin_operation`, `SyndromeSource.round_payloads`,
+`Decoder.decode`, `Link.send`, `Frame.commit_correction`. A component
+depends on ports, never on another component's class. The methods on a
+port are the handoffs of "The target", point 2, so the port file is also
+the map of the pipeline.
+
+One root object, `Machine`, builds every component from its settings and
+wires them; no component builds or looks up another. The yaml selects an
+implementation by name (`qpu: stim_device`, `weak_decoder:
+union_find`), and a table in the root maps the name to the class.
+
+Adding a component means: write one class that implements the port, add
+one row to that table, add its settings to the yaml reference. Nothing
+else changes. A slice that makes adding a component take more than that
+is not done.
+
+A mechanical rewrite keeps a file's current shape, including a `connect`
+step that exists today, and only makes it read well; a structural slice
+moves the component to this shape and is planned and gated on its own.
+
+## Rule 8. Decisions come from sources
+
+A modeling question (how a shared channel serializes, how a DMA engine
+queues, what a distillation level costs, how a window commits) is
+answered by reading the referent, not by choosing. The referents are on
+disk in the sandbox: the papers under tmp/papers, gem5 under
+tmp/resources/gem5, ns-3 and the other buffer oracles under
+tmp/resources/l5_buffers, the style guides and the Software Engineering
+at Google book under tmp/resources/style_guides, qLDPC, Stim, PyMatching
+and beliefmatching under the environment. Compilers, simulators and
+schedulers outside this field are referents too when they solve the same
+shape of problem. The design note of a structural slice names the
+referent for each decision, and the code's docstring names it again.
+When the referents disagree or are silent, the note says so and picks the
+simplest law that the gate can pin.
+
+## Rule 9. Google Python style, enforced
 
 The Google Python Style Guide applies wherever the rules above are
 silent. Import modules, not names: `import decsim.message as message`,
@@ -203,31 +279,55 @@ Run, from the repo root, before every commit:
 
 `tools/check.sh` runs all three. The ruff binary lives at
 `.pydeps/bin/ruff`; if `-m ruff` reports RuffNotFound, copy it from the
-ruff wheel's `data/scripts/ruff` into that folder.
+ruff wheel's `data/scripts/ruff` into that folder. From a worktree, run
+the main checkout's interpreter with `PYTHONPATH=.` and confirm
+`decsim.__file__` is the worktree before trusting any result.
 
 ## Tests
 
-New tests are written from sources, not copied from the old ones. A test
-file's docstring names the paper, the reference code, or the closed form
-it checks against; ruff keeps the module docstring required under
-`tests/`. A test name is a sentence that states the behavior:
-`test_a_second_correction_for_a_window_is_refused`. One new test file per
+The best test of a component is its output beside a referent's output on
+the same input: qLDPC's sliding windows on the same detector error
+model, Stim's detector converter on the same circuit, PyMatching on the
+same graph, the Tan and Skoric window harnesses, gem5's DMA law for the
+links, the closed-form queue results for the decoder pool. Every
+component has at least one such test, and when a referent exists for a
+law, the test compares against the referent rather than against a number
+the author computed by hand. The validation harnesses under the sandbox
+are these tests at the system level, and they stay exact at every commit.
+
+Beyond the referent tests, a test pins one law of the component through
+its public surface, named as a sentence:
+`test_a_second_correction_for_a_window_is_refused`. The values that
+matter sit inside the test, even when that repeats a line; a helper
+builds only what the test does not care about. A test has no branches; a
+loop is allowed only in a property test that runs many random programs
+against an oracle, and the test says so in its name. A test file's
+docstring names the paper, the reference code, or the closed form it
+checks against, and cites only what is on disk. One test file per
 module, at `tests/<component>/test_<module>.py`.
 
-A test checks one behavior through the public surface, and checks the
-state it leaves, not the calls it made. The values that matter sit
-inside the test, even when that repeats a line; a helper builds only
-what the test does not care about. A test has no branches; a loop is
-allowed only in a property test that runs many random programs against
-an oracle, and the test says so in its name. A test that must change
-when the implementation changes, but the behavior does not, is a
-brittle test and is rewritten. The old tests keep
-running until the new ones cover the same behavior, then they are deleted
-in one commit per test directory.
+Tests are not written for inputs nothing produces. A test of a check
+that rule 4 deletes goes with it. A test that must change when the
+implementation changes, but the behavior does not, is brittle and is
+rewritten. The old tests keep running until the new ones cover the same
+behavior, then they are deleted in one commit per test directory.
 
 Log lines are part of the pinned behavior: the gate hashes the full log
 of every strict point. A change to a log line's text or source name is a
 surface change (below), never part of a mechanical slice.
+
+## Size
+
+Every checklist row carries three numbers for the file: lines before,
+lines after, and lines after with blank lines, comments and docstrings
+removed; and one line saying where any growth came from. Growth that is
+right: a dense line unpacked under rule 1, a value named, a check at a
+boundary that was missing. Growth that is wrong, and is removed before
+the slice closes: a check for an input no caller produces, a law for a
+shape nothing runs, a helper that exists to dodge the line cap, a
+docstring that repeats the code, a record or alias that has one reader.
+A file may end larger than it began when all of its growth is the right
+kind; it may not end larger for the wrong kind.
 
 ## Slices and commits
 
@@ -235,49 +335,68 @@ Every commit is one of three kinds, never two:
 
 - mechanical: a file reads better, its shape is unchanged, the gate passes
   unchanged;
-- structural: a split, a new component, a new wiring; planned, reviewed,
-  and gated on its own;
+- structural: a split, a new component, a new port, a new wiring;
+  planned in a design note, reviewed, and gated on its own;
 - surface: a config key, a link path name, or a log line changes;
   reference.yaml, the parameter reference, the frozen suite configs and
   the golden move in the same commit, under a design note.
 
 A bug found on the way gets its own commit with a test and a referent; an
 old test that pinned the bug is corrected or deleted in that same commit,
-and the message says so. The golden is regenerated only under a design
-note.
+and the message says so. Any change to what decsim computes, however
+small, is its own commit that says so. The golden is regenerated only
+under a design note.
 
 Before a slice commit: gate green, component harnesses exact, old and new
 tests green, `tools/check.sh` clean on the touched files. The file
-checklist in docs/rewrite/PLAN.md moves in the same commit.
+checklist in docs/rewrite/PLAN.md moves in the same commit, with the
+size numbers.
+
+Each remaining mechanical pass happens inside the structural slice that
+touches the file, so a file is rewritten once, not twice.
 
 ## Review
 
-Each slice has one implementer and at least two adversarial reviewers,
-each in its own context, each seeing only the diff and told to assume it
-is wrong (owner directive 2026-09-02). A reviewer's only job is to find
-bugs and reasons the code does not work; a reviewer never implements,
-and the implementer never reviews. Every finding goes back to the
-implementer, who fixes it and resubmits. Each finding carries a severity:
-bug, a test that cannot fail, untested law, weak test, rule violation.
-A slice closes when no bug and no test-that-cannot-fail remains, every
-untested law has its test, and every other finding is either fixed or
-written on the file's checklist row with the slice that fixes it. A
-reviewer's report that lists only recorded items is an empty report. Beyond bugs, each reviewer answers this list
-with yes or no for every touched file:
+Each slice has one implementer and reviewers who only find defects; a
+reviewer never implements, and the implementer never reviews.
+
+Reviewer A runs the differential: the same inputs through the old tree
+and the new tree, every output compared, and reads the diff for anything
+the differential cannot reach. Reviewer A checks every slice.
+
+Reviewer B runs mutation testing against the new tests and reads the
+files against the rules. Reviewer B checks the first round of a slice
+only.
+
+A reviewer's scope is what a yaml, a front call, or a runtime path can
+produce. A finding about an input none of those produces is out of
+scope: it is written on the checklist row if the reviewer thinks it
+matters, and it is not fixed. A reviewer does not ask for a check, a
+test or a law for such an input.
+
+Each finding carries a severity: bug, a test that cannot fail, untested
+law, weak test, rule violation. A slice has at most two rounds. Round one
+fixes every in-scope bug and every test that cannot fail. Round two is
+reviewer A's differential on the fix. Anything left after round two is
+written on the checklist row, and the slice closes. Beyond bugs, each
+reviewer answers this list with yes or no for every touched file:
 
 1. Does every line do one thing, and does `tools/check.sh` pass?
 2. Is every name a full word that says what the thing is, with no
-   abbreviation and no acronym outside qpu, id, io, xor, yaml?
+   abbreviation and no acronym outside qpu, id, io, xor, yaml, json?
 3. Does every comment say why, and does every module docstring say what
-   the component is in plain words?
-4. Is every check either at an entry point or a contract of the method it
-   sits in, and is nothing re-checked?
+   the component is in one or two plain sentences?
+4. Is every check at a boundary where input enters or a contract of the
+   method it sits in, and is nothing re-checked?
 5. Did every rename move its callers and its tests, with no alias left?
 6. Does every class own one job, with at most six attributes, all final
    at the end of `__init__`, public before private?
-7. Are imports by module, signatures annotated, and Optional written out?
-8. Is the commit one kind only, and does the checklist row move with it?
-9. Is the gate green, are the harnesses exact, and are the tests green?
+7. Does the component talk to others through ports, and could a new
+   implementation plug in with one class and one table row?
+8. Is every decision cited to its source?
+9. Is the commit one kind only, and does the checklist row move with it,
+   with the size numbers?
+10. Is the gate green, are the harnesses exact, and are the tests green?
 
 A file the owner finds unreadable is not done.
 
@@ -292,7 +411,22 @@ checker flags a line that reads well, the fix is to the checker's rules,
 recorded here, never a per-file exception. Chapter 22's rule for a
 large change: past a few hundred edits, write the tool that makes the
 edit (the tick-helper rename was one), and add a check so the old form
-cannot come back. Chapter 12 gives the test rules above.
+cannot come back. Chapter 12 gives the test rules above: test behaviors
+through the public surface, and do not chase every conceivable input.
+The component shape is gem5's (src/sim/sim_object.hh and the Python
+params), the front is sinter's, the engine is SimPy's.
+
+## What the first two lanes taught
+
+Recorded 2026-09-03 so the rules above are not read as abstract. The
+detector-model lane took eight review rounds and grew the package from
+2,200 to 3,500 lines. Rounds one and two found four real bugs. Rounds
+three to eight found inputs no yaml or runtime path produces, and each
+was fixed with a check, a law or a test. That growth was the wrong kind
+under "Size", the review had no scope bound, and the loop had no round
+cap. Rule 4, the scope sentence in "Review", and the two-round cap are
+the corrections. The lane's mechanical rewrite, its four bug fixes and
+its referent tests are kept.
 
 ## Where the tree stands
 

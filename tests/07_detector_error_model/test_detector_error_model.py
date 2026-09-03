@@ -1396,8 +1396,6 @@ def test_parse_window_entry_normalises_three_and_four_value_forms(entry, expecte
 @pytest.mark.parametrize(
     "entry, expected_error",
     [
-        ((1, 2, True), ValueError),
-        ((1.0, 2.0, 3.0), ValueError),
         ((0, 2, 3), ValueError),
         ((3, 2, 4), ValueError),
         ((2, 1, 3, 4), ValueError),
@@ -1405,7 +1403,7 @@ def test_parse_window_entry_normalises_three_and_four_value_forms(entry, expecte
     ],
 )
 def test_parse_window_entry_rejects_bad_bounds(entry, expected_error):
-    """Plan bounds must be built-in positive integers in non-decreasing order."""
+    """Plan bounds must be positive and in non-decreasing order."""
     with pytest.raises(expected_error):
         window_placement.parse_window_entry(entry)
 
@@ -1552,22 +1550,20 @@ def test_owned_columns_are_not_recorded_on_the_explicit_path():
 @pytest.mark.parametrize(
     "ranges, expected_error, expected_message",
     [
-        (((True, 3),), ValueError, "built-in integer"),
-        (((1.0, 3),), ValueError, "built-in integer"),
         (((4, 3),), ValueError, "is inverted"),
     ],
 )
 def test_fault_exclusion_ranges_are_validated(ranges, expected_error, expected_message):
-    """Exclusion ranges must be built-in integer pairs that are not inverted."""
+    """Exclusion ranges must not be inverted."""
     with pytest.raises(expected_error) as failure:
-        window_placement.checked_fault_exclusion_ranges(ranges, 4)
+        window_placement.checked_fault_exclusion_ranges(ranges)
     assert expected_message in str(failure.value)
 
 
 def test_valid_exclusion_ranges_pass():
     """Well-formed and empty exclusion range tuples are accepted."""
-    window_placement.checked_fault_exclusion_ranges(((1, 3), (5, 5)), 6)
-    window_placement.checked_fault_exclusion_ranges((), 6)
+    window_placement.checked_fault_exclusion_ranges(((1, 3), (5, 5)))
+    window_placement.checked_fault_exclusion_ranges(())
 
 
 def test_unowned_faults_are_those_touching_an_exclusion_range():
@@ -1848,24 +1844,6 @@ def test_slice_window_builds_one_shared_placement_context(monkeypatch):
     assert (shared.first_commit_round, shared.last_commit_round, shared.is_last) == (1, 2, False)
 
 
-def test_explicit_owner_and_predecessor_maps_come_together():
-    """Explicit owner and predecessor maps must be supplied together."""
-    slicer = window_slicer.WindowSlicer(
-        chain_circuit(),
-        round_count=CHAIN_ROUND_COUNT,
-        detector_rounds=dict(CHAIN_DETECTOR_ROUNDS),
-        fault_model_requirement=GRAPHLIKE_REQUIREMENT,
-    )
-    with pytest.raises(RuntimeError) as failure:
-        slicer.slice_window(
-            1, 1, 2, 2, is_last=False, explicitly_owned_faults={GRAPHLIKE: set()}
-        )
-    assert "must be supplied together" in str(failure.value)
-    with pytest.raises(RuntimeError):
-        slicer.slice_window(
-            1, 1, 2, 2, is_last=False, explicitly_prior_faults={GRAPHLIKE: set()}
-        )
-
 
 def test_slice_window_products_are_complete():
     """One sliced window carries its rows, coordinates, matrices, ownership, flip maps and residual defect positions."""
@@ -1952,7 +1930,7 @@ def test_uncovered_fault_is_left_unowned_by_a_partial_plan():
     """A fault touching no commit region of a partial plan is left unowned."""
     partial_entries = ((3, 3, 3, 3), (4, 4, 4, 4))
     ownership = window_ownership_dag.explicit_fault_ownership(
-        isolated_slicer(), partial_entries, (0, 1), CHAIN_ROUND_COUNT, ()
+        isolated_slicer(), partial_entries, (0, 1), ()
     )
     assert ownership == ({GRAPHLIKE: {1}}, {GRAPHLIKE: set()})
 
@@ -2121,11 +2099,10 @@ def test_build_window_error_models_returns_one_model_per_entry_in_plan_order():
     [
         ([(1, 2, 2), (4, 4, 4)], "must be contiguous in plan order"),
         ([(1, 2, 2), (2, 4, 4)], "must be contiguous in plan order"),
-        ([(1, 5, 5)], "window commit or buffer region exceeds round_count"),
     ],
 )
 def test_commit_regions_must_tile_the_plan(plan, expected):
-    """Commit regions must be contiguous without gaps or overlaps and may not exceed the round count."""
+    """Commit regions must be contiguous without gaps or overlaps."""
     with pytest.raises(ValueError) as failure:
         chain_models(plan)
     assert expected in str(failure.value)

@@ -1,21 +1,10 @@
 """What a window plan must look like to be decoded under a named protocol.
 
-GENERIC accepts any plan. TAN_ZERO_SEAM_GRAPHLIKE is the sandwich
-construction of Tan et al. (2209.09219, section "Sandwich decoder"):
-odd-numbered windows are seams one detector layer wide, each seam depends
-on the two windows beside it and on nothing else, and every seam is a
-closed time boundary. The construction is validated for the graphlike
-(matching) representation only, so a plan that has seams and asks for
-anything else is refused.
-
-A closed time boundary (Tan's word; Skoric et al. 2209.08552 call the
-same boundary smooth) is one where the decoder must not invent an
-artificial boundary edge. So a fault that flips a detector inside such a
-window and another outside it is refused, because slicing it to the
-window would create exactly that edge.
-
-The protocol seam is closed: the dispatch accepts these two members and
-rejects every other, and a third protocol needs an edit here.
+GENERIC accepts any plan; TAN_ZERO_SEAM_GRAPHLIKE is the sandwich of Tan
+et al. (2209.09219, section "Sandwich decoder"): odd-numbered windows are
+one-layer seams, each depending on exactly its two neighbours, each a
+closed time boundary (Skoric et al. 2209.08552 say smooth) that no fault
+may be cut at, validated for the graphlike representation only.
 """
 
 from typing import Optional

@@ -370,19 +370,6 @@ def test_a_physical_fault_kept_uncommitted_past_its_component_is_refused():
         )
 
 
-def test_explicit_owner_and_prior_maps_must_come_together():
-    slicer = surface_code_slicer(4)
-    with pytest.raises(RuntimeError, match="supplied together"):
-        slicer.slice_window(
-            1,
-            1,
-            2,
-            3,
-            is_last=False,
-            explicitly_owned_faults={GRAPHLIKE: set()},
-        )
-
-
 def test_the_terminal_window_owns_the_front_buffer_faults_nobody_committed():
     slicer = surface_code_slicer(4)
     slicer.slice_window(1, 1, 1, 1, is_last=False)

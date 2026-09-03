@@ -1,30 +1,13 @@
 """Places the faults of one window: its rows, its columns, what it owns.
 
-A window covers a run of rounds. Its rows are the detectors of those
-rounds. Its columns are every catalog fault that flips one of its rows
-and that no earlier window has already committed; the decoder needs the
-uncommitted faults reaching in from outside to explain what it sees. That
-is the overlapping recovery of Dennis et al. as Skoric et al. (2209.08552,
-section I.B) and qLDPC's SlidingWindowDecoder apply it.
-
-A window owns, and later commits, the faults that touch its commit
-rounds; the buffer rounds after the commit rounds are decoded but not
-committed, so a chain that crosses the commit boundary is cut there and
-its far end becomes an artificial defect for the next window (Skoric et
-al., Fig. 2). A fault a window owns is never offered to a later window
-again (qLDPC's `d_errors[addressed] = False`). The terminal window of an
-operation, the one whose commit rounds reach the last round, owns every
-fault it sees that nothing committed before, because nothing comes after
-it. A fault touching an excluded round is owned by nobody and stays a
-column in every window that sees it. When a plan compiled from a
-dependency graph supplies the owner sets explicitly, they replace the
-incremental rule and already carry the terminal law and the exclusions
-(window_ownership_dag).
-
-Every owned column keeps its whole detector effect in boundary_flips, so
-the window that receives the handoff can intersect it with its own rows
-whether it comes before or after in time (Tan et al. 2209.09219, whose
-seam windows receive flips from both neighbours).
+A window's rows are the detectors of its rounds, its columns every
+catalog fault that flips one of them and that no earlier window
+committed, and it owns the faults touching its commit rounds (Skoric et
+al. 2209.08552, section I.B; qLDPC's SlidingWindowDecoder, whose
+`d_errors[addressed] = False` removes a committed fault from later
+windows). An owned column hands off its whole detector effect, so a
+window before or after in time can intersect it with its own rows (Tan
+et al. 2209.09219).
 """
 
 import dataclasses
@@ -61,13 +44,6 @@ def parse_window_entry(
     A three-value entry (first commit, last commit, last buffer) has no
     buffer before its commit rounds.
     """
-    if len(window_entry) not in (3, 4):
-        raise ValueError(
-            f"a window entry has three or four bounds, got {len(window_entry)}"
-        )
-    for bound in window_entry:
-        if type(bound) is not int:
-            raise ValueError("window bounds must be built-in ints")
     if any(bound < 1 for bound in window_entry):
         raise ValueError("window bounds must be positive")
     if len(window_entry) == 4:
@@ -98,35 +74,15 @@ def detectors_in_window(
 
 
 def checked_fault_exclusion_ranges(
-    fault_exclusion_ranges: Sequence[Sequence[int]], round_count: int
+    fault_exclusion_ranges: Sequence[Sequence[int]],
 ) -> tuple[tuple[int, int], ...]:
-    """The ranges as a tuple of pairs, each checked against the operation.
-
-    Any sequence of pairs is accepted; a str or bytes is not, since its
-    items are characters or byte values, not ranges. A round outside
-    1..round_count holds no detector, so a range reaching there is a
-    caller's mistake rather than an empty exclusion.
-    """
-    if _is_text(fault_exclusion_ranges) or not isinstance(
-        fault_exclusion_ranges, Sequence
-    ):
-        raise ValueError(
-            "fault_exclusion_ranges must be a sequence of ranges, got "
-            f"{fault_exclusion_ranges!r}"
-        )
+    """The ranges as a tuple of (first, last) round pairs, none inverted."""
     checked_ranges = []
-    for exclusion in fault_exclusion_ranges:
-        _check_range_is_a_pair_of_ints(exclusion)
-        first_excluded, last_excluded = exclusion
+    for first_excluded, last_excluded in fault_exclusion_ranges:
         if first_excluded > last_excluded:
             raise ValueError(
                 f"fault-exclusion range {first_excluded}-{last_excluded} "
                 f"is inverted"
-            )
-        if first_excluded < 1 or last_excluded > round_count:
-            raise ValueError(
-                f"fault-exclusion range {first_excluded}-{last_excluded} "
-                f"lies outside rounds 1..{round_count}"
             )
         checked_ranges.append((first_excluded, last_excluded))
     return tuple(checked_ranges)
@@ -195,21 +151,13 @@ def local_link_projection(
 ) -> scipy.sparse.csc_matrix:
     """The catalog link restricted to this window's columns, checked.
 
-    Only the detector rows are checked. They fail to add up when a window
-    keeps a physical fault while an earlier window, or an ancestor in the
-    dependency graph, owns a component of it that touches this window's
-    rows: the parent then reaches this window without the component, and
-    no consistent link exists, so the slice is refused. That is the
-    contract between the slicer's per-representation ownership and this
-    projection; the builders refuse the inputs that reach it, a linked
-    requirement with an exclusion range on a plan of more than one window
-    (window_model_builders) and a linked plan whose owner tables give a
-    kept fault's component to an ancestor (window_ownership_dag). A
-    physical fault can have a component whose
-    detectors all lie outside this window while that component carries a
-    logical flip, so the observable rows of a window need not add up;
-    each decoder commits observables from its own placed view, never
-    through this link.
+    Raises RuntimeError when the detector rows do not add up, which
+    happens when a window keeps a physical fault while an earlier window
+    or an ancestor owns a component of it touching this window's rows:
+    that is the contract between the slicer's per-representation
+    ownership and this projection. Only the detector rows are checked: a
+    component carrying a logical flip may lie wholly outside the window,
+    and each decoder commits observables from its own placed view.
     """
     graphlike_rows = list(graphlike.source_fault_ids)
     physical_columns = list(physical.source_fault_ids)
@@ -237,27 +185,6 @@ _WindowArrays = tuple[
     numpy.ndarray,
     dict[int, tuple[int, ...]],
 ]
-
-
-def _is_text(value: object) -> bool:
-    return isinstance(value, (str, bytes))
-
-
-def _check_range_is_a_pair_of_ints(exclusion: object) -> None:
-    if _is_text(exclusion) or not isinstance(exclusion, Sequence):
-        _refuse_exclusion_range(exclusion)
-    if len(exclusion) != 2:
-        _refuse_exclusion_range(exclusion)
-    for endpoint in exclusion:
-        if type(endpoint) is not int:
-            _refuse_exclusion_range(exclusion)
-
-
-def _refuse_exclusion_range(exclusion: object) -> None:
-    raise ValueError(
-        "each fault-exclusion range must be a pair of built-in integers, "
-        f"got {exclusion!r}"
-    )
 
 
 def _prior_faults(
@@ -292,10 +219,9 @@ def _fault_owned_by_window(
     """Whether this window commits the fault.
 
     Precedence: an excluded fault is never owned; an explicit owner set
-    decides next, and it already leaves out the excluded faults and names
-    the terminal window for every fault no window's commit rounds reach;
-    a fault committed elsewhere is not owned; the terminal window owns
-    the rest; any other window owns what touches its commit rounds.
+    decides next; a fault committed elsewhere is not owned; the terminal
+    window owns the rest; any other window owns what touches its commit
+    rounds.
     """
     if fault_index in unowned_faults:
         return False

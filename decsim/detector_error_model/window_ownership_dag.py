@@ -1,37 +1,16 @@
 """Decides which window owns each fault when windows form a dependency graph.
 
 A parallel window plan (Tan et al. 2209.09219; Skoric et al. 2209.08552,
-section I.C) decodes some windows first and lets the windows between them
-wait for both neighbours' committed corrections. The plan says so with
-edges from a window to the windows that depend on it. This module checks
-that those edges form an acyclic graph, gives every window a depth (zero
-for a window that waits for nothing), and assigns every fault to the
-shallowest window whose commit rounds it touches; a fault that touches
-two windows of the same depth has no causal owner and is refused. The
-terminal window, whose commit rounds reach the last round, also owns
-every fault its rows see that no commit round of the plan reaches, the
-same law the slicer applies when it advances ownership itself (Skoric et
-al. 2209.08552, the last paragraph of section III, Methods (text lines
-693-700): in both branches the last window commits through the last
-round, the last B window of reduced size, or the last A window whose
-commit region runs from the bottom of the regular commit region to the
-last round). An exclusion range is
-decsim's own device with no paper referent: a strong re-decode leaves
-the faults the weak decoder already committed uncommitted
-(decsim/decoders/strong_escalation). A fault a range keeps uncommitted
-has no owner at all, and a fault nobody has committed stays in the
-decoding graph of every window that sees it, because only that window
-can explain a defect the fault causes. The module also answers, for each
-window, which faults its ancestors own, so the slicer can leave those
-out of the window's columns, and it refuses a linked plan in which a
-window would keep a physical fault while an ancestor owns one of its
-graphlike components on the window's rows.
+section I.C) says with edges which windows wait for which; this module
+checks that the edges form an acyclic graph, gives every window a depth,
+assigns every fault to the shallowest window whose commit rounds it
+touches, and answers, for each window, which faults its ancestors own. A
+fault touching an excluded round (decsim's own device for the strong
+re-decode, decsim/decoders/strong_escalation) has no owner at all.
 """
 
 from collections.abc import Container, Sequence
 from typing import Optional
-
-import scipy.sparse
 
 from decsim.detector_error_model import (
     fault_model_contracts,
@@ -91,16 +70,13 @@ def explicit_fault_ownership(
     slicer: window_slicer.WindowSlicer,
     entries: tuple[tuple[int, int, int, int], ...],
     depths: tuple[int, ...],
-    round_count: int,
     fault_exclusion_ranges: tuple[tuple[int, int], ...],
 ) -> tuple[dict[fault_model_contracts.FaultRepresentation, set[int]], ...]:
     """The faults each window owns: the shallowest window it touches.
 
-    A fault outside every commit round of the plan has no owner, which is
-    how a plan covers part of an operation; the terminal window still
-    owns every such fault its rows see. A fault touching an excluded
-    round has no owner in any window. Raises ValueError for a fault with
-    two owners of the same depth.
+    A fault outside every commit round of the plan, or touching an
+    excluded round, has no owner. Raises ValueError for a fault with two
+    owners of the same depth.
     """
     ownership = [
         {representation: set() for representation in slicer.catalogs}
@@ -110,15 +86,6 @@ def explicit_fault_ownership(
     _assign_commit_round_owners(
         ownership, slicer, entries, depths, excluded_faults
     )
-    terminal_window = _terminal_window(entries, round_count)
-    if terminal_window is not None:
-        _assign_unowned_faults_to_the_terminal_window(
-            ownership,
-            slicer,
-            entries[terminal_window],
-            terminal_window,
-            excluded_faults,
-        )
     return tuple(ownership)
 
 
@@ -149,48 +116,6 @@ def explicit_prior_faults(
             )
         prior_faults.append(by_representation)
     return tuple(prior_faults)
-
-
-def check_every_kept_physical_fault_keeps_its_components(
-    slicer: window_slicer.WindowSlicer,
-    entries: tuple[tuple[int, int, int, int], ...],
-    ownership: tuple[
-        dict[fault_model_contracts.FaultRepresentation, set[int]], ...
-    ],
-    ancestors: tuple[frozenset[int], ...],
-) -> None:
-    """A kept physical fault keeps every component on the window's rows.
-
-    A component's candidate owners are a subset of its physical parent's,
-    so the shallowest-window rule can give the parent and the component
-    to windows on different branches: a window keeps the parent while an
-    ancestor owns a component on the window's rows. This is the law of
-    the projection (window_placement.local_link_projection) when the
-    components of one fault share no detector, which Stim's decomposition
-    guarantees; a hand-written model whose components share a detector
-    may be refused here where the projection would still balance. Raises
-    ValueError naming the window, the fault, the component and the
-    ancestor; a plan without a link has nothing to check.
-    """
-    if slicer.catalog_link is None:
-        return
-    physical = fault_model_contracts.FaultRepresentation.PHYSICAL
-    graphlike = fault_model_contracts.FaultRepresentation.GRAPHLIKE
-    owner_of_physical_fault = _owner_by_fault(ownership, physical)
-    owner_of_component = _owner_by_fault(ownership, graphlike)
-    components_by_physical_fault = _components_by_physical_fault(
-        slicer.catalog_link
-    )
-    for window_index, entry in enumerate(entries):
-        _check_a_window_keeps_whole_physical_faults(
-            slicer,
-            entry,
-            window_index,
-            ancestors[window_index],
-            owner_of_physical_fault,
-            owner_of_component,
-            components_by_physical_fault,
-        )
 
 
 class _AncestorOwnedFaults:
@@ -315,123 +240,6 @@ def _owner_window(
             "independent commit regions without a causal owner"
         )
     return earliest[0]
-
-
-def _terminal_window(
-    entries: tuple[tuple[int, int, int, int], ...], round_count: int
-) -> Optional[int]:
-    """The window whose commit rounds reach the last round, if any does."""
-    for window_index, entry in enumerate(entries):
-        _, _, last_commit_round, _ = entry
-        if last_commit_round == round_count:
-            return window_index
-    return None
-
-
-def _assign_unowned_faults_to_the_terminal_window(
-    ownership: list,
-    slicer: window_slicer.WindowSlicer,
-    terminal_entry: tuple[int, int, int, int],
-    terminal_window: int,
-    excluded_faults: dict[fault_model_contracts.FaultRepresentation, set[int]],
-) -> None:
-    """Every fault the terminal window's rows see and no window owns."""
-    for representation in slicer.catalogs:
-        owner_by_fault = _owner_by_fault(ownership, representation)
-        seen_faults = _faults_seen_by_the_window(
-            slicer, terminal_entry, representation
-        )
-        unowned_faults = seen_faults - set(owner_by_fault)
-        unowned_faults -= excluded_faults[representation]
-        ownership[terminal_window][representation].update(unowned_faults)
-
-
-def _faults_seen_by_the_window(
-    slicer: window_slicer.WindowSlicer,
-    entry: tuple[int, int, int, int],
-    representation: fault_model_contracts.FaultRepresentation,
-) -> set[int]:
-    """The faults of one representation that touch the window's rounds."""
-    first_buffer_round, _, _, last_buffer_round = entry
-    after_last_buffer_round = last_buffer_round + 1
-    seen_rounds = range(first_buffer_round, after_last_buffer_round)
-    faults_by_round = slicer.fault_index.faults_by_round[representation]
-    seen_faults = set()
-    for round_index in seen_rounds:
-        faults = faults_by_round.get(round_index, ())
-        seen_faults.update(faults)
-    return seen_faults
-
-
-def _components_by_physical_fault(
-    catalog_link: scipy.sparse.csc_matrix,
-) -> tuple[tuple[int, ...], ...]:
-    """Each physical fault's graphlike components, read off the link once."""
-    column_starts = catalog_link.indptr.tolist()
-    component_rows = catalog_link.indices.tolist()
-    components = []
-    physical_fault_count = catalog_link.shape[1]
-    for physical_fault in range(physical_fault_count):
-        next_physical_fault = physical_fault + 1
-        first_entry = column_starts[physical_fault]
-        after_last_entry = column_starts[next_physical_fault]
-        rows = component_rows[first_entry:after_last_entry]
-        components.append(tuple(sorted(rows)))
-    return tuple(components)
-
-
-def _check_a_window_keeps_whole_physical_faults(
-    slicer: window_slicer.WindowSlicer,
-    entry: tuple[int, int, int, int],
-    window_index: int,
-    ancestor_indices: frozenset[int],
-    owner_of_physical_fault: dict[int, int],
-    owner_of_component: dict[int, int],
-    components_by_physical_fault: tuple[tuple[int, ...], ...],
-) -> None:
-    """Refuse the first kept physical fault whose component an ancestor owns."""
-    seen_physical_faults = _faults_seen_by_the_window(
-        slicer, entry, fault_model_contracts.FaultRepresentation.PHYSICAL
-    )
-    seen_components = _faults_seen_by_the_window(
-        slicer, entry, fault_model_contracts.FaultRepresentation.GRAPHLIKE
-    )
-    for physical_fault in sorted(seen_physical_faults):
-        physical_owner = owner_of_physical_fault.get(physical_fault)
-        if physical_owner in ancestor_indices:
-            continue
-        dropped = _component_an_ancestor_owns(
-            components_by_physical_fault[physical_fault],
-            seen_components,
-            owner_of_component,
-            ancestor_indices,
-        )
-        if dropped is None:
-            continue
-        component, component_owner = dropped
-        raise ValueError(
-            "a linked fault model requirement is refused for this plan: "
-            f"window {window_index} keeps physical fault {physical_fault} "
-            f"while window {component_owner}, which it depends on, owns "
-            f"graphlike component {component} of that fault on rows window "
-            f"{window_index} decodes"
-        )
-
-
-def _component_an_ancestor_owns(
-    components: tuple[int, ...],
-    seen_components: set[int],
-    owner_of_component: dict[int, int],
-    ancestor_indices: frozenset[int],
-) -> Optional[tuple[int, int]]:
-    """The first component on the window's rows an ancestor owns, and who."""
-    for component in components:
-        if component not in seen_components:
-            continue
-        component_owner = owner_of_component.get(component)
-        if component_owner in ancestor_indices:
-            return component, component_owner
-    return None
 
 
 def _excluded_faults(

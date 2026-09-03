@@ -49,15 +49,11 @@ def resolve_detector_rounds(
 def checked_detector_round_map(
     detector_rounds: dict[int, int], detector_count: int, round_count: int
 ) -> dict[int, int]:
-    """Returns the map it was given, checked once against this module's law.
+    """The map it was given, covering every detector inside 1..round_count.
 
-    Raises ValueError unless the map covers every detector exactly once
-    with rounds inside 1..round_count. detector_formation holds a declared
-    map to the same law through this function, so the check lives here
-    alone. Nothing in the machine writes to the map: the formation table
-    reads it into its recipes while it is built and does not keep it, and
-    the slicer's chronology keeps it and only reads it; a copy would
-    serve every caller the same.
+    A QLX program declares the map, so this is the boundary check for it;
+    detector_formation holds a declared map to the same law through this
+    function.
     """
     every_detector = set(range(detector_count))
     if set(detector_rounds) != every_detector:

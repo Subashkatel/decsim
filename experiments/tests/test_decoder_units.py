@@ -71,7 +71,7 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     assert config.active_decoder is config.decoder.weak
     # engine cycles price on a named domain, resolved once like the links
     assert config.decoder.weak.engine.clock == "fridge"
-    assert config.decoder.weak.engine.frequency_mhz == config.clocks["fridge"]
+    assert config.decoder.weak.engine.megahertz == config.clocks["fridge"]
     assert config.decoder.strong.engine.clock == "room"
 
 
@@ -95,8 +95,8 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
         },
     })
     config = load_experiment(config_path)
-    assert config.controller.readout_to_bits_us == 0.054
-    assert config.controller.decision_to_pulse_us == 0.016
+    assert config.controller.readout_to_bits_microseconds == 0.054
+    assert config.controller.decision_to_pulse_microseconds == 0.016
 
     spec, _ = build_run(
         config, physical_error_probability=0.001, distance=3,

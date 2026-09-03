@@ -215,7 +215,7 @@ def sweep_points(config: ExperimentConfig) -> list:
     period axis (no timing here), so a block must sweep exactly one."""
     points = {}
     for block in config.sweep:
-        if len(block.round_periods_us) != 1:
+        if len(block.round_periods_microseconds) != 1:
             raise ValueError(
                 "offline configs sweep one round period (timing sweeps "
                 "belong to the closed-loop runner)")

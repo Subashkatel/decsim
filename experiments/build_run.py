@@ -81,7 +81,7 @@ def _unit_engine(unit, algorithm) -> DecoderEngine:
     release = DecoderStage(
         "release", cycles_per_job=unit.engine.release_cycles_per_job)
     timing = DecoderTiming(before=(fetch,), after=(release,),
-                           frequency_mhz=unit.engine.frequency_mhz)
+                           frequency_mhz=unit.engine.megahertz)
     return DecoderEngine(algorithm, timing)
 
 
@@ -221,27 +221,27 @@ def link_model(config: ExperimentConfig):
     cwb = cards.pop("controller_to_weak_buffer")
     if cwb is not None:
         profile = with_controller_to_weak_buffer_path(
-            profile, latency_microseconds=cwb.latency_us,
-            aggregate_bits_per_microsecond=cwb.bits_per_us, source=source)
+            profile, latency_microseconds=cwb.latency_microseconds,
+            aggregate_bits_per_microsecond=cwb.bits_per_microsecond, source=source)
     csb = cards.pop("controller_to_strong_buffer")
     if csb is not None:
         profile = with_controller_to_strong_buffer_path(
-            profile, latency_microseconds=csb.latency_us,
-            aggregate_bits_per_microsecond=csb.bits_per_us, source=source)
+            profile, latency_microseconds=csb.latency_microseconds,
+            aggregate_bits_per_microsecond=csb.bits_per_microsecond, source=source)
     edge_overrides = {}
     for path, card in cards.items():
         if card is None:
             continue
         capacity = None
-        if card.bits_per_us is not None:
-            capacity = CapacitySettings(card.bits_per_us,
+        if card.bits_per_microsecond is not None:
+            capacity = CapacitySettings(card.bits_per_microsecond,
                                         QuantityBasis.AGGREGATE,
                                         None, source)
-        channel = ChannelSettings(path, microseconds_to_ticks(card.latency_us),
+        channel = ChannelSettings(path, microseconds_to_ticks(card.latency_microseconds),
                                   capacity, source)
         setup_ticks = 0
-        if card.setup_us_per_transfer:
-            setup_ticks = microseconds_to_ticks(card.setup_us_per_transfer)
+        if card.setup_microseconds_per_transfer:
+            setup_ticks = microseconds_to_ticks(card.setup_microseconds_per_transfer)
         edge_overrides[path] = replace(getattr(profile, path), channel=channel,
                                        setup_ticks=setup_ticks)
     # The config prices readout classification on its own line, so its QC card is link
@@ -398,10 +398,10 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
     timing = TimingConfig(
         round_period_microseconds=round_period_us,
         readout_to_bits_microseconds=
-            config.controller.readout_to_bits_us,
-        packing_microseconds_per_round=config.controller.packing_us_per_round,
+            config.controller.readout_to_bits_microseconds,
+        packing_microseconds_per_round=config.controller.packing_microseconds_per_round,
         decision_to_pulse_microseconds=
-            config.controller.decision_to_pulse_us)
+            config.controller.decision_to_pulse_microseconds)
     scheme = WINDOWING_SCHEMES[config.windowing.scheme]()
     routing = {"decoder": engine, "num_units": config.active_decoder.units}
     if config.decode_path == "switching":
@@ -451,7 +451,7 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
                 if config.decode_path == "switching" else None),
             threshold_calibrator=threshold_calibrator),
         idle_policy=idle_policy(config),
-        pauli_frame=PauliFrameConfig(commit_microseconds=config.pauli_frame_commit_us),
+        pauli_frame=PauliFrameConfig(commit_microseconds=config.pauli_frame_commit_microseconds),
         seed=seed,
         **routing)
     return spec, engine

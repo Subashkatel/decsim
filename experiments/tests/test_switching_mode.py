@@ -63,7 +63,7 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
 
 def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     config = load_experiment(switching_config(tmp_path, 20.0))
-    assert config.switching.gap_threshold_db == 20.0
+    assert config.switching.gap_threshold_decibels == 20.0
     assert math.isclose(config.switching.gap_threshold_nats,
                         2.0 * math.log(10.0))
 

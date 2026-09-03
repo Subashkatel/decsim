@@ -53,7 +53,7 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     block = config.sweep[0]
     physical_error_probability = block.physical_error_probabilities[0]
     distance = block.distances[0]
-    round_period_us = block.round_periods_us[0]
+    round_period_us = block.round_periods_microseconds[0]
     algorithm = config.active_decoder.algorithm
     spec, engine = build_run(
         config, physical_error_probability=physical_error_probability,

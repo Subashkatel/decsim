@@ -50,7 +50,7 @@ def resolved_description(config: ExperimentConfig) -> list:
             f"sweep block {index}: "
             f"p {list(block.physical_error_probabilities)}, "
             f"d {list(block.distances)}, "
-            f"round period {list(block.round_periods_us)} us, "
+            f"round period {list(block.round_periods_microseconds)} us, "
             f"{block.shots} shots")
     lines.append(f"trace: {config.trace}"
                  + (" with component I/O" if config.log_component_io else ""))
@@ -168,7 +168,7 @@ def run_sweep(config: ExperimentConfig, run_dir: Path = None) -> list:
     measurements = {}
     for block in config.sweep:
         points = itertools.product(block.physical_error_probabilities,
-                                   block.distances, block.round_periods_us)
+                                   block.distances, block.round_periods_microseconds)
         for physical_error_probability, distance, round_period_us in points:
             threshold_calibrator = online_threshold_calibrator(
                 config,

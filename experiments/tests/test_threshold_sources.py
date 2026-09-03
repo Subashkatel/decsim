@@ -60,7 +60,7 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     table = calibration_table(tmp_path)
     config = load_experiment(source_config(tmp_path, {
         "threshold_source": "table", "threshold_table": table}))
-    assert config.switching.gap_threshold_db is None
+    assert config.switching.gap_threshold_decibels is None
     assert config.switching.threshold_column == "gth_eq4_wilson"
 
     resolved = resolve_gap_threshold_nats(

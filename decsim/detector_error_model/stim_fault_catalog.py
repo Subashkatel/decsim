@@ -1,23 +1,12 @@
 """The whole-circuit fault catalog, read off Stim's detector error model.
 
-Stim lists every error mechanism as `error(p) D.. L.. ^ D.. L..`
-(Stim, doc/file_format_dem_detector_error_model.md): the detectors and
-logical observables the mechanism flips and, after decompose_errors=True,
-the `^` separators that split it into graphlike components of one or two
-detectors. A target listed twice cancels, so every identity here is
-reduced modulo two first: across the whole instruction for the physical
-identity, and within each component for the graphlike ones. Equal
-components of one instruction cancel too, because the separators partition
-one correlated mechanism rather than listing independent faults.
-
-A catalog holds one column per distinct identity. Mechanisms with the same
-identity are merged as independent errors, p(1-q) + q(1-p), the rule
-PyMatching applies to parallel edges under merge_strategy="independent".
-The graphlike catalog holds components; the physical catalog holds whole
-mechanisms. When a decoder needs both, prepare_fault_catalogs also
-returns the link matrix that says which graphlike columns each physical
-column is made of, and checks that Stim's decomposed and undecomposed
-models describe the same physical faults.
+Every `error(p) D.. L.. ^ D.. L..` instruction (Stim,
+doc/file_format_dem_detector_error_model.md) is reduced modulo two, as a
+whole for the physical identity and per `^` component for the graphlike
+ones, and mechanisms with one identity merge as independent errors,
+p(1-q) + q(1-p) (PyMatching's merge_strategy="independent"). When a
+decoder needs both catalogs, the link matrix says which graphlike
+columns each physical column is made of.
 """
 
 import dataclasses

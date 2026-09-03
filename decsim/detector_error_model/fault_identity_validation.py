@@ -1,23 +1,10 @@
 """Reduces fault identities modulo two and checks decoder input matrices.
 
-A fault's identity is the set of detectors and logical observables it
-flips. A target listed twice cancels, because two flips of one detector
-leave it alone; that is Stim's rule for the targets of one error
-instruction (doc/file_format_dem_detector_error_model.md). A fault that
-flips no detector but flips an observable is undetectable, so no decoder
-can ever correct it; such a fault is refused wherever it appears.
-
-The matrix checks read a check matrix and an observable matrix the way
-PyMatching's from_check_matrix does, one column per fault, and refuse a
-column that has lost its logical identity. The graphlike check also
-refuses a column with more than two detectors, which no matching decoder
-can represent. The belief-matching check (Higgott et al., beliefmatching)
-also reads the physical check matrix, its priors and the map from
-physical faults to their graphlike components, and refuses a physical
-column whose detectors are not the parity of its components.
-
-This module reads no Stim object and no window; a decoder outside the
-package can check its own matrices with it.
+A target listed twice in one error cancels, and a fault that flips an
+observable but no detector is undetectable and refused (Stim,
+doc/file_format_dem_detector_error_model.md); the matrix checks read one
+column per fault the way PyMatching's from_check_matrix and the
+belief-matching decoder (Higgott et al., beliefmatching) do.
 """
 
 from collections.abc import Iterable

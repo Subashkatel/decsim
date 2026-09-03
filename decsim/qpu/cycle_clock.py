@@ -11,11 +11,6 @@ boundary and occupy whole cycles; a command that arrives on a boundary
 starts on that boundary (QubiC, 2404.15260 Sec. IV: a pulse timestamp is
 the time after which the pulse plays). This module owns that cadence
 only; program dependencies, windows and decoder state live elsewhere.
-
-At every boundary, in this order: the rounds of the cycle that just
-ended (idle patches first, then running operations), then the commands
-waiting to start. An operation's last round and its completion land in
-the same event.
 """
 
 import dataclasses

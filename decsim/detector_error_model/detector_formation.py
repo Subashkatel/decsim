@@ -1,28 +1,12 @@
 """Turns raw measurement bits into detection events, round by round.
 
-A detector asks whether a stabilizer reading differs from what it should
-be. Its recipe is the list of raw measurement bits that XOR into it plus
-the noiseless reference parity of those bits. That is Stim's own rule
-(stim.Circuit.compile_m2d_converter, measurements_to_detection_events),
-and the reference term is what keeps a circuit whose expected readings
-are not all zero correct.
-
-Every measurement bit is addressed as (round, slot): round is the QPU
-round whose packet carries it, slot is its position inside that packet.
-Rounds are one-based. Which round a measurement belongs to is the QPU's
-schedule, not a property of the circuit text, so a front end may declare
-it (measurement_rounds). Without a declaration the Stim generator
-convention applies: the measurement blocks before a DETECTOR group belong
-to the round that group announces in its time coordinate, and the
-trailing data readout folds into the last round's packet after that
-round's own bits. Either way the readout detectors land on the last
-round, exactly where detector_chronology.resolve_detector_rounds puts
-them.
-
-build_formation_table reads the recipes off a circuit once;
-StreamingDetectorFormer applies them one packet at a time in the
-controller; split_measurements_into_packets and form_shot are the QPU
-side and the whole-shot check.
+A detector's recipe is the raw measurement bits, addressed as (round,
+slot) in the QPU's one-based packet schedule, that XOR into it plus their
+noiseless reference parity; that is Stim's own rule
+(stim.Circuit.compile_m2d_converter, measurements_to_detection_events).
+A front end may declare the packet schedule (measurement_rounds);
+without one, the Stim generator layout applies, with the trailing data
+readout folded into the last round's packet.
 """
 
 import dataclasses

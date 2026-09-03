@@ -546,7 +546,7 @@ class Metric(Protocol):
 @runtime_checkable
 class MemoryModel(Protocol):
     """Port 18. Observes retained payload storage inside SyndromeBuffer:
-    store()/evict() fire on exactly the fragments held. Optional — when
+    store()/evict() fire on exactly the fragments held. Optional; when
     absent, storage is unbounded."""
 
     def store(self, key, payload) -> None: ...

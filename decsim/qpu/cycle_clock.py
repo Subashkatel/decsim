@@ -18,7 +18,7 @@ from typing import Any, Callable, Optional, Protocol
 
 import decsim.engine
 import decsim.message as message
-import decsim.protocols as protocols
+import decsim.ports as ports
 
 # Patches and operation ids are opaque identities chosen by the workload;
 # Any stands for them in every signature below.
@@ -53,7 +53,7 @@ class QPUDevice:
     def __init__(
         self,
         engine: decsim.engine.Engine,
-        syndrome_source: protocols.SyndromeDevice,
+        syndrome_source: ports.SyndromeDevice,
         cycle_ticks: int,
         readout_receiver: Optional[ReadoutReceiver] = None,
         completion_receiver: Optional[

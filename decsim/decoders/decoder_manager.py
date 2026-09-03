@@ -10,12 +10,13 @@ from enum import Enum
 import math
 from typing import Callable, Optional
 
-from ..message import (DecodeJob, DecodeOutcome, DecodeResult,
+from ..message import (
+    LinkPath,DecodeJob, DecodeOutcome, DecodeResult,
                       DecoderRequestKey, DecoderServiceKey, SoftOutput)
 from ..message import Directive
 from .decoder_memory import (DecoderMemory, DecoderMemoryConfig,
                              count_decoder_input_round_demand)
-from .decoder_memory_transfer import DecoderInputStaging, FixedLatencyDecoderMemoryTransfer
+from .decoder_memory_transfer import CancellableDecoderMemoryTransfer, DecoderInputStaging
 from .strong_escalation import HeldStrongCompletion, StrongRequestLedger
 from ..config import format_ticks
 
@@ -105,7 +106,7 @@ class DecoderManager:
         self.engine = engine
         self.router = router
         self.decoder_memory_transfer = (
-            FixedLatencyDecoderMemoryTransfer(engine)
+            CancellableDecoderMemoryTransfer(engine)
             if decoder_memory_transfer is None else decoder_memory_transfer
         )
         transport_engine = getattr(self.decoder_memory_transfer, "engine", engine)
@@ -227,11 +228,12 @@ class DecoderManager:
     def pool_tag(pool: str) -> str:
         return "" if pool == "default" else f"{pool} "
 
-    def enqueue(self, job: DecodeJob, reserve_transfer=None) -> None:
+    def enqueue(self, job: DecodeJob, send_input=None) -> None:
         """Admit once and queue the request; its rounds stay in Buffer 0.
 
-        ``reserve_transfer`` is called at dispatch, after a unit is assigned,
-        to reserve the input link and return the transfer delay in ticks (the
+        ``send_input(on_landed)`` is called at dispatch, after a unit is
+        assigned, to send the input over its link; it calls ``on_landed``
+        at the delivery and returns the delay the link expects (the
         accelerator pattern: invoke the unit, then DMA its input into that
         unit's memory, then compute; Aladdin aladdin_sys_connection.h and
         dma_interface.h). ``None`` means the job carries no syndrome data.
@@ -243,7 +245,7 @@ class DecoderManager:
             # a gap half is neither tier: it feeds the join, not the ledger
             self.strong.admit_weak(job, self.engine.now)
         job.submitted = True
-        job.reserve_transfer = reserve_transfer
+        job.send_input = send_input
         self._enqueue_now(job)
 
     @staticmethod
@@ -563,7 +565,7 @@ class DecoderManager:
 
     def _carries_input(self, job: DecodeJob) -> bool:
         """The job moves syndrome data into a unit's memory."""
-        return job.reserve_transfer is not None or self._memory_demand(job) > 0
+        return job.send_input is not None or self._memory_demand(job) > 0
 
     def _resident_capacity(self, job: DecodeJob) -> int:
         """Two residents per unit (the depth-1 access-execute machine)
@@ -926,22 +928,22 @@ class DecoderManager:
         self._gap_joins[key] = GapJoinState()
         window_manager = getattr(self.services, "wm", None)
 
-        def reserve_transfer(sibling=sibling, primary=job):
+        def send_input(on_landed, sibling=sibling, primary=job) -> int:
             if window_manager is None:
+                on_landed()
                 return 0
-            from ..links.links import LinkPath
             payload_bits = window_manager._job_payload_bits(sibling)
-            # the link attribution is the window's, so the reservation
-            # rides the primary job's window identity; the delay applies
-            # to the sibling's own delivery
-            arrival = window_manager._link_arrival(
-                LinkPath.WBD, primary, payload_bits=payload_bits)
-            return arrival - self.engine.now
+            # the link attribution is the window's, so the transfer rides
+            # the primary job's window identity; the landing is the
+            # sibling's own
+            return window_manager._send_job_transfer(
+                LinkPath.WBD, primary, payload_bits=payload_bits,
+                on_delivered=on_landed)
 
         self.engine.log(self.log_name,
                         f"SPLIT GAP {job.label}: sibling submitted to the "
                         f"gap pool")
-        self.enqueue(sibling, reserve_transfer)
+        self.enqueue(sibling, send_input)
 
     def _gap_sibling_done(self, key: tuple, sibling_weight) -> None:
         """One gap half landed; conclude the window if the other is in."""
@@ -1141,16 +1143,12 @@ class DecoderManager:
             if serial_job is None and not deferred:
                 (carrier,) = self.strong.carriers_for(key)
                 strong_request_key = carrier.request_job.request_key
-            selection_delay = self.services.prepare_strong_selection(
+            self.services.prepare_strong_selection(
                 job, strong_request_key, serial_job, deferred=deferred,
+                on_selection_delivered=lambda:
+                    self._select_strong_result(key, strong_request_key),
             )
             self.strong.begin_selection(key, strong_request_key)
-            self.engine.schedule(
-                selection_delay,
-                lambda destination=key, request_key=strong_request_key:
-                    self._select_strong_result(destination, request_key),
-                label=f"select strong result {key}",
-            )
         job.awaiting_strong_result = awaiting      # BEFORE the commit callback
         self.on_window_decoded(job, result)
         self._record_request(

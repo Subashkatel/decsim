@@ -14,16 +14,9 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Callable, Optional
 
-from ..message import (DecodeJob,
-                      DecodeResult, DecoderRequestKey, DecoderTier, LogicalContribution,
-                      Operation,
-                      StrongDecodeCompletion,
-                      SuccessorReadiness, SyndromeRoundPacket, Window, WindowInfo,
-                      WindowPlan, WindowProtocol, WindowReadiness,
-                      stable_identity_order_key)
+from ..message import (DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier, LinkPath, LogicalContribution, Operation, RequestTransferRelation, StrongDecodeCompletion, SuccessorReadiness, SyndromeRoundPacket, TransferAttribution, Window, WindowInfo, WindowPlan, WindowProtocol, WindowReadiness, stable_identity_order_key)
 from ..decoders.decoder_memory import count_decoder_input_round_demand
 from ..decoders.strong_escalation import NoStrongTier, StrongEscalation
-from ..links.links import LinkPath, RequestTransferRelation, TrafficAttribution
 from ..syndrome_buffer.syndrome_buffer import (DecoderInputHold, PendingStrong,
                                                PotentialStrong, SyndromeBuffer)
 from ..syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
@@ -82,7 +75,7 @@ class WindowManager:
         self.primary_tier = escalation_policy.primary_tier
         self._idle_decode_demand_receiver = None
         self.withdraw_decode = None      # wired to the decoder manager
-        self.submit_fn = submit_fn                   # (job, reserve_transfer) -> None
+        self.submit_fn = submit_fn                   # (job, send_input) -> None
         self.escalation = (StrongEscalation(self, check_strong_route)
                            if retain_strong_context else NoStrongTier())
         self.on_workload_complete = on_workload_complete
@@ -818,8 +811,11 @@ class WindowManager:
                         submission.job.request_key is not None
                         and self.syndrome_buffer.has_hold(
                             DecoderInputHold(submission.job.request_key))):
-                    self.submit_fn(submission.job,
-                                   lambda delay=submission.delay_ticks: delay)
+                    def resend_held_input(on_landed,
+                                          delay=submission.delay_ticks) -> int:
+                        return self._land_after(delay, on_landed)
+
+                    self.submit_fn(submission.job, resend_held_input)
                     continue
                 self._bind_decoder_input_hold(
                     submission.job, key, self.primary_store)
@@ -832,12 +828,14 @@ class WindowManager:
                               if self.primary_tier is DecoderTier.WEAK
                               else LinkPath.SBD)
 
-                def reserve_transfer(job=primary_job, bits=payload_bits,
-                                     extra=extra_delay, path=input_path) -> int:
-                    return (self._link_arrival(path, job, payload_bits=bits)
-                            - self.engine.now + extra)
+                def send_input(on_landed, job=primary_job, bits=payload_bits,
+                               extra=extra_delay, path=input_path) -> int:
+                    expected_delay_ticks = self._send_job_transfer(
+                        path, job, payload_bits=bits,
+                        on_delivered=lambda: self._land_after(extra, on_landed))
+                    return expected_delay_ticks + extra
 
-                self.submit_fn(primary_job, reserve_transfer)
+                self.submit_fn(primary_job, send_input)
             else:
                 if submission.delay_ticks != 0:
                     raise ValueError(
@@ -894,9 +892,17 @@ class WindowManager:
             return None
         return sum(sizes)
 
+    def _land_after(self, delay_ticks: int, on_landed: Callable[[], None]) -> int:
+        """Land an input that rides no link: now, or after a fixed delay."""
+        if delay_ticks == 0:
+            on_landed()
+            return 0
+        self.engine.schedule(delay_ticks, on_landed, label="held input lands")
+        return delay_ticks
+
     @staticmethod
     def _job_attribution(job: DecodeJob,
-                         request_key: DecoderRequestKey) -> TrafficAttribution:
+                         request_key: DecoderRequestKey) -> TransferAttribution:
         patches = {}
         for payload in job.payloads or ():
             patch_id = payload.patch_id
@@ -905,7 +911,7 @@ class WindowManager:
         window = job.window
         if window is None:
             raise RuntimeError("window-scoped transport requires a DecodeJob window")
-        return TrafficAttribution(
+        return TransferAttribution(
             operation_id=job.op_id,
             patch_ids=patch_ids,
             window_id=job.window_id,
@@ -927,8 +933,8 @@ class WindowManager:
         window: Window,
         op: Operation,
         request_key: DecoderRequestKey,
-    ) -> TrafficAttribution:
-        return TrafficAttribution(
+    ) -> TransferAttribution:
+        return TransferAttribution(
             operation_id=op.id,
             patch_ids=tuple(sorted(
                 op.patches,
@@ -948,21 +954,23 @@ class WindowManager:
             relation=RequestTransferRelation(request_key),
         )
 
-    def _window_link_arrival(
+    def _send_window_transfer(
         self,
         path: LinkPath,
         window: Window,
         op: Operation,
         request_key: DecoderRequestKey,
-        payload_bits: Optional[int] = None,
-    ) -> int:
-        reservation = self.links.reserve(
-            path,
-            payload_bits=payload_bits,
-            now_ticks=self.engine.now,
-            attribution=self._window_attribution(window, op, request_key),
-        )
-        return self.engine.now + reservation.total_delay_ticks
+        payload_bits: Optional[int],
+        on_delivered: Callable[[], None],
+    ) -> None:
+        """Send in a window's name; on_delivered runs at the delivery."""
+        attribution = self._window_attribution(window, op, request_key)
+
+        def delivered(_transfer) -> None:
+            on_delivered()
+
+        self.links.send(path, payload_bits, self.engine.now, attribution,
+                        delivered)
 
     @staticmethod
     def _result_payload_bits(result: DecodeResult, op: Operation) -> int:
@@ -972,22 +980,30 @@ class WindowManager:
             return len(result.logical_observables)
         return max(1, len(op.patches))
 
-    def _link_arrival(
+    def _send_job_transfer(
         self,
         path: LinkPath,
         job: DecodeJob,
         *,
         payload_bits: Optional[int],
         request_key: Optional[DecoderRequestKey] = None,
+        on_delivered: Callable[[], None],
     ) -> int:
+        """Send in a job's name; on_delivered runs at the delivery.
+
+        Returns the delay the link expects, a scheduler's estimate.
+        """
         relation_key = job.request_key if request_key is None else request_key
-        reservation = self.links.reserve(
-            path,
-            payload_bits=payload_bits,
-            now_ticks=self.engine.now,
-            attribution=self._job_attribution(job, relation_key),
-        )
-        return self.engine.now + reservation.total_delay_ticks
+        attribution = self._job_attribution(job, relation_key)
+        now_ticks = self.engine.now
+        expected_delay_ticks = self.links.expected_delay_ticks(
+            path, payload_bits, now_ticks)
+
+        def delivered(_transfer) -> None:
+            on_delivered()
+
+        self.links.send(path, payload_bits, now_ticks, attribution, delivered)
+        return expected_delay_ticks
 
 
     # ---- the EscalationServices seam: what an escalation policy may ask of the run
@@ -1022,15 +1038,10 @@ class WindowManager:
         output_path = (LinkPath.WDO
                        if job.request_key.tier is DecoderTier.WEAK
                        else LinkPath.DO)
-        delivery_ticks = self._window_link_arrival(
+        self._send_window_transfer(
             output_path, window, op, job.request_key,
-            payload_bits=self._result_payload_bits(res, op))
-        self.engine.schedule(
-            delivery_ticks - self.engine.now,
-            lambda: self._sink_weak_correction(job, res),
-            label=f"{job.request_key.tier.value} result "
-                  f"{op.name}W{window.k}->pauli frame",
-        )
+            self._result_payload_bits(res, op),
+            lambda: self._sink_weak_correction(job, res))
 
     def _sink_weak_correction(self, job: DecodeJob, res: DecodeResult) -> None:
         """Charge and install one final correction before committing it."""
@@ -1147,14 +1158,10 @@ class WindowManager:
                completion.request_key.window_id)
         window = self.windows[key]
         op = self._ops[window.op_id]
-        delivery_ticks = self._window_link_arrival(
+        self._send_window_transfer(
             LinkPath.DO, window, op, completion.request_key,
-            payload_bits=self._result_payload_bits(completion.result, op))
-        self.engine.schedule(
-            delivery_ticks - self.engine.now,
-            lambda: self._commit_strong_decode_done(completion),
-            label=f"strong result {op.name}W{window.k}->pauli frame",
-        )
+            self._result_payload_bits(completion.result, op),
+            lambda: self._commit_strong_decode_done(completion))
 
     def _commit_strong_decode_done(
         self,

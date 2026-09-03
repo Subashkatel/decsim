@@ -1,6 +1,6 @@
 """Syndrome sources without a circuit: timing-only and fake-bit readout.
 
-A syndrome source fills the SyndromeDevice seam (decsim/protocols.py) and
+A syndrome source fills the SyndromeDevice seam (decsim/ports.py) and
 is driven by the QPU cycle clock (cycle_clock.py): one payload list per
 operation round, one per idle stream round. Neither source here has a
 circuit, so both answer every detector-error-model question with nothing.
@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
-import decsim.protocols as protocols
+import decsim.ports as ports
 import decsim.seeding as seeding
 
 # Stream ids and patches are opaque identities chosen by the workload; Any
@@ -127,7 +127,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def __init__(
         self,
-        code: protocols.CodeModel,
+        code: ports.CodeModel,
         seed: Optional[int] = None,
         max_bit_count: int = 8,
         one_payload_per_patch: bool = False,

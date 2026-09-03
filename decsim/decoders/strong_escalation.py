@@ -27,10 +27,10 @@ from copy import deepcopy
 from dataclasses import replace
 from enum import Enum, auto
 from types import MappingProxyType
-from typing import Optional
+from typing import Callable, Optional
 
-from ..links.links import LinkPath
-from ..message import (DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier,
+from ..message import (
+    LinkPath,DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier,
                        LogicalContribution, Operation, SeamFaultOwner, StrongDecodeCompletion,
                        StrongRegionPlan, Window, WindowInfo, stable_identity_order_key)
 from ..syndrome_buffer.syndrome_buffer import (CsdInput, PendingStrong, PotentialStrong,
@@ -462,6 +462,10 @@ class StrongEscalation:
         self.wm = window_manager
         self._check_strong_route = check_strong_route
         self._escalations = _EscalationRegistry()
+        # strong request keys whose WSD selection has arrived, and the
+        # SBD landings waiting for one that has not
+        self._delivered_selections: set = set()
+        self._landing_after_selection: dict = {}
 
     def submit_strong(self, strong_job) -> None:
         """An escalation policy submitted a strong job alongside the weak one (run both at once)."""
@@ -480,10 +484,12 @@ class StrongEscalation:
         *,
         wsd_arrival_ticks: Optional[int] = None,
     ) -> None:
-        """Queue a strong job now; its SBD input transfer is reserved at dispatch.
+        """Queue a strong job now; its SBD input is sent at dispatch.
 
         The unit is assigned first, then the input moves into that unit's memory
         (SBD link); a serial job also waits for its WSD selection to arrive.
+        ``wsd_arrival_ticks`` is the tick the selection is expected, for the
+        pool's estimate; the landing itself waits for the delivery.
         """
         request_key = strong_job.request_key
         window_key = strong_job.strong_decode_for
@@ -505,16 +511,53 @@ class StrongEscalation:
             (fragment.operation_id, fragment.round_index)
             for fragment in strong_job.payloads))
 
-        def reserve_transfer() -> int:
-            arrival = self.wm._link_arrival(LinkPath.SBD, strong_job, payload_bits=payload_bits)
-            if wsd_arrival_ticks is not None:
-                arrival = max(arrival, wsd_arrival_ticks)
-            # the DMA cannot start before its last context round landed in
-            # syndrome buffer 1 (a no-op whenever the csb margin holds)
-            arrival = max(arrival, sb1.ready_tick(context_identities))
-            return arrival - self.wm.engine.now
+        def send_input(on_landed) -> int:
+            # the DMA reads only context rounds that landed in syndrome
+            # buffer 1 (always, whenever the csb margin holds)
+            sb1.check_rounds_stored(context_identities)
+            def landed() -> None:
+                if wsd_arrival_ticks is None:
+                    on_landed()
+                    return
+                self._land_after_selection(request_key, on_landed)
 
-        self.wm.submit_fn(strong_job, reserve_transfer)
+            expected_delay_ticks = self.wm._send_job_transfer(
+                LinkPath.SBD, strong_job, payload_bits=payload_bits,
+                on_delivered=landed)
+            if wsd_arrival_ticks is None:
+                return expected_delay_ticks
+            selection_delay_ticks = wsd_arrival_ticks - self.wm.engine.now
+            return max(expected_delay_ticks, selection_delay_ticks)
+
+        self.wm.submit_fn(strong_job, send_input)
+
+    def _land_after_selection(self, request_key: DecoderRequestKey,
+                              on_landed: Callable[[], None]) -> None:
+        """A serial strong input lands only once its WSD selection arrived."""
+        if request_key in self._delivered_selections:
+            on_landed()
+            return
+        self._landing_after_selection[request_key] = on_landed
+
+    def _selection_delivered(self, request_key: DecoderRequestKey) -> None:
+        self._delivered_selections.add(request_key)
+        waiting = self._landing_after_selection.pop(request_key, None)
+        if waiting is not None:
+            waiting()
+
+    def _send_selection(self, weak_job: DecodeJob,
+                        strong_request_key: DecoderRequestKey,
+                        on_selection_delivered: Callable[[], None]) -> int:
+        """Send the escalation over WSD; returns its expected arrival tick."""
+
+        def delivered() -> None:
+            self._selection_delivered(strong_request_key)
+            on_selection_delivered()
+
+        expected_delay_ticks = self.wm._send_job_transfer(
+            LinkPath.WSD, weak_job, payload_bits=None,
+            request_key=strong_request_key, on_delivered=delivered)
+        return self.wm.engine.now + expected_delay_ticks
     def prepare_strong_selection(
         self,
         weak_job: DecodeJob,
@@ -522,48 +565,33 @@ class StrongEscalation:
         serial_strong_job: Optional[DecodeJob],
         *,
         deferred: bool,
-    ) -> int:
-        """Reserve real input legs and return WSD selection-delivery delay."""
+        on_selection_delivered: Callable[[], None],
+    ) -> None:
+        """Send the WSD selection; on_selection_delivered runs at its arrival."""
         key = (weak_job.op_id, weak_job.window_id)
         pending = self._escalations.peek_key(key)
         if deferred:
-            wsd_arrival_ticks = self.wm._link_arrival(
-                LinkPath.WSD,
-                weak_job,
-                payload_bits=None,
-                request_key=strong_request_key,
-            )
+            wsd_arrival_ticks = self._send_selection(
+                weak_job, strong_request_key, on_selection_delivered)
             pending = self._escalations.update_wsd_arrival(
                 pending, wsd_arrival_ticks)
-            selection_delay = max(
-                0, pending.wsd_arrival_ticks - self.wm.engine.now)
             if (pending.phase is _EscalationPhase.WAITING_TERMINAL_DATA
                     and self.wm.syndrome_buffer_1.rounds_arrived.get(
                         pending.key[0], 0) >=
                     pending.resolved_region.plan.context_hi):
                 self._submit_terminal_strong(pending.key[0], pending)
-            return selection_delay
+            return
         if serial_strong_job is not None:
-            wsd_arrival_ticks = self.wm._link_arrival(
-                LinkPath.WSD,
-                weak_job,
-                payload_bits=None,
-                request_key=strong_request_key,
-            )
+            wsd_arrival_ticks = self._send_selection(
+                weak_job, strong_request_key, on_selection_delivered)
             self._submit_strong_with_sbd(
                 serial_strong_job,
                 wsd_arrival_ticks=wsd_arrival_ticks,
             )
-            return wsd_arrival_ticks - self.wm.engine.now
+            return
         if pending is not None:
             raise RuntimeError("deferred pending request needs an explicit key")
-        wsd_arrival_ticks = self.wm._link_arrival(
-            LinkPath.WSD,
-            weak_job,
-            payload_bits=None,
-            request_key=strong_request_key,
-        )
-        return wsd_arrival_ticks - self.wm.engine.now
+        self._send_selection(weak_job, strong_request_key, on_selection_delivered)
     def make_strong_job(self, weak_job: DecodeJob, label: str) -> DecodeJob:
         """Build the strong job for a weak one; a route back to the weak decoder fails now."""
         strong = self.make_strong_decode_job(weak_job, label)

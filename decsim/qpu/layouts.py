@@ -2,13 +2,13 @@
 
 A uniform layout gives every patch the same code card and claims one
 qubit-exclusivity resource per operation. That is the only layout today;
-the seam it fills is LayoutModel in decsim/protocols.py.
+the seam it fills is LayoutModel in decsim/ports.py.
 """
 
 from typing import Any
 
 import decsim.message as message
-import decsim.protocols as protocols
+import decsim.ports as ports
 
 # A patch identity is opaque to the layout; Any stands for it below.
 
@@ -16,17 +16,17 @@ import decsim.protocols as protocols
 class UniformLayout:
     """Every patch uses the same code card."""
 
-    def __init__(self, code: protocols.CodeModel):
+    def __init__(self, code: ports.CodeModel):
         self.code = code
 
-    def code_for_patch(self, patch_id: Any) -> protocols.CodeModel:
+    def code_for_patch(self, patch_id: Any) -> ports.CodeModel:
         """The one code, whatever the patch."""
         del patch_id
         return self.code
 
     def code_for_op(
         self, operation: message.OperationPlanningView
-    ) -> protocols.CodeModel:
+    ) -> ports.CodeModel:
         """The one code, whatever the operation."""
         del operation
         return self.code
@@ -55,6 +55,6 @@ class UniformLayout:
         qubits = frozenset(operation.qubits)
         return [message.ResourceClaim("qubits", qubits)]
 
-    def codes(self) -> list[protocols.CodeModel]:
+    def codes(self) -> list[ports.CodeModel]:
         """The one code, as the list the seam asks for."""
         return [self.code]

@@ -1,14 +1,20 @@
-"""Blind Q-062(d/f) contracts for the priced controller-to-Buffer-0 hop."""
+"""The priced controller-to-buffer-0 hop (cwb) through syndrome packing.
+
+Sources: the cwb card in decsim/links/link_profiles.py and the packing
+stage in decsim/controller/syndrome_packing.py (one send per round, the
+publication at arrival, retries without a second send).
+"""
 
 from types import SimpleNamespace
 
 import pytest
 
 from decsim.config import microseconds_to_ticks
+from decsim.engine import Engine
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
-from decsim.links.links import LinkPath, TrafficAttribution
+from decsim.message import LinkPath, TransferAttribution
 from decsim.controller.syndrome_packing import SyndromePacketRouteKind, SyndromePacking, _PackingSlotState
-from decsim.links.link_traffic_report import topology_json_value, traffic_json_value
+from decsim.observe.link_traffic import TrafficLedger
 
 
 class _Engine:
@@ -16,7 +22,7 @@ class _Engine:
         self.now = now
         self.events = []
 
-    def schedule(self, delay, callback, *, label):
+    def schedule(self, delay, callback, label=""):
         self.events.append((self.now + delay, callback, label))
 
     def log_io(self, who, message):
@@ -56,6 +62,19 @@ def _wired_profile(*, latency_us=0.25, bandwidth=100.0, source="Q-062 test card"
     )
 
 
+def _fabric_and_ledger(settings, engine):
+    ledger = TrafficLedger(settings)
+    return settings.build(engine, ledger), ledger
+
+
+def _send(engine, fabric, path, payload_bits, attribution):
+    """Send now and run the engine to the delivery; the transfer comes back."""
+    delivered = []
+    fabric.send(path, payload_bits, engine.now, attribution, delivered.append)
+    engine.run()
+    return delivered[0]
+
+
 def test_legacy_cards_leave_optional_cwb_absent_without_changing_edge_identity():
     legacy = logical_reference_profile()
     legacy_edges = {path.value: getattr(legacy, path.value) for path in legacy.wired_paths()}
@@ -65,7 +84,7 @@ def test_legacy_cards_leave_optional_cwb_absent_without_changing_edge_identity()
 
     assert legacy.cwb is None
     assert LinkPath.CWB not in legacy.wired_paths()
-    assert LinkPath.CWB not in legacy.build().paths
+    assert not legacy.build(Engine()).is_wired(LinkPath.CWB)
     assert extended.cwb is not None
     assert LinkPath.CWB in extended.wired_paths()
     for path_name, edge in legacy_edges.items():
@@ -74,38 +93,41 @@ def test_legacy_cards_leave_optional_cwb_absent_without_changing_edge_identity()
 
 def test_wired_cwb_card_preserves_positive_numbers_source_and_physical_topology():
     source = "explicit Q-062 PROJECT_DESIGN latency and bandwidth"
-    model = _wired_profile(latency_us=0.25, bandwidth=120.0, source=source).build()
-    topology = topology_json_value(model.snapshot())
-    cwb_edge = next(edge for edge in topology["edges"] if edge["path"] == "cwb")
+    settings = _wired_profile(latency_us=0.25, bandwidth=120.0, source=source)
+    _fabric, ledger = _fabric_and_ledger(settings, Engine())
+    traffic = ledger.traffic_json_value()
+    cwb_edge = next(edge for edge in traffic["semantic_edges"] if edge["path"] == "cwb")
     channel = next(
-        row for row in topology["physical_channels"]
+        row for row in traffic["physical_channels"]
         if row["physical_alias"] == cwb_edge["physical_alias"]
     )
 
-    assert topology["path_order"].count("cwb") == 1
+    assert traffic["path_order"].count("cwb") == 1
     assert channel["member_paths"] == ["cwb"]
-    assert channel["propagation_latency_ticks"] == microseconds_to_ticks(0.25)
-    assert channel["capacity"]["aggregate_bits_per_us"] == 120.0
-    assert channel["configuration_source"] == source
-    assert cwb_edge["actual_payload_source"] == "SyndromeRoundPacket.fragment_size_sum"
+    assert settings.cwb.channel.propagation_latency_ticks == microseconds_to_ticks(0.25)
+    assert settings.cwb.channel.capacity.aggregate_bits_per_microsecond == 120.0
+    assert settings.cwb.channel.configuration_source == source
+    assert settings.cwb.actual_payload_source == "SyndromeRoundPacket.fragment_size_sum"
 
 
 def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
-    model = _wired_profile(latency_us=0.25, bandwidth=100.0).build()
-    attribution = TrafficAttribution(
+    engine = Engine()
+    model, ledger = _fabric_and_ledger(
+        _wired_profile(latency_us=0.25, bandwidth=100.0), engine)
+    attribution = TransferAttribution(
         operation_id=7, patch_ids=(2, 9), window_id=None, first_round=11, last_round=11)
 
-    first = model.reserve(
-        LinkPath.CWB, payload_bits=300, now_ticks=10,
-        attribution=attribution,
-    )
-    second = model.reserve(
-        LinkPath.CWB, payload_bits=200, now_ticks=10,
-        attribution=TrafficAttribution(
+    delivered = []
+    model.send(LinkPath.CWB, 300, 10, attribution, delivered.append)
+    model.send(
+        LinkPath.CWB, 200, 10,
+        TransferAttribution(
             operation_id=7, patch_ids=(2, 9), window_id=None,
             first_round=12, last_round=12),
-    )
-    traffic = traffic_json_value(model.snapshot())
+        delivered.append)
+    engine.run()
+    first, second = delivered
+    traffic = ledger.traffic_json_value()
     rows = [row for row in traffic["transfers"] if row["path"] == "cwb"]
 
     assert first.serialization_ticks == microseconds_to_ticks(3.0)
@@ -123,11 +145,12 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
 
 
 def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
-    model = _wired_profile(latency_us=0.10, bandwidth=1000.0).build()
+    engine = Engine()
+    model = _wired_profile(latency_us=0.10, bandwidth=1000.0).build(engine)
 
-    reservation = model.reserve(
-        LinkPath.CWB, payload_bits=500, now_ticks=0,
-        attribution=TrafficAttribution(
+    reservation = _send(
+        engine, model, LinkPath.CWB, 500,
+        TransferAttribution(
             operation_id=1, patch_ids=(0,), window_id=None, first_round=1, last_round=1))
 
     assert reservation.serialization_ticks == microseconds_to_ticks(0.5)   # 500 bits at 1000 bits/us
@@ -136,16 +159,22 @@ def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
 
 
 def test_unbounded_cwb_bandwidth_charges_propagation_only():
-    model = _wired_profile(latency_us=0.10, bandwidth=None).build()
+    engine = Engine()
+    model = _wired_profile(latency_us=0.10, bandwidth=None).build(engine)
 
-    first = model.reserve(
-        LinkPath.CWB, payload_bits=500, now_ticks=0,
-        attribution=TrafficAttribution(
-            operation_id=1, patch_ids=(0,), window_id=None, first_round=1, last_round=1))
-    second = model.reserve(
-        LinkPath.CWB, payload_bits=500, now_ticks=0,
-        attribution=TrafficAttribution(
-            operation_id=1, patch_ids=(0,), window_id=None, first_round=2, last_round=2))
+    delivered = []
+    model.send(
+        LinkPath.CWB, 500, 0,
+        TransferAttribution(
+            operation_id=1, patch_ids=(0,), window_id=None, first_round=1, last_round=1),
+        delivered.append)
+    model.send(
+        LinkPath.CWB, 500, 0,
+        TransferAttribution(
+            operation_id=1, patch_ids=(0,), window_id=None, first_round=2, last_round=2),
+        delivered.append)
+    engine.run()
+    first, second = delivered
 
     assert first.serialization_ticks == 0
     assert first.total_delay_ticks == microseconds_to_ticks(0.10)
@@ -155,7 +184,8 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
 
 def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry():
     engine = _Engine(now=1_000)
-    links = _wired_profile(latency_us=0.25, bandwidth=100.0).build()
+    links, ledger = _fabric_and_ledger(
+        _wired_profile(latency_us=0.25, bandwidth=100.0), engine)
     receiver = _Receiver([False, True])
     publication = _PublicationSpy()
     packet = SimpleNamespace(
@@ -187,7 +217,7 @@ def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry
     assert packing._transmit_window_input_round(slot) is True
     assert receiver.received == []
     assert publication.calls == []
-    assert len(traffic_json_value(links.snapshot())["transfers"]) == 1
+    assert len(engine.events) == 1
 
     engine.run_next()
     arrival_tick = 1_000 + microseconds_to_ticks(0.25) + microseconds_to_ticks(3.0)
@@ -195,16 +225,17 @@ def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry
     assert receiver.received == [packet]
     assert publication.calls == [((17, 4), arrival_tick)]
     assert slot.state is _PackingSlotState.PACKED_WAIT
+    assert len(ledger.traffic_json_value()["transfers"]) == 1
 
     assert packing._transmit_window_input_round(slot) is True
     assert receiver.received == [packet, packet]
     assert publication.calls == [((17, 4), arrival_tick)]
-    assert len(traffic_json_value(links.snapshot())["transfers"]) == 1
+    assert len(ledger.traffic_json_value()["transfers"]) == 1
 
 
 def test_unwired_legacy_packing_delivery_is_immediate_and_has_no_cwb_publication():
     engine = _Engine(now=321)
-    links = logical_reference_profile().build()
+    links, ledger = _fabric_and_ledger(logical_reference_profile(), engine)
     receiver = _Receiver([True])
     publication = _PublicationSpy()
     packet = SimpleNamespace(
@@ -229,7 +260,7 @@ def test_unwired_legacy_packing_delivery_is_immediate_and_has_no_cwb_publication
     assert packing._transmit_window_input_round(slot) is True
     assert receiver.received == [packet]
     assert publication.calls == []
-    assert "cwb" not in traffic_json_value(links.snapshot())["path_order"]
+    assert "cwb" not in ledger.traffic_json_value()["path_order"]
 
 
 def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():

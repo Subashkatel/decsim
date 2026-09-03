@@ -1,6 +1,6 @@
 """The circuit-less syndrome sources shape their payloads by the code card.
 
-Sources: the SyndromeDevice seam in decsim/protocols.py; the rotated
+Sources: the SyndromeDevice seam in decsim/ports.py; the rotated
 surface code's d*d - 1 stabilizers per round (Stim's generated circuit,
 src/stim/gen/gen_surface_code.cc).
 """

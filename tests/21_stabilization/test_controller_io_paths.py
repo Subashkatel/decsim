@@ -6,6 +6,7 @@ online stage in causal order.
 """
 
 from decsim.config import TimingConfig, microseconds_to_ticks
+from decsim.observe.link_traffic import TrafficLedger
 from decsim.controller.controller import Controller
 from decsim.controller.syndrome_packing import SyndromePacking
 from decsim.decoders.decoders import PresetLatencyDecoder
@@ -30,7 +31,9 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
     produces the same bit values, neither early nor altered."""
     engine = Engine(verbose=False)
     receiver = _WindowInputReceiver()
-    links = fabric["declared_profile"](cwb=False, csb=False).build()
+    settings = fabric["declared_profile"](cwb=False, csb=False)
+    ledger = TrafficLedger(settings)
+    links = settings.build(engine, ledger)
     packing = SyndromePacking(
         engine, links=links, t_pack=0, packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)
@@ -53,9 +56,9 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
     assert len(receiver.packets) == 1
     assert receiver.packets[0].fragments[0].bits == (1, 0, 1, 0)
     assert receiver.packets[0].fragments[0].size_bits == 4
-    qc_transfer = next(transfer for transfer in links.snapshot().transfers
-                       if transfer.path.value == "qc")
-    assert qc_transfer.reservation.payload_bits == 4
+    qc_record = next(record for record in ledger.snapshot().transfers
+                     if record.path.value == "qc")
+    assert qc_record.transfer.payload_bits == 4
 
 
 def test_packing_charges_its_assembly_time_for_every_round(fabric):
@@ -66,7 +69,7 @@ def test_packing_charges_its_assembly_time_for_every_round(fabric):
     packetization, bus transfer, result return and the conditional)."""
     engine = Engine(verbose=False)
     receiver = _WindowInputReceiver()
-    links = fabric["declared_profile"](cwb=False, csb=False).build()
+    links = fabric["declared_profile"](cwb=False, csb=False).build(engine)
     packing = SyndromePacking(
         engine, links=links, t_pack=microseconds_to_ticks(1), packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)

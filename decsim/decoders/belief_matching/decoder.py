@@ -19,7 +19,7 @@ from .window_decoder import belief_matching_window_decoder
 
 if TYPE_CHECKING:
     from ...message import DecodeJob
-    from ...protocols import Decoder
+    from ...ports import Decoder
 
 
 class BeliefMatchingDecoder:

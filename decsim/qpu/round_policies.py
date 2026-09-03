@@ -1,6 +1,6 @@
 """The round policies: how many syndrome rounds an operation occupies.
 
-Every policy fills the RoundsPolicy seam (decsim/protocols.py): given an
+Every policy fills the RoundsPolicy seam (decsim/ports.py): given an
 operation and its code card, return the round count, at least one. The
 lattice-surgery unit of d rounds per step comes from Horsman et al.
 (arXiv 1111.4022v3, Sec. 3.1, 3.2 and 6: d rounds of error correction per
@@ -12,7 +12,7 @@ one time step of d code cycles).
 from typing import Optional
 
 import decsim.message as message
-import decsim.protocols as protocols
+import decsim.ports as ports
 
 
 class FixedRounds:
@@ -25,7 +25,7 @@ class FixedRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: protocols.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The fixed count."""
         del operation, code
@@ -43,7 +43,7 @@ class PerOperationRounds:
     def __init__(
         self,
         rounds_by_operation: dict,
-        fallback: Optional[protocols.RoundsPolicy] = None,
+        fallback: Optional[ports.RoundsPolicy] = None,
     ):
         self.rounds_by_operation = {}
         rounds_by_operation = dict(rounds_by_operation)
@@ -59,7 +59,7 @@ class PerOperationRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: protocols.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The operation's own count, or the fallback policy's."""
         if operation.id in self.rounds_by_operation:
@@ -76,7 +76,7 @@ class CodeRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: protocols.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The scaled logical cycle, rounded, never below one."""
         del operation
@@ -106,7 +106,7 @@ class GateRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: protocols.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The kind's cost in rounds of the code's distance."""
         distance = code.distance
@@ -133,7 +133,7 @@ class TemporalRounds:
     def __init__(
         self,
         temporal_distance: int,
-        base: Optional[protocols.RoundsPolicy] = None,
+        base: Optional[ports.RoundsPolicy] = None,
     ):
         temporal_distance = int(temporal_distance)
         self.temporal_distance = _at_least_one_round(
@@ -146,7 +146,7 @@ class TemporalRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: protocols.CodeModel,
+        code: ports.CodeModel,
     ) -> int:
         """The temporal distance for surgery, else the base policy's count."""
         kind = operation.kind

@@ -10,10 +10,10 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Callable
 
-from ..links.links import LinkPath, TrafficAttribution
 from ..qpu.cycle_clock import patches_of
-from ..message import (Decision, Operation, QPUReadout, RunOperationBody,
-                       SyndromePacketRoute, SyndromePayload, normalize_binary_bits)
+from ..message import (Decision, LinkPath, Operation, QPUReadout, RunOperationBody,
+                       SyndromePacketRoute, SyndromePayload, TransferAttribution,
+                       normalize_binary_bits)
 
 
 @dataclass(frozen=True)
@@ -91,14 +91,15 @@ class Controller:
         """False while a protected feedback stream holds the operation for its cycle boundary."""
         return not self.streams.blocks_start(operation)
 
-    def issue_operation(self, operation: Operation, idle_rounds: int) -> int:
-        """Prepare one real QPU command and return its physical start boundary.
+    def issue_operation(self, operation: Operation, idle_rounds: int) -> None:
+        """Prepare one real QPU command; the runtime learns its start boundary.
 
         Program roots and ordinary DAG successors are time-tagged/preloaded;
         their online controller preparation occurred before the simulated
-        interval.  A feedback-blocked operation is dynamic: its actual
+        interval, and the runtime hears the start boundary now.  A
+        feedback-blocked operation is dynamic: its actual
         ``RunOperationBody`` pays controller output processing and CQ before
-        it can enter the QPU.
+        it can enter the QPU, and the runtime hears the boundary at arrival.
         """
         self.streams.begin(operation)
         for patch in patches_of(operation):
@@ -126,43 +127,50 @@ class Controller:
         if operation.blocked_by is None:
             self.output_events.append(ControllerOutputEvent(
                 "PRELOADED_COMMAND", self.engine.now, operation.id, command))
-            self.qpu.issue(command)
-            return self.qpu.next_boundary()
-        return self._dispatch_dynamic_command(command)
+            self._start_on_qpu(operation, command)
+            return
+        self._dispatch_dynamic_command(operation, command)
 
-    def _dispatch_dynamic_command(self, command: RunOperationBody) -> int:
+    def _start_on_qpu(self, operation: Operation, command: RunOperationBody) -> None:
+        """The command is at the QPU: it starts on the next cycle boundary."""
+        self.qpu.issue(command)
+        boundary = self.qpu.next_boundary()
+        self.runtime.operation_started(operation, boundary)
+
+    def _dispatch_dynamic_command(self, operation: Operation,
+                                  command: RunOperationBody) -> None:
         """Carry the feedback-selected command through pulse generation and CQ."""
-        arrival_tick = self._send_controller_output(
-            payload=command, operation_id=command.operation.id,
+        self._send_controller_output(
+            payload=command, operation_id=operation.id,
             event_kind="CONTROL_PULSE_COMMAND_ISSUED",
-            deliver=self.qpu.issue)
-        return self.qpu.boundary_at_or_after(arrival_tick)
+            deliver=lambda arrived: self._start_on_qpu(operation, arrived))
 
     def _send_controller_output(self, *, payload, operation_id,
-                                event_kind: str, deliver: Callable) -> int:
-        """Process one output payload, reserve CQ, and schedule its delivery."""
-        output_tick = (self.engine.now +
-                       self.instruction_or_decision_to_analog_control_pulse_ticks)
-        attribution = TrafficAttribution(
+                                event_kind: str, deliver: Callable) -> None:
+        """Process one output payload, then send it over CQ to the QPU.
+
+        The send is made at the output tick, when the pulse processing is
+        done; ``deliver(payload)`` runs when the QPU has it.
+        """
+        output_delay_ticks = self.instruction_or_decision_to_analog_control_pulse_ticks
+        attribution = TransferAttribution(
             operation_id=operation_id, patch_ids=(), window_id=None,
             first_round=None, last_round=None)
-        if self.links is None:
-            arrival_tick = output_tick
-        else:
-            reservation = self.links.reserve(
-                LinkPath.CQ, payload_bits=None, now_ticks=output_tick,
-                attribution=attribution)
-            arrival_tick = output_tick + reservation.total_delay_ticks
+
+        def delivered(_transfer):
+            deliver(payload)
 
         def output_ready():
             self.output_events.append(ControllerOutputEvent(
                 event_kind, self.engine.now, operation_id, payload))
+            if self.links is None:
+                deliver(payload)
+                return
+            self.links.send(LinkPath.CQ, None, self.engine.now, attribution,
+                            delivered)
 
-        self.engine.schedule(output_tick - self.engine.now, output_ready,
+        self.engine.schedule(output_delay_ticks, output_ready,
                              label="controller-output-ready")
-        self.engine.schedule(arrival_tick - self.engine.now,
-                             lambda: deliver(payload), label="controller->qpu")
-        return arrival_tick
 
     def _log_start(self, operation: Operation) -> None:
         kind = "Clifford" if operation.clifford else "non-Clifford"
@@ -278,11 +286,11 @@ class Controller:
         A result-return without an operation still traverses those stages
         before it is reported as available at the QPU.
         """
-        attribution = TrafficAttribution(
+        attribution = TransferAttribution(
             operation_id=decision.target_operation_id, patch_ids=(),
             window_id=None, first_round=None, last_round=None)
 
-        def at_controller():
+        def at_controller(_transfer=None):
             self.output_events.append(ControllerOutputEvent(
                 "DECISION_AVAILABLE", self.engine.now,
                 decision.target_operation_id, decision))
@@ -295,11 +303,8 @@ class Controller:
                     event_kind="CONTROL_DECISION_ISSUED",
                     deliver=deliver)
 
-        oc_delay = (0 if self.links is None else
-                    self._instruction_delay(LinkPath.OC, attribution))
-        self.engine.schedule(oc_delay, at_controller, label="pauli frame->controller")
-
-    def _instruction_delay(self, path: LinkPath, attribution: TrafficAttribution) -> int:
-        reservation = self.links.reserve(path, payload_bits=None, now_ticks=self.engine.now,
-                                         attribution=attribution)
-        return reservation.total_delay_ticks
+        if self.links is None:
+            self.engine.schedule(0, at_controller, label="pauli frame->controller")
+            return
+        self.links.send(LinkPath.OC, None, self.engine.now, attribution,
+                        at_controller)

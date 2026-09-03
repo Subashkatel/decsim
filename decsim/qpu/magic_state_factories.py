@@ -1,6 +1,6 @@
 """The magic-state factories: where a non-Clifford operation gets its state.
 
-A factory fills the MagicStateFactory seam (decsim/protocols.py): an
+A factory fills the MagicStateFactory seam (decsim/ports.py): an
 operation that needs a magic state calls request and is called back when
 one is ready; an empty store stalls the requester, and that supply stall
 is the quantity the factories exist to measure.
@@ -34,7 +34,7 @@ from typing import Callable, Optional, Protocol
 
 import decsim.config as config
 import decsim.engine
-import decsim.protocols as protocols
+import decsim.ports as ports
 import decsim.seeding as seeding
 
 
@@ -101,7 +101,7 @@ class DistillationFactory(seeding._RandomSeedConsumer):
         engine: decsim.engine.Engine,
         unit_count: int,
         attempt_ticks: int,
-        decode_service: protocols.ResourcePool,
+        decode_service: ports.ResourcePool,
         correction_round_count: int,
         correction_decode_count: int = 11,
         return_ticks: int = 0,
@@ -380,7 +380,7 @@ class MultiLevelDistillationFactory(seeding._RandomSeedConsumer):
         preparation_logical_cycles: int = 2,
         preparation_distance: int = 3,
         preparation_success_probability: float = 1.0,
-        decode_service: Optional[protocols.ResourcePool] = None,
+        decode_service: Optional[ports.ResourcePool] = None,
         correction_round_count: int = 0,
         correction_decode_count: int = 0,
         seed: Optional[int] = None,

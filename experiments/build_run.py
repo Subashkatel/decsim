@@ -25,8 +25,8 @@ from decsim.decoders.weak_strong_switching import StrongOnly
 from decsim.links.link_profiles import (logical_reference_profile,
                                         with_controller_to_buffer_edge,
                                         with_csb_edge)
-from decsim.links.links import (LinkCapacityConfig, LinkConfig,
-                                LinkQuantityBasis, TransferOverheadConfig)
+from decsim.links.settings import (CapacitySettings, ChannelSettings,
+                                   QuantityBasis)
 from decsim.message import Operation
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.code_geometry import SurfaceCodeModel
@@ -234,21 +234,21 @@ def link_model(config: ExperimentConfig):
             continue
         capacity = None
         if card.bits_per_us is not None:
-            capacity = LinkCapacityConfig(card.bits_per_us,
-                                          LinkQuantityBasis.DIRECT_AGGREGATE,
-                                          None, source)
-        channel = LinkConfig(microseconds_to_ticks(card.latency_us), capacity, source)
-        overhead = None
+            capacity = CapacitySettings(card.bits_per_us,
+                                        QuantityBasis.AGGREGATE,
+                                        None, source)
+        channel = ChannelSettings(path, microseconds_to_ticks(card.latency_us),
+                                  capacity, source)
+        setup_ticks = 0
         if card.transfer_overhead_us:
-            overhead = TransferOverheadConfig(
-                microseconds_to_ticks(card.transfer_overhead_us), source)
+            setup_ticks = microseconds_to_ticks(card.transfer_overhead_us)
         edge_overrides[path] = replace(getattr(profile, path), channel=channel,
-                                       transfer_overhead=overhead)
+                                       setup_ticks=setup_ticks)
     # The config prices readout classification on its own line, so its QC card is link
     # propagation only; the attestation lets a nonzero processing cost run.
     return replace(profile, **edge_overrides,
                    profile_name=f"{config.name}.yaml",
-                   qc_excludes_controller_processing=True)
+                   is_controller_processing_outside_qpu_to_controller=True)
 
 
 def code_model(config: ExperimentConfig, distance: int) -> SurfaceCodeModel:

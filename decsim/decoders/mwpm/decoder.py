@@ -25,7 +25,7 @@ from ...detector_error_model.fault_model_contracts import (
 )
 
 if TYPE_CHECKING:
-    from ...protocols import Decoder
+    from ...ports import Decoder
 
 
 def _match_best_effort(matching, syndrome, faults):

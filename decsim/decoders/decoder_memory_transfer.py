@@ -1,16 +1,18 @@
 """Moves a job's rounds from Buffer 0 into the assigned unit's memory: the
-transfer delay (a transport), the landing into DecoderMemory, the release,
-the cancel. DecoderInputStaging is the sole writer of job.decoder_input,
-job.memory and job.input_hold; the transport owns delay and cancellation of
-in-flight deliveries only, so a supplied transport cannot bypass decoder
-memory.
+transport (the job's input link, made cancellable), the landing into
+DecoderMemory, the release, the cancel. DecoderInputStaging is the sole
+writer of job.decoder_input, job.memory and job.input_hold; the transport
+owns the in-flight delivery and its cancellation only, so a supplied
+transport cannot bypass decoder memory.
 """
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Callable, Optional
 
 from ..message import DecodeJob
+
+SendInput = Callable[[Callable[[], None]], int]
 
 
 class DecoderInputStaging:
@@ -19,14 +21,15 @@ class DecoderInputStaging:
         self.engine = engine
 
     def stage(self, job: DecodeJob, memory, on_landed: Callable[[DecodeJob], None]) -> None:
-        """Reserve the input link (the job's reserve_transfer), then after the
-        transport delay deposit the rounds in the unit's memory, drop the
-        Buffer 0 hold and report the landing."""
-        delay_ticks = 0 if job.reserve_transfer is None else job.reserve_transfer()
-        job.reserve_transfer = None
-        job.input_landing_ticks = self.engine.now + delay_ticks
+        """Send the input over its link (the job's send_input), then at the
+        landing deposit the rounds in the unit's memory, drop the Buffer 0
+        hold and report the landing. Until the landing, input_landing_ticks
+        is the tick the link expects."""
+        send_input = job.send_input
+        job.send_input = None
 
         def land(_delivered: DecodeJob) -> None:
+            job.input_landing_ticks = self.engine.now
             job.decoder_input = memory.deposit(job)
             job.payloads = []
             job.memory = memory
@@ -36,7 +39,8 @@ class DecoderInputStaging:
                 job.input_hold = None
             on_landed(job)
 
-        self.transport.deliver(job, delay_ticks, land)
+        expected_delay_ticks = self.transport.deliver(job, send_input, land)
+        job.input_landing_ticks = self.engine.now + expected_delay_ticks
 
     def cancel(self, job: DecodeJob) -> None:
         """Drop one job from transport and storage, then free its upstream
@@ -68,13 +72,14 @@ class DecoderInputStaging:
             self.release(member)
 
 
-class FixedLatencyDecoderMemoryTransfer:
-    """Deliver one admitted job to its receiver after a fixed delay.
+class CancellableDecoderMemoryTransfer:
+    """Deliver one admitted job to its receiver when its link delivers,
+    unless it is cancelled first.
 
-    The decoder cannot read the input before delivery. One in-flight key per
-    request makes cancellation observable: a request cancelled before its
-    delivery event never reaches the receiver, and cancelling an unknown or
-    already delivered request does nothing.
+    The decoder cannot read the input before the landing. One in-flight key
+    per request makes cancellation observable: a request cancelled before its
+    landing never reaches the receiver, and cancelling an unknown or already
+    landed request does nothing.
     """
 
     def __init__(self, engine) -> None:
@@ -86,11 +91,11 @@ class FixedLatencyDecoderMemoryTransfer:
         return job.request_key if job.request_key is not None else id(job)
 
     def deliver(
-        self, job: DecodeJob, delay_ticks: int,
+        self, job: DecodeJob, send_input: Optional[SendInput],
         receiver: Callable[[DecodeJob], None],
-    ) -> None:
-        if delay_ticks < 0:
-            raise ValueError("delay_ticks must be nonnegative")
+    ) -> int:
+        """Send the input and land it at delivery; a job with no input lands
+        now. Returns the delay the link expects."""
         key = self._key(job)
         if key in self._in_flight_keys:
             raise RuntimeError(
@@ -99,18 +104,15 @@ class FixedLatencyDecoderMemoryTransfer:
 
         def complete() -> None:
             if key not in self._in_flight_keys:
-                return                      # cancelled before this delivery
+                return                      # cancelled before this landing
             self._in_flight_keys.remove(key)
             receiver(job)
 
-        if delay_ticks == 0:
+        if send_input is None:
             complete()
-        else:
-            self.engine.schedule(
-                delay_ticks, complete,
-                label=f"fixed-latency decoder input {job.label}",
-            )
+            return 0
+        return send_input(complete)
 
     def cancel(self, job: DecodeJob) -> None:
-        """Suppress delivery of a request that has not arrived yet."""
+        """Suppress the landing of a request that has not landed yet."""
         self._in_flight_keys.discard(self._key(job))

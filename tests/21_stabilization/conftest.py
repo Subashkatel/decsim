@@ -16,7 +16,7 @@ from decsim.controller.policies import Held
 from decsim.links.link_profiles import (logical_reference_profile,
                                         with_controller_to_buffer_edge,
                                         with_csb_edge)
-from decsim.links.links import LinkConfig, LinkEdgeConfig
+from decsim.links.settings import ChannelSettings, PathSettings
 from decsim.message import Operation
 from decsim.decoders.decoder_memory import DecoderMemoryConfig
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
@@ -42,9 +42,10 @@ ROUND_US = 1.0
 
 
 def _declared_edge(base_edge, latency_us):
-    channel = LinkConfig(microseconds_to_ticks(latency_us), None, "stabilization declared tick")
-    return LinkEdgeConfig(channel, base_edge.default_payload,
-                          base_edge.actual_payload_source)
+    channel = ChannelSettings(base_edge.channel.name, microseconds_to_ticks(latency_us),
+                              None, "stabilization declared tick")
+    return PathSettings(channel, base_edge.default_payload,
+                        base_edge.actual_payload_source)
 
 
 def declared_profile(*, cwb=True, csb=True, csb_us=None):
@@ -63,7 +64,7 @@ def declared_profile(*, cwb=True, csb=True, csb_us=None):
         cq=_declared_edge(base.cq, DECLARED_US["cq"]),
         # the declared qc tick is wire time only; readout classification
         # prices the controller processing separately
-        qc_excludes_controller_processing=True,
+        is_controller_processing_outside_qpu_to_controller=True,
     )
     if cwb:
         profile = with_controller_to_buffer_edge(

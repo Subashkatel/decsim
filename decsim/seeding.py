@@ -5,7 +5,7 @@ import random
 import threading
 
 from .message import RunSeedPathSegment, RunSeedReservation
-from .protocols import RunSeedComposite, RunSeedConsumer
+from .ports import RunSeedComposite, RunSeedConsumer
 
 _NAMESPACE = b"decsim.run-seed.v1"
 

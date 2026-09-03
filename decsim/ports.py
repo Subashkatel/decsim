@@ -1,7 +1,10 @@
-"""Interfaces for the simulator parts that users may replace.
+"""The ports: what one component needs from another, and nothing more.
 
-Each protocol describes one construction seam used by ``RunSpec``. Runtime
-state and implementation logic belong in the implementing modules.
+Each port is a small Protocol with the methods one component calls on
+its neighbour, named for what they do; a component depends on ports,
+never on another component's class, so a new implementation plugs in as
+one class that fills the port. Runtime state and the implementations
+live in the component modules.
 """
 
 from __future__ import annotations
@@ -13,10 +16,10 @@ from typing import (Any, Callable, Iterable, Mapping, Optional, Protocol,
 
 from .message import (BoundaryDelivery, BoundaryUpdate, DecodeJob, DecoderTier, Directive, OutcomeDirective, Submission,
                       DecoderRequestKey,
-                      DecodeOutcome, DecodeResult, OperationPlanningView,
+                      DecodeOutcome, DecodeResult, LinkPath, OperationPlanningView,
                       ResolvedCodeGeometry, RunSeedChild, RunSeedReservation,
                       QPUReadout, StrongRegionPlan, SyndromePacketRoute,
-                      SyndromePayload,
+                      SyndromePayload, Transfer, TransferAttribution,
                       Window, WindowInfo, WindowReadiness)
 
 
@@ -95,7 +98,8 @@ class EscalationServices(Protocol):
     def prepare_strong_selection(
         self, weak_job: DecodeJob, strong_request_key: DecoderRequestKey,
         serial_strong_job: Optional[DecodeJob], *, deferred: bool,
-    ) -> int: ...
+        on_selection_delivered: Callable[[], None],
+    ) -> None: ...
 
 
 @runtime_checkable
@@ -252,20 +256,24 @@ class Scheduler(Protocol):
 
 @runtime_checkable
 class DecoderMemoryTransfer(Protocol):
-    """Port 22. Carry one admitted job to the decoder side after a delay.
+    """Port 22. Carry one admitted job to the decoder side when its link delivers.
 
-    Implementations call ``receiver(job)`` exactly once after ``delay_ticks``,
-    unless the request is cancelled first. ``cancel(job)`` is idempotent: the
-    receiver is never invoked for a request cancelled before its delivery, and
-    cancelling an unknown or already delivered request does nothing. Storage
-    admission, materialization, stored-input lifetime, link reservation,
-    admission, service, and result handling belong elsewhere.
+    ``send_input(on_landed)`` sends the job's input over its link, calls
+    ``on_landed()`` once at delivery, and returns the delay the link expects;
+    ``None`` means the job carries no input and lands now. Implementations call
+    ``receiver(job)`` exactly once at the landing, unless the request is
+    cancelled first, and return the expected delay. ``cancel(job)`` is
+    idempotent: the receiver is never invoked for a request cancelled before its
+    landing, and cancelling an unknown or already landed request does nothing.
+    Storage admission, materialization, stored-input lifetime, admission,
+    service, and result handling belong elsewhere.
     """
 
     def deliver(
-        self, job: DecodeJob, delay_ticks: int,
+        self, job: DecodeJob,
+        send_input: Optional[Callable[[Callable[[], None]], int]],
         receiver: Callable[[DecodeJob], None],
-    ) -> None: ...
+    ) -> int: ...
 
     def cancel(self, job: DecodeJob) -> None: ...
 
@@ -303,7 +311,7 @@ class ResourcePool(Protocol):
     and the final check that no decoder work is stranded.
     """
 
-    def enqueue(self, job: DecodeJob, reserve_transfer=None) -> None: ...   # reserve_transfer() at dispatch -> transfer ticks
+    def enqueue(self, job: DecodeJob, send_input=None) -> None: ...   # send_input(on_landed) at dispatch sends the input link
 
     def submit_decode(self, round_count: int, on_done: Callable[[], None],
                       label: str = "") -> None: ...
@@ -368,6 +376,29 @@ class MultiFaultExclusionSyndromeDevice(Protocol):
         self, op, window, round_count: int, *,
         fault_model_requirement, fault_exclusion_ranges: tuple,
     ): ...
+
+
+@runtime_checkable
+class Link(Protocol):
+    """The link fabric as every sender sees it.
+
+    A path is wired or free; a send on a wired path delivers by callback,
+    ``on_delivered(transfer)`` at the delivery tick with every tick of the
+    transfer on the record; ``expected_delay_ticks`` is what a send now would
+    pay if nothing else reached its channel first, a scheduler's estimate.
+    """
+
+    def is_wired(self, path: LinkPath) -> bool: ...
+
+    def expected_delay_ticks(
+        self, path: LinkPath, payload_bits: Optional[int], now_ticks: int,
+    ) -> int: ...
+
+    def send(
+        self, path: LinkPath, payload_bits: Optional[int], now_ticks: int,
+        attribution: TransferAttribution,
+        on_delivered: Callable[[Transfer], None],
+    ) -> None: ...
 
 
 @runtime_checkable

@@ -6,7 +6,7 @@ import pytest
 
 from decsim.pauli_frame.pauli_frame import PauliFrame as RuntimePauliFrame
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
-from decsim.protocols import PauliFrame as PauliFramePort
+from decsim.ports import PauliFrame as PauliFramePort
 import decsim.run_spec as run_spec_module
 from decsim.run_spec import RunSpec
 from decsim.windows.window_manager import WindowManager
@@ -236,7 +236,9 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     manager.pauli_frame = sink
     manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
     manager._ops = {4: SimpleNamespace(name="logical")}
-    manager._window_link_arrival = lambda *args, **kwargs: final_engine.now + 4
+    manager._send_window_transfer = (
+        lambda path, window, op, request_key, payload_bits, on_delivered:
+            final_engine.schedule(4, on_delivered))
     manager._commit_decode_done = lambda actual_job, actual_result: weak_commits.append(
         (actual_job, actual_result)
     )
@@ -281,7 +283,9 @@ def test_final_results_use_the_sink_while_provisional_and_delivery_legs_bypass_i
     )
     strong.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
     strong._ops = {4: SimpleNamespace(name="logical")}
-    strong._window_link_arrival = lambda *args, **kwargs: engine.now + 5
+    strong._send_window_transfer = (
+        lambda path, window, op, request_key, payload_bits, on_delivered:
+            engine.schedule(5, on_delivered))
     strong._commit_strong_decode_done = lambda completion: strong_calls.append(completion)
     completion = SimpleNamespace(
         request_key=request(9, tier="strong", operation_id=4, window_id=1),
@@ -374,8 +378,7 @@ def test_frameless_strong_commit_finishes_directly():
 
 def test_final_result_rides_its_tiers_output_link():
     """WDO carries a weak final home; DO carries a strong-primary final."""
-    from decsim.links.links import LinkPath
-    from decsim.message import DecoderRequestKey, DecoderTier
+    from decsim.message import DecoderRequestKey, DecoderTier, LinkPath
 
     for tier, expected_path in ((DecoderTier.WEAK, LinkPath.WDO),
                                 (DecoderTier.STRONG, LinkPath.DO)):
@@ -386,10 +389,11 @@ def test_final_result_rides_its_tiers_output_link():
         manager.windows = {(4, 1): SimpleNamespace(t_done=None, k=1)}
         manager._ops = {4: SimpleNamespace(name="logical")}
         paths = []
-        def arrival(path, window, op, request_key, payload_bits=None, paths=paths):
+        def send(path, window, op, request_key, payload_bits, on_delivered,
+                 paths=paths):
             paths.append(path)
-            return engine.now + 4
-        manager._window_link_arrival = arrival
+            engine.schedule(4, on_delivered)
+        manager._send_window_transfer = send
         manager._hand_on_boundary = lambda *args: None
         manager._commit_decode_done = lambda job, result: None
         job = SimpleNamespace(

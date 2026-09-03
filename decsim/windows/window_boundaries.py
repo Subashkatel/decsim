@@ -14,9 +14,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Optional
 
-from ..links.links import BoundaryTransferRelation, LinkPath
-from ..message import (BoundaryDelivery, BoundaryUpdate, DecoderRequestKey, Operation,
-                       Window, WindowInfo)
+from ..message import (BoundaryDelivery, BoundaryTransferRelation, BoundaryUpdate, DecoderRequestKey, LinkPath, Operation, Window, WindowInfo)
 
 
 @dataclass(frozen=True)
@@ -132,22 +130,16 @@ class BoundaryCourier:
         self._committed_boundaries[source_key] = boundary
         for dep_key, delivery_key, delivery_version in deliveries:
             self._boundary_delivery_versions[delivery_key] = delivery_version
-            reservation = self.wm.links.reserve(
-                LinkPath.DD,
-                payload_bits=None,
-                now_ticks=self.wm.engine.now,
-                attribution=replace(
-                    self.wm._window_attribution(window, op, source_request_key),
-                    relation=BoundaryTransferRelation(
-                        source_request_key, source_key, dep_key,
-                        version, delivery_version)),
-            )
-            self.wm.engine.schedule(
-                reservation.total_delay_ticks,
-                lambda dk=dep_key, so=op.id, bd=boundary,
+            attribution = replace(
+                self.wm._window_attribution(window, op, source_request_key),
+                relation=BoundaryTransferRelation(
+                    source_request_key, source_key, dep_key,
+                    version, delivery_version))
+            self.wm.links.send(
+                LinkPath.DD, None, self.wm.engine.now, attribution,
+                lambda _transfer, dk=dep_key, so=op.id, bd=boundary,
                        sk=source_key, v=version, dv=delivery_version:
-                    self._receive_boundary(dk, so, bd, sk, v, dv),
-                label=f"boundary {op.name}W{window.k}->W{dep_key}")
+                    self._receive_boundary(dk, so, bd, sk, v, dv))
     def merge_available(
         self, source_key: tuple, destination: Window, boundary,
     ) -> None:

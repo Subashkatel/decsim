@@ -9,6 +9,7 @@ import pytest
 
 from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
+from decsim.links.fabric import LinkFabric
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.message import (DecoderTier, RetainedSyndromeFragment,
                             SyndromeRoundPacket, TransferAttribution)
@@ -117,7 +118,7 @@ def test_sb1_gap_cannot_be_served(fabric):
     """A missing interior round is never hidden by the stored-through
     counter: exact reads refuse."""
     engine = Engine()
-    sb1 = SyndromeBuffer1(engine, logical_reference_profile().build(engine))
+    sb1 = SyndromeBuffer1(engine, LinkFabric(logical_reference_profile(), engine))
     sb1.register_hold("reader", [(1, 1), (1, 2), (1, 3)])
 
     def write(round_index):

@@ -269,6 +269,47 @@ def test_a_zero_setup_request_goes_to_the_wire_ahead_of_anothers_setup():
     assert second_delivered.physical_sequence == 1
 
 
+def test_a_request_with_no_setup_leaves_the_setup_engine_untouched():
+    engine = decsim.engine.Engine(verbose=False)
+    channel = unbounded_channel(engine, 0)
+    delivered = []
+    send_at(engine, channel, 10, 8, 5, delivered)
+    send_at(engine, channel, 12, 8, 0, delivered)
+    send_at(engine, channel, 13, 8, 5, delivered)
+    engine.run()
+    without_setup = delivered[0]
+    second_with_setup = delivered[2]
+    assert without_setup.send_ticks == 12
+    assert (second_with_setup.setup_ticks, second_with_setup.send_ticks) == (
+        7,
+        20,
+    )
+
+
+def test_a_setup_ending_as_a_zero_setup_request_arrives_follows_event_order():
+    """A tie within one tick runs in the order the events were enqueued.
+
+    That is ns-3's rule: the Scheduler serves same-time events in
+    insertion order (src/core/model/scheduler.h). The zero-setup send at
+    15 was enqueued before the setup that ends at 15, so it takes the
+    wire first.
+    """
+    engine = decsim.engine.Engine(verbose=False)
+    channel = bounded_channel(engine, 1000.0, 0)
+    delivered = []
+    send_at(engine, channel, 15, 8, 0, delivered)
+    send_at(engine, channel, 10, 8, 5, delivered)
+    engine.run()
+    without_setup = delivered[0]
+    with_setup = delivered[1]
+    assert without_setup.request_ticks == 15
+    assert without_setup.serializer_start_ticks == 15
+    assert without_setup.physical_sequence == 0
+    assert with_setup.send_ticks == 15
+    assert with_setup.serializer_start_ticks == 8015
+    assert with_setup.physical_sequence == 1
+
+
 def test_setup_serialization_and_propagation_add_up():
     engine = decsim.engine.Engine(verbose=False)
     channel = bounded_channel(engine, 1000.0, 300)

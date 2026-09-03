@@ -121,7 +121,7 @@ def logical_reference_profile() -> settings.FabricSettings:
 def bandwidth_limited_profile(
     *,
     syndrome_bits_per_round: int,
-    round_us: float,
+    round_microseconds: float,
     commit_rounds: int,
     buffer_rounds: int,
     capacity_scale: float = 1.0,
@@ -142,18 +142,24 @@ def bandwidth_limited_profile(
     provisioning, the way ns-3 declares a DataRate per point-to-point
     device, never a floor borrowed from another path.
     """
-    commit_region_us = commit_rounds * round_us
+    commit_region_microseconds = commit_rounds * round_microseconds
     weak_window_rounds = commit_rounds + buffer_rounds
     weak_window_bits = weak_window_rounds * syndrome_bits_per_round
     strong_window_rounds = commit_rounds + 2 * buffer_rounds
     strong_window_bits = strong_window_rounds * syndrome_bits_per_round
-    one_per_region = 1 / commit_region_us
-    round_bits_per_us = syndrome_bits_per_round / round_us
-    weak_window_bits_per_us = weak_window_bits / commit_region_us
-    strong_window_bits_per_us = strong_window_bits / commit_region_us
-    boundary_bits_per_us = 100 / commit_region_us
-    bus_word_bits_per_us = BUS_WORD_BITS / commit_region_us
-    instruction_word_bits_per_us = INSTRUCTION_WORD_BITS / commit_region_us
+    one_per_region = 1 / commit_region_microseconds
+    round_bits_per_microsecond = syndrome_bits_per_round / round_microseconds
+    weak_window_bits_per_microsecond = (
+        weak_window_bits / commit_region_microseconds
+    )
+    strong_window_bits_per_microsecond = (
+        strong_window_bits / commit_region_microseconds
+    )
+    boundary_bits_per_microsecond = 100 / commit_region_microseconds
+    bus_word_bits_per_microsecond = BUS_WORD_BITS / commit_region_microseconds
+    instruction_word_bits_per_microsecond = (
+        INSTRUCTION_WORD_BITS / commit_region_microseconds
+    )
     bus_word_source = BUS_WORD_SOURCE + ", one per commit region"
     instruction_word_source = (
         INSTRUCTION_WORD_SOURCE + ", one per commit region"
@@ -163,7 +169,7 @@ def bandwidth_limited_profile(
         "qpu_to_controller",
         0.15,
         syndrome_bits_per_round,
-        round_bits_per_us,
+        round_bits_per_microsecond,
         "one syndrome round per round period",
         "SyndromePayload.size_bits",
     )
@@ -171,7 +177,7 @@ def bandwidth_limited_profile(
         "weak_buffer_to_weak_decoder",
         2.0,
         weak_window_bits,
-        weak_window_bits_per_us,
+        weak_window_bits_per_microsecond,
         "one weak window of rcom+rbuf rounds per commit region "
         "(tmp/references/papers/2510.25222v1.txt:1150-1152, "
         '"rcom = rbuf = d")',
@@ -189,7 +195,7 @@ def bandwidth_limited_profile(
         "strong_buffer_to_strong_decoder",
         2.0,
         strong_window_bits,
-        strong_window_bits_per_us,
+        strong_window_bits_per_microsecond,
         "one strong window of rcom+2rbuf rounds per commit region "
         "(tmp/references/papers/2510.25222v1.txt:1155, "
         '"In this paper, we assume that rstrong = rcom + 2rbuf.")',
@@ -207,7 +213,7 @@ def bandwidth_limited_profile(
         "decoder_to_decoder",
         0.5,
         100,
-        boundary_bits_per_us,
+        boundary_bits_per_microsecond,
         "one boundary transaction per commit region",
         None,
     )
@@ -223,7 +229,7 @@ def bandwidth_limited_profile(
         "frame_to_controller",
         4.0,
         BUS_WORD_BITS,
-        bus_word_bits_per_us,
+        bus_word_bits_per_microsecond,
         bus_word_source,
         None,
     )
@@ -231,7 +237,7 @@ def bandwidth_limited_profile(
         "controller_to_qpu",
         0.15,
         INSTRUCTION_WORD_BITS,
-        instruction_word_bits_per_us,
+        instruction_word_bits_per_microsecond,
         instruction_word_source,
         None,
     )
@@ -252,7 +258,7 @@ def bandwidth_limited_profile(
 def with_transfer_overhead(
     profile: settings.FabricSettings,
     *,
-    overhead_us: float,
+    overhead_microseconds: float,
     paths: tuple = (
         "weak_buffer_to_weak_decoder",
         "strong_buffer_to_strong_decoder",
@@ -264,7 +270,7 @@ def with_transfer_overhead(
     streaming during a setup, but successive setups on one channel
     serialize (gem5-Aladdin's one delayed-DMA event).
     """
-    setup_ticks = config.microseconds_to_ticks(overhead_us)
+    setup_ticks = config.microseconds_to_ticks(overhead_microseconds)
     replacements = {}
     for path in paths:
         path_settings = getattr(profile, path)
@@ -283,19 +289,22 @@ def with_transfer_overhead(
 def with_controller_to_strong_buffer_path(
     profile: settings.FabricSettings,
     *,
-    latency_us: float,
-    aggregate_bits_per_us: Optional[float],
+    latency_microseconds: float,
+    aggregate_bits_per_microsecond: Optional[float],
     source: str,
 ) -> settings.FabricSettings:
     """The profile with the optional priced controller_to_strong_buffer hop.
 
     The caller supplies both experiment-card numbers and their provenance;
-    aggregate_bits_per_us of None means unbounded bandwidth (the hop
+    aggregate_bits_per_microsecond of None means unbounded bandwidth (the hop
     charges propagation latency only); a profile without this hop stores
     rounds in syndrome buffer 1 for free.
     """
     store_path = _store_path(
-        "controller_to_strong_buffer", latency_us, aggregate_bits_per_us, source
+        "controller_to_strong_buffer",
+        latency_microseconds,
+        aggregate_bits_per_microsecond,
+        source,
     )
     return dataclasses.replace(
         profile,
@@ -307,19 +316,22 @@ def with_controller_to_strong_buffer_path(
 def with_controller_to_weak_buffer_path(
     profile: settings.FabricSettings,
     *,
-    latency_us: float,
-    aggregate_bits_per_us: Optional[float],
+    latency_microseconds: float,
+    aggregate_bits_per_microsecond: Optional[float],
     source: str,
 ) -> settings.FabricSettings:
     """The profile with the optional priced controller_to_weak_buffer hop.
 
     The caller supplies both experiment-card numbers and their provenance;
-    aggregate_bits_per_us of None means unbounded bandwidth (the hop
+    aggregate_bits_per_microsecond of None means unbounded bandwidth (the hop
     charges propagation latency only); a profile without this hop
     publishes rounds to buffer 0 for free.
     """
     store_path = _store_path(
-        "controller_to_weak_buffer", latency_us, aggregate_bits_per_us, source
+        "controller_to_weak_buffer",
+        latency_microseconds,
+        aggregate_bits_per_microsecond,
+        source,
     )
     return dataclasses.replace(
         profile,
@@ -337,17 +349,17 @@ class _Provisioning:
     def path(
         self,
         name: str,
-        latency_us: float,
+        latency_microseconds: float,
         bits: int,
-        nominal_bits_per_us: float,
+        nominal_bits_per_microsecond: float,
         source: str,
         actual_payload_source: Optional[str],
     ) -> settings.PathSettings:
-        rate = nominal_bits_per_us * self._capacity_scale
+        rate = nominal_bits_per_microsecond * self._capacity_scale
         capacity = settings.CapacitySettings(
             rate, settings.QuantityBasis.AGGREGATE, None, source
         )
-        latency_ticks = config.microseconds_to_ticks(latency_us)
+        latency_ticks = config.microseconds_to_ticks(latency_microseconds)
         channel = settings.ChannelSettings(
             name, latency_ticks, capacity, source
         )
@@ -362,41 +374,44 @@ def _aggregate_payload(bits: int, source: str) -> settings.PayloadSettings:
 
 
 def _unbounded_channel(
-    name: str, latency_us: float, source: str
+    name: str, latency_microseconds: float, source: str
 ) -> settings.ChannelSettings:
-    latency_ticks = config.microseconds_to_ticks(latency_us)
+    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
     return settings.ChannelSettings(name, latency_ticks, None, source)
 
 
 def _actual_path(
-    name: str, latency_us: float, source: str, actual_payload_source: str
+    name: str,
+    latency_microseconds: float,
+    source: str,
+    actual_payload_source: str,
 ) -> settings.PathSettings:
-    channel = _unbounded_channel(name, latency_us, source)
+    channel = _unbounded_channel(name, latency_microseconds, source)
     return settings.PathSettings(channel, None, actual_payload_source)
 
 
 def _default_path(
-    name: str, latency_us: float, bits: int, source: str
+    name: str, latency_microseconds: float, bits: int, source: str
 ) -> settings.PathSettings:
-    channel = _unbounded_channel(name, latency_us, source)
+    channel = _unbounded_channel(name, latency_microseconds, source)
     payload = _aggregate_payload(bits, source)
     return settings.PathSettings(channel, payload, None)
 
 
 def _store_path(
     name: str,
-    latency_us: float,
-    aggregate_bits_per_us: Optional[float],
+    latency_microseconds: float,
+    aggregate_bits_per_microsecond: Optional[float],
     source: str,
 ) -> settings.PathSettings:
     capacity = None
-    if aggregate_bits_per_us is not None:
+    if aggregate_bits_per_microsecond is not None:
         capacity = settings.CapacitySettings(
-            aggregate_bits_per_us,
+            aggregate_bits_per_microsecond,
             settings.QuantityBasis.AGGREGATE,
             None,
             source,
         )
-    latency_ticks = config.microseconds_to_ticks(latency_us)
+    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
     channel = settings.ChannelSettings(name, latency_ticks, capacity, source)
     return settings.PathSettings(channel, None, ROUND_PAYLOAD_SOURCE)

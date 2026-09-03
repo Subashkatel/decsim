@@ -9,6 +9,7 @@ paths' counters by construction (one counter stream, folded twice).
 import json
 
 import decsim.engine
+import decsim.links.fabric as fabric_module
 import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
@@ -119,7 +120,9 @@ class Run:
         settings = link_settings.FabricSettings(profile_name="test", **wiring)
         self.engine = decsim.engine.Engine(verbose=False)
         self.ledger = link_traffic.TrafficLedger(settings)
-        self.fabric = settings.build(self.engine, self.ledger)
+        self.fabric = fabric_module.LinkFabric(
+            settings, self.engine, self.ledger
+        )
 
     def send(self, path, payload_bits, tick, attribution):
         delay = tick - self.engine.now
@@ -195,9 +198,13 @@ def test_counters_reconcile_with_the_transfer_list():
     snapshot = run.ledger.snapshot()
     counters_by_path = {path.path: path.counters for path in snapshot.paths}
     shared_channel = snapshot.channels[0]
+    first_transfer = snapshot.transfers[0].transfer
+    second_transfer = snapshot.transfers[1].transfer
+    third_transfer = snapshot.transfers[2].transfer
     summed = link_traffic.TrafficCounters()
-    for record in snapshot.transfers:
-        summed = summed.plus_transfer(record.transfer)
+    summed = summed.plus_transfer(first_transfer)
+    summed = summed.plus_transfer(second_transfer)
+    summed = summed.plus_transfer(third_transfer)
     assert summed == shared_channel.counters
     assert shared_channel.counters == link_traffic.TrafficCounters(
         transfer_count=3,
@@ -235,13 +242,15 @@ def test_channels_are_aliased_in_the_order_the_paths_first_meet_them():
         weak_decoder_to_strong_decoder=shared,
     )
     report = run.ledger.traffic_json_value()
-    aliases = {}
-    for edge in report["semantic_edges"]:
-        aliases[edge["path"]] = edge["physical_alias"]
-    assert aliases["qpu_to_controller"] == "channel-0"
-    assert aliases["weak_buffer_to_weak_decoder"] == "channel-1"
-    assert aliases["weak_decoder_to_strong_decoder"] == "channel-0"
-    assert aliases["strong_buffer_to_strong_decoder"] == "channel-2"
+    edges = report["semantic_edges"]
+    assert edges[0]["path"] == "qpu_to_controller"
+    assert edges[0]["physical_alias"] == "channel-0"
+    assert edges[1]["path"] == "weak_buffer_to_weak_decoder"
+    assert edges[1]["physical_alias"] == "channel-1"
+    assert edges[2]["path"] == "weak_decoder_to_strong_decoder"
+    assert edges[2]["physical_alias"] == "channel-0"
+    assert edges[3]["path"] == "strong_buffer_to_strong_decoder"
+    assert edges[3]["physical_alias"] == "channel-2"
     assert report["physical_channels"][0]["member_paths"] == [
         "qpu_to_controller",
         "weak_decoder_to_strong_decoder",
@@ -335,6 +344,44 @@ def test_the_traffic_json_itemizes_the_setup_per_path():
         },
         "setup_ticks": 50,
     }
+
+
+def test_the_traffic_json_sums_the_setup_over_a_paths_transfers():
+    bounded = bounded_path("bounded", 1.0, 10, setup_ticks=50)
+    run = Run(strong_buffer_to_strong_decoder=bounded)
+    first_window = requested_window(3)
+    second_window = requested_window(4)
+    run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, first_window)
+    run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, second_window)
+    run.engine.run()
+    report = run.ledger.traffic_json_value()
+    semantic_edge = report["semantic_edges"][3]
+    assert report["transfers"][0]["setup_ticks"] == 50
+    assert report["transfers"][1]["setup_ticks"] == 100
+    assert semantic_edge["setup_ticks"] == 150
+
+
+def test_the_ledger_sums_the_queue_wait_per_transfer_and_per_channel():
+    shared = bounded_path("shared", 1000.0, 0)
+    run = Run(qpu_to_controller=shared, controller_to_weak_buffer=shared)
+    first_round = round_attribution(1)
+    second_round = round_attribution(2)
+    third_round = round_attribution(3)
+    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, first_round)
+    run.send(PATH.CONTROLLER_TO_WEAK_BUFFER, 8, 0, second_round)
+    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, third_round)
+    run.engine.run()
+    report = run.ledger.traffic_json_value()
+    transfers = report["transfers"]
+    on_qpu_path = report["semantic_edges"][0]
+    on_weak_buffer_path = report["semantic_edges"][1]
+    shared_channel = report["physical_channels"][0]
+    assert transfers[0]["queue_wait_ticks"] == 0
+    assert transfers[1]["queue_wait_ticks"] == 8000
+    assert transfers[2]["queue_wait_ticks"] == 16000
+    assert on_qpu_path["counters"]["queue_wait_ticks"] == 16000
+    assert on_weak_buffer_path["counters"]["queue_wait_ticks"] == 8000
+    assert shared_channel["counters"]["queue_wait_ticks"] == 24000
 
 
 def test_the_traffic_json_writes_a_boundary_relation():

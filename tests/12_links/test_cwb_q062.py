@@ -11,6 +11,7 @@ import pytest
 
 from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
+from decsim.links.fabric import LinkFabric
 from decsim.links.link_profiles import logical_reference_profile, with_controller_to_weak_buffer_path
 from decsim.message import LinkPath, TransferAttribution
 from decsim.controller.syndrome_packing import SyndromePacketRouteKind, SyndromePacking, _PackingSlotState
@@ -56,15 +57,15 @@ class _PublicationSpy:
 def _wired_profile(*, latency_us=0.25, bandwidth=100.0, source="Q-062 test card"):
     return with_controller_to_weak_buffer_path(
         logical_reference_profile(),
-        latency_us=latency_us,
-        aggregate_bits_per_us=bandwidth,
+        latency_microseconds=latency_us,
+        aggregate_bits_per_microsecond=bandwidth,
         source=source,
     )
 
 
 def _fabric_and_ledger(settings, engine):
     ledger = TrafficLedger(settings)
-    return settings.build(engine, ledger), ledger
+    return LinkFabric(settings, engine, ledger), ledger
 
 
 def _send(engine, fabric, path, payload_bits, attribution):
@@ -80,11 +81,12 @@ def test_legacy_cards_leave_optional_cwb_absent_without_changing_edge_identity()
     legacy_edges = {path.value: getattr(legacy, path.value) for path in legacy.wired_paths()}
 
     extended = with_controller_to_weak_buffer_path(
-        legacy, latency_us=0.25, aggregate_bits_per_us=100.0, source="Q-062 test card")
+        legacy, latency_microseconds=0.25, aggregate_bits_per_microsecond=100.0,
+        source="Q-062 test card")
 
     assert legacy.controller_to_weak_buffer is None
     assert LinkPath.CONTROLLER_TO_WEAK_BUFFER not in legacy.wired_paths()
-    assert not legacy.build(Engine()).is_wired(LinkPath.CONTROLLER_TO_WEAK_BUFFER)
+    assert not LinkFabric(legacy, Engine()).is_wired(LinkPath.CONTROLLER_TO_WEAK_BUFFER)
     assert extended.controller_to_weak_buffer is not None
     assert LinkPath.CONTROLLER_TO_WEAK_BUFFER in extended.wired_paths()
     for path_name, edge in legacy_edges.items():
@@ -146,7 +148,7 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
 
 def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
     engine = Engine()
-    model = _wired_profile(latency_us=0.10, bandwidth=1000.0).build(engine)
+    model = LinkFabric(_wired_profile(latency_us=0.10, bandwidth=1000.0), engine)
 
     reservation = _send(
         engine, model, LinkPath.CONTROLLER_TO_WEAK_BUFFER, 500,
@@ -160,7 +162,7 @@ def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
 
 def test_unbounded_cwb_bandwidth_charges_propagation_only():
     engine = Engine()
-    model = _wired_profile(latency_us=0.10, bandwidth=None).build(engine)
+    model = LinkFabric(_wired_profile(latency_us=0.10, bandwidth=None), engine)
 
     delivered = []
     model.send(
@@ -284,8 +286,8 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
         decoder=PresetLatencyDecoder(0.01),
         timing=TimingConfig(round_us=0.02),
         links=with_controller_to_weak_buffer_path(
-            logical_reference_profile(), latency_us=0.25,
-            aggregate_bits_per_us=10_000.0, source="test"),
+            logical_reference_profile(), latency_microseconds=0.25,
+            aggregate_bits_per_microsecond=10_000.0, source="test"),
         seed=0).build()
     delivered = sorted(row["delivery_ticks"] for row in completed.result.link_traffic["transfers"]
                        if row["path"] == "controller_to_weak_buffer")
@@ -301,8 +303,9 @@ def _packing(*, assembly_slots=None, buffer_capacity=None, overflow=None):
     policy = SyndromePackingPolicy(
         overflow=overflow if overflow is not None
         else PackingOverflowPolicy.FAIL_STOP)
+    engine = _Engine()
     return SyndromePacking(
-        _Engine(), t_pack=0,
+        engine, LinkFabric(logical_reference_profile(), engine), t_pack=0,
         packing_context_capacity=assembly_slots,
         window_input_receiver=_Receiver([True] * 8),
         feedback_memory_receiver=None,

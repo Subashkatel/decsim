@@ -7,6 +7,7 @@ import pytest
 
 from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
+from decsim.links.fabric import LinkFabric
 from decsim.links.link_profiles import (logical_reference_profile,
                                         with_controller_to_strong_buffer_path)
 from decsim.message import (RetainedSyndromeFragment, SyndromeRoundPacket,
@@ -31,16 +32,16 @@ def _write(sb1, packet):
 
 
 def _free_fabric(engine):
-    return logical_reference_profile().build(engine)
+    return LinkFabric(logical_reference_profile(), engine)
 
 
 def _priced_fabric(engine, latency_us=0.5):
     """The fabric with a priced csb hop, and the ledger that counts it."""
     settings = with_controller_to_strong_buffer_path(
-        logical_reference_profile(), latency_us=latency_us,
-        aggregate_bits_per_us=None, source="test csb")
+        logical_reference_profile(), latency_microseconds=latency_us,
+        aggregate_bits_per_microsecond=None, source="test csb")
     ledger = TrafficLedger(settings)
-    return settings.build(engine, ledger), ledger
+    return LinkFabric(settings, engine, ledger), ledger
 
 
 def _csb_transfer_count(ledger):

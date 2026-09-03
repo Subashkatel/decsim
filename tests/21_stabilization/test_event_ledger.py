@@ -152,12 +152,15 @@ def test_dropped_round_is_an_accounted_terminal_state():
                                                     SyndromePacking,
                                                     SyndromePackingPolicy)
     from decsim.engine import Engine
+    from decsim.links.fabric import LinkFabric
+    from decsim.links.link_profiles import logical_reference_profile
     from decsim.message import QPUReadout, WINDOW_INPUT_ROUTE
     from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
 
     engine = Engine(verbose=False)
     packing = SyndromePacking(
-        engine, t_pack=0, packing_context_capacity=None,
+        engine, LinkFabric(logical_reference_profile(), engine),
+        t_pack=0, packing_context_capacity=None,
         window_input_receiver=SimpleNamespace(
             accept_window_input=lambda packet: True),
         feedback_memory_receiver=None,
@@ -197,12 +200,15 @@ def test_reassembly_context_drop_is_an_accounted_terminal_state():
                                                     SyndromePacking,
                                                     SyndromePackingPolicy)
     from decsim.engine import Engine
+    from decsim.links.fabric import LinkFabric
+    from decsim.links.link_profiles import logical_reference_profile
     from decsim.message import QPUReadout, WINDOW_INPUT_ROUTE
     from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
 
     engine = Engine(verbose=False)
     packing = SyndromePacking(
-        engine, t_pack=0, packing_context_capacity=1,
+        engine, LinkFabric(logical_reference_profile(), engine),
+        t_pack=0, packing_context_capacity=1,
         window_input_receiver=SimpleNamespace(
             accept_window_input=lambda packet: True),
         feedback_memory_receiver=None,

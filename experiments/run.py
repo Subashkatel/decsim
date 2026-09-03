@@ -139,7 +139,7 @@ def write_manifest(config: ExperimentConfig, run_dir: Path,
                    started_utc: str, finished_utc: str = None) -> None:
     """The run's identity: everything needed to interpret or reproduce it
     without the source tree. Sampling is deterministic from (stim version,
-    code_task, distance, rounds, p, seed), so the manifest plus seeds are
+    circuit, distance, rounds, p, seed), so the manifest plus seeds are
     the raw data."""
     import os
     # default=str turns Paths and cards into strings; the round trip

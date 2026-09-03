@@ -388,17 +388,20 @@ class Link(Protocol):
     pay if nothing else reached its channel first, a scheduler's estimate.
     """
 
-    def is_wired(self, path: LinkPath) -> bool: ...
+    def is_wired(self, path: LinkPath) -> bool:
+        """Whether the card prices this path; an unwired path is a free hop."""
 
     def expected_delay_ticks(
         self, path: LinkPath, payload_bits: Optional[int], now_ticks: int,
-    ) -> int: ...
+    ) -> int:
+        """What a send now would pay if nothing else reached its channel."""
 
     def send(
         self, path: LinkPath, payload_bits: Optional[int], now_ticks: int,
         attribution: TransferAttribution,
         on_delivered: Callable[[Transfer], None],
-    ) -> None: ...
+    ) -> None:
+        """Send one transfer on the path; on_delivered(transfer) runs at delivery."""
 
 
 @runtime_checkable

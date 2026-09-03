@@ -75,7 +75,7 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
 
     weak_run_dir, rows = run_experiment(wall_clock_config(tmp_path, [3, 5]))
     strong_path = write_config(tmp_path, {
-        "mode": "strong_only",
+        "decode_path": "strong_only",
         "decoder": strong_unit("belief_matching"),
         "sweep": [{"physical_error_probability": [0.001],
                    "distance": [3, 5], "round_period_us": [1.0],

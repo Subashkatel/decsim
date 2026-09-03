@@ -47,7 +47,7 @@ def _events(completed):
     """(sbd send tick, delivery tick) per window plus per-window stamps."""
     sends = {}
     for row in completed.result.link_traffic["transfers"]:
-        if row["path"] == "sbd":
+        if row["path"] == "strong_buffer_to_strong_decoder":
             sends[row["attribution"]["window_id"]] = (
                 row["send_ticks"], row["delivery_ticks"])
     stamps = {k: (w.t_dispatch, w.t_done)

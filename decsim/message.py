@@ -652,19 +652,21 @@ class DecodeOutcome:
 
 class LinkPath(str, Enum):
     """The hops of the reaction path, one per pair of components, in the
-    order the reports list them."""
+    order the reports list them. The weak buffer is syndrome buffer 0,
+    the strong buffer syndrome buffer 1; the two controller-to-buffer
+    hops are optional on a card."""
 
-    QC = "qc"      # QPU to controller: syndrome readout leaving the QPU
-    CWB = "cwb"    # controller to syndrome buffer 0, a published round (optional)
-    WBD = "wbd"    # weak buffer to weak decoder: a window, or a feedback-memory round
-    WSD = "wsd"    # weak decoder to strong decoder: the escalation of a window
-    SBD = "sbd"    # strong buffer to strong decoder: the strong window's input
-    WDO = "wdo"    # weak decoder to Pauli frame: the weak correction
-    DD = "dd"      # decoder to decoder: a committed window boundary
-    DO = "do"      # strong decoder to Pauli frame: the strong correction
-    OC = "oc"      # Pauli frame to controller: the conditional release
-    CQ = "cq"      # controller to QPU: the instruction back to the QPU
-    CSB = "csb"    # controller to syndrome buffer 1, the room-side write (optional)
+    QPU_TO_CONTROLLER = "qpu_to_controller"                # a readout
+    CONTROLLER_TO_WEAK_BUFFER = "controller_to_weak_buffer"  # a published round
+    WEAK_BUFFER_TO_WEAK_DECODER = "weak_buffer_to_weak_decoder"  # a window, or a feedback-memory round
+    WEAK_DECODER_TO_STRONG_DECODER = "weak_decoder_to_strong_decoder"  # an escalation
+    STRONG_BUFFER_TO_STRONG_DECODER = "strong_buffer_to_strong_decoder"  # the strong window's input
+    WEAK_DECODER_TO_FRAME = "weak_decoder_to_frame"        # the weak correction
+    DECODER_TO_DECODER = "decoder_to_decoder"              # a committed window boundary
+    STRONG_DECODER_TO_FRAME = "strong_decoder_to_frame"    # the strong correction
+    FRAME_TO_CONTROLLER = "frame_to_controller"            # the conditional release
+    CONTROLLER_TO_QPU = "controller_to_qpu"                # the instruction back
+    CONTROLLER_TO_STRONG_BUFFER = "controller_to_strong_buffer"  # the room-side write
 
 
 @dataclass(frozen=True)

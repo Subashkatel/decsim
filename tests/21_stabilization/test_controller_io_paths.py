@@ -31,7 +31,7 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
     produces the same bit values, neither early nor altered."""
     engine = Engine(verbose=False)
     receiver = _WindowInputReceiver()
-    settings = fabric["declared_profile"](cwb=False, csb=False)
+    settings = fabric["declared_profile"](controller_to_weak_buffer=False, controller_to_strong_buffer=False)
     ledger = TrafficLedger(settings)
     links = settings.build(engine, ledger)
     packing = SyndromePacking(
@@ -57,7 +57,7 @@ def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fab
     assert receiver.packets[0].fragments[0].bits == (1, 0, 1, 0)
     assert receiver.packets[0].fragments[0].size_bits == 4
     qc_record = next(record for record in ledger.snapshot().transfers
-                     if record.path.value == "qc")
+                     if record.path.value == "qpu_to_controller")
     assert qc_record.transfer.payload_bits == 4
 
 
@@ -69,7 +69,7 @@ def test_packing_charges_its_assembly_time_for_every_round(fabric):
     packetization, bus transfer, result return and the conditional)."""
     engine = Engine(verbose=False)
     receiver = _WindowInputReceiver()
-    links = fabric["declared_profile"](cwb=False, csb=False).build(engine)
+    links = fabric["declared_profile"](controller_to_weak_buffer=False, controller_to_strong_buffer=False).build(engine)
     packing = SyndromePacking(
         engine, links=links, t_pack=microseconds_to_ticks(1), packing_context_capacity=None,
         window_input_receiver=receiver, feedback_memory_receiver=None)
@@ -106,7 +106,7 @@ def _feedback_run(fabric, *, controller_output_us):
     return RunSpec(
         ops=operations, d=3, rounds_policy=FixedRounds(6),
         decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"]),
-        links=fabric["declared_profile"](cwb=True, csb=False),
+        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False),
         timing=timing,
         pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
     ).build()
@@ -127,9 +127,9 @@ def test_results_and_decisions_cross_links_at_their_own_size(fabric):
     for transfer in transfers:
         payload_by_path.setdefault(transfer["path"], set()).add(
             transfer["payload_bits"])
-    assert payload_by_path["wdo"] == {1}
-    assert payload_by_path["oc"] == {32}
-    assert payload_by_path["cq"] == {128}
+    assert payload_by_path["weak_decoder_to_frame"] == {1}
+    assert payload_by_path["frame_to_controller"] == {32}
+    assert payload_by_path["controller_to_qpu"] == {128}
 
 
 def test_feedback_operation_command_traverses_controller_output_and_cq(fabric):
@@ -210,7 +210,7 @@ def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
     completed = RunSpec(
         ops=(operation,), d=3, rounds_policy=FixedRounds(6),
         decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"]),
-        links=fabric["declared_profile"](cwb=True, csb=False), timing=timing,
+        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False), timing=timing,
         pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
     ).build()
     completed.engine.run()

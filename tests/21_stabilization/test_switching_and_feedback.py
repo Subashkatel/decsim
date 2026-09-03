@@ -67,14 +67,14 @@ def test_parallel_requires_the_csb_margin(fabric):
     strong build refuses loudly instead of waiting (the documented
     fail-loud contract; a waiting design would need its own note)."""
     with pytest.raises(RuntimeError,
-                       match="csb lag beyond the escalation margin"):
+                       match="controller_to_strong_buffer lag beyond the escalation margin"):
         fabric["switching_run"](escalation_probability=0.0, rounds=9,
                                 run_both_at_once=True)
 
 
 def test_parallel_confident_weak_cancels_every_strong(fabric):
     completed = fabric["switching_run"](escalation_probability=0.0, rounds=9,
-                                        run_both_at_once=True, csb_us=2.0)
+                                        run_both_at_once=True, strong_buffer_us=2.0)
     records = completed.pauli_frame.snapshot().records
     assert [record.tier for record in records] == ["weak"] * 3
     assert completed.decoder_manager.strong_cancelled == 3
@@ -84,7 +84,7 @@ def test_parallel_confident_weak_cancels_every_strong(fabric):
 
 def test_parallel_unconfident_weak_takes_every_strong(fabric):
     completed = fabric["switching_run"](escalation_probability=1.0, rounds=9,
-                                        run_both_at_once=True, csb_us=2.0)
+                                        run_both_at_once=True, strong_buffer_us=2.0)
     records = completed.pauli_frame.snapshot().records
     assert [record.tier for record in records] == ["strong"] * 3
     assert completed.decoder_manager.strong_needed == 3
@@ -200,7 +200,7 @@ def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
         escalation_policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE, bulk_strong=True),
         boundary_policy=Held(),
         unit_pools={"default": 4, "strong": 1},
-        links=fabric["declared_profile"](cwb=True, csb=True),
+        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=True),
         timing=fabric["declared_timing"](),
         pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]),
         seed=0).build()
@@ -292,7 +292,7 @@ def test_no_feedback_when_none_is_required(fabric):
     completed = fabric["weak_only_run"](rounds=6)
     assert completed.execution_runtime.decode_release_time == {}
     transfers = completed.result.link_traffic.get("transfers", [])
-    assert not any(row.get("path") in ("oc", "cq") for row in transfers)
+    assert not any(row.get("path") in ("frame_to_controller", "controller_to_qpu") for row in transfers)
 
 
 def test_release_travels_oc_then_cq_with_exact_cost(fabric):

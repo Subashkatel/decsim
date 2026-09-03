@@ -52,7 +52,18 @@ def default_path(name, bits):
 def fabric_with(engine, listener=None, **paths):
     """A fabric whose paths are free unless the test wires them itself."""
     wiring = dict.fromkeys(
-        ("qc", "wbd", "wsd", "sbd", "wdo", "dd", "do", "oc", "cq"), FREE_PATH
+        (
+            "qpu_to_controller",
+            "weak_buffer_to_weak_decoder",
+            "weak_decoder_to_strong_decoder",
+            "strong_buffer_to_strong_decoder",
+            "weak_decoder_to_frame",
+            "decoder_to_decoder",
+            "strong_decoder_to_frame",
+            "frame_to_controller",
+            "controller_to_qpu",
+        ),
+        FREE_PATH,
     )
     wiring.update(paths)
     settings = link_settings.FabricSettings(profile_name="test", **wiring)
@@ -144,12 +155,24 @@ def send_on(engine, fabric, path, payload_bits, tick, attribution, delivered):
 def test_two_paths_on_one_channel_share_its_queue():
     engine = decsim.engine.Engine(verbose=False)
     shared = bounded_path("shared", 1000.0, 300)
-    fabric = fabric_with(engine, qc=shared, cwb=shared)
+    fabric = fabric_with(
+        engine, qpu_to_controller=shared, controller_to_weak_buffer=shared
+    )
     delivered = []
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    send_on(engine, fabric, PATH.QC, 8, 0, first_round, delivered)
-    send_on(engine, fabric, PATH.CWB, 4, 0, second_round, delivered)
+    send_on(
+        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
+    )
+    send_on(
+        engine,
+        fabric,
+        PATH.CONTROLLER_TO_WEAK_BUFFER,
+        4,
+        0,
+        second_round,
+        delivered,
+    )
     engine.run()
     on_weak_buffer_path = delivered[1]
     assert on_weak_buffer_path.serializer_start_ticks == 8000
@@ -161,12 +184,26 @@ def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
     engine = decsim.engine.Engine(verbose=False)
     first_wire = bounded_path("first", 1000.0, 0)
     second_wire = bounded_path("second", 1000.0, 0)
-    fabric = fabric_with(engine, qc=first_wire, cwb=second_wire)
+    fabric = fabric_with(
+        engine,
+        qpu_to_controller=first_wire,
+        controller_to_weak_buffer=second_wire,
+    )
     delivered = []
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    send_on(engine, fabric, PATH.QC, 8, 0, first_round, delivered)
-    send_on(engine, fabric, PATH.CWB, 8, 0, second_round, delivered)
+    send_on(
+        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
+    )
+    send_on(
+        engine,
+        fabric,
+        PATH.CONTROLLER_TO_WEAK_BUFFER,
+        8,
+        0,
+        second_round,
+        delivered,
+    )
     engine.run()
     on_weak_buffer_path = delivered[1]
     assert on_weak_buffer_path.queue_wait_ticks == 0
@@ -176,12 +213,32 @@ def test_two_channels_with_the_same_numbers_and_different_names_are_two_wires():
 def test_two_paths_with_setups_on_one_channel_share_its_setup_engine():
     engine = decsim.engine.Engine(verbose=False)
     shared = unbounded_path("shared", 0, setup_ticks=5)
-    fabric = fabric_with(engine, wbd=shared, sbd=shared)
+    fabric = fabric_with(
+        engine,
+        weak_buffer_to_weak_decoder=shared,
+        strong_buffer_to_strong_decoder=shared,
+    )
     delivered = []
     weak_window = requested_window(1)
     strong_window = requested_window(2)
-    send_on(engine, fabric, PATH.WBD, 8, 10, weak_window, delivered)
-    send_on(engine, fabric, PATH.SBD, 8, 11, strong_window, delivered)
+    send_on(
+        engine,
+        fabric,
+        PATH.WEAK_BUFFER_TO_WEAK_DECODER,
+        8,
+        10,
+        weak_window,
+        delivered,
+    )
+    send_on(
+        engine,
+        fabric,
+        PATH.STRONG_BUFFER_TO_STRONG_DECODER,
+        8,
+        11,
+        strong_window,
+        delivered,
+    )
     engine.run()
     second = delivered[1]
     assert (second.setup_ticks, second.send_ticks) == (9, 20)
@@ -191,12 +248,32 @@ def test_a_path_with_no_setup_never_waits_for_another_paths_setup():
     engine = decsim.engine.Engine(verbose=False)
     with_setup = unbounded_path("shared", 0, setup_ticks=5)
     without_setup = unbounded_path("shared", 0)
-    fabric = fabric_with(engine, wbd=with_setup, sbd=without_setup)
+    fabric = fabric_with(
+        engine,
+        weak_buffer_to_weak_decoder=with_setup,
+        strong_buffer_to_strong_decoder=without_setup,
+    )
     delivered = []
     weak_window = requested_window(1)
     strong_window = requested_window(2)
-    send_on(engine, fabric, PATH.WBD, 8, 10, weak_window, delivered)
-    send_on(engine, fabric, PATH.SBD, 8, 12, strong_window, delivered)
+    send_on(
+        engine,
+        fabric,
+        PATH.WEAK_BUFFER_TO_WEAK_DECODER,
+        8,
+        10,
+        weak_window,
+        delivered,
+    )
+    send_on(
+        engine,
+        fabric,
+        PATH.STRONG_BUFFER_TO_STRONG_DECODER,
+        8,
+        12,
+        strong_window,
+        delivered,
+    )
     engine.run()
     first_delivered = delivered[0]
     assert first_delivered.request_ticks == 12
@@ -208,7 +285,9 @@ def test_a_free_path_costs_nothing():
     fabric = fabric_with(engine)
     delivered = []
     first_round = round_attribution(1)
-    send_on(engine, fabric, PATH.QC, 1000, 42, first_round, delivered)
+    send_on(
+        engine, fabric, PATH.QPU_TO_CONTROLLER, 1000, 42, first_round, delivered
+    )
     engine.run()
     transfer = delivered[0]
     assert transfer.total_delay_ticks == 0
@@ -221,9 +300,9 @@ def test_a_path_refuses_an_attribution_outside_its_rule():
     attribution = requested_window(1)
     with pytest.raises(
         RuntimeError,
-        match="qc transfers are attributed to a round range, not to a window",
+        match="qpu_to_controller transfers are attributed to a round range",
     ):
-        fabric.send(PATH.QC, 1, 0, attribution, print)
+        fabric.send(PATH.QPU_TO_CONTROLLER, 1, 0, attribution, print)
 
 
 def test_a_window_path_refuses_a_round_range():
@@ -232,9 +311,11 @@ def test_a_window_path_refuses_a_round_range():
     attribution = round_attribution(1)
     with pytest.raises(
         RuntimeError,
-        match="sbd transfers are attributed to a window, not to a round range",
+        match="strong_buffer_to_strong_decoder transfers are attributed to a window",
     ):
-        fabric.send(PATH.SBD, 1, 0, attribution, print)
+        fabric.send(
+            PATH.STRONG_BUFFER_TO_STRONG_DECODER, 1, 0, attribution, print
+        )
 
 
 def test_an_operation_path_refuses_a_round_range():
@@ -243,9 +324,9 @@ def test_an_operation_path_refuses_a_round_range():
     attribution = round_attribution(1)
     with pytest.raises(
         RuntimeError,
-        match="oc transfers are attributed to the operation alone",
+        match="frame_to_controller transfers are attributed to the operation",
     ):
-        fabric.send(PATH.OC, 1, 0, attribution, print)
+        fabric.send(PATH.FRAME_TO_CONTROLLER, 1, 0, attribution, print)
 
 
 def test_the_weak_input_path_takes_a_round_or_a_window():
@@ -254,8 +335,24 @@ def test_the_weak_input_path_takes_a_round_or_a_window():
     delivered = []
     one_round = round_attribution(1)
     windowed = requested_window(3)
-    send_on(engine, fabric, PATH.WBD, 1, 0, one_round, delivered)
-    send_on(engine, fabric, PATH.WBD, 1, 0, windowed, delivered)
+    send_on(
+        engine,
+        fabric,
+        PATH.WEAK_BUFFER_TO_WEAK_DECODER,
+        1,
+        0,
+        one_round,
+        delivered,
+    )
+    send_on(
+        engine,
+        fabric,
+        PATH.WEAK_BUFFER_TO_WEAK_DECODER,
+        1,
+        0,
+        windowed,
+        delivered,
+    )
     engine.run()
     assert len(delivered) == 2
 
@@ -264,8 +361,11 @@ def test_the_weak_input_path_refuses_a_window_without_its_request():
     engine = decsim.engine.Engine(verbose=False)
     fabric = fabric_with(engine)
     attribution = window_attribution(3)
-    with pytest.raises(RuntimeError, match="wbd transfers carry their request"):
-        fabric.send(PATH.WBD, 1, 0, attribution, print)
+    with pytest.raises(
+        RuntimeError,
+        match="weak_buffer_to_weak_decoder transfers carry their request",
+    ):
+        fabric.send(PATH.WEAK_BUFFER_TO_WEAK_DECODER, 1, 0, attribution, print)
 
 
 def test_the_weak_input_path_refuses_a_relation_on_a_round():
@@ -280,8 +380,11 @@ def test_the_weak_input_path_refuses_a_relation_on_a_round():
         last_round=1,
         relation=relation,
     )
-    with pytest.raises(RuntimeError, match="wbd transfers carry no relation"):
-        fabric.send(PATH.WBD, 1, 0, attribution, print)
+    with pytest.raises(
+        RuntimeError,
+        match="weak_buffer_to_weak_decoder transfers carry no relation",
+    ):
+        fabric.send(PATH.WEAK_BUFFER_TO_WEAK_DECODER, 1, 0, attribution, print)
 
 
 def test_a_relation_that_names_another_window_is_refused():
@@ -290,15 +393,19 @@ def test_a_relation_that_names_another_window_is_refused():
     relation = request_relation_for(4)
     attribution = window_attribution(3, relation)
     with pytest.raises(RuntimeError, match="names another operation or window"):
-        fabric.send(PATH.SBD, 1, 0, attribution, print)
+        fabric.send(
+            PATH.STRONG_BUFFER_TO_STRONG_DECODER, 1, 0, attribution, print
+        )
 
 
 def test_the_decoder_to_decoder_path_carries_its_boundary():
     engine = decsim.engine.Engine(verbose=False)
     fabric = fabric_with(engine)
     attribution = window_attribution(3)
-    with pytest.raises(RuntimeError, match="dd transfers carry their boundary"):
-        fabric.send(PATH.DD, 1, 0, attribution, print)
+    with pytest.raises(
+        RuntimeError, match="decoder_to_decoder transfers carry their boundary"
+    ):
+        fabric.send(PATH.DECODER_TO_DECODER, 1, 0, attribution, print)
 
 
 def test_the_decoder_to_decoder_path_accepts_a_matching_boundary():
@@ -306,7 +413,9 @@ def test_the_decoder_to_decoder_path_accepts_a_matching_boundary():
     fabric = fabric_with(engine)
     delivered = []
     attribution = boundary_attribution(1, 3)
-    send_on(engine, fabric, PATH.DD, 100, 20, attribution, delivered)
+    send_on(
+        engine, fabric, PATH.DECODER_TO_DECODER, 100, 20, attribution, delivered
+    )
     engine.run()
     transfer = delivered[0]
     assert transfer.payload_bits == 100
@@ -317,7 +426,7 @@ def test_a_boundary_from_another_operation_is_refused():
     fabric = fabric_with(engine)
     attribution = boundary_attribution(2, 3)
     with pytest.raises(RuntimeError, match="names another operation or window"):
-        fabric.send(PATH.DD, 100, 20, attribution, print)
+        fabric.send(PATH.DECODER_TO_DECODER, 100, 20, attribution, print)
 
 
 def test_an_operation_path_refuses_a_relation():
@@ -325,8 +434,10 @@ def test_an_operation_path_refuses_a_relation():
     fabric = fabric_with(engine)
     relation = request_relation_for(3)
     attribution = operation_attribution(relation)
-    with pytest.raises(RuntimeError, match="oc transfers carry no relation"):
-        fabric.send(PATH.OC, 1, 0, attribution, print)
+    with pytest.raises(
+        RuntimeError, match="frame_to_controller transfers carry no relation"
+    ):
+        fabric.send(PATH.FRAME_TO_CONTROLLER, 1, 0, attribution, print)
 
 
 def test_an_actual_payload_is_priced_and_named_by_its_source():
@@ -335,7 +446,9 @@ def test_an_actual_payload_is_priced_and_named_by_its_source():
     fabric = fabric_with(engine, listener)
     delivered = []
     first_round = round_attribution(1)
-    send_on(engine, fabric, PATH.QC, 7, 0, first_round, delivered)
+    send_on(
+        engine, fabric, PATH.QPU_TO_CONTROLLER, 7, 0, first_round, delivered
+    )
     engine.run()
     record = listener.records[0]
     transfer = delivered[0]
@@ -348,10 +461,18 @@ def test_a_missing_payload_takes_the_cards_default():
     engine = decsim.engine.Engine(verbose=False)
     listener = Listener()
     bus_word = default_path("bus", 32)
-    fabric = fabric_with(engine, listener, oc=bus_word)
+    fabric = fabric_with(engine, listener, frame_to_controller=bus_word)
     delivered = []
     attribution = operation_attribution()
-    send_on(engine, fabric, PATH.OC, None, 0, attribution, delivered)
+    send_on(
+        engine,
+        fabric,
+        PATH.FRAME_TO_CONTROLLER,
+        None,
+        0,
+        attribution,
+        delivered,
+    )
     engine.run()
     record = listener.records[0]
     transfer = delivered[0]
@@ -368,7 +489,9 @@ def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
     fabric = fabric_with(engine, listener)
     delivered = []
     first_round = round_attribution(1)
-    send_on(engine, fabric, PATH.QC, None, 0, first_round, delivered)
+    send_on(
+        engine, fabric, PATH.QPU_TO_CONTROLLER, None, 0, first_round, delivered
+    )
     engine.run()
     record = listener.records[0]
     transfer = delivered[0]
@@ -379,21 +502,21 @@ def test_an_unsized_transfer_rides_an_unbounded_channel_unresolved():
 def test_a_bounded_channel_refuses_a_transfer_with_no_payload_size():
     engine = decsim.engine.Engine(verbose=False)
     bounded = bounded_path("bounded", 1000.0, 0)
-    fabric = fabric_with(engine, cwb=bounded)
+    fabric = fabric_with(engine, controller_to_weak_buffer=bounded)
     attribution = round_attribution(1)
     with pytest.raises(
         RuntimeError, match="a bounded wire needs a size to serialize"
     ):
-        fabric.send(PATH.CWB, None, 0, attribution, print)
+        fabric.send(PATH.CONTROLLER_TO_WEAK_BUFFER, None, 0, attribution, print)
 
 
 def test_an_actual_payload_on_a_path_without_a_source_is_refused():
     engine = decsim.engine.Engine(verbose=False)
     default_only = default_path("default", 100)
-    fabric = fabric_with(engine, qc=default_only)
+    fabric = fabric_with(engine, qpu_to_controller=default_only)
     attribution = round_attribution(1)
     with pytest.raises(RuntimeError, match="actual payload source"):
-        fabric.send(PATH.QC, 3, 0, attribution, print)
+        fabric.send(PATH.QPU_TO_CONTROLLER, 3, 0, attribution, print)
 
 
 def test_the_listener_sees_every_transfer_once_in_order():
@@ -403,12 +526,16 @@ def test_the_listener_sees_every_transfer_once_in_order():
     delivered = []
     first_round = round_attribution(1)
     instruction = operation_attribution()
-    send_on(engine, fabric, PATH.QC, 8, 0, first_round, delivered)
-    send_on(engine, fabric, PATH.CQ, 128, 5, instruction, delivered)
+    send_on(
+        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
+    )
+    send_on(
+        engine, fabric, PATH.CONTROLLER_TO_QPU, 128, 5, instruction, delivered
+    )
     engine.run()
     paths = [record.path for record in listener.records]
     sequences = [record.request_sequence for record in listener.records]
-    assert paths == [PATH.QC, PATH.CQ]
+    assert paths == [PATH.QPU_TO_CONTROLLER, PATH.CONTROLLER_TO_QPU]
     assert sequences == [0, 1]
     assert len(delivered) == 2
 
@@ -424,7 +551,7 @@ def test_the_listener_sees_the_transfer_before_the_caller():
         seen_by_caller.append(record_count)
 
     attribution = round_attribution(1)
-    fabric.send(PATH.QC, 8, 0, attribution, delivered)
+    fabric.send(PATH.QPU_TO_CONTROLLER, 8, 0, attribution, delivered)
     engine.run()
     assert seen_by_caller == [1]
 
@@ -434,7 +561,9 @@ def test_a_fabric_with_no_listener_runs():
     fabric = fabric_with(engine)
     delivered = []
     first_round = round_attribution(1)
-    send_on(engine, fabric, PATH.QC, 8, 0, first_round, delivered)
+    send_on(
+        engine, fabric, PATH.QPU_TO_CONTROLLER, 8, 0, first_round, delivered
+    )
     engine.run()
     assert len(delivered) == 1
 
@@ -442,11 +571,11 @@ def test_a_fabric_with_no_listener_runs():
 def test_an_optional_path_is_wired_only_when_the_card_names_it():
     engine = decsim.engine.Engine(verbose=False)
     store = unbounded_path("store", 3)
-    with_store = fabric_with(engine, csb=store)
+    with_store = fabric_with(engine, controller_to_strong_buffer=store)
     without_store = fabric_with(engine)
-    assert with_store.is_wired(PATH.CSB)
-    assert not without_store.is_wired(PATH.CSB)
-    assert without_store.is_wired(PATH.QC)
+    assert with_store.is_wired(PATH.CONTROLLER_TO_STRONG_BUFFER)
+    assert not without_store.is_wired(PATH.CONTROLLER_TO_STRONG_BUFFER)
+    assert without_store.is_wired(PATH.QPU_TO_CONTROLLER)
 
 
 def test_the_expected_delay_prices_the_paths_payload_rule():
@@ -455,8 +584,10 @@ def test_the_expected_delay_prices_the_paths_payload_rule():
     channel = link_settings.ChannelSettings("bounded", 300, capacity, "test")
     payload = link_settings.PayloadSettings(8, AGGREGATE, None, "test default")
     bus_word = link_settings.PathSettings(channel, payload, None)
-    fabric = fabric_with(engine, oc=bus_word)
-    assert fabric.expected_delay_ticks(PATH.OC, None, 0) == 8300
+    fabric = fabric_with(engine, frame_to_controller=bus_word)
+    assert (
+        fabric.expected_delay_ticks(PATH.FRAME_TO_CONTROLLER, None, 0) == 8300
+    )
 
 
 def test_the_fabric_keeps_its_card():
@@ -471,7 +602,7 @@ def test_a_transfer_on_an_unwired_path_is_a_caller_bug():
     fabric = fabric_with(engine)
     attribution = round_attribution(1)
     with pytest.raises(KeyError):
-        fabric.send(PATH.CWB, 1, 0, attribution, print)
+        fabric.send(PATH.CONTROLLER_TO_WEAK_BUFFER, 1, 0, attribution, print)
 
 
 def test_the_fabric_fills_the_link_port():

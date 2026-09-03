@@ -50,10 +50,10 @@ POINTS = (
     "qpu_first_round_to_frame",      # first required round off QPU -> frame
 )
 
-INPUT_LINK = {"weak_baseline": "wbd", "strong_only": "sbd",
-              "switching": "wbd"}
-OUTPUT_LINK = {"weak_baseline": "wdo", "strong_only": "do",
-               "switching": "wdo"}
+INPUT_LINK = {"weak_baseline": "weak_buffer_to_weak_decoder", "strong_only": "strong_buffer_to_strong_decoder",
+              "switching": "weak_buffer_to_weak_decoder"}
+OUTPUT_LINK = {"weak_baseline": "weak_decoder_to_frame", "strong_only": "strong_decoder_to_frame",
+               "switching": "weak_decoder_to_frame"}
 
 
 @dataclass(frozen=True)
@@ -122,7 +122,7 @@ def cwb_delays_us(transfers: list) -> list:
     """Every round's controller-to-Buffer-0 delay, in microseconds."""
     delays = []
     for row in transfers:
-        if row["path"] != "cwb":
+        if row["path"] != "controller_to_weak_buffer":
             continue
         delays.append(microseconds_to_ticks(row["delivery_ticks"] - row["send_ticks"]))
     return delays
@@ -132,7 +132,7 @@ def qc_send_ticks(transfers: list) -> dict:
     """round -> tick that round left the QPU (its earliest QC send)."""
     send = {}
     for row in transfers:
-        if row["path"] != "qc":
+        if row["path"] != "qpu_to_controller":
             continue
         round_index = row["attribution"]["round_lo"]
         earlier = send.get(round_index)
@@ -156,7 +156,7 @@ def window_points_us(window, frame_record, stage_us: dict, link_delay: dict,
         "algorithm": stage_us["algorithm"],
         "release": stage_us["release"],
         "service": microseconds_to_ticks(window.t_done - window.t_dispatch),
-        "dd_per_window": microseconds_to_ticks(link_delay.get(("dd", window_id), 0)),
+        "dd_per_window": microseconds_to_ticks(link_delay.get(("decoder_to_decoder", window_id), 0)),
         "output_link_per_window":
             microseconds_to_ticks(link_delay.get((output_path, window_id), 0)),
         "frame_commit":
@@ -172,7 +172,7 @@ def window_points_us(window, frame_record, stage_us: dict, link_delay: dict,
     }
 
 
-def collect_samples(completed, engine, mode: str) -> dict:
+def collect_samples(completed, engine, decode_path: str) -> dict:
     """point -> list of microsecond samples over this shot's decoded windows."""
     transfers = completed.result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
@@ -191,7 +191,7 @@ def collect_samples(completed, engine, mode: str) -> dict:
         stage_us = {record.stage: microseconds_to_ticks(record.end_ticks - record.start_ticks)
                     for record in stage_records}
         points = window_points_us(window, frame_record, stage_us, link_delay,
-                                  qc_send, INPUT_LINK[mode], OUTPUT_LINK[mode])
+                                  qc_send, INPUT_LINK[decode_path], OUTPUT_LINK[decode_path])
         for point, value in points.items():
             samples[point].append(value)
     return samples
@@ -253,7 +253,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
         threshold_calibrator=threshold_calibrator)
     wall_start = time.perf_counter()
     completed = spec.build(verbose=config.trace in ("print", "both"),
-                           io_trace=config.trace_io)
+                           io_trace=config.log_component_io)
     wall_seconds = time.perf_counter() - wall_start
     if completed.result.terminal_status != "complete":
         raise RuntimeError(
@@ -263,7 +263,7 @@ def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
                      _shot_label(config, physical_error_probability, distance,
                                  round_period_us, seed))
 
-    samples = collect_samples(completed, engine, config.mode)
+    samples = collect_samples(completed, engine, config.decode_path)
     decoded_windows = len(samples["service"])
     rounds_this_shot = config.rounds_per_shot.rounds_for(distance)
     load = chain_load(samples, config, distance, round_period_us)

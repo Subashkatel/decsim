@@ -1,1 +1,1 @@
-"""The links: the classical channels of the reaction path and the fabric that wires them."""
+"""The links: the classical channels of the reaction path and their fabric."""

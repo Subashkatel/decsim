@@ -12,7 +12,7 @@ decoder:
   weak:
     algorithm: pymatching
     units: 1
-    unit_buffer_size: null
+    unit_memory_rounds: null
     engine:
       clock: fridge
       fetch_cycles_per_round: 1

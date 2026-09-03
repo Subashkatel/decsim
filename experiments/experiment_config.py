@@ -22,13 +22,13 @@ import yaml
 ALGORITHMS = ("pymatching", "belief_matching")
 AlgorithmCard = Union[float, str]
 
-MODES = ("weak_baseline", "strong_only", "switching")
-# The decoder unit each mode decodes on. A mode's unit must be defined;
+DECODE_PATHS = ("weak_baseline", "strong_only", "switching")
+# The decoder unit each decode_path decodes on. A decode_path's unit must be defined;
 # the other tier's card may be omitted. Switching decodes every window
 # on the weak tier first (its unit is the active one) and requires the
 # strong tier too, for escalation.
-MODE_TIER = {"weak_baseline": "weak", "strong_only": "strong",
-             "switching": "weak"}
+DECODE_PATH_TIER = {"weak_baseline": "weak", "strong_only": "strong",
+                    "switching": "weak"}
 TRACE_MODES = ("off", "print", "file", "both")
 SCHEMES = ("sliding", "parallel", "sandwich", "naive_online")
 # How an idle patch's rounds are charged. Idle rounds are decoder workload
@@ -36,8 +36,12 @@ SCHEMES = ("sliding", "parallel", "sandwich", "naive_online")
 # separate_decode_jobs is the default; ignore is the optimistic card for
 # active-path latency studies; extend_stream folds them into a live stream.
 IDLE_POLICIES = ("separate_decode_jobs", "ignore", "extend_stream")
-LINK_PATHS = ("qc", "cwb", "csb", "wbd", "wsd", "sbd",
-              "dd", "wdo", "do", "oc", "cq")
+LINK_PATHS = ("qpu_to_controller", "controller_to_weak_buffer",
+              "controller_to_strong_buffer", "weak_buffer_to_weak_decoder",
+              "weak_decoder_to_strong_decoder",
+              "strong_buffer_to_strong_decoder", "decoder_to_decoder",
+              "weak_decoder_to_frame", "strong_decoder_to_frame",
+              "frame_to_controller", "controller_to_qpu")
 
 
 @dataclass(frozen=True)
@@ -52,10 +56,10 @@ class LinkCard:
     clock: str
     bits_per_cycle: Optional[float]
     channels: int
-    transfer_overhead_cycles: Optional[float]
+    setup_cycles_per_transfer: Optional[float]
     latency_us: float                     # latency_cycles / clock MHz
     bits_per_us: Optional[float]          # bits_per_cycle x channels x MHz
-    transfer_overhead_us: Optional[float]
+    setup_us_per_transfer: Optional[float]
 
 
 @dataclass(frozen=True)
@@ -75,7 +79,7 @@ class DecoderUnitCard:
     transfer with compute only when two windows fit in its SRAM."""
     algorithm: AlgorithmCard
     units: int
-    unit_buffer_size: Optional[int]
+    unit_memory_rounds: Optional[int]
     engine: EngineCard
 
 
@@ -84,7 +88,7 @@ class DecoderCard:
     """The two tiers of the decoder-switching architecture, as two distinct
     units (Toshio arXiv 2510.25222: lightweight decoders decode constantly,
     a separate accurate decoder is invoked on demand). A config defines the
-    units its mode uses; the mode picks the active one."""
+    units its decode_path uses; the decode_path picks the active one."""
     weak: Optional[DecoderUnitCard]
     strong: Optional[DecoderUnitCard]
 
@@ -154,15 +158,15 @@ class SwitchingCard:
 class BuffersCard:
     """Syndrome-path store capacities, in rounds (None = unbounded).
 
-    ``buffer_0_size`` bounds Buffer 0, the upstream round store; a full
+    ``weak_buffer_rounds`` bounds Buffer 0, the upstream round store; a full
     Buffer 0 refuses the next round and the packing overflow policy decides
-    what happens (fail-stop by default). ``buffer_1_size`` bounds syndrome
+    what happens (fail-stop by default). ``strong_buffer_rounds`` bounds syndrome
     buffer 1, the strong-side store; overflowing it is a hard error.
-    ``packing_workspace_size`` bounds the packing stage's assembly
+    ``packing_rounds_in_flight`` bounds the packing stage's assembly
     workspace, the rounds in flight through the stage at once."""
-    buffer_0_size: Optional[int]
-    buffer_1_size: Optional[int]
-    packing_workspace_size: Optional[int]
+    weak_buffer_rounds: Optional[int]
+    strong_buffer_rounds: Optional[int]
+    packing_rounds_in_flight: Optional[int]
 
 
 @dataclass(frozen=True)
@@ -177,13 +181,13 @@ class WindowingCard:
 class ControllerCard:
     """Controller work per round, in cycles of a named clock domain; the
     loader resolves the microsecond fields once, like the link cards."""
-    measurement_signal_to_classical_bits_cycles: float
-    t_pack_cycles: float
-    instruction_or_decision_to_analog_control_pulse_cycles: float
+    readout_to_bits_cycles: float
+    packing_cycles_per_round: float
+    decision_to_pulse_cycles: float
     clock: str
-    measurement_signal_to_classical_bits_us: float
-    t_pack_us: float
-    instruction_or_decision_to_analog_control_pulse_us: float
+    readout_to_bits_us: float
+    packing_us_per_round: float
+    decision_to_pulse_us: float
 
 
 @dataclass(frozen=True)
@@ -221,8 +225,8 @@ class RoundsCard:
 @dataclass(frozen=True)
 class ExperimentConfig:
     name: str                       # the yaml stem; suffixes the run folder
-    mode: str                       # weak_baseline | strong_only
-    code_task: str                  # stim generator task
+    decode_path: str                       # weak_baseline | strong_only
+    circuit: str                  # stim generator task
     rounds_per_shot: RoundsCard     # fixed count or per-distance ("10d")
     windowing: WindowingCard
     sweep: tuple                    # of SweepBlock
@@ -233,30 +237,30 @@ class ExperimentConfig:
     buffers: BuffersCard
     decoder: DecoderCard
     switching: Optional[SwitchingCard]  # the escalation threshold; present
-                                    # exactly when mode is switching
+                                    # exactly when decode_path is switching
     trace: str                      # off | print | file | both: the engine
                                     # narrator, live on screen and/or one log
                                     # file per shot in the run dir's trace/
-    trace_io: bool                  # add component I/O lines to the trace:
+    log_component_io: bool                  # add component I/O lines to the trace:
                                     # what each store and unit received,
                                     # holds, and emitted
-    verify_windows: str             # none | tesseract: re-decode every
+    check_windows_with: str             # none | tesseract: re-decode every
                                     # window with the Tesseract referee and
                                     # count disagreements (never priced)
     idle_policy: str                # separate_decode_jobs | ignore |
                                     # extend_stream: how an idle patch's
                                     # rounds are charged (inert while the
                                     # workload is a single always-busy op)
-    pauli_frame_commit_us: float    # resolved from pauli_frame.commit_cycles
+    pauli_frame_commit_us: float    # resolved from pauli_frame.write_cycles
                                     # on its named clock
     config_files: tuple             # the yaml files this config was read
                                     # from, nearest first (an extends chain)
 
     @property
     def active_decoder(self) -> DecoderUnitCard:
-        """The unit the mode decodes on: weak_baseline reads decoder.weak,
+        """The unit the decode_path decodes on: weak_baseline reads decoder.weak,
         strong_only reads decoder.strong (present, enforced at load)."""
-        return getattr(self.decoder, MODE_TIER[self.mode])
+        return getattr(self.decoder, DECODE_PATH_TIER[self.decode_path])
 
 
 def _link_card(card: Optional[dict], clocks: dict) -> Optional[LinkCard]:
@@ -267,32 +271,32 @@ def _link_card(card: Optional[dict], clocks: dict) -> Optional[LinkCard]:
     latency_cycles = card["latency_cycles"]
     bits_per_cycle = card["bits_per_cycle"]
     channels = card.get("channels", 1)
-    overhead_cycles = card.get("transfer_overhead_cycles")
+    overhead_cycles = card.get("setup_cycles_per_transfer")
     return LinkCard(
         latency_cycles=latency_cycles, clock=clock,
         bits_per_cycle=bits_per_cycle, channels=channels,
-        transfer_overhead_cycles=overhead_cycles,
+        setup_cycles_per_transfer=overhead_cycles,
         latency_us=latency_cycles / megahertz,
         bits_per_us=(None if bits_per_cycle is None
                      else bits_per_cycle * channels * megahertz),
-        transfer_overhead_us=(None if overhead_cycles is None
+        setup_us_per_transfer=(None if overhead_cycles is None
                               else overhead_cycles / megahertz))
 
 
 def _controller_card(card: dict, clocks: dict) -> ControllerCard:
     clock = card["clock"]
     megahertz = clocks[clock]
-    input_cycles = card["measurement_signal_to_classical_bits_cycles"]
-    pack_cycles = card["t_pack_cycles"]
-    output_cycles = card["instruction_or_decision_to_analog_control_pulse_cycles"]
+    input_cycles = card["readout_to_bits_cycles"]
+    pack_cycles = card["packing_cycles_per_round"]
+    output_cycles = card["decision_to_pulse_cycles"]
     return ControllerCard(
-        measurement_signal_to_classical_bits_cycles=input_cycles,
-        t_pack_cycles=pack_cycles,
-        instruction_or_decision_to_analog_control_pulse_cycles=output_cycles,
+        readout_to_bits_cycles=input_cycles,
+        packing_cycles_per_round=pack_cycles,
+        decision_to_pulse_cycles=output_cycles,
         clock=clock,
-        measurement_signal_to_classical_bits_us=input_cycles / megahertz,
-        t_pack_us=pack_cycles / megahertz,
-        instruction_or_decision_to_analog_control_pulse_us=
+        readout_to_bits_us=input_cycles / megahertz,
+        packing_us_per_round=pack_cycles / megahertz,
+        decision_to_pulse_us=
             output_cycles / megahertz)
 
 
@@ -309,7 +313,7 @@ def _decoder_unit(card: Optional[dict], clocks: dict,
     engine_clock = engine["clock"]
     return DecoderUnitCard(
         algorithm=algorithm, units=card["units"],
-        unit_buffer_size=card["unit_buffer_size"],
+        unit_memory_rounds=card["unit_memory_rounds"],
         engine=EngineCard(
             clock=engine_clock,
             fetch_cycles_per_round=engine["fetch_cycles_per_round"],
@@ -317,8 +321,8 @@ def _decoder_unit(card: Optional[dict], clocks: dict,
             frequency_mhz=clocks[engine_clock]))
 
 
-def _decoder_card(raw_decoder, clocks: dict, mode: str) -> DecoderCard:
-    """The decoder card: one unit card per tier, the mode's tier required."""
+def _decoder_card(raw_decoder, clocks: dict, decode_path: str) -> DecoderCard:
+    """The decoder card: one unit card per tier, the decode_path's tier required."""
     unknown = set(raw_decoder) - {"weak", "strong"}
     if unknown:
         raise ValueError(f"decoder does not know {sorted(unknown)}; its keys "
@@ -326,25 +330,25 @@ def _decoder_card(raw_decoder, clocks: dict, mode: str) -> DecoderCard:
     card = DecoderCard(
         weak=_decoder_unit(raw_decoder.get("weak"), clocks, "weak"),
         strong=_decoder_unit(raw_decoder.get("strong"), clocks, "strong"))
-    tier = MODE_TIER[mode]
+    tier = DECODE_PATH_TIER[decode_path]
     if getattr(card, tier) is None:
-        raise ValueError(f"mode {mode} decodes on decoder.{tier}, "
+        raise ValueError(f"decode_path {decode_path} decodes on decoder.{tier}, "
                          f"which this config does not define")
-    if mode == "switching" and card.strong is None:
-        raise ValueError("mode switching escalates to decoder.strong, "
+    if decode_path == "switching" and card.strong is None:
+        raise ValueError("decode_path switching escalates to decoder.strong, "
                          "which this config does not define")
     return card
 
 
-def _switching_card(raw_switching, mode: str) -> Optional[SwitchingCard]:
-    """The switching card, present exactly when the mode escalates."""
-    if mode != "switching":
+def _switching_card(raw_switching, decode_path: str) -> Optional[SwitchingCard]:
+    """The switching card, present exactly when the decode_path escalates."""
+    if decode_path != "switching":
         if raw_switching is not None:
-            raise ValueError(f"mode {mode} never escalates; drop the "
+            raise ValueError(f"decode_path {decode_path} never escalates; drop the "
                              f"switching card")
         return None
     if raw_switching is None:
-        raise ValueError("mode switching needs a switching card with "
+        raise ValueError("decode_path switching needs a switching card with "
                          "gap_threshold_db")
     unknown = set(raw_switching) - {"gap_threshold_db", "double_window",
                                     "gap_computation", "gap_units",
@@ -378,7 +382,7 @@ def _switching_card(raw_switching, mode: str) -> Optional[SwitchingCard]:
                 f"threshold_table/threshold_column belong to "
                 f"threshold_source table; the source is {threshold_source}")
         if "gap_threshold_db" not in raw_switching:
-            raise ValueError("mode switching needs a switching card with "
+            raise ValueError("decode_path switching needs a switching card with "
                              "gap_threshold_db")
         gap_threshold_db = float(raw_switching["gap_threshold_db"])
         # decibels are 10 log10 of the likelihood ratio; matching weights
@@ -514,7 +518,7 @@ def _rounds_card(value) -> RoundsCard:
 
 
 def _pauli_frame_commit_us(card: dict, clocks: dict) -> float:
-    return card["commit_cycles"] / clocks[card["clock"]]
+    return card["write_cycles"] / clocks[card["clock"]]
 
 
 def _require(value, allowed: tuple, key: str):
@@ -546,7 +550,7 @@ def load_experiment(path) -> ExperimentConfig:
     windowing = raw["windowing"]
     controller = raw["controller"]
     buffers = raw["buffers"]
-    mode = _require(raw["mode"], MODES, "mode")
+    decode_path = _require(raw["decode_path"], DECODE_PATHS, "decode_path")
     clocks = dict(raw["clocks"])
     links = {link_path: _link_card(raw["links"].get(link_path), clocks)
              for link_path in LINK_PATHS}
@@ -557,8 +561,8 @@ def load_experiment(path) -> ExperimentConfig:
                   for index, block in enumerate(raw["sweep"], start=1))
     return ExperimentConfig(
         name=path.stem,
-        mode=mode,
-        code_task=raw["code_task"],
+        decode_path=decode_path,
+        circuit=raw["circuit"],
         rounds_per_shot=_rounds_card(raw["rounds_per_shot"]),
         windowing=WindowingCard(
             scheme=_require(windowing["scheme"], SCHEMES, "windowing.scheme"),
@@ -569,18 +573,18 @@ def load_experiment(path) -> ExperimentConfig:
         clocks=clocks,
         links=links,
         buffers=BuffersCard(
-            buffer_0_size=buffers["buffer_0_size"],
-            buffer_1_size=buffers["buffer_1_size"],
-            packing_workspace_size=buffers["packing_workspace_size"]),
-        decoder=_decoder_card(raw["decoder"], clocks, mode),
-        switching=_switching_card(raw.get("switching"), mode),
+            weak_buffer_rounds=buffers["weak_buffer_rounds"],
+            strong_buffer_rounds=buffers["strong_buffer_rounds"],
+            packing_rounds_in_flight=buffers["packing_rounds_in_flight"]),
+        decoder=_decoder_card(raw["decoder"], clocks, decode_path),
+        switching=_switching_card(raw.get("switching"), decode_path),
         trace=_require(raw_trace, TRACE_MODES, "trace"),
-        trace_io=_require(raw.get("trace_io", False), (True, False),
-                          "trace_io"),
+        log_component_io=_require(raw.get("log_component_io", False), (True, False),
+                          "log_component_io"),
         idle_policy=_require(raw.get("idle_policy", "separate_decode_jobs"),
                              IDLE_POLICIES, "idle_policy"),
-        verify_windows=_require(raw.get("verify_windows", "none"),
-                                ("none", "tesseract"), "verify_windows"),
+        check_windows_with=_require(raw.get("check_windows_with", "none"),
+                                ("none", "tesseract"), "check_windows_with"),
         pauli_frame_commit_us=_pauli_frame_commit_us(raw["pauli_frame"],
                                                       clocks),
         config_files=config_files)

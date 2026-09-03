@@ -41,7 +41,18 @@ def actual_path(channel_settings, setup_ticks=0):
 
 def card(**paths):
     wiring = dict.fromkeys(
-        ("qc", "wbd", "wsd", "sbd", "wdo", "dd", "do", "oc", "cq"), FREE_PATH
+        (
+            "qpu_to_controller",
+            "weak_buffer_to_weak_decoder",
+            "weak_decoder_to_strong_decoder",
+            "strong_buffer_to_strong_decoder",
+            "weak_decoder_to_frame",
+            "decoder_to_decoder",
+            "strong_decoder_to_frame",
+            "frame_to_controller",
+            "controller_to_qpu",
+        ),
+        FREE_PATH,
     )
     wiring.update(paths)
     return link_settings.FabricSettings(profile_name="test", **wiring)
@@ -149,26 +160,28 @@ def test_a_default_payload_with_another_lane_count_is_refused():
 
 
 def test_a_card_without_a_required_path_is_refused():
-    with pytest.raises(ValueError, match="oc is a required link path"):
-        card(oc=None)
+    with pytest.raises(
+        ValueError, match="frame_to_controller is a required link path"
+    ):
+        card(frame_to_controller=None)
 
 
 def test_a_card_lists_its_wired_paths_in_vocabulary_order():
     store_channel = channel("store")
     store_path = actual_path(store_channel)
-    settings = card(csb=store_path)
+    settings = card(controller_to_strong_buffer=store_path)
     wired = settings.wired_paths()
     assert [path.value for path in wired] == [
-        "qc",
-        "wbd",
-        "wsd",
-        "sbd",
-        "wdo",
-        "dd",
-        "do",
-        "oc",
-        "cq",
-        "csb",
+        "qpu_to_controller",
+        "weak_buffer_to_weak_decoder",
+        "weak_decoder_to_strong_decoder",
+        "strong_buffer_to_strong_decoder",
+        "weak_decoder_to_frame",
+        "decoder_to_decoder",
+        "strong_decoder_to_frame",
+        "frame_to_controller",
+        "controller_to_qpu",
+        "controller_to_strong_buffer",
     ]
 
 
@@ -180,7 +193,7 @@ def test_one_channel_name_with_two_settings_is_refused():
     with pytest.raises(
         ValueError, match="channel 'shared' is declared with different"
     ):
-        card(qc=on_five, wbd=on_seven)
+        card(qpu_to_controller=on_five, weak_buffer_to_weak_decoder=on_seven)
 
 
 def test_capacities_built_from_the_same_numbers_compare_equal():

@@ -60,10 +60,10 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
         distance=distance, round_period_us=round_period_us, seed=0)
     completed = spec.build()
 
-    input_path = INPUT_LINK[config.mode]
-    output_path = OUTPUT_LINK[config.mode]
-    store_path = "csb" if config.mode == "strong_only" else "cwb"
-    store_name = ("syndrome buffer 1" if config.mode == "strong_only"
+    input_path = INPUT_LINK[config.decode_path]
+    output_path = OUTPUT_LINK[config.decode_path]
+    store_path = "controller_to_strong_buffer" if config.decode_path == "strong_only" else "controller_to_weak_buffer"
+    store_name = ("syndrome buffer 1" if config.decode_path == "strong_only"
                   else "buffer 0")
 
     transfers = completed.result.link_traffic["transfers"]
@@ -78,10 +78,10 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
             selected[key] = transfer
         return selected
 
-    qc = on("qc", by_round=True)
+    qc = on("qpu_to_controller", by_round=True)
     store = on(store_path, by_round=True)
     input_link = on(input_path, by_round=False)
-    dd = on("dd", by_round=False)
+    dd = on("decoder_to_decoder", by_round=False)
     output_link = on(output_path, by_round=False)
     windows = {window_id: window for (_, window_id), window
                in sorted(completed.window_manager.windows.items())}
@@ -170,11 +170,11 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     timeline_titles = {"weak_baseline": "Weak only path timeline",
                        "strong_only": "Strong only path timeline",
                        "switching": "Switching path timeline"}
-    axis.set_title(timeline_titles.get(config.mode, config.name), pad=22)
+    axis.set_title(timeline_titles.get(config.decode_path, config.name), pad=22)
     commit_rounds = config.windowing.commit_rounds or distance
     buffer_rounds = config.windowing.buffer_rounds or distance
     axis.text(0.5, 1.005,
-              f"d={distance} {config.code_task.split(':')[0]}"
+              f"d={distance} {config.circuit.split(':')[0]}"
               f" · {config.windowing.scheme} windows: commit {commit_rounds},"
               f" buffer {buffer_rounds} rounds"
               f" · rounds every {round_period_us:g} µs"
@@ -228,10 +228,10 @@ def decoder_title(config: ExperimentConfig) -> str:
     """"pymatching decoder (weak)" / "belief matching decoder (strong)".
     A numeric card reads as pymatching: the card prices latency but its
     corrections come from the same MWPM path."""
-    from experiments.experiment_config import MODE_TIER
+    from experiments.experiment_config import DECODE_PATH_TIER
     algorithm = config.active_decoder.algorithm
     name = algorithm if isinstance(algorithm, str) else "pymatching"
-    return f"{name.replace('_', ' ')} decoder ({MODE_TIER[config.mode]})"
+    return f"{name.replace('_', ' ')} decoder ({DECODE_PATH_TIER[config.decode_path]})"
 
 
 def _power_of_ten_label(value: float) -> str:

@@ -824,9 +824,9 @@ class WindowManager:
                 extra_delay = submission.delay_ticks
                 # unit assigned: move the window from the primary store into
                 # its memory, over the primary tier's input link
-                input_path = (LinkPath.WBD
+                input_path = (LinkPath.WEAK_BUFFER_TO_WEAK_DECODER
                               if self.primary_tier is DecoderTier.WEAK
-                              else LinkPath.SBD)
+                              else LinkPath.STRONG_BUFFER_TO_STRONG_DECODER)
 
                 def send_input(on_landed, job=primary_job, bits=payload_bits,
                                extra=extra_delay, path=input_path) -> int:
@@ -1035,9 +1035,9 @@ class WindowManager:
         self._hand_on_boundary(job, res, window, op)
         # the result rides its tier's output link home: WDO for the weak
         # tier, DO for a strong-primary decode
-        output_path = (LinkPath.WDO
+        output_path = (LinkPath.WEAK_DECODER_TO_FRAME
                        if job.request_key.tier is DecoderTier.WEAK
-                       else LinkPath.DO)
+                       else LinkPath.STRONG_DECODER_TO_FRAME)
         self._send_window_transfer(
             output_path, window, op, job.request_key,
             self._result_payload_bits(res, op),
@@ -1159,7 +1159,7 @@ class WindowManager:
         window = self.windows[key]
         op = self._ops[window.op_id]
         self._send_window_transfer(
-            LinkPath.DO, window, op, completion.request_key,
+            LinkPath.STRONG_DECODER_TO_FRAME, window, op, completion.request_key,
             self._result_payload_bits(completion.result, op),
             lambda: self._commit_strong_decode_done(completion))
 

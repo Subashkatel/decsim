@@ -102,7 +102,17 @@ class Run:
 
     def __init__(self, **paths):
         wiring = dict.fromkeys(
-            ("qc", "wbd", "wsd", "sbd", "wdo", "dd", "do", "oc", "cq"),
+            (
+                "qpu_to_controller",
+                "weak_buffer_to_weak_decoder",
+                "weak_decoder_to_strong_decoder",
+                "strong_buffer_to_strong_decoder",
+                "weak_decoder_to_frame",
+                "decoder_to_decoder",
+                "strong_decoder_to_frame",
+                "frame_to_controller",
+                "controller_to_qpu",
+            ),
             FREE_PATH,
         )
         wiring.update(paths)
@@ -174,13 +184,13 @@ def boundary_attribution(window_id):
 
 def test_counters_reconcile_with_the_transfer_list():
     shared = unbounded_path("shared", 300)
-    run = Run(qc=shared, cwb=shared)
+    run = Run(qpu_to_controller=shared, controller_to_weak_buffer=shared)
     first_round = round_attribution(1)
     second_round = round_attribution(2)
     third_round = round_attribution(3)
-    run.send(PATH.QC, 8, 0, first_round)
-    run.send(PATH.CWB, 4, 0, second_round)
-    run.send(PATH.QC, None, 0, third_round)
+    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, first_round)
+    run.send(PATH.CONTROLLER_TO_WEAK_BUFFER, 4, 0, second_round)
+    run.send(PATH.QPU_TO_CONTROLLER, None, 0, third_round)
     run.engine.run()
     snapshot = run.ledger.snapshot()
     counters_by_path = {path.path: path.counters for path in snapshot.paths}
@@ -197,45 +207,52 @@ def test_counters_reconcile_with_the_transfer_list():
         propagation_ticks=900,
         queue_wait_ticks=0,
     )
-    on_qpu_path = counters_by_path[PATH.QC]
-    on_weak_buffer_path = counters_by_path[PATH.CWB]
+    on_qpu_path = counters_by_path[PATH.QPU_TO_CONTROLLER]
+    on_weak_buffer_path = counters_by_path[PATH.CONTROLLER_TO_WEAK_BUFFER]
     assert on_qpu_path.plus(on_weak_buffer_path) == shared_channel.counters
 
 
 def test_the_transfers_are_listed_in_request_order_whatever_delivered_first():
     slow = unbounded_path("slow", 500)
     fast = unbounded_path("fast", 5)
-    run = Run(qc=slow, cwb=fast)
+    run = Run(qpu_to_controller=slow, controller_to_weak_buffer=fast)
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    run.send(PATH.QC, 8, 0, first_round)
-    run.send(PATH.CWB, 8, 1, second_round)
+    run.send(PATH.QPU_TO_CONTROLLER, 8, 0, first_round)
+    run.send(PATH.CONTROLLER_TO_WEAK_BUFFER, 8, 1, second_round)
     run.engine.run()
     snapshot = run.ledger.snapshot()
     paths = [record.path for record in snapshot.transfers]
-    assert paths == [PATH.QC, PATH.CWB]
+    assert paths == [PATH.QPU_TO_CONTROLLER, PATH.CONTROLLER_TO_WEAK_BUFFER]
 
 
 def test_channels_are_aliased_in_the_order_the_paths_first_meet_them():
     shared = unbounded_path("shared", 0)
     own = unbounded_path("own", 0)
-    run = Run(qc=shared, wbd=own, wsd=shared)
+    run = Run(
+        qpu_to_controller=shared,
+        weak_buffer_to_weak_decoder=own,
+        weak_decoder_to_strong_decoder=shared,
+    )
     report = run.ledger.traffic_json_value()
     aliases = {}
     for edge in report["semantic_edges"]:
         aliases[edge["path"]] = edge["physical_alias"]
-    assert aliases["qc"] == "channel-0"
-    assert aliases["wbd"] == "channel-1"
-    assert aliases["wsd"] == "channel-0"
-    assert aliases["sbd"] == "channel-2"
-    assert report["physical_channels"][0]["member_paths"] == ["qc", "wsd"]
+    assert aliases["qpu_to_controller"] == "channel-0"
+    assert aliases["weak_buffer_to_weak_decoder"] == "channel-1"
+    assert aliases["weak_decoder_to_strong_decoder"] == "channel-0"
+    assert aliases["strong_buffer_to_strong_decoder"] == "channel-2"
+    assert report["physical_channels"][0]["member_paths"] == [
+        "qpu_to_controller",
+        "weak_decoder_to_strong_decoder",
+    ]
 
 
 def test_the_traffic_json_carries_the_pinned_keys():
     boundary = unbounded_path("boundary", 0)
-    run = Run(dd=boundary)
+    run = Run(decoder_to_decoder=boundary)
     attribution = boundary_attribution(3)
-    run.send(PATH.DD, 9, 30, attribution)
+    run.send(PATH.DECODER_TO_DECODER, 9, 30, attribution)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     transfer = report["transfers"][0]
@@ -256,16 +273,16 @@ def test_the_traffic_json_carries_the_pinned_keys():
 
 def test_the_traffic_json_writes_a_transfers_timing_and_identity():
     bounded = bounded_path("bounded", 1.0, 10, setup_ticks=50)
-    run = Run(sbd=bounded)
+    run = Run(strong_buffer_to_strong_decoder=bounded)
     attribution = requested_window(3)
-    run.send(PATH.SBD, 4, 100, attribution)
+    run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, attribution)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     transfer = report["transfers"][0]
     operation_json = message.stable_identity_json(OPERATION_ID)
     first_patch_json = message.stable_identity_json(1)
     second_patch_json = message.stable_identity_json(2)
-    assert transfer["path"] == "sbd"
+    assert transfer["path"] == "strong_buffer_to_strong_decoder"
     assert transfer["physical_alias"] == "channel-1"
     assert transfer["payload_bits"] == 4
     assert transfer["payload_selection"] == "actual"
@@ -299,14 +316,14 @@ def test_the_traffic_json_writes_a_transfers_timing_and_identity():
 
 def test_the_traffic_json_itemizes_the_setup_per_path():
     bounded = bounded_path("bounded", 1.0, 10, setup_ticks=50)
-    run = Run(sbd=bounded)
+    run = Run(strong_buffer_to_strong_decoder=bounded)
     attribution = requested_window(3)
-    run.send(PATH.SBD, 4, 100, attribution)
+    run.send(PATH.STRONG_BUFFER_TO_STRONG_DECODER, 4, 100, attribution)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     semantic_edge = report["semantic_edges"][3]
     assert semantic_edge == {
-        "path": "sbd",
+        "path": "strong_buffer_to_strong_decoder",
         "physical_alias": "channel-1",
         "counters": {
             "transfer_count": 1,
@@ -323,7 +340,7 @@ def test_the_traffic_json_itemizes_the_setup_per_path():
 def test_the_traffic_json_writes_a_boundary_relation():
     run = Run()
     attribution = boundary_attribution(3)
-    run.send(PATH.DD, None, 30, attribution)
+    run.send(PATH.DECODER_TO_DECODER, None, 30, attribution)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     relation = report["transfers"][0]["attribution"]["relation"]
@@ -337,39 +354,42 @@ def test_the_traffic_json_writes_a_boundary_relation():
 
 def test_the_reconciliation_row_states_the_sum_and_the_channel():
     shared = unbounded_path("shared", 0)
-    run = Run(qc=shared, wbd=shared)
+    run = Run(qpu_to_controller=shared, weak_buffer_to_weak_decoder=shared)
     first_round = round_attribution(1)
     second_round = round_attribution(2)
-    run.send(PATH.QC, 3, 1, first_round)
-    run.send(PATH.WBD, 5, 1, second_round)
+    run.send(PATH.QPU_TO_CONTROLLER, 3, 1, first_round)
+    run.send(PATH.WEAK_BUFFER_TO_WEAK_DECODER, 5, 1, second_round)
     run.engine.run()
     report = run.ledger.traffic_json_value()
     row = report["reconciliation"][0]
-    assert row["member_paths"] == ["qc", "wbd"]
+    assert row["member_paths"] == [
+        "qpu_to_controller",
+        "weak_buffer_to_weak_decoder",
+    ]
     assert row["reconciles"] is True
     assert row["semantic_counter_sum"] == row["physical_counters"]
     assert row["physical_counters"]["transfer_count"] == 2
     assert row["physical_counters"]["known_payload_bits"] == 8
     assert report["path_order"] == [
-        "qc",
-        "wbd",
-        "wsd",
-        "sbd",
-        "wdo",
-        "dd",
-        "do",
-        "oc",
-        "cq",
+        "qpu_to_controller",
+        "weak_buffer_to_weak_decoder",
+        "weak_decoder_to_strong_decoder",
+        "strong_buffer_to_strong_decoder",
+        "weak_decoder_to_frame",
+        "decoder_to_decoder",
+        "strong_decoder_to_frame",
+        "frame_to_controller",
+        "controller_to_qpu",
     ]
 
 
 def test_an_empty_ledger_reports_every_path_with_zero_counters():
     store = unbounded_path("store", 0)
-    run = Run(csb=store)
+    run = Run(controller_to_strong_buffer=store)
     report = run.ledger.traffic_json_value()
     counts = [
         edge["counters"]["transfer_count"] for edge in report["semantic_edges"]
     ]
     assert counts == [0] * 10
     assert report["transfers"] == []
-    assert report["path_order"][-1] == "csb"
+    assert report["path_order"][-1] == "controller_to_strong_buffer"

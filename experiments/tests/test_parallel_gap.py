@@ -191,5 +191,5 @@ def test_the_pair_closed_loop_matches_the_serial_closed_loop(tmp_path):
         paired_shot = measured_shot(paired, seed)
         assert (paired_shot.logical_failure
                 == serial_shot.logical_failure)
-        assert (paired_shot.link_totals["wsd"]["transfers"]
-                == serial_shot.link_totals["wsd"]["transfers"])
+        assert (paired_shot.link_totals["weak_decoder_to_strong_decoder"]["transfers"]
+                == serial_shot.link_totals["weak_decoder_to_strong_decoder"]["transfers"])

@@ -11,7 +11,7 @@ import pytest
 
 from decsim.config import microseconds_to_ticks
 from decsim.engine import Engine
-from decsim.links.link_profiles import logical_reference_profile, with_controller_to_buffer_edge
+from decsim.links.link_profiles import logical_reference_profile, with_controller_to_weak_buffer_path
 from decsim.message import LinkPath, TransferAttribution
 from decsim.controller.syndrome_packing import SyndromePacketRouteKind, SyndromePacking, _PackingSlotState
 from decsim.observe.link_traffic import TrafficLedger
@@ -54,7 +54,7 @@ class _PublicationSpy:
 
 
 def _wired_profile(*, latency_us=0.25, bandwidth=100.0, source="Q-062 test card"):
-    return with_controller_to_buffer_edge(
+    return with_controller_to_weak_buffer_path(
         logical_reference_profile(),
         latency_us=latency_us,
         aggregate_bits_per_us=bandwidth,
@@ -79,14 +79,14 @@ def test_legacy_cards_leave_optional_cwb_absent_without_changing_edge_identity()
     legacy = logical_reference_profile()
     legacy_edges = {path.value: getattr(legacy, path.value) for path in legacy.wired_paths()}
 
-    extended = with_controller_to_buffer_edge(
+    extended = with_controller_to_weak_buffer_path(
         legacy, latency_us=0.25, aggregate_bits_per_us=100.0, source="Q-062 test card")
 
-    assert legacy.cwb is None
-    assert LinkPath.CWB not in legacy.wired_paths()
-    assert not legacy.build(Engine()).is_wired(LinkPath.CWB)
-    assert extended.cwb is not None
-    assert LinkPath.CWB in extended.wired_paths()
+    assert legacy.controller_to_weak_buffer is None
+    assert LinkPath.CONTROLLER_TO_WEAK_BUFFER not in legacy.wired_paths()
+    assert not legacy.build(Engine()).is_wired(LinkPath.CONTROLLER_TO_WEAK_BUFFER)
+    assert extended.controller_to_weak_buffer is not None
+    assert LinkPath.CONTROLLER_TO_WEAK_BUFFER in extended.wired_paths()
     for path_name, edge in legacy_edges.items():
         assert getattr(extended, path_name) is edge
 
@@ -96,18 +96,18 @@ def test_wired_cwb_card_preserves_positive_numbers_source_and_physical_topology(
     settings = _wired_profile(latency_us=0.25, bandwidth=120.0, source=source)
     _fabric, ledger = _fabric_and_ledger(settings, Engine())
     traffic = ledger.traffic_json_value()
-    cwb_edge = next(edge for edge in traffic["semantic_edges"] if edge["path"] == "cwb")
+    cwb_edge = next(edge for edge in traffic["semantic_edges"] if edge["path"] == "controller_to_weak_buffer")
     channel = next(
         row for row in traffic["physical_channels"]
         if row["physical_alias"] == cwb_edge["physical_alias"]
     )
 
-    assert traffic["path_order"].count("cwb") == 1
-    assert channel["member_paths"] == ["cwb"]
-    assert settings.cwb.channel.propagation_latency_ticks == microseconds_to_ticks(0.25)
-    assert settings.cwb.channel.capacity.aggregate_bits_per_microsecond == 120.0
-    assert settings.cwb.channel.configuration_source == source
-    assert settings.cwb.actual_payload_source == "SyndromeRoundPacket.fragment_size_sum"
+    assert traffic["path_order"].count("controller_to_weak_buffer") == 1
+    assert channel["member_paths"] == ["controller_to_weak_buffer"]
+    assert settings.controller_to_weak_buffer.channel.propagation_latency_ticks == microseconds_to_ticks(0.25)
+    assert settings.controller_to_weak_buffer.channel.capacity.aggregate_bits_per_microsecond == 120.0
+    assert settings.controller_to_weak_buffer.channel.configuration_source == source
+    assert settings.controller_to_weak_buffer.actual_payload_source == "SyndromeRoundPacket.fragment_size_sum"
 
 
 def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
@@ -118,9 +118,9 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
         operation_id=7, patch_ids=(2, 9), window_id=None, first_round=11, last_round=11)
 
     delivered = []
-    model.send(LinkPath.CWB, 300, 10, attribution, delivered.append)
+    model.send(LinkPath.CONTROLLER_TO_WEAK_BUFFER, 300, 10, attribution, delivered.append)
     model.send(
-        LinkPath.CWB, 200, 10,
+        LinkPath.CONTROLLER_TO_WEAK_BUFFER, 200, 10,
         TransferAttribution(
             operation_id=7, patch_ids=(2, 9), window_id=None,
             first_round=12, last_round=12),
@@ -128,7 +128,7 @@ def test_cwb_traffic_uses_exact_round_attribution_payload_and_fifo_delays():
     engine.run()
     first, second = delivered
     traffic = ledger.traffic_json_value()
-    rows = [row for row in traffic["transfers"] if row["path"] == "cwb"]
+    rows = [row for row in traffic["transfers"] if row["path"] == "controller_to_weak_buffer"]
 
     assert first.serialization_ticks == microseconds_to_ticks(3.0)
     assert first.propagation_ticks == microseconds_to_ticks(0.25)
@@ -149,7 +149,7 @@ def test_finite_cwb_bandwidth_charges_serialization_plus_propagation():
     model = _wired_profile(latency_us=0.10, bandwidth=1000.0).build(engine)
 
     reservation = _send(
-        engine, model, LinkPath.CWB, 500,
+        engine, model, LinkPath.CONTROLLER_TO_WEAK_BUFFER, 500,
         TransferAttribution(
             operation_id=1, patch_ids=(0,), window_id=None, first_round=1, last_round=1))
 
@@ -164,12 +164,12 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
 
     delivered = []
     model.send(
-        LinkPath.CWB, 500, 0,
+        LinkPath.CONTROLLER_TO_WEAK_BUFFER, 500, 0,
         TransferAttribution(
             operation_id=1, patch_ids=(0,), window_id=None, first_round=1, last_round=1),
         delivered.append)
     model.send(
-        LinkPath.CWB, 500, 0,
+        LinkPath.CONTROLLER_TO_WEAK_BUFFER, 500, 0,
         TransferAttribution(
             operation_id=1, patch_ids=(0,), window_id=None, first_round=2, last_round=2),
         delivered.append)
@@ -260,7 +260,7 @@ def test_unwired_legacy_packing_delivery_is_immediate_and_has_no_cwb_publication
     assert packing._transmit_window_input_round(slot) is True
     assert receiver.received == [packet]
     assert publication.calls == []
-    assert "cwb" not in ledger.traffic_json_value()["path_order"]
+    assert "controller_to_weak_buffer" not in ledger.traffic_json_value()["path_order"]
 
 
 def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
@@ -283,12 +283,12 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
         ops=[op], d=3, rounds_policy=FixedRounds(8), device=StimDevice(),
         decoder=PresetLatencyDecoder(0.01),
         timing=TimingConfig(round_us=0.02),
-        links=with_controller_to_buffer_edge(
+        links=with_controller_to_weak_buffer_path(
             logical_reference_profile(), latency_us=0.25,
             aggregate_bits_per_us=10_000.0, source="test"),
         seed=0).build()
     delivered = sorted(row["delivery_ticks"] for row in completed.result.link_traffic["transfers"]
-                       if row["path"] == "cwb")
+                       if row["path"] == "controller_to_weak_buffer")
     assert len(delivered) == 8
     gaps = [(b - a) / TICKS_PER_MICROSECOND for a, b in zip(delivered, delivered[1:])]
     assert all(gap == pytest.approx(0.02, abs=1e-3) for gap in gaps), gaps   # first gap adds serialization

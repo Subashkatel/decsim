@@ -231,17 +231,27 @@ _ROUND_OR_WINDOW_RULE = PathRule(
 )
 
 _RULE_BY_PATH = {
-    message.LinkPath.QC: _round_rule(is_required=True),
-    message.LinkPath.CWB: _round_rule(is_required=False),
-    message.LinkPath.WBD: _ROUND_OR_WINDOW_RULE,
-    message.LinkPath.WSD: _window_rule(carries_boundary=False),
-    message.LinkPath.SBD: _window_rule(carries_boundary=False),
-    message.LinkPath.WDO: _window_rule(carries_boundary=False),
-    message.LinkPath.DD: _window_rule(carries_boundary=True),
-    message.LinkPath.DO: _window_rule(carries_boundary=False),
-    message.LinkPath.OC: _OPERATION_RULE,
-    message.LinkPath.CQ: _OPERATION_RULE,
-    message.LinkPath.CSB: _round_rule(is_required=False),
+    message.LinkPath.QPU_TO_CONTROLLER: _round_rule(is_required=True),
+    message.LinkPath.CONTROLLER_TO_WEAK_BUFFER: _round_rule(is_required=False),
+    message.LinkPath.WEAK_BUFFER_TO_WEAK_DECODER: _ROUND_OR_WINDOW_RULE,
+    message.LinkPath.WEAK_DECODER_TO_STRONG_DECODER: _window_rule(
+        carries_boundary=False
+    ),
+    message.LinkPath.STRONG_BUFFER_TO_STRONG_DECODER: _window_rule(
+        carries_boundary=False
+    ),
+    message.LinkPath.WEAK_DECODER_TO_FRAME: _window_rule(
+        carries_boundary=False
+    ),
+    message.LinkPath.DECODER_TO_DECODER: _window_rule(carries_boundary=True),
+    message.LinkPath.STRONG_DECODER_TO_FRAME: _window_rule(
+        carries_boundary=False
+    ),
+    message.LinkPath.FRAME_TO_CONTROLLER: _OPERATION_RULE,
+    message.LinkPath.CONTROLLER_TO_QPU: _OPERATION_RULE,
+    message.LinkPath.CONTROLLER_TO_STRONG_BUFFER: _round_rule(
+        is_required=False
+    ),
 }
 
 

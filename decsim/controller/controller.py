@@ -166,7 +166,7 @@ class Controller:
             if self.links is None:
                 deliver(payload)
                 return
-            self.links.send(LinkPath.CQ, None, self.engine.now, attribution,
+            self.links.send(LinkPath.CONTROLLER_TO_QPU, None, self.engine.now, attribution,
                             delivered)
 
         self.engine.schedule(output_delay_ticks, output_ready,
@@ -306,5 +306,5 @@ class Controller:
         if self.links is None:
             self.engine.schedule(0, at_controller, label="pauli frame->controller")
             return
-        self.links.send(LinkPath.OC, None, self.engine.now, attribution,
+        self.links.send(LinkPath.FRAME_TO_CONTROLLER, None, self.engine.now, attribution,
                         at_controller)

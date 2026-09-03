@@ -1,7 +1,7 @@
 # The strong decoder baseline. Every key is documented in reference.yaml.
 
-mode: strong_only
-code_task: surface_code:rotated_memory_z
+decode_path: strong_only
+circuit: surface_code:rotated_memory_z
 rounds_per_shot: 10d
 
 windowing:
@@ -33,37 +33,37 @@ sweep:
 
 controller:
   clock: fridge
-  measurement_signal_to_classical_bits_cycles: 0
-  instruction_or_decision_to_analog_control_pulse_cycles: 0
-  t_pack_cycles: 0
+  readout_to_bits_cycles: 0
+  decision_to_pulse_cycles: 0
+  packing_cycles_per_round: 0
 
 clocks:
   fridge: 250.0
   room: 250.0
 
 links:
-  qc:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-  cwb: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
-  csb: {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  sbd: {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  dd:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  do:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
-  wbd: null
-  wdo: null
-  wsd: null
-  oc:  null
-  cq:  null
+  qpu_to_controller:  {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_weak_buffer: {latency_cycles: 1, clock: fridge, bits_per_cycle: null}
+  controller_to_strong_buffer: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  strong_buffer_to_strong_decoder: {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  decoder_to_decoder:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  strong_decoder_to_frame:  {latency_cycles: 1, clock: room, bits_per_cycle: null}
+  weak_buffer_to_weak_decoder: null
+  weak_decoder_to_frame: null
+  weak_decoder_to_strong_decoder: null
+  frame_to_controller:  null
+  controller_to_qpu:  null
 
 buffers:
-  buffer_0_size: null
-  buffer_1_size: null
-  packing_workspace_size: null
+  weak_buffer_rounds: null
+  strong_buffer_rounds: null
+  packing_rounds_in_flight: null
 
 decoder:
   strong:
     algorithm: belief_matching
     units: 1
-    unit_buffer_size: null
+    unit_memory_rounds: null
     engine:
       clock: room
       fetch_cycles_per_round: 1
@@ -71,9 +71,9 @@ decoder:
 
 pauli_frame:
   clock: fridge
-  commit_cycles: 1
+  write_cycles: 1
 
 idle_policy: separate_decode_jobs
-verify_windows: none
-trace_io: false
+check_windows_with: none
+log_component_io: false
 trace: off

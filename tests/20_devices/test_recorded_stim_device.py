@@ -95,7 +95,7 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
                         decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)), seed=0).build()
     bits_by_round = defaultdict(int)
     for record in completed.traffic_ledger.snapshot().transfers:
-        if record.path is LinkPath.QC:
+        if record.path is LinkPath.QPU_TO_CONTROLLER:
             bits_by_round[record.attribution.first_round] += record.transfer.payload_bits
     stabilizers, data = distance * distance - 1, distance * distance
     assert bits_by_round == {**{r: stabilizers for r in range(1, rounds)}, rounds: stabilizers + data}

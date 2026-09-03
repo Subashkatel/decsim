@@ -54,54 +54,66 @@ def logical_reference_profile() -> settings.FabricSettings:
     II sizes.
     """
     qpu_to_controller = _actual_path(
-        "qc", 0.15, "Khalid qc effective time", "SyndromePayload.size_bits"
+        "qpu_to_controller",
+        0.15,
+        "Khalid qc effective time",
+        "SyndromePayload.size_bits",
     )
     weak_buffer_to_weak_decoder = _actual_path(
-        "wbd",
+        "weak_buffer_to_weak_decoder",
         2.0,
         "Khalid cd latency; logical_reference integrated weak-input transfer",
         ROUND_PAYLOAD_SOURCE,
     )
     weak_decoder_to_strong_decoder = _actual_path(
-        "wsd",
+        "weak_decoder_to_strong_decoder",
         0.5,
         "repository weak-to-strong model choice",
         "switching decision payload_bits",
     )
     strong_buffer_to_strong_decoder = _actual_path(
-        "sbd",
+        "strong_buffer_to_strong_decoder",
         2.0,
         "Khalid cd mapped to the strong input",
         "DecodeJob.retained_payload_size_bits",
     )
     weak_decoder_to_frame = _actual_path(
-        "wdo",
+        "weak_decoder_to_frame",
         1.0,
         "Khalid do latency mapped to the weak output",
         RESULT_PAYLOAD_SOURCE,
     )
     decoder_to_decoder = _default_path(
-        "dd", 0.5, 100, "Khalid dd representative aggregate transaction"
+        "decoder_to_decoder",
+        0.5,
+        100,
+        "Khalid dd representative aggregate transaction",
     )
     strong_decoder_to_frame = _actual_path(
-        "do", 1.0, "Khalid do latency", RESULT_PAYLOAD_SOURCE
+        "strong_decoder_to_frame",
+        1.0,
+        "Khalid do latency",
+        RESULT_PAYLOAD_SOURCE,
     )
     frame_to_controller = _default_path(
-        "oc", 4.0, BUS_WORD_BITS, BUS_WORD_SOURCE
+        "frame_to_controller", 4.0, BUS_WORD_BITS, BUS_WORD_SOURCE
     )
     controller_to_qpu = _default_path(
-        "cq", 0.15, INSTRUCTION_WORD_BITS, INSTRUCTION_WORD_SOURCE
+        "controller_to_qpu",
+        0.15,
+        INSTRUCTION_WORD_BITS,
+        INSTRUCTION_WORD_SOURCE,
     )
     return settings.FabricSettings(
-        qc=qpu_to_controller,
-        wbd=weak_buffer_to_weak_decoder,
-        wsd=weak_decoder_to_strong_decoder,
-        sbd=strong_buffer_to_strong_decoder,
-        wdo=weak_decoder_to_frame,
-        dd=decoder_to_decoder,
-        do=strong_decoder_to_frame,
-        oc=frame_to_controller,
-        cq=controller_to_qpu,
+        qpu_to_controller=qpu_to_controller,
+        weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
+        weak_decoder_to_strong_decoder=weak_decoder_to_strong_decoder,
+        strong_buffer_to_strong_decoder=strong_buffer_to_strong_decoder,
+        weak_decoder_to_frame=weak_decoder_to_frame,
+        decoder_to_decoder=decoder_to_decoder,
+        strong_decoder_to_frame=strong_decoder_to_frame,
+        frame_to_controller=frame_to_controller,
+        controller_to_qpu=controller_to_qpu,
         profile_name="logical_reference",
     )
 
@@ -148,7 +160,7 @@ def bandwidth_limited_profile(
     )
     provisioning = _Provisioning(capacity_scale)
     qpu_to_controller = provisioning.path(
-        "qc",
+        "qpu_to_controller",
         0.15,
         syndrome_bits_per_round,
         round_bits_per_us,
@@ -156,7 +168,7 @@ def bandwidth_limited_profile(
         "SyndromePayload.size_bits",
     )
     weak_buffer_to_weak_decoder = provisioning.path(
-        "wbd",
+        "weak_buffer_to_weak_decoder",
         2.0,
         weak_window_bits,
         weak_window_bits_per_us,
@@ -166,7 +178,7 @@ def bandwidth_limited_profile(
         ROUND_PAYLOAD_SOURCE,
     )
     weak_decoder_to_strong_decoder = provisioning.path(
-        "wsd",
+        "weak_decoder_to_strong_decoder",
         0.5,
         1,
         one_per_region,
@@ -174,7 +186,7 @@ def bandwidth_limited_profile(
         "switching decision payload_bits",
     )
     strong_buffer_to_strong_decoder = provisioning.path(
-        "sbd",
+        "strong_buffer_to_strong_decoder",
         2.0,
         strong_window_bits,
         strong_window_bits_per_us,
@@ -184,7 +196,7 @@ def bandwidth_limited_profile(
         "DecodeJob.retained_payload_size_bits",
     )
     weak_decoder_to_frame = provisioning.path(
-        "wdo",
+        "weak_decoder_to_frame",
         1.0,
         1,
         one_per_region,
@@ -192,7 +204,7 @@ def bandwidth_limited_profile(
         RESULT_PAYLOAD_SOURCE,
     )
     decoder_to_decoder = provisioning.path(
-        "dd",
+        "decoder_to_decoder",
         0.5,
         100,
         boundary_bits_per_us,
@@ -200,7 +212,7 @@ def bandwidth_limited_profile(
         None,
     )
     strong_decoder_to_frame = provisioning.path(
-        "do",
+        "strong_decoder_to_frame",
         1.0,
         1,
         one_per_region,
@@ -208,7 +220,7 @@ def bandwidth_limited_profile(
         RESULT_PAYLOAD_SOURCE,
     )
     frame_to_controller = provisioning.path(
-        "oc",
+        "frame_to_controller",
         4.0,
         BUS_WORD_BITS,
         bus_word_bits_per_us,
@@ -216,7 +228,7 @@ def bandwidth_limited_profile(
         None,
     )
     controller_to_qpu = provisioning.path(
-        "cq",
+        "controller_to_qpu",
         0.15,
         INSTRUCTION_WORD_BITS,
         instruction_word_bits_per_us,
@@ -224,15 +236,15 @@ def bandwidth_limited_profile(
         None,
     )
     return settings.FabricSettings(
-        qc=qpu_to_controller,
-        wbd=weak_buffer_to_weak_decoder,
-        wsd=weak_decoder_to_strong_decoder,
-        sbd=strong_buffer_to_strong_decoder,
-        wdo=weak_decoder_to_frame,
-        dd=decoder_to_decoder,
-        do=strong_decoder_to_frame,
-        oc=frame_to_controller,
-        cq=controller_to_qpu,
+        qpu_to_controller=qpu_to_controller,
+        weak_buffer_to_weak_decoder=weak_buffer_to_weak_decoder,
+        weak_decoder_to_strong_decoder=weak_decoder_to_strong_decoder,
+        strong_buffer_to_strong_decoder=strong_buffer_to_strong_decoder,
+        weak_decoder_to_frame=weak_decoder_to_frame,
+        decoder_to_decoder=decoder_to_decoder,
+        strong_decoder_to_frame=strong_decoder_to_frame,
+        frame_to_controller=frame_to_controller,
+        controller_to_qpu=controller_to_qpu,
         profile_name="bandwidth_limited",
     )
 
@@ -241,7 +253,10 @@ def with_transfer_overhead(
     profile: settings.FabricSettings,
     *,
     overhead_us: float,
-    paths: tuple = ("wbd", "sbd"),
+    paths: tuple = (
+        "weak_buffer_to_weak_decoder",
+        "strong_buffer_to_strong_decoder",
+    ),
 ) -> settings.FabricSettings:
     """The profile with a fixed per-transfer setup cost on the listed paths.
 
@@ -265,47 +280,51 @@ def with_transfer_overhead(
     )
 
 
-def with_csb_edge(
+def with_controller_to_strong_buffer_path(
     profile: settings.FabricSettings,
     *,
     latency_us: float,
     aggregate_bits_per_us: Optional[float],
     source: str,
 ) -> settings.FabricSettings:
-    """The profile with the optional priced csb hop to syndrome buffer 1.
+    """The profile with the optional priced controller_to_strong_buffer hop.
 
     The caller supplies both experiment-card numbers and their provenance;
     aggregate_bits_per_us of None means unbounded bandwidth (the hop
     charges propagation latency only); a profile without this hop stores
     rounds in syndrome buffer 1 for free.
     """
-    store_path = _store_path("csb", latency_us, aggregate_bits_per_us, source)
+    store_path = _store_path(
+        "controller_to_strong_buffer", latency_us, aggregate_bits_per_us, source
+    )
     return dataclasses.replace(
         profile,
-        csb=store_path,
-        profile_name=f"{profile.profile_name}+priced_csb",
+        controller_to_strong_buffer=store_path,
+        profile_name=f"{profile.profile_name}+priced_controller_to_strong_buffer",
     )
 
 
-def with_controller_to_buffer_edge(
+def with_controller_to_weak_buffer_path(
     profile: settings.FabricSettings,
     *,
     latency_us: float,
     aggregate_bits_per_us: Optional[float],
     source: str,
 ) -> settings.FabricSettings:
-    """The profile with the optional priced cwb hop to syndrome buffer 0.
+    """The profile with the optional priced controller_to_weak_buffer hop.
 
     The caller supplies both experiment-card numbers and their provenance;
     aggregate_bits_per_us of None means unbounded bandwidth (the hop
     charges propagation latency only); a profile without this hop
     publishes rounds to buffer 0 for free.
     """
-    store_path = _store_path("cwb", latency_us, aggregate_bits_per_us, source)
+    store_path = _store_path(
+        "controller_to_weak_buffer", latency_us, aggregate_bits_per_us, source
+    )
     return dataclasses.replace(
         profile,
-        cwb=store_path,
-        profile_name=f"{profile.profile_name}+priced_cwb",
+        controller_to_weak_buffer=store_path,
+        profile_name=f"{profile.profile_name}+priced_controller_to_weak_buffer",
     )
 
 

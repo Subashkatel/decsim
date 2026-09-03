@@ -159,9 +159,9 @@ def test_online_source_reproduces_its_decisions(tmp_path):
     first = run_sweep(config, None)
     second = run_sweep(config, None)
 
-    first_links = [measurement.link_totals["wsd"]["transfers"]
+    first_links = [measurement.link_totals["weak_decoder_to_strong_decoder"]["transfers"]
                    for measurement in first]
-    second_links = [measurement.link_totals["wsd"]["transfers"]
+    second_links = [measurement.link_totals["weak_decoder_to_strong_decoder"]["transfers"]
                     for measurement in second]
     assert first_links == second_links
     assert ([m.logical_failure for m in first]

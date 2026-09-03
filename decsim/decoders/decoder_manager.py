@@ -937,7 +937,7 @@ class DecoderManager:
             # the primary job's window identity; the landing is the
             # sibling's own
             return window_manager._send_job_transfer(
-                LinkPath.WBD, primary, payload_bits=payload_bits,
+                LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, primary, payload_bits=payload_bits,
                 on_delivered=on_landed)
 
         self.engine.log(self.log_name,

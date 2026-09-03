@@ -136,7 +136,7 @@ class BoundaryCourier:
                     source_request_key, source_key, dep_key,
                     version, delivery_version))
             self.wm.links.send(
-                LinkPath.DD, None, self.wm.engine.now, attribution,
+                LinkPath.DECODER_TO_DECODER, None, self.wm.engine.now, attribution,
                 lambda _transfer, dk=dep_key, so=op.id, bd=boundary,
                        sk=source_key, v=version, dv=delivery_version:
                     self._receive_boundary(dk, so, bd, sk, v, dv))

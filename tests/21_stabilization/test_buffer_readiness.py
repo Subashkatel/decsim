@@ -34,7 +34,7 @@ def test_weak_only_pipeline_arithmetic(fabric):
 
 def test_unpriced_cwb_publishes_at_packing(fabric):
     """Without the CWB edge the round is public at packing completion."""
-    completed = fabric["weak_only_run"](rounds=6, cwb=False)
+    completed = fabric["weak_only_run"](rounds=6, controller_to_weak_buffer=False)
     window = completed.window_manager.windows[(1, 0)]
     assert window.t_first_round == microseconds_to_ticks(1 + 2 + 3)
     assert window.t_data_complete == microseconds_to_ticks(6 + 2 + 3)
@@ -73,7 +73,7 @@ def test_weak_primary_readiness_is_buffer0_not_sb1(fabric):
     buffer0_complete = fabric["log_index"](
         completed.engine.log_lines, "round 6 of mem1 arrived")
     sb1_landing = fabric["log_index"](
-        completed.engine.log_lines, "received round 6 of op 1 from csb")
+        completed.engine.log_lines, "received round 6 of op 1 from controller_to_strong_buffer")
     assert buffer0_complete < sb1_landing
 
 
@@ -102,8 +102,8 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
     link_traffic = completed.result.link_traffic
     transfers_by_path = {edge["path"]: edge["counters"]["transfer_count"]
                          for edge in link_traffic["semantic_edges"]}
-    assert transfers_by_path["cwb"] == 0
-    assert transfers_by_path["csb"] == 6
+    assert transfers_by_path["controller_to_weak_buffer"] == 0
+    assert transfers_by_path["controller_to_strong_buffer"] == 6
     buffer_0 = completed.window_manager.syndrome_buffer.metrics()
     assert buffer_0.allocations_total == 0
     (record,) = completed.pauli_frame.snapshot().records
@@ -156,7 +156,7 @@ def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
     completed = RunSpec(
         ops=[fabric["memory_op"](1)], d=3, rounds_policy=FixedRounds(12),
         decoder=PresetLatencyDecoder(declared["weak"]),
-        links=fabric["declared_profile"](cwb=True, csb=False),
+        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False),
         timing=fabric["declared_timing"](),
         syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=7),
         pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]),

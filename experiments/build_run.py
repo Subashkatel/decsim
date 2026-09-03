@@ -23,8 +23,8 @@ from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.decoders.weak_strong_switching import StrongOnly
 from decsim.links.link_profiles import (logical_reference_profile,
-                                        with_controller_to_buffer_edge,
-                                        with_csb_edge)
+                                        with_controller_to_weak_buffer_path,
+                                        with_controller_to_strong_buffer_path)
 from decsim.links.settings import (CapacitySettings, ChannelSettings,
                                    QuantityBasis)
 from decsim.message import Operation
@@ -55,7 +55,7 @@ def memory_circuit(config: ExperimentConfig, physical_error_probability: float,
     probability on all four of Stim's noise channels (as Stim's guide does)."""
     p = physical_error_probability
     return stim.Circuit.generated(
-        config.code_task, rounds=config.rounds_per_shot.rounds_for(distance),
+        config.circuit, rounds=config.rounds_per_shot.rounds_for(distance),
         distance=distance,
         after_clifford_depolarization=p, before_round_data_depolarization=p,
         before_measure_flip_probability=p, after_reset_flip_probability=p)
@@ -95,7 +95,7 @@ def decoder_engine(config: ExperimentConfig) -> DecoderEngine:
     unit, wrapped so every weak decode carries its complementary gap."""
     unit = config.active_decoder
     algorithm = _unit_algorithm(unit)
-    if config.mode == "switching":
+    if config.decode_path == "switching":
         from decsim.confidence.complementary import (
             ComplementaryGapMetricFactory)
         from decsim.confidence.decoder import (
@@ -117,7 +117,7 @@ def decoder_engine(config: ExperimentConfig) -> DecoderEngine:
         else:
             algorithm = SoftOutputDecoder(algorithm,
                                           ComplementaryGapMetricFactory())
-    if config.verify_windows == "tesseract":
+    if config.check_windows_with == "tesseract":
         algorithm = TesseractCheckedDecoder(algorithm)
     return _unit_engine(unit, algorithm)
 
@@ -218,14 +218,14 @@ def link_model(config: ExperimentConfig):
     source = f"experiments/configs/{config.name}.yaml links"
     cards = dict(config.links)
     profile = logical_reference_profile()
-    cwb = cards.pop("cwb")
+    cwb = cards.pop("controller_to_weak_buffer")
     if cwb is not None:
-        profile = with_controller_to_buffer_edge(
+        profile = with_controller_to_weak_buffer_path(
             profile, latency_us=cwb.latency_us,
             aggregate_bits_per_us=cwb.bits_per_us, source=source)
-    csb = cards.pop("csb")
+    csb = cards.pop("controller_to_strong_buffer")
     if csb is not None:
-        profile = with_csb_edge(
+        profile = with_controller_to_strong_buffer_path(
             profile, latency_us=csb.latency_us,
             aggregate_bits_per_us=csb.bits_per_us, source=source)
     edge_overrides = {}
@@ -240,8 +240,8 @@ def link_model(config: ExperimentConfig):
         channel = ChannelSettings(path, microseconds_to_ticks(card.latency_us),
                                   capacity, source)
         setup_ticks = 0
-        if card.transfer_overhead_us:
-            setup_ticks = microseconds_to_ticks(card.transfer_overhead_us)
+        if card.setup_us_per_transfer:
+            setup_ticks = microseconds_to_ticks(card.setup_us_per_transfer)
         edge_overrides[path] = replace(getattr(profile, path), channel=channel,
                                        setup_ticks=setup_ticks)
     # The config prices readout classification on its own line, so its QC card is link
@@ -268,10 +268,10 @@ def idle_policy(config: ExperimentConfig):
 
 
 def decoder_memory(config: ExperimentConfig):
-    unit_buffer_size = config.active_decoder.unit_buffer_size
-    if unit_buffer_size is None:
+    unit_memory_rounds = config.active_decoder.unit_memory_rounds
+    if unit_memory_rounds is None:
         return None
-    return DecoderMemoryConfig({"default": unit_buffer_size})
+    return DecoderMemoryConfig({"default": unit_memory_rounds})
 
 
 def syndrome_buffering(config: ExperimentConfig) -> SyndromeBufferingConfig:
@@ -279,9 +279,9 @@ def syndrome_buffering(config: ExperimentConfig) -> SyndromeBufferingConfig:
     (rounds; None = unbounded)."""
     buffers = config.buffers
     return SyndromeBufferingConfig(
-        upstream_packet_slots=buffers.buffer_0_size,
-        sb1_packet_slots=buffers.buffer_1_size,
-        packing_assembly_slots=buffers.packing_workspace_size)
+        upstream_packet_slots=buffers.weak_buffer_rounds,
+        sb1_packet_slots=buffers.strong_buffer_rounds,
+        packing_assembly_slots=buffers.packing_rounds_in_flight)
 
 
 def resolve_gap_threshold_nats(config: ExperimentConfig, *,
@@ -339,7 +339,7 @@ def online_threshold_calibrator(config: ExperimentConfig, *,
     by every shot of the point so the controller learns over the
     point's whole window stream. Seeded by the point's identity, so a
     rerun reproduces the same audit draws."""
-    if config.mode != "switching" or (
+    if config.decode_path != "switching" or (
             config.switching.threshold_source != "online"):
         return None
     import random
@@ -372,9 +372,9 @@ def escalation_policy(config: ExperimentConfig, *,
     (the paper's Sec. III A protocol without the parallel head start);
     the threshold is the resolved sweep-point value, and an online
     calibrator (threshold_source online) owns it from there."""
-    if config.mode == "strong_only":
+    if config.decode_path == "strong_only":
         return StrongOnly()
-    if config.mode == "switching":
+    if config.decode_path == "switching":
         from decsim.confidence.complementary import COMPLEMENTARY_GAP_SOURCE
         from decsim.decoders.weak_strong_switching import Switching
         if gap_threshold_nats is None:
@@ -398,13 +398,13 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
     timing = TimingConfig(
         round_us=round_period_us,
         measurement_signal_to_classical_bits_us=
-            config.controller.measurement_signal_to_classical_bits_us,
-        t_pack_us=config.controller.t_pack_us,
+            config.controller.readout_to_bits_us,
+        t_pack_us=config.controller.packing_us_per_round,
         instruction_or_decision_to_analog_control_pulse_us=
-            config.controller.instruction_or_decision_to_analog_control_pulse_us)
+            config.controller.decision_to_pulse_us)
     scheme = WINDOWING_SCHEMES[config.windowing.scheme]()
     routing = {"decoder": engine, "num_units": config.active_decoder.units}
-    if config.mode == "switching":
+    if config.decode_path == "switching":
         # Two units behind one router; the strong pool serves escalated
         # jobs (hint "strong"). Switching requires the lookahead terminal
         # policy: the literature-exact flush has no trailing tail context.
@@ -448,7 +448,7 @@ def build_run(config: ExperimentConfig, *, physical_error_probability: float,
                     config,
                     physical_error_probability=physical_error_probability,
                     distance=distance)
-                if config.mode == "switching" else None),
+                if config.decode_path == "switching" else None),
             threshold_calibrator=threshold_calibrator),
         idle_policy=idle_policy(config),
         pauli_frame=PauliFrameConfig(commit_microseconds=config.pauli_frame_commit_us),

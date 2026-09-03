@@ -1,7 +1,7 @@
 """Syndrome buffer 1: the room-side round store that feeds the strong tier.
 
 Every packed round is written out of the fridge exactly once over the
-csb hop (priced when the card wires ``LinkPath.CSB``, free
+csb hop (priced when the card wires ``LinkPath.CONTROLLER_TO_STRONG_BUFFER``, free
 otherwise) and stored here in parallel with its Buffer 0 publication.
 Strong jobs point into this store and their SBD input is assembled from it,
 so the two-sided strong context lives at room temperature and Buffer 0
@@ -75,7 +75,7 @@ class SyndromeBuffer1:
                     f"{self.capacity_rounds}")
         self._written.add(identity)
         self.copied_bits_total += packet_bits or 0
-        if not self.links.is_wired(LinkPath.CSB):
+        if not self.links.is_wired(LinkPath.CONTROLLER_TO_STRONG_BUFFER):
             self._store(packet)
             return
         self._in_flight_writes += 1
@@ -84,7 +84,7 @@ class SyndromeBuffer1:
             self._in_flight_writes -= 1
             self._store(packet)
 
-        self.links.send(LinkPath.CSB, packet_bits, self.engine.now,
+        self.links.send(LinkPath.CONTROLLER_TO_STRONG_BUFFER, packet_bits, self.engine.now,
                         attribution, land)
 
     def _store(self, packet: SyndromeRoundPacket) -> None:
@@ -105,7 +105,7 @@ class SyndromeBuffer1:
         self.engine.log_io(
             "SyndromeBuffer1",
             lambda: f"received round {packet.round_index} of op {operation_id} "
-                    f"from csb; {packet.defects_text()}; holds "
+                    f"from controller_to_strong_buffer; {packet.defects_text()}; holds "
                     f"{self.store.held_rounds_description()}")
         if self.on_round_stored is not None:
             self.on_round_stored(operation_id)
@@ -178,7 +178,7 @@ class SyndromeBuffer1:
         if self._in_flight_writes:
             raise RuntimeError(
                 f"syndrome buffer 1 ended with {self._in_flight_writes} "
-                f"csb writes in flight")
+                f"controller_to_strong_buffer writes in flight")
         snapshot = self.store.snapshot()
         if snapshot.occupancy:
             raise RuntimeError(

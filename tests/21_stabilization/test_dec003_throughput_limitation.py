@@ -35,14 +35,14 @@ SERVICE_US = 100.0
 INITIATION_US = 1.0
 
 
-def _backlog_run(fabric, *, decoder, n_ops=4, csb=False, escalation_policy=None):
+def _backlog_run(fabric, *, decoder, n_ops=4, controller_to_strong_buffer=False, escalation_policy=None):
     """n_ops parallel one-window ops, one default unit."""
     spec = RunSpec(
         ops=[fabric["memory_op"](op_id) for op_id in range(1, n_ops + 1)],
         d=3, rounds_policy=FixedRounds(3),
         decoder=decoder,
         escalation_policy=escalation_policy,
-        links=fabric["declared_profile"](cwb=True, csb=csb),
+        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=controller_to_strong_buffer),
         timing=fabric["declared_timing"](),
         pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
         seed=0)
@@ -63,7 +63,7 @@ def test_unit_occupancy_equals_service_latency(fabric):
     plain model's meaning, not a bug."""
     windows = _windows(_backlog_run(
         fabric, decoder=PresetLatencyDecoder(SERVICE_US)))
-    wbd = fabric["DECLARED_US"]["wbd"]
+    wbd = fabric["DECLARED_US"]["weak_buffer_to_weak_decoder"]
 
     assert [window.t_data_complete for window in windows] == [microseconds_to_ticks(12)] * 4
     assert [window.t_done for window in windows] == \
@@ -94,7 +94,7 @@ def test_pipelined_unit_starts_every_initiation_interval(fabric):
     decoder = PipelinedDecoder(PresetLatencyDecoder(SERVICE_US), INITIATION_US)
     completed = _backlog_run(fabric, decoder=decoder, n_ops=6)
     windows = _windows(completed, n_ops=6)
-    wbd = fabric["DECLARED_US"]["wbd"]
+    wbd = fabric["DECLARED_US"]["weak_buffer_to_weak_decoder"]
     landing = microseconds_to_ticks(12 + wbd)                                  # inputs land at 17
 
     assert [window.t_dispatch for window in windows] == [microseconds_to_ticks(12)] * 6
@@ -135,7 +135,7 @@ def test_pipeline_depth_bounds_in_flight_work(fabric):
     decoder = PipelinedDecoder(PresetLatencyDecoder(SERVICE_US), INITIATION_US,
                                pipeline_depth=2)
     windows = _windows(_backlog_run(fabric, decoder=decoder))
-    wbd = fabric["DECLARED_US"]["wbd"]
+    wbd = fabric["DECLARED_US"]["weak_buffer_to_weak_decoder"]
 
     assert [window.t_done for window in windows] == \
         [microseconds_to_ticks(117), microseconds_to_ticks(118), microseconds_to_ticks(217), microseconds_to_ticks(222)]
@@ -165,7 +165,7 @@ def test_pipelined_strong_primary_is_the_plain_path_and_works(fabric):
     pipelined model serves them: one window, sbd 6 lands at 21 us, done
     at 121 us."""
     decoder = PipelinedDecoder(PresetLatencyDecoder(SERVICE_US), INITIATION_US)
-    completed = _backlog_run(fabric, decoder=decoder, n_ops=1, csb=True,
+    completed = _backlog_run(fabric, decoder=decoder, n_ops=1, controller_to_strong_buffer=True,
                              escalation_policy=StrongOnly())
     window = completed.window_manager.windows[(1, 0)]
     assert window.t_done == microseconds_to_ticks(21 + SERVICE_US)
@@ -196,7 +196,7 @@ def test_pipelined_escalation_route_refuses(fabric):
         escalation_policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE),
         boundary_policy=Held(),
         unit_pools={"default": 1, "strong": 1},
-        links=fabric["declared_profile"](cwb=True, csb=True),
+        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=True),
         timing=fabric["declared_timing"](),
         pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
         seed=0)

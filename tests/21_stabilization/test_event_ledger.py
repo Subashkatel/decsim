@@ -112,10 +112,10 @@ def test_release_links_to_the_blocking_operations_commit(fabric):
     cause = events_by_id[decision.prev_event_id]
     assert release.op == 2
     assert (cause.kind, cause.op) == ("FRAME_COMMITTED", 1)
-    assert decision.tick == cause.tick + microseconds_to_ticks(fabric["DECLARED_US"]["oc"])
+    assert decision.tick == cause.tick + microseconds_to_ticks(fabric["DECLARED_US"]["frame_to_controller"])
     assert release.tick == decision.tick
     assert issued.tick == release.tick
-    assert arrived.tick == issued.tick + microseconds_to_ticks(fabric["DECLARED_US"]["cq"])
+    assert arrived.tick == issued.tick + microseconds_to_ticks(fabric["DECLARED_US"]["controller_to_qpu"])
     assert started.tick == arrived.tick
     assert release.prev_event_id == decision.event_id
     assert issued.prev_event_id == release.event_id
@@ -271,7 +271,7 @@ def test_ledger_holds_over_randomized_configurations(fabric, seed):
             decoder=PipelinedDecoder(
                 PresetLatencyDecoder(100.0), 1.0,
                 pipeline_depth=rng.choice([None, 2, 3])),
-            links=fabric["declared_profile"](cwb=True, csb=False),
+            links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False),
             timing=fabric["declared_timing"](),
             pauli_frame=PauliFrameConfig(
                 commit_microseconds=fabric["DECLARED_US"]["frame"]),
@@ -288,7 +288,7 @@ def test_ledger_holds_over_randomized_configurations(fabric, seed):
     elif mode == "switching_parallel":
         completed = fabric["switching_run"](
             rounds=rounds, escalation_probability=1.0,
-            run_both_at_once=True, csb_us=2.0)
+            run_both_at_once=True, strong_buffer_us=2.0)
     else:
         completed = fabric["switching_run"](
             rounds=rounds, escalation_probability=1.0, double_window=True)
@@ -327,7 +327,7 @@ def test_idle_rounds_reach_one_terminal_state_on_a_fabric_without_cwb(fabric):
     fabric that publishes for free it must not carry a PUBLISHED event
     beside its FEEDBACK_MEMORY_DELIVERED terminal."""
     completed = fabric["weak_only_run"](
-        rounds=6, cwb=False,
+        rounds=6, controller_to_weak_buffer=False,
         ops=[fabric["memory_op"](1), fabric["memory_op"](2, blocked_by=1)])
     ledger = event_ledger(completed)
     ledger.check()

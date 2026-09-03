@@ -171,25 +171,26 @@ class PathSettings:
 class FabricSettings:
     """A fabric card: one path setting per hop plus a profile name.
 
-    The nine original paths are required; cwb and csb are optional. A
+    The nine original paths are required; the two controller-to-buffer
+    hops are optional. A
     card whose QPU-to-controller latency leaves out the controller's
     readout processing says so, because the timing card prices that
     processing on its own line.
     """
 
-    qc: PathSettings
-    wbd: PathSettings
-    wsd: PathSettings
-    sbd: PathSettings
-    wdo: PathSettings
-    dd: PathSettings
-    do: PathSettings
-    oc: PathSettings
-    cq: PathSettings
+    qpu_to_controller: PathSettings
+    weak_buffer_to_weak_decoder: PathSettings
+    weak_decoder_to_strong_decoder: PathSettings
+    strong_buffer_to_strong_decoder: PathSettings
+    weak_decoder_to_frame: PathSettings
+    decoder_to_decoder: PathSettings
+    strong_decoder_to_frame: PathSettings
+    frame_to_controller: PathSettings
+    controller_to_qpu: PathSettings
     profile_name: str
     is_controller_processing_outside_qpu_to_controller: bool = False
-    cwb: Optional[PathSettings] = None
-    csb: Optional[PathSettings] = None
+    controller_to_weak_buffer: Optional[PathSettings] = None
+    controller_to_strong_buffer: Optional[PathSettings] = None
 
     def __post_init__(self) -> None:
         channel_by_name = {}
@@ -234,7 +235,17 @@ class FabricSettings:
 
 
 _REQUIRED_PATH_VALUES = frozenset(
-    ("qc", "wbd", "wsd", "sbd", "wdo", "dd", "do", "oc", "cq")
+    (
+        "qpu_to_controller",
+        "weak_buffer_to_weak_decoder",
+        "weak_decoder_to_strong_decoder",
+        "strong_buffer_to_strong_decoder",
+        "weak_decoder_to_frame",
+        "decoder_to_decoder",
+        "strong_decoder_to_frame",
+        "frame_to_controller",
+        "controller_to_qpu",
+    )
 )
 
 

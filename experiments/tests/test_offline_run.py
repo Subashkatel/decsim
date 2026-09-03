@@ -42,7 +42,7 @@ def test_offline_matches_closed_loop_on_the_weak_tier(tmp_path):
 
 def test_offline_matches_closed_loop_on_the_strong_tier(tmp_path):
     config_path = write_config(tmp_path, {
-        "mode": "strong_only",
+        "decode_path": "strong_only",
         "decoder": strong_unit("belief_matching")})
     config = load_experiment(config_path)
     probability, distance, seeds = 0.005, 3, 6

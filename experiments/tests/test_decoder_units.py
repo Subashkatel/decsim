@@ -23,28 +23,28 @@ CONFIGS_DIR = Path(__file__).parent.parent / "configs"
 # override keys through the `overrides` dict (top-level replacement, the
 # same rule as `extends`).
 MINIMAL_CONFIG = {
-    "mode": "weak_baseline",
-    "code_task": "surface_code:rotated_memory_z",
+    "decode_path": "weak_baseline",
+    "circuit": "surface_code:rotated_memory_z",
     "rounds_per_shot": 15,
     "windowing": {"scheme": "sliding", "commit_rounds": None,
                   "buffer_rounds": None},
     "sweep": [{"physical_error_probability": [0.001], "distance": [3],
                "round_period_us": [1.0], "shots": 1}],
     "controller": {"clock": "fridge",
-                   "measurement_signal_to_classical_bits_cycles": 0,
-                   "t_pack_cycles": 0,
-                   "instruction_or_decision_to_analog_control_pulse_cycles": 0},
+                   "readout_to_bits_cycles": 0,
+                   "packing_cycles_per_round": 0,
+                   "decision_to_pulse_cycles": 0},
     "clocks": {"fridge": 250.0, "room": 250.0},
-    "links": {"qc": {"latency_cycles": 1, "clock": "fridge",
+    "links": {"qpu_to_controller": {"latency_cycles": 1, "clock": "fridge",
                      "bits_per_cycle": None}},
-    "buffers": {"buffer_0_size": None, "buffer_1_size": None,
-                "packing_workspace_size": None},
+    "buffers": {"weak_buffer_rounds": None, "strong_buffer_rounds": None,
+                "packing_rounds_in_flight": None},
     "decoder": {"weak": {"algorithm": 0.028, "units": 1,
-                         "unit_buffer_size": None,
+                         "unit_memory_rounds": None,
                          "engine": {"clock": "fridge",
                                     "fetch_cycles_per_round": 1,
                                     "release_cycles_per_job": 1}}},
-    "pauli_frame": {"clock": "fridge", "commit_cycles": 1},
+    "pauli_frame": {"clock": "fridge", "write_cycles": 1},
 }
 
 
@@ -58,7 +58,7 @@ def write_config(tmp_path, overrides: dict) -> Path:
 
 def strong_unit(algorithm) -> dict:
     return {"strong": {"algorithm": algorithm, "units": 1,
-                       "unit_buffer_size": None,
+                       "unit_memory_rounds": None,
                        "engine": {"clock": "room",
                                   "fetch_cycles_per_round": 1,
                                   "release_cycles_per_job": 1}}}
@@ -89,14 +89,14 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
         "clocks": {"fridge": 500.0, "room": 250.0},
         "controller": {
             "clock": "fridge",
-            "measurement_signal_to_classical_bits_cycles": 27,
-            "t_pack_cycles": 0,
-            "instruction_or_decision_to_analog_control_pulse_cycles": 8,
+            "readout_to_bits_cycles": 27,
+            "packing_cycles_per_round": 0,
+            "decision_to_pulse_cycles": 8,
         },
     })
     config = load_experiment(config_path)
-    assert config.controller.measurement_signal_to_classical_bits_us == 0.054
-    assert config.controller.instruction_or_decision_to_analog_control_pulse_us == 0.016
+    assert config.controller.readout_to_bits_us == 0.054
+    assert config.controller.decision_to_pulse_us == 0.016
 
     spec, _ = build_run(
         config, physical_error_probability=0.001, distance=3,
@@ -109,7 +109,7 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
 
 def test_a_mode_without_its_tier_is_refused(tmp_path):
     config_path = write_config(tmp_path, {
-        "mode": "strong_only"})   # decoder defines only weak
+        "decode_path": "strong_only"})   # decoder defines only weak
     with pytest.raises(ValueError, match="decoder.strong"):
         load_experiment(config_path)
 
@@ -122,7 +122,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         load_experiment(unknown_algorithm)
 
     old_flat_decoder = write_config(tmp_path, {
-        "decoder": {"units": 1, "unit_buffer_size": None,
+        "decoder": {"units": 1, "unit_memory_rounds": None,
                     "engine": {"clock": "fridge", "fetch_cycles_per_round": 1,
                                "release_cycles_per_job": 1}}})
     with pytest.raises(ValueError, match="tiers"):
@@ -169,7 +169,7 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
 
 def test_strong_unit_runs_belief_matching(tmp_path):
     config_path = write_config(tmp_path, {
-        "mode": "strong_only",
+        "decode_path": "strong_only",
         "decoder": strong_unit("belief_matching")})
     config = load_experiment(config_path)
     measurement = measure_shot(config, physical_error_probability=0.001,
@@ -223,7 +223,7 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
 
     manifest = json.loads((run_dir / "manifest.json").read_text())
     assert manifest["versions"]["stim"]
-    assert manifest["resolved_config"]["mode"] == "weak_baseline"
+    assert manifest["resolved_config"]["decode_path"] == "weak_baseline"
     assert manifest["started_utc"] and manifest["finished_utc"]
 
     with open(run_dir / "shots.csv") as handle:

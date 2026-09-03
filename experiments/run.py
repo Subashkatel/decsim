@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from experiments.build_run import online_threshold_calibrator
-from experiments.experiment_config import (MODE_TIER, ExperimentConfig,
+from experiments.experiment_config import (DECODE_PATH_TIER, ExperimentConfig,
                                            load_experiment)
 from experiments.measure_shot import measure_shot
 from experiments.sweep_report import summarize, terminal_lines, write_report
@@ -39,10 +39,10 @@ def resolved_description(config: ExperimentConfig) -> list:
     files = " <- ".join(str(path) for path in config.config_files)
     unit = config.active_decoder
     lines = [f"config: {files}",
-             f"mode: {config.mode}, {config.code_task}, "
+             f"decode_path: {config.decode_path}, {config.circuit}, "
              f"{config.rounds_per_shot} rounds per shot",
              f"windows: {config.windowing.scheme}",
-             f"decoder: the {MODE_TIER[config.mode]} tier, algorithm "
+             f"decoder: the {DECODE_PATH_TIER[config.decode_path]} tier, algorithm "
              f"{unit.algorithm}, {unit.units} unit(s), "
              f"engine clock {unit.engine.clock}"]
     for index, block in enumerate(config.sweep, start=1):
@@ -53,7 +53,7 @@ def resolved_description(config: ExperimentConfig) -> list:
             f"round period {list(block.round_periods_us)} us, "
             f"{block.shots} shots")
     lines.append(f"trace: {config.trace}"
-                 + (" with component I/O" if config.trace_io else ""))
+                 + (" with component I/O" if config.log_component_io else ""))
     return lines
 
 

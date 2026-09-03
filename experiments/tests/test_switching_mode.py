@@ -27,12 +27,12 @@ NEAR_THRESHOLD_P = 0.008
 def switching_config(tmp_path, gap_threshold_db: float,
                      rounds: int = 30):
     weak_unit = {"weak": {"algorithm": "pymatching", "units": 1,
-                          "unit_buffer_size": None,
+                          "unit_memory_rounds": None,
                           "engine": {"clock": "fridge",
                                      "fetch_cycles_per_round": 1,
                                      "release_cycles_per_job": 1}}}
     return write_config(tmp_path, {
-        "mode": "switching",
+        "decode_path": "switching",
         "rounds_per_shot": rounds,
         "switching": {"gap_threshold_db": gap_threshold_db},
         "decoder": {**weak_unit, **strong_unit("belief_matching")},
@@ -48,12 +48,12 @@ def measured_shot(config, seed: int):
 def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
     with pytest.raises(ValueError, match="decoder.strong"):
         load_experiment(write_config(tmp_path, {
-            "mode": "switching",
+            "decode_path": "switching",
             "switching": {"gap_threshold_db": 20.0},
             "decoder": {"weak": MINIMAL_CONFIG["decoder"]["weak"]}}))
     with pytest.raises(ValueError, match="switching card"):
         load_experiment(write_config(tmp_path, {
-            "mode": "switching",
+            "decode_path": "switching",
             "decoder": {**MINIMAL_CONFIG["decoder"],
                         **strong_unit("belief_matching")}}))
     with pytest.raises(ValueError, match="never escalates"):
@@ -76,10 +76,10 @@ def test_every_window_commits_once_across_both_output_links(tmp_path):
     for seed in range(6):
         measurement = measured_shot(config, seed)
         links = measurement.link_totals
-        escalations = links["wsd"]["transfers"]
-        assert links["sbd"]["transfers"] == escalations
-        assert links["do"]["transfers"] == escalations
-        assert (links["wdo"]["transfers"] + escalations
+        escalations = links["weak_decoder_to_strong_decoder"]["transfers"]
+        assert links["strong_buffer_to_strong_decoder"]["transfers"] == escalations
+        assert links["strong_decoder_to_frame"]["transfers"] == escalations
+        assert (links["weak_decoder_to_frame"]["transfers"] + escalations
                 == measurement.windows)
         found_escalation = found_escalation or escalations > 0
     assert found_escalation, ("no window escalated in 6 near-threshold "
@@ -90,18 +90,18 @@ def test_zero_threshold_never_escalates(tmp_path):
     config = load_experiment(switching_config(tmp_path, 0.0))
     measurement = measured_shot(config, seed=0)
     links = measurement.link_totals
-    assert links["wsd"]["transfers"] == 0
-    assert links["do"]["transfers"] == 0
-    assert links["wdo"]["transfers"] == measurement.windows
+    assert links["weak_decoder_to_strong_decoder"]["transfers"] == 0
+    assert links["strong_decoder_to_frame"]["transfers"] == 0
+    assert links["weak_decoder_to_frame"]["transfers"] == measurement.windows
 
 
 def test_unreachable_threshold_escalates_every_window(tmp_path):
     config = load_experiment(switching_config(tmp_path, 1e6))
     measurement = measured_shot(config, seed=0)
     links = measurement.link_totals
-    assert links["wsd"]["transfers"] == measurement.windows
-    assert links["do"]["transfers"] == measurement.windows
-    assert links["wdo"]["transfers"] == 0
+    assert links["weak_decoder_to_strong_decoder"]["transfers"] == measurement.windows
+    assert links["strong_decoder_to_frame"]["transfers"] == measurement.windows
+    assert links["weak_decoder_to_frame"]["transfers"] == 0
 
 
 def test_gap_records_decide_the_selected_tier(tmp_path):

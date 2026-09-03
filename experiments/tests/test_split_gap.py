@@ -78,12 +78,12 @@ def test_split_pair_matches_serial_decisions_and_doubles_wbd(tmp_path):
                 == serial_shot.logical_failure)
         serial_links = serial_shot.link_totals
         split_links = split_shot.link_totals
-        assert (split_links["wsd"]["transfers"]
-                == serial_links["wsd"]["transfers"])
+        assert (split_links["weak_decoder_to_strong_decoder"]["transfers"]
+                == serial_links["weak_decoder_to_strong_decoder"]["transfers"])
         # every window's syndrome crosses WBD twice: once to the weak
         # unit, once to its gap sibling's unit
-        assert (split_links["wbd"]["transfers"]
-                == 2 * serial_links["wbd"]["transfers"])
+        assert (split_links["weak_buffer_to_weak_decoder"]["transfers"]
+                == 2 * serial_links["weak_buffer_to_weak_decoder"]["transfers"])
 
 
 def test_split_pair_threshold_edges_still_pin_the_plumbing(tmp_path):
@@ -91,6 +91,6 @@ def test_split_pair_threshold_edges_still_pin_the_plumbing(tmp_path):
     always = load_experiment(split_config(tmp_path, 10000.0))
     never_shot = measured_shot(never, 0)
     always_shot = measured_shot(always, 0)
-    assert never_shot.link_totals["wsd"]["transfers"] == 0
-    assert (always_shot.link_totals["wsd"]["transfers"]
+    assert never_shot.link_totals["weak_decoder_to_strong_decoder"]["transfers"] == 0
+    assert (always_shot.link_totals["weak_decoder_to_strong_decoder"]["transfers"]
             == always_shot.windows)

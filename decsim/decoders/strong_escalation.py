@@ -350,7 +350,7 @@ class _EscalationRegistry:
             raise RuntimeError(
                 f"stale escalation timing update for {expected.key}")
         if expected.wsd_arrival_ticks is not None:
-            raise RuntimeError(f"duplicate WSD reservation for {expected.key}")
+            raise RuntimeError(f"duplicate weak_decoder_to_strong_decoder send for {expected.key}")
         updated = replace(expected, wsd_arrival_ticks=wsd_arrival_ticks)
         self._by_key[expected.key] = updated
         return updated
@@ -522,7 +522,7 @@ class StrongEscalation:
                 self._land_after_selection(request_key, on_landed)
 
             expected_delay_ticks = self.wm._send_job_transfer(
-                LinkPath.SBD, strong_job, payload_bits=payload_bits,
+                LinkPath.STRONG_BUFFER_TO_STRONG_DECODER, strong_job, payload_bits=payload_bits,
                 on_delivered=landed)
             if wsd_arrival_ticks is None:
                 return expected_delay_ticks
@@ -555,7 +555,7 @@ class StrongEscalation:
             on_selection_delivered()
 
         expected_delay_ticks = self.wm._send_job_transfer(
-            LinkPath.WSD, weak_job, payload_bits=None,
+            LinkPath.WEAK_DECODER_TO_STRONG_DECODER, weak_job, payload_bits=None,
             request_key=strong_request_key, on_delivered=delivered)
         return self.wm.engine.now + expected_delay_ticks
     def prepare_strong_selection(
@@ -633,7 +633,7 @@ class StrongEscalation:
         if missing:
             raise RuntimeError(
                 f"strong context for {key} arrived at Buffer 0 but is not "
-                f"stored in syndrome buffer 1: {missing} (csb lag "
+                f"stored in syndrome buffer 1: {missing} (controller_to_strong_buffer lag "
                 f"beyond the escalation margin, or an early release)")
         self.wm._stamp_first_round_tick(
             strong_window, self.wm.syndrome_buffer_1)
@@ -1090,7 +1090,7 @@ class StrongEscalation:
         pending: _PendingEscalation,
     ) -> None:
         if pending.wsd_arrival_ticks is None:
-            raise RuntimeError("far strong submission requires WSD reservation")
+            raise RuntimeError("far strong submission requires the weak_decoder_to_strong_decoder send")
         strong_job = self._build_pending_strong_job(pending)
         self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_far(far_boundary_key, pending)
@@ -1109,7 +1109,7 @@ class StrongEscalation:
         pending: _PendingEscalation,
     ) -> None:
         if pending.wsd_arrival_ticks is None:
-            raise RuntimeError("terminal strong submission requires WSD reservation")
+            raise RuntimeError("terminal strong submission requires the weak_decoder_to_strong_decoder send")
         strong_job = self._build_pending_strong_job(pending)
         self.check_strong_route(pending.weak_job, strong_job)
         self._escalations.take_terminal(operation_id, pending)

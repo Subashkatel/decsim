@@ -225,7 +225,7 @@ class SyndromePacking:
                 self.engine.schedule(processing_ticks, receive,
                                      label="controller-binary-availability")
 
-        self._send(LinkPath.QC, payload_bits=payload.size_bits,
+        self._send(LinkPath.QPU_TO_CONTROLLER, payload_bits=payload.size_bits,
                    attribution=attribution, on_delivered=at_controller)
 
     def _receive_fragment(self, fragment: RetainedSyndromeFragment, fragment_count: int,
@@ -347,7 +347,7 @@ class SyndromePacking:
         # on a fabric without CWB, at CWB delivery otherwise; a
         # feedback-memory round is stored but never published, its
         # terminal is FEEDBACK_MEMORY_DELIVERED
-        cwb_is_priced = self.links.is_wired(LinkPath.CWB)
+        cwb_is_priced = self.links.is_wired(LinkPath.CONTROLLER_TO_WEAK_BUFFER)
         on_window_route = context.route.kind is SyndromePacketRouteKind.WINDOW_INPUT
         publication_tick = (self.engine.now if on_window_route and not cwb_is_priced
                             else None)
@@ -492,7 +492,7 @@ class SyndromePacking:
     def _transmit_window_input_round(self, context: _PackingContext) -> bool:
         """Send on CWB once; a packet delivered but backpressured is retried
         without a second send, as is every packet on a fabric without CWB."""
-        cwb_is_priced = self.links.is_wired(LinkPath.CWB)
+        cwb_is_priced = self.links.is_wired(LinkPath.CONTROLLER_TO_WEAK_BUFFER)
         if context.cwb_reserved or not cwb_is_priced:
             return self._deliver_window_input_round(context)
         packet = context.packet
@@ -501,13 +501,13 @@ class SyndromePacking:
             "CWB_SENT", self.engine.now, context.round_key[0],
             context.round_key[1], None, context.route.kind.name))
         context.state = _PackingSlotState.DRAINING
-        self._send(LinkPath.CWB, payload_bits=context.packet_bits,
+        self._send(LinkPath.CONTROLLER_TO_WEAK_BUFFER, payload_bits=context.packet_bits,
                    attribution=self._packet_attribution(packet),
                    on_delivered=lambda: self._deliver_window_input_round(context))
         return True
 
     def _deliver_window_input_round(self, context: _PackingContext) -> bool:
-        cwb_is_priced = self.links.is_wired(LinkPath.CWB)
+        cwb_is_priced = self.links.is_wired(LinkPath.CONTROLLER_TO_WEAK_BUFFER)
         if cwb_is_priced and not context.cwb_delivered:
             self.syndrome_buffer.mark_publication_tick(context.round_key, self.engine.now)
             context.cwb_delivered = True
@@ -542,7 +542,7 @@ class SyndromePacking:
         packet = context.packet
         source_operation_id = context.route.source_operation_id
         self._send(
-            LinkPath.WBD, payload_bits=context.packet_bits,
+            LinkPath.WEAK_BUFFER_TO_WEAK_DECODER, payload_bits=context.packet_bits,
             attribution=self._packet_attribution(packet),
             on_delivered=lambda: self._deliver_feedback_memory_round(
                 context, source_operation_id))

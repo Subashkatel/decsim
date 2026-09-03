@@ -380,8 +380,8 @@ def test_final_result_rides_its_tiers_output_link():
     """WDO carries a weak final home; DO carries a strong-primary final."""
     from decsim.message import DecoderRequestKey, DecoderTier, LinkPath
 
-    for tier, expected_path in ((DecoderTier.WEAK, LinkPath.WDO),
-                                (DecoderTier.STRONG, LinkPath.DO)):
+    for tier, expected_path in ((DecoderTier.WEAK, LinkPath.WEAK_DECODER_TO_FRAME),
+                                (DecoderTier.STRONG, LinkPath.STRONG_DECODER_TO_FRAME)):
         engine = ManualEngine(now=10)
         manager = object.__new__(WindowManager)
         manager.engine = engine

@@ -33,7 +33,7 @@ from decsim.qpu.round_policies import (
     CodeRounds,
     FixedRounds,
     GateRounds,
-    PerOpRounds,
+    PerOperationRounds,
     TemporalRounds,
 )
 
@@ -429,13 +429,13 @@ def test_fixed_and_per_operation_policies_normalize_and_validate_counts():
 
     original = {1: 0, 2: 4.8}
     fallback = SimpleNamespace(rounds_for=lambda value, code: 9)
-    per_operation = PerOpRounds(original, fallback=fallback)
+    per_operation = PerOperationRounds(original, fallback=fallback)
     original[1] = 7
     assert per_operation.rounds_for(SimpleNamespace(id=1), object()) == 0
     assert per_operation.rounds_for(SimpleNamespace(id=2), object()) == 4
     assert per_operation.rounds_for(SimpleNamespace(id=3), object()) == 9
     with pytest.raises(ValueError):
-        PerOpRounds({1: -1})
+        PerOperationRounds({1: -1})
 
 
 def test_code_rounds_scale_with_python_rounding_and_clamp_to_one():
@@ -449,7 +449,7 @@ def test_code_rounds_scale_with_python_rounding_and_clamp_to_one():
 def test_gate_rounds_apply_operation_kind_and_qubit_arity_costs():
     """Gate rounds distinguish constant, distance, merge, and multi-qubit costs."""
     code = SimpleNamespace(distance=5)
-    policy = GateRounds(merge_steps=3)
+    policy = GateRounds(merge_step_count=3)
     expected = {
         OpKind.MEASURE: 1,
         OpKind.INJECT: 1,
@@ -461,7 +461,7 @@ def test_gate_rounds_apply_operation_kind_and_qubit_arity_costs():
         assert policy.rounds_for(operation(1, kind=kind), code) == round_count
     assert policy.rounds_for(operation(2, qubits=(0, 1)), code) == 15
     assert policy.rounds_for(operation(3, qubits=(0,)), code) == 5
-    assert GateRounds(True).merge_steps == 1
+    assert GateRounds(True).merge_step_count == 1
     with pytest.raises(ValueError):
         GateRounds(0)
 
@@ -473,7 +473,7 @@ def test_temporal_rounds_override_merges_and_delegate_other_operations():
     assert policy.rounds_for(operation(1, kind=OpKind.MERGE), object()) == 7
     assert policy.rounds_for(operation(2, qubits=(0, 1)), object()) == 7
     assert policy.rounds_for(operation(3, kind=OpKind.MEASURE), object()) == 13
-    assert TemporalRounds(True).d_m == 1
+    assert TemporalRounds(True).temporal_distance == 1
     with pytest.raises(ValueError):
         TemporalRounds(0)
 
@@ -560,7 +560,7 @@ def test_execution_planning_rejects_unknown_zero_round_and_invalid_boundary_owne
         compile_plan(
             (operation(1),),
             (1,),
-            rounds_policy=PerOpRounds({1: 0}),
+            rounds_policy=PerOperationRounds({1: 0}),
         )
     with pytest.raises(ValueError, match="unknown predecessor"):
         compile_plan(
@@ -571,7 +571,7 @@ def test_execution_planning_rejects_unknown_zero_round_and_invalid_boundary_owne
     plan, _, _, _ = compile_plan(
         (operation(1), operation(2)),
         (1,),
-        rounds_policy=PerOpRounds({1: 2, 2: 0}),
+        rounds_policy=PerOperationRounds({1: 2, 2: 0}),
     )
     assert [value.round_count for value in plan.resolved_operations] == [2, 0]
 

@@ -217,5 +217,5 @@ def test_run_cadence_uses_code_then_run_spec_then_timing_precedence():
     assert built_round_ticks(
         timing=timing,
         round_us=1.25,
-        code=SurfaceCodeModel(round_us=2.0),
+        code=SurfaceCodeModel(round_microseconds=2.0),
     ) == 2_000_000

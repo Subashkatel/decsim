@@ -1,195 +1,304 @@
-"""Execute controller commands and emit QPU readout events on one QEC cycle clock.
+"""The QEC cycle clock: one syndrome round per cycle on every live patch.
 
-The QPU runs syndrome extraction on every live patch every cycle, whether or
-not an operation is using the patch (Google 2207.06431 / 2408.13687: every
-measure qubit is read out each cycle; SWIPER device_manager.py
-``_generate_syndrome_round``: active instructions emit one round per patch and
-every other active patch emits an idle round). Operations start on a cycle
-boundary and consume whole cycles. This module owns that cadence only; program
-dependencies, windowing and decoder state live elsewhere.
+The QPU runs syndrome extraction on every live patch every cycle, whether
+or not an operation is using the patch: every measure qubit is read out
+each cycle (Google, Suppressing quantum errors by scaling a surface code
+logical qubit, 2207.06431; Google, Quantum error correction below the
+surface code threshold, 2408.13687), and SWIPER's device manager emits one
+round per active patch per cycle, an idle round where no instruction runs
+(device_manager.py, _generate_syndrome_round). Operations start on a cycle
+boundary and occupy whole cycles; a command that arrives on a boundary
+starts on that boundary (QubiC, 2404.15260 Sec. IV: a pulse timestamp is
+the time after which the pulse plays). This module owns that cadence
+only; program dependencies, windows and decoder state live elsewhere.
 """
-from __future__ import annotations
-from dataclasses import dataclass, replace
 
-from ..message import (
-    RunOperationBody, QPUReadout, SyndromePacketRoute, WINDOW_INPUT_ROUTE,
-)
+import dataclasses
+from typing import Any, Callable, Optional, Protocol
+
+import decsim.engine
+import decsim.message as message
+import decsim.protocols as protocols
+
+# Patches and operation ids are opaque identities chosen by the workload;
+# Any stands for them in every signature below.
 
 
-@dataclass(frozen=True)
+class ReadoutReceiver(Protocol):
+    """The component every readout is handed to: the controller."""
+
+    def accept_qpu_readout(
+        self, readout: message.QPUReadout, route: message.SyndromePacketRoute
+    ) -> None:
+        """Take one readout on its route."""
+
+
+@dataclasses.dataclass(frozen=True)
 class QPUCommandEvent:
-    """Arrival/start evidence for the actual immutable QPU command."""
+    """When a command arrived at the QPU, and when it started."""
 
+    # "ARRIVED" or "STARTED"; the event ledger reads these words.
     kind: str
     tick: int
-    command: RunOperationBody
+    command: message.RunOperationBody
 
 
 class QPUDevice:
-    """Run issued operations on the configured physical device model."""
+    """Runs issued operation bodies on one QEC cycle clock.
 
-    def __init__(self, engine, model, cycle_ticks: int, readout_receiver=None,
-                 completion_receiver=None, idle_receiver=None):
+    Every cycle emits one syndrome round per running operation and per
+    idle patch. The receivers may arrive later through connect_*.
+    """
+
+    def __init__(
+        self,
+        engine: decsim.engine.Engine,
+        syndrome_source: protocols.SyndromeDevice,
+        cycle_ticks: int,
+        readout_receiver: Optional[ReadoutReceiver] = None,
+        completion_receiver: Optional[
+            Callable[[message.Operation], None]
+        ] = None,
+        idle_receiver: Optional[Callable[[Any, Any, int], None]] = None,
+    ):
         self.engine = engine
-        self.model = model
+        self.syndrome_source = syndrome_source
         self.cycle_ticks = cycle_ticks
         self.readout_receiver = readout_receiver
         self.completion_receiver = completion_receiver
         self.idle_receiver = idle_receiver
-        self.cycle = 0                 # cycles completed
-        self._pending = []             # commands waiting for the next boundary
-        self._running = {}             # op.id -> [command, rounds emitted]
-        self._idle = {}                # patch -> [operation_id, idle rounds emitted]
-        self._finished = False
-        self._scheduled = set()        # boundary ticks already scheduled
-        self._emitted_boundary = 0     # last boundary whose rounds were emitted
         self.command_events: list[QPUCommandEvent] = []
+        self._running_by_operation_id: dict = {}
+        self._idle_by_patch: dict = {}
+        self._commands_waiting: list[message.RunOperationBody] = []
+        self._scheduled_boundaries: set = set()
+        self._last_emitted_boundary = 0
+        self._is_finished = False
 
-    def connect_readout_receiver(self, receiver) -> None:
+    def connect_readout_receiver(self, receiver: ReadoutReceiver) -> None:
+        """Wire the component that accepts every readout."""
         self.readout_receiver = receiver
 
-    def connect_completion_receiver(self, receiver) -> None:
+    def connect_completion_receiver(
+        self, receiver: Callable[[message.Operation], None]
+    ) -> None:
+        """Wire the callback for a completed operation body."""
         self.completion_receiver = receiver
 
-    def connect_idle_receiver(self, receiver) -> None:
+    def connect_idle_receiver(
+        self, receiver: Callable[[Any, Any, int], None]
+    ) -> None:
+        """Wire the callback for an idle patch's round."""
         self.idle_receiver = receiver
 
-    # ------------------------------------------------------------ commands
-
-    def issue(self, command: RunOperationBody) -> None:
+    def issue(self, command: message.RunOperationBody) -> None:
         """Queue one operation body; it starts on the next cycle boundary."""
         if command.round_ticks != self.cycle_ticks:
             raise ValueError("operation cadence must equal the QPU cycle")
-        if command.round_count == 0 and command.emits_detector_data \
-                and not command.finalizes_stream_round:
-            raise ValueError("zero-duration detector emitters must finalize a stream round")
-        self.command_events.append(QPUCommandEvent("ARRIVED", self.engine.now, command))
-        self._pending.append(command)
-        self._arm()
+        is_instant = command.round_count == 0
+        emits_without_finalizing = (
+            command.emits_detector_data and not command.finalizes_stream_round
+        )
+        if is_instant and emits_without_finalizing:
+            raise ValueError(
+                "zero-duration detector emitters must finalize a stream round"
+            )
+        event = QPUCommandEvent("ARRIVED", self.engine.now, command)
+        self.command_events.append(event)
+        self._commands_waiting.append(command)
+        boundary = self.next_boundary()
+        self._schedule_boundary(boundary)
 
     def finish(self) -> None:
-        """The program is complete: idle patches stop after the current cycle."""
-        self._finished = True
-
-    # --------------------------------------------------------------- clock
+        """The program is complete: idle patches stop after this cycle."""
+        self._is_finished = True
 
     def next_boundary(self) -> int:
         """The cycle boundary at or after now, where issued operations start."""
-        return self.boundary_at_or_after(self.engine.now)
+        now = self.engine.now
+        return self.boundary_at_or_after(now)
 
     def boundary_at_or_after(self, tick: int) -> int:
-        """The first valid QEC-cycle boundary not earlier than ``tick``."""
+        """The first cycle boundary not earlier than the tick."""
         if tick < 0:
             raise ValueError("QPU boundary query tick must be nonnegative")
-        return tick if tick % self.cycle_ticks == 0 else \
-            (tick // self.cycle_ticks + 1) * self.cycle_ticks
+        if tick % self.cycle_ticks == 0:
+            return tick
+        whole_cycle_count = tick // self.cycle_ticks
+        return (whole_cycle_count + 1) * self.cycle_ticks
 
-    def _arm(self, boundary=None) -> None:
-        if boundary is None:
-            boundary = self.next_boundary()
-        if boundary in self._scheduled:
+    def emit_idle_stream_round(
+        self,
+        operation: message.Operation,
+        stream_id: Any,
+        global_round: int,
+        patch: Any,
+    ) -> None:
+        """Produce and deliver one idle round of a live stream."""
+        payloads = self.syndrome_source.idle_round_payloads(
+            operation, stream_id, global_round, patch
+        )
+        self._deliver(payloads, operation)
+
+    def emit_feedback_memory_round(
+        self, operation_id: Any, patch: Any, round_index: int
+    ) -> None:
+        """Deliver the timing-only round of an idle patch."""
+        payload = message.QPUReadout(
+            ("idle", operation_id, patch), patch, round_index
+        )
+        route = message.SyndromePacketRoute.feedback_memory_round(operation_id)
+        self.readout_receiver.accept_qpu_readout(payload, route)
+
+    def _schedule_boundary(self, boundary: int) -> None:
+        if boundary in self._scheduled_boundaries:
             return
-        self._scheduled.add(boundary)
-        self.engine.schedule(boundary - self.engine.now, self._tick,
-                             label=f"qpu-cycle({boundary // self.cycle_ticks})")
+        self._scheduled_boundaries.add(boundary)
+        delay = boundary - self.engine.now
+        cycle_number = boundary // self.cycle_ticks
+        self.engine.schedule(
+            delay, self._cross_boundary, label=f"qpu-cycle({cycle_number})"
+        )
 
-    def _tick(self) -> None:
-        """One cycle boundary: rounds of the cycle just ended, then starts."""
+    def _cross_boundary(self) -> None:
+        """One cycle boundary: the ended cycle's rounds, then the starts."""
         now = self.engine.now
-        self._scheduled.discard(now)
-        if now > self._emitted_boundary:
-            self._emitted_boundary = now
-            self.cycle = now // self.cycle_ticks
+        self._scheduled_boundaries.discard(now)
+        if now > self._last_emitted_boundary:
+            self._last_emitted_boundary = now
             self._emit_idle_rounds()
             self._emit_operation_rounds()
-        self._start_pending()
-        if self._finished:
-            self._idle.clear()
-        if self._running or self._idle or self._pending:
-            self._arm(now + self.cycle_ticks)
+        self._start_waiting_commands()
+        if self._is_finished:
+            self._idle_by_patch.clear()
+        has_running = bool(self._running_by_operation_id)
+        has_idle = bool(self._idle_by_patch)
+        has_waiting = bool(self._commands_waiting)
+        is_live = has_running or has_idle
+        if is_live or has_waiting:
+            next_boundary = now + self.cycle_ticks
+            self._schedule_boundary(next_boundary)
 
     def _emit_idle_rounds(self) -> None:
-        for patch, state in list(self._idle.items()):
-            state[1] += 1
-            self.idle_receiver(state[0], patch, state[1])
-
-    def _emit_operation_rounds(self) -> None:
-        for op_id, state in list(self._running.items()):
-            command, done = state
-            state[1] = done + 1
-            op = command.operation
-            if command.emits_detector_data:
-                self.engine.log("QPU", f"{op.name} fires round {state[1]}/{command.round_count}")
-                self._emit(self.model.round_payloads(op, state[1]), op)
-            if state[1] == command.round_count:
-                del self._running[op_id]
-                self._body_done(command)
-
-    def _start_pending(self) -> None:
-        pending, self._pending = self._pending, []
-        for command in pending:
-            op = command.operation
-            self.command_events.append(QPUCommandEvent("STARTED", self.engine.now, command))
-            for patch in patches_of(op):
-                self._idle.pop(patch, None)
-            if command.round_count == 0:
-                if command.emits_detector_data:
-                    self._emit(self.model.finalize_stream_round(op, command.source_round_count), op)
-                self._body_done(command)
-                continue
-            if command.emits_detector_data:
-                self.model.begin_operation(op, command.round_count, command.source_round_count)
-            self._running[op.id] = [command, 0]
-
-    def _body_done(self, command: RunOperationBody) -> None:
-        self._release_patches(command)
-        self.completion_receiver(command.operation)
-
-    def _release_patches(self, command: RunOperationBody) -> None:
-        for patch in patches_of(command.operation):
-            self._idle.setdefault(patch, [command.operation.id, 0])
-
-    # ---------------------------------------------------------------- emit
-
-    def _emit(self, payloads, operation) -> None:
-        if not payloads:
-            raise ValueError("a detector-emitting round must emit at least one readout")
-        if operation.syndrome_fragment_index is not None and len(payloads) != 1:
-            raise ValueError("an explicit syndrome fragment slot must emit one payload")
-        count = (operation.syndrome_fragment_count
-                 if operation.syndrome_fragment_count is not None
-                 else len(payloads))
-        if (
-            operation.syndrome_fragment_index is None
-            and operation.syndrome_fragment_count is not None
-            and operation.syndrome_fragment_count != len(payloads)
-        ):
-            raise ValueError(
-                "declared syndrome fragment count must match emitted readouts")
-        for local_index, payload in enumerate(payloads):
-            index = operation.syndrome_fragment_index if operation.syndrome_fragment_index is not None else local_index
-            self.readout_receiver.accept_qpu_readout(
-                replace(payload, n_fragments=count, fragment_index=index),
-                WINDOW_INPUT_ROUTE,
+        idle_patches = self._idle_by_patch.items()
+        for patch, idle in list(idle_patches):
+            idle.emitted_round_count += 1
+            self.idle_receiver(
+                idle.operation_id, patch, idle.emitted_round_count
             )
 
-    def emit_idle_stream_round(self, operation, stream_id,
-                               global_round: int, patch) -> None:
-        """Produce and transmit one physical idle round for a live stream."""
-        self._emit(self.model.idle_round_payloads(
-            operation, stream_id, global_round, patch), operation)
+    def _emit_operation_rounds(self) -> None:
+        running_operations = self._running_by_operation_id.items()
+        for operation_id, running in list(running_operations):
+            running.emitted_round_count += 1
+            command = running.command
+            operation = command.operation
+            if command.emits_detector_data:
+                self.engine.log(
+                    "QPU",
+                    f"{operation.name} fires round "
+                    f"{running.emitted_round_count}/{command.round_count}",
+                )
+                payloads = self.syndrome_source.round_payloads(
+                    operation, running.emitted_round_count
+                )
+                self._deliver(payloads, operation)
+            if running.emitted_round_count == command.round_count:
+                del self._running_by_operation_id[operation_id]
+                self._finish_command(command)
 
-    def emit_feedback_memory_round(self, operation_id, patch,
-                                   round_index: int) -> None:
-        """Produce the timing-only physical round of an idle patch."""
-        payload = QPUReadout(("idle", operation_id, patch), patch, round_index)
-        self.readout_receiver.accept_qpu_readout(
-            payload, SyndromePacketRoute.feedback_memory_round(operation_id))
+    def _start_waiting_commands(self) -> None:
+        waiting = self._commands_waiting
+        self._commands_waiting = []
+        for command in waiting:
+            self._start_command(command)
+
+    def _start_command(self, command: message.RunOperationBody) -> None:
+        operation = command.operation
+        event = QPUCommandEvent("STARTED", self.engine.now, command)
+        self.command_events.append(event)
+        for patch in patches_of(operation):
+            self._idle_by_patch.pop(patch, None)
+        if command.round_count == 0:
+            self._run_instant_command(command)
+            return
+        if command.emits_detector_data:
+            self.syndrome_source.begin_operation(
+                operation, command.round_count, command.source_round_count
+            )
+        running = _RunningOperation(command, 0)
+        self._running_by_operation_id[operation.id] = running
+
+    def _run_instant_command(self, command: message.RunOperationBody) -> None:
+        """A zero-round body only finalizes a stream round, then completes."""
+        operation = command.operation
+        if command.emits_detector_data:
+            payloads = self.syndrome_source.finalize_stream_round(
+                operation, command.source_round_count
+            )
+            self._deliver(payloads, operation)
+        self._finish_command(command)
+
+    def _finish_command(self, command: message.RunOperationBody) -> None:
+        operation = command.operation
+        for patch in patches_of(operation):
+            idle = _IdlePatch(operation.id, 0)
+            self._idle_by_patch.setdefault(patch, idle)
+        self.completion_receiver(operation)
+
+    def _deliver(
+        self, payloads: list[message.QPUReadout], operation: message.Operation
+    ) -> None:
+        """Stamp every payload with its fragment slot and hand it on."""
+        if not payloads:
+            raise ValueError(
+                "a detector-emitting round must emit at least one readout"
+            )
+        fragment_index = operation.syndrome_fragment_index
+        declared_count = operation.syndrome_fragment_count
+        if fragment_index is not None and len(payloads) != 1:
+            raise ValueError(
+                "an explicit syndrome fragment slot must emit one payload"
+            )
+        fragment_count = declared_count
+        if declared_count is None:
+            fragment_count = len(payloads)
+        elif fragment_index is None and declared_count != len(payloads):
+            raise ValueError(
+                "declared syndrome fragment count must match emitted readouts"
+            )
+        for local_index, payload in enumerate(payloads):
+            index = local_index
+            if fragment_index is not None:
+                index = fragment_index
+            readout = dataclasses.replace(
+                payload, n_fragments=fragment_count, fragment_index=index
+            )
+            self.readout_receiver.accept_qpu_readout(
+                readout, message.WINDOW_INPUT_ROUTE
+            )
 
 
-def patches_of(operation) -> tuple:
+def patches_of(operation: message.Operation) -> tuple:
+    """The patches an operation occupies; its first qubit stands in for none."""
     if operation.patches:
         return tuple(operation.patches)
     if operation.qubits:
         return (operation.qubits[0],)
     return (0,)
+
+
+@dataclasses.dataclass
+class _RunningOperation:
+    """An operation body on the QPU and how many rounds it has emitted."""
+
+    command: message.RunOperationBody
+    emitted_round_count: int
+
+
+@dataclasses.dataclass
+class _IdlePatch:
+    """A patch between operations and how many idle rounds it has emitted."""
+
+    operation_id: object
+    emitted_round_count: int

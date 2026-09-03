@@ -4,24 +4,23 @@ A shot is one circuit through the whole reaction path. `measure_shot` runs
 it and reads every latency point in POINTS off the run's own records: the
 link ledger, the window stamps, the engine's stage records and the Pauli
 frame. The input and output transfers are named by role, not by wire,
-because the mode picks the wire: weak_baseline moves windows on wbd and
-results on wdo, strong_only on sbd and do.
+because the decode path picks the wire: weak_baseline moves windows on
+weak_buffer_to_weak_decoder and results on weak_decoder_to_frame,
+strong_only on strong_buffer_to_strong_decoder and
+strong_decoder_to_frame.
 """
 
-from __future__ import annotations
-
+import dataclasses
 import statistics
 import time
-from dataclasses import dataclass
 
-import numpy as np
+import numpy
 import pymatching
 import stim
 
-from decsim.config import TICKS_PER_MICROSECOND
-
-from experiments.build_run import build_run
-from experiments.experiment_config import ExperimentConfig
+import decsim.config as config_module
+import experiments.build_run as build_run
+import experiments.experiment_config as experiment_config
 
 # Latency points, in path order, in microseconds per window unless noted.
 POINTS = (
@@ -29,87 +28,212 @@ POINTS = (
     "cwb_per_round",
     # first round in window arrives -> last arrives (waiting on the QPU)
     "buffer_fill",
-    "dep_block",            # window complete -> job queued (dependencies)
-    "queue_wait",           # queued -> unit assigned (ready-queue wait)
-    # unit assigned -> input in decoder memory (wbd weak, sbd strong)
+    "dep_block",  # window complete -> job queued (dependencies)
+    "queue_wait",  # queued -> unit assigned (ready-queue wait)
+    # unit assigned -> input in decoder memory (the tier's input link)
     "input_link_per_window",
-    "fetch",                # engine: read the window out of decoder memory
-    "algorithm",            # engine: the decoding algorithm
-    "release",              # engine: correction write-out
+    "fetch",  # engine: read the window out of decoder memory
+    "algorithm",  # engine: the decoding algorithm
+    "release",  # engine: correction write-out
     # unit assigned -> decode done (transfer + fetch + algorithm + release)
     "service",
-    "dd_per_window",        # decoder -> next decoder, the boundary handoff
-    "output_link_per_window",  # decoder -> Pauli frame (wdo weak, do strong)
-    "frame_commit",         # Pauli frame accepted -> committed
+    "dd_per_window",  # decoder -> next decoder, the boundary handoff
+    "output_link_per_window",  # decoder -> Pauli frame (the tier's link)
+    "frame_commit",  # Pauli frame accepted -> committed
     # Totals. The buffer0 pair starts the clock at Buffer 0 publication;
     # the qpu pair starts it when the round leaves the QPU (the QC send),
     # so it includes QC, controller processing, packing and CWB.
-    "buffer0_ready_to_frame",        # window complete in Buffer 0 -> frame
+    "buffer0_ready_to_frame",  # window complete in Buffer 0 -> frame
     "buffer0_first_round_to_frame",  # first round in Buffer 0 -> frame
-    "qpu_last_round_to_frame",       # last required round off QPU -> frame
-    "qpu_first_round_to_frame",      # first required round off QPU -> frame
+    "qpu_last_round_to_frame",  # last required round off QPU -> frame
+    "qpu_first_round_to_frame",  # first required round off QPU -> frame
 )
 
-INPUT_LINK = {"weak_baseline": "weak_buffer_to_weak_decoder", "strong_only": "strong_buffer_to_strong_decoder",
-              "switching": "weak_buffer_to_weak_decoder"}
-OUTPUT_LINK = {"weak_baseline": "weak_decoder_to_frame", "strong_only": "strong_decoder_to_frame",
-               "switching": "weak_decoder_to_frame"}
+INPUT_LINK = {
+    "weak_baseline": "weak_buffer_to_weak_decoder",
+    "strong_only": "strong_buffer_to_strong_decoder",
+    "switching": "weak_buffer_to_weak_decoder",
+}
+OUTPUT_LINK = {
+    "weak_baseline": "weak_decoder_to_frame",
+    "strong_only": "strong_decoder_to_frame",
+    "switching": "weak_decoder_to_frame",
+}
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class ShotMeasurement:
+    """One shot's numbers; the field names are the csv columns."""
+
     physical_error_probability: float
     distance: int
     round_period_us: float
-    algorithm: object       # the active unit's card: a name or a latency in us
+    algorithm: object  # the active unit's card: a name or a latency in us
     seed: int
     windows: int
     logical_failure: bool
-    samples: dict          # point -> us list, one per window (per round
-                           # for cwb)
-    means: dict            # point -> mean us over this shot's windows
-    maxes: dict            # point -> max us
-    load: float            # service per window / window inter-arrival
-    direct_failure: bool   # whole-circuit PyMatching on the same events
-                           # failed
+    samples: dict  # point -> us list, one per window (per round for cwb)
+    means: dict  # point -> mean us over this shot's windows
+    maxes: dict  # point -> max us
+    load: float  # service per window / window inter-arrival
+    direct_failure: bool  # whole-circuit PyMatching on the same events failed
     direct_mismatch: bool  # loop prediction differs from direct PyMatching
     throughput_windows_per_us: float
     throughput_rounds_per_us: float
     max_queued_windows: int
-    tesseract_windows_checked: int       # referee re-decodes (0 = referee off)
-    tesseract_window_disagreements: int  # referee reached a different owned
-                                         # observable contribution
-    link_totals: dict      # path -> the run's own ledger counters plus
-                           # rounds/windows context, for links.csv; totals
-                           # come straight off TrafficCounters, no manual
-                           # counting (the ledger refuses counts that do
-                           # not reconcile per channel)
+    tesseract_windows_checked: int  # referee re-decodes (0 = referee off)
+    # referee reached a different owned observable contribution
+    tesseract_window_disagreements: int
+    # path -> the run's own ledger counters plus rounds/windows context,
+    # for links.csv; the totals come straight off the ledger's counters
+    link_totals: dict
     sim_wall_seconds: float
 
 
-def microseconds_to_ticks(ticks: int) -> float:
-    return ticks / TICKS_PER_MICROSECOND
+def measure_shot(
+    config: experiment_config.ExperimentConfig,
+    *,
+    physical_error_probability: float,
+    distance: int,
+    round_period_us: float,
+    seed: int,
+    run_dir=None,
+    threshold_calibrator=None,
+) -> ShotMeasurement:
+    """Run one shot and read its numbers off the completed run.
+
+    run_dir receives the trace file when trace: file|both is on; None
+    writes nothing beyond the returned measurement. threshold_calibrator
+    is the sweep point's online controller (threshold_source online):
+    one instance across the point's shots.
+    """
+    spec, engine = build_run.build_run(
+        config,
+        physical_error_probability=physical_error_probability,
+        distance=distance,
+        round_period_us=round_period_us,
+        seed=seed,
+        threshold_calibrator=threshold_calibrator,
+    )
+    is_verbose = config.trace in ("print", "both")
+    wall_start = time.perf_counter()
+    completed = spec.build(verbose=is_verbose, io_trace=config.log_component_io)
+    wall_end = time.perf_counter()
+    wall_seconds = wall_end - wall_start
+    if completed.result.terminal_status != "complete":
+        raise RuntimeError(
+            f"run did not complete: {completed.result.terminal_status}"
+        )
+    writes_trace = config.trace in ("file", "both")
+    if run_dir is not None and writes_trace:
+        label = _shot_label(
+            config, physical_error_probability, distance, round_period_us, seed
+        )
+        _write_trace(completed, run_dir, label)
+    return _measurement(
+        config,
+        spec,
+        engine,
+        completed,
+        physical_error_probability=physical_error_probability,
+        distance=distance,
+        round_period_us=round_period_us,
+        seed=seed,
+        wall_seconds=wall_seconds,
+    )
+
+
+def _measurement(
+    config: experiment_config.ExperimentConfig,
+    spec,
+    engine,
+    completed,
+    *,
+    physical_error_probability: float,
+    distance: int,
+    round_period_us: float,
+    seed: int,
+    wall_seconds: float,
+) -> ShotMeasurement:
+    """Read every number of one completed shot off its records."""
+    samples = collect_samples(completed, engine, config.decode_path)
+    circuit = spec.ops[0].circuit
+    reference_prediction = direct_prediction(completed, circuit)
+    operation_result = completed.result.operation_results[0]
+    truth = tuple(operation_result.observable_truth)
+    loop_prediction = tuple(operation_result.logical_observables)
+    decoded_windows = len(samples["service"])
+    rounds_this_shot = config.rounds_per_shot.rounds_for(distance)
+    span_us = _decoded_span_microseconds(completed)
+    queue_depths = []
+    for _tick, depth in completed.decoder_manager.queue_log:
+        queue_depths.append(depth)
+    load = chain_load(samples, config, distance, round_period_us)
+    windows_checked = getattr(engine.decoder, "windows_checked", 0)
+    disagreements = getattr(engine.decoder, "window_disagreements", 0)
+    totals = link_totals(completed.result.link_traffic)
+    means = _means(samples)
+    maxes = _maxes(samples)
+    is_logical_failure = loop_prediction != truth
+    is_direct_failure = reference_prediction != truth
+    is_direct_mismatch = loop_prediction != reference_prediction
+    windows_per_us = decoded_windows / span_us
+    rounds_per_us = rounds_this_shot / span_us
+    return ShotMeasurement(
+        physical_error_probability=physical_error_probability,
+        distance=distance,
+        round_period_us=round_period_us,
+        algorithm=config.active_decoder.algorithm,
+        seed=seed,
+        windows=decoded_windows,
+        logical_failure=is_logical_failure,
+        samples=samples,
+        means=means,
+        maxes=maxes,
+        load=load,
+        direct_failure=is_direct_failure,
+        direct_mismatch=is_direct_mismatch,
+        throughput_windows_per_us=windows_per_us,
+        throughput_rounds_per_us=rounds_per_us,
+        max_queued_windows=max(queue_depths, default=0),
+        tesseract_windows_checked=windows_checked,
+        tesseract_window_disagreements=disagreements,
+        link_totals=totals,
+        sim_wall_seconds=wall_seconds,
+    )
+
+
+def ticks_to_microseconds(ticks: int) -> float:
+    """A tick count as a float of microseconds, for the csv columns."""
+    return ticks / config_module.TICKS_PER_MICROSECOND
 
 
 def link_totals(traffic: dict) -> dict:
-    """path -> the ledger's own counters for this shot, in microseconds."""
+    """The ledger's own counters for this shot by path, in microseconds."""
     totals = {}
     for edge in traffic["semantic_edges"]:
         counters = edge["counters"]
         totals[edge["path"]] = {
             "transfers": counters["transfer_count"],
             "payload_bits": counters["known_payload_bits"],
-            "unknown_payload_transfers":
-                counters["unknown_payload_transfer_count"],
-            "queue_wait_us": microseconds_to_ticks(counters["queue_wait_ticks"]),
-            "serialization_us": microseconds_to_ticks(counters["serialization_ticks"]),
-            "propagation_us": microseconds_to_ticks(counters["propagation_ticks"]),
+            "unknown_payload_transfers": counters[
+                "unknown_payload_transfer_count"
+            ],
+            "queue_wait_us": ticks_to_microseconds(
+                counters["queue_wait_ticks"]
+            ),
+            "serialization_us": ticks_to_microseconds(
+                counters["serialization_ticks"]
+            ),
+            "propagation_us": ticks_to_microseconds(
+                counters["propagation_ticks"]
+            ),
         }
     return totals
 
 
 def link_delay_by_window(transfers: list) -> dict:
-    """(path, window_id) -> total ticks from send to delivery over that path."""
+    """Ticks from send to delivery by (path, window id), summed per key."""
     delay = {}
     for row in transfers:
         key = (row["path"], row["attribution"]["window_id"])
@@ -124,12 +248,13 @@ def cwb_delays_us(transfers: list) -> list:
     for row in transfers:
         if row["path"] != "controller_to_weak_buffer":
             continue
-        delays.append(microseconds_to_ticks(row["delivery_ticks"] - row["send_ticks"]))
+        delay = _span_microseconds(row["delivery_ticks"], row["send_ticks"])
+        delays.append(delay)
     return delays
 
 
 def qc_send_ticks(transfers: list) -> dict:
-    """round -> tick that round left the QPU (its earliest QC send)."""
+    """The tick each round left the QPU (its earliest QC send), by round."""
     send = {}
     for row in transfers:
         if row["path"] != "qpu_to_controller":
@@ -141,164 +266,214 @@ def qc_send_ticks(transfers: list) -> dict:
     return send
 
 
-def window_points_us(window, frame_record, stage_us: dict, link_delay: dict,
-                     qc_send: dict, input_path: str, output_path: str) -> dict:
+def window_points_us(
+    window,
+    frame_record,
+    stage_us: dict,
+    link_delay: dict,
+    qc_send: dict,
+    input_path: str,
+    output_path: str,
+) -> dict:
     """The per-window latency points, in us, for one decoded window."""
     window_id = window.key[1]
     last_emitted_round = max(qc_send)
     last_required_round = min(window.buffer_hi, last_emitted_round)
+    committed = frame_record.committed_ticks
+    input_ticks = link_delay.get((input_path, window_id), 0)
+    handoff_ticks = link_delay.get(("decoder_to_decoder", window_id), 0)
+    output_ticks = link_delay.get((output_path, window_id), 0)
+    last_required_send = qc_send[last_required_round]
+    first_required_send = qc_send[window.start_round]
     return {
-        "buffer_fill": microseconds_to_ticks(window.t_data_complete - window.t_first_round),
-        "dep_block": microseconds_to_ticks(window.t_queued - window.t_data_complete),
-        "queue_wait": microseconds_to_ticks(window.t_dispatch - window.t_queued),
-        "input_link_per_window": microseconds_to_ticks(link_delay.get((input_path, window_id), 0)),
+        "buffer_fill": _span_microseconds(
+            window.t_data_complete, window.t_first_round
+        ),
+        "dep_block": _span_microseconds(
+            window.t_queued, window.t_data_complete
+        ),
+        "queue_wait": _span_microseconds(window.t_dispatch, window.t_queued),
+        "input_link_per_window": ticks_to_microseconds(input_ticks),
         "fetch": stage_us["fetch"],
         "algorithm": stage_us["algorithm"],
         "release": stage_us["release"],
-        "service": microseconds_to_ticks(window.t_done - window.t_dispatch),
-        "dd_per_window": microseconds_to_ticks(link_delay.get(("decoder_to_decoder", window_id), 0)),
-        "output_link_per_window":
-            microseconds_to_ticks(link_delay.get((output_path, window_id), 0)),
-        "frame_commit":
-            microseconds_to_ticks(frame_record.committed_ticks - frame_record.accepted_ticks),
-        "buffer0_ready_to_frame":
-            microseconds_to_ticks(frame_record.committed_ticks - window.t_data_complete),
-        "buffer0_first_round_to_frame":
-            microseconds_to_ticks(frame_record.committed_ticks - window.t_first_round),
-        "qpu_last_round_to_frame":
-            microseconds_to_ticks(frame_record.committed_ticks - qc_send[last_required_round]),
-        "qpu_first_round_to_frame":
-            microseconds_to_ticks(frame_record.committed_ticks - qc_send[window.start_round]),
+        "service": _span_microseconds(window.t_done, window.t_dispatch),
+        "dd_per_window": ticks_to_microseconds(handoff_ticks),
+        "output_link_per_window": ticks_to_microseconds(output_ticks),
+        "frame_commit": _span_microseconds(
+            committed, frame_record.accepted_ticks
+        ),
+        "buffer0_ready_to_frame": _span_microseconds(
+            committed, window.t_data_complete
+        ),
+        "buffer0_first_round_to_frame": _span_microseconds(
+            committed, window.t_first_round
+        ),
+        "qpu_last_round_to_frame": _span_microseconds(
+            committed, last_required_send
+        ),
+        "qpu_first_round_to_frame": _span_microseconds(
+            committed, first_required_send
+        ),
     }
 
 
 def collect_samples(completed, engine, decode_path: str) -> dict:
-    """point -> list of microsecond samples over this shot's decoded windows."""
+    """Every point's microsecond samples over the shot's decoded windows."""
     transfers = completed.result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
     qc_send = qc_send_ticks(transfers)
-    frame_by_window = {record.window_key[1]: record
-                       for record in completed.pauli_frame.snapshot().records}
-    samples = {point: [] for point in POINTS}
+    frame_snapshot = completed.pauli_frame.snapshot()
+    frame_by_window = {}
+    for record in frame_snapshot.records:
+        frame_by_window[record.window_key[1]] = record
+    samples = {}
+    for point in POINTS:
+        samples[point] = []
     samples["cwb_per_round"] = cwb_delays_us(transfers)
-    all_windows = sorted(completed.window_manager.windows.items())
+    input_path = INPUT_LINK[decode_path]
+    output_path = OUTPUT_LINK[decode_path]
+    window_items = completed.window_manager.windows.items()
+    all_windows = sorted(window_items)
     for (op_id, window_id), window in all_windows:
         frame_record = frame_by_window.get(window_id)
-        decoded = frame_record is not None and window.t_done is not None
-        if not decoded:
+        if frame_record is None or window.t_done is None:
             continue
-        stage_records = engine.stage_records_for(op_id, window_id)
-        stage_us = {record.stage: microseconds_to_ticks(record.end_ticks - record.start_ticks)
-                    for record in stage_records}
-        points = window_points_us(window, frame_record, stage_us, link_delay,
-                                  qc_send, INPUT_LINK[decode_path], OUTPUT_LINK[decode_path])
+        stage_us = _stage_microseconds(engine, op_id, window_id)
+        points = window_points_us(
+            window,
+            frame_record,
+            stage_us,
+            link_delay,
+            qc_send,
+            input_path,
+            output_path,
+        )
         for point, value in points.items():
             samples[point].append(value)
     return samples
 
 
 def direct_prediction(completed, circuit: stim.Circuit) -> tuple:
-    """Whole-circuit PyMatching on the detection events the device sampled:
-    the reference the loop must agree with."""
+    """Whole-circuit PyMatching on the detection events the device sampled.
+
+    The reference the loop must agree with.
+    """
+    detector_error_model = circuit.detector_error_model(decompose_errors=True)
     matching = pymatching.Matching.from_detector_error_model(
-        circuit.detector_error_model(decompose_errors=True))
+        detector_error_model
+    )
     operation_id = completed.result.operation_results[0].operation_id
-    events = np.asarray(
-        completed.qpu.syndrome_source.sampled_detection_events(operation_id), dtype=bool)
+    source = completed.qpu.syndrome_source
+    sampled = source.sampled_detection_events(operation_id)
+    events = numpy.asarray(sampled, dtype=bool)
     predicted = matching.decode(events)
-    return tuple(int(bit) for bit in predicted)
+    bits = []
+    for bit in predicted:
+        bits.append(int(bit))
+    return tuple(bits)
 
 
-def chain_load(samples: dict, config: ExperimentConfig, distance: int,
-               round_period_us: float) -> float:
-    """rho: the serial chain's service per window (unit assigned -> decode
-    done, plus the DD boundary handoff) over the window inter-arrival time
-    (commit rounds x round period). Above 1 the chain cannot keep up."""
-    service_samples = samples["service"]
-    handoff_samples = samples["dd_per_window"]
-    service_us = statistics.fmean(service_samples) if service_samples else 0.0
-    handoff_us = statistics.fmean(handoff_samples) if handoff_samples else 0.0
-    commit_rounds = config.windowing.commit_rounds or distance
+def chain_load(
+    samples: dict,
+    config: experiment_config.ExperimentConfig,
+    distance: int,
+    round_period_us: float,
+) -> float:
+    """rho: the serial chain's service per window over the window period.
+
+    Service is unit assigned to decode done plus the DD boundary handoff;
+    the window inter-arrival time is commit rounds times the round
+    period. Above 1 the chain cannot keep up.
+    """
+    service_us = _mean_or_zero(samples["service"])
+    handoff_us = _mean_or_zero(samples["dd_per_window"])
+    commit_rounds = config.windowing.commit_rounds
+    if commit_rounds is None:
+        commit_rounds = distance
     inter_arrival_us = commit_rounds * round_period_us
-    return (service_us + handoff_us) / inter_arrival_us
+    chain_us = service_us + handoff_us
+    return chain_us / inter_arrival_us
 
 
-def _shot_label(config: ExperimentConfig, physical_error_probability: float,
-                distance: int, round_period_us: float, seed: int) -> str:
-    return (f"p{physical_error_probability:g}_d{distance}"
-            f"_algo{config.active_decoder.algorithm}"
-            f"_round{round_period_us:g}us_seed{seed}")
+def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
+    span_ticks = end_ticks - start_ticks
+    return ticks_to_microseconds(span_ticks)
+
+
+def _stage_microseconds(engine, op_id, window_id) -> dict:
+    """The engine's recorded duration of each stage, in microseconds."""
+    stage_us = {}
+    for record in engine.stage_records_for(op_id, window_id):
+        stage_us[record.stage] = _span_microseconds(
+            record.end_ticks, record.start_ticks
+        )
+    return stage_us
+
+
+def _decoded_span_microseconds(completed) -> float:
+    """First round into any window to the last frame commit, in us."""
+    first_round_ticks = []
+    for window in completed.window_manager.windows.values():
+        if window.t_first_round is not None:
+            first_round_ticks.append(window.t_first_round)
+    first_round_tick = min(first_round_ticks)
+    frame_snapshot = completed.pauli_frame.snapshot()
+    commit_ticks = []
+    for record in frame_snapshot.records:
+        commit_ticks.append(record.committed_ticks)
+    last_commit_tick = max(commit_ticks)
+    return _span_microseconds(last_commit_tick, first_round_tick)
+
+
+def _mean_or_zero(values: list) -> float:
+    if not values:
+        return 0.0
+    return statistics.fmean(values)
+
+
+def _max_or_zero(values: list) -> float:
+    if not values:
+        return 0.0
+    return max(values)
+
+
+def _means(samples: dict) -> dict:
+    means = {}
+    for point, values in samples.items():
+        means[point] = _mean_or_zero(values)
+    return means
+
+
+def _maxes(samples: dict) -> dict:
+    maxes = {}
+    for point, values in samples.items():
+        maxes[point] = _max_or_zero(values)
+    return maxes
+
+
+def _shot_label(
+    config: experiment_config.ExperimentConfig,
+    physical_error_probability: float,
+    distance: int,
+    round_period_us: float,
+    seed: int,
+) -> str:
+    algorithm = config.active_decoder.algorithm
+    return (
+        f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
+        f"_round{round_period_us:g}us_seed{seed}"
+    )
 
 
 def _write_trace(completed, run_dir, label: str) -> None:
-    """One file per shot with the engine narrator's full line record: the
-    same lines trace: print shows live."""
+    """One file per shot with the engine narrator's full line record.
+
+    The same lines trace: print shows live.
+    """
     trace_dir = run_dir / "trace"
     trace_dir.mkdir(parents=True, exist_ok=True)
-    name = f"{label}.log"
-    (trace_dir / name).write_text(
-        "\n".join(completed.engine.log_lines) + "\n")
-
-
-def measure_shot(config: ExperimentConfig, *, physical_error_probability: float,
-                 distance: int, round_period_us: float, seed: int,
-                 run_dir=None, threshold_calibrator=None) -> ShotMeasurement:
-    """run_dir receives the trace file when trace: file|both is on;
-    None writes nothing beyond the returned measurement.
-    threshold_calibrator is the sweep point's online controller
-    (threshold_source online): one instance across the point's shots."""
-    spec, engine = build_run(
-        config, physical_error_probability=physical_error_probability,
-        distance=distance, round_period_us=round_period_us, seed=seed,
-        threshold_calibrator=threshold_calibrator)
-    wall_start = time.perf_counter()
-    completed = spec.build(verbose=config.trace in ("print", "both"),
-                           io_trace=config.log_component_io)
-    wall_seconds = time.perf_counter() - wall_start
-    if completed.result.terminal_status != "complete":
-        raise RuntimeError(
-            f"run did not complete: {completed.result.terminal_status}")
-    if run_dir is not None and config.trace in ("file", "both"):
-        _write_trace(completed, run_dir,
-                     _shot_label(config, physical_error_probability, distance,
-                                 round_period_us, seed))
-
-    samples = collect_samples(completed, engine, config.decode_path)
-    decoded_windows = len(samples["service"])
-    rounds_this_shot = config.rounds_per_shot.rounds_for(distance)
-    load = chain_load(samples, config, distance, round_period_us)
-    operation_result = completed.result.operation_results[0]
-    truth = tuple(operation_result.observable_truth)
-    loop_prediction = tuple(operation_result.logical_observables)
-    reference_prediction = direct_prediction(completed, spec.ops[0].circuit)
-    windows = completed.window_manager.windows.values()
-    first_round_tick = min(window.t_first_round for window in windows
-                           if window.t_first_round is not None)
-    frame_records = completed.pauli_frame.snapshot().records
-    last_commit_tick = max(record.committed_ticks for record in frame_records)
-    span_us = microseconds_to_ticks(last_commit_tick - first_round_tick)
-    queue_depths = [depth for _, depth in completed.decoder_manager.queue_log]
-    return ShotMeasurement(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_us=round_period_us,
-        algorithm=config.active_decoder.algorithm,
-        seed=seed, windows=decoded_windows,
-        logical_failure=loop_prediction != truth,
-        samples=samples,
-        means={point: (statistics.fmean(values) if values else 0.0)
-               for point, values in samples.items()},
-        maxes={point: (max(values) if values else 0.0)
-               for point, values in samples.items()},
-        load=load,
-        direct_failure=reference_prediction != truth,
-        direct_mismatch=loop_prediction != reference_prediction,
-        throughput_windows_per_us=decoded_windows / span_us,
-        throughput_rounds_per_us=rounds_this_shot / span_us,
-        max_queued_windows=max(queue_depths, default=0),
-        tesseract_windows_checked=getattr(
-            engine.decoder, "windows_checked", 0),
-        tesseract_window_disagreements=getattr(
-            engine.decoder, "window_disagreements", 0),
-        link_totals=link_totals(completed.result.link_traffic),
-        sim_wall_seconds=wall_seconds)
+    text = "\n".join(completed.engine.log_lines)
+    trace_path = trace_dir / f"{label}.log"
+    contents = text + "\n"
+    trace_path.write_text(contents)

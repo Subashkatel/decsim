@@ -458,7 +458,7 @@ def _feedback_chain(idle_policy=None):
     ]).build()
     return RunSpec(
         ops=ops, num_units=1, rounds_policy=FixedRounds(3), round_us=1.0,
-        code=SurfaceCodeModel(d=3),
+        code=SurfaceCodeModel(distance=3),
         scheme=SlidingWindowScheme(
             terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
         decoder=PresetLatencyDecoder(2.0),
@@ -527,7 +527,7 @@ def test_single_operation_run_charges_no_idle_work():
     ]).build()
     completed = RunSpec(
         ops=ops, num_units=1, rounds_policy=FixedRounds(6), round_us=1.0,
-        code=SurfaceCodeModel(d=3), scheme=SlidingWindowScheme(),
+        code=SurfaceCodeModel(distance=3), scheme=SlidingWindowScheme(),
         decoder=PresetLatencyDecoder(2.0), seed=13).build()
 
     assert completed.controller.idle_rounds_emitted == 0

@@ -67,7 +67,7 @@ def _run_native_physical_program(program, device):
         decode_ops=program.decoder_operations,
         device=device,
         decoder=PerRoundDecoder(tau_us=0.0),
-        rounds_policy=GateRounds(merge_steps=2),
+        rounds_policy=GateRounds(merge_step_count=2),
         # Native runtime source length, not a code-distance claim.
         d=8,
         seed=28,
@@ -93,7 +93,7 @@ def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
     assert start_rounds == tuple(sorted(start_rounds))
     assert program.feedback_candidates == [(10, 9)]
 
-    rounds_policy = GateRounds(merge_steps=2)
+    rounds_policy = GateRounds(merge_step_count=2)
     completed = RunSpec(
         frontend=program,
         rounds_policy=rounds_policy,

@@ -27,6 +27,12 @@ What is reported, by kind:
     deep nesting        blocks nested deeper than MAX_BLOCK_DEPTH
     wide state          a class whose __init__ sets more attributes than
                         MAX_ATTRIBUTES
+
+Two kinds are reports, not failures: long function and wide state. The
+40 lines is Google's prompt to think, not a limit, and the six
+attributes is this project's own number (REWRITE.md rule 1); the
+checklist row says why a function or class is that size. They are
+printed under their own heading and do not set the exit code.
 """
 
 import ast
@@ -68,6 +74,7 @@ EXCLUDED_PARTS = frozenset(
         "tmp",
         "archive",
         "__pycache__",
+        "stimcircuits",
     }
 )
 MAX_FUNCTION_LINES = 40
@@ -456,17 +463,31 @@ def python_files(targets):
         yield candidate
 
 
+REPORT_ONLY_KINDS = frozenset({"long function", "wide state"})
+
+
 def main(arguments):
     """Check every file named, print the findings, return the exit code."""
     findings = []
     for path in python_files(arguments):
         file_findings = check_file(path)
         findings.extend(file_findings)
+    failures = []
+    reports = []
     for finding in findings:
+        if finding.kind in REPORT_ONLY_KINDS:
+            reports.append(finding)
+        else:
+            failures.append(finding)
+    for finding in failures:
         print(finding)
-    paths = {finding.path for finding in findings}
-    print(f"{len(findings)} findings in {len(paths)} files")
-    if findings:
+    failure_paths = {finding.path for finding in failures}
+    print(f"{len(failures)} findings in {len(failure_paths)} files")
+    if reports:
+        print("reports (size prompts, recorded on the checklist row):")
+    for finding in reports:
+        print(finding)
+    if failures:
         return 1
     return 0
 

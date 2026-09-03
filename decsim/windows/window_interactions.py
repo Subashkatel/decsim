@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Any, Mapping, Optional, Protocol, runtime_checkable
 
 from ..message import (
     BoundaryUpdate,
@@ -10,6 +11,58 @@ from ..message import (
     SeamFaultOwner,
     StrongRegionPlan,
 )
+
+
+@runtime_checkable
+class WindowInteraction(Protocol):
+    """Decisions relating adjacent or replaced windows.
+
+    Implementations return data and immutable decisions; the window
+    manager owns event ordering, lifecycle, retention, logical accounting
+    and finality.
+    """
+
+    def initial_boundary_state(self, window: WindowInfo) -> Any:
+        """The boundary a window starts with."""
+
+    def boundary_from_result(
+        self, result: Optional[DecodeResult], fallback: Any,
+    ) -> Any:
+        """The boundary a decode result carries, else the fallback."""
+
+    def boundaries_equal(self, left: Any, right: Any) -> bool:
+        """Whether two boundaries carry the same defects."""
+
+    def boundary_targets(
+        self, source: WindowInfo, windows: Mapping[tuple, WindowInfo],
+    ) -> list:
+        """The unstarted destinations among the source's declared edges."""
+
+    def merge_boundary(
+        self,
+        delivery: BoundaryDelivery,
+        destination: WindowInfo,
+        current_state: Any,
+    ) -> BoundaryUpdate:
+        """The destination's boundary after this delivery."""
+
+    def apply_boundary(
+        self, state: Any, window: WindowInfo, payload, round_key: int,
+    ):
+        """Fold one delivered boundary into the window's state."""
+
+    def invalidated_windows(
+        self, source_key: tuple, windows: Mapping[tuple, WindowInfo],
+    ) -> list:
+        """The replay roots; the runtime adds their dependent closure."""
+
+    def plan_strong_region(
+        self,
+        weak_window: WindowInfo,
+        later_windows: list[WindowInfo],
+        operation_round_count: int,
+    ) -> Optional[StrongRegionPlan]:
+        """The strong window that replaces a weak window, or None."""
 
 
 class _DefectBoundaryState(dict):

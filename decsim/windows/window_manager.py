@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum, auto
 from types import MappingProxyType
-from typing import Callable, Optional
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 from ..message import (DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier, LinkPath, LogicalContribution, Operation, RequestTransferRelation, StrongDecodeCompletion, SuccessorReadiness, SyndromeRoundPacket, TransferAttribution, Window, WindowInfo, WindowPlan, WindowProtocol, WindowReadiness, stable_identity_order_key)
 from ..decoders.decoder_memory import count_decoder_input_round_demand
@@ -24,6 +24,61 @@ from .dynamic_windows import DynamicWindows
 from .committed_rounds import LogicalLedger
 from .window_boundaries import BoundaryCourier, HeldBoundary
 
+
+
+@runtime_checkable
+class BoundaryPolicy(Protocol):
+    """When a committed window may ship its boundary defects to dependents.
+
+    Eager ships at every weak commit (the default); Held ships only once
+    the result is final. A provisional boundary that ships is never
+    revised, so serial switching (which can revise a result) needs Held.
+    """
+
+    def on_commit(self, window: Window, *, final: bool) -> bool:
+        """Whether to ship the boundary now."""
+
+
+@runtime_checkable
+class ErrorModelProvider(Protocol):
+    """Builds the decoder-facing models of windows and streams."""
+
+    def register_dynamic_stream(
+        self, stream_op, round_count: int, *, fault_model_requirement,
+    ):
+        """Note a dynamic stream; its window models come per window."""
+
+    def validate_stream_length(
+        self, stream_op, stream_round_count: int,
+    ) -> None:
+        """Refuse a stream longer than the source can supply."""
+
+    def window_models_for_operation(
+        self, op, windows: list, round_count: int, *,
+        fault_model_requirement, fault_exclusion_ranges: tuple,
+        window_protocol,
+    ) -> list:
+        """One model per window of the operation."""
+
+    def window_model_for_stream(self, stream_id, window):
+        """The model of one window of a dynamic stream."""
+
+    def strong_window_model_for_operation(
+        self, op, window, round_count: int, *,
+        fault_model_requirement, exclude_faults_touching=None,
+    ):
+        """The model of one strong window of the operation."""
+
+
+@runtime_checkable
+class MultiFaultExclusionSyndromeDevice(Protocol):
+    """A provider that can exclude disjoint fault ranges from a strong model."""
+
+    def strong_window_model_for_operation_with_exclusions(
+        self, op, window, round_count: int, *,
+        fault_model_requirement, fault_exclusion_ranges: tuple,
+    ):
+        """The strong model with every listed fault range excluded."""
 
 
 class WindowManager:

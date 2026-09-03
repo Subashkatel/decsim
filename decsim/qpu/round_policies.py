@@ -9,10 +9,18 @@ merge, per split, and per operation) and Litinski (arXiv 1808.02892v3,
 one time step of d code cycles).
 """
 
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
 
 import decsim.message as message
-import decsim.ports as ports
+import decsim.qpu.code_geometry as code_geometry
+
+
+@runtime_checkable
+class RoundsPolicy(Protocol):
+    """How many syndrome rounds an operation runs for; always at least 1."""
+
+    def rounds_for(self, operation: message.OperationPlanningView, code) -> int:
+        """The operation's round count on this code."""
 
 
 class FixedRounds:
@@ -25,7 +33,7 @@ class FixedRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: ports.CodeModel,
+        code: code_geometry.CodeModel,
     ) -> int:
         """The fixed count."""
         del operation, code
@@ -43,7 +51,7 @@ class PerOperationRounds:
     def __init__(
         self,
         rounds_by_operation: dict,
-        fallback: Optional[ports.RoundsPolicy] = None,
+        fallback: Optional[RoundsPolicy] = None,
     ):
         self.rounds_by_operation = {}
         rounds_by_operation = dict(rounds_by_operation)
@@ -59,7 +67,7 @@ class PerOperationRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: ports.CodeModel,
+        code: code_geometry.CodeModel,
     ) -> int:
         """The operation's own count, or the fallback policy's."""
         if operation.id in self.rounds_by_operation:
@@ -76,7 +84,7 @@ class CodeRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: ports.CodeModel,
+        code: code_geometry.CodeModel,
     ) -> int:
         """The scaled logical cycle, rounded, never below one."""
         del operation
@@ -106,7 +114,7 @@ class GateRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: ports.CodeModel,
+        code: code_geometry.CodeModel,
     ) -> int:
         """The kind's cost in rounds of the code's distance."""
         distance = code.distance
@@ -133,7 +141,7 @@ class TemporalRounds:
     def __init__(
         self,
         temporal_distance: int,
-        base: Optional[ports.RoundsPolicy] = None,
+        base: Optional[RoundsPolicy] = None,
     ):
         temporal_distance = int(temporal_distance)
         self.temporal_distance = _at_least_one_round(
@@ -146,7 +154,7 @@ class TemporalRounds:
     def rounds_for(
         self,
         operation: message.OperationPlanningView,
-        code: ports.CodeModel,
+        code: code_geometry.CodeModel,
     ) -> int:
         """The temporal distance for surgery, else the base policy's count."""
         kind = operation.kind

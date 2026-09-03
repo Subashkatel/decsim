@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
-import decsim.ports as ports
+import decsim.qpu.code_geometry as code_geometry
 import decsim.seeding as seeding
 
 # Stream ids and patches are opaque identities chosen by the workload; Any
@@ -127,7 +127,7 @@ class SyndromeBitDevice(seeding._RandomSeedConsumer):
 
     def __init__(
         self,
-        code: ports.CodeModel,
+        code: code_geometry.CodeModel,
         seed: Optional[int] = None,
         max_bit_count: int = 8,
         one_payload_per_patch: bool = False,

@@ -8,12 +8,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from types import MappingProxyType
-from typing import Callable
+from typing import Callable, Protocol, runtime_checkable
 
 from ..qpu.cycle_clock import patches_of
 from ..message import (Decision, LinkPath, Operation, QPUReadout, RunOperationBody,
                        SyndromePacketRoute, SyndromePayload, TransferAttribution,
                        normalize_binary_bits)
+
+
+@runtime_checkable
+class SyndromeTransport(Protocol):
+    """Syndrome packing, as the controller sees it."""
+
+    def relay_qpu_readout(
+        self, payload: SyndromePayload, route: SyndromePacketRoute, *,
+        processing_ticks: int,
+    ) -> None:
+        """Carry one readout over QC, then receive it after processing."""
 
 
 @dataclass(frozen=True)

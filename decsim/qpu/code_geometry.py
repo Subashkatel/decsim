@@ -17,7 +17,37 @@ Z checks, the [[144, 12, 12]] gross code by default.
 """
 
 import dataclasses
-from typing import Optional
+from typing import Optional, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class CodeModel(Protocol):
+    """A code card: window sizes, cycle length, graph size, syndrome width."""
+
+    name: str
+    distance: int
+    window_floor_justification: Optional[str]
+
+    def rounds_per_logical_cycle(self) -> int:
+        """Syndrome rounds per logical cycle."""
+
+    def round_period_us(self) -> Optional[float]:
+        """The card's own round period, or None for the run's cadence."""
+
+    def commit_rounds(self) -> int:
+        """Rounds committed per decode window."""
+
+    def buffer_rounds(self) -> int:
+        """Look-ahead rounds per decode window."""
+
+    def buffering_floor(self) -> tuple[int, int]:
+        """The leading and trailing buffer rounds the code needs."""
+
+    def spatial_nodes(self, num_patches: int) -> int:
+        """Decoding-graph nodes per round for this many patches."""
+
+    def syndrome_bits_per_round(self, num_patches: int) -> int:
+        """Syndrome bits one round of this many patches produces."""
 
 
 @dataclasses.dataclass(frozen=True)

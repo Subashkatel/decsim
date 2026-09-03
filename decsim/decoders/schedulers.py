@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+from typing import Protocol, runtime_checkable
+
 from ..message import DecodeJob
+
+
+@runtime_checkable
+class Scheduler(Protocol):
+    """Which ready job a decoder pool serves next."""
+
+    def pop(self, queue: list[DecodeJob]) -> DecodeJob:
+        """Remove and return the next job of one pool's ready queue."""
 
 
 class FifoScheduler:

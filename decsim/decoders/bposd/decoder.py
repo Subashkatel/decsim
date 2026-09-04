@@ -1,63 +1,67 @@
-"""The BP-OSD adapter: qLDPC's default decoder as a tier of its own."""
+"""The BP-OSD adapter: ldpc's BpOsdDecoder on the window's physical faults.
 
-import decsim.decoders.bposd.window_decoder as window_decoder
-import decsim.decoders.window_decode_results as window_decode_results
+qLDPC's default decoder (qldpc/decoders/retrieval.py:132 builds the same
+BpOsdDecoder), one decoder per live window model. ldpc's osd_cs indexes
+candidate strings by osd_order without a bound check (osd.hpp:90-99) and
+overruns past n - m, so the order is clamped to the window's own n - m,
+as stimbposd clamps it (bp_osd.py:62-68).
+"""
+
+from typing import Optional
+
+import ldpc
+import scipy.sparse
+
+import decsim.decoders.decoder as decoder_module
+import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
-import decsim.message as message
-import decsim.ports as ports
 
 
-class BPOSDDecoder:
-    """Decode one window with BP-OSD and report simulated latency separately.
-
-    Wide state (7 attributes) recorded for the port commit, which folds
-    the window decoder into the base class.
-    """
+class BPOSDDecoder(decoder_module.WindowDecoderBase):
+    """Decode one window with BP-OSD; ldpc's argument names are kept."""
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    fault_representation = fault_models.FaultRepresentation.PHYSICAL
 
     def __init__(
         self,
-        latency_model: ports.Decoder,
+        latency_model: Optional[decoder_module.DecoderBase] = None,
         max_iterations: int = 2,
         osd_order: int = 0,
         belief_propagation_method: str = "product_sum",
         schedule: str = "serial",
         osd_method: str = "osd_cs",
     ):
-        self.latency_model = latency_model
+        decoder_module.WindowDecoderBase.__init__(self, latency_model)
         self.max_iterations = max_iterations
         self.osd_order = osd_order
         self.belief_propagation_method = belief_propagation_method
         self.schedule = schedule
         self.osd_method = osd_method
-        self.window_decoder = window_decoder.bposd_window_decoder(
-            max_iterations=max_iterations,
-            osd_order=osd_order,
-            belief_propagation_method=belief_propagation_method,
-            schedule=schedule,
-            osd_method=osd_method,
+
+    def compile(self, faults, model=None):
+        """Ldpc's BP-OSD decoder over the window's physical check."""
+        del model
+        fault_identity.validate_placed_fault_matrices(
+            faults.check, faults.observables, location="BP-OSD window model"
+        )
+        row_count, column_count = faults.check.shape
+        window_rank = column_count - row_count
+        window_osd_order = max(0, min(self.osd_order, window_rank))
+        check = scipy.sparse.csr_matrix(faults.check)
+        error_channel = list(faults.priors)
+        return ldpc.BpOsdDecoder(
+            check,
+            error_channel=error_channel,
+            max_iter=self.max_iterations,
+            bp_method=self.belief_propagation_method,
+            schedule=self.schedule,
+            osd_method=self.osd_method,
+            osd_order=window_osd_order,
         )
 
-    def run_seed_children(self) -> tuple:
-        """The latency model that controls simulated service time."""
-        path = (message.RunSeedPathSegment("field", "latency_model"),)
-        child = message.RunSeedChild(path, self.latency_model)
-        return (child,)
-
-    def latency(self, job: message.DecodeJob) -> int:
-        """Timing comes from the wrapped latency model."""
-        return self.latency_model.latency(job)
-
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
-        """Run windowed BP-OSD on the job's window model."""
-        model = job.dem
-        if model is None:
-            return message.DecodeResult(job.op_id, job.window_id)
-        faults = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
-        syndrome = window_decode_results.payload_syndrome(job)
-        window_decode_results.check_syndrome_size(job, syndrome, faults)
-        selected = self.window_decoder(model, syndrome)
-        return window_decode_results.result_from_selected_faults(
-            job, model, faults, selected
-        )
+    def decode_window(self, backend, model, faults, syndrome) -> tuple:
+        """One BP-OSD call; ldpc always returns a correction."""
+        del model
+        del faults
+        return backend.decode(syndrome), None

@@ -1,20 +1,19 @@
 """Timing-only decoders, the routers and the sampled-confidence wrapper.
 
-Every decoder here implements the Decoder port (ports.py): latency(job)
-prices one window job's compute as a service time in ticks (the manager
-dispatches the job to a free unit and schedules completion that many
-ticks later), and decode(job) produces the DecodeResult. Timing-only
-decoders return empty results; data-path decoders also compute
-corrections.
+Every decoder here is a row on the Decoder port (ports.py, the defaults
+in decoder.py): latency(job) prices one window job's compute as a
+service time in ticks, and decode(job) produces the DecodeResult, empty
+for a timing-only row. A pipelined unit is the staged decoder's timing
+(staged_decoder.py, UnitTiming), not a decoder.
 """
 
 import math
 from typing import Optional
 
 import decsim.config as config
+import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
-import decsim.ports as ports
 import decsim.seeding as seeding
 
 SAMPLED_CONFIDENCE_SOURCE = message.SoftOutputSource(
@@ -69,12 +68,7 @@ class SwitchingRouter:
     presence is also the manager's signal that split-pair joins are on.
     """
 
-    def __init__(
-        self,
-        weak: ports.Decoder,
-        strong: ports.Decoder,
-        gap: Optional[ports.Decoder] = None,
-    ):
+    def __init__(self, weak, strong, gap=None):
         self.weak = weak
         self.strong = strong
         self.gap = gap
@@ -110,7 +104,7 @@ class SwitchingRouter:
         return weak_requirement.joined(strong_requirement)
 
 
-class FunctionLatencyDecoder:
+class FunctionLatencyDecoder(decoder_module.DecoderBase):
     """Timing-only decoder priced by a caller-supplied function.
 
     The function maps a job to microseconds; any factor (n_rounds,
@@ -118,8 +112,6 @@ class FunctionLatencyDecoder:
     next to the experiment that uses them; the named classes below are
     the established parameterizations of this one.
     """
-
-    fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, latency_us_for):
         self.latency_us_for = latency_us_for  # job -> microseconds
@@ -140,10 +132,8 @@ class FunctionLatencyDecoder:
         return message.DecodeResult(job.op_id, job.window_id)
 
 
-class PresetLatencyDecoder:
+class PresetLatencyDecoder(decoder_module.DecoderBase):
     """Timing-only decoder with one fixed latency for every job."""
-
-    fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, latency_us: float = 1.0):
         self.latency_us = latency_us
@@ -158,10 +148,8 @@ class PresetLatencyDecoder:
         return message.DecodeResult(job.op_id, job.window_id)
 
 
-class PerRoundDecoder:
+class PerRoundDecoder(decoder_module.DecoderBase):
     """Timing-only decoder with a linear cost per syndrome round."""
-
-    fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, tau_us: float = 1.0):
         self.tau_us = tau_us
@@ -176,81 +164,9 @@ class PerRoundDecoder:
         return message.DecodeResult(job.op_id, job.window_id)
 
 
-class PipelinedDecoder:
-    """A pipelined decoder unit model: the DEC-003 pair of numbers.
-
-    Results return after the inner model's latency; a new job may START
-    on the same unit every ``initiation_interval_us``, with at most
-    ``pipeline_depth`` decodes in flight at once (default: the fully
-    occupied pipeline, ceil(latency / interval), computed per job). The
-    non-pipelined models above keep their exact meaning: occupancy equal
-    to latency is what "no initiation interval" means.
-
-    Serves plain window and external decodes; the strong tier, gap
-    siblings, and merged batches refuse a pipelined route until they get
-    their own design pass.
-    """
-
-    def __init__(
-        self,
-        inner,
-        initiation_interval_us: float,
-        pipeline_depth: Optional[int] = None,
-    ):
-        if (
-            not math.isfinite(initiation_interval_us)
-            or initiation_interval_us <= 0
-        ):
-            raise ValueError(
-                "initiation_interval_us must be positive and finite"
-            )
-        interval_ticks = config.microseconds_to_ticks(initiation_interval_us)
-        if interval_ticks == 0:
-            raise ValueError(
-                "initiation_interval_us is positive but rounds to zero ticks"
-            )
-        if pipeline_depth is not None and pipeline_depth < 1:
-            raise ValueError("pipeline_depth must be at least 1")
-        run = getattr(inner, "run", None)
-        if run is not None:
-            raise ValueError(
-                "PipelinedDecoder wraps an algorithm timing model, "
-                "not a staged DecoderEngine"
-            )
-        self.inner = inner
-        self.initiation_interval_us = initiation_interval_us
-        self.pipeline_depth = pipeline_depth
-
-    @property
-    def fault_model_requirement(self):
-        """The wrapped model's requirement; none when it declares none."""
-        return getattr(
-            self.inner,
-            "fault_model_requirement",
-            fault_models.NO_FAULT_MODEL_REQUIRED,
-        )
-
-    def run_seed_children(self) -> tuple:
-        """The wrapped timing model under the segment inner."""
-        path = (message.RunSeedPathSegment("field", "inner"),)
-        child = message.RunSeedChild(path, self.inner)
-        return (child,)
-
-    def latency(self, job: message.DecodeJob) -> int:
-        """The wrapped model's latency."""
-        return self.inner.latency(job)
-
-    def initiation_interval(self, job: message.DecodeJob) -> int:
-        """Minimum ticks between consecutive starts on one unit."""
-        del job
-        return config.microseconds_to_ticks(self.initiation_interval_us)
-
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
-        """The wrapped model's result."""
-        return self.inner.decode(job)
-
-
-class SampledConfidenceDecoder(seeding._RandomSeedConsumer):
+class SampledConfidenceDecoder(
+    seeding._RandomSeedConsumer, decoder_module.DecoderBase
+):
     """Pretends the decoder inside it is unsure about a fraction of windows.
 
     Timing-only decoders produce no syndrome data, so there is nothing to
@@ -267,7 +183,7 @@ class SampledConfidenceDecoder(seeding._RandomSeedConsumer):
 
     def __init__(
         self,
-        inner: ports.Decoder,
+        inner: decoder_module.DecoderBase,
         escalation_probability: float,
         seed: Optional[int] = None,
         probability_for=None,

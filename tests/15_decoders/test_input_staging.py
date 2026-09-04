@@ -306,11 +306,10 @@ def test_a_pipelined_units_compute_returns_to_the_pool_once():
     window while the intake is still busy (Hennessy and Patterson App. C:
     one issue per initiation interval).
     """
-    from decsim.decoders.decoders import PipelinedDecoder
+    from decsim.decoders.staged_decoder import StagedDecoder, UnitTiming
 
-    decoder = PipelinedDecoder(
-        PresetLatencyDecoder(4.0), initiation_interval_us=0.5
-    )
+    timing = UnitTiming((), (), 1.0, initiation_interval_us=0.5)
+    decoder = StagedDecoder(PresetLatencyDecoder(4.0), timing)
     engine, manager, submit, compute_start = _standalone_pool(
         1, 0.2, 4.0, decoder
     )

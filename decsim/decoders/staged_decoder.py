@@ -1,12 +1,11 @@
-"""Simulated timing around one functional QEC decoder.
+"""The decoder unit's timing around one algorithm: stages and a pipeline.
 
-One decode job is one walk through: the configured stages before the
+One decode job is one walk through the configured stages before the
 algorithm (for a weak ASIC, reading the window out of the decoder-side
-memory), the algorithm itself, priced by the wrapped decoder's own
-latency model with its result available when that time ends, then the
-configured stages after it (releasing the correction). Every stage is
-one engine event and one record, so the trace shows latency at each
-point inside the decoder.
+memory), the algorithm itself, started on its own decoder and delivered
+when its time ends, then the configured stages after it (releasing the
+correction). Every stage is one engine event and one record, so the
+trace shows latency at each point inside the unit.
 
 Stages are data (name, cycles per job, cycles per round, at one clock),
 not a fixed vocabulary: a hardware decoder declares its own real stages
@@ -14,8 +13,11 @@ when it has them. Precedent for modeling actual units and reporting
 their cycles per job: XQsim src/XQ-simulator
 (https://github.com/SNU-HPCS/XQsim, commit
 006c38474c4caf8d51e2065ad3f3a5144b251bfc, MIT); nothing is copied from
-it. No pipelining or overlap: one job holds one unit from first stage
-to release; the unit count is the decoder manager's pool size.
+it. A unit may pipeline: with an initiation interval a new job may start
+every interval while each result still returns after the whole latency,
+at most pipeline_depth in flight (Hennessy and Patterson, Computer
+Architecture, App. C; Helios 2301.08419 is the hardware shape). Without
+one, a job holds the unit from first stage to release.
 """
 
 import dataclasses
@@ -23,6 +25,7 @@ import math
 from typing import Callable, Optional
 
 import decsim.config as config
+import decsim.decoders.decoder as decoder_module
 import decsim.message as message
 
 ALGORITHM_STAGE = "algorithm"
@@ -47,12 +50,20 @@ class DecoderStage:
 
 
 @dataclasses.dataclass(frozen=True)
-class DecoderTiming:
-    """Stages before and after the algorithm, and the clock that prices them."""
+class UnitTiming:
+    """The unit's stages, the clock that prices them, and its pipeline.
+
+    initiation_interval_us is the least time between two starts on the
+    unit; None means the unit holds its compute for the whole decode.
+    pipeline_depth bounds the decodes in flight; None means the full
+    pipeline, ceil(latency / interval), computed per job.
+    """
 
     before: tuple[DecoderStage, ...]
     after: tuple[DecoderStage, ...]
     frequency_mhz: float
+    initiation_interval_us: Optional[float] = None
+    pipeline_depth: Optional[int] = None
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.frequency_mhz) or self.frequency_mhz <= 0:
@@ -63,6 +74,7 @@ class DecoderTiming:
                     f"{ALGORITHM_STAGE!r} names the decoder itself, not a "
                     "hardware stage"
                 )
+        _check_pipeline(self.initiation_interval_us, self.pipeline_depth)
 
     def stage_ticks(self, job: message.DecodeJob) -> dict:
         """Ticks per stage, by name.
@@ -81,6 +93,12 @@ class DecoderTiming:
             previous_end = end
         return ticks
 
+    def initiation_interval_ticks(self) -> Optional[int]:
+        """The interval in ticks; None when the unit does not pipeline."""
+        if self.initiation_interval_us is None:
+            return None
+        return config.microseconds_to_ticks(self.initiation_interval_us)
+
 
 @dataclasses.dataclass(frozen=True)
 class DecoderStageRecord:
@@ -92,20 +110,19 @@ class DecoderStageRecord:
     cycles: Optional[int]  # None for the algorithm, priced in time
     start_ticks: int
     end_ticks: int
-    # the algorithm's wall clock, when the real call was measured
-    measured_ns: Optional[int] = None
 
 
-class DecoderEngine:
-    """The Decoder port plus run(): stages before, the algorithm, stages after.
+class StagedDecoder(decoder_module.DecoderBase):
+    """A decoder on a unit: its stages walked as engine events.
 
-    The result reaches the caller through the on_result callback when the
-    last stage ends (None when the job was cancelled meanwhile).
+    The wrapped decoder starts the algorithm stage on its own terms
+    (priced, or measured on the host clock); the result reaches on_result
+    when the last stage ends (None when the job was cancelled meanwhile).
     """
 
     log_name = "DecoderEngine"
 
-    def __init__(self, decoder, timing: DecoderTiming):
+    def __init__(self, decoder, timing: UnitTiming):
         self.decoder = decoder
         self.timing = timing
         self.fault_model_requirement = decoder.fault_model_requirement
@@ -118,11 +135,9 @@ class DecoderEngine:
         child = message.RunSeedChild(path, self.decoder)
         return (child,)
 
-    @property
-    def measures_wall_clock(self) -> bool:
-        """Whether the wrapped decoder is timed on the host clock."""
-        measures = getattr(self.decoder, "measures_wall_clock", False)
-        return bool(measures)
+    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+        """The wrapped decoder's result; the stages add no correction."""
+        return self.decoder.decode(job)
 
     def latency(self, job: message.DecodeJob) -> int:
         """The stages' ticks plus the wrapped decoder's latency."""
@@ -132,7 +147,36 @@ class DecoderEngine:
         algorithm = self.decoder.latency(job)
         return stages + algorithm
 
-    def run(
+    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+        """The initiation interval when pipelined, else the whole latency.
+
+        None when the wrapped decoder is measured on the host clock: the
+        unit cannot say in advance when it frees.
+        """
+        interval_ticks = self.timing.initiation_interval_ticks()
+        if interval_ticks is not None:
+            return interval_ticks
+        algorithm = self.decoder.occupancy(job)
+        if algorithm is None:
+            return None
+        stage_ticks = self.timing.stage_ticks(job)
+        stage_values = stage_ticks.values()
+        stages = sum(stage_values)
+        return stages + algorithm
+
+    def pipeline_depth(self, job: message.DecodeJob) -> int:
+        """The declared depth, or the full pipeline ceil(latency / interval)."""
+        interval_ticks = self.timing.initiation_interval_ticks()
+        if interval_ticks is None:
+            return 1
+        if self.timing.pipeline_depth is not None:
+            return self.timing.pipeline_depth
+        latency_ticks = self.latency(job)
+        decodes_per_latency = latency_ticks / interval_ticks
+        full_pipeline = math.ceil(decodes_per_latency)
+        return max(1, full_pipeline)
+
+    def start(
         self,
         job: message.DecodeJob,
         engine,
@@ -151,6 +195,7 @@ class DecoderEngine:
         running = self._running.pop(key, None)
         if running is not None:
             running.aborted = True
+        self.decoder.cancel(job)
 
     def stage_records_for(self, op_id: int, window_id: int) -> tuple:
         """One window's stage records, in stage order."""
@@ -161,7 +206,7 @@ class DecoderEngine:
         return tuple(records)
 
     def _steps(self, job: message.DecodeJob) -> list:
-        """(name, cycles, ticks) per stage; the algorithm's are priced later."""
+        """(name, cycles, ticks) per stage; the algorithm's time is its own."""
         ticks = self.timing.stage_ticks(job)
         steps = []
         for stage in self.timing.before:
@@ -183,25 +228,28 @@ class DecoderEngine:
             running.on_result(running.result)
             return
         name, cycles, ticks = steps[index]
-        start = engine.now
-        measured_ns = None
+        text = _stage_text(name, job, cycles)
+        engine.log(self.log_name, text)
         if name == ALGORITHM_STAGE:
-            ticks, measured_ns = self._enter_algorithm(running)
+            self._enter_algorithm(running, engine, steps, index)
+            return
+        start = engine.now
         end = start + ticks
         record = DecoderStageRecord(
-            job.op_id, job.window_id, name, cycles, start, end, measured_ns
+            job.op_id, job.window_id, name, cycles, start, end
         )
         self.stage_records.append(record)
-        text = _stage_text(name, job, cycles, measured_ns)
-        engine.log(self.log_name, text)
+        next_index = index + 1
         engine.schedule(
             ticks,
-            lambda: self._leave(running, engine, steps, index),
+            lambda: self._enter(running, engine, steps, next_index),
             label=f"{name}({job.label})",
         )
 
-    def _enter_algorithm(self, running) -> tuple:
-        """(ticks, measured nanoseconds) of the algorithm stage at its start."""
+    def _enter_algorithm(
+        self, running, engine, steps: list, index: int
+    ) -> None:
+        """Start the wrapped decoder; its result closes the stage."""
         job = running.job
         if job.decoder_input is not None:
             # the read out of this unit's memory
@@ -209,37 +257,23 @@ class DecoderEngine:
             for round_input in job.decoder_input.rounds:
                 fragments.extend(round_input.fragments)
             job.payloads = fragments
-        if not self.measures_wall_clock:
-            ticks = self.decoder.latency(job)
-            return ticks, None
-        # Software decoder on this host: run the real call now, hold the
-        # unit for exactly as long as it took, release the result then.
-        measured_ns = None
-        if not job.cancelled:
-            running.result = self.decoder.decode(job)
-            measured_ns = self.decoder.last_decode_ns
-        elapsed_ns = 0
-        if measured_ns is not None:
-            elapsed_ns = measured_ns
-        measured_microseconds = elapsed_ns / 1000.0
-        ticks = config.microseconds_to_ticks(measured_microseconds)
-        return ticks, measured_ns
+        start = engine.now
 
-    def _leave(self, running, engine, steps: list, index: int) -> None:
-        name, _cycles, _ticks = steps[index]
-        if name == ALGORITHM_STAGE:
-            self._decode_at_time_end(running)
-        next_index = index + 1
-        self._enter(running, engine, steps, next_index)
+        def on_algorithm_result(result: Optional[message.DecodeResult]) -> None:
+            running.result = result
+            record = DecoderStageRecord(
+                job.op_id,
+                job.window_id,
+                ALGORITHM_STAGE,
+                None,
+                start,
+                engine.now,
+            )
+            self.stage_records.append(record)
+            next_index = index + 1
+            self._enter(running, engine, steps, next_index)
 
-    def _decode_at_time_end(self, running) -> None:
-        """A priced algorithm's result is ready when its time ends."""
-        job = running.job
-        if job.cancelled:
-            return
-        if self.measures_wall_clock:
-            return
-        running.result = self.decoder.decode(job)
+        self.decoder.start(job, engine, on_algorithm_result)
 
 
 @dataclasses.dataclass
@@ -248,6 +282,28 @@ class _RunningDecode:
     on_result: Callable[[Optional[message.DecodeResult]], None]
     result: Optional[message.DecodeResult] = None
     aborted: bool = False
+
+
+def _check_pipeline(
+    initiation_interval_us: Optional[float], pipeline_depth: Optional[int]
+) -> None:
+    if initiation_interval_us is None:
+        if pipeline_depth is not None:
+            raise ValueError(
+                "pipeline_depth needs an initiation_interval_us; without "
+                "one the unit holds its compute for the whole decode"
+            )
+        return
+    is_positive = initiation_interval_us > 0
+    if not math.isfinite(initiation_interval_us) or not is_positive:
+        raise ValueError("initiation_interval_us must be positive and finite")
+    interval_ticks = config.microseconds_to_ticks(initiation_interval_us)
+    if interval_ticks == 0:
+        raise ValueError(
+            "initiation_interval_us is positive but rounds to zero ticks"
+        )
+    if pipeline_depth is not None and pipeline_depth < 1:
+        raise ValueError("pipeline_depth must be at least 1")
 
 
 def _key(job: message.DecodeJob):
@@ -264,10 +320,8 @@ def _hardware_step(
     return stage.name, cycles, ticks[stage.name]
 
 
-def _stage_text(name: str, job: message.DecodeJob, cycles, measured_ns) -> str:
+def _stage_text(name: str, job: message.DecodeJob, cycles) -> str:
     text = f"{name} {job.label}"
     if cycles is not None:
         text += f" ({cycles} cycles)"
-    if measured_ns is not None:
-        text += f" ({measured_ns} ns measured)"
     return text

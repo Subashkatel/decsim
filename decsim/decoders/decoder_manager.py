@@ -749,14 +749,7 @@ class DecoderManager:
         deep pipeline pays its SRAM price visibly or refuses loudly.
         """
         decoder = self.router.route(job)
-        interval_of = getattr(decoder, "initiation_interval", None)
-        if interval_of is None:
-            return 2
-        interval = interval_of(job)
-        depth = getattr(decoder, "pipeline_depth", None)
-        if depth is None:
-            latency_ticks = decoder.latency(job)
-            depth = _full_pipeline_depth(latency_ticks, interval)
+        depth = decoder.pipeline_depth(job)
         return depth + 1
 
     def _slot_memory_ok(self, slot: tuple, job: message.DecodeJob) -> bool:
@@ -968,15 +961,10 @@ class DecoderManager:
         """
         slot = (job.pool, job.unit)
         decoder = self.router.route(job)
-        measures_wall_clock = getattr(decoder, "measures_wall_clock", False)
-        if measures_wall_clock:
+        occupancy = decoder.occupancy(job)
+        if occupancy is None:
             self._compute_free_ticks.pop(slot, None)
             return
-        interval_of = getattr(decoder, "initiation_interval", None)
-        if interval_of is None:
-            occupancy = decoder.latency(job)
-        else:
-            occupancy = interval_of(job)
         start = self.engine.now
         landing = job.input_landing_ticks
         if landing is not None:
@@ -985,31 +973,31 @@ class DecoderManager:
 
     # ------------------------------------------------- the pipelined unit
 
-    def _initiation_interval_ticks(
-        self, decoder, job: message.DecodeJob, latency_ticks: int
-    ):
-        """(interval, depth) for a pipelined start, (None, None) otherwise.
+    def _pipeline_of(self, decoder, job: message.DecodeJob):
+        """(interval, latency, depth) of a pipelined start, else None.
 
-        The pipelined model serves plain window and external decodes
-        only; the strong tier, gap siblings, and merged batches keep
-        occupancy == latency until they get their own design pass, and a
-        pipelined route there refuses loudly rather than silently
+        A unit pipelines when its occupancy is shorter than its latency
+        (gem5's FuncUnit: an issue latency below the op latency,
+        fu_pool.hh). The pipelined model serves plain window and external
+        decodes only; the strong tier, gap siblings, and merged batches
+        keep occupancy == latency until they get their own design pass,
+        and a pipelined route there refuses loudly rather than silently
         serializing.
         """
-        interval_of = getattr(decoder, "initiation_interval", None)
-        if interval_of is None:
-            return None, None
+        occupancy = decoder.occupancy(job)
+        if occupancy is None:
+            return None
+        latency_ticks = decoder.latency(job)
+        if occupancy == latency_ticks:
+            return None
         if _is_outside_pipelined_model(job):
             raise RuntimeError(
                 f"decode job {job.label!r}: a pipelined decoder serves plain "
                 "window or external decodes only; the strong tier, gap "
                 "siblings, and merged batches are not pipelined yet"
             )
-        interval = interval_of(job)
-        depth = getattr(decoder, "pipeline_depth", None)
-        if depth is None:
-            depth = _full_pipeline_depth(latency_ticks, interval)
-        return interval, depth
+        depth = decoder.pipeline_depth(job)
+        return occupancy, latency_ticks, depth
 
     def _track_pipelined_start(
         self,
@@ -1257,18 +1245,17 @@ class DecoderManager:
         decoder = self.router.route(job)
         self.engine.log(self.log_name, f"START DECODE {job.label}")
         self._predict_compute_free(job)
-        run = getattr(decoder, "run", None)
-        if run is not None:  # a staged decoder reads memory itself
-            run(
-                job,
-                self.engine,
-                lambda result: self._on_decode_done(job, result),
-            )
-            return
+        pipeline = self._pipeline_of(decoder, job)
         if job.decoder_input is not None:
-            # a plain decoder reads its memory now
+            # the decoder reads this unit's memory now
             job.payloads = _fragments_in(job.decoder_input)
-        self._schedule_decode(decoder, job)
+        decoder.start(
+            job, self.engine, lambda result: self._on_decode_done(job, result)
+        )
+        if pipeline is None:
+            return
+        interval_ticks, latency_ticks, depth = pipeline
+        self._track_pipelined_start(job, latency_ticks, interval_ticks, depth)
 
     def _is_boundary_owed(self, job: message.DecodeJob) -> bool:
         if self.service_gate is None:
@@ -1303,27 +1290,6 @@ class DecoderManager:
         # at its own landing
         self._computing[slot] = job
         self._begin_service(job, gated=False)
-
-    def _schedule_decode(self, decoder, job: message.DecodeJob) -> None:
-        """The algorithm's result is ready when its latency ends."""
-        latency_ticks = decoder.latency(job)
-        interval_ticks, depth = self._initiation_interval_ticks(
-            decoder, job, latency_ticks
-        )
-        self.engine.schedule(
-            latency_ticks,
-            lambda: self._decode_now(decoder, job),
-            label=f"decode_done({job.label})",
-        )
-        if interval_ticks is None:
-            return
-        self._track_pipelined_start(job, latency_ticks, interval_ticks, depth)
-
-    def _decode_now(self, decoder, job: message.DecodeJob) -> None:
-        result = None
-        if not job.cancelled and job.on_done is None:
-            result = decoder.decode(job)
-        self._on_decode_done(job, result)
 
     # ------------------------------------------------- the split gap
 
@@ -1676,9 +1642,7 @@ class DecoderManager:
             return
         job.cancelled = True
         decoder = self.router.route(job)
-        cancel = getattr(decoder, "cancel", None)
-        if cancel is not None:  # a staged decoder stops its stages
-            cancel(job)
+        decoder.cancel(job)
         self.staging.cancel(job)
         self.staging.release(live.request_job)
         self._free_unit(job)
@@ -1900,13 +1864,6 @@ def _is_live_weak_window_job(job: message.DecodeJob, window_key: tuple) -> bool:
     if job.on_done is not None:
         return False
     return not job.cancelled
-
-
-def _full_pipeline_depth(latency_ticks: int, interval_ticks: int) -> int:
-    """The decodes in flight when a start every interval fills the latency."""
-    decodes_per_latency = latency_ticks / interval_ticks
-    full_pipeline = math.ceil(decodes_per_latency)
-    return max(1, full_pipeline)
 
 
 def _flight_of(flights: list, job: message.DecodeJob):

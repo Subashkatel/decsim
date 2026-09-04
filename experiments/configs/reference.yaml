@@ -201,9 +201,11 @@ strong_round_store:                # syndrome buffer 1, the strong-side store
 # weak_baseline decodes on weak_decoder, strong_only on strong_decoder;
 # the unused tier's section may be omitted.
 weak_decoder:                      # the lightweight tier: fast, higher LER
-  kind: pymatching                 # pymatching | belief_matching: the real
-                                   # algorithm, measured wall clock per window;
-                                   # or a number: fixed core latency in us.
+  kind: pymatching                 # pymatching | unweighted_pymatching |
+                                   # belief_matching | union_find | tesseract |
+                                   # relay_bp | bposd: the real algorithm,
+                                   # measured wall clock per window; or a
+                                   # number: fixed core latency in us.
                                    # Known number cards: 0.028 = LILLIPUT-class
                                    # core, [d=3, m=2] 7 cycles at 250 MHz
                                    # (2108.06569 sec. 6.3, Table 4); 5.0 = the

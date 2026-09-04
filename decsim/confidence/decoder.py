@@ -1,20 +1,11 @@
 """Attach a typed confidence record to each committed decoder window."""
-from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Optional
 
-from ..decoders.window_decode_results import payload_syndrome
-from ..message import (
-    DecodeJob,
-    DecodeResult,
-    RunSeedChild,
-    RunSeedPathSegment,
-    SoftOutputSource,
-)
-from ..detector_error_model.fault_model_contracts import DecoderFaultModelRequirement
-
-if TYPE_CHECKING:
-    from ..ports import Decoder
+import decsim.decoders.decoder as decoder_module
+import decsim.decoders.window_decode_results as window_decode_results
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.message as message
 
 # cache value meaning "this model was inspected and has no usable
 # observable"; distinct from a missing key, which means "not built yet"
@@ -33,46 +24,51 @@ def cached_metric_for_model(cache: dict, metric_cls, model):
     """
     import weakref
 
-    from ..detector_error_model.fault_model_contracts import (
-        FaultRepresentation,
-    )
-
     if model is None:
         return None
-    cached = cache.get(id(model))
+    model_identity = id(model)
+    cached = cache.get(model_identity)
+    if cached is _NO_OBSERVABLE:
+        return None
     if cached is not None:
-        return None if cached is _NO_OBSERVABLE else cached
-    faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
+        return cached
+    faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
     observables = faults.observables.toarray()
     has_one_observable = observables.shape[0] == 1 and observables.any()
-    metric = (metric_cls.from_window_model(model)
-              if has_one_observable else _NO_OBSERVABLE)
-    cache[id(model)] = metric
-    weakref.finalize(model, cache.pop, id(model), None)
-    return None if metric is _NO_OBSERVABLE else metric
+    metric = _NO_OBSERVABLE
+    if has_one_observable:
+        metric = metric_cls.from_window_model(model)
+    cache[model_identity] = metric
+    weakref.finalize(model, cache.pop, model_identity, None)
+    if metric is _NO_OBSERVABLE:
+        return None
+    return metric
 
 
-class SoftOutputDecoder:
+class SoftOutputDecoder(decoder_module.DecoderBase):
     """Attach one configured metric's confidence without changing hard output.
 
     ``metric_cls`` is a configured factory instance declaring ``source`` and
-    ``from_window_model(model)``.
+    ``from_window_model(model)``. Timing is the base decoder's; on the
+    measured path the soft output is part of the weak decoder's real
+    work (the paper's weak decoder computes it during decoding), so the
+    measured time is the base's own backend call plus the timed gap
+    solve, never the base's untimed setup (graph build and warm-up).
     """
 
-    def __init__(self, base: "Decoder", metric_cls):
+    def __init__(self, base: decoder_module.DecoderBase, metric_cls):
         if isinstance(metric_cls, type):
             raise TypeError(
                 "SoftOutputDecoder requires a configured metric factory "
                 "instance, not a metric class"
             )
-        if not isinstance(
-            getattr(metric_cls, "source", None),
-            SoftOutputSource,
-        ):
+        source = getattr(metric_cls, "source", None)
+        if not isinstance(source, message.SoftOutputSource):
             raise TypeError(
                 "configured metric factory must declare one SoftOutputSource"
             )
-        if not callable(getattr(metric_cls, "from_window_model", None)):
+        builder = getattr(metric_cls, "from_window_model", None)
+        if not callable(builder):
             raise TypeError(
                 "configured metric factory must build from a window model"
             )
@@ -84,12 +80,16 @@ class SoftOutputDecoder:
                 "base decoder and metric factory must declare "
                 "fault_model_requirement"
             ) from error
-        if not isinstance(base_requirement, DecoderFaultModelRequirement):
+        if not isinstance(
+            base_requirement, fault_models.DecoderFaultModelRequirement
+        ):
             raise TypeError(
                 "base decoder fault_model_requirement must be a "
                 "DecoderFaultModelRequirement"
             )
-        if not isinstance(metric_requirement, DecoderFaultModelRequirement):
+        if not isinstance(
+            metric_requirement, fault_models.DecoderFaultModelRequirement
+        ):
             raise TypeError(
                 "metric factory fault_model_requirement must be a "
                 "DecoderFaultModelRequirement"
@@ -103,54 +103,60 @@ class SoftOutputDecoder:
 
     def run_seed_children(self):
         """Expose the base decoder and configured confidence builder."""
+        base_path = (message.RunSeedPathSegment("field", "base"),)
+        metric_path = (message.RunSeedPathSegment("field", "metric_cls"),)
         return (
-            RunSeedChild(
-                (RunSeedPathSegment("field", "base"),),
-                self.base,
-            ),
-            RunSeedChild(
-                (RunSeedPathSegment("field", "metric_cls"),),
-                self.metric_cls,
-            ),
+            message.RunSeedChild(base_path, self.base),
+            message.RunSeedChild(metric_path, self.metric_cls),
         )
 
-    def latency(self, job: DecodeJob) -> int:
-        """Timing is the base decoder's; the soft output adds no modelled latency."""
+    def latency(self, job: message.DecodeJob) -> int:
+        """The base decoder's timing; the soft output adds no latency."""
         return self.base.latency(job)
 
-    @property
-    def measures_wall_clock(self):
-        return getattr(self.base, "measures_wall_clock", False)
+    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+        """The base decoder's occupancy; None when it is measured."""
+        return self.base.occupancy(job)
 
-    def decode(self, job: DecodeJob) -> DecodeResult:
-        """Run the base decode, then attach the soft output when available.
+    def pipeline_depth(self, job: message.DecodeJob) -> int:
+        """The base decoder's pipeline depth."""
+        return self.base.pipeline_depth(job)
 
-        The soft output is part of the weak decoder's real work (the paper's
-        weak decoder computes it during decoding), so last_decode_ns is
-        the base decoder's OWN measured decode plus the timed gap solves.
-        Wrapping base.decode in this wrapper's stopwatch instead would
-        re-capture the base's untimed setup (graph build and warm-up),
-        which the base deliberately keeps out of its measurement."""
+    def cancel(self, job: message.DecodeJob) -> None:
+        """Stop the base decoder's job."""
+        self.base.cancel(job)
+
+    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+        """Run the base decode, then attach the soft output when available."""
+        result, _elapsed_ns = self.decode_timed(job)
+        return result
+
+    def decode_timed(self, job: message.DecodeJob) -> tuple:
+        """The base's measured call plus the timed soft-output evaluation."""
         import time
+
         metric = self._metric_for(job.dem)
-        result = self.base.decode(job)
-        base_decode_ns = getattr(self.base, "last_decode_ns", None) or 0
+        result, base_decode_ns = self.base.decode_timed(job)
         started_ns = time.perf_counter_ns()
         if metric is not None:
-            result.soft_output = metric.evaluate(payload_syndrome(job))
-        evaluate_ns = time.perf_counter_ns() - started_ns
-        self.last_decode_ns = base_decode_ns + evaluate_ns
-        return result
+            syndrome = window_decode_results.payload_syndrome(job)
+            result.soft_output = metric.evaluate(syndrome)
+        finished_ns = time.perf_counter_ns()
+        evaluate_ns = finished_ns - started_ns
+        return result, base_decode_ns + evaluate_ns
 
     def _metric_for(self, model):
         """This window model's cached metric, or None without an observable."""
         return cached_metric_for_model(
-            self._metrics_by_model_identity, self.metric_cls, model)
+            self._metrics_by_model_identity, self.metric_cls, model
+        )
 
 
 class ParallelGapDecoder(SoftOutputDecoder):
-    """The paired-core weak unit: the gap's two forced-class solves run
-    on two matching cores side by side, joined by a subtract-compare.
+    """The paired-core weak unit: two forced-class solves side by side.
+
+    The gap's two forced-class solves run on two matching cores, joined
+    by a subtract-compare.
 
     Accuracy is unchanged by construction: the committed correction and
     observables still come from the base decode, and the pair only
@@ -173,30 +179,38 @@ class ParallelGapDecoder(SoftOutputDecoder):
     min(w_forced) == w_plain is pinned at the metric level.
     """
 
-    def __init__(self, base: "Decoder", metric_cls, combine_ns: int = 0):
-        super().__init__(base, metric_cls)
+    def __init__(
+        self,
+        base: decoder_module.DecoderBase,
+        metric_cls,
+        combine_ns: int = 0,
+    ):
+        SoftOutputDecoder.__init__(self, base, metric_cls)
         if combine_ns < 0:
-            raise ValueError("combine_ns models join hardware and cannot "
-                             "be negative")
+            raise ValueError(
+                "combine_ns models join hardware and cannot be negative"
+            )
         self.combine_ns = combine_ns
 
-    def decode(self, job: DecodeJob) -> DecodeResult:
+    def decode_timed(self, job: message.DecodeJob) -> tuple:
         """Base decode for the payload; paired solves for gap and time."""
-        result = self.base.decode(job)
+        result, base_decode_ns = self.base.decode_timed(job)
         metric = self._metric_for(job.dem)
         if metric is None:
-            self.last_decode_ns = getattr(self.base, "last_decode_ns", 0)
-            return result
-        paired = metric.paired_evaluate(payload_syndrome(job))
+            return result, base_decode_ns
+        syndrome = window_decode_results.payload_syndrome(job)
+        paired = metric.paired_evaluate(syndrome)
         result.soft_output = paired.soft_output
-        self.last_decode_ns = max(paired.forced_solve_ns) + self.combine_ns
-        return result
+        slower_solve_ns = max(paired.forced_solve_ns)
+        return result, slower_solve_ns + self.combine_ns
 
 
 class SplitGapDecoder(SoftOutputDecoder):
-    """The weak half of a split gap pair: this unit solves ONE forced
-    class (class 0) and the base decode, while a sibling job on a
-    separate decoder unit solves the other class.
+    """The weak half of a split gap pair.
+
+    This unit solves ONE forced class (class 0) and the base decode,
+    while a sibling job on a separate decoder unit solves the other
+    class.
 
     The gap does not exist until both halves report, so this decoder
     attaches no soft output; it stamps its forced weight on the result
@@ -209,54 +223,70 @@ class SplitGapDecoder(SoftOutputDecoder):
 
     FORCED_CLASS = 0
 
-    def decode(self, job: DecodeJob) -> DecodeResult:
-        result = self.base.decode(job)
+    def decode_timed(self, job: message.DecodeJob) -> tuple:
+        """Base decode for the payload; this half's forced solve for time."""
+        result, base_decode_ns = self.base.decode_timed(job)
         metric = self._metric_for(job.dem)
         if metric is None:
-            self.last_decode_ns = getattr(self.base, "last_decode_ns", 0)
-            return result
+            return result, base_decode_ns
+        syndrome = window_decode_results.payload_syndrome(job)
         weight, elapsed_ns = metric.forced_class_solve(
-            payload_syndrome(job), self.FORCED_CLASS)
+            syndrome, self.FORCED_CLASS
+        )
         result.gap_half_weight = weight
-        self.last_decode_ns = elapsed_ns
-        return result
+        return result, elapsed_ns
 
 
-class GapHalfDecoder:
-    """The sibling half of a split gap pair: one forced-class solve
-    (class 1) on its own decoder unit, no correction, no observables.
+class GapHalfDecoder(decoder_module.DecoderBase):
+    """The sibling half of a split gap pair.
+
+    One forced-class solve (class 1) on its own decoder unit, no
+    correction, no observables.
 
     Its result exists only to carry a weight to the join; it never
     touches the strong ledger or the Pauli frame (the manager routes
     ``gap_sibling_for`` completions to the join before any of that).
+    Always measured on the host clock: the forced solve is the unit's
+    time.
     """
 
     FORCED_CLASS = 1
 
+    fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
+
     def __init__(self, metric_cls):
-        from ..detector_error_model.fault_model_contracts import (
-            GRAPHLIKE_FAULT_MODEL_REQUIRED,
-        )
         self.metric_cls = metric_cls
-        self.fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
-        self.measures_wall_clock = True
-        self.last_decode_ns = 0
         self._metrics_by_model_identity: dict = {}
 
-    def latency(self, job: DecodeJob) -> int:
-        raise RuntimeError("measured wall-clock timing needs the "
-                           "DecoderEngine: it decodes first and charges "
-                           "the measured time")
+    def latency(self, job: message.DecodeJob) -> int:
+        """A measured decoder has no latency before its call."""
+        del job
+        raise NotImplementedError(
+            "the gap half is measured on the host clock; the unit holds it "
+            "for the forced solve's time"
+        )
 
-    def decode(self, job: DecodeJob) -> DecodeResult:
-        result = DecodeResult(job.op_id, job.window_id)
-        metric = cached_metric_for_model(
-            self._metrics_by_model_identity, self.metric_cls, job.dem)
-        if metric is None:
-            self.last_decode_ns = 0
-            return result
-        weight, elapsed_ns = metric.forced_class_solve(
-            payload_syndrome(job), self.FORCED_CLASS)
-        result.gap_half_weight = weight
-        self.last_decode_ns = elapsed_ns
+    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+        """None: the unit cannot say in advance when it frees."""
+        del job
+        return None
+
+    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+        """The forced-class weight on an otherwise empty result."""
+        result, _elapsed_ns = self.decode_timed(job)
         return result
+
+    def decode_timed(self, job: message.DecodeJob) -> tuple:
+        """The forced solve and its wall clock; nothing without a metric."""
+        result = message.DecodeResult(job.op_id, job.window_id)
+        metric = cached_metric_for_model(
+            self._metrics_by_model_identity, self.metric_cls, job.dem
+        )
+        if metric is None:
+            return result, 0
+        syndrome = window_decode_results.payload_syndrome(job)
+        weight, elapsed_ns = metric.forced_class_solve(
+            syndrome, self.FORCED_CLASS
+        )
+        result.gap_half_weight = weight
+        return result, elapsed_ns

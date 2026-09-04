@@ -35,13 +35,17 @@ import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_packing as syndrome_packing_module
 import decsim.decoders.belief_matching.decoder as belief_matching
-import decsim.decoders.decoder_engine as decoder_engine
+import decsim.decoders.bposd.decoder as bposd
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.mwpm.decoder as mwpm
+import decsim.decoders.relay_bp.decoder as relay_bp
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
+import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.tesseract.decoder as tesseract
+import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.verify_windows as verify_windows
 import decsim.decoders.weak_strong_switching as weak_strong_switching
 import decsim.engine as engine_module
@@ -86,10 +90,17 @@ SYNDROME_SOURCES = {
 }
 # A named row decodes every window for real and is charged its measured
 # wall clock; a number instead of a name is a fixed core latency in
-# microseconds on the MWPM path (_algorithm).
+# microseconds on the MWPM path (_algorithm). Every row is one class on
+# the Decoder port (decsim/decoders/decoder.py); sinter's
+# BUILT_IN_DECODERS is the shape.
 DECODERS = {
     "pymatching": mwpm.PyMatchingDecoder,
+    "unweighted_pymatching": mwpm.UnweightedPyMatchingDecoder,
     "belief_matching": belief_matching.BeliefMatchingDecoder,
+    "union_find": union_find.UnionFindDecoder,
+    "tesseract": tesseract.TesseractDecoder,
+    "relay_bp": relay_bp.RelayBpDecoder,
+    "bposd": bposd.BPOSDDecoder,
 }
 ROUND_STORES = {
     "round_store": syndrome_buffer_module.SyndromeBuffer,
@@ -512,7 +523,7 @@ class Machine:
 def build_decoder_unit(settings: MachineSettings, tier: str):
     """The decoder unit of one tier, weak or strong, as the root builds it.
 
-    A named row decodes for real inside a DecoderEngine whose fetch and
+    A named row decodes for real inside a StagedDecoder whose fetch and
     release stages are cycles of the tier's clock; a number is a fixed
     core latency on the MWPM path. The tier that decodes the plan's
     windows carries the gap wrapper when the escalation switches
@@ -530,7 +541,9 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     algorithm = _algorithm(tier_settings.kind, tier)
     is_active = tier == settings.escalation.decodes_on
     if is_active and settings.escalation.kind == "switching":
-        algorithm = _gap_wrapped(algorithm, settings.escalation)
+        # a named row is measured on the host clock; a number is priced
+        is_measured = isinstance(tier_settings.kind, str)
+        algorithm = _gap_wrapped(algorithm, settings.escalation, is_measured)
     check = _row(
         WINDOW_CHECKS,
         "observation.check_windows_with",
@@ -968,15 +981,16 @@ def _algorithm(kind, tier: str):
     return mwpm.PyMatchingDecoder(latency_model)
 
 
-def _gap_wrapped(algorithm, escalation: decoder_settings.EscalationSettings):
+def _gap_wrapped(
+    algorithm, escalation: decoder_settings.EscalationSettings, is_measured
+):
     """The weak algorithm carrying its complementary gap, per computation."""
     metric_factory = complementary.ComplementaryGapMetricFactory()
     computation = escalation.gap_computation
     if computation == "parallel_pair":
         return confidence_decoder.ParallelGapDecoder(algorithm, metric_factory)
     if computation == "split_pair":
-        measures_wall_clock = getattr(algorithm, "measures_wall_clock", False)
-        if not measures_wall_clock:
+        if not is_measured:
             raise ValueError(
                 "split_pair times two real forced-class solves on separate "
                 "units, so the weak tier needs a named wall-clock "
@@ -987,7 +1001,7 @@ def _gap_wrapped(algorithm, escalation: decoder_settings.EscalationSettings):
     return confidence_decoder.SoftOutputDecoder(algorithm, metric_factory)
 
 
-def _gap_unit(settings: MachineSettings) -> decoder_engine.DecoderEngine:
+def _gap_unit(settings: MachineSettings) -> staged_decoder.StagedDecoder:
     """split_pair's sibling pool: one forced solve per window, timed for real.
 
     Staged over the weak tier's engine timing, since it reads the same
@@ -1000,24 +1014,24 @@ def _gap_unit(settings: MachineSettings) -> decoder_engine.DecoderEngine:
 
 def _staged_unit(
     tier_settings: decoder_settings.DecoderSettings, algorithm
-) -> decoder_engine.DecoderEngine:
+) -> staged_decoder.StagedDecoder:
     """The algorithm between its fetch and release stages.
 
     Fetch cycles per round before it, release cycles per job after it,
     on the tier's engine clock.
     """
-    fetch = decoder_engine.DecoderStage(
+    fetch = staged_decoder.DecoderStage(
         "fetch", cycles_per_round=tier_settings.fetch_cycles_per_round
     )
-    release = decoder_engine.DecoderStage(
+    release = staged_decoder.DecoderStage(
         "release", cycles_per_job=tier_settings.release_cycles_per_job
     )
-    timing = decoder_engine.DecoderTiming(
+    timing = staged_decoder.UnitTiming(
         before=(fetch,),
         after=(release,),
         frequency_mhz=tier_settings.engine_megahertz,
     )
-    return decoder_engine.DecoderEngine(algorithm, timing)
+    return staged_decoder.StagedDecoder(algorithm, timing)
 
 
 # --------------------------------------------------- the stores and frame

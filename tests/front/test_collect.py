@@ -134,13 +134,14 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         round_period_us=1.0,
         shots=1,
     )
-    weak_decoder = decoder_settings.DecoderSettings(kind="union_find")
+    weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
     settings = dataclasses.replace(task.settings, weak_decoder=weak_decoder)
     unknown = dataclasses.replace(task, settings=settings)
     with pytest.raises(
         ValueError,
-        match="weak_decoder.kind 'union_find' is not a row of its table; the "
-        r"rows are \['belief_matching', 'pymatching'\]",
+        match="weak_decoder.kind 'lookup_table' is not a row of its table; "
+        r"the rows are \['belief_matching', 'bposd', 'pymatching', "
+        r"'relay_bp', 'tesseract', 'union_find', 'unweighted_pymatching'\]",
     ):
         collect.collect([unknown], measure_shot.measure_shot)
 

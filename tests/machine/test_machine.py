@@ -14,8 +14,9 @@ import pathlib
 import pytest
 
 import decsim.config as config
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.settings as decoder_settings
-import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.decoders.union_find.decoder as union_find_decoder
 import decsim.engine as engine_module
 import decsim.machine as machine_module
 import decsim.message as message
@@ -42,10 +43,8 @@ class RecordingReceiver:
         self.arrivals.append((self.engine.now, readout.round_index))
 
 
-class FakeWeakDecoder:
+class FakeWeakDecoder(decoder_module.DecoderBase):
     """A table row for the plug-in test: fixed latency, no correction."""
-
-    fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
 
     def __init__(self, latency_model=None):
         del latency_model
@@ -115,13 +114,31 @@ def test_a_new_decoder_is_one_class_and_one_table_row():
     assert decode_lines
 
 
+def test_a_second_table_row_runs_gate_point_one():
+    """Gate point 1's settings run to completion on the union_find row."""
+    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    experiment = experiment_config.load_experiment(config_path)
+    settings = experiment.point_settings(
+        physical_error_probability=0.003, distance=3, round_period_us=1.0
+    )
+    weak_decoder = dataclasses.replace(settings.weak_decoder, kind="union_find")
+    settings = dataclasses.replace(settings, weak_decoder=weak_decoder)
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    inner = machine.active_decoder.decoder
+    assert type(inner) is union_find_decoder.UnionFindDecoder
+    assert result.operation_results[0].logical_observables is not None
+
+
 def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
-    weak_decoder = decoder_settings.DecoderSettings(kind="union_find")
+    weak_decoder = decoder_settings.DecoderSettings(kind="lookup_table")
     settings = machine_module.MachineSettings(weak_decoder=weak_decoder)
     with pytest.raises(
         ValueError,
-        match="weak_decoder.kind 'union_find' is not a row of its table; the "
-        r"rows are \['belief_matching', 'pymatching'\]",
+        match="weak_decoder.kind 'lookup_table' is not a row of its table; "
+        r"the rows are \['belief_matching', 'bposd', 'pymatching', "
+        r"'relay_bp', 'tesseract', 'union_find', 'unweighted_pymatching'\]",
     ):
         machine_module.Machine.build(settings)
 

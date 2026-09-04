@@ -25,10 +25,11 @@ class RoundStoreSettings:
 
     @classmethod
     def from_yaml(cls, section: Mapping) -> "RoundStoreSettings":
-        """A store section: `rounds`, a positive count or null."""
+        """A store section: its kind, and `rounds`, a positive count or null."""
+        kind = section.get("kind", "round_store")
         rounds = section.get("rounds")
         if rounds is not None and rounds < 1:
             raise ValueError(
                 f"a round store holds at least one round, got {rounds!r}"
             )
-        return cls(rounds=rounds)
+        return cls(kind=kind, rounds=rounds)

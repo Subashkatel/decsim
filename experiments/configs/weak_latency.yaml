@@ -8,15 +8,14 @@
 
 extends: weak_decoder_baseline.yaml
 
-decoder:
-  weak:
-    algorithm: pymatching
-    units: 1
-    unit_memory_rounds: null
-    engine:
-      clock: fridge
-      fetch_cycles_per_round: 1
-      release_cycles_per_job: 10
+weak_decoder:
+  kind: pymatching
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: fridge
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
 
 sweep:
   - physical_error_probability: [0.001]

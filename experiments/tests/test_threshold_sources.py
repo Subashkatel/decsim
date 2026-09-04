@@ -39,7 +39,7 @@ def source_config(tmp_path, switching_card: dict, shots: int = 1):
     config_path = switching_config(tmp_path, 20.0)
     import yaml
     raw = yaml.safe_load(config_path.read_text())
-    raw["switching"] = switching_card
+    raw["escalation"] = {"kind": "switching", **switching_card}
     raw["sweep"][0]["shots"] = shots
     config_path.write_text(yaml.safe_dump(raw))
     return config_path

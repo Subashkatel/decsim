@@ -25,15 +25,15 @@ from test_switching_mode import measured_shot, switching_config
 def split_config(tmp_path, gap_threshold_db: float, gap_units: int = 1):
     path = switching_config(tmp_path, gap_threshold_db)
     raw = yaml.safe_load(path.read_text())
-    raw["switching"]["gap_computation"] = "split_pair"
-    raw["switching"]["gap_units"] = gap_units
+    raw["escalation"]["gap_computation"] = "split_pair"
+    raw["escalation"]["gap_units"] = gap_units
     return write_config(tmp_path, raw)
 
 
 def test_gap_units_requires_split_pair(tmp_path):
     path = switching_config(tmp_path, 20.0)
     raw = yaml.safe_load(path.read_text())
-    raw["switching"]["gap_units"] = 2
+    raw["escalation"]["gap_units"] = 2
     with pytest.raises(ValueError, match="gap_units"):
         load_experiment(write_config(tmp_path, raw))
 
@@ -41,8 +41,8 @@ def test_gap_units_requires_split_pair(tmp_path):
 def test_split_pair_refuses_double_window(tmp_path):
     path = switching_config(tmp_path, 20.0)
     raw = yaml.safe_load(path.read_text())
-    raw["switching"]["gap_computation"] = "split_pair"
-    raw["switching"]["double_window"] = True
+    raw["escalation"]["gap_computation"] = "split_pair"
+    raw["escalation"]["double_window"] = True
     with pytest.raises(ValueError, match="serial switching only"):
         load_experiment(write_config(tmp_path, raw))
 
@@ -50,7 +50,7 @@ def test_split_pair_refuses_double_window(tmp_path):
 def test_split_pair_refuses_a_priced_card_weak_tier(tmp_path):
     path = split_config(tmp_path, 20.0)
     raw = yaml.safe_load(path.read_text())
-    raw["decoder"]["weak"]["algorithm"] = 0.028
+    raw["weak_decoder"]["kind"] = 0.028
     config = load_experiment(write_config(tmp_path, raw))
     with pytest.raises(ValueError, match="wall-clock"):
         build_decoder_unit(config.settings, "weak")

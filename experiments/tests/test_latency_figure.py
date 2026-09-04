@@ -15,8 +15,8 @@ from test_decoder_units import MINIMAL_CONFIG, strong_unit, write_config
 
 def wall_clock_config(tmp_path, distances):
     return write_config(tmp_path, {
-        "decoder": {"weak": {**MINIMAL_CONFIG["decoder"]["weak"],
-                             "algorithm": "pymatching"}},
+        "weak_decoder": {**MINIMAL_CONFIG["weak_decoder"],
+                         "kind": "pymatching"},
         "sweep": [{"physical_error_probability": [0.001],
                    "distance": distances, "round_period_us": [1.0],
                    "shots": 2}]})
@@ -75,8 +75,8 @@ def test_combined_figure_reads_two_runs_sample_files(tmp_path, monkeypatch):
 
     weak_run_dir, rows = run_experiment(wall_clock_config(tmp_path, [3, 5]))
     strong_path = write_config(tmp_path, {
-        "decode_path": "strong_only",
-        "decoder": strong_unit("belief_matching"),
+        "escalation": {"kind": "strong_only"},
+        **strong_unit("belief_matching"),
         "sweep": [{"physical_error_probability": [0.001],
                    "distance": [3, 5], "round_period_us": [1.0],
                    "shots": 1}]})

@@ -26,16 +26,16 @@ NEAR_THRESHOLD_P = 0.008
 
 def switching_config(tmp_path, gap_threshold_db: float,
                      rounds: int = 30):
-    weak_unit = {"weak": {"algorithm": "pymatching", "units": 1,
-                          "unit_memory_rounds": None,
-                          "engine": {"clock": "fridge",
-                                     "fetch_cycles_per_round": 1,
-                                     "release_cycles_per_job": 1}}}
+    weak_unit = {"weak_decoder": {"kind": "pymatching", "units": 1,
+                                  "unit_memory_rounds": None,
+                                  "engine": {"clock": "fridge",
+                                             "fetch_cycles_per_round": 1,
+                                             "release_cycles_per_job": 1}}}
     return write_config(tmp_path, {
-        "decode_path": "switching",
-        "rounds_per_shot": rounds,
-        "switching": {"gap_threshold_db": gap_threshold_db},
-        "decoder": {**weak_unit, **strong_unit("belief_matching")},
+        "escalation": {"kind": "switching",
+                       "gap_threshold_db": gap_threshold_db},
+        "workload": {**MINIMAL_CONFIG["workload"], "rounds_per_shot": rounds},
+        **weak_unit, **strong_unit("belief_matching"),
         "sweep": [{"physical_error_probability": [NEAR_THRESHOLD_P],
                    "distance": [3], "round_period_us": [1.0], "shots": 1}]})
 
@@ -48,21 +48,19 @@ def measured_shot(config, seed: int):
 def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
     from decsim.machine import Machine
     weak_only = load_experiment(write_config(tmp_path, {
-        "decode_path": "switching",
-        "switching": {"gap_threshold_db": 20.0},
-        "decoder": {"weak": MINIMAL_CONFIG["decoder"]["weak"]}}))
+        "escalation": {"kind": "switching", "gap_threshold_db": 20.0}}))
     with pytest.raises(ValueError, match="escalates to the strong_decoder"):
         Machine.build(weak_only.point_settings(
             physical_error_probability=NEAR_THRESHOLD_P, distance=3,
             round_period_us=1.0))
     with pytest.raises(ValueError, match="needs gap_threshold_db"):
         load_experiment(write_config(tmp_path, {
-            "decode_path": "switching",
-            "decoder": {**MINIMAL_CONFIG["decoder"],
-                        **strong_unit("belief_matching")}}))
+            "escalation": {"kind": "switching"},
+            **strong_unit("belief_matching")}))
     with pytest.raises(ValueError, match="never escalates"):
         load_experiment(write_config(tmp_path, {
-            "switching": {"gap_threshold_db": 20.0}}))
+            "escalation": {"kind": "weak_baseline",
+                           "gap_threshold_db": 20.0}}))
 
 
 def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):

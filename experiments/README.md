@@ -1,9 +1,11 @@
 # Experiments
 
-One yaml file is one experiment. `configs/<name>.yaml` holds every knob:
-the decode path (`decode_path: weak_baseline | strong_only`), code and rounds,
-windowing, sweep blocks, link cards, decoder cards, staging, boundary
-application, frame commit. Nothing about an experiment lives in code.
+One yaml file is one experiment. `configs/<name>.yaml` holds every knob,
+one section per component: the escalation (`escalation: {kind:
+weak_baseline | strong_only | switching}`), the workload's code task and
+rounds, the windows, the sweep blocks, the link cards, the two decoder
+tiers, the round stores, the frame commit and the observation. Nothing
+about an experiment lives in code.
 
 Run one:
 

@@ -28,8 +28,8 @@ def closed_loop_failures(config, probability, distance, seeds) -> list:
 
 def test_offline_matches_closed_loop_on_the_weak_tier(tmp_path):
     config_path = write_config(tmp_path, {
-        "decoder": {"weak": {**MINIMAL_CONFIG["decoder"]["weak"],
-                             "algorithm": "pymatching"}}})
+        "weak_decoder": {**MINIMAL_CONFIG["weak_decoder"],
+                         "kind": "pymatching"}})
     config = load_experiment(config_path)
     probability, distance, seeds = 0.005, 3, 10
     point = SweepPointDecoder(config, physical_error_probability=probability,
@@ -42,8 +42,8 @@ def test_offline_matches_closed_loop_on_the_weak_tier(tmp_path):
 
 def test_offline_matches_closed_loop_on_the_strong_tier(tmp_path):
     config_path = write_config(tmp_path, {
-        "decode_path": "strong_only",
-        "decoder": strong_unit("belief_matching")})
+        "escalation": {"kind": "strong_only"},
+        **strong_unit("belief_matching")})
     config = load_experiment(config_path)
     probability, distance, seeds = 0.005, 3, 6
     point = SweepPointDecoder(config, physical_error_probability=probability,
@@ -96,8 +96,8 @@ def test_offline_refuses_a_timing_sweep(tmp_path):
 
 def test_offline_refuses_non_sliding_windows(tmp_path):
     config_path = write_config(tmp_path, {
-        "windowing": {"scheme": "sandwich", "commit_rounds": None,
-                      "buffer_rounds": None}})
+        "windows": {"kind": "sandwich", "commit_rounds": None,
+                    "buffer_rounds": None}})
     config = load_experiment(config_path)
     with pytest.raises(ValueError, match="sliding"):
         SweepPointDecoder(config, physical_error_probability=0.001,

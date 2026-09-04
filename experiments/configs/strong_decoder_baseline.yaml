@@ -1,11 +1,17 @@
 # The strong decoder baseline. Every key is documented in reference.yaml.
 
-decode_path: strong_only
-circuit: surface_code:rotated_memory_z
-rounds_per_shot: 10d
+qpu:
+  kind: stim_device
 
-windowing:
-  scheme: sliding
+escalation:
+  kind: strong_only
+workload:
+  kind: memory_circuit
+  code_task: surface_code:rotated_memory_z
+  rounds_per_shot: 10d
+
+windows:
+  kind: sliding
   commit_rounds: null
   buffer_rounds: null
 
@@ -36,6 +42,7 @@ controller:
   readout_to_bits_cycles: 0
   decision_to_pulse_cycles: 0
   packing_cycles_per_round: 0
+  packing_rounds_in_flight: null
 
 clocks:
   fridge: 250.0
@@ -54,26 +61,26 @@ links:
   frame_to_controller:  null
   controller_to_qpu:  null
 
-buffers:
-  weak_buffer_rounds: null
-  strong_buffer_rounds: null
-  packing_rounds_in_flight: null
+round_store:
+  rounds: null
+strong_round_store:
+  rounds: null
 
-decoder:
-  strong:
-    algorithm: belief_matching
-    units: 1
-    unit_memory_rounds: null
-    engine:
-      clock: room
-      fetch_cycles_per_round: 1
-      release_cycles_per_job: 10
+strong_decoder:
+  kind: belief_matching
+  units: 1
+  unit_memory_rounds: null
+  engine:
+    clock: room
+    fetch_cycles_per_round: 1
+    release_cycles_per_job: 10
 
 pauli_frame:
   clock: fridge
   write_cycles: 1
 
 idle_policy: separate_decode_jobs
-check_windows_with: none
-log_component_io: false
-trace: off
+observation:
+  check_windows_with: none
+  log_component_io: false
+  trace: off

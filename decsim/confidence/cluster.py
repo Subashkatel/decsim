@@ -7,19 +7,19 @@ import itertools
 import math
 from fractions import Fraction
 
-from ..detector_error_model.fault_model_contracts import (
-    FaultRepresentation,
-    GRAPHLIKE_FAULT_MODEL_REQUIRED,
-)
-from ..message import DecodeJob, DecodeResult, SoftOutput, SoftOutputSource
 from ..decoders.union_find.decoder import UnionFindDecoder
 from ..decoders.union_find.window_decoder import (
     Closed,
     Open,
     UnionFindGraph,
     UnionFindHardEvidence,
-    _normalize_weight_step,
+    normalized_weight_step,
 )
+from ..detector_error_model.fault_model_contracts import (
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+    FaultRepresentation,
+)
+from ..message import DecodeJob, DecodeResult, SoftOutput, SoftOutputSource
 
 
 def union_find_cluster_gap_source(weight_step=0.1) -> SoftOutputSource:
@@ -30,7 +30,7 @@ def union_find_cluster_gap_source(weight_step=0.1) -> SoftOutputSource:
         growth_schedule="weighted_global_fair",
         gap_units="decibels",
         correction="none",
-        weight_step_natural_log=_normalize_weight_step(weight_step),
+        weight_step_natural_log=normalized_weight_step(weight_step),
         references=("cluster-gap method",),
     )
 

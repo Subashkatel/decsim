@@ -63,7 +63,8 @@ class Task:
             "metadata": json_value(self.metadata),
         }
         text = json.dumps(value, sort_keys=True)
-        digest = hashlib.sha256(text.encode("utf8"))
+        encoded = text.encode("utf8")
+        digest = hashlib.sha256(encoded)
         return digest.hexdigest()
 
     def shot_settings(self) -> machine_module.MachineSettings:
@@ -111,7 +112,13 @@ def collect(
 
 
 def unique_tasks(tasks: Iterable[Task]) -> list:
-    """The tasks in first-seen order, same strong id merged to one."""
+    """The tasks in first-seen order, same strong id merged to one.
+
+    The merged task keeps the first block's calibrator, so an online
+    switching point named in two blocks calibrates once over all its
+    shots; the old runner calibrated once per block. No shipped or
+    frozen yaml names an online point twice.
+    """
     task_by_id = {}
     for task in tasks:
         strong_id = task.strong_id()

@@ -1035,13 +1035,13 @@ def _strong_round_store(
     links: fabric.LinkFabric,
 ):
     """Syndrome buffer 1, only when a tier reads from the room side."""
+    _row(ROUND_STORES, "strong_round_store.kind", settings.kind)
     uses_strong_store = (
         escalation_policy.requires_strong_context
         or escalation_policy.primary_tier is message.DecoderTier.STRONG
     )
     if not uses_strong_store:
         return None
-    _row(ROUND_STORES, "strong_round_store.kind", settings.kind)
     return syndrome_buffer_1_module.SyndromeBuffer1(
         engine, links, capacity_rounds=settings.rounds
     )

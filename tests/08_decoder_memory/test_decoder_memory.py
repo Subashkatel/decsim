@@ -28,7 +28,10 @@ from decsim.decoders.decoders import PerRoundDecoder
 from decsim.message import DecodeJob, Operation, RetainedSyndromeFragment
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.qpu.round_policies import FixedRounds
-from decsim.run_spec import RunSpec
+from decsim.decoders.settings import DecoderManagerSettings, DecoderSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.qpu.settings import QpuSettings
 
 
 @dataclass(frozen=True)
@@ -242,22 +245,23 @@ def test_real_stim_run_reaches_model_backed_materialization_and_completes(
         record_model_backed_materialization,
     )
 
-    completed = RunSpec(
-        ops=[operation],
-        d=3,
-        rounds_policy=FixedRounds(3),
-        device=StimDevice(),
-        decoder=PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)),
-        decoder_memory=store_config,
-        seed=7,
-    ).build()
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=[operation],
+                                  rounds_policy=FixedRounds(3)),
+        qpu=QpuSettings(distance=3, device=StimDevice()),
+        weak_decoder=DecoderSettings(
+            decoder=PyMatchingDecoder(PerRoundDecoder(tau_us=0.1))),
+        decoder_manager=DecoderManagerSettings(decoder_memory=store_config),
+    )
+    completed = Machine.build(settings, 7)
+    result = completed.run()
 
-    assert completed.result.terminal_status == "complete"
-    assert completed.result.event_queue_empty
-    assert completed.result.execution_workload_complete
+    assert result.terminal_status == "complete"
+    assert result.event_queue_empty
+    assert result.execution_workload_complete
     assert model_backed_jobs
     assert all(isinstance(job.dem, WindowErrorModel) for job in model_backed_jobs)
-    logical_result = completed.result.operation_results[0]
+    logical_result = result.operation_results[0]
     assert logical_result.logical_observables == logical_result.observable_truth
 
 
@@ -528,12 +532,16 @@ def test_run_gives_every_unit_its_own_memory_and_frees_it_at_completion() -> Non
     from decsim.decoders.decoders import PerRoundDecoder
     from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
-    from decsim.run_spec import RunSpec
 
     operations = [Operation(id=i, name=f"op {i}", qubits=(i,), patches=(i,)) for i in (1, 2)]
-    completed = RunSpec(ops=operations, d=3, rounds_policy=FixedRounds(3),
-                        decoder=PerRoundDecoder(tau_us=1.0), num_units=2,
-                        decoder_memory=DecoderMemoryConfig({"default": 6})).build()
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=operations, rounds_policy=FixedRounds(3)),
+        qpu=QpuSettings(distance=3),
+        weak_decoder=DecoderSettings(decoder=PerRoundDecoder(tau_us=1.0), units=2),
+        decoder_manager=DecoderManagerSettings(
+            decoder_memory=DecoderMemoryConfig({"default": 6})))
+    completed = Machine.build(settings)
+    completed.run()
     memories = completed.decoder_manager.decoder_memories
     assert sorted(memories) == [("default", 0), ("default", 1)]
     assert all(m.occupied_rounds == 0 for m in memories.values())
@@ -545,9 +553,15 @@ def test_a_unit_too_small_for_its_window_fails_the_run_loudly() -> None:
     from decsim.decoders.decoders import PerRoundDecoder
     from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
-    from decsim.run_spec import RunSpec
 
+    settings = MachineSettings(
+        workload=WorkloadSettings(
+            operations=[Operation(id=1, name="op", qubits=(1,), patches=(1,))],
+            rounds_policy=FixedRounds(3)),
+        qpu=QpuSettings(distance=3),
+        weak_decoder=DecoderSettings(decoder=PerRoundDecoder(tau_us=1.0)),
+        decoder_manager=DecoderManagerSettings(
+            decoder_memory=DecoderMemoryConfig({"default": 1})))
     with pytest.raises(DecoderMemoryCapacityExhaustion):
-        RunSpec(ops=[Operation(id=1, name="op", qubits=(1,), patches=(1,))], d=3,
-                rounds_policy=FixedRounds(3), decoder=PerRoundDecoder(tau_us=1.0),
-                decoder_memory=DecoderMemoryConfig({"default": 1})).build()
+        machine = Machine.build(settings)
+        machine.run()

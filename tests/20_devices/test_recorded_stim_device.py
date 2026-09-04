@@ -7,7 +7,10 @@ from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.message import Operation
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
 from decsim.qpu.round_policies import FixedRounds
-from decsim.run_spec import RunSpec
+from decsim.decoders.settings import DecoderSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.qpu.settings import QpuSettings
 
 
 @pytest.fixture(scope="module")
@@ -32,10 +35,13 @@ def test_replayed_shot_forms_the_recorded_truth_and_decodes_the_recorded_bits(re
     op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
     agree = 0
     for shot in range(len(dets)):
-        result = RunSpec(ops=[op], d=3, rounds_policy=FixedRounds(9),
-                         device=RecordedStimDevice(measurements, shot),
-                         decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)),
-                         seed=shot).build().result.operation_results[0]
+        settings = MachineSettings(
+            workload=WorkloadSettings(operations=[op], rounds_policy=FixedRounds(9)),
+            qpu=QpuSettings(distance=3, device=RecordedStimDevice(measurements, shot)),
+            weak_decoder=DecoderSettings(
+                decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028))))
+        machine = Machine.build(settings, shot)
+        result = machine.run().operation_results[0]
         assert tuple(int(b) for b in obs[shot]) == tuple(result.observable_truth)
         agree += tuple(int(b) for b in matching.decode(dets[shot])) == result.logical_observables
     assert agree >= len(dets) - 1        # windowed vs whole-shot may differ rarely
@@ -74,10 +80,13 @@ def test_sliding_windows_match_qldpc_shot_for_shot(recorded):
     reference_predictions = reference.decode_shots(dets.astype(np.uint8))
     op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
     for shot in range(len(dets)):
-        result = RunSpec(ops=[op], d=distance, rounds_policy=FixedRounds(rounds),
-                         device=RecordedStimDevice(measurements, shot),
-                         decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)),
-                         seed=shot).build().result.operation_results[0]
+        settings = MachineSettings(
+            workload=WorkloadSettings(operations=[op], rounds_policy=FixedRounds(rounds)),
+            qpu=QpuSettings(distance=distance, device=RecordedStimDevice(measurements, shot)),
+            weak_decoder=DecoderSettings(
+                decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028))))
+        machine = Machine.build(settings, shot)
+        result = machine.run().operation_results[0]
         assert result.logical_observables == tuple(int(b) for b in reference_predictions[shot])
 
 
@@ -90,9 +99,13 @@ def test_readout_bits_per_round_equal_stims_measurement_counts(recorded):
     circuit, measurements, _, _, _ = recorded
     rounds, distance = 9, 3
     op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
-    completed = RunSpec(ops=[op], d=distance, rounds_policy=FixedRounds(rounds),
-                        device=RecordedStimDevice(measurements, 0),
-                        decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028)), seed=0).build()
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=[op], rounds_policy=FixedRounds(rounds)),
+        qpu=QpuSettings(distance=distance, device=RecordedStimDevice(measurements, 0)),
+        weak_decoder=DecoderSettings(
+            decoder=PyMatchingDecoder(PresetLatencyDecoder(0.028))))
+    completed = Machine.build(settings, 0)
+    completed.run()
     bits_by_round = defaultdict(int)
     for record in completed.traffic_ledger.snapshot().transfers:
         if record.path is LinkPath.QPU_TO_CONTROLLER:

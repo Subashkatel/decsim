@@ -5,7 +5,12 @@ preserve the real data crossing each declared boundary and charge each
 online stage in causal order.
 """
 
-from decsim.config import TimingConfig, microseconds_to_ticks
+from decsim.config import microseconds_to_ticks
+from decsim.controller.settings import ControllerSettings
+from decsim.decoders.settings import DecoderSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import MachineSettings
+from decsim.qpu.settings import QpuSettings
 from decsim.observe.link_traffic import TrafficLedger
 from decsim.controller.controller import Controller
 from decsim.controller.syndrome_packing import SyndromePacking
@@ -15,7 +20,6 @@ from decsim.links.fabric import LinkFabric
 from decsim.message import Decision, QPUReadout, RunOperationBody, WINDOW_INPUT_ROUTE
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
-from decsim.run_spec import RunSpec
 
 
 class _WindowInputReceiver:
@@ -100,19 +104,20 @@ def _feedback_run(fabric, *, controller_output_us):
         fabric["memory_op"](1),
         fabric["memory_op"](2, blocked_by=1),
     )
-    timing = TimingConfig(
-        round_period_microseconds=1.0,
+    controller = ControllerSettings(
         readout_to_bits_microseconds=fabric["DECLARED_US"]["binary"],
         decision_to_pulse_microseconds=controller_output_us,
         packing_microseconds_per_round=fabric["DECLARED_US"]["pack"],
     )
-    return RunSpec(
-        ops=operations, d=3, rounds_policy=FixedRounds(6),
-        decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"]),
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=operations, rounds_policy=FixedRounds(6)),
+        qpu=QpuSettings(distance=3, round_period_microseconds=1.0),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"])),
         links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False),
-        timing=timing,
+        controller=controller,
         pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
-    ).build()
+    )
+    return fabric["run_machine"](settings)
 
 
 def test_results_and_decisions_cross_links_at_their_own_size(fabric):
@@ -125,7 +130,7 @@ def test_results_and_decisions_cross_links_at_their_own_size(fabric):
     processor, Fruitwala et al. 2404.15260). The reference card carries no
     system-wide aggregate on these paths."""
     completed = _feedback_run(fabric, controller_output_us=0.0)
-    transfers = completed.result.link_traffic["transfers"]
+    transfers = completed.traffic_ledger.traffic_json_value()["transfers"]
     payload_by_path = {}
     for transfer in transfers:
         payload_by_path.setdefault(transfer["path"], set()).add(
@@ -205,17 +210,18 @@ def test_preloaded_program_command_is_not_charged_as_online_feedback(fabric):
 
 def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
     operation = fabric["memory_op"](1, requires_result_return=True)
-    timing = TimingConfig(
-        round_period_microseconds=1.0,
+    controller = ControllerSettings(
         readout_to_bits_microseconds=fabric["DECLARED_US"]["binary"],
         packing_microseconds_per_round=fabric["DECLARED_US"]["pack"],
         decision_to_pulse_microseconds=3.0)
-    completed = RunSpec(
-        ops=(operation,), d=3, rounds_policy=FixedRounds(6),
-        decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"]),
-        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False), timing=timing,
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=(operation,), rounds_policy=FixedRounds(6)),
+        qpu=QpuSettings(distance=3, round_period_microseconds=1.0),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(fabric["DECLARED_US"]["weak"])),
+        links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False), controller=controller,
         pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
-    ).build()
+    )
+    completed = fabric["run_machine"](settings)
     completed.engine.run()
     commit = next(record.committed_ticks
                   for record in completed.pauli_frame.snapshot().records)
@@ -259,11 +265,11 @@ def test_qubic_500_mhz_eight_cycle_controller_fixture_is_parameter_driven():
     clock_hz = 500_000_000
     cycles = 8
     controller_output_us = cycles / clock_hz * 1_000_000
-    timing = TimingConfig(
+    timing = ControllerSettings(
         decision_to_pulse_microseconds=controller_output_us)
 
     assert controller_output_us == 0.016
-    assert timing.ticks("decision_to_pulse") == microseconds_to_ticks(0.016)
+    assert timing.decision_to_pulse_ticks() == microseconds_to_ticks(0.016)
 
 
 def test_qubicml_500_mhz_27_cycle_discriminator_fixture_is_parameter_driven():
@@ -273,8 +279,8 @@ def test_qubicml_500_mhz_27_cycle_discriminator_fixture_is_parameter_driven():
     clock_hz = 500_000_000
     inference_cycles = 27
     classification_us = inference_cycles / clock_hz * 1_000_000
-    timing = TimingConfig(
+    timing = ControllerSettings(
         readout_to_bits_microseconds=classification_us)
 
     assert classification_us == 0.054
-    assert timing.ticks("readout_to_bits") == microseconds_to_ticks(0.054)
+    assert timing.readout_to_bits_ticks() == microseconds_to_ticks(0.054)

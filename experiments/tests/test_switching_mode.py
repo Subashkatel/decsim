@@ -46,12 +46,16 @@ def measured_shot(config, seed: int):
 
 
 def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
-    with pytest.raises(ValueError, match="decoder.strong"):
-        load_experiment(write_config(tmp_path, {
-            "decode_path": "switching",
-            "switching": {"gap_threshold_db": 20.0},
-            "decoder": {"weak": MINIMAL_CONFIG["decoder"]["weak"]}}))
-    with pytest.raises(ValueError, match="switching card"):
+    from decsim.machine import Machine
+    weak_only = load_experiment(write_config(tmp_path, {
+        "decode_path": "switching",
+        "switching": {"gap_threshold_db": 20.0},
+        "decoder": {"weak": MINIMAL_CONFIG["decoder"]["weak"]}}))
+    with pytest.raises(ValueError, match="escalates to the strong_decoder"):
+        Machine.build(weak_only.point_settings(
+            physical_error_probability=NEAR_THRESHOLD_P, distance=3,
+            round_period_us=1.0))
+    with pytest.raises(ValueError, match="needs gap_threshold_db"):
         load_experiment(write_config(tmp_path, {
             "decode_path": "switching",
             "decoder": {**MINIMAL_CONFIG["decoder"],
@@ -63,8 +67,8 @@ def test_switching_config_requires_both_tiers_and_the_card(tmp_path):
 
 def test_threshold_converts_decibels_to_natural_log_weight(tmp_path):
     config = load_experiment(switching_config(tmp_path, 20.0))
-    assert config.switching.gap_threshold_decibels == 20.0
-    assert math.isclose(config.switching.gap_threshold_nats,
+    assert config.settings.escalation.gap_threshold_decibels == 20.0
+    assert math.isclose(config.settings.escalation.gap_threshold_nats,
                         2.0 * math.log(10.0))
 
 
@@ -111,18 +115,22 @@ def test_gap_records_decide_the_selected_tier(tmp_path):
     replaces the prediction in place, so the window stays an
     ordinary_window either way; the selected request key names the tier
     that produced the committed result.)"""
+    from dataclasses import replace
+    from decsim.machine import Machine
     from decsim.message import DecoderTier
     from decsim.observe.run_views import switching_records_view
-    from experiments.build_run import build_run
 
     config = load_experiment(switching_config(tmp_path, 20.0))
-    threshold_nats = config.switching.gap_threshold_nats
+    threshold_nats = config.settings.escalation.gap_threshold_nats
     for seed in range(4):
-        spec, _ = build_run(config,
-                            physical_error_probability=NEAR_THRESHOLD_P,
-                            distance=3, round_period_us=1.0, seed=seed)
-        spec.record_switching_windows = True
-        completed = spec.build()
+        settings = config.point_settings(
+            physical_error_probability=NEAR_THRESHOLD_P,
+            distance=3, round_period_us=1.0)
+        observation = replace(settings.observation,
+                              record_switching_windows=True)
+        settings = replace(settings, observation=observation)
+        completed = Machine.build(settings, seed)
+        completed.run()
         view = switching_records_view(completed.window_manager,
                                       completed.decoder_manager)
         gap_by_window = {}

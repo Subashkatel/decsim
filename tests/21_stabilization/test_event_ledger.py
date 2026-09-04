@@ -256,7 +256,9 @@ def test_ledger_holds_over_randomized_configurations(fabric, seed):
     from decsim.decoders.decoders import PipelinedDecoder, PresetLatencyDecoder
     from decsim.qpu.round_policies import FixedRounds
     from decsim.pauli_frame.pauli_frame import PauliFrameConfig
-    from decsim.run_spec import RunSpec
+    from decsim.decoders.settings import DecoderSettings
+    from decsim.frontends.settings import WorkloadSettings
+    from decsim.machine import MachineSettings
 
     rng = random.Random(seed)
     mode = _SWEEP_MODES[seed % len(_SWEEP_MODES)]
@@ -270,19 +272,20 @@ def test_ledger_holds_over_randomized_configurations(fabric, seed):
             rounds=rounds, ops=[fabric["memory_op"](1),
                                 fabric["memory_op"](2, blocked_by=1)])
     elif mode == "weak_pipelined":
-        spec = RunSpec(
-            ops=[fabric["memory_op"](op_id)
-                 for op_id in range(1, rng.randint(2, 4) + 1)],
-            d=3, rounds_policy=FixedRounds(rng.randint(3, 6)),
-            decoder=PipelinedDecoder(
+        settings = MachineSettings(
+            workload=WorkloadSettings(
+                operations=[fabric["memory_op"](op_id)
+                            for op_id in range(1, rng.randint(2, 4) + 1)],
+                rounds_policy=FixedRounds(rng.randint(3, 6))),
+            qpu=fabric["declared_qpu"](),
+            weak_decoder=DecoderSettings(decoder=PipelinedDecoder(
                 PresetLatencyDecoder(100.0), 1.0,
-                pipeline_depth=rng.choice([None, 2, 3])),
+                pipeline_depth=rng.choice([None, 2, 3]))),
             links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False),
-            timing=fabric["declared_timing"](),
+            controller=fabric["declared_timing"](),
             pauli_frame=PauliFrameConfig(
-                commit_microseconds=fabric["DECLARED_US"]["frame"]),
-            seed=seed)
-        completed = spec.build()
+                commit_microseconds=fabric["DECLARED_US"]["frame"]))
+        completed = fabric["run_machine"](settings, seed)
     elif mode == "strong":
         completed = fabric["strong_only_run"](rounds=rounds)
     elif mode == "switching_keep":

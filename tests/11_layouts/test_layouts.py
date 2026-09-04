@@ -12,7 +12,10 @@ from decsim.qpu.layouts import UniformLayout
 from decsim.message import Operation, OperationPlanningView, ResourceClaim
 from decsim.qpu.code_geometry import CodeModel
 from decsim.qpu.layouts import LayoutModel
-from decsim.run_spec import RunSpec
+from decsim.decoders.settings import DecoderSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.qpu.settings import QpuSettings
 
 
 class RecordingLayout:
@@ -219,11 +222,13 @@ def test_timing_build_dispatches_real_planning_views_through_layout_hooks():
     layout = RecordingLayout(code)
     operation = make_operation(qubits=(2, 6), patches=(13,))
 
-    RunSpec(
-        ops=[operation],
-        layout=layout,
-        decoder=PresetLatencyDecoder(latency_us=1.0),
-    ).build()
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=[operation]),
+        qpu=QpuSettings(layout=layout),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(latency_us=1.0)),
+    )
+    machine = Machine.build(settings)
+    machine.run()
 
     calls_by_name = {}
     for name, value in layout.calls:
@@ -244,13 +249,17 @@ def test_run_spec_owns_code_source_and_declared_code_count_checks():
     operation = make_operation()
 
     with pytest.raises(ValueError, match="multiple code sources"):
-        RunSpec(ops=[operation], code=code, layout=UniformLayout(code)).build()
+        Machine.build(MachineSettings(
+            workload=WorkloadSettings(operations=[operation]),
+            qpu=QpuSettings(code=code, layout=UniformLayout(code))))
 
     for declared_codes in ([], [code, SurfaceCodeModel(distance=5)]):
         layout = RecordingLayout(code)
         layout.codes = lambda values=declared_codes: values
         with pytest.raises(ValueError, match="exactly one code"):
-            RunSpec(ops=[operation], layout=layout).build()
+            Machine.build(MachineSettings(
+                workload=WorkloadSettings(operations=[operation]),
+                qpu=QpuSettings(layout=layout)))
 
 
 def test_planner_rejects_operation_selector_identity_changes():
@@ -260,7 +269,9 @@ def test_planner_rejects_operation_selector_identity_changes():
     layout.code_for_op = lambda operation: SurfaceCodeModel(distance=3)
 
     with pytest.raises(ValueError, match="selected a code different"):
-        RunSpec(ops=[make_operation()], layout=layout).build()
+        Machine.build(MachineSettings(
+            workload=WorkloadSettings(operations=[make_operation()]),
+            qpu=QpuSettings(layout=layout)))
 
 
 def test_planner_rejects_patch_selector_identity_changes():
@@ -270,4 +281,6 @@ def test_planner_rejects_patch_selector_identity_changes():
     layout.code_for_patch = lambda patch_identity: SurfaceCodeModel(distance=3)
 
     with pytest.raises(ValueError, match="selected a code different"):
-        RunSpec(ops=[make_operation()], layout=layout).build()
+        Machine.build(MachineSettings(
+            workload=WorkloadSettings(operations=[make_operation()]),
+            qpu=QpuSettings(layout=layout)))

@@ -14,7 +14,11 @@ from decsim.links.link_profiles import logical_reference_profile
 from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
 from decsim.qpu.stim_device import StimDevice
-from decsim.run_spec import RunSpec
+from decsim.decoders.settings import DecoderSettings, EscalationSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.qpu.settings import QpuSettings
+from decsim.windows.settings import WindowSettings
 from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
                                               SlidingWindowScheme,
                                               TanSandwichScheme)
@@ -33,15 +37,23 @@ def _stim_run(*, round_us=1.0, scheme=None, units=1, policy=None):
         "surface_code:rotated_memory_z", rounds=ROUNDS, distance=3,
         after_clifford_depolarization=p, before_measure_flip_probability=p,
         after_reset_flip_probability=p, before_round_data_depolarization=p)
-    return RunSpec(
-        ops=[Operation(id=1, name="memory", qubits=(0,), patches=(0,),
-                       circuit=circuit)],
-        d=3, rounds_policy=FixedRounds(ROUNDS), round_us=round_us,
-        device=StimDevice(),
-        decoder=PyMatchingDecoder(PresetLatencyDecoder(5.0)), num_units=units,
-        scheme=(scheme if scheme is not None else _sliding()),
-        escalation_policy=(policy if policy is not None else StrongOnly()),
-        links=logical_reference_profile(), seed=3).build()
+    settings = MachineSettings(
+        workload=WorkloadSettings(
+            operations=[Operation(id=1, name="memory", qubits=(0,), patches=(0,),
+                                  circuit=circuit)],
+            rounds_policy=FixedRounds(ROUNDS)),
+        qpu=QpuSettings(distance=3, round_period_microseconds=round_us,
+                        device=StimDevice()),
+        weak_decoder=DecoderSettings(
+            decoder=PyMatchingDecoder(PresetLatencyDecoder(5.0)), units=units),
+        windows=WindowSettings(
+            scheme=(scheme if scheme is not None else _sliding())),
+        escalation=EscalationSettings(
+            policy=(policy if policy is not None else StrongOnly())),
+        links=logical_reference_profile())
+    machine = Machine.build(settings, 3)
+    result = machine.run()
+    return machine, result
 
 
 def _gaps(completed):
@@ -54,13 +66,14 @@ def test_saturated_chain_is_dd_plus_max_of_transfer_and_decode():
     """The reference cadence: with the raw input shipped under the previous
     decode, each window costs dd (0.5) + max(sbd 2.0, decode 5.0) = 5.5 us,
     never the serial dd + sbd + decode = 7.5 us."""
-    assert _gaps(_stim_run()) == [microseconds_to_ticks(5.5)]
+    completed, _ = _stim_run()
+    assert _gaps(completed) == [microseconds_to_ticks(5.5)]
 
 
 def test_parked_decode_starts_at_the_boundary_arrival():
     """The landed input waits parked; the decode begins the tick the last
     boundary lands (predecessor done + dd 0.5)."""
-    completed = _stim_run()
+    completed, _ = _stim_run()
     windows = dict(sorted(completed.window_manager.windows.items()))
     dones = {k: w.t_done for (_, k), w in windows.items()}
     for (_, k), window in windows.items():
@@ -73,7 +86,7 @@ def test_relaxed_stream_parks_only_the_clamped_terminal_window():
     """With rounds every 3.0 us the chain drains between arrivals: no
     window but the terminal pair's dependent ever waits parked past its
     data-complete plus the transfer."""
-    completed = _stim_run(round_us=3.0)
+    completed, _ = _stim_run(round_us=3.0)
     windows = dict(sorted(completed.window_manager.windows.items()))
     late = [k for (_, k), w in windows.items()
             if w.t_done is not None
@@ -86,7 +99,7 @@ def test_tan_seams_never_deadlock_the_unit():
     """A Tan seam fills before its neighbor cores and reads both of their
     boundaries. It must wait in its slot, not on the unit: every window
     decodes and the answer is right, on a single unit."""
-    completed = _stim_run(scheme=TanSandwichScheme(), units=1)
+    completed, result = _stim_run(scheme=TanSandwichScheme(), units=1)
     windows = completed.window_manager.windows.values()
     assert all(w.t_done is not None for w in windows)
-    assert completed.result.operation_results[0].logical_failure is False
+    assert result.operation_results[0].logical_failure is False

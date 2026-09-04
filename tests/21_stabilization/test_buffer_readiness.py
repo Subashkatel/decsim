@@ -100,7 +100,7 @@ def test_strong_primary_rounds_never_enter_the_weak_path(fabric):
     readout-to-decoder FIFO, Das et al. ASPLOS 2022; Google's streaming
     decoder, Nature 2024)."""
     completed = fabric["strong_only_run"](rounds=6, record=True)
-    link_traffic = completed.result.link_traffic
+    link_traffic = completed.traffic_ledger.traffic_json_value()
     transfers_by_path = {edge["path"]: edge["counters"]["transfer_count"]
                          for edge in link_traffic["semantic_edges"]}
     assert transfers_by_path["controller_to_weak_buffer"] == 0
@@ -151,17 +151,21 @@ def test_a_full_buffer_0_stalls_the_controller_instead_of_failing(fabric):
     from decsim.decoders.decoders import PresetLatencyDecoder
     from decsim.pauli_frame.pauli_frame import PauliFrameConfig
     from decsim.qpu.round_policies import FixedRounds
-    from decsim.run_spec import RunSpec
-    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBufferingConfig
+    from decsim.decoders.settings import DecoderSettings
+    from decsim.frontends.settings import WorkloadSettings
+    from decsim.machine import MachineSettings
+    from decsim.syndrome_buffer.settings import RoundStoreSettings
     declared = fabric["DECLARED_US"]
-    completed = RunSpec(
-        ops=[fabric["memory_op"](1)], d=3, rounds_policy=FixedRounds(12),
-        decoder=PresetLatencyDecoder(declared["weak"]),
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=[fabric["memory_op"](1)],
+                                  rounds_policy=FixedRounds(12)),
+        qpu=fabric["declared_qpu"](),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(declared["weak"])),
         links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=False),
-        timing=fabric["declared_timing"](),
-        syndrome_buffering=SyndromeBufferingConfig(upstream_packet_slots=7),
-        pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]),
-        seed=0).build()
+        controller=fabric["declared_timing"](),
+        round_store=RoundStoreSettings(rounds=7),
+        pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]))
+    completed = fabric["run_machine"](settings, 0)
     packing = completed.syndrome_packing
     assert packing.packing_drops == 0
     published = [(event.round_index, event.tick) for event in packing.round_events

@@ -1,6 +1,6 @@
 """The link number cards: the two reference fabrics and the optional hops.
 
-logical_reference_profile is the default when RunSpec.links is unset:
+logical_reference_profile is the default when no links card is given:
 every channel unbounded, so it prices propagation only and no transfer
 ever queues; latencies from Khalid et al. Table II. bandwidth_limited_
 profile is the same fabric with finite calibrated rates so contention
@@ -10,14 +10,16 @@ functions add the optional store hops and a setup cost to either.
 Every number carries a source string that travels into the traffic
 report; paper locators are line numbers in tmp/references/papers/. To
 change a number, copy a card into your own file and edit it, then pass
-it as RunSpec(links=...).
+it as the machine's links setting.
 """
 
 import dataclasses
-from typing import Optional
+from collections.abc import Mapping
+from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.links.settings as settings
+import decsim.message as message
 
 # A decoder result reaches the frame as one bit per logical observable, the
 # logical-frame convention: Caune et al. 2410.05202 return one Boolean per
@@ -255,6 +257,65 @@ def bandwidth_limited_profile(
     )
 
 
+def from_yaml(
+    section: Mapping, clocks: config.ClockSettings, name: str
+) -> settings.FabricSettings:
+    """The yaml's `links` section: one card per path over the reference.
+
+    A card prices its path in cycles of a named clock domain: latency,
+    bits per cycle per lane (null is unbounded), the lane count, and an
+    optional per-transfer setup cost. A null card keeps the reference
+    card's numbers for that path. The two controller-to-buffer hops are
+    free until a card wires them. The config prices readout
+    classification on its own line, so its qpu_to_controller card is
+    link propagation only, and the fabric says so.
+    """
+    source = f"experiments/configs/{name}.yaml links"
+    path_names = []
+    for path in message.LinkPath:
+        path_names.append(path.value)
+    for path_name in section:
+        if path_name not in path_names:
+            raise ValueError(
+                f"links names {path_name!r}, which is not a path; the "
+                f"paths are {path_names}"
+            )
+    profile = logical_reference_profile()
+    cards = dict(section)
+    weak_store_card = cards.pop("controller_to_weak_buffer", None)
+    if weak_store_card is not None:
+        profile = _priced_store_hop(
+            profile,
+            with_controller_to_weak_buffer_path,
+            weak_store_card,
+            clocks,
+            source,
+        )
+    strong_store_card = cards.pop("controller_to_strong_buffer", None)
+    if strong_store_card is not None:
+        profile = _priced_store_hop(
+            profile,
+            with_controller_to_strong_buffer_path,
+            strong_store_card,
+            clocks,
+            source,
+        )
+    replacements = {}
+    for path_name, card in cards.items():
+        if card is None:
+            continue
+        path_settings = getattr(profile, path_name)
+        replacements[path_name] = _carded_path(
+            path_name, path_settings, card, clocks, source
+        )
+    return dataclasses.replace(
+        profile,
+        **replacements,
+        profile_name=f"{name}.yaml",
+        is_controller_processing_outside_qpu_to_controller=True,
+    )
+
+
 def with_transfer_overhead(
     profile: settings.FabricSettings,
     *,
@@ -337,6 +398,71 @@ def with_controller_to_weak_buffer_path(
         profile,
         controller_to_weak_buffer=store_path,
         profile_name=f"{profile.profile_name}+priced_controller_to_weak_buffer",
+    )
+
+
+def _card_microseconds(card: Mapping, clocks: config.ClockSettings) -> tuple:
+    """(latency, aggregate rate, setup) of one card in microseconds."""
+    megahertz = clocks.megahertz(card["clock"])
+    latency_microseconds = card["latency_cycles"] / megahertz
+    bits_per_cycle = card["bits_per_cycle"]
+    lane_count = card.get("channels", 1)
+    bits_per_microsecond = None
+    if bits_per_cycle is not None:
+        bits_per_microsecond = bits_per_cycle * lane_count * megahertz
+    setup_cycles = card.get("setup_cycles_per_transfer")
+    setup_microseconds = None
+    if setup_cycles is not None:
+        setup_microseconds = setup_cycles / megahertz
+    return latency_microseconds, bits_per_microsecond, setup_microseconds
+
+
+def _priced_store_hop(
+    profile: settings.FabricSettings,
+    with_store_path: Callable,
+    card: Mapping,
+    clocks: config.ClockSettings,
+    source: str,
+) -> settings.FabricSettings:
+    latency_microseconds, bits_per_microsecond, _setup = _card_microseconds(
+        card, clocks
+    )
+    return with_store_path(
+        profile,
+        latency_microseconds=latency_microseconds,
+        aggregate_bits_per_microsecond=bits_per_microsecond,
+        source=source,
+    )
+
+
+def _carded_path(
+    path_name: str,
+    path_settings: settings.PathSettings,
+    card: Mapping,
+    clocks: config.ClockSettings,
+    source: str,
+) -> settings.PathSettings:
+    """The reference path with the card's channel and setup cost."""
+    latency_microseconds, bits_per_microsecond, setup_microseconds = (
+        _card_microseconds(card, clocks)
+    )
+    capacity = None
+    if bits_per_microsecond is not None:
+        capacity = settings.CapacitySettings(
+            bits_per_microsecond,
+            settings.QuantityBasis.AGGREGATE,
+            None,
+            source,
+        )
+    latency_ticks = config.microseconds_to_ticks(latency_microseconds)
+    channel = settings.ChannelSettings(
+        path_name, latency_ticks, capacity, source
+    )
+    setup_ticks = 0
+    if setup_microseconds:
+        setup_ticks = config.microseconds_to_ticks(setup_microseconds)
+    return dataclasses.replace(
+        path_settings, channel=channel, setup_ticks=setup_ticks
     )
 
 

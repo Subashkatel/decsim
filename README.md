@@ -24,16 +24,24 @@ python -m pip install -e ".[experiments]"
 
 ## Quickstart
 
-A run is one `RunSpec` handed to `simulate`. Every field has a default;
-you set only what you study. This timing-only run needs no dependencies:
+A run is one `Machine` built from a `MachineSettings` and run once. Every
+settings field has a default; you set only what you study. This
+timing-only run needs no dependencies:
 
 ```python
-from decsim import RunSpec, simulate, PerRoundDecoder, cnot_plus_two_t_circuit, fmt
+from decsim.config import format_ticks
+from decsim.decoders.decoders import PerRoundDecoder
+from decsim.decoders.settings import DecoderSettings
+from decsim.frontends.circuit_frontend import cnot_plus_two_t_circuit
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
 
-completed = simulate(RunSpec(
-    ops=cnot_plus_two_t_circuit(),
-    decoder=PerRoundDecoder(tau_us=1.0)))
-print("workload done at", fmt(completed.result.fully_done_ticks))
+settings = MachineSettings(
+    workload=WorkloadSettings(operations=cnot_plus_two_t_circuit()),
+    weak_decoder=DecoderSettings(decoder=PerRoundDecoder(tau_us=1.0)))
+machine = Machine.build(settings)
+result = machine.run()
+print("workload done at", format_ticks(result.fully_done_ticks))
 ```
 
 ```
@@ -46,10 +54,14 @@ and a decoder:
 ```python
 import stim
 
-from decsim import PresetLatencyDecoder, RunSpec, simulate
+from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.mwpm.decoder import PyMatchingDecoder
+from decsim.decoders.settings import DecoderSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
 from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds
+from decsim.qpu.settings import QpuSettings
 from decsim.qpu.stim_device import StimDevice
 
 circuit = stim.Circuit.generated(
@@ -61,12 +73,16 @@ circuit = stim.Circuit.generated(
 operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
                       circuit=circuit)
 
-completed = simulate(RunSpec(
-    ops=[operation], d=3, rounds_policy=FixedRounds(9),
-    device=StimDevice(), decoder=PyMatchingDecoder(PresetLatencyDecoder(1.0)),
-    seed=0))
+settings = MachineSettings(
+    workload=WorkloadSettings(operations=[operation],
+                              rounds_policy=FixedRounds(9)),
+    qpu=QpuSettings(distance=3, device=StimDevice()),
+    weak_decoder=DecoderSettings(
+        decoder=PyMatchingDecoder(PresetLatencyDecoder(1.0))))
+machine = Machine.build(settings, seed=0)
+result = machine.run()
 
-outcome = completed.result.operation_results[0]
+outcome = result.operation_results[0]
 print("prediction:", outcome.logical_observables)
 print("truth:     ", outcome.observable_truth)
 print("failure:   ", outcome.logical_failure)
@@ -76,38 +92,42 @@ The device samples the circuit, streams raw measurements round by round,
 and the run decodes them in sliding windows. `outcome.logical_failure`
 compares the prediction against the sampled truth; count failures over
 seeds to estimate a logical error rate. To charge each decode's measured
-wall clock instead of a fixed latency, wrap `PyMatchingDecoder()` in a
+wall clock instead of a fixed latency, name the decoder by its `kind`
+(`DecoderSettings(kind="pymatching")`) so the root stages it in a
 `DecoderEngine`.
 
-`completed.result` is the immutable outcome (timing, per-operation logical
-results, link traffic, metric values). `completed` also carries the runtime
-owners (`window_manager`, `decoder_manager`, `controller`, `qpu`, ...) for
+`result` is the immutable outcome (timing, per-operation logical results,
+link traffic, metric values). `machine` carries the components
+(`window_manager`, `decoder_manager`, `controller`, `qpu`, ...) for
 inspection after the run.
 
 ## Configure a run
 
-Each `RunSpec` field selects one component. A field left `None` takes the
-default. `resolve_run_configuration` in `decsim/run_configuration.py`
-applies every default and validates the combination in one place.
+`MachineSettings` has one settings record per yaml section; each record
+is owned by the package it configures, and a pluggable part is named by
+its `kind`, a row of the tables at the top of `decsim/machine.py`.
 
-| To change | Pass | Options in |
+| To change | Set | Options in |
 | --- | --- | --- |
-| Code and distance | `d=` or `code=` or `layout=` (at most one; default surface code, d=3) | `decsim/qpu/code_geometry.py` |
-| Windowing scheme | `scheme=` (default sliding) | `decsim/windows/windowing_schemes.py` |
-| Decoder | `decoder=`, per-code `decoders=`, or `router=` | `decsim/decoders/` |
-| Decoder count and memory | `num_units=`, `decoder_memory=` | `decsim/decoders/decoder_memory.py` |
-| Rounds per operation | `rounds_policy=` (default gate rounds) | `decsim/qpu/round_policies.py` |
+| Code and distance | `qpu=QpuSettings(distance=)`, or `code=` or `layout=` (at most one; default surface code, d=3) | `decsim/qpu/settings.py`, `decsim/qpu/code_geometry.py` |
+| Syndrome source | `qpu=QpuSettings(kind=)` (stim_device, timing_only, syndrome_bits, recorded_stim) or `device=` | `decsim/qpu/` |
+| Round period | `qpu=QpuSettings(round_period_microseconds=)` | `decsim/qpu/settings.py` |
+| Controller costs | `controller=ControllerSettings(...)` | `decsim/controller/settings.py` |
+| Windowing scheme | `windows=WindowSettings(kind=)` (sliding, parallel, sandwich, naive_online) | `decsim/windows/settings.py` |
+| Decoder | `weak_decoder=DecoderSettings(kind=)` (pymatching, belief_matching, or a latency in microseconds) or `decoder=` | `decsim/decoders/settings.py` |
+| Decoder count and memory | `DecoderSettings(units=, unit_memory_rounds=)` | `decsim/decoders/settings.py` |
+| Escalation | `escalation=EscalationSettings(kind=)` (weak_baseline, strong_only, switching) | `decsim/decoders/settings.py` |
+| Rounds per operation | `workload=WorkloadSettings(rounds_policy=)` (default gate rounds) | `decsim/qpu/round_policies.py` |
 | Link latency and bandwidth | `links=` (default `logical_reference_profile()`) | `decsim/links/link_profiles.py` |
-| Round period and controller costs | `timing=TimingConfig(...)` | `decsim/config.py` |
-| Syndrome source | `device=` (timing-only, syndrome bits, or Stim sampling) | `decsim/qpu/` |
+| Round stores | `round_store=`, `strong_round_store=RoundStoreSettings(rounds=)` | `decsim/syndrome_buffer/settings.py` |
 | Pauli frame commit cost | `pauli_frame=PauliFrameConfig(...)` | `decsim/pauli_frame/pauli_frame.py` |
-| Reproducibility | `seed=` (one root seed drives every component) | `decsim/seeding.py` |
+| Reproducibility | `Machine.build(settings, seed)` (one root seed drives every component) | `decsim/seeding.py` |
 
 ## Package layout
 
-- `run_spec.py`, `run_configuration.py`: composition root; `simulate(RunSpec(...))` is the one entry point.
+- `machine.py`: the root; `Machine.build(MachineSettings(...), seed)` builds every component and wires it, `Machine.run()` returns the `RunResult`.
 - `engine.py`: the discrete-event core (integer ticks, 1 tick = 1e-6 us).
-- `message.py`, `protocols.py`: the typed objects that flow between components, and the Protocol seams a custom component implements.
+- `message.py`, `ports.py`: the typed objects that flow between components, and the ports (one Protocol per handoff) a component implements.
 - `qpu/`: codes and layouts, round policies, cycle clock, Stim devices, magic-state factories.
 - `controller/`: readout handling, detector formation at ingress, feedback streams.
 - `links/`: link cards with latency, bandwidth, and traffic accounting per path.
@@ -118,8 +138,9 @@ applies every default and validates the combination in one place.
 - `pauli_frame/`, `observe/`: frame commit, conditional release, and run metrics.
 - `frontends/`: workload builders that produce `Operation` lists.
 
-To add your own decoder, scheme, or policy, implement the matching Protocol
-in `decsim/protocols.py` and pass the instance to `RunSpec`.
+To add your own decoder, scheme, or policy, implement the matching port
+in `decsim/ports.py` and add one row to its table in `decsim/machine.py`,
+or pass the instance through its settings record.
 
 ## Run the tests
 

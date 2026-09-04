@@ -12,7 +12,7 @@ import pytest
 
 import decsim.config as config
 import decsim.links.link_profiles as link_profiles
-import decsim.run_spec as run_spec
+import decsim.machine as machine
 
 # One distance-5 patch: 24 syndrome bits per 1.0 us round, commit and
 # buffer regions of 5 rounds.
@@ -261,9 +261,10 @@ def test_the_priced_weak_store_hop_is_unbounded_when_no_rate_is_given():
 
 
 def test_a_run_without_a_card_uses_the_reference_card():
-    default_run = run_spec.RunSpec(ops=[])
-    default_completed = default_run.build()
+    default_machine = machine.Machine.build(machine.MachineSettings())
+    default_result = default_machine.run()
     reference = link_profiles.logical_reference_profile()
-    explicit_run = run_spec.RunSpec(ops=[], links=reference)
-    explicit_completed = explicit_run.build()
-    assert default_completed.result == explicit_completed.result
+    explicit_settings = machine.MachineSettings(links=reference)
+    explicit_machine = machine.Machine.build(explicit_settings)
+    explicit_result = explicit_machine.run()
+    assert default_result == explicit_result

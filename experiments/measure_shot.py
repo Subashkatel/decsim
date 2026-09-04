@@ -1,10 +1,11 @@
-"""One completed run -> one shot's numbers. Nothing is built here.
+"""One machine at one sweep point -> one shot's numbers.
 
-A shot is one circuit through the whole reaction path. `measure_shot` runs
-it and reads every latency point in POINTS off the run's own records: the
-link ledger, the window stamps, the engine's stage records and the Pauli
-frame. The input and output transfers are named by role, not by wire,
-because the decode path picks the wire: weak_baseline moves windows on
+A shot is one circuit through the whole reaction path. `measure_shot`
+builds the machine at the point, runs it and reads every latency point
+in POINTS off the run's own records: the link ledger, the window stamps,
+the decoder unit's stage records and the Pauli frame. The input and
+output transfers are named by role, not by wire, because the escalation
+kind picks the wire: weak_baseline moves windows on
 weak_buffer_to_weak_decoder and results on weak_decoder_to_frame,
 strong_only on strong_buffer_to_strong_decoder and
 strong_decoder_to_frame.
@@ -19,7 +20,7 @@ import pymatching
 import stim
 
 import decsim.config as config_module
-import experiments.build_run as build_run
+import decsim.machine as machine_module
 import experiments.experiment_config as experiment_config
 
 # Latency points, in path order, in microseconds per window unless noted.
@@ -107,34 +108,28 @@ def measure_shot(
     is the sweep point's online controller (threshold_source online):
     one instance across the point's shots.
     """
-    spec, engine = build_run.build_run(
-        config,
+    settings = config.point_settings(
         physical_error_probability=physical_error_probability,
         distance=distance,
         round_period_us=round_period_us,
-        seed=seed,
         threshold_calibrator=threshold_calibrator,
     )
-    is_verbose = config.trace in ("print", "both")
     wall_start = time.perf_counter()
-    completed = spec.build(verbose=is_verbose, io_trace=config.log_component_io)
+    machine = machine_module.Machine.build(settings, seed)
+    result = machine.run()
     wall_end = time.perf_counter()
     wall_seconds = wall_end - wall_start
-    if completed.result.terminal_status != "complete":
-        raise RuntimeError(
-            f"run did not complete: {completed.result.terminal_status}"
-        )
-    writes_trace = config.trace in ("file", "both")
-    if run_dir is not None and writes_trace:
+    if result.terminal_status != "complete":
+        raise RuntimeError(f"run did not complete: {result.terminal_status}")
+    if run_dir is not None and settings.observation.writes_trace:
         label = _shot_label(
             config, physical_error_probability, distance, round_period_us, seed
         )
-        _write_trace(completed, run_dir, label)
+        _write_trace(machine, run_dir, label)
     return _measurement(
         config,
-        spec,
-        engine,
-        completed,
+        machine,
+        result,
         physical_error_probability=physical_error_probability,
         distance=distance,
         round_period_us=round_period_us,
@@ -145,9 +140,8 @@ def measure_shot(
 
 def _measurement(
     config: experiment_config.ExperimentConfig,
-    spec,
-    engine,
-    completed,
+    machine: machine_module.Machine,
+    result: machine_module.RunResult,
     *,
     physical_error_probability: float,
     distance: int,
@@ -156,22 +150,25 @@ def _measurement(
     wall_seconds: float,
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records."""
-    samples = collect_samples(completed, engine, config.decode_path)
-    circuit = spec.ops[0].circuit
-    reference_prediction = direct_prediction(completed, circuit)
-    operation_result = completed.result.operation_results[0]
+    escalation_kind = config.settings.escalation.kind
+    samples = collect_samples(machine, result, escalation_kind)
+    circuit = machine.operations[0].circuit
+    reference_prediction = direct_prediction(machine, result, circuit)
+    operation_result = result.operation_results[0]
     truth = tuple(operation_result.observable_truth)
     loop_prediction = tuple(operation_result.logical_observables)
     decoded_windows = len(samples["service"])
-    rounds_this_shot = config.rounds_per_shot.rounds_for(distance)
-    span_us = _decoded_span_microseconds(completed)
+    rounds_per_shot = config.settings.workload.rounds_per_shot
+    rounds_this_shot = rounds_per_shot.rounds_for(distance)
+    span_us = _decoded_span_microseconds(machine)
     queue_depths = []
-    for _tick, depth in completed.decoder_manager.queue_log:
+    for _tick, depth in machine.decoder_manager.queue_log:
         queue_depths.append(depth)
     load = chain_load(samples, config, distance, round_period_us)
-    windows_checked = getattr(engine.decoder, "windows_checked", 0)
-    disagreements = getattr(engine.decoder, "window_disagreements", 0)
-    totals = link_totals(completed.result.link_traffic)
+    algorithm = machine.active_decoder.decoder
+    windows_checked = getattr(algorithm, "windows_checked", 0)
+    disagreements = getattr(algorithm, "window_disagreements", 0)
+    totals = link_totals(result.link_traffic)
     means = _means(samples)
     maxes = _maxes(samples)
     is_logical_failure = loop_prediction != truth
@@ -183,7 +180,7 @@ def _measurement(
         physical_error_probability=physical_error_probability,
         distance=distance,
         round_period_us=round_period_us,
-        algorithm=config.active_decoder.algorithm,
+        algorithm=config.active_decoder.kind,
         seed=seed,
         windows=decoded_windows,
         logical_failure=is_logical_failure,
@@ -318,12 +315,16 @@ def window_points_us(
     }
 
 
-def collect_samples(completed, engine, decode_path: str) -> dict:
+def collect_samples(
+    machine: machine_module.Machine,
+    result: machine_module.RunResult,
+    escalation_kind: str,
+) -> dict:
     """Every point's microsecond samples over the shot's decoded windows."""
-    transfers = completed.result.link_traffic["transfers"]
+    transfers = result.link_traffic["transfers"]
     link_delay = link_delay_by_window(transfers)
     qc_send = qc_send_ticks(transfers)
-    frame_snapshot = completed.pauli_frame.snapshot()
+    frame_snapshot = machine.pauli_frame.snapshot()
     frame_by_window = {}
     for record in frame_snapshot.records:
         frame_by_window[record.window_key[1]] = record
@@ -331,15 +332,16 @@ def collect_samples(completed, engine, decode_path: str) -> dict:
     for point in POINTS:
         samples[point] = []
     samples["cwb_per_round"] = cwb_delays_us(transfers)
-    input_path = INPUT_LINK[decode_path]
-    output_path = OUTPUT_LINK[decode_path]
-    window_items = completed.window_manager.windows.items()
+    input_path = INPUT_LINK[escalation_kind]
+    output_path = OUTPUT_LINK[escalation_kind]
+    window_items = machine.window_manager.windows.items()
     all_windows = sorted(window_items)
+    unit = machine.active_decoder
     for (op_id, window_id), window in all_windows:
         frame_record = frame_by_window.get(window_id)
         if frame_record is None or window.t_done is None:
             continue
-        stage_us = _stage_microseconds(engine, op_id, window_id)
+        stage_us = _stage_microseconds(unit, op_id, window_id)
         points = window_points_us(
             window,
             frame_record,
@@ -354,7 +356,11 @@ def collect_samples(completed, engine, decode_path: str) -> dict:
     return samples
 
 
-def direct_prediction(completed, circuit: stim.Circuit) -> tuple:
+def direct_prediction(
+    machine: machine_module.Machine,
+    result: machine_module.RunResult,
+    circuit: stim.Circuit,
+) -> tuple:
     """Whole-circuit PyMatching on the detection events the device sampled.
 
     The reference the loop must agree with.
@@ -363,8 +369,8 @@ def direct_prediction(completed, circuit: stim.Circuit) -> tuple:
     matching = pymatching.Matching.from_detector_error_model(
         detector_error_model
     )
-    operation_id = completed.result.operation_results[0].operation_id
-    source = completed.qpu.syndrome_source
+    operation_id = result.operation_results[0].operation_id
+    source = machine.syndrome_source
     sampled = source.sampled_detection_events(operation_id)
     events = numpy.asarray(sampled, dtype=bool)
     predicted = matching.decode(events)
@@ -388,7 +394,7 @@ def chain_load(
     """
     service_us = _mean_or_zero(samples["service"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])
-    commit_rounds = config.windowing.commit_rounds
+    commit_rounds = config.settings.windows.commit_rounds
     if commit_rounds is None:
         commit_rounds = distance
     inter_arrival_us = commit_rounds * round_period_us
@@ -401,24 +407,24 @@ def _span_microseconds(end_ticks: int, start_ticks: int) -> float:
     return ticks_to_microseconds(span_ticks)
 
 
-def _stage_microseconds(engine, op_id, window_id) -> dict:
-    """The engine's recorded duration of each stage, in microseconds."""
+def _stage_microseconds(unit, op_id, window_id) -> dict:
+    """The unit's recorded duration of each stage, in microseconds."""
     stage_us = {}
-    for record in engine.stage_records_for(op_id, window_id):
+    for record in unit.stage_records_for(op_id, window_id):
         stage_us[record.stage] = _span_microseconds(
             record.end_ticks, record.start_ticks
         )
     return stage_us
 
 
-def _decoded_span_microseconds(completed) -> float:
+def _decoded_span_microseconds(machine: machine_module.Machine) -> float:
     """First round into any window to the last frame commit, in us."""
     first_round_ticks = []
-    for window in completed.window_manager.windows.values():
+    for window in machine.window_manager.windows.values():
         if window.t_first_round is not None:
             first_round_ticks.append(window.t_first_round)
     first_round_tick = min(first_round_ticks)
-    frame_snapshot = completed.pauli_frame.snapshot()
+    frame_snapshot = machine.pauli_frame.snapshot()
     commit_ticks = []
     for record in frame_snapshot.records:
         commit_ticks.append(record.committed_ticks)
@@ -459,21 +465,21 @@ def _shot_label(
     round_period_us: float,
     seed: int,
 ) -> str:
-    algorithm = config.active_decoder.algorithm
+    algorithm = config.active_decoder.kind
     return (
         f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
         f"_round{round_period_us:g}us_seed{seed}"
     )
 
 
-def _write_trace(completed, run_dir, label: str) -> None:
+def _write_trace(machine: machine_module.Machine, run_dir, label: str) -> None:
     """One file per shot with the engine narrator's full line record.
 
     The same lines trace: print shows live.
     """
     trace_dir = run_dir / "trace"
     trace_dir.mkdir(parents=True, exist_ok=True)
-    text = "\n".join(completed.engine.log_lines)
+    text = "\n".join(machine.engine.log_lines)
     trace_path = trace_dir / f"{label}.log"
     contents = text + "\n"
     trace_path.write_text(contents)

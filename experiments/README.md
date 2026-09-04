@@ -27,9 +27,9 @@ numbers; a new yaml key belongs in `experiment_config.py` first.
 so update both in the same change as any config-surface edit.
 
 The pipeline is four small modules, one job each, in call order:
-`run.py` (orchestrates) -> `experiment_config.py` (the only yaml reader)
--> `build_run.py` (one sweep point -> one wired RunSpec)
--> `measure_shot.py` (one completed run -> one shot's numbers)
+`run.py` (orchestrates) -> `experiment_config.py` (the only yaml reader,
+one settings record per section) -> `measure_shot.py` (one sweep point
+and seed -> one machine -> one shot's numbers)
 -> `sweep_report.py` / `plots.py` (rows -> csv files, figures).
 
 Also here:

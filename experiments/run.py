@@ -8,7 +8,6 @@ point; only the wall-clock column varies).
 """
 
 import csv
-import dataclasses
 import datetime
 import itertools
 import json
@@ -25,7 +24,6 @@ import numpy
 import pymatching
 import stim
 
-import experiments.build_run as build_run
 import experiments.experiment_config as experiment_config
 import experiments.measure_shot as measure_shot
 import experiments.plots as plots
@@ -47,15 +45,17 @@ def resolved_description(config: experiment_config.ExperimentConfig) -> list:
     for path in config.config_files:
         file_names.append(str(path))
     files = " <- ".join(file_names)
+    settings = config.settings
     unit = config.active_decoder
-    tier = experiment_config.DECODE_PATH_TIER[config.decode_path]
+    tier = settings.escalation.decodes_on
     lines = [
         f"config: {files}",
-        f"decode_path: {config.decode_path}, {config.circuit}, "
-        f"{config.rounds_per_shot} rounds per shot",
-        f"windows: {config.windowing.scheme}",
-        f"decoder: the {tier} tier, algorithm {unit.algorithm}, "
-        f"{unit.units} unit(s), engine clock {unit.engine.clock}",
+        f"escalation: {settings.escalation.kind}, "
+        f"{settings.workload.code_task}, "
+        f"{settings.workload.rounds_per_shot} rounds per shot",
+        f"windows: {settings.windows.kind}",
+        f"decoder: the {tier} tier, kind {unit.kind}, "
+        f"{unit.units} unit(s), engine at {unit.engine_megahertz} MHz",
     ]
     for index, block in enumerate(config.sweep, start=1):
         probabilities = list(block.physical_error_probabilities)
@@ -65,8 +65,8 @@ def resolved_description(config: experiment_config.ExperimentConfig) -> list:
             f"sweep block {index}: p {probabilities}, d {distances}, "
             f"round period {periods} us, {block.shots} shots"
         )
-    trace_line = f"trace: {config.trace}"
-    if config.log_component_io:
+    trace_line = f"trace: {settings.observation.trace}"
+    if settings.observation.log_component_io:
         trace_line += " with component I/O"
     lines.append(trace_line)
     return lines
@@ -124,11 +124,7 @@ def write_manifest(
     Sampling is deterministic from (stim version, circuit, distance,
     rounds, p, seed), so the manifest plus seeds are the raw data.
     """
-    # default=str turns Paths and cards into strings; the round trip
-    # leaves a plain json-safe dict.
-    config_as_dict = dataclasses.asdict(config)
-    config_text = json.dumps(config_as_dict, default=str)
-    json_safe_config = json.loads(config_text)
+    json_safe_config = experiment_config.as_json_value(config)
     config_files = []
     for path in config.config_files:
         config_files.append(str(path))
@@ -235,8 +231,7 @@ def _measure_point(
     shots: int,
 ) -> None:
     """Every seed of one sweep point, sharing one online calibrator."""
-    threshold_calibrator = build_run.online_threshold_calibrator(
-        config,
+    threshold_calibrator = config.online_calibrator(
         physical_error_probability=physical_error_probability,
         distance=distance,
     )

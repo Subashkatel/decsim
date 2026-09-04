@@ -1,7 +1,6 @@
 import pytest
 
 from decsim.engine import Engine
-from decsim.run_spec import RunSpec
 
 
 class ProbeMetric:

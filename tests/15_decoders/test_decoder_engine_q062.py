@@ -148,7 +148,10 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
     from decsim.message import Operation
     from decsim.decoders.mwpm.decoder import PyMatchingDecoder
     from decsim.qpu.round_policies import FixedRounds
-    from decsim.run_spec import RunSpec
+    from decsim.decoders.settings import DecoderSettings
+    from decsim.frontends.settings import WorkloadSettings
+    from decsim.machine import Machine, MachineSettings
+    from decsim.qpu.settings import QpuSettings
 
     def build(decoder):
         circuit = stim.Circuit.generated(
@@ -159,16 +162,22 @@ def test_end_to_end_stim_memory_run_through_the_timed_decoder():
             before_round_data_depolarization=0.005)
         operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,),
                               circuit=circuit)
-        return RunSpec(ops=[operation], d=3, rounds_policy=FixedRounds(6),
-                       device=StimDevice(), decoder=decoder, seed=11).build()
+        settings = MachineSettings(
+            workload=WorkloadSettings(operations=[operation],
+                                      rounds_policy=FixedRounds(6)),
+            qpu=QpuSettings(distance=3, device=StimDevice()),
+            weak_decoder=DecoderSettings(decoder=decoder))
+        machine = Machine.build(settings, 11)
+        result = machine.run()
+        return machine, result
 
-    bare = build(PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)))
+    _, bare_result = build(PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)))
     timed = DecoderEngine(PyMatchingDecoder(PerRoundDecoder(tau_us=0.1)), _timing())
-    staged = build(timed)
+    staged, staged_result = build(timed)
 
-    assert staged.result.terminal_status == "complete"
-    assert ([r.logical_observables for r in staged.result.operation_results]
-            == [r.logical_observables for r in bare.result.operation_results])
+    assert staged_result.terminal_status == "complete"
+    assert ([r.logical_observables for r in staged_result.operation_results]
+            == [r.logical_observables for r in bare_result.operation_results])
     windows = sorted({(r.op_id, r.window_id) for r in timed.stage_records})
     assert windows
     for key in windows:
@@ -191,7 +200,10 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
     from decsim.message import Operation
     from decsim.decoders.mwpm.decoder import PyMatchingDecoder
     from decsim.qpu.round_policies import FixedRounds
-    from decsim.run_spec import RunSpec
+    from decsim.decoders.settings import DecoderSettings
+    from decsim.frontends.settings import WorkloadSettings
+    from decsim.machine import Machine, MachineSettings
+    from decsim.qpu.settings import QpuSettings
 
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z", rounds=6, distance=3,
@@ -199,9 +211,14 @@ def test_measured_wall_clock_algorithm_holds_the_unit_for_the_real_call():
         after_reset_flip_probability=0.005, before_round_data_depolarization=0.005)
     operation = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
     engine = DecoderEngine(PyMatchingDecoder(latency_model=None), _timing())
-    completed = RunSpec(ops=[operation], d=3, rounds_policy=FixedRounds(6),
-                        device=StimDevice(), decoder=engine, seed=3).build()
-    assert completed.result.terminal_status == "complete"
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=[operation],
+                                  rounds_policy=FixedRounds(6)),
+        qpu=QpuSettings(distance=3, device=StimDevice()),
+        weak_decoder=DecoderSettings(decoder=engine))
+    completed = Machine.build(settings, 3)
+    result = completed.run()
+    assert result.terminal_status == "complete"
     algorithm = [r for r in engine.stage_records if r.stage == ALGORITHM_STAGE]
     assert algorithm
     for record in algorithm:

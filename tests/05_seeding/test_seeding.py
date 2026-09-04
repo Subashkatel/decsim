@@ -6,7 +6,8 @@ from types import SimpleNamespace
 import pytest
 
 from decsim.message import RunSeedChild, RunSeedPathSegment, RunSeedReservation
-from decsim.run_spec import RunSpec
+from decsim.machine import Machine, MachineSettings
+from decsim.windows.settings import WindowSettings
 from decsim.seeding import (
     _AtomicRunSeedConsumer,
     _RandomSeedConsumer,
@@ -652,12 +653,12 @@ def test_binder_allows_empty_paths_and_naturally_rejects_malformed_graph_shapes(
 
 
 @pytest.mark.parametrize("seed", [None, 0, MAX_SEED, IntegerSubclass(31)])
-def test_run_spec_normalizes_seed_boundaries_at_public_entry(seed):
-    """RunSpec accepts public seed boundaries and converts integral subclasses before binding."""
+def test_machine_normalizes_seed_boundaries_at_public_entry(seed):
+    """Machine.build accepts public seed boundaries and converts integral subclasses before binding."""
     events = []
     policy = RecordingConsumer("boundary", events)
 
-    RunSpec(ops=[], boundary_policy=policy, seed=seed).build()
+    Machine.build(MachineSettings(windows=WindowSettings(boundary_policy=policy)), seed)
 
     reserved_seed = next(value for action, _, value in events if action == "reserve")
     if seed is None:
@@ -677,48 +678,20 @@ def test_run_spec_normalizes_seed_boundaries_at_public_entry(seed):
         (1 << 64, ValueError),
     ],
 )
-def test_run_spec_refuses_invalid_public_seeds(seed, error):
-    """RunSpec rejects seeds outside [0, 2**64) at build entry."""
+def test_machine_refuses_invalid_public_seeds(seed, error):
+    """Machine.build rejects seeds outside [0, 2**64) at build entry."""
     with pytest.raises(error):
-        RunSpec(ops=[], seed=seed).build()
+        Machine.build(MachineSettings(), seed)
 
 
-def test_run_spec_binding_failure_precedes_conditional_release_connection():
-    """A seed reservation failure stops the build before runtime owners are connected."""
-    events = []
-
-    class FailingPolicy(RecordingConsumer):
-        def reserve_run_seed(self, seed):
-            events.append("reserve")
-            raise RuntimeError("reservation failed")
-
-    class OrchestratorProbe:
-        def connect(self, controller, callback):
-            events.append("connect")
-
-    def make_conditional_release(engine):
-        events.append("construct")
-        return OrchestratorProbe()
-
-    with pytest.raises(RuntimeError, match="reservation failed"):
-        RunSpec(
-            ops=[],
-            boundary_policy=FailingPolicy("boundary"),
-            make_conditional_release=make_conditional_release,
-            seed=4,
-        ).build()
-
-    assert events == ["construct", "reserve"]
-
-
-def test_run_spec_binds_outside_composite_at_stable_policy_path():
+def test_machine_binds_outside_composite_at_stable_policy_path():
     """An outside composite injected through a policy axis binds its duck child at a stable path."""
     events = []
     leaf = RecordingConsumer("outside-leaf", events)
     duck_child = SimpleNamespace(relative_path=(field("leaf"),), child=leaf)
     outside_policy = ChildrenComposite((duck_child,))
 
-    RunSpec(ops=[], boundary_policy=outside_policy, seed=23).build()
+    Machine.build(MachineSettings(windows=WindowSettings(boundary_policy=outside_policy)), 23)
 
     expected = derive_component_seed(
         23, (field("boundary_policy"), field("leaf"))

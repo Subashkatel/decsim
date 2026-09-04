@@ -16,7 +16,9 @@ from decsim.decoders.decoder_memory import (
     DecoderMemoryConfig,
 )
 from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.decoders.mwpm.decoder import PyMatchingDecoder
+from decsim.decoders.minimum_weight_perfect_matching.decoder import (
+    PyMatchingDecoder,
+)
 from decsim.decoders.settings import (
     DecoderManagerSettings,
     DecoderSettings,

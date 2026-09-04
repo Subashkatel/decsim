@@ -1,12 +1,15 @@
 """Complementary-gap soft output: ``g_comp = |w_comp - w_min|`` for MWPM (SoftOutputMetric seam)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..message import SoftOutput, SoftOutputSource
-from ..detector_error_model.fault_model_contracts import GRAPHLIKE_FAULT_MODEL_REQUIRED
-from ..decoders.mwpm.weights import matching_weights
+from ..detector_error_model.fault_model_contracts import (
+    GRAPHLIKE_FAULT_MODEL_REQUIRED,
+)
+from ..decoders.minimum_weight_perfect_matching.weights import matching_weights
 
 if TYPE_CHECKING:
     import stim
@@ -30,7 +33,10 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
     from ..detector_error_model.fault_identity_validation import (
         validate_graphlike_fault,
     )
-    from ..detector_error_model.stim_fault_catalog import detector_error_model_to_faults
+    from ..detector_error_model.stim_fault_catalog import (
+        detector_error_model_to_faults,
+    )
+
     num_det = dem.num_detectors
     num_obs = dem.num_observables
     h_cols: list = []
@@ -61,8 +67,16 @@ def dem_to_matrices(dem: "stim.DetectorErrorModel"):
             float(matching_weights([probability])[0]),
         )
 
-    h = np.array(h_cols, dtype=np.uint8).T if h_cols else np.zeros((num_det, 0), np.uint8)
-    o = np.array(o_cols, dtype=np.uint8).T if o_cols else np.zeros((num_obs, 0), np.uint8)
+    h = (
+        np.array(h_cols, dtype=np.uint8).T
+        if h_cols
+        else np.zeros((num_det, 0), np.uint8)
+    )
+    o = (
+        np.array(o_cols, dtype=np.uint8).T
+        if o_cols
+        else np.zeros((num_obs, 0), np.uint8)
+    )
     return h, o, np.asarray(weights, dtype=float)
 
 
@@ -81,8 +95,12 @@ class ComplementaryGapMetric:
 
         from scipy.sparse import csc_matrix, issparse
 
-        self.check = (check.tocsc() if issparse(check) else csc_matrix(np.asarray(check))).astype(np.uint8)
-        self.obs = (obs.toarray() if issparse(obs) else np.asarray(obs)).astype(np.uint8)
+        self.check = (
+            check.tocsc() if issparse(check) else csc_matrix(np.asarray(check))
+        ).astype(np.uint8)
+        self.obs = (obs.toarray() if issparse(obs) else np.asarray(obs)).astype(
+            np.uint8
+        )
         self.weights = np.asarray(weights, dtype=float)
         validate_graphlike_matrices(
             self.check,
@@ -93,20 +111,28 @@ class ComplementaryGapMetric:
             raise ValueError(
                 "the complementary gap is defined for one observable; got "
                 f"{self.obs.shape[0]}. Decode each logical operator with its own "
-                "metric.")
+                "metric."
+            )
         # parallel faults (a window restriction folds distinct faults onto
         # one edge) combine as independent errors, the convention of
         # PyMatching's detector-error-model loader and of the window
         # decoder, so w_min here is the window decoder's minimum weight
         priors = 1 / (1 + np.exp(self.weights))
         self._base = pymatching.Matching.from_check_matrix(
-            self.check.copy(), weights=self.weights, error_probabilities=priors,
-            merge_strategy="independent")
+            self.check.copy(),
+            weights=self.weights,
+            error_probabilities=priors,
+            merge_strategy="independent",
+        )
         from scipy.sparse import csc_matrix, vstack
+
         check_aug = vstack([self.check, csc_matrix(self.obs[0:1, :])]).tocsc()
         self._aug = pymatching.Matching.from_check_matrix(
-            check_aug.copy(), weights=self.weights, error_probabilities=priors,
-            merge_strategy="independent")
+            check_aug.copy(),
+            weights=self.weights,
+            error_probabilities=priors,
+            merge_strategy="independent",
+        )
         self._warm_matchings()
 
     def _warm_matchings(self) -> None:
@@ -124,7 +150,8 @@ class ComplementaryGapMetric:
         warmed = 0
         for column in range(self.check.shape[1]):
             rows = self.check.indices[
-                self.check.indptr[column]:self.check.indptr[column + 1]]
+                self.check.indptr[column] : self.check.indptr[column + 1]
+            ]
             if rows.size == 0:
                 continue
             syndrome = np.zeros(self.check.shape[0], dtype=np.uint8)
@@ -132,22 +159,29 @@ class ComplementaryGapMetric:
             self._base.decode(syndrome)
             observable_bit = int(self.obs[0, column])
             augmented_syndrome = np.concatenate(
-                [syndrome, [observable_bit]]).astype(np.uint8)
+                [syndrome, [observable_bit]]
+            ).astype(np.uint8)
             self._aug.decode(augmented_syndrome)
             warmed += 1
             if warmed == 3:
                 break
 
     @classmethod
-    def from_dem(cls, dem: "stim.DetectorErrorModel") -> "ComplementaryGapMetric":
+    def from_dem(
+        cls, dem: "stim.DetectorErrorModel"
+    ) -> "ComplementaryGapMetric":
         """Build the metric from a (decomposed) stim DetectorErrorModel."""
         check, obs, weights = dem_to_matrices(dem)
         return cls(check, obs, weights)
 
     @classmethod
-    def from_window_model(cls, model: "WindowErrorModel") -> "ComplementaryGapMetric":
+    def from_window_model(
+        cls, model: "WindowErrorModel"
+    ) -> "ComplementaryGapMetric":
         """Build the metric from a decsim WindowErrorModel (check/obs/priors)."""
-        from ..detector_error_model.fault_model_contracts import FaultRepresentation
+        from ..detector_error_model.fault_model_contracts import (
+            FaultRepresentation,
+        )
 
         faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
         return cls(
@@ -191,8 +225,7 @@ class ComplementaryGapMetric:
         forced_weights = []
         solve_times_ns = []
         for forced_class in (0, 1):
-            weight, elapsed_ns = self.forced_class_solve(
-                syndrome, forced_class)
+            weight, elapsed_ns = self.forced_class_solve(syndrome, forced_class)
             forced_weights.append(weight)
             solve_times_ns.append(elapsed_ns)
         predicted_class = int(forced_weights[1] < forced_weights[0])

@@ -3,7 +3,9 @@
 import numpy as np
 import stim
 
-from decsim.decoders.bposd.decoder import BPOSDDecoder
+from decsim.decoders.belief_propagation_osd.decoder import (
+    BeliefPropagationOsdDecoder,
+)
 from decsim.detector_error_model.fault_model_contracts import (
     PHYSICAL_FAULT_MODEL_REQUIRED,
     FaultRepresentation,
@@ -34,7 +36,7 @@ def test_osd_order_above_window_rank_does_not_overrun():
         fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
     )
     faults = model.require_faults(FaultRepresentation.PHYSICAL)
-    decoder = BPOSDDecoder(max_iterations=5, osd_order=60)
+    decoder = BeliefPropagationOsdDecoder(max_iterations=5, osd_order=60)
     backend = decoder.compile(faults, model)
     syndrome = np.zeros(faults.check.shape[0], dtype=np.uint8)
     syndrome[0] = 1

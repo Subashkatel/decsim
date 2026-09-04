@@ -8,7 +8,7 @@ built. The profile refusals live in tests/15_decoders/test_relay_bp_profile.py.
 import numpy
 import pytest
 
-import decsim.decoders.relay_bp.decoder as relay_bp
+import decsim.decoders.relay_belief_propagation.decoder as relay_belief_propagation
 import decsim.detector_error_model.fault_model_contracts as fault_models
 from tests.decoders import windows
 
@@ -23,7 +23,9 @@ def test_the_row_returns_the_backends_correction():
     )
     physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
     detection_events, _ = windows.sampled_shots(circuit, 10, 3)
-    row = relay_bp.RelayBpDecoder(gamma_table_seed=5, relay_set_count=20)
+    row = relay_belief_propagation.RelayBeliefPropagationDecoder(
+        gamma_table_seed=5, relay_set_count=20
+    )
     faults_backend = row.window_decoder._compiled_model(physical).backend
     del backend
     for shot in detection_events:

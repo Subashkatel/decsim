@@ -17,7 +17,9 @@ from decsim.decoders.decoder_memory import (
     materialize_decoder_input,
 )
 from decsim.decoders.decoders import PerRoundDecoder
-from decsim.decoders.mwpm.decoder import PyMatchingDecoder
+from decsim.decoders.minimum_weight_perfect_matching.decoder import (
+    PyMatchingDecoder,
+)
 from decsim.decoders.settings import DecoderManagerSettings, DecoderSettings
 from decsim.detector_error_model.fault_model_contracts import (
     GRAPHLIKE_FAULT_MODEL_REQUIRED,

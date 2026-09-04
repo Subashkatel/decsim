@@ -92,7 +92,8 @@ class BeliefMatchingDecoder(decoder_module.WindowDecoderBase):
         """BP on the hyperedges, then a matching with posterior weights.
 
         PyMatching raises on odd parity in a boundaryless component (see
-        mwpm); that case is an empty correction marked invalid.
+        the PyMatching adapter); that case is an empty correction marked
+        invalid.
         """
         del model
         belief_propagation, edge_from_hyperedge = backend

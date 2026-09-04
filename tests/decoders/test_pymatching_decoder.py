@@ -11,8 +11,8 @@ import numpy
 import pymatching
 import sinter
 
-import decsim.decoders.mwpm.decoder as mwpm
-import decsim.decoders.mwpm.weights as weights
+import decsim.decoders.minimum_weight_perfect_matching.decoder as minimum_weight_perfect_matching
+import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.fault_model_contracts as fault_models
 from tests.decoders import windows
 
@@ -32,7 +32,7 @@ def _window_and_shots():
 def test_the_row_matches_pymatching_on_the_same_graph():
     _, model, detection_events, _ = _window_and_shots()
     faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
-    row = mwpm.PyMatchingDecoder()
+    row = minimum_weight_perfect_matching.PyMatchingDecoder()
     direct = pymatching.Matching.from_check_matrix(
         faults.check.copy(),
         weights=weights.matching_weights(faults.priors),
@@ -59,7 +59,7 @@ def test_the_row_predicts_what_sinters_pymatching_row_predicts():
     )
     predictions = numpy.unpackbits(predictions, axis=1, bitorder="little")
     whole = pymatching.Matching.from_detector_error_model(dem)
-    row = mwpm.PyMatchingDecoder()
+    row = minimum_weight_perfect_matching.PyMatchingDecoder()
     faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
     matching = row.compiled_for(faults, model)
     ties = 0

@@ -8,7 +8,9 @@ import stim
 
 from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.decoders.mwpm.decoder import PyMatchingDecoder
+from decsim.decoders.minimum_weight_perfect_matching.decoder import (
+    PyMatchingDecoder,
+)
 from decsim.decoders.weak_strong_switching import StrongOnly
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.message import Operation
@@ -19,46 +21,68 @@ from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
 from decsim.qpu.settings import QpuSettings
 from decsim.windows.settings import WindowSettings
-from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
-                                              SlidingWindowScheme,
-                                              TanSandwichScheme)
+from decsim.windows.windowing_schemes import (
+    SlidingTerminalPolicy,
+    SlidingWindowScheme,
+    TanSandwichScheme,
+)
 
 ROUNDS = 27
 
 
 def _sliding():
     return SlidingWindowScheme(
-        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD)
+        terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+    )
 
 
 def _stim_run(*, round_us=1.0, scheme=None, units=1, policy=None):
     p = 0.003
     circuit = stim.Circuit.generated(
-        "surface_code:rotated_memory_z", rounds=ROUNDS, distance=3,
-        after_clifford_depolarization=p, before_measure_flip_probability=p,
-        after_reset_flip_probability=p, before_round_data_depolarization=p)
+        "surface_code:rotated_memory_z",
+        rounds=ROUNDS,
+        distance=3,
+        after_clifford_depolarization=p,
+        before_measure_flip_probability=p,
+        after_reset_flip_probability=p,
+        before_round_data_depolarization=p,
+    )
     settings = MachineSettings(
         workload=WorkloadSettings(
-            operations=[Operation(id=1, name="memory", qubits=(0,), patches=(0,),
-                                  circuit=circuit)],
-            rounds_policy=FixedRounds(ROUNDS)),
-        qpu=QpuSettings(distance=3, round_period_microseconds=round_us,
-                        device=StimDevice()),
+            operations=[
+                Operation(
+                    id=1,
+                    name="memory",
+                    qubits=(0,),
+                    patches=(0,),
+                    circuit=circuit,
+                )
+            ],
+            rounds_policy=FixedRounds(ROUNDS),
+        ),
+        qpu=QpuSettings(
+            distance=3, round_period_microseconds=round_us, device=StimDevice()
+        ),
         weak_decoder=DecoderSettings(
-            decoder=PyMatchingDecoder(PresetLatencyDecoder(5.0)), units=units),
+            decoder=PyMatchingDecoder(PresetLatencyDecoder(5.0)), units=units
+        ),
         windows=WindowSettings(
-            scheme=(scheme if scheme is not None else _sliding())),
+            scheme=(scheme if scheme is not None else _sliding())
+        ),
         escalation=EscalationSettings(
-            policy=(policy if policy is not None else StrongOnly())),
-        links=logical_reference_profile())
+            policy=(policy if policy is not None else StrongOnly())
+        ),
+        links=logical_reference_profile(),
+    )
     machine = Machine.build(settings, 3)
     result = machine.run()
     return machine, result
 
 
 def _gaps(completed):
-    dones = sorted(w.t_done for _, w in
-                   completed.window_manager.windows.items())
+    dones = sorted(
+        w.t_done for _, w in completed.window_manager.windows.items()
+    )
     return sorted({b - a for a, b in zip(dones, dones[1:])})
 
 
@@ -82,15 +106,20 @@ def test_parked_decode_starts_at_the_boundary_arrival():
         boundary_arrival = dones[k - 1] + microseconds_to_ticks(0.5)
         assert window.t_done - microseconds_to_ticks(5.0) >= boundary_arrival
 
+
 def test_relaxed_stream_parks_only_the_clamped_terminal_window():
     """With rounds every 3.0 us the chain drains between arrivals: no
     window but the terminal pair's dependent ever waits parked past its
     data-complete plus the transfer."""
     completed, _ = _stim_run(round_us=3.0)
     windows = dict(sorted(completed.window_manager.windows.items()))
-    late = [k for (_, k), w in windows.items()
-            if w.t_done is not None
-            and w.t_done - microseconds_to_ticks(5.0) - microseconds_to_ticks(2.0) > w.t_data_complete + microseconds_to_ticks(0.6)]
+    late = [
+        k
+        for (_, k), w in windows.items()
+        if w.t_done is not None
+        and w.t_done - microseconds_to_ticks(5.0) - microseconds_to_ticks(2.0)
+        > w.t_data_complete + microseconds_to_ticks(0.6)
+    ]
     last = max(k for (_, k) in windows)
     assert late in ([], [last]), late
 

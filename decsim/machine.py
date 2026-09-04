@@ -35,12 +35,12 @@ import decsim.controller.policies as policies
 import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_packing as syndrome_packing_module
 import decsim.decoders.belief_matching.decoder as belief_matching
-import decsim.decoders.bposd.decoder as bposd
+import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_manager as decoder_manager_module
 import decsim.decoders.decoder_memory as decoder_memory_module
 import decsim.decoders.decoders as decoders
-import decsim.decoders.mwpm.decoder as mwpm
-import decsim.decoders.relay_bp.decoder as relay_bp
+import decsim.decoders.minimum_weight_perfect_matching.decoder as minimum_weight_perfect_matching
+import decsim.decoders.relay_belief_propagation.decoder as relay_belief_propagation
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
@@ -94,13 +94,13 @@ SYNDROME_SOURCES = {
 # the Decoder port (decsim/decoders/decoder.py); sinter's
 # BUILT_IN_DECODERS is the shape.
 DECODERS = {
-    "pymatching": mwpm.PyMatchingDecoder,
-    "unweighted_pymatching": mwpm.UnweightedPyMatchingDecoder,
+    "pymatching": minimum_weight_perfect_matching.PyMatchingDecoder,
+    "unweighted_pymatching": minimum_weight_perfect_matching.UnweightedPyMatchingDecoder,
     "belief_matching": belief_matching.BeliefMatchingDecoder,
     "union_find": union_find.UnionFindDecoder,
     "tesseract": tesseract.TesseractDecoder,
-    "relay_bp": relay_bp.RelayBpDecoder,
-    "bposd": bposd.BPOSDDecoder,
+    "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
+    "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
 }
 ROUND_STORES = {
     "round_store": syndrome_buffer_module.SyndromeBuffer,
@@ -978,7 +978,7 @@ def _algorithm(kind, tier: str):
         row = _row(DECODERS, f"{tier}_decoder.kind", kind)
         return row(latency_model=None)
     latency_model = decoders.PresetLatencyDecoder(kind)
-    return mwpm.PyMatchingDecoder(latency_model)
+    return minimum_weight_perfect_matching.PyMatchingDecoder(latency_model)
 
 
 def _gap_wrapped(

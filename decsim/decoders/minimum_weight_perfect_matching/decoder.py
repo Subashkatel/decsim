@@ -13,7 +13,7 @@ import numpy
 import pymatching
 
 import decsim.decoders.decoder as decoder_module
-import decsim.decoders.mwpm.weights as weights
+import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.decoders.window_decode_results as window_decode_results
 import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models

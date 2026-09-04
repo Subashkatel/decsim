@@ -3,13 +3,13 @@
 from typing import Optional
 
 import decsim.decoders.decoder as decoder_module
-import decsim.decoders.relay_bp.window_decoder as window_decoder
+import decsim.decoders.relay_belief_propagation.window_decoder as window_decoder
 import decsim.decoders.window_decode_results as window_decode_results
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
 
-class RelayBpDecoder(decoder_module.WindowDecoderBase):
+class RelayBeliefPropagationDecoder(decoder_module.WindowDecoderBase):
     """Use Relay-BP for corrections and an injected model for service time."""
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
@@ -30,16 +30,18 @@ class RelayBpDecoder(decoder_module.WindowDecoderBase):
         gamma_table_seed: Optional[int] = None,
     ) -> None:
         decoder_module.WindowDecoderBase.__init__(self, latency_model)
-        self.window_decoder = window_decoder.RelayBpWindowDecoder(
-            alpha=alpha,
-            alpha_iteration_scaling_factor=alpha_iteration_scaling_factor,
-            gamma0=gamma0,
-            pre_iterations=pre_iterations,
-            relay_set_count=relay_set_count,
-            iterations_per_set=iterations_per_set,
-            gamma_interval=gamma_interval,
-            converged_solution_count=converged_solution_count,
-            gamma_table_seed=gamma_table_seed,
+        self.window_decoder = (
+            window_decoder.RelayBeliefPropagationWindowDecoder(
+                alpha=alpha,
+                alpha_iteration_scaling_factor=alpha_iteration_scaling_factor,
+                gamma0=gamma0,
+                pre_iterations=pre_iterations,
+                relay_set_count=relay_set_count,
+                iterations_per_set=iterations_per_set,
+                gamma_interval=gamma_interval,
+                converged_solution_count=converged_solution_count,
+                gamma_table_seed=gamma_table_seed,
+            )
         )
 
     def run_seed_children(self) -> tuple:

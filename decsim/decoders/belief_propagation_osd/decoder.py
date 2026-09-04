@@ -17,7 +17,7 @@ import decsim.detector_error_model.fault_identity_validation as fault_identity
 import decsim.detector_error_model.fault_model_contracts as fault_models
 
 
-class BPOSDDecoder(decoder_module.WindowDecoderBase):
+class BeliefPropagationOsdDecoder(decoder_module.WindowDecoderBase):
     """Decode one window with BP-OSD; ldpc's argument names are kept."""
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED

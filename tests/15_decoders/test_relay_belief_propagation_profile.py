@@ -2,7 +2,9 @@
 
 import pytest
 
-from decsim.decoders.relay_bp.window_decoder import RelayBpWindowDecoder
+from decsim.decoders.relay_belief_propagation.window_decoder import (
+    RelayBeliefPropagationWindowDecoder,
+)
 
 
 def test_zero_pre_iterations_is_rejected():
@@ -10,8 +12,8 @@ def test_zero_pre_iterations_is_rejected():
     previous call's decoding in place (relay.rs), so a zero first leg would
     hand back stale state; the profile refuses it up front."""
     with pytest.raises(ValueError, match="pre_iterations must be positive"):
-        RelayBpWindowDecoder(pre_iterations=0)
+        RelayBeliefPropagationWindowDecoder(pre_iterations=0)
 
 
 def test_single_pre_iteration_is_accepted():
-    RelayBpWindowDecoder(pre_iterations=1)
+    RelayBeliefPropagationWindowDecoder(pre_iterations=1)

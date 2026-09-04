@@ -9,7 +9,9 @@ import numpy as np
 import pytest
 
 from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.decoders.mwpm.decoder import PyMatchingDecoder
+from decsim.decoders.minimum_weight_perfect_matching.decoder import (
+    PyMatchingDecoder,
+)
 from decsim.decoders.union_find.decoder import UnionFindDecoder
 from decsim.decoders.window_decode_results import (
     BackendDecodeOutcome,
@@ -76,7 +78,7 @@ def _job(model, syndrome):
 BOUNDARYLESS = [[1, 0], [0, 1], [1, 0], [0, 1]]
 
 
-def test_mwpm_reports_an_unmatchable_syndrome_instead_of_raising():
+def test_pymatching_reports_an_unmatchable_syndrome_instead_of_raising():
     # One defect per boundaryless component: PyMatching has no perfect
     # matching; the run gets an empty correction marked INVALID_CORRECTION.
     result = PyMatchingDecoder(PresetLatencyDecoder(0.0)).decode(
@@ -86,7 +88,7 @@ def test_mwpm_reports_an_unmatchable_syndrome_instead_of_raising():
     assert result.correction.tolist() == [0, 0]
 
 
-def test_mwpm_satisfiable_syndrome_has_no_status():
+def test_pymatching_satisfiable_syndrome_has_no_status():
     result = PyMatchingDecoder(PresetLatencyDecoder(0.0)).decode(
         _job(_window(BOUNDARYLESS), [1, 0, 1, 0])
     )

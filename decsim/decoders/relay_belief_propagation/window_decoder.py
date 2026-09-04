@@ -32,7 +32,7 @@ _Reason = window_decode_results.BackendFailureReason
 _SEED_LIMIT = 2**64
 
 
-class RelayBpWindowDecoder(seeding._AtomicRunSeedConsumer):
+class RelayBeliefPropagationWindowDecoder(seeding._AtomicRunSeedConsumer):
     """Decode physical fault columns with one fixed-gamma Relay-BP profile.
 
     Inputs are original physical fault columns, not graph
@@ -150,7 +150,7 @@ class RelayBpWindowDecoder(seeding._AtomicRunSeedConsumer):
         with self._run_seed_lock:
             if self._pending_run_seed is not None:
                 raise RuntimeError(
-                    "RelayBpWindowDecoder cannot compile while a run-seed "
+                    "RelayBeliefPropagationWindowDecoder cannot compile while a run-seed "
                     "reservation is pending"
                 )
             self._stochastic_use_started = True
@@ -291,7 +291,7 @@ def _load_relay_decoder_type():
         raise ImportError(
             "Relay-BP decoding requires the optional official "
             "dependency `relay-bp`; install that package before selecting "
-            "RelayBpWindowDecoder"
+            "RelayBeliefPropagationWindowDecoder"
         ) from error
     return RelayDecoderF32
 

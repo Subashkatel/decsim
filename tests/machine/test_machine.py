@@ -21,6 +21,7 @@ import decsim.machine as machine_module
 import decsim.message as message
 import decsim.qpu.cycle_clock as cycle_clock
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.syndrome_buffer.settings as round_store_settings
 import experiments.experiment_config as experiment_config
 
 THIS_FILE = pathlib.Path(__file__)
@@ -121,6 +122,23 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         ValueError,
         match="weak_decoder.kind 'union_find' is not a row of its table; the "
         r"rows are \['belief_matching', 'pymatching'\]",
+    ):
+        machine_module.Machine.build(settings)
+
+
+def test_a_strong_store_kind_off_the_table_is_refused_even_when_unused():
+    # The weak baseline never reads the strong store, but the yaml still
+    # names its kind, and a kind off the table is a mistake in the yaml.
+    strong_round_store = round_store_settings.RoundStoreSettings(
+        kind="off_table"
+    )
+    settings = machine_module.MachineSettings(
+        strong_round_store=strong_round_store
+    )
+    with pytest.raises(
+        ValueError,
+        match="strong_round_store.kind 'off_table' is not a row of its "
+        r"table; the rows are \['round_store'\]",
     ):
         machine_module.Machine.build(settings)
 

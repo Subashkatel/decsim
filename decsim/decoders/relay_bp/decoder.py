@@ -1,32 +1,17 @@
-"""Runtime Relay-BP decoder adapter."""
-
-from __future__ import annotations
+"""The Relay-BP adapter: corrections from relay-bp, time from a model."""
 
 from typing import Optional
 
-from ..window_decode_results import (
-    check_syndrome_size,
-    payload_syndrome,
-    result_from_backend_outcome,
-    validate_backend_outcome,
-)
-from ...detector_error_model.fault_model_contracts import (
-    FaultRepresentation,
-    PHYSICAL_FAULT_MODEL_REQUIRED,
-)
-from ...message import (
-    DecodeJob,
-    DecodeResult,
-    RunSeedChild,
-    RunSeedPathSegment,
-)
-from .window_decoder import RelayBpWindowDecoder
+import decsim.decoders.relay_bp.window_decoder as window_decoder
+import decsim.decoders.window_decode_results as window_decode_results
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.message as message
 
 
 class RelayBpDecoder:
     """Use Relay-BP for corrections and an injected model for service time."""
 
-    fault_model_requirement = PHYSICAL_FAULT_MODEL_REQUIRED
+    fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
 
     def __init__(
         self,
@@ -43,10 +28,9 @@ class RelayBpDecoder:
         gamma_table_seed: Optional[int] = None,
     ) -> None:
         self.latency_model = latency_model
-        self.window_decoder = RelayBpWindowDecoder(
+        self.window_decoder = window_decoder.RelayBpWindowDecoder(
             alpha=alpha,
-            alpha_iteration_scaling_factor=
-                alpha_iteration_scaling_factor,
+            alpha_iteration_scaling_factor=alpha_iteration_scaling_factor,
             gamma0=gamma0,
             pre_iterations=pre_iterations,
             relay_set_count=relay_set_count,
@@ -56,31 +40,31 @@ class RelayBpDecoder:
             gamma_table_seed=gamma_table_seed,
         )
 
-    def run_seed_children(self):
-        """Expose timing and fixed-gamma owners at stable semantic paths."""
+    def run_seed_children(self) -> tuple:
+        """The timing and fixed-gamma owners at stable semantic paths."""
+        latency_path = (message.RunSeedPathSegment("field", "latency_model"),)
+        decoder_path = (message.RunSeedPathSegment("field", "window_decoder"),)
         return (
-            RunSeedChild(
-                (RunSeedPathSegment("field", "latency_model"),),
-                self.latency_model,
-            ),
-            RunSeedChild(
-                (RunSeedPathSegment("field", "window_decoder"),),
-                self.window_decoder,
-            ),
+            message.RunSeedChild(latency_path, self.latency_model),
+            message.RunSeedChild(decoder_path, self.window_decoder),
         )
 
-    def latency(self, job: DecodeJob) -> int:
+    def latency(self, job: message.DecodeJob) -> int:
         """Simulation time comes only from the injected latency model."""
         return self.latency_model.latency(job)
 
-    def decode(self, job: DecodeJob) -> DecodeResult:
-        """Decode and commit the same-model physical outcome, best effort or not."""
+    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+        """The same-model physical outcome, committed best effort or not."""
         model = job.dem
         if model is None:
-            return DecodeResult(job.op_id, job.window_id)
-        faults = model.require_faults(FaultRepresentation.PHYSICAL)
-        syndrome = payload_syndrome(job)
-        check_syndrome_size(job, syndrome, faults)
+            return message.DecodeResult(job.op_id, job.window_id)
+        faults = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
+        syndrome = window_decode_results.payload_syndrome(job)
+        window_decode_results.check_syndrome_size(job, syndrome, faults)
         outcome = self.window_decoder.decode(model, syndrome)
-        validate_backend_outcome(outcome, model, faults, syndrome)
-        return result_from_backend_outcome(job, model, faults, outcome)
+        window_decode_results.validate_backend_outcome(
+            outcome, model, faults, syndrome
+        )
+        return window_decode_results.result_from_backend_outcome(
+            job, model, faults, outcome
+        )

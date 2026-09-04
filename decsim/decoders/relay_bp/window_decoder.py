@@ -1,27 +1,231 @@
-"""Relay-BP adapter for one placed physical window model."""
+"""Relay-BP over one placed physical window model.
 
-from __future__ import annotations
+The official relay-bp package (Maurer et al. 2510.21600, the qLDPC
+real-time baseline; the Rust source is at tmp/reference-decoders/relay-bp,
+the wheel is not installed here) is compiled once per live model with a
+fixed gamma table drawn from the run seed, and decode_detailed is called
+once per syndrome. The paper assumes 0 < p < 1/2; this adapter also
+accepts exactly p = 1/2 as a tested software-profile extension with a
+zero prior log ratio. Decided, majority-one and non-finite priors are
+refused instead of silently transformed. Backend wall time is
+diagnostic only and never becomes simulated time.
+"""
 
-from dataclasses import dataclass
+import dataclasses
 import hashlib
 import math
-from numbers import Integral, Real
 import os
 import secrets
 import threading
-from typing import Optional
 import weakref
+from numbers import Integral, Real
+from typing import Optional
 
-from ..window_decode_results import (
-    BackendDecodeOutcome,
-    BackendDecodeStatus,
-    BackendFailureReason,
-    decoder_configuration_fingerprint,
-    empty_fault_model_outcome,
-    fault_model_fingerprint,
-)
-from ...detector_error_model.fault_model_contracts import FaultRepresentation
-from ...seeding import _AtomicRunSeedConsumer
+import numpy
+import scipy.sparse
+
+import decsim.decoders.window_decode_results as window_decode_results
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.seeding as seeding
+
+_Status = window_decode_results.BackendDecodeStatus
+_Reason = window_decode_results.BackendFailureReason
+_SEED_LIMIT = 2**64
+
+
+class RelayBpWindowDecoder(seeding._AtomicRunSeedConsumer):
+    """Decode physical fault columns with one fixed-gamma Relay-BP profile.
+
+    Inputs are original physical fault columns, not graph
+    decompositions. Gamma tables are fixed per live model; native
+    per-shot resampling is not exposed.
+    """
+
+    _explicit_seed_label = "gamma-table seed"
+
+    def __init__(
+        self,
+        *,
+        alpha: Optional[float] = None,
+        alpha_iteration_scaling_factor: float = 1.0,
+        gamma0: Optional[float] = 0.1,
+        pre_iterations: int = 80,
+        relay_set_count: int = 300,
+        iterations_per_set: int = 60,
+        gamma_interval: tuple[float, float] = (-0.24, 0.66),
+        converged_solution_count: int = 1,
+        gamma_table_seed: Optional[int] = None,
+    ) -> None:
+        self.profile = _relay_profile(
+            alpha,
+            alpha_iteration_scaling_factor,
+            gamma0,
+            pre_iterations,
+            relay_set_count,
+            iterations_per_set,
+            gamma_interval,
+            converged_solution_count,
+        )
+        self._explicit_gamma_table_seed = _validated_seed(
+            gamma_table_seed, "gamma_table_seed"
+        )
+        self._initialize_run_seed_binding(self._explicit_gamma_table_seed)
+        self._effective_gamma_table_seed = self._explicit_seed
+        self._thread_state = threading.local()
+
+    def decode(
+        self, window_model, syndrome
+    ) -> window_decode_results.BackendDecodeOutcome:
+        """Call the official detailed API once and snapshot its evidence."""
+        faults = window_model.require_faults(
+            fault_models.FaultRepresentation.PHYSICAL
+        )
+        detector_count = faults.check.shape[0]
+        syndrome = _validated_syndrome(syndrome, detector_count)
+        compiled = self._compiled_model(faults)
+        if faults.check.shape[1] == 0:
+            return window_decode_results.empty_fault_model_outcome(
+                faults,
+                syndrome,
+                decoder_configuration_fingerprint=(
+                    compiled.configuration_fingerprint
+                ),
+            )
+        if compiled.backend_construction_failed:
+            return _backend_error_outcome(compiled)
+        try:
+            detailed = compiled.backend.decode_detailed(syndrome)
+            correction = _binary_vector(
+                detailed.decoding, expected_size=faults.check.shape[1]
+            )
+        except _WrongCorrectionArityError:
+            return _invalid_outcome(compiled, _Reason.CORRECTION_WRONG_ARITY)
+        except _NonbinaryCorrectionError:
+            return _invalid_outcome(compiled, _Reason.CORRECTION_NOT_BINARY)
+        except Exception:
+            return _backend_error_outcome(compiled)
+        try:
+            evidence = _detailed_evidence(detailed, faults)
+        except Exception:
+            return _backend_error_outcome(compiled)
+        return _outcome_of(compiled, faults, syndrome, correction, evidence)
+
+    def _entropy_seed(self):
+        return secrets.randbits(64)
+
+    def _install_run_seed_state(self, prepared_state) -> None:
+        self._effective_gamma_table_seed = prepared_state
+
+    def _compiled_model(self, faults) -> "_CompiledRelayModel":
+        """The backend compiled for one model, kept while the model lives."""
+        cache = self._thread_cache()
+        identity = id(faults)
+        entry = cache.get(identity)
+        if entry is not None:
+            reference, compiled = entry
+            if reference() is faults:
+                return compiled
+        compiled = self._compile(faults)
+
+        def discard(reference) -> None:
+            current = cache.get(identity)
+            if current is not None and current[0] is reference:
+                del cache[identity]
+
+        reference = weakref.ref(faults, discard)
+        cache[identity] = (reference, compiled)
+        return compiled
+
+    def _compile(self, faults) -> "_CompiledRelayModel":
+        check, priors = _validated_model(faults)
+        seed = self._gamma_seed()
+        column_count = check.shape[1]
+        gamma_table = _gamma_table(self.profile, seed, column_count)
+        configuration_fingerprint = _configuration_fingerprint(
+            self.profile, seed, gamma_table
+        )
+        model_fingerprint = window_decode_results.fault_model_fingerprint(
+            faults
+        )
+        if column_count == 0:
+            return _CompiledRelayModel(
+                backend=None,
+                backend_construction_failed=False,
+                fault_model_fingerprint=model_fingerprint,
+                configuration_fingerprint=configuration_fingerprint,
+            )
+        backend = _construct_backend(
+            self.profile, check, priors, gamma_table, seed
+        )
+        construction_failed = backend is None
+        return _CompiledRelayModel(
+            backend=backend,
+            backend_construction_failed=construction_failed,
+            fault_model_fingerprint=model_fingerprint,
+            configuration_fingerprint=configuration_fingerprint,
+        )
+
+    def _gamma_seed(self) -> int:
+        with self._run_seed_lock:
+            if self._pending_run_seed is not None:
+                raise RuntimeError(
+                    "RelayBpWindowDecoder cannot compile while a run-seed "
+                    "reservation is pending"
+                )
+            self._stochastic_use_started = True
+            if self._effective_gamma_table_seed is None:
+                self._effective_gamma_table_seed = secrets.randbits(64)
+            return self._effective_gamma_table_seed
+
+    def _thread_cache(self) -> dict:
+        """This thread's compiled models; a new process starts afresh."""
+        process_id = os.getpid()
+        cached_process_id = getattr(self._thread_state, "process_id", None)
+        if cached_process_id != process_id:
+            self._thread_state.process_id = process_id
+            self._thread_state.compiled_models = {}
+        return self._thread_state.compiled_models
+
+
+@dataclasses.dataclass(frozen=True)
+class _RelayProfile:
+    """One fixed-gamma Relay-BP profile, in relay-bp's own argument names."""
+
+    alpha: Optional[float]
+    alpha_iteration_scaling_factor: float
+    gamma0: Optional[float]
+    pre_iterations: int
+    relay_set_count: int
+    iterations_per_set: int
+    gamma_interval: tuple[float, float]
+    converged_solution_count: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _CompiledRelayModel:
+    backend: object
+    backend_construction_failed: bool
+    fault_model_fingerprint: str
+    configuration_fingerprint: str
+
+
+@dataclasses.dataclass(frozen=True)
+class _DetailedEvidence:
+    """What one decode_detailed answer says beside its correction."""
+
+    decoded_detectors: tuple
+    iterations: int
+    iteration_limit: int
+    posterior_log_likelihood_ratios: tuple
+    succeeded: bool
+
+
+class _WrongCorrectionArityError(ValueError):
+    pass
+
+
+class _NonbinaryCorrectionError(ValueError):
+    pass
 
 
 def _finite_real(value, name: str, *, allow_none: bool = False):
@@ -44,416 +248,314 @@ def _nonnegative_integer(value, name: str) -> int:
     return normalized
 
 
-@dataclass(frozen=True)
-class _RelayProfile:
-    alpha: Optional[float]
-    alpha_iteration_scaling_factor: float
-    gamma0: Optional[float]
-    pre_iterations: int
-    relay_set_count: int
-    iterations_per_set: int
-    gamma_interval: tuple[float, float]
-    converged_solution_count: int
+def _validated_seed(value, name: str):
+    if value is None:
+        return None
+    if type(value) is not int or not 0 <= value < _SEED_LIMIT:
+        raise TypeError(f"{name} must be an unsigned 64-bit integer or None")
+    return value
 
 
-@dataclass(frozen=True)
-class _CompiledRelayModel:
-    backend: object
-    backend_construction_failed: bool
-    fault_model_fingerprint: str
-    configuration_fingerprint: str
+def _relay_profile(
+    alpha,
+    alpha_iteration_scaling_factor,
+    gamma0,
+    pre_iterations,
+    relay_set_count,
+    iterations_per_set,
+    gamma_interval,
+    converged_solution_count,
+) -> _RelayProfile:
+    """The profile with every argument checked once."""
+    if type(gamma_interval) is not tuple or len(gamma_interval) != 2:
+        raise TypeError("gamma_interval must be an exact pair")
+    gamma_low = _finite_real(gamma_interval[0], "gamma_interval[0]")
+    gamma_high = _finite_real(gamma_interval[1], "gamma_interval[1]")
+    if gamma_low > gamma_high:
+        raise ValueError("gamma_interval must be ordered low to high")
+    converged_solution_count = _nonnegative_integer(
+        converged_solution_count, "converged_solution_count"
+    )
+    if converged_solution_count == 0:
+        raise ValueError("converged_solution_count must be positive")
+    pre_iterations = _nonnegative_integer(pre_iterations, "pre_iterations")
+    if pre_iterations == 0:
+        # relay-bp runs its first leg for pre_iter iterations and keeps the
+        # previous call's decoding when that loop never runs
+        # (relay.rs decode_inner), so a zero first leg returns stale state
+        raise ValueError("pre_iterations must be positive")
+    alpha = _finite_real(alpha, "alpha", allow_none=True)
+    scaling = _finite_real(
+        alpha_iteration_scaling_factor, "alpha_iteration_scaling_factor"
+    )
+    gamma0 = _finite_real(gamma0, "gamma0", allow_none=True)
+    relay_set_count = _nonnegative_integer(relay_set_count, "relay_set_count")
+    iterations_per_set = _nonnegative_integer(
+        iterations_per_set, "iterations_per_set"
+    )
+    return _RelayProfile(
+        alpha=alpha,
+        alpha_iteration_scaling_factor=scaling,
+        gamma0=gamma0,
+        pre_iterations=pre_iterations,
+        relay_set_count=relay_set_count,
+        iterations_per_set=iterations_per_set,
+        gamma_interval=(gamma_low, gamma_high),
+        converged_solution_count=converged_solution_count,
+    )
 
 
-class RelayBpWindowDecoder(_AtomicRunSeedConsumer):
-    """Decode physical fault columns with one fixed-gamma Relay-BP profile.
+def _load_relay_decoder_type():
+    try:
+        from relay_bp import RelayDecoderF32
+    except ImportError as error:
+        raise ImportError(
+            "Relay-BP decoding requires the optional official "
+            "dependency `relay-bp`; install that package before selecting "
+            "RelayBpWindowDecoder"
+        ) from error
+    return RelayDecoderF32
 
-    SCOPE:
-    - Inputs are original physical fault columns, not graph decompositions.
-    - The official ``decode_detailed`` API is called once per syndrome.
-    - Gamma tables are fixed per live model; native per-shot resampling is not
-      exposed.
-    - Backend wall time is diagnostic only and never becomes simulated time.
 
-    The paper assumes ``0 < p < 1/2``. This adapter also accepts exactly
-    ``p=1/2`` as a tested software-profile extension with a zero prior log
-    ratio. Decided, majority-one, and non-finite priors are rejected instead
-    of being silently transformed.
-    """
+def _gamma_table(profile: _RelayProfile, seed: int, column_count: int):
+    """The fixed gamma table of one model, drawn from the seed."""
+    bit_generator = numpy.random.PCG64(seed)
+    generator = numpy.random.Generator(bit_generator)
+    gamma_low, gamma_high = profile.gamma_interval
+    shape = (profile.relay_set_count, column_count)
+    gamma_table = generator.uniform(gamma_low, gamma_high, size=shape)
+    gamma_table = gamma_table.astype(numpy.float64, copy=False)
+    return numpy.ascontiguousarray(gamma_table)
 
-    _explicit_seed_label = "gamma-table seed"
 
-    def __init__(
-        self,
-        *,
-        alpha: Optional[float] = None,
-        alpha_iteration_scaling_factor: float = 1.0,
-        gamma0: Optional[float] = 0.1,
-        pre_iterations: int = 80,
-        relay_set_count: int = 300,
-        iterations_per_set: int = 60,
-        gamma_interval: tuple[float, float] = (-0.24, 0.66),
-        converged_solution_count: int = 1,
-        gamma_table_seed: Optional[int] = None,
-    ) -> None:
-        if type(gamma_interval) is not tuple or len(gamma_interval) != 2:
-            raise TypeError("gamma_interval must be an exact pair")
-        gamma_low = _finite_real(gamma_interval[0], "gamma_interval[0]")
-        gamma_high = _finite_real(gamma_interval[1], "gamma_interval[1]")
-        if gamma_low > gamma_high:
-            raise ValueError("gamma_interval must be ordered low to high")
-        converged_solution_count = _nonnegative_integer(
-            converged_solution_count,
-            "converged_solution_count",
-        )
-        if converged_solution_count == 0:
-            raise ValueError("converged_solution_count must be positive")
-        pre_iterations = _nonnegative_integer(pre_iterations, "pre_iterations")
-        if pre_iterations == 0:
-            # relay-bp runs its first leg for pre_iter iterations and keeps the
-            # previous call's decoding when that loop never runs
-            # (relay.rs decode_inner), so a zero first leg returns stale state
-            raise ValueError("pre_iterations must be positive")
-        self._profile = _RelayProfile(
-            alpha=_finite_real(alpha, "alpha", allow_none=True),
-            alpha_iteration_scaling_factor=_finite_real(
-                alpha_iteration_scaling_factor,
-                "alpha_iteration_scaling_factor",
-            ),
-            gamma0=_finite_real(gamma0, "gamma0", allow_none=True),
-            pre_iterations=pre_iterations,
-            relay_set_count=_nonnegative_integer(
-                relay_set_count,
-                "relay_set_count",
-            ),
-            iterations_per_set=_nonnegative_integer(
-                iterations_per_set,
-                "iterations_per_set",
-            ),
-            gamma_interval=(gamma_low, gamma_high),
-            converged_solution_count=converged_solution_count,
-        )
-        self._explicit_gamma_table_seed = self._validate_seed(
-            gamma_table_seed,
-            "gamma_table_seed",
-        )
-        self._initialize_run_seed_binding(
-            self._explicit_gamma_table_seed
-        )
-        self._effective_gamma_table_seed = self._explicit_seed
-        self._thread_state = threading.local()
-
-    @staticmethod
-    def _validate_seed(value, name: str):
-        if value is None:
-            return None
-        if type(value) is not int or not 0 <= value < 2**64:
-            raise TypeError(f"{name} must be an unsigned 64-bit integer or None")
-        return value
-
-    def _entropy_seed(self):
-        return secrets.randbits(64)
-
-    def _install_run_seed_state(self, prepared_state) -> None:
-        self._effective_gamma_table_seed = prepared_state
-
-    def decode(self, window_model, syndrome) -> BackendDecodeOutcome:
-        """Call the official detailed API once and snapshot its evidence."""
-        import numpy as np
-
-        faults = window_model.require_faults(FaultRepresentation.PHYSICAL)
-        syndrome = self._validated_syndrome(syndrome, faults.check.shape[0])
-        compiled = self._compiled_model(faults)
-        if faults.check.shape[1] == 0:
-            return empty_fault_model_outcome(
-                faults,
-                syndrome,
-                decoder_configuration_fingerprint=
-                    compiled.configuration_fingerprint,
-            )
-        if compiled.backend_construction_failed:
-            return self._backend_error_outcome(compiled)
-        try:
-            detailed = compiled.backend.decode_detailed(syndrome)
-            correction = self._binary_vector(
-                detailed.decoding,
-                expected_size=faults.check.shape[1],
-            )
-        except _WrongCorrectionArity:
-            return self._invalid_outcome(
-                compiled,
-                BackendFailureReason.CORRECTION_WRONG_ARITY,
-            )
-        except _NonbinaryCorrection:
-            return self._invalid_outcome(
-                compiled,
-                BackendFailureReason.CORRECTION_NOT_BINARY,
-            )
-        except Exception:
-            return self._backend_error_outcome(compiled)
-        try:
-            decoded_detectors = self._binary_vector(
-                detailed.decoded_detectors,
-                expected_size=faults.check.shape[0],
-            )
-            iterations = int(detailed.iterations)
-            iteration_limit = int(detailed.max_iter)
-            posterior = np.asarray(detailed.posterior_ratios)
-            if posterior.ndim != 1 or posterior.shape[0] != faults.check.shape[1]:
-                raise ValueError("Relay posterior ratios have the wrong arity")
-            if np.any(np.isnan(posterior.astype(float))):
-                raise ValueError("Relay posterior ratios cannot contain NaN")
-            succeeded = bool(detailed.success)
-        except Exception:
-            return self._backend_error_outcome(compiled)
-
-        reconstructed = self._reconstruct(faults.check, correction)
-        if decoded_detectors != reconstructed or (
-            succeeded
-            and reconstructed != tuple(int(bit) for bit in syndrome)
-        ):
-            return BackendDecodeOutcome(
-                status=BackendDecodeStatus.INVALID_CORRECTION,
-                failure_reason=
-                    BackendFailureReason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
-                physical_correction=correction,
-                component_correction=None,
-                reconstructed_syndrome=decoded_detectors,
-                iterations=iterations,
-                iteration_limit=iteration_limit,
-                posterior_log_likelihood_ratios=tuple(
-                    float(value) for value in posterior
-                ),
-                fault_model_fingerprint=compiled.fault_model_fingerprint,
-                decoder_configuration_fingerprint=
-                    compiled.configuration_fingerprint,
-            )
-        common = dict(
-            physical_correction=correction,
-            component_correction=None,
-            reconstructed_syndrome=decoded_detectors,
-            iterations=iterations,
-            iteration_limit=iteration_limit,
-            posterior_log_likelihood_ratios=tuple(
-                float(value) for value in posterior
-            ),
-            fault_model_fingerprint=compiled.fault_model_fingerprint,
-            decoder_configuration_fingerprint=
-                compiled.configuration_fingerprint,
-        )
-        if not succeeded:
-            return BackendDecodeOutcome(
-                status=BackendDecodeStatus.NONCONVERGED,
-                failure_reason=
-                    BackendFailureReason.NO_CONVERGED_RELAY_SOLUTION,
-                **common,
-            )
-        return BackendDecodeOutcome(
-            status=BackendDecodeStatus.SUCCEEDED,
-            failure_reason=None,
-            **common,
-        )
-
-    def _compiled_model(self, faults) -> _CompiledRelayModel:
-        cache = self._thread_cache()
-        identity = id(faults)
-        entry = cache.get(identity)
-        if entry is not None and entry[0]() is faults:
-            return entry[1]
-        compiled = self._compile(faults)
-
-        def discard(reference) -> None:
-            current = cache.get(identity)
-            if current is not None and current[0] is reference:
-                del cache[identity]
-
-        reference = weakref.ref(faults, discard)
-        cache[identity] = (reference, compiled)
-        return compiled
-
-    def _compile(self, faults) -> _CompiledRelayModel:
-        import numpy as np
-
-        check, priors = self._validated_model(faults)
-        seed = self._gamma_seed()
-        generator = np.random.Generator(np.random.PCG64(seed))
-        gamma_table = generator.uniform(
-            self._profile.gamma_interval[0],
-            self._profile.gamma_interval[1],
-            size=(self._profile.relay_set_count, check.shape[1]),
-        ).astype(np.float64, copy=False)
-        gamma_table = np.ascontiguousarray(gamma_table)
-        gamma_table_sha256 = hashlib.sha256(
-            gamma_table.tobytes(order="C")
-        ).hexdigest()
-        configuration_fingerprint = decoder_configuration_fingerprint({
+def _configuration_fingerprint(
+    profile: _RelayProfile, seed: int, gamma_table
+) -> str:
+    table_bytes = gamma_table.tobytes(order="C")
+    digest = hashlib.sha256(table_bytes)
+    gamma_table_sha256 = digest.hexdigest()
+    return window_decode_results.decoder_configuration_fingerprint(
+        {
             "backend": "relay_bp.RelayDecoderF32",
-            "profile": self._profile,
+            "profile": profile,
             "gamma_table_seed": seed,
             "gamma_table_shape": tuple(gamma_table.shape),
             "gamma_table_sha256": gamma_table_sha256,
             "stopping_criterion": "nconv",
-        })
-        model_fingerprint = fault_model_fingerprint(faults)
-        if check.shape[1] == 0:
-            return _CompiledRelayModel(
-                backend=None,
-                backend_construction_failed=False,
-                fault_model_fingerprint=model_fingerprint,
-                configuration_fingerprint=configuration_fingerprint,
-            )
-        decoder_type = self._load_relay_decoder_type()
-        try:
-            from scipy.sparse import csr_matrix
+        }
+    )
 
-            backend = decoder_type(
-                csr_matrix(check),
-                priors,
-                alpha=self._profile.alpha,
-                alpha_iteration_scaling_factor=
-                    self._profile.alpha_iteration_scaling_factor,
-                gamma0=self._profile.gamma0,
-                pre_iter=self._profile.pre_iterations,
-                num_sets=self._profile.relay_set_count,
-                set_max_iter=self._profile.iterations_per_set,
-                gamma_dist_interval=self._profile.gamma_interval,
-                explicit_gammas=gamma_table,
-                stop_nconv=self._profile.converged_solution_count,
-                stopping_criterion="nconv",
-                logging=False,
-                seed=seed,
-            )
-        except Exception:
-            return _CompiledRelayModel(
-                backend=None,
-                backend_construction_failed=True,
-                fault_model_fingerprint=model_fingerprint,
-                configuration_fingerprint=configuration_fingerprint,
-            )
-        return _CompiledRelayModel(
-            backend=backend,
-            backend_construction_failed=False,
-            fault_model_fingerprint=model_fingerprint,
-            configuration_fingerprint=configuration_fingerprint,
+
+def _construct_backend(
+    profile: _RelayProfile, check, priors, gamma_table, seed: int
+):
+    """The backend decoder, or None when the backend refused the model."""
+    decoder_type = _load_relay_decoder_type()
+    sparse_check = scipy.sparse.csr_matrix(check)
+    try:
+        return decoder_type(
+            sparse_check,
+            priors,
+            alpha=profile.alpha,
+            alpha_iteration_scaling_factor=(
+                profile.alpha_iteration_scaling_factor
+            ),
+            gamma0=profile.gamma0,
+            pre_iter=profile.pre_iterations,
+            num_sets=profile.relay_set_count,
+            set_max_iter=profile.iterations_per_set,
+            gamma_dist_interval=profile.gamma_interval,
+            explicit_gammas=gamma_table,
+            stop_nconv=profile.converged_solution_count,
+            stopping_criterion="nconv",
+            logging=False,
+            seed=seed,
         )
+    except Exception:
+        return None
 
-    @staticmethod
-    def _load_relay_decoder_type():
-        try:
-            from relay_bp import RelayDecoderF32
-        except ImportError as error:
-            raise ImportError(
-                "Relay-BP decoding requires the optional official "
-                "dependency `relay-bp`; install that package before selecting "
-                "RelayBpWindowDecoder"
-            ) from error
-        return RelayDecoderF32
 
-    def _gamma_seed(self) -> int:
-        with self._run_seed_lock:
-            if self._pending_run_seed is not None:
-                raise RuntimeError(
-                    "RelayBpWindowDecoder cannot compile while a run-seed "
-                    "reservation is pending"
-                )
-            self._stochastic_use_started = True
-            if self._effective_gamma_table_seed is None:
-                self._effective_gamma_table_seed = secrets.randbits(64)
-            return self._effective_gamma_table_seed
+def _validated_model(faults) -> tuple:
+    """(check, priors) of a model the paper's assumptions hold for."""
+    check = faults.check
+    priors = numpy.asarray(faults.priors, dtype=float)
+    if len(check.shape) != 2:
+        raise ValueError("Relay check matrix must be two-dimensional")
+    is_zero = check.data == 0
+    is_one = check.data == 1
+    is_bit = is_zero | is_one
+    if not numpy.all(is_bit):
+        raise ValueError("Relay check matrix must be binary")
+    if priors.ndim != 1 or priors.shape[0] != check.shape[1]:
+        raise ValueError("Relay priors must align with physical fault columns")
+    for column_index, probability in enumerate(priors):
+        if not math.isfinite(probability) or not 0 < probability <= 0.5:
+            raise ValueError(
+                "Relay prior at physical column "
+                f"{column_index} must satisfy finite 0 < p <= 0.5"
+            )
+    return check, priors.astype(numpy.float64)
 
-    def _thread_cache(self) -> dict:
-        process_id = os.getpid()
-        if getattr(self._thread_state, "process_id", None) != process_id:
-            self._thread_state.process_id = process_id
-            self._thread_state.compiled_models = {}
-        return self._thread_state.compiled_models
 
-    @staticmethod
-    def _validated_model(faults):
-        import numpy as np
+def _validated_syndrome(syndrome, detector_count: int):
+    syndrome = numpy.asarray(syndrome)
+    if syndrome.ndim != 1 or syndrome.shape[0] != detector_count:
+        raise ValueError("Relay syndrome arity does not match detector rows")
+    is_zero = syndrome == 0
+    is_one = syndrome == 1
+    is_bit = is_zero | is_one
+    if not numpy.all(is_bit):
+        raise ValueError("Relay syndrome must be binary")
+    return syndrome.astype(numpy.uint8)
 
-        check = faults.check
-        priors = np.asarray(faults.priors, dtype=float)
-        if len(check.shape) != 2:
-            raise ValueError("Relay check matrix must be two-dimensional")
-        if not np.all((check.data == 0) | (check.data == 1)):
-            raise ValueError("Relay check matrix must be binary")
-        if priors.ndim != 1 or priors.shape[0] != check.shape[1]:
-            raise ValueError("Relay priors must align with physical fault columns")
-        for column_index, probability in enumerate(priors):
-            if not math.isfinite(float(probability)) or not 0 < probability <= 0.5:
-                raise ValueError(
-                    "Relay prior at physical column "
-                    f"{column_index} must satisfy finite 0 < p <= 0.5"
-                )
-        return check, priors.astype(np.float64)
 
-    @staticmethod
-    def _validated_syndrome(syndrome, detector_count: int):
-        import numpy as np
+def _binary_vector(value, *, expected_size: int) -> tuple:
+    vector = numpy.asarray(value)
+    if vector.ndim != 1 or vector.shape[0] != expected_size:
+        raise _WrongCorrectionArityError
+    is_zero = vector == 0
+    is_one = vector == 1
+    is_bit = is_zero | is_one
+    if not numpy.all(is_bit):
+        raise _NonbinaryCorrectionError
+    return _bit_tuple(vector)
 
-        syndrome = np.asarray(syndrome)
-        if syndrome.ndim != 1 or syndrome.shape[0] != detector_count:
-            raise ValueError("Relay syndrome arity does not match detector rows")
-        if not np.all((syndrome == 0) | (syndrome == 1)):
-            raise ValueError("Relay syndrome must be binary")
-        return syndrome.astype(np.uint8)
 
-    @staticmethod
-    def _binary_vector(value, *, expected_size: int) -> tuple[int, ...]:
-        import numpy as np
+def _bit_tuple(array) -> tuple:
+    bits = []
+    for bit in array:
+        bits.append(int(bit))
+    return tuple(bits)
 
-        vector = np.asarray(value)
-        if vector.ndim != 1 or vector.shape[0] != expected_size:
-            raise _WrongCorrectionArity
-        if not np.all((vector == 0) | (vector == 1)):
-            raise _NonbinaryCorrection
-        return tuple(int(bit) for bit in vector)
 
-    @staticmethod
-    def _reconstruct(check, correction) -> tuple[int, ...]:
-        import numpy as np
+def _float_tuple(values) -> tuple:
+    numbers = []
+    for value in values:
+        numbers.append(float(value))
+    return tuple(numbers)
 
-        reconstructed = np.asarray(
-            check.astype(np.int64) @ np.asarray(correction, dtype=np.int64)
-        ).ravel() % 2
-        return tuple(int(bit) for bit in reconstructed)
 
-    @staticmethod
-    def _invalid_outcome(compiled, reason) -> BackendDecodeOutcome:
-        return BackendDecodeOutcome(
-            status=BackendDecodeStatus.INVALID_CORRECTION,
-            failure_reason=reason,
-            physical_correction=None,
-            component_correction=None,
-            reconstructed_syndrome=None,
-            iterations=None,
-            iteration_limit=None,
-            posterior_log_likelihood_ratios=None,
-            fault_model_fingerprint=compiled.fault_model_fingerprint,
-            decoder_configuration_fingerprint=
-                compiled.configuration_fingerprint,
+def _reconstruct(check, correction) -> tuple:
+    check_integers = check.astype(numpy.int64)
+    correction_integers = numpy.asarray(correction, dtype=numpy.int64)
+    product = check_integers @ correction_integers
+    product = numpy.asarray(product)
+    flat = product.ravel()
+    parity = flat % 2
+    return _bit_tuple(parity)
+
+
+def _detailed_evidence(detailed, faults) -> _DetailedEvidence:
+    """The answer's diagnostics, each checked for its arity."""
+    decoded_detectors = _binary_vector(
+        detailed.decoded_detectors, expected_size=faults.check.shape[0]
+    )
+    iterations = int(detailed.iterations)
+    iteration_limit = int(detailed.max_iter)
+    posterior = numpy.asarray(detailed.posterior_ratios)
+    if posterior.ndim != 1 or posterior.shape[0] != faults.check.shape[1]:
+        raise ValueError("Relay posterior ratios have the wrong arity")
+    as_float = posterior.astype(float)
+    is_nan = numpy.isnan(as_float)
+    if numpy.any(is_nan):
+        raise ValueError("Relay posterior ratios cannot contain NaN")
+    succeeded = bool(detailed.success)
+    posterior_log_likelihood_ratios = _float_tuple(posterior)
+    return _DetailedEvidence(
+        decoded_detectors=decoded_detectors,
+        iterations=iterations,
+        iteration_limit=iteration_limit,
+        posterior_log_likelihood_ratios=posterior_log_likelihood_ratios,
+        succeeded=succeeded,
+    )
+
+
+def _outcome_of(
+    compiled: _CompiledRelayModel,
+    faults,
+    syndrome,
+    correction: tuple,
+    evidence: _DetailedEvidence,
+) -> window_decode_results.BackendDecodeOutcome:
+    """The outcome of one answer: inconsistent, nonconverged or succeeded."""
+    reconstructed = _reconstruct(faults.check, correction)
+    syndrome_bits = _bit_tuple(syndrome)
+    is_inconsistent = evidence.decoded_detectors != reconstructed
+    if evidence.succeeded and reconstructed != syndrome_bits:
+        is_inconsistent = True
+    if is_inconsistent:
+        return _detailed_outcome(
+            compiled,
+            correction,
+            evidence,
+            _Status.INVALID_CORRECTION,
+            _Reason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
         )
-
-    @staticmethod
-    def _backend_error_outcome(compiled) -> BackendDecodeOutcome:
-        return BackendDecodeOutcome(
-            status=BackendDecodeStatus.BACKEND_ERROR,
-            failure_reason=BackendFailureReason.UPSTREAM_EXCEPTION,
-            physical_correction=None,
-            component_correction=None,
-            reconstructed_syndrome=None,
-            iterations=None,
-            iteration_limit=None,
-            posterior_log_likelihood_ratios=None,
-            fault_model_fingerprint=compiled.fault_model_fingerprint,
-            decoder_configuration_fingerprint=
-                compiled.configuration_fingerprint,
+    if not evidence.succeeded:
+        return _detailed_outcome(
+            compiled,
+            correction,
+            evidence,
+            _Status.NONCONVERGED,
+            _Reason.NO_CONVERGED_RELAY_SOLUTION,
         )
+    return _detailed_outcome(
+        compiled, correction, evidence, _Status.SUCCEEDED, None
+    )
 
 
-class _WrongCorrectionArity(ValueError):
-    pass
+def _detailed_outcome(
+    compiled: _CompiledRelayModel,
+    correction: tuple,
+    evidence: _DetailedEvidence,
+    status,
+    reason,
+) -> window_decode_results.BackendDecodeOutcome:
+    return window_decode_results.BackendDecodeOutcome(
+        status=status,
+        failure_reason=reason,
+        physical_correction=correction,
+        component_correction=None,
+        reconstructed_syndrome=evidence.decoded_detectors,
+        iterations=evidence.iterations,
+        iteration_limit=evidence.iteration_limit,
+        posterior_log_likelihood_ratios=(
+            evidence.posterior_log_likelihood_ratios
+        ),
+        fault_model_fingerprint=compiled.fault_model_fingerprint,
+        decoder_configuration_fingerprint=compiled.configuration_fingerprint,
+    )
 
 
-class _NonbinaryCorrection(ValueError):
-    pass
+def _invalid_outcome(
+    compiled: _CompiledRelayModel, reason
+) -> window_decode_results.BackendDecodeOutcome:
+    return window_decode_results.BackendDecodeOutcome(
+        status=_Status.INVALID_CORRECTION,
+        failure_reason=reason,
+        physical_correction=None,
+        component_correction=None,
+        reconstructed_syndrome=None,
+        iterations=None,
+        iteration_limit=None,
+        posterior_log_likelihood_ratios=None,
+        fault_model_fingerprint=compiled.fault_model_fingerprint,
+        decoder_configuration_fingerprint=compiled.configuration_fingerprint,
+    )
+
+
+def _backend_error_outcome(
+    compiled: _CompiledRelayModel,
+) -> window_decode_results.BackendDecodeOutcome:
+    return window_decode_results.BackendDecodeOutcome(
+        status=_Status.BACKEND_ERROR,
+        failure_reason=_Reason.UPSTREAM_EXCEPTION,
+        physical_correction=None,
+        component_correction=None,
+        reconstructed_syndrome=None,
+        iterations=None,
+        iteration_limit=None,
+        posterior_log_likelihood_ratios=None,
+        fault_model_fingerprint=compiled.fault_model_fingerprint,
+        decoder_configuration_fingerprint=compiled.configuration_fingerprint,
+    )

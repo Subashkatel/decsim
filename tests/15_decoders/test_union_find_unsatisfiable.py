@@ -1,12 +1,15 @@
-"""Union-Find on a residual syndrome the window cannot explain: best effort,
-as PECOS (grow until no progress, then peel) and ldpc (return the decoding)
-do; nothing raises, the unmatched detectors are reported in the evidence."""
+"""Union-Find on a residual syndrome the window cannot explain.
+
+Best effort, as PECOS (grow until no progress, then peel) and ldpc
+(return the decoding) do; nothing raises, the unmatched detectors are
+reported in the evidence.
+"""
 
 import numpy as np
 
 from decsim.decoders.union_find.window_decoder import (
-    _decode_graph,
-    _graph_from_model,
+    decode_graph,
+    graph_from_model,
 )
 from decsim.detector_error_model.fault_model_contracts import (
     FaultRepresentation,
@@ -31,8 +34,10 @@ def _placed(check, priors, observables=None):
 
 
 def _decode(check, priors, syndrome):
-    graph = _graph_from_model(_placed(check, priors), location="test", weight_step=0.1)
-    return _decode_graph(graph, np.asarray(syndrome, dtype=np.uint8))
+    graph = graph_from_model(
+        _placed(check, priors), location="test", weight_step=0.1
+    )
+    return decode_graph(graph, np.asarray(syndrome, dtype=np.uint8))
 
 
 def test_isolated_defect_is_left_unmatched_without_raising():

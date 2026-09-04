@@ -17,7 +17,10 @@ from decsim.detector_error_model.detector_chronology import resolve_detector_rou
 from decsim.frontends.qlx_frontend import qlx_frontend
 from decsim.message import OpKind
 from decsim.qpu.round_policies import GateRounds
-from decsim.run_spec import RunSpec
+from decsim.decoders.settings import DecoderSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.qpu.settings import QpuSettings
 
 
 QLX_DATA = Path(__file__).resolve().parents[1] / "data" / "qlx"
@@ -62,16 +65,19 @@ def _physical_device(program):
 
 def _run_native_physical_program(program, device):
     """Run the native eight-round physical source with timing-only decoding."""
-    return RunSpec(
-        frontend=program,
-        decode_ops=program.decoder_operations,
-        device=device,
-        decoder=PerRoundDecoder(tau_us=0.0),
-        rounds_policy=GateRounds(merge_step_count=2),
+    settings = MachineSettings(
+        workload=WorkloadSettings(
+            kind="qlx",
+            program=program,
+            decode_operations=program.decoder_operations,
+            rounds_policy=GateRounds(merge_step_count=2)),
         # Native runtime source length, not a code-distance claim.
-        d=8,
-        seed=28,
-    ).build()
+        qpu=QpuSettings(distance=8, device=device),
+        weak_decoder=DecoderSettings(decoder=PerRoundDecoder(tau_us=0.0)),
+    )
+    machine = Machine.build(settings, 28)
+    result = machine.run()
+    return machine, result
 
 
 def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
@@ -94,11 +100,13 @@ def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
     assert program.feedback_candidates == [(10, 9)]
 
     rounds_policy = GateRounds(merge_step_count=2)
-    completed = RunSpec(
-        frontend=program,
-        rounds_policy=rounds_policy,
-        d=3,
-    ).build()
+    settings = MachineSettings(
+        workload=WorkloadSettings(kind="qlx", program=program,
+                                  rounds_policy=rounds_policy),
+        qpu=QpuSettings(distance=3),
+    )
+    completed = Machine.build(settings)
+    result = completed.run()
 
     resolved_rounds = tuple(
         completed.window_manager.rounds_for(operation)
@@ -106,7 +114,7 @@ def test_frozen_mem_surface_schedule_has_stable_structure_and_gate_rounds():
     )
     assert resolved_rounds == (3, 3, 3, 3, 3, 3, 3, 3, 3, 1, 3)
     assert resolved_rounds != tuple(program.raw_durations.values())
-    assert completed.result.terminal_status == "complete"
+    assert result.terminal_status == "complete"
 
 
 def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim():
@@ -146,7 +154,7 @@ def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim
     assert [measurement_rounds[index] for index in (0, 7, 8, 63, 64, 72)] == [1, 1, 2, 8, 8, 8]
 
     device = _physical_device(program)
-    completed = _run_native_physical_program(program, device)
+    completed, result = _run_native_physical_program(program, device)
 
     assert completed.window_manager.rounds_for(
         program.decoder_operations[0]
@@ -173,13 +181,13 @@ def test_frozen_mem_surface_native_round_routing_completes_without_quality_claim
     assert tuple(len(payload.bits) for payload in round_payloads) == (
         8, 8, 8, 8, 8, 8, 8, 17,
     )
-    assert completed.result.terminal_status == "complete"
-    assert completed.result.event_queue_empty
-    assert completed.result.decode_work_settled
-    assert completed.result.execution_workload_complete
+    assert result.terminal_status == "complete"
+    assert result.event_queue_empty
+    assert result.decode_work_settled
+    assert result.execution_workload_complete
     assert all(
-        result.result_status == "no_logical_output"
-        for result in completed.result.operation_results
+        operation_result.result_status == "no_logical_output"
+        for operation_result in result.operation_results
     )
 
 

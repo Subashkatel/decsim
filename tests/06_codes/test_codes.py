@@ -4,13 +4,17 @@ import inspect
 import pytest
 
 from decsim.qpu.code_geometry import BivariateBicycleCodeModel, SurfaceCodeModel
-from decsim.config import TimingConfig, microseconds_to_ticks
+from decsim.config import microseconds_to_ticks
 from decsim.decoders.decoders import CodeRouter, PresetLatencyDecoder
 from decsim.qpu.syndrome_devices import SyndromeBitDevice
 from decsim.qpu.layouts import UniformLayout
 from decsim.message import DecodeJob, Operation
 from decsim.qpu.code_geometry import CodeModel
-from decsim.run_spec import RunSpec
+from decsim.decoders.settings import DecoderSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.qpu.settings import QpuSettings
+from decsim.windows.settings import WindowSettings
 from decsim.windows.windowing_schemes import ParallelWindowScheme
 
 
@@ -67,15 +71,17 @@ def make_operation():
     return Operation(id=1, name="memory", qubits=(0,))
 
 
-def build_run(code=None, **options):
-    arguments = {
-        "ops": [make_operation()],
-        "decoder": PresetLatencyDecoder(0.0),
-        **options,
-    }
-    if code is not None:
-        arguments["code"] = code
-    return RunSpec(**arguments).build()
+def build_run(code=None, scheme=None, **qpu_options):
+    """The machine and its result; qpu_options are QpuSettings fields."""
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=[make_operation()]),
+        qpu=QpuSettings(code=code, **qpu_options),
+        windows=WindowSettings(scheme=scheme),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(0.0)),
+    )
+    machine = Machine.build(settings)
+    result = machine.run()
+    return machine, result
 
 
 @pytest.mark.parametrize(
@@ -122,7 +128,8 @@ def test_buffer_below_the_floor_needs_a_written_justification():
     justified = SurfaceCodeModel(buffer_rounds_override=0,
                                  window_floor_justification="test: zero buffer on purpose")
     assert justified.buffer_rounds() == 0
-    assert build_run(justified).result.terminal_status == "complete"
+    _, result = build_run(justified)
+    assert result.terminal_status == "complete"
 
 
 def test_justification_above_the_floor_is_refused():
@@ -195,20 +202,16 @@ def test_cadence_normalizes_numeric_inputs_and_value_equality(model_type):
 def test_none_cadence_uses_the_run_level_fallback(model_type):
     """A missing card cadence uses the run-level cadence in a complete build."""
     card = model_type(round_microseconds=None)
-    completed = build_run(card, round_us=2.25)
+    completed, _ = build_run(card, round_period_microseconds=2.25)
     assert card.round_period_us() is None
     assert completed.qpu.cycle_ticks == microseconds_to_ticks(2.25)
 
 
 @pytest.mark.parametrize("model_type", (SurfaceCodeModel, BivariateBicycleCodeModel))
-def test_card_cadence_precedes_run_and_timing_fallbacks(model_type):
-    """An explicit card cadence wins over run and timing fallback values."""
+def test_card_cadence_precedes_the_qpu_round_period(model_type):
+    """An explicit card cadence wins over the QPU settings' round period."""
     card = model_type(round_microseconds=1.75)
-    completed = build_run(
-        card,
-        round_us=2.25,
-        timing=TimingConfig(round_period_microseconds=3.5),
-    )
+    completed, _ = build_run(card, round_period_microseconds=2.25)
     assert completed.qpu.cycle_ticks == microseconds_to_ticks(1.75)
 
 
@@ -325,7 +328,8 @@ def test_distance_one_surface_card_has_zero_syndrome_width():
     card = SurfaceCodeModel(distance=1)
     assert card.spatial_nodes(1) == 1
     assert card.syndrome_bits_per_round(1) == 0
-    assert build_run(card).result.terminal_status == "complete"
+    _, result = build_run(card)
+    assert result.terminal_status == "complete"
 
 
 def test_zero_patch_syndrome_device_fails_naturally_when_selecting_a_target():
@@ -412,14 +416,14 @@ def test_outside_structural_code_model_completes_a_full_run():
     """A minimal outside structural code model drives a complete run without registration."""
     card = OutsideCodeModel()
     assert isinstance(card, CodeModel)
-    completed = build_run(card)
-    assert completed.result.terminal_status == "complete"
+    completed, result = build_run(card)
+    assert result.terminal_status == "complete"
     assert completed.window_manager._code_geometry.code_name == card.name
 
 
 def test_default_run_resolves_a_distance_three_surface_card():
     """A run without an explicit code resolves the default distance-three Surface geometry."""
-    completed = build_run()
+    completed, _ = build_run()
     geometry = completed.window_manager._code_geometry
     assert geometry.code_name == "rotated surface code (d=3)"
     assert geometry.distance == 3
@@ -429,22 +433,11 @@ def test_outside_name_annotation_is_declared_but_not_runtime_validated():
     """An outside card's name annotation does not add runtime router validation."""
     card = OutsideCodeModel()
     card.name = 7
-    completed = build_run(card)
+    completed, result = build_run(card)
     geometry = completed.window_manager._code_geometry
     assert geometry.code_name == 7
     assert geometry.window_floor_justification is None
-    assert completed.result.terminal_status == "complete"
-
-
-def test_equal_but_distinct_device_code_is_rejected_by_identity():
-    """A syndrome device must share the exact run code object rather than an equal card."""
-    run_code = SurfaceCodeModel()
-    equal_device_code = SurfaceCodeModel()
-    assert run_code == equal_device_code
-    assert run_code is not equal_device_code
-    device = SyndromeBitDevice(equal_device_code, seed=7)
-    with pytest.raises(ValueError, match="exact resolved run code"):
-        build_run(run_code, device=device)
+    assert result.terminal_status == "complete"
 
 
 @pytest.mark.parametrize("broken_selector", ("operation", "patch"))
@@ -454,11 +447,11 @@ def test_layout_selectors_must_return_the_exact_declared_code(broken_selector):
     alternate = SurfaceCodeModel()
     layout = IdentityBreakingLayout(declared, alternate, broken_selector)
     with pytest.raises(ValueError, match=f"layout {broken_selector}"):
-        RunSpec(
-            ops=[make_operation()],
-            layout=layout,
-            decoder=PresetLatencyDecoder(0.0),
-        ).build()
+        Machine.build(MachineSettings(
+            workload=WorkloadSettings(operations=[make_operation()]),
+            qpu=QpuSettings(layout=layout),
+            weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(0.0)),
+        ))
 
 
 def test_syndrome_device_stamps_the_exact_card_name_on_readouts():

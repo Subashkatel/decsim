@@ -270,26 +270,31 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
     latency: the link serializes them FIFO and propagation is pipelined."""
     stim = pytest.importorskip("stim")
     from decsim.qpu.stim_device import StimDevice
-    from decsim.config import TimingConfig, TICKS_PER_MICROSECOND
+    from decsim.config import TICKS_PER_MICROSECOND
     from decsim.decoders.decoders import PresetLatencyDecoder
+    from decsim.decoders.settings import DecoderSettings
+    from decsim.frontends.settings import WorkloadSettings
+    from decsim.machine import Machine, MachineSettings
     from decsim.message import Operation
     from decsim.qpu.round_policies import FixedRounds
-    from decsim.run_spec import RunSpec
+    from decsim.qpu.settings import QpuSettings
 
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z", rounds=8, distance=3,
         after_clifford_depolarization=0.001, before_measure_flip_probability=0.001,
         after_reset_flip_probability=0.001, before_round_data_depolarization=0.001)
     op = Operation(id=1, name="memory", qubits=(0,), patches=(0,), circuit=circuit)
-    completed = RunSpec(
-        ops=[op], d=3, rounds_policy=FixedRounds(8), device=StimDevice(),
-        decoder=PresetLatencyDecoder(0.01),
-        timing=TimingConfig(round_period_microseconds=0.02),
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=[op], rounds_policy=FixedRounds(8)),
+        qpu=QpuSettings(distance=3, round_period_microseconds=0.02,
+                        device=StimDevice()),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(0.01)),
         links=with_controller_to_weak_buffer_path(
             logical_reference_profile(), latency_microseconds=0.25,
-            aggregate_bits_per_microsecond=10_000.0, source="test"),
-        seed=0).build()
-    delivered = sorted(row["delivery_ticks"] for row in completed.result.link_traffic["transfers"]
+            aggregate_bits_per_microsecond=10_000.0, source="test"))
+    completed = Machine.build(settings, 0)
+    result = completed.run()
+    delivered = sorted(row["delivery_ticks"] for row in result.link_traffic["transfers"]
                        if row["path"] == "controller_to_weak_buffer")
     assert len(delivered) == 8
     gaps = [(b - a) / TICKS_PER_MICROSECOND for a, b in zip(delivered, delivered[1:])]

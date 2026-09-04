@@ -7,8 +7,9 @@ import pytest
 from decsim.pauli_frame.pauli_frame import PauliFrame as RuntimePauliFrame
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.ports import Frame as PauliFramePort
-import decsim.run_spec as run_spec_module
-from decsim.run_spec import RunSpec
+import decsim.machine as machine_module
+from decsim.machine import MachineSettings
+from decsim.message import RunSeedPathSegment
 from decsim.windows.window_manager import WindowManager
 
 
@@ -194,7 +195,7 @@ def test_configuration_rejects_implicit_or_disappearing_costs():
 
 
 def test_default_toggle_is_absent_and_zero_cost_matches_the_inline_off_path():
-    assert RunSpec().pauli_frame is None
+    assert MachineSettings().pauli_frame is None
 
     job = SimpleNamespace(request_key=request(1), op_id=7, window_id=2)
     result = SimpleNamespace(logical_observables=(1, 0))
@@ -313,8 +314,8 @@ def test_runtime_satisfies_the_declared_keyword_only_correction_seam():
 
 def test_frame_owner_is_a_named_seed_root_and_snapshot_is_non_destructive():
     owner = object()
-    roots = run_spec_module._seed_roots(pauli_frame=owner, metrics=())
-    expected_path = (run_spec_module.RunSeedPathSegment("field", "pauli_frame"),)
+    roots = machine_module._seed_roots(pauli_frame=owner, metrics=())
+    expected_path = (RunSeedPathSegment("field", "pauli_frame"),)
     assert roots == ((expected_path, owner),)
 
     frame = RuntimePauliFrame(ManualEngine(), commit_ticks=0)

@@ -29,7 +29,11 @@ from decsim.decoders.decoders import PipelinedDecoder, PresetLatencyDecoder
 from decsim.decoders.weak_strong_switching import StrongOnly
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
-from decsim.run_spec import RunSpec
+from decsim.decoders.settings import (DecoderManagerSettings, DecoderSettings,
+                                      EscalationSettings)
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.windows.settings import WindowSettings
 
 SERVICE_US = 100.0
 INITIATION_US = 1.0
@@ -37,16 +41,17 @@ INITIATION_US = 1.0
 
 def _backlog_run(fabric, *, decoder, n_ops=4, controller_to_strong_buffer=False, escalation_policy=None):
     """n_ops parallel one-window ops, one default unit."""
-    spec = RunSpec(
-        ops=[fabric["memory_op"](op_id) for op_id in range(1, n_ops + 1)],
-        d=3, rounds_policy=FixedRounds(3),
-        decoder=decoder,
-        escalation_policy=escalation_policy,
+    settings = MachineSettings(
+        workload=WorkloadSettings(
+            operations=[fabric["memory_op"](op_id) for op_id in range(1, n_ops + 1)],
+            rounds_policy=FixedRounds(3)),
+        qpu=fabric["declared_qpu"](),
+        weak_decoder=DecoderSettings(decoder=decoder),
+        escalation=EscalationSettings(policy=escalation_policy),
         links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=controller_to_strong_buffer),
-        timing=fabric["declared_timing"](),
-        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
-        seed=0)
-    return spec.build()
+        controller=fabric["declared_timing"](),
+        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]))
+    return fabric["run_machine"](settings, 0)
 
 
 def _windows(completed, n_ops=4):
@@ -188,20 +193,23 @@ def test_pipelined_escalation_route_refuses(fabric):
     router = SwitchingRouter(
         weak=weak,
         strong=PipelinedDecoder(PresetLatencyDecoder(SERVICE_US), INITIATION_US))
-    spec = RunSpec(
-        ops=[fabric["memory_op"](1)], d=3, rounds_policy=FixedRounds(6),
-        scheme=SlidingWindowScheme(
-            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
-        router=router,
-        escalation_policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE),
-        boundary_policy=Held(),
-        unit_pools={"default": 1, "strong": 1},
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=[fabric["memory_op"](1)],
+                                  rounds_policy=FixedRounds(6)),
+        qpu=fabric["declared_qpu"](),
+        windows=WindowSettings(
+            scheme=SlidingWindowScheme(
+                terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
+            boundary_policy=Held()),
+        decoder_manager=DecoderManagerSettings(
+            router=router, unit_pools={"default": 1, "strong": 1}),
+        escalation=EscalationSettings(policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE)),
         links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=True),
-        timing=fabric["declared_timing"](),
-        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]),
-        seed=0)
+        controller=fabric["declared_timing"](),
+        pauli_frame=PauliFrameConfig(commit_microseconds=fabric["DECLARED_US"]["frame"]))
     with pytest.raises(RuntimeError, match="not pipelined yet"):
-        spec.build()
+        machine = Machine.build(settings, 0)
+        machine.run()
 
 
 def test_pipelined_decoder_validates_its_parameters():

@@ -32,7 +32,7 @@ import csv
 import json
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -47,7 +47,9 @@ from decsim.seeding import derive_component_seed
 from decsim.windows.committed_rounds import LogicalLedger
 from decsim.windows.window_interactions import DefaultWindowInteraction
 
-from experiments.build_run import code_model, decoder_engine, memory_circuit
+from decsim.frontends.settings import memory_circuit
+from decsim.machine import build_decoder_unit
+
 from experiments.experiment_config import ExperimentConfig, load_experiment
 from experiments.plots import decoder_title, ler_plot
 from experiments.run import new_run_dir, snapshot_code_state, write_manifest
@@ -72,14 +74,16 @@ class SweepPointDecoder:
 
     def __init__(self, config: ExperimentConfig, *,
                  physical_error_probability: float, distance: int):
-        self.circuit = memory_circuit(config, physical_error_probability,
-                                      distance)
-        self.rounds = config.rounds_per_shot.rounds_for(distance)
+        workload = config.settings.workload
+        self.rounds = workload.rounds_per_shot.rounds_for(distance)
+        self.circuit = memory_circuit(workload.code_task, self.rounds,
+                                      distance, physical_error_probability)
         self.operation = Operation(id=OPERATION_ID, name="memory",
                                    qubits=(0,), patches=(0,),
                                    circuit=self.circuit)
         self.windows = self._planned_windows(config, distance)
-        self.algorithm = decoder_engine(config).decoder
+        tier = config.settings.escalation.decodes_on
+        self.algorithm = build_decoder_unit(config.settings, tier).decoder
         self.models = StimDevice().window_models_for_operation(
             self.operation, self.windows, self.rounds,
             fault_model_requirement=self.algorithm.fault_model_requirement,
@@ -104,8 +108,9 @@ class SweepPointDecoder:
         """The scheme's window chain, materialized exactly as the planner
         does (frontends/planner.py): geometry fields, dependency edges,
         dependency counters."""
-        code = code_model(config, distance)
-        scheme = config.windowing.scheme
+        qpu = replace(config.settings.qpu, distance=distance)
+        code, _layout = qpu.build_code(config.settings.windows)
+        scheme = config.settings.windows.kind
         if scheme != "sliding":
             raise ValueError(
                 f"the offline lane supports sliding windows, not {scheme}")
@@ -278,7 +283,7 @@ def decode_shard(run_dir: str, shard_number: int) -> Path:
         shot = point.decode_shot(seed)
         rows.append({"distance": distance,
                      "physical_error_probability": probability,
-                     "algorithm": config.active_decoder.algorithm,
+                     "algorithm": config.active_decoder.kind,
                      "seed": shot.seed, "windows": shot.windows,
                      "logical_failure": shot.logical_failure,
                      "wall_seconds": round(shot.wall_seconds, 6)})

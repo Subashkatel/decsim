@@ -1,11 +1,10 @@
 """A link card in the yaml reaches the path settings the run is built from.
 
 Source: experiments/configs/reference.yaml, the links section (one card
-per path in cycles of a named clock), and experiments/build_run.link_model.
+per path in cycles of a named clock), and decsim/links/link_profiles.from_yaml.
 """
 
 from decsim.config import microseconds_to_ticks
-from experiments.build_run import link_model
 from experiments.experiment_config import load_experiment
 
 CARD_YAML = (
@@ -42,7 +41,7 @@ CARD_YAML = (
 
 def test_the_setup_cost_key_reaches_the_path(tmp_path):
     (tmp_path / "overhead_card.yaml").write_text(CARD_YAML)
-    card = link_model(load_experiment(tmp_path / "overhead_card.yaml"))
+    card = load_experiment(tmp_path / "overhead_card.yaml").settings.links
     assert (
         card.weak_buffer_to_weak_decoder.setup_ticks
         == microseconds_to_ticks(0.4)
@@ -52,7 +51,7 @@ def test_the_setup_cost_key_reaches_the_path(tmp_path):
 
 def test_the_latency_and_rate_keys_reach_the_channel(tmp_path):
     (tmp_path / "card.yaml").write_text(CARD_YAML)
-    card = link_model(load_experiment(tmp_path / "card.yaml"))
+    card = load_experiment(tmp_path / "card.yaml").settings.links
     assert (
         card.weak_buffer_to_weak_decoder.channel.name
         == "weak_buffer_to_weak_decoder"

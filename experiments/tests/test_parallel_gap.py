@@ -23,8 +23,8 @@ from decsim.detector_error_model.fault_model_contracts import (
 )
 from decsim.message import DecodeJob, DecodeResult, SoftOutput
 
+from decsim.machine import build_decoder_unit
 from experiments.experiment_config import load_experiment
-from experiments.build_run import decoder_engine
 from experiments.measure_shot import measure_shot
 
 from test_decoder_units import write_config
@@ -175,11 +175,11 @@ def pair_config(tmp_path, gap_threshold_db: float):
 
 
 def test_gap_computation_selects_the_pair_engine(tmp_path):
-    serial_engine = decoder_engine(
-        load_experiment(switching_config(tmp_path, 20.0)))
+    serial = load_experiment(switching_config(tmp_path, 20.0))
+    serial_engine = build_decoder_unit(serial.settings, "weak")
     assert type(serial_engine.decoder) is SoftOutputDecoder
-    pair_engine = decoder_engine(
-        load_experiment(pair_config(tmp_path, 20.0)))
+    paired = load_experiment(pair_config(tmp_path, 20.0))
+    pair_engine = build_decoder_unit(paired.settings, "weak")
     assert type(pair_engine.decoder) is ParallelGapDecoder
 
 

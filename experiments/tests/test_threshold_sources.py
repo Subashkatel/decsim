@@ -12,8 +12,6 @@ whole window stream.
 
 import math
 
-from experiments.build_run import (online_threshold_calibrator,
-                                   resolve_gap_threshold_nats)
 from experiments.experiment_config import load_experiment
 from experiments.run import run_sweep
 
@@ -23,6 +21,17 @@ from test_decoder_units import strong_unit, write_config
 from test_switching_mode import NEAR_THRESHOLD_P, switching_config
 
 NATS_TO_DB = 10.0 / math.log(10.0)
+
+
+def resolve_gap_threshold_nats(config, *, physical_error_probability, distance):
+    return config.settings.escalation.threshold_nats_for(
+        physical_error_probability, distance)
+
+
+def online_threshold_calibrator(config, *, physical_error_probability, distance):
+    return config.online_calibrator(
+        physical_error_probability=physical_error_probability,
+        distance=distance)
 
 
 def source_config(tmp_path, switching_card: dict, shots: int = 1):
@@ -47,10 +56,10 @@ def calibration_table(tmp_path) -> str:
 
 def test_fixed_is_the_default_source(tmp_path):
     config = load_experiment(switching_config(tmp_path, 20.0))
-    assert config.switching.threshold_source == "fixed"
+    assert config.settings.escalation.threshold_source == "fixed"
     resolved = resolve_gap_threshold_nats(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3)
-    assert resolved == config.switching.gap_threshold_nats
+    assert resolved == config.settings.escalation.gap_threshold_nats
     assert online_threshold_calibrator(
         config, physical_error_probability=NEAR_THRESHOLD_P,
         distance=3) is None
@@ -60,8 +69,8 @@ def test_table_source_resolves_the_sweep_point_and_refuses_others(tmp_path):
     table = calibration_table(tmp_path)
     config = load_experiment(source_config(tmp_path, {
         "threshold_source": "table", "threshold_table": table}))
-    assert config.switching.gap_threshold_decibels is None
-    assert config.switching.threshold_column == "gth_eq4_wilson"
+    assert config.settings.escalation.gap_threshold_decibels is None
+    assert config.settings.escalation.threshold_column == "gth_eq4_wilson"
 
     resolved = resolve_gap_threshold_nats(
         config, physical_error_probability=NEAR_THRESHOLD_P, distance=3)

@@ -24,8 +24,8 @@ import sys
 from pathlib import Path
 
 from decsim.config import TICKS_PER_MICROSECOND
+from decsim.machine import Machine
 
-from experiments.build_run import build_run
 from experiments.experiment_config import ExperimentConfig
 from experiments.measure_shot import INPUT_LINK, OUTPUT_LINK
 
@@ -54,19 +54,20 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     physical_error_probability = block.physical_error_probabilities[0]
     distance = block.distances[0]
     round_period_us = block.round_periods_microseconds[0]
-    algorithm = config.active_decoder.algorithm
-    spec, engine = build_run(
-        config, physical_error_probability=physical_error_probability,
-        distance=distance, round_period_us=round_period_us, seed=0)
-    completed = spec.build()
+    algorithm = config.active_decoder.kind
+    settings = config.point_settings(
+        physical_error_probability=physical_error_probability,
+        distance=distance, round_period_us=round_period_us)
+    completed = Machine.build(settings, 0)
+    result = completed.run()
 
-    input_path = INPUT_LINK[config.decode_path]
-    output_path = OUTPUT_LINK[config.decode_path]
-    store_path = "controller_to_strong_buffer" if config.decode_path == "strong_only" else "controller_to_weak_buffer"
-    store_name = ("syndrome buffer 1" if config.decode_path == "strong_only"
+    input_path = INPUT_LINK[config.settings.escalation.kind]
+    output_path = OUTPUT_LINK[config.settings.escalation.kind]
+    store_path = "controller_to_strong_buffer" if config.settings.escalation.kind == "strong_only" else "controller_to_weak_buffer"
+    store_name = ("syndrome buffer 1" if config.settings.escalation.kind == "strong_only"
                   else "buffer 0")
 
-    transfers = completed.result.link_traffic["transfers"]
+    transfers = result.link_traffic["transfers"]
 
     def on(path_name, by_round):
         selected = {}
@@ -87,7 +88,7 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
                in sorted(completed.window_manager.windows.items())}
     frame_records = {record.window_key[1]: record
                      for record in completed.pauli_frame.snapshot().records}
-    rounds = config.rounds_per_shot.rounds_for(distance)
+    rounds = config.settings.workload.rounds_per_shot.rounds_for(distance)
 
     rows = ["qpu round", "qc link"]
     if store:
@@ -129,7 +130,7 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
                       height=0.17, alpha=alpha)
 
         stages = {record.stage: record
-                  for record in engine.stage_records_for(1, window_id)}
+                  for record in completed.active_decoder.stage_records_for(1, window_id)}
         read_hi = min(window.buffer_hi, rounds)
         stored_tick = microseconds_to_ticks(stored_row[read_hi]["delivery_ticks"])
         window_ranges.append(
@@ -170,12 +171,12 @@ def timeline_plot(config: ExperimentConfig, path: Path) -> None:
     timeline_titles = {"weak_baseline": "Weak only path timeline",
                        "strong_only": "Strong only path timeline",
                        "switching": "Switching path timeline"}
-    axis.set_title(timeline_titles.get(config.decode_path, config.name), pad=22)
-    commit_rounds = config.windowing.commit_rounds or distance
-    buffer_rounds = config.windowing.buffer_rounds or distance
+    axis.set_title(timeline_titles.get(config.settings.escalation.kind, config.name), pad=22)
+    commit_rounds = config.settings.windows.commit_rounds or distance
+    buffer_rounds = config.settings.windows.buffer_rounds or distance
     axis.text(0.5, 1.005,
-              f"d={distance} {config.circuit.split(':')[0]}"
-              f" · {config.windowing.scheme} windows: commit {commit_rounds},"
+              f"d={distance} {config.settings.workload.code_task.split(':')[0]}"
+              f" · {config.settings.windows.kind} windows: commit {commit_rounds},"
               f" buffer {buffer_rounds} rounds"
               f" · rounds every {round_period_us:g} µs"
               f" · algorithm {card_label(algorithm)}"
@@ -228,10 +229,10 @@ def decoder_title(config: ExperimentConfig) -> str:
     """"pymatching decoder (weak)" / "belief matching decoder (strong)".
     A numeric card reads as pymatching: the card prices latency but its
     corrections come from the same MWPM path."""
-    from experiments.experiment_config import DECODE_PATH_TIER
-    algorithm = config.active_decoder.algorithm
+    algorithm = config.active_decoder.kind
     name = algorithm if isinstance(algorithm, str) else "pymatching"
-    return f"{name.replace('_', ' ')} decoder ({DECODE_PATH_TIER[config.decode_path]})"
+    tier = config.settings.escalation.decodes_on
+    return f"{name.replace('_', ' ')} decoder ({tier})"
 
 
 def _power_of_ten_label(value: float) -> str:
@@ -536,7 +537,7 @@ def latency_plot(config: ExperimentConfig, measurements: list,
     distances = list(pooled)
     round_period_us = measurements[0].round_period_us
     probability = measurements[0].physical_error_probability
-    algorithm = config.active_decoder.algorithm
+    algorithm = config.active_decoder.kind
 
     figure, axis = plt.subplots(figsize=(4.8, 3.6))
     _latency_violins(axis, pooled, distances, 1.4, "C0", algorithm)
@@ -611,7 +612,7 @@ def plots(config: ExperimentConfig, rows: list, report_dir: Path,
         ler_plot(rows, report_dir / "ler.png", title=decoder_title(config))
     # a named algorithm charges measured wall clock; a numeric card is a
     # fixed latency, flat in d, so its figure would be a horizontal line
-    measured_wall_clock = isinstance(config.active_decoder.algorithm, str)
+    measured_wall_clock = isinstance(config.active_decoder.kind, str)
     swept_distances = {measurement.distance
                        for measurement in measurements or ()}
     if measured_wall_clock and len(swept_distances) > 1:

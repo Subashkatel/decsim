@@ -184,26 +184,34 @@ def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
     from decsim.controller.policies import Held
     from decsim.pauli_frame.pauli_frame import PauliFrameConfig
     from decsim.qpu.round_policies import FixedRounds
-    from decsim.run_spec import RunSpec
+    from decsim.decoders.settings import (DecoderManagerSettings,
+                                          EscalationSettings)
+    from decsim.frontends.settings import WorkloadSettings
+    from decsim.machine import MachineSettings
+    from decsim.windows.settings import WindowSettings
     from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
                                                   SlidingWindowScheme)
     declared = fabric["DECLARED_US"]
     weak = SampledConfidenceDecoder(PresetLatencyDecoder(declared["weak"]), 1.0)
     router = SwitchingRouter(weak=weak,
                              strong=PresetLatencyDecoder(declared["strong"]))
-    completed = RunSpec(
-        ops=[fabric["memory_op"](patch) for patch in (1, 2, 3, 4)],
-        d=3, rounds_policy=FixedRounds(6),
-        scheme=SlidingWindowScheme(
-            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
-        router=router,
-        escalation_policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE, bulk_strong=True),
-        boundary_policy=Held(),
-        unit_pools={"default": 4, "strong": 1},
+    settings = MachineSettings(
+        workload=WorkloadSettings(
+            operations=[fabric["memory_op"](patch) for patch in (1, 2, 3, 4)],
+            rounds_policy=FixedRounds(6)),
+        qpu=fabric["declared_qpu"](),
+        windows=WindowSettings(
+            scheme=SlidingWindowScheme(
+                terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
+            boundary_policy=Held()),
+        decoder_manager=DecoderManagerSettings(
+            router=router, unit_pools={"default": 4, "strong": 1}),
+        escalation=EscalationSettings(
+            policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE, bulk_strong=True)),
         links=fabric["declared_profile"](controller_to_weak_buffer=True, controller_to_strong_buffer=True),
-        timing=fabric["declared_timing"](),
-        pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]),
-        seed=0).build()
+        controller=fabric["declared_timing"](),
+        pauli_frame=PauliFrameConfig(commit_microseconds=declared["frame"]))
+    completed = fabric["run_machine"](settings, 0)
     log_lines = completed.engine.log_lines
     assert any("strong-batch x2" in line for line in log_lines)
     records = completed.pauli_frame.snapshot().records
@@ -291,7 +299,7 @@ def test_no_feedback_when_none_is_required(fabric):
     CQ traffic."""
     completed = fabric["weak_only_run"](rounds=6)
     assert completed.execution_runtime.decode_release_time == {}
-    transfers = completed.result.link_traffic.get("transfers", [])
+    transfers = completed.traffic_ledger.traffic_json_value().get("transfers", [])
     assert not any(row.get("path") in ("frame_to_controller", "controller_to_qpu") for row in transfers)
 
 

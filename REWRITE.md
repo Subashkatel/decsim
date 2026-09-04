@@ -397,6 +397,13 @@ tests green, `tools/check.sh` clean on the touched files. The file
 checklist in docs/rewrite/PLAN.md moves in the same commit, with the
 size numbers.
 
+Work is committed often, so that a cut-off loses little (owner,
+2026-09-04). Inside a structural commit the implementer commits a
+checkpoint whenever the tree imports and the touched tests pass, then
+squashes the checkpoints into the one structural commit with
+`git reset --soft <base>` and one commit when the gate is green. Never
+more than about an hour of work sits uncommitted.
+
 A file is touched in one slice, in two commits: the mechanical commit
 first, with the gate unchanged, then the structural commit under the
 design note. Mixing the two in one diff hides the move behind the

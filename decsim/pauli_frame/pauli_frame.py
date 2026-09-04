@@ -15,6 +15,7 @@ exactly once follows Riesebos (DAC 2017). One write costs one clock cycle,
 
 import dataclasses
 import math
+from collections.abc import Mapping
 from typing import Any, Callable, Optional
 
 import decsim.config as config
@@ -57,6 +58,16 @@ class PauliFrameConfig:
             raise ValueError(
                 "zero_commit_cost_justification needs a free write"
             )
+
+    @classmethod
+    def from_yaml(
+        cls, section: Mapping, clocks: config.ClockSettings
+    ) -> "PauliFrameConfig":
+        """The `pauli_frame` section: write_cycles on its clock."""
+        clock = section["clock"]
+        write_cycles = section["write_cycles"]
+        commit_microseconds = clocks.microseconds(write_cycles, clock)
+        return cls(commit_microseconds=commit_microseconds)
 
     def commit_ticks(self) -> int:
         """The write cost in ticks."""

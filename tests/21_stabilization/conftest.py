@@ -6,7 +6,15 @@ from dataclasses import replace
 
 import pytest
 
-from decsim.config import TimingConfig, microseconds_to_ticks
+from decsim.config import microseconds_to_ticks
+from decsim.controller.settings import ControllerSettings
+from decsim.decoders.settings import (DecoderManagerSettings, DecoderSettings,
+                                      EscalationSettings)
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.observe.settings import ObservationSettings
+from decsim.qpu.settings import QpuSettings
+from decsim.windows.settings import WindowSettings
 from decsim.decoders.decoders import (SAMPLED_CONFIDENCE_SOURCE,
                                       PresetLatencyDecoder,
                                       SampledConfidenceDecoder,
@@ -21,7 +29,6 @@ from decsim.message import Operation
 from decsim.decoders.decoder_memory import DecoderMemoryConfig
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
-from decsim.run_spec import RunSpec
 from decsim.windows.windowing_schemes import (SlidingTerminalPolicy,
                                               SlidingWindowScheme)
 
@@ -77,10 +84,23 @@ def declared_profile(*, controller_to_weak_buffer=True, controller_to_strong_buf
     return profile
 
 
-def declared_timing(round_us=ROUND_US):
-    return TimingConfig(round_period_microseconds=round_us,
-                        readout_to_bits_microseconds=DECLARED_US["binary"],
-                        packing_microseconds_per_round=DECLARED_US["pack"])
+def declared_timing():
+    return ControllerSettings(readout_to_bits_microseconds=DECLARED_US["binary"],
+                              packing_microseconds_per_round=DECLARED_US["pack"])
+
+
+def declared_qpu(round_us=ROUND_US):
+    return QpuSettings(distance=3, round_period_microseconds=round_us)
+
+
+def run_machine(settings, seed=0, make_metrics=None):
+    """Build the machine, add the test's own metrics, run it."""
+    machine = Machine.build(settings, seed)
+    if make_metrics is not None:
+        for metric in make_metrics(machine):
+            machine.engine.add_metric(metric)
+    machine.run()
+    return machine
 
 
 def memory_op(op_id=1, *, name=None, blocked_by=None, predecessors=(),
@@ -94,33 +114,36 @@ def memory_op(op_id=1, *, name=None, blocked_by=None, predecessors=(),
 def weak_only_run(*, rounds=6, ops=None, controller_to_weak_buffer=True, seed=0, io_trace=False,
                   frame=True, make_metrics=None):
     """Weak-only baseline on the declared fabric; d=3 sliding windows."""
-    spec = RunSpec(
-        ops=(ops if ops is not None else [memory_op(1)]),
-        d=3, rounds_policy=FixedRounds(rounds),
-        decoder=PresetLatencyDecoder(DECLARED_US["weak"]),
+    settings = MachineSettings(
+        workload=WorkloadSettings(
+            operations=(ops if ops is not None else [memory_op(1)]),
+            rounds_policy=FixedRounds(rounds)),
+        qpu=declared_qpu(),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(DECLARED_US["weak"])),
         links=declared_profile(controller_to_weak_buffer=controller_to_weak_buffer, controller_to_strong_buffer=False),
-        timing=declared_timing(),
+        controller=declared_timing(),
         pauli_frame=(PauliFrameConfig(commit_microseconds=DECLARED_US["frame"])
                      if frame else None),
-        make_metrics=make_metrics,
-        seed=seed)
-    return spec.build(io_trace=io_trace)
+        observation=ObservationSettings(log_component_io=io_trace))
+    return run_machine(settings, seed, make_metrics)
 
 
 def strong_only_run(*, rounds=6, ops=None, seed=0, io_trace=False,
                     record=False):
     """Strong-primary baseline: readiness listens to syndrome buffer 1."""
-    spec = RunSpec(
-        ops=(ops if ops is not None else [memory_op(1)]),
-        d=3, rounds_policy=FixedRounds(rounds),
-        decoder=PresetLatencyDecoder(DECLARED_US["strong"]),
-        escalation_policy=StrongOnly(),
+    settings = MachineSettings(
+        workload=WorkloadSettings(
+            operations=(ops if ops is not None else [memory_op(1)]),
+            rounds_policy=FixedRounds(rounds)),
+        qpu=declared_qpu(),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(DECLARED_US["strong"])),
+        escalation=EscalationSettings(policy=StrongOnly()),
         links=declared_profile(controller_to_weak_buffer=True, controller_to_strong_buffer=True),
-        timing=declared_timing(),
+        controller=declared_timing(),
         pauli_frame=PauliFrameConfig(commit_microseconds=DECLARED_US["frame"]),
-        record_switching_windows=record,
-        seed=seed)
-    return spec.build(io_trace=io_trace)
+        observation=ObservationSettings(log_component_io=io_trace,
+                                        record_switching_windows=record))
+    return run_machine(settings, seed)
 
 
 def switching_run(*, rounds=6, escalation_probability, ops=None,
@@ -143,24 +166,29 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
     policy = Switching(0.5, SAMPLED_CONFIDENCE_SOURCE,
                        run_both_at_once=run_both_at_once,
                        double_window=double_window)
-    spec = RunSpec(
-        ops=(ops if ops is not None else [memory_op(1)]),
-        d=3, rounds_policy=FixedRounds(rounds), scheme=sliding_scheme(),
-        router=router, escalation_policy=policy,
-        # serial switching requires Held boundaries; double_window rejects
-        # them (weak_strong_switching.validate_declared_run)
-        boundary_policy=(None if double_window else Held()),
-        unit_pools=(unit_pools if unit_pools is not None
-                    else {"default": 1, "strong": 1}),
+    settings = MachineSettings(
+        workload=WorkloadSettings(
+            operations=(ops if ops is not None else [memory_op(1)]),
+            rounds_policy=FixedRounds(rounds)),
+        qpu=declared_qpu(round_us),
+        windows=WindowSettings(
+            scheme=sliding_scheme(),
+            # serial switching requires Held boundaries; double_window rejects
+            # them (weak_strong_switching.validate_declared_run)
+            boundary_policy=(None if double_window else Held())),
+        decoder_manager=DecoderManagerSettings(
+            router=router,
+            unit_pools=(unit_pools if unit_pools is not None
+                        else {"default": 1, "strong": 1}),
+            decoder_memory=(None if weak_memory_rounds is None else
+                            DecoderMemoryConfig({"default": weak_memory_rounds}))),
+        escalation=EscalationSettings(policy=policy),
         links=declared_profile(controller_to_weak_buffer=True, controller_to_strong_buffer=True, strong_buffer_us=strong_buffer_us),
-        timing=declared_timing(round_us),
+        controller=declared_timing(),
         pauli_frame=PauliFrameConfig(commit_microseconds=DECLARED_US["frame"]),
-        record_switching_windows=record,
-        make_metrics=make_metrics,
-        decoder_memory=(None if weak_memory_rounds is None else
-                        DecoderMemoryConfig({"default": weak_memory_rounds})),
-        seed=seed)
-    return spec.build(io_trace=io_trace)
+        observation=ObservationSettings(log_component_io=io_trace,
+                                        record_switching_windows=record))
+    return run_machine(settings, seed, make_metrics)
 
 
 class OccupancyProbe:
@@ -190,11 +218,11 @@ class OccupancyProbe:
 
 
 def occupancy_metrics():
-    """make_metrics factory returning ONE probe; read it off CompletedRun."""
+    """make_metrics factory returning ONE probe; read it off the machine."""
     probes = []
 
-    def make(engine, window_manager, decoder_manager, execution_runtime, factory):
-        probe = OccupancyProbe(window_manager)
+    def make(machine):
+        probe = OccupancyProbe(machine.window_manager)
         probes.append(probe)
         return [probe]
 
@@ -227,6 +255,8 @@ def fabric():
         "DECLARED_US": DECLARED_US, "ROUND_US": ROUND_US,
         "declared_profile": declared_profile,
         "declared_timing": declared_timing,
+        "declared_qpu": declared_qpu,
+        "run_machine": run_machine,
         "memory_op": memory_op,
         "weak_only_run": weak_only_run,
         "strong_only_run": strong_only_run,

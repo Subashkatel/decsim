@@ -8,7 +8,12 @@ from decsim.message import RunSeedReservation, SoftOutputSource
 from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
 from decsim.ports import IdlePolicy
 from decsim.windows.window_manager import BoundaryPolicy
-from decsim.run_spec import RunSpec
+from decsim.controller.settings import IdlePolicySettings
+from decsim.decoders.settings import DecoderSettings
+from decsim.frontends.settings import WorkloadSettings
+from decsim.machine import Machine, MachineSettings
+from decsim.qpu.settings import QpuSettings
+from decsim.windows.settings import WindowSettings
 from decsim.windows.windowing_schemes import SlidingTerminalPolicy, SlidingWindowScheme
 from decsim.decoders.weak_strong_switching import Baseline, Switching
 
@@ -187,8 +192,10 @@ def test_runspec_builds_fresh_policy_defaults():
     """Each run with omitted policies receives fresh eager and charged-idle
     defaults: idle rounds are decoder workload in every reference system
     (SWIPER, XQsim, Terhal backlog), so the default costs them."""
-    first = RunSpec(ops=[]).build()
-    second = RunSpec(ops=[]).build()
+    first = Machine.build(MachineSettings())
+    first.run()
+    second = Machine.build(MachineSettings())
+    second.run()
 
     assert isinstance(first.window_manager.boundary_policy, Eager)
     assert isinstance(first.controller.idle_policy, SeparateDecodeJobs)
@@ -201,9 +208,13 @@ def test_runspec_builds_fresh_policy_defaults():
 def test_runspec_preserves_truthy_custom_policies_on_independent_axes():
     """RunSpec preserves truthy custom policies and wires the two axes independently."""
     boundary_policy = ExternalBoundaryPolicy()
-    boundary_run = RunSpec(ops=[], boundary_policy=boundary_policy).build()
+    boundary_run = Machine.build(MachineSettings(
+        windows=WindowSettings(boundary_policy=boundary_policy)))
+    boundary_run.run()
     idle_policy = ExternalIdlePolicy()
-    idle_run = RunSpec(ops=[], idle_policy=idle_policy).build()
+    idle_run = Machine.build(MachineSettings(
+        idle_policy=IdlePolicySettings(policy=idle_policy)))
+    idle_run.run()
 
     assert boundary_run.window_manager.boundary_policy is boundary_policy
     assert isinstance(boundary_run.controller.idle_policy, SeparateDecodeJobs)
@@ -386,12 +397,11 @@ def test_run_seed_binding_uses_distinct_policy_paths():
 
     boundary_policy = SeededBoundary()
     idle_policy = SeededIdle()
-    completed = RunSpec(
-        ops=[],
-        boundary_policy=boundary_policy,
-        idle_policy=idle_policy,
-        seed=23,
-    ).build()
+    completed = Machine.build(MachineSettings(
+        windows=WindowSettings(boundary_policy=boundary_policy),
+        idle_policy=IdlePolicySettings(policy=idle_policy),
+    ), 23)
+    completed.run()
 
     assert completed.window_manager.boundary_policy is boundary_policy
     assert completed.controller.idle_policy is idle_policy
@@ -457,14 +467,18 @@ def _feedback_chain(idle_policy=None):
         Operation(1, "T1", (0,), clifford=False, consumes_magic_state=False,
                   blocked_by=0),
     ]).build()
-    return RunSpec(
-        ops=ops, num_units=1, rounds_policy=FixedRounds(3), round_us=1.0,
-        code=SurfaceCodeModel(distance=3),
-        scheme=SlidingWindowScheme(
-            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD),
-        decoder=PresetLatencyDecoder(2.0),
-        feedback_boundary_mode="trailing_buffer",
-        idle_policy=idle_policy, seed=13).build()
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=ops, rounds_policy=FixedRounds(3),
+                                  feedback_boundary_mode="trailing_buffer"),
+        qpu=QpuSettings(code=SurfaceCodeModel(distance=3),
+                        round_period_microseconds=1.0),
+        windows=WindowSettings(scheme=SlidingWindowScheme(
+            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD)),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(2.0), units=1),
+        idle_policy=IdlePolicySettings(policy=idle_policy))
+    machine = Machine.build(settings, 13)
+    machine.run()
+    return machine
 
 
 def _idle_decode_labels(completed) -> set:
@@ -526,10 +540,14 @@ def test_single_operation_run_charges_no_idle_work():
     ops = CircuitFrontend([
         Operation(0, "M", (0,), clifford=True, consumes_magic_state=False),
     ]).build()
-    completed = RunSpec(
-        ops=ops, num_units=1, rounds_policy=FixedRounds(6), round_us=1.0,
-        code=SurfaceCodeModel(distance=3), scheme=SlidingWindowScheme(),
-        decoder=PresetLatencyDecoder(2.0), seed=13).build()
+    settings = MachineSettings(
+        workload=WorkloadSettings(operations=ops, rounds_policy=FixedRounds(6)),
+        qpu=QpuSettings(code=SurfaceCodeModel(distance=3),
+                        round_period_microseconds=1.0),
+        windows=WindowSettings(scheme=SlidingWindowScheme()),
+        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(2.0), units=1))
+    completed = Machine.build(settings, 13)
+    completed.run()
 
     assert completed.controller.idle_rounds_emitted == 0
     assert completed.window_manager.memory_filled_buffer_windows == 0

@@ -66,13 +66,13 @@ def strong_unit(algorithm) -> dict:
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     config = load_experiment(CONFIGS_DIR / "reference.yaml")
-    assert config.decoder.weak.algorithm == "pymatching"
-    assert config.decoder.strong.algorithm == "belief_matching"
-    assert config.active_decoder is config.decoder.weak
+    settings = config.settings
+    assert settings.weak_decoder.kind == "pymatching"
+    assert settings.strong_decoder.kind == "belief_matching"
+    assert config.active_decoder is settings.weak_decoder
     # engine cycles price on a named domain, resolved once like the links
-    assert config.decoder.weak.engine.clock == "fridge"
-    assert config.decoder.weak.engine.megahertz == config.clocks["fridge"]
-    assert config.decoder.strong.engine.clock == "room"
+    assert settings.weak_decoder.engine_megahertz == settings.clocks.megahertz("fridge")
+    assert settings.strong_decoder.engine_megahertz == settings.clocks.megahertz("room")
 
 
 def test_every_shipped_config_loads():
@@ -83,7 +83,7 @@ def test_every_shipped_config_loads():
 
 def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     from decsim.config import microseconds_to_ticks
-    from experiments.build_run import build_run
+    from decsim.machine import Machine
 
     config_path = write_config(tmp_path, {
         "clocks": {"fridge": 500.0, "room": 250.0},
@@ -95,31 +95,38 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
         },
     })
     config = load_experiment(config_path)
-    assert config.controller.readout_to_bits_microseconds == 0.054
-    assert config.controller.decision_to_pulse_microseconds == 0.016
+    assert config.settings.controller.readout_to_bits_microseconds == 0.054
+    assert config.settings.controller.decision_to_pulse_microseconds == 0.016
 
-    spec, _ = build_run(
-        config, physical_error_probability=0.001, distance=3,
-        round_period_us=1.0, seed=0)
-    completed = spec.build()
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0)
+    completed = Machine.build(settings, 0)
     assert completed.controller.measurement_signal_to_classical_bits_ticks == microseconds_to_ticks(0.054)
     assert (completed.controller.instruction_or_decision_to_analog_control_pulse_ticks
             == microseconds_to_ticks(0.016))
 
 
 def test_a_mode_without_its_tier_is_refused(tmp_path):
+    from decsim.machine import Machine
     config_path = write_config(tmp_path, {
         "decode_path": "strong_only"})   # decoder defines only weak
-    with pytest.raises(ValueError, match="decoder.strong"):
-        load_experiment(config_path)
+    config = load_experiment(config_path)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0)
+    with pytest.raises(ValueError, match="strong tier, which names no decoder"):
+        Machine.build(settings)
 
 
 def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
+    from decsim.machine import Machine
     unknown_algorithm = write_config(tmp_path, {
         "decoder": {"weak": {**MINIMAL_CONFIG["decoder"]["weak"],
                              "algorithm": "union_find"}}})
-    with pytest.raises(ValueError, match="algorithm"):
-        load_experiment(unknown_algorithm)
+    config = load_experiment(unknown_algorithm)
+    settings = config.point_settings(
+        physical_error_probability=0.001, distance=3, round_period_us=1.0)
+    with pytest.raises(ValueError, match="weak_decoder.kind 'union_find' is not a row"):
+        Machine.build(settings)
 
     old_flat_decoder = write_config(tmp_path, {
         "decoder": {"units": 1, "unit_memory_rounds": None,
@@ -148,7 +155,7 @@ def test_engine_clock_must_name_a_clock_domain(tmp_path):
                              "engine": {"clock": "sfq",
                                         "fetch_cycles_per_round": 1,
                                         "release_cycles_per_job": 1}}}})
-    with pytest.raises(KeyError):
+    with pytest.raises(ValueError, match="clock 'sfq' is not a clocks entry"):
         load_experiment(config_path)
 
 
@@ -201,9 +208,10 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
         "sweep": [{"physical_error_probability": [0.001], "distance": [3, 5],
                    "round_period_us": [1.0], "shots": 1}]})
     config = load_experiment(config_path)
-    assert config.rounds_per_shot.rounds_for(3) == 30
-    assert config.rounds_per_shot.rounds_for(5) == 50
-    assert str(config.rounds_per_shot) == "10d"
+    rounds_per_shot = config.settings.workload.rounds_per_shot
+    assert rounds_per_shot.rounds_for(3) == 30
+    assert rounds_per_shot.rounds_for(5) == 50
+    assert str(rounds_per_shot) == "10d"
     measurement = measure_shot(config, physical_error_probability=0.001,
                                distance=5, round_period_us=1.0, seed=0)
     assert measurement.distance == 5
@@ -223,7 +231,7 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
 
     manifest = json.loads((run_dir / "manifest.json").read_text())
     assert manifest["versions"]["stim"]
-    assert manifest["resolved_config"]["decode_path"] == "weak_baseline"
+    assert manifest["resolved_config"]["settings"]["escalation"]["kind"] == "weak_baseline"
     assert manifest["started_utc"] and manifest["finished_utc"]
 
     with open(run_dir / "shots.csv") as handle:

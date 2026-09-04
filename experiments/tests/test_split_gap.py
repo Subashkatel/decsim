@@ -14,7 +14,7 @@ import numpy
 import pytest
 import yaml
 
-from experiments.build_run import decoder_engine
+from decsim.machine import build_decoder_unit
 from experiments.experiment_config import load_experiment
 
 from test_decoder_units import write_config
@@ -53,7 +53,7 @@ def test_split_pair_refuses_a_priced_card_weak_tier(tmp_path):
     raw["decoder"]["weak"]["algorithm"] = 0.028
     config = load_experiment(write_config(tmp_path, raw))
     with pytest.raises(ValueError, match="wall-clock"):
-        decoder_engine(config)
+        build_decoder_unit(config.settings, "weak")
 
 
 def test_the_two_forced_solves_reassemble_the_serial_gap():

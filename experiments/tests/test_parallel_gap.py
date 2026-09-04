@@ -169,7 +169,7 @@ def pair_config(tmp_path, gap_threshold_db: float):
     import yaml
     path = switching_config(tmp_path, gap_threshold_db)
     raw = yaml.safe_load(path.read_text())
-    raw["switching"]["gap_computation"] = "parallel_pair"
+    raw["escalation"]["gap_computation"] = "parallel_pair"
     return write_config(tmp_path, raw)
 
 

@@ -5,34 +5,19 @@
 # (weak_decoder_baseline.yaml, strong_decoder_baseline.yaml) share; the tiny
 # sweep makes this file cheap to run, so the test suite runs it as a smoke check.
 #
-# One section per component; a pluggable component's section carries a
-# `kind` key naming a row of the tables at the top of decsim/machine.py,
-# and each section is read by the package it configures (its
-# settings.py). Kept honest by experiments/tests/test_decoder_units.py:
-# the test fails if this file and the readers drift apart. Knobs the yaml
-# cannot reach are Python objects on the settings records: multi-op
-# workloads, dynamic streams, routers, escalation families, schedulers,
-# devices, policies, magic state factories.
+# Kept honest by experiments/tests/test_decoder_units.py: the test fails
+# if this file and the loader (experiment_config.py) drift apart. Knobs the
+# yaml cannot reach are Python objects: multi-op workloads, dynamic
+# streams, routers, escalation families, schedulers, devices, policies.
 
-qpu:
-  kind: stim_device                # stim_device | timing_only | syndrome_bits
-                                   # | recorded_stim: what the QPU reads out
-                                   # each round. stim_device samples the
-                                   # workload's circuit (real detector data);
-                                   # the sweep sets the distance and the round
-                                   # period
+decode_path: weak_baseline                # weak_baseline | strong_only
+                                   # | switching. strong_only wakes windows from
+                                   # syndrome buffer 1, moves inputs on strong_buffer_to_strong_decoder,
+                                   # results on strong_decoder_to_frame
 
-escalation:
-  kind: weak_baseline              # weak_baseline | strong_only | switching.
-                                   # strong_only wakes windows from syndrome
-                                   # buffer 1, moves inputs on
-                                   # strong_buffer_to_strong_decoder, results
-                                   # on strong_decoder_to_frame. switching adds
-                                   # the keys below (refused for any other
-                                   # kind, so they are documented as comments;
-                                   # switching_validation.yaml runs them):
-# escalation:
-#   kind: switching
+# decode_path switching adds the switching card (refused for any other decode_path, so it
+# is documented here as comments; switching_validation.yaml runs it):
+# switching:
 #   gap_threshold_db: 20.0         # keep the weak result when its complementary
 #                                  # gap is at or above this, in the paper's
 #                                  # decibels (Toshio 2510.25222 gth = 20 dB).
@@ -78,25 +63,21 @@ escalation:
 #                                  # the two forced-class gap solves run
 #   gap_units: 1                   # split_pair only: sibling pool size
 
-workload:
-  kind: memory_circuit             # memory_circuit is the one yaml row; the
-                                   # other rows (circuit_list, surgery_ir, qlx)
-                                   # are built in Python
-  code_task: surface_code:rotated_memory_z   # stim generator task
-  rounds_per_shot: 15              # QEC rounds per shot: a fixed count, or
+circuit: surface_code:rotated_memory_z   # stim generator task (real detector data)
+rounds_per_shot: 15                # QEC rounds per shot: a fixed count, or
                                    # "<n>d" to scale with the swept distance
                                    # ("10d" = the 10 d-round memory experiment,
                                    # Toshio 2510.25222 Fig. 4)
 
-windows:
-  kind: sliding                    # sliding | parallel | sandwich | naive_online
+windowing:
+  scheme: sliding                  # sliding | parallel | sandwich | naive_online
   commit_rounds: null              # rounds committed per window; null = d
   buffer_rounds: null              # look-ahead rounds per window; null = d
 
-# The sweep: a list of blocks; each block is the cross product of its three
-# axes, `shots` seeds per point (0..shots-1); a point named twice runs
+# The sweep: a list of blocks; each block is the cross product of its two
+# axes, `shots` seeds per point (0..shots-1); a point+seed named twice runs
 # once. The algorithm is NOT a sweep axis: it is structure, fixed per unit
-# on the decoder sections below; comparing algorithms is comparing configs.
+# on the decoder card below; comparing algorithms is comparing configs.
 # The baselines put shots where they matter: a timing block sweeps many
 # round periods with few shots (the weak baseline's 0.9/0.85/0.8 bracket
 # the load = 1 knee of its 0.028 card), and an LER block sweeps several
@@ -127,8 +108,6 @@ controller:                        # controller work per round, in cycles of its
                                    # measure 250 to 370 cycles for packetization,
                                    # bus transfer, result return and the
                                    # conditional together: an upper bound here
-  packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
-                                   # through the packing stage. null = unbounded
 
 clocks:                            # clock domain name -> MHz; a link prices its
                                    # cycles on the domain it names. More domains
@@ -180,28 +159,28 @@ links:                             # one card per path; null = the logical_refer
   frame_to_controller: null        # Pauli frame -> controller, a release
   controller_to_qpu: null          # controller -> QPU, an instruction
 
-round_store:                       # Buffer 0, the upstream round store
-  kind: round_store                # the one row today
-  rounds: null                     # capacity in rounds. When it is full the
-                                   # controller holds the finished round and
-                                   # publishes it in order once a slot frees,
-                                   # the backpressure real systems apply to their
-                                   # source; drop_round and fail_stop are
-                                   # Python-level study knobs. null = unbounded
+buffers:                           # syndrome-path store capacities, in rounds
+  weak_buffer_rounds: null         # Buffer 0, the upstream round store. When it
+                                   # is full the controller holds the finished
+                                   # round and publishes it in order once a slot
+                                   # frees, the backpressure real systems apply
+                                   # to their source; drop_round and fail_stop
+                                   # are Python-level study knobs. null = unbounded
+  strong_buffer_rounds: null       # syndrome buffer 1, the strong-side store
+                                   # (exists only when the decode_path uses it); overflow
+                                   # is a hard error. null = unbounded
+  packing_rounds_in_flight: null   # packing assembly workspace: rounds in flight
+                                   # through the packing stage. null = unbounded
 
-strong_round_store:                # syndrome buffer 1, the strong-side store
-                                   # (exists only when the escalation uses it)
-  kind: round_store
-  rounds: null                     # capacity in rounds; overflow is a hard
-                                   # error. null = unbounded
-
-# The two decoder tiers are two distinct units (Toshio 2510.25222:
-# lightweight decoders decode constantly, a separate accurate decoder is
-# invoked on demand). The escalation kind picks the active unit:
-# weak_baseline decodes on weak_decoder, strong_only on strong_decoder;
-# the unused tier's section may be omitted.
-weak_decoder:                      # the lightweight tier: fast, higher LER
-  kind: pymatching                 # pymatching | belief_matching: the real
+decoder:                           # the two tiers as two distinct units
+                                   # (Toshio 2510.25222: lightweight decoders
+                                   # decode constantly, a separate accurate
+                                   # decoder is invoked on demand). The mode
+                                   # picks the active unit: weak_baseline
+                                   # decodes on weak, strong_only on strong;
+                                   # the unused tier's card may be omitted.
+  weak:                            # the lightweight tier: fast, higher LER
+    algorithm: pymatching          # pymatching | belief_matching: the real
                                    # algorithm, measured wall clock per window;
                                    # or a number: fixed core latency in us.
                                    # Known number cards: 0.028 = LILLIPUT-class
@@ -210,30 +189,29 @@ weak_decoder:                      # the lightweight tier: fast, higher LER
                                    # old accuracy-first strong reference card.
                                    # A card prices the algorithm stage ONLY;
                                    # fetch and release cycles are separate
-  units: 1                         # decoder units in this tier's pool
-  unit_memory_rounds: null         # input SRAM rounds PER UNIT; null = unbounded.
+    units: 1                       # decoder units in this tier's pool
+    unit_memory_rounds: null         # input SRAM rounds PER UNIT; null = unbounded.
                                    # Each unit holds two windows when they fit
                                    # (transfer overlaps compute); a unit sized
                                    # for one window falls back to serial residency
-  engine:
-    clock: fridge                  # cycle-priced stages on this clock domain
-    fetch_cycles_per_round: 1      # read one round out of decoder memory per
+    engine:
+      clock: fridge                # cycle-priced stages on this clock domain
+      fetch_cycles_per_round: 1    # read one round out of decoder memory per
                                    # cycle (LILLIPUT FIFO, sec. 4)
-    release_cycles_per_job: 1      # correction write-out per job (the
+      release_cycles_per_job: 1    # correction write-out per job (the
                                    # baselines use 10, an experiment card)
-
-strong_decoder:                    # the accurate tier: slow, lower LER
-  kind: belief_matching
-  units: 1
-  unit_memory_rounds: null
-  engine:
-    clock: room                    # the strong unit lives room-side
-    fetch_cycles_per_round: 1
-    release_cycles_per_job: 1
+  strong:                          # the accurate tier: slow, lower LER
+    algorithm: belief_matching
+    units: 1
+    unit_memory_rounds: null
+    engine:
+      clock: room                  # the strong unit lives room-side
+      fetch_cycles_per_round: 1
+      release_cycles_per_job: 1
 
 pauli_frame:
   clock: fridge
-  write_cycles: 1                  # XOR of a correction into the frame register
+  write_cycles: 1                 # XOR of a correction into the frame register
                                    # (one cycle, XQsim PFU)
 
 idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stream.
@@ -245,18 +223,19 @@ idle_policy: separate_decode_jobs  # separate_decode_jobs | ignore | extend_stre
                                    # active-path latency studies. Inert while the
                                    # workload is a single always-busy operation.
 
-observation:                       # what a run records beyond its results
-  check_windows_with: none         # none | tesseract. tesseract re-decodes every
+check_windows_with: none               # none | tesseract. tesseract re-decodes every
                                    # window with the official Tesseract backend and
                                    # counts disagreements in the owned observable
                                    # contribution; never latency-priced. A window is
                                    # a d-round problem at any shot length, so this
                                    # holds at every distance (9.6 ms/window at d=9,
                                    # 18.1 ms at d=11, measured 2026-08-26).
-  log_component_io: false          # true adds component I/O lines to the trace:
+
+log_component_io: false                    # true adds component I/O lines to the trace:
                                    # what each store and unit received, holds
                                    # (rounds, residents), and emitted
-  trace: off                       # off | print | file | both. The engine narrator:
+
+trace: off                         # off | print | file | both. The engine narrator:
                                    # print shows it live on screen; file writes each
                                    # shot's full line record to
                                    # results/<name>/trace/p<p>_algo<card>_round<T>us_seed<n>.log;

@@ -34,27 +34,30 @@ def measure_point_shot(config, *, physical_error_probability, distance,
 # override keys through the `overrides` dict (top-level replacement, the
 # same rule as `extends`).
 MINIMAL_CONFIG = {
-    "decode_path": "weak_baseline",
-    "circuit": "surface_code:rotated_memory_z",
-    "rounds_per_shot": 15,
-    "windowing": {"scheme": "sliding", "commit_rounds": None,
-                  "buffer_rounds": None},
+    "qpu": {"kind": "stim_device"},
+    "escalation": {"kind": "weak_baseline"},
+    "workload": {"kind": "memory_circuit",
+                 "code_task": "surface_code:rotated_memory_z",
+                 "rounds_per_shot": 15},
+    "windows": {"kind": "sliding", "commit_rounds": None,
+                "buffer_rounds": None},
     "sweep": [{"physical_error_probability": [0.001], "distance": [3],
                "round_period_us": [1.0], "shots": 1}],
     "controller": {"clock": "fridge",
                    "readout_to_bits_cycles": 0,
                    "packing_cycles_per_round": 0,
-                   "decision_to_pulse_cycles": 0},
+                   "decision_to_pulse_cycles": 0,
+                   "packing_rounds_in_flight": None},
     "clocks": {"fridge": 250.0, "room": 250.0},
     "links": {"qpu_to_controller": {"latency_cycles": 1, "clock": "fridge",
                      "bits_per_cycle": None}},
-    "buffers": {"weak_buffer_rounds": None, "strong_buffer_rounds": None,
-                "packing_rounds_in_flight": None},
-    "decoder": {"weak": {"algorithm": 0.028, "units": 1,
-                         "unit_memory_rounds": None,
-                         "engine": {"clock": "fridge",
-                                    "fetch_cycles_per_round": 1,
-                                    "release_cycles_per_job": 1}}},
+    "round_store": {"rounds": None},
+    "strong_round_store": {"rounds": None},
+    "weak_decoder": {"kind": 0.028, "units": 1,
+                     "unit_memory_rounds": None,
+                     "engine": {"clock": "fridge",
+                                "fetch_cycles_per_round": 1,
+                                "release_cycles_per_job": 1}},
     "pauli_frame": {"clock": "fridge", "write_cycles": 1},
 }
 
@@ -68,11 +71,11 @@ def write_config(tmp_path, overrides: dict) -> Path:
 
 
 def strong_unit(algorithm) -> dict:
-    return {"strong": {"algorithm": algorithm, "units": 1,
-                       "unit_memory_rounds": None,
-                       "engine": {"clock": "room",
-                                  "fetch_cycles_per_round": 1,
-                                  "release_cycles_per_job": 1}}}
+    return {"strong_decoder": {"kind": algorithm, "units": 1,
+                               "unit_memory_rounds": None,
+                               "engine": {"clock": "room",
+                                          "fetch_cycles_per_round": 1,
+                                          "release_cycles_per_job": 1}}}
 
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
@@ -120,7 +123,7 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
 def test_a_mode_without_its_tier_is_refused(tmp_path):
     from decsim.machine import Machine
     config_path = write_config(tmp_path, {
-        "decode_path": "strong_only"})   # decoder defines only weak
+        "escalation": {"kind": "strong_only"}})   # only weak_decoder is defined
     config = load_experiment(config_path)
     settings = config.point_settings(
         physical_error_probability=0.001, distance=3, round_period_us=1.0)
@@ -131,8 +134,8 @@ def test_a_mode_without_its_tier_is_refused(tmp_path):
 def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
     from decsim.machine import Machine
     unknown_algorithm = write_config(tmp_path, {
-        "decoder": {"weak": {**MINIMAL_CONFIG["decoder"]["weak"],
-                             "algorithm": "union_find"}}})
+        "weak_decoder": {**MINIMAL_CONFIG["weak_decoder"],
+                         "kind": "union_find"}})
     config = load_experiment(unknown_algorithm)
     settings = config.point_settings(
         physical_error_probability=0.001, distance=3, round_period_us=1.0)
@@ -143,7 +146,7 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
         "decoder": {"units": 1, "unit_memory_rounds": None,
                     "engine": {"clock": "fridge", "fetch_cycles_per_round": 1,
                                "release_cycles_per_job": 1}}})
-    with pytest.raises(ValueError, match="tiers"):
+    with pytest.raises(ValueError, match=r"no section \['decoder'\]"):
         load_experiment(old_flat_decoder)
 
     old_sweep_axis = write_config(tmp_path, {
@@ -162,10 +165,10 @@ def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
 
 def test_engine_clock_must_name_a_clock_domain(tmp_path):
     config_path = write_config(tmp_path, {
-        "decoder": {"weak": {**MINIMAL_CONFIG["decoder"]["weak"],
-                             "engine": {"clock": "sfq",
-                                        "fetch_cycles_per_round": 1,
-                                        "release_cycles_per_job": 1}}}})
+        "weak_decoder": {**MINIMAL_CONFIG["weak_decoder"],
+                         "engine": {"clock": "sfq",
+                                    "fetch_cycles_per_round": 1,
+                                    "release_cycles_per_job": 1}}})
     with pytest.raises(ValueError, match="clock 'sfq' is not a clocks entry"):
         load_experiment(config_path)
 
@@ -174,8 +177,8 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
     """The functional gate: the loop with the weak unit's real MWPM reaches
     the same prediction as whole-circuit PyMatching on the same events."""
     config_path = write_config(tmp_path, {
-        "decoder": {"weak": {**MINIMAL_CONFIG["decoder"]["weak"],
-                             "algorithm": "pymatching"}}})
+        "weak_decoder": {**MINIMAL_CONFIG["weak_decoder"],
+                         "kind": "pymatching"}})
     config = load_experiment(config_path)
     for seed in range(3):
         measurement = measure_point_shot(config, physical_error_probability=0.005,
@@ -187,8 +190,8 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
 
 def test_strong_unit_runs_belief_matching(tmp_path):
     config_path = write_config(tmp_path, {
-        "decode_path": "strong_only",
-        "decoder": strong_unit("belief_matching")})
+        "escalation": {"kind": "strong_only"},
+        **strong_unit("belief_matching")})
     config = load_experiment(config_path)
     measurement = measure_point_shot(config, physical_error_probability=0.001,
                                distance=3, round_period_us=1.0, seed=0)
@@ -215,7 +218,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
     """"10d" is Toshio 2510.25222's memory-experiment convention: the shot
     length follows the swept code distance."""
     config_path = write_config(tmp_path, {
-        "rounds_per_shot": "10d",
+        "workload": {**MINIMAL_CONFIG["workload"], "rounds_per_shot": "10d"},
         "sweep": [{"physical_error_probability": [0.001], "distance": [3, 5],
                    "round_period_us": [1.0], "shots": 1}]})
     config = load_experiment(config_path)

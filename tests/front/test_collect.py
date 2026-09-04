@@ -148,8 +148,11 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
 def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
     """threshold_source online: one calibrator per point, on the task."""
     raw = _reference_yaml()
-    raw["decode_path"] = "switching"
-    raw["switching"] = {"gap_threshold_db": 15.0, "threshold_source": "online"}
+    raw["escalation"] = {
+        "kind": "switching",
+        "gap_threshold_db": 15.0,
+        "threshold_source": "online",
+    }
     online_path = tmp_path / "online.yaml"
     online = _written_yaml(raw, online_path)
     config = experiment_config.load_experiment(online)

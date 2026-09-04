@@ -138,9 +138,8 @@ def load_experiment(path) -> ExperimentConfig:
     raw, config_files = _raw_yaml(path)
     raw_sweep = raw.pop("sweep")
     sweep = _sweep_blocks(raw_sweep)
-    sections = _sections(raw)
     settings = machine.MachineSettings.from_mapping(
-        sections, name=path.stem, base_directory=path.parent
+        raw, name=path.stem, base_directory=path.parent
     )
     return ExperimentConfig(
         name=path.stem,
@@ -166,74 +165,6 @@ def _raw_yaml(path: Path) -> tuple:
     base, base_paths = _raw_yaml(base_path)
     base.update(raw)
     return base, (path,) + base_paths
-
-
-def _sections(raw: dict) -> dict:
-    """Today's top-level keys as the sections their owners read.
-
-    The yaml still carries the names the surface commit of this slice
-    renames (decode_path and switching, decoder.weak, buffers,
-    windowing, circuit and rounds_per_shot, the three trace keys); this
-    mapping goes with that commit.
-    """
-    buffers = raw["buffers"]
-    windowing = raw["windowing"]
-    controller = dict(raw["controller"])
-    controller["packing_rounds_in_flight"] = buffers["packing_rounds_in_flight"]
-    escalation = {"kind": raw["decode_path"]}
-    switching = raw.get("switching")
-    if switching is not None:
-        escalation.update(switching)
-    sections = {
-        "clocks": raw["clocks"],
-        "qpu": {"kind": "stim_device"},
-        "controller": controller,
-        "links": raw["links"],
-        "round_store": {"rounds": buffers["weak_buffer_rounds"]},
-        "strong_round_store": {"rounds": buffers["strong_buffer_rounds"]},
-        "windows": {
-            "kind": windowing["scheme"],
-            "commit_rounds": windowing["commit_rounds"],
-            "buffer_rounds": windowing["buffer_rounds"],
-        },
-        "escalation": escalation,
-        "pauli_frame": raw["pauli_frame"],
-        "workload": {
-            "kind": "memory_circuit",
-            "code_task": raw["circuit"],
-            "rounds_per_shot": raw["rounds_per_shot"],
-        },
-        "observation": _observation_section(raw),
-    }
-    if "idle_policy" in raw:
-        sections["idle_policy"] = raw["idle_policy"]
-    tiers = raw["decoder"]
-    unknown = set(tiers) - {"weak", "strong"}
-    if unknown:
-        listed = sorted(unknown)
-        raise ValueError(
-            f"decoder does not know {listed}; its keys are the tiers: weak, "
-            "strong"
-        )
-    for tier in ("weak", "strong"):
-        if tier not in tiers or tiers[tier] is None:
-            continue
-        sections[f"{tier}_decoder"] = _tier_section(tiers[tier])
-    return sections
-
-
-def _observation_section(raw: dict) -> dict:
-    section = {}
-    for key in ("trace", "log_component_io", "check_windows_with"):
-        if key in raw:
-            section[key] = raw[key]
-    return section
-
-
-def _tier_section(card: dict) -> dict:
-    section = dict(card)
-    section["kind"] = section.pop("algorithm")
-    return section
 
 
 def _sweep_blocks(raw_sweep: list) -> tuple:

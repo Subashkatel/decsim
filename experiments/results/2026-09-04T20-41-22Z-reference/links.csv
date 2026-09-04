@@ -1,0 +1,11 @@
+distance,physical_error_probability,algorithm,round_period_us,link,transfers_per_shot,payload_bits_per_shot,bits_per_transfer,unknown_payload_transfers_per_shot,queue_wait_us_per_shot,serialization_us_per_shot,propagation_us_per_shot
+3,0.001,pymatching,1.0,controller_to_qpu,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+3,0.001,pymatching,1.0,controller_to_weak_buffer,15.0,129.0,8.6,0.0,0.0,0.0645,0.06
+3,0.001,pymatching,1.0,decoder_to_decoder,3.0,300.0,100.0,0.0,0.0,0.0,0.012
+3,0.001,pymatching,1.0,frame_to_controller,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+3,0.001,pymatching,1.0,qpu_to_controller,15.0,129.0,8.6,0.0,0.0,0.0,0.06
+3,0.001,pymatching,1.0,strong_buffer_to_strong_decoder,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+3,0.001,pymatching,1.0,strong_decoder_to_frame,0.0,0.0,0.0,0.0,0.0,0.0,0.0
+3,0.001,pymatching,1.0,weak_buffer_to_weak_decoder,4.0,192.0,48.0,0.0,0.0,0.0,0.016
+3,0.001,pymatching,1.0,weak_decoder_to_frame,4.0,4.0,1.0,0.0,0.0,0.0,0.016
+3,0.001,pymatching,1.0,weak_decoder_to_strong_decoder,0.0,0.0,0.0,0.0,0.0,0.0,0.0

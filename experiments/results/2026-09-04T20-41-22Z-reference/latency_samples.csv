@@ -1,0 +1,9 @@
+distance,physical_error_probability,round_period_us,algorithm,seed,algorithm_us
+3,0.001,1.0,pymatching,0,8.031
+3,0.001,1.0,pymatching,0,8.54
+3,0.001,1.0,pymatching,0,5.38
+3,0.001,1.0,pymatching,0,4.92
+3,0.001,1.0,pymatching,1,5.84
+3,0.001,1.0,pymatching,1,5.18
+3,0.001,1.0,pymatching,1,5.011
+3,0.001,1.0,pymatching,1,5.84

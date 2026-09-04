@@ -8,10 +8,12 @@ the top-level keys this file names.
 """
 
 import dataclasses
+import itertools
 from pathlib import Path
 
 import yaml
 
+import decsim.collect as collect
 import decsim.machine as machine
 
 SWEEP_KEYS = (
@@ -50,20 +52,58 @@ class ExperimentConfig:
     # chain)
     config_files: tuple
 
+    def tasks(self) -> list:
+        """One task per sweep point, blocks in order, each block a product."""
+        tasks = []
+        for block in self.sweep:
+            points = itertools.product(
+                block.physical_error_probabilities,
+                block.distances,
+                block.round_periods_microseconds,
+            )
+            for physical_error_probability, distance, round_period_us in points:
+                task = self.point_task(
+                    physical_error_probability=physical_error_probability,
+                    distance=distance,
+                    round_period_us=round_period_us,
+                    shots=block.shots,
+                )
+                tasks.append(task)
+        return tasks
+
+    def point_task(
+        self,
+        *,
+        physical_error_probability: float,
+        distance: int,
+        round_period_us: float,
+        shots: int,
+    ) -> collect.Task:
+        """The task of one sweep point: its settings, shots and metadata."""
+        settings = self.point_settings(
+            physical_error_probability=physical_error_probability,
+            distance=distance,
+            round_period_us=round_period_us,
+        )
+        metadata = {
+            "physical_error_probability": physical_error_probability,
+            "distance": distance,
+            "round_period_us": round_period_us,
+        }
+        return collect.Task.at_point(settings, shots, metadata)
+
     def point_settings(
         self,
         *,
         physical_error_probability: float,
         distance: int,
         round_period_us: float,
-        threshold_calibrator=None,
     ) -> machine.MachineSettings:
         """The machine at one sweep point.
 
         The point sets the QPU's distance and round period, the memory
         circuit's noise, and the escalation threshold the point
-        certifies; the point's online calibrator, when there is one, is
-        shared by every shot of the point.
+        certifies.
         """
         settings = self.settings
         qpu = dataclasses.replace(
@@ -79,20 +119,10 @@ class ExperimentConfig:
             physical_error_probability, distance
         )
         escalation = dataclasses.replace(
-            settings.escalation,
-            gap_threshold_nats=threshold_nats,
-            threshold_calibrator=threshold_calibrator,
+            settings.escalation, gap_threshold_nats=threshold_nats
         )
         return dataclasses.replace(
             settings, qpu=qpu, workload=workload, escalation=escalation
-        )
-
-    def online_calibrator(
-        self, *, physical_error_probability: float, distance: int
-    ):
-        """The point's online threshold calibrator, or None."""
-        return self.settings.escalation.online_calibrator(
-            physical_error_probability, distance
         )
 
     @property
@@ -118,38 +148,6 @@ def load_experiment(path) -> ExperimentConfig:
         sweep=sweep,
         config_files=config_files,
     )
-
-
-def as_json_value(value):
-    """A settings record as plain json: dataclasses walked, objects named.
-
-    A Python-built component (a decoder, a policy) has no yaml text, so
-    it appears as its class name; every number, string and flag appears
-    as written.
-    """
-    if dataclasses.is_dataclass(value):
-        fields = {}
-        for field in dataclasses.fields(value):
-            field_value = getattr(value, field.name)
-            fields[field.name] = as_json_value(field_value)
-        return fields
-    if isinstance(value, dict):
-        items = {}
-        for key, item in value.items():
-            items[str(key)] = as_json_value(item)
-        return items
-    if isinstance(value, (list, tuple)):
-        items = []
-        for item in value:
-            json_item = as_json_value(item)
-            items.append(json_item)
-        return items
-    if isinstance(value, (bool, int, float, str)) or value is None:
-        return value
-    if isinstance(value, Path):
-        return str(value)
-    value_type = type(value)
-    return value_type.__name__
 
 
 def _raw_yaml(path: Path) -> tuple:

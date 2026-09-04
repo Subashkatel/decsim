@@ -7,7 +7,7 @@ more than one distance.
 """
 
 from experiments.experiment_config import load_experiment
-from experiments.measure_shot import measure_shot
+from test_decoder_units import measure_point_shot
 from experiments.plots import latency_samples_by_distance, plots
 
 from test_decoder_units import MINIMAL_CONFIG, strong_unit, write_config
@@ -24,7 +24,7 @@ def wall_clock_config(tmp_path, distances):
 
 def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
     config = load_experiment(wall_clock_config(tmp_path, [3]))
-    measurement = measure_shot(config, physical_error_probability=0.001,
+    measurement = measure_point_shot(config, physical_error_probability=0.001,
                                distance=3, round_period_us=1.0, seed=0)
     samples = measurement.samples["algorithm"]
     assert len(samples) == measurement.windows
@@ -34,7 +34,7 @@ def test_every_decoded_window_contributes_one_latency_sample(tmp_path):
 def test_latency_samples_pool_over_shots_per_distance(tmp_path):
     config = load_experiment(wall_clock_config(tmp_path, [3, 5]))
     measurements = [
-        measure_shot(config, physical_error_probability=0.001,
+        measure_point_shot(config, physical_error_probability=0.001,
                      distance=distance, round_period_us=1.0, seed=seed)
         for distance in (3, 5) for seed in range(2)]
     pooled = latency_samples_by_distance(measurements)

@@ -15,7 +15,7 @@ and every window commits from the strong tier.
 import math
 
 from experiments.experiment_config import load_experiment
-from experiments.measure_shot import measure_shot
+from test_decoder_units import measure_point_shot
 
 import pytest
 
@@ -41,7 +41,7 @@ def switching_config(tmp_path, gap_threshold_db: float,
 
 
 def measured_shot(config, seed: int):
-    return measure_shot(config, physical_error_probability=NEAR_THRESHOLD_P,
+    return measure_point_shot(config, physical_error_probability=NEAR_THRESHOLD_P,
                         distance=3, round_period_us=1.0, seed=seed)
 
 

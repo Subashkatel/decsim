@@ -28,8 +28,9 @@ so update both in the same change as any config-surface edit.
 
 The pipeline is four small modules, one job each, in call order:
 `run.py` (orchestrates) -> `experiment_config.py` (the only yaml reader,
-one settings record per section) -> `measure_shot.py` (one sweep point
-and seed -> one machine -> one shot's numbers)
+one settings record per section) -> `decsim/collect.py` (one task per
+sweep point, one machine per seed) -> `measure_shot.py` (one collected shot
+-> one shot's numbers)
 -> `sweep_report.py` / `plots.py` (rows -> csv files, figures).
 
 Also here:

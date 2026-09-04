@@ -12,7 +12,7 @@ import json
 import pytest
 
 from experiments.experiment_config import load_experiment
-from experiments.measure_shot import measure_shot
+from test_decoder_units import measure_point_shot
 from experiments.offline_run import (SweepPointDecoder, decode_shard, merge,
                                      plan)
 
@@ -20,7 +20,7 @@ from test_decoder_units import MINIMAL_CONFIG, write_config, strong_unit
 
 
 def closed_loop_failures(config, probability, distance, seeds) -> list:
-    return [measure_shot(config, physical_error_probability=probability,
+    return [measure_point_shot(config, physical_error_probability=probability,
                          distance=distance, round_period_us=1.0,
                          seed=seed).logical_failure
             for seed in range(seeds)]

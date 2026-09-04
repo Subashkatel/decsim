@@ -25,7 +25,6 @@ from decsim.message import DecodeJob, DecodeResult, SoftOutput
 
 from decsim.machine import build_decoder_unit
 from experiments.experiment_config import load_experiment
-from experiments.measure_shot import measure_shot
 
 from test_decoder_units import write_config
 from test_switching_mode import (

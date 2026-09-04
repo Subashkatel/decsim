@@ -55,7 +55,7 @@ and a decoder:
 import stim
 
 from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.decoders.mwpm.decoder import PyMatchingDecoder
+from decsim.decoders.minimum_weight_perfect_matching.decoder import PyMatchingDecoder
 from decsim.decoders.settings import DecoderSettings
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings

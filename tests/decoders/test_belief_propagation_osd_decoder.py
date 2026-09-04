@@ -9,7 +9,7 @@ stimbposd's (bp_osd.py:62-68): max(0, min(order, n - m)).
 import numpy
 import qldpc.decoders
 
-import decsim.decoders.bposd.decoder as bposd
+import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.detector_error_model.fault_model_contracts as fault_models
 from tests.decoders import windows
 
@@ -38,7 +38,9 @@ def test_the_row_matches_qldpcs_bp_osd_on_the_same_matrix():
         osd_method="osd_cs",
         osd_order=2,
     )
-    row = bposd.BPOSDDecoder(max_iterations=5, osd_order=2)
+    row = belief_propagation_osd.BeliefPropagationOsdDecoder(
+        max_iterations=5, osd_order=2
+    )
     for shot in detection_events:
         syndrome = numpy.asarray(shot)[list(model.detector_ids)]
         expected = numpy.asarray(referee.decode(syndrome.astype(numpy.uint8)))
@@ -52,6 +54,8 @@ def test_the_osd_order_clamp_is_stimbposds():
     model, _ = _window_and_shots()
     physical = model.require_faults(fault_models.FaultRepresentation.PHYSICAL)
     row_count, column_count = physical.check.shape
-    row = bposd.BPOSDDecoder(max_iterations=5, osd_order=10_000)
+    row = belief_propagation_osd.BeliefPropagationOsdDecoder(
+        max_iterations=5, osd_order=10_000
+    )
     backend = row.compile(physical, model)
     assert backend.osd_order == max(0, min(10_000, column_count - row_count))

@@ -10,7 +10,9 @@ import numpy as np
 import pytest
 
 from decsim.decoders.decoders import PresetLatencyDecoder
-from decsim.decoders.mwpm.decoder import PyMatchingDecoder
+from decsim.decoders.minimum_weight_perfect_matching.decoder import (
+    PyMatchingDecoder,
+)
 from decsim.detector_error_model.fault_model_contracts import (
     FaultRepresentation,
     PlacedFaultModel,
@@ -99,7 +101,9 @@ def test_gap_metric_minimum_weight_equals_the_window_decoders():
     circuits), which the augmented-detector solve requires.
     """
     from decsim.confidence.complementary import ComplementaryGapMetric
-    from decsim.decoders.mwpm.weights import matching_weights
+    from decsim.decoders.minimum_weight_perfect_matching.weights import (
+        matching_weights,
+    )
 
     # A: two parallel boundary faults flipping the observable (0.05 each,
     # combined 0.095, weight 2.254); A-B and B's boundary at 0.2 (2.773)

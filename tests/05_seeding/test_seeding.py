@@ -61,11 +61,15 @@ class AtomicProbe(_AtomicRunSeedConsumer):
         return self.entropy_result
 
     def _prepare_run_seed_state(self, effective_seed):
-        self.calls.append(("prepare", effective_seed, self._run_seed_lock.locked()))
+        self.calls.append(
+            ("prepare", effective_seed, self._run_seed_lock.locked())
+        )
         return ("prepared", effective_seed)
 
     def _install_run_seed_state(self, prepared_state):
-        self.calls.append(("install", prepared_state, self._run_seed_lock.locked()))
+        self.calls.append(
+            ("install", prepared_state, self._run_seed_lock.locked())
+        )
         self.active_state = prepared_state
 
 
@@ -137,9 +141,11 @@ def test_atomic_consumer_initializes_default_hooks_and_live_label():
     with pytest.raises(NotImplementedError):
         consumer._install_run_seed_state(marker)
 
-    from decsim.decoders.relay_bp.window_decoder import RelayBpWindowDecoder
+    from decsim.decoders.relay_belief_propagation.window_decoder import (
+        RelayBeliefPropagationWindowDecoder,
+    )
 
-    relay = RelayBpWindowDecoder(gamma_table_seed=5)
+    relay = RelayBeliefPropagationWindowDecoder(gamma_table_seed=5)
     with pytest.raises(ValueError, match="explicit gamma-table seed"):
         relay.reserve_run_seed(9)
 
@@ -217,6 +223,7 @@ def test_reservation_selects_effective_seed_source_and_prepares_under_lock(
 
 def test_preparation_failure_leaves_no_pending_or_active_change():
     """A preparation exception leaves no pending reservation and preserves active state."""
+
     class FailingPreparation(AtomicProbe):
         def _prepare_run_seed_state(self, effective_seed):
             assert self._run_seed_lock.locked()
@@ -254,7 +261,9 @@ def test_one_consumer_serializes_competing_reservations():
     join_threads(threads)
 
     assert sorted(outcome[0] for outcome in outcomes) == ["refused", "reserved"]
-    reservation = next(value for status, value in outcomes if status == "reserved")
+    reservation = next(
+        value for status, value in outcomes if status == "reserved"
+    )
     consumer.cancel_run_seed(reservation)
 
 
@@ -273,7 +282,9 @@ def test_distinct_consumers_can_prepare_concurrently():
     def reserve(index):
         reservations[index] = consumers[index].reserve_run_seed(index)
 
-    threads = [threading.Thread(target=reserve, args=(index,)) for index in range(2)]
+    threads = [
+        threading.Thread(target=reserve, args=(index,)) for index in range(2)
+    ]
     for thread in threads:
         thread.start()
     join_threads(threads)
@@ -303,7 +314,6 @@ def test_random_consumer_stages_swap_and_reproduces_integer_seed():
     assert [consumer._rng.random() for _ in range(4)] == [
         reference.random() for _ in range(4)
     ]
-
 
 
 def test_random_consumer_accepts_entropy_preparation_without_comparing_outputs():
@@ -346,7 +356,9 @@ def test_random_consumer_accepts_entropy_preparation_without_comparing_outputs()
         ),
     ],
 )
-def test_component_seed_derivation_matches_fixed_vectors_and_framing(root, path, expected):
+def test_component_seed_derivation_matches_fixed_vectors_and_framing(
+    root, path, expected
+):
     """Component seeds match fixed vectors built from the versioned framed preimage."""
     preimage = (
         b"decsim.run-seed.v1"
@@ -394,12 +406,24 @@ def test_binder_dispatches_duck_typed_roles_in_stable_preorder():
     """Structural roles traverse sorted roots and children in depth-first consumer preorder."""
     forward = stable_binder_trace(False)
     reverse = stable_binder_trace(True)
-    expected_names = ["dual", "child-early", "child-late", "middle-leaf", "last"]
+    expected_names = [
+        "dual",
+        "child-early",
+        "child-late",
+        "middle-leaf",
+        "last",
+    ]
 
     assert forward == reverse
-    assert [name for action, name, _ in forward if action == "reserve"] == expected_names
-    assert [name for action, name, _ in forward if action == "commit"] == expected_names
-    assert [action for action, _, _ in forward] == ["reserve"] * 5 + ["commit"] * 5
+    assert [
+        name for action, name, _ in forward if action == "reserve"
+    ] == expected_names
+    assert [
+        name for action, name, _ in forward if action == "commit"
+    ] == expected_names
+    assert [action for action, _, _ in forward] == ["reserve"] * 5 + [
+        "commit"
+    ] * 5
 
 
 @pytest.mark.parametrize(
@@ -420,7 +444,9 @@ def test_binder_dispatches_duck_typed_roles_in_stable_preorder():
         ),
     ],
 )
-def test_binder_rejects_duplicate_paths_through_rendered_diagnostics(path, rendered):
+def test_binder_rejects_duplicate_paths_through_rendered_diagnostics(
+    path, rendered
+):
     """Duplicate canonical paths are rejected with their field and key rendering."""
     with pytest.raises(ValueError) as caught:
         bind_run_seed(1, [(path, object()), (path, object())])
@@ -429,7 +455,9 @@ def test_binder_rejects_duplicate_paths_through_rendered_diagnostics(path, rende
 
 
 @pytest.mark.parametrize("same_child", [False, True])
-def test_binder_rejects_duplicate_sibling_paths_for_same_or_distinct_objects(same_child):
+def test_binder_rejects_duplicate_sibling_paths_for_same_or_distinct_objects(
+    same_child,
+):
     """Duplicate sibling paths fail before shared-object identity can suppress traversal."""
     first = object()
     second = first if same_child else object()
@@ -486,7 +514,9 @@ def test_binder_reserves_shared_alias_at_first_sorted_path_once():
     [
         lambda child: RunSeedChild((field("leaf"),), child),
         lambda child: ChildRecordSubclass((field("leaf"),), child),
-        lambda child: SimpleNamespace(relative_path=(field("leaf"),), child=child),
+        lambda child: SimpleNamespace(
+            relative_path=(field("leaf"),), child=child
+        ),
     ],
 )
 def test_binder_accepts_structural_child_records(record_factory):
@@ -509,8 +539,14 @@ def test_binder_accepts_structural_child_records(record_factory):
     [
         (SimpleNamespace(child=object()), AttributeError),
         (SimpleNamespace(relative_path=(field("leaf"),)), AttributeError),
-        (SimpleNamespace(relative_path=[field("leaf")], child=object()), TypeError),
-        (SimpleNamespace(relative_path=(object(),), child=object()), AttributeError),
+        (
+            SimpleNamespace(relative_path=[field("leaf")], child=object()),
+            TypeError,
+        ),
+        (
+            SimpleNamespace(relative_path=(object(),), child=object()),
+            AttributeError,
+        ),
     ],
 )
 def test_binder_allows_child_record_shape_to_fail_naturally(record, error):
@@ -529,12 +565,24 @@ def test_binder_reserves_every_consumer_before_committing_in_order():
 
     bind_run_seed(5, roots)
 
-    assert [action for action, _, _ in events] == ["reserve"] * 3 + ["commit"] * 3
-    assert [name for action, name, _ in events if action == "reserve"] == ["a", "b", "c"]
-    assert [name for action, name, _ in events if action == "commit"] == ["a", "b", "c"]
+    assert [action for action, _, _ in events] == ["reserve"] * 3 + [
+        "commit"
+    ] * 3
+    assert [name for action, name, _ in events if action == "reserve"] == [
+        "a",
+        "b",
+        "c",
+    ]
+    assert [name for action, name, _ in events if action == "commit"] == [
+        "a",
+        "b",
+        "c",
+    ]
 
 
-@pytest.mark.parametrize("error", [RuntimeError("late"), FatalReservationError("fatal")])
+@pytest.mark.parametrize(
+    "error", [RuntimeError("late"), FatalReservationError("fatal")]
+)
 @pytest.mark.parametrize("failure_index", [0, 1, 2])
 def test_binder_rolls_back_prior_acquisitions_in_reverse_on_reserve_failure(
     error, failure_index
@@ -558,12 +606,13 @@ def test_binder_rolls_back_prior_acquisitions_in_reverse_on_reserve_failure(
     with pytest.raises(type(error)):
         bind_run_seed(
             8,
-            [((field(name),), consumer) for name, consumer in zip(names, consumers)],
+            [
+                ((field(name),), consumer)
+                for name, consumer in zip(names, consumers)
+            ],
         )
 
-    expected = [
-        ("reserve", name) for name in names[: failure_index + 1]
-    ] + [
+    expected = [("reserve", name) for name in names[: failure_index + 1]] + [
         ("cancel", name) for name in reversed(names[:failure_index])
     ]
     assert [event[:2] for event in events] == expected
@@ -572,6 +621,7 @@ def test_binder_rolls_back_prior_acquisitions_in_reverse_on_reserve_failure(
 @pytest.mark.parametrize("source", ["derived", "other", ""])
 def test_binder_rejects_other_unseeded_source_labels(source):
     """Unseeded binding rejects every source label outside explicit local and entropy."""
+
     class InvalidSourceConsumer(RecordingConsumer):
         def reserve_run_seed(self, seed):
             return SimpleNamespace(
@@ -588,7 +638,9 @@ def test_binder_rejects_other_unseeded_source_labels(source):
     ("source", "proposed"),
     [("entropy", 999), ("explicit_local", None), ("explicit_local", "local")],
 )
-def test_binder_accepts_both_unseeded_sources_without_checking_proposed_seed(source, proposed):
+def test_binder_accepts_both_unseeded_sources_without_checking_proposed_seed(
+    source, proposed
+):
     """Unseeded binding accepts both source labels without validating the proposed seed field."""
     committed = []
 
@@ -615,7 +667,9 @@ def test_binder_accepts_both_unseeded_sources_without_checking_proposed_seed(sou
         lambda seed: RunSeedReservation("derived", seed, "state"),
         lambda seed: ReservationSubclass("derived", seed, "state"),
         lambda seed: SimpleNamespace(
-            proposed_seed_source="derived", proposed_seed=seed, prepared_state="state"
+            proposed_seed_source="derived",
+            proposed_seed=seed,
+            prepared_state="state",
         ),
     ],
 )
@@ -643,7 +697,12 @@ def test_binder_allows_empty_paths_and_naturally_rejects_malformed_graph_shapes(
 
     bind_run_seed(4, [((), empty)])
     bind_run_seed(4, [([], list_path)])
-    assert [event[0] for event in events] == ["reserve", "commit", "reserve", "commit"]
+    assert [event[0] for event in events] == [
+        "reserve",
+        "commit",
+        "reserve",
+        "commit",
+    ]
     assert events[0][2] == derive_component_seed(4, ())
 
     with pytest.raises(TypeError):
@@ -658,9 +717,13 @@ def test_machine_normalizes_seed_boundaries_at_public_entry(seed):
     events = []
     policy = RecordingConsumer("boundary", events)
 
-    Machine.build(MachineSettings(windows=WindowSettings(boundary_policy=policy)), seed)
+    Machine.build(
+        MachineSettings(windows=WindowSettings(boundary_policy=policy)), seed
+    )
 
-    reserved_seed = next(value for action, _, value in events if action == "reserve")
+    reserved_seed = next(
+        value for action, _, value in events if action == "reserve"
+    )
     if seed is None:
         assert reserved_seed is None
     else:
@@ -691,7 +754,10 @@ def test_machine_binds_outside_composite_at_stable_policy_path():
     duck_child = SimpleNamespace(relative_path=(field("leaf"),), child=leaf)
     outside_policy = ChildrenComposite((duck_child,))
 
-    Machine.build(MachineSettings(windows=WindowSettings(boundary_policy=outside_policy)), 23)
+    Machine.build(
+        MachineSettings(windows=WindowSettings(boundary_policy=outside_policy)),
+        23,
+    )
 
     expected = derive_component_seed(
         23, (field("boundary_policy"), field("leaf"))

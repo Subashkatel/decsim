@@ -21,14 +21,19 @@ from experiments.measure_shot import measure_shot
 CONFIGS_DIR = Path(__file__).parent.parent / "configs"
 
 
-def measure_point_shot(config, *, physical_error_probability, distance,
-                       round_period_us, seed):
+def measure_point_shot(
+    config, *, physical_error_probability, distance, round_period_us, seed
+):
     """One seeded shot at one sweep point, collected and measured."""
     task = config.point_task(
         physical_error_probability=physical_error_probability,
-        distance=distance, round_period_us=round_period_us, shots=seed + 1)
+        distance=distance,
+        round_period_us=round_period_us,
+        shots=seed + 1,
+    )
     shot = collect.run_shot(task, seed)
     return measure_shot(shot)
+
 
 # A complete runnable config, small enough for a functional test. Tests
 # override keys through the `overrides` dict (top-level replacement, the
@@ -36,28 +41,51 @@ def measure_point_shot(config, *, physical_error_probability, distance,
 MINIMAL_CONFIG = {
     "qpu": {"kind": "stim_device"},
     "escalation": {"kind": "weak_baseline"},
-    "workload": {"kind": "memory_circuit",
-                 "code_task": "surface_code:rotated_memory_z",
-                 "rounds_per_shot": 15},
-    "windows": {"kind": "sliding", "commit_rounds": None,
-                "buffer_rounds": None},
-    "sweep": [{"physical_error_probability": [0.001], "distance": [3],
-               "round_period_us": [1.0], "shots": 1}],
-    "controller": {"clock": "fridge",
-                   "readout_to_bits_cycles": 0,
-                   "packing_cycles_per_round": 0,
-                   "decision_to_pulse_cycles": 0,
-                   "packing_rounds_in_flight": None},
+    "workload": {
+        "kind": "memory_circuit",
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds_per_shot": 15,
+    },
+    "windows": {
+        "kind": "sliding",
+        "commit_rounds": None,
+        "buffer_rounds": None,
+    },
+    "sweep": [
+        {
+            "physical_error_probability": [0.001],
+            "distance": [3],
+            "round_period_us": [1.0],
+            "shots": 1,
+        }
+    ],
+    "controller": {
+        "clock": "fridge",
+        "readout_to_bits_cycles": 0,
+        "packing_cycles_per_round": 0,
+        "decision_to_pulse_cycles": 0,
+        "packing_rounds_in_flight": None,
+    },
     "clocks": {"fridge": 250.0, "room": 250.0},
-    "links": {"qpu_to_controller": {"latency_cycles": 1, "clock": "fridge",
-                     "bits_per_cycle": None}},
+    "links": {
+        "qpu_to_controller": {
+            "latency_cycles": 1,
+            "clock": "fridge",
+            "bits_per_cycle": None,
+        }
+    },
     "round_store": {"rounds": None},
     "strong_round_store": {"rounds": None},
-    "weak_decoder": {"kind": 0.028, "units": 1,
-                     "unit_memory_rounds": None,
-                     "engine": {"clock": "fridge",
-                                "fetch_cycles_per_round": 1,
-                                "release_cycles_per_job": 1}},
+    "weak_decoder": {
+        "kind": 0.028,
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "fridge",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 1,
+        },
+    },
     "pauli_frame": {"clock": "fridge", "write_cycles": 1},
 }
 
@@ -71,11 +99,18 @@ def write_config(tmp_path, overrides: dict) -> Path:
 
 
 def strong_unit(algorithm) -> dict:
-    return {"strong_decoder": {"kind": algorithm, "units": 1,
-                               "unit_memory_rounds": None,
-                               "engine": {"clock": "room",
-                                          "fetch_cycles_per_round": 1,
-                                          "release_cycles_per_job": 1}}}
+    return {
+        "strong_decoder": {
+            "kind": algorithm,
+            "units": 1,
+            "unit_memory_rounds": None,
+            "engine": {
+                "clock": "room",
+                "fetch_cycles_per_round": 1,
+                "release_cycles_per_job": 1,
+            },
+        }
+    }
 
 
 def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
@@ -85,8 +120,13 @@ def test_reference_config_defines_both_tiers_and_the_mode_picks_weak():
     assert settings.strong_decoder.kind == "belief_matching"
     assert config.active_decoder is settings.weak_decoder
     # engine cycles price on a named domain, resolved once like the links
-    assert settings.weak_decoder.engine_megahertz == settings.clocks.megahertz("fridge")
-    assert settings.strong_decoder.engine_megahertz == settings.clocks.megahertz("room")
+    assert settings.weak_decoder.engine_megahertz == settings.clocks.megahertz(
+        "fridge"
+    )
+    assert (
+        settings.strong_decoder.engine_megahertz
+        == settings.clocks.megahertz("room")
+    )
 
 
 def test_every_shipped_config_loads():
@@ -99,102 +139,181 @@ def test_controller_cycle_card_reaches_both_runtime_paths(tmp_path):
     from decsim.config import microseconds_to_ticks
     from decsim.machine import Machine
 
-    config_path = write_config(tmp_path, {
-        "clocks": {"fridge": 500.0, "room": 250.0},
-        "controller": {
-            "clock": "fridge",
-            "readout_to_bits_cycles": 27,
-            "packing_cycles_per_round": 0,
-            "decision_to_pulse_cycles": 8,
+    config_path = write_config(
+        tmp_path,
+        {
+            "clocks": {"fridge": 500.0, "room": 250.0},
+            "controller": {
+                "clock": "fridge",
+                "readout_to_bits_cycles": 27,
+                "packing_cycles_per_round": 0,
+                "decision_to_pulse_cycles": 8,
+            },
         },
-    })
+    )
     config = load_experiment(config_path)
     assert config.settings.controller.readout_to_bits_microseconds == 0.054
     assert config.settings.controller.decision_to_pulse_microseconds == 0.016
 
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0)
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
     completed = Machine.build(settings, 0)
-    assert completed.controller.measurement_signal_to_classical_bits_ticks == microseconds_to_ticks(0.054)
-    assert (completed.controller.instruction_or_decision_to_analog_control_pulse_ticks
-            == microseconds_to_ticks(0.016))
+    assert (
+        completed.controller.measurement_signal_to_classical_bits_ticks
+        == microseconds_to_ticks(0.054)
+    )
+    assert (
+        completed.controller.instruction_or_decision_to_analog_control_pulse_ticks
+        == microseconds_to_ticks(0.016)
+    )
 
 
 def test_a_mode_without_its_tier_is_refused(tmp_path):
     from decsim.machine import Machine
-    config_path = write_config(tmp_path, {
-        "escalation": {"kind": "strong_only"}})   # only weak_decoder is defined
+
+    config_path = write_config(
+        tmp_path, {"escalation": {"kind": "strong_only"}}
+    )  # only weak_decoder is defined
     config = load_experiment(config_path)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0)
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
     with pytest.raises(ValueError, match="strong tier, which names no decoder"):
         Machine.build(settings)
 
 
 def test_unknown_algorithms_and_stale_keys_fail_loudly(tmp_path):
     from decsim.machine import Machine
-    unknown_algorithm = write_config(tmp_path, {
-        "weak_decoder": {**MINIMAL_CONFIG["weak_decoder"],
-                         "kind": "union_find"}})
+
+    unknown_algorithm = write_config(
+        tmp_path,
+        {
+            "weak_decoder": {
+                **MINIMAL_CONFIG["weak_decoder"],
+                "kind": "lookup_table",
+            }
+        },
+    )
     config = load_experiment(unknown_algorithm)
     settings = config.point_settings(
-        physical_error_probability=0.001, distance=3, round_period_us=1.0)
-    with pytest.raises(ValueError, match="weak_decoder.kind 'union_find' is not a row"):
+        physical_error_probability=0.001, distance=3, round_period_us=1.0
+    )
+    with pytest.raises(
+        ValueError, match="weak_decoder.kind 'lookup_table' is not a row"
+    ):
         Machine.build(settings)
 
-    old_flat_decoder = write_config(tmp_path, {
-        "decoder": {"units": 1, "unit_memory_rounds": None,
-                    "engine": {"clock": "fridge", "fetch_cycles_per_round": 1,
-                               "release_cycles_per_job": 1}}})
+    old_flat_decoder = write_config(
+        tmp_path,
+        {
+            "decoder": {
+                "units": 1,
+                "unit_memory_rounds": None,
+                "engine": {
+                    "clock": "fridge",
+                    "fetch_cycles_per_round": 1,
+                    "release_cycles_per_job": 1,
+                },
+            }
+        },
+    )
     with pytest.raises(ValueError, match=r"no section \['decoder'\]"):
         load_experiment(old_flat_decoder)
 
-    old_sweep_axis = write_config(tmp_path, {
-        "sweep": [{"physical_error_probability": [0.001], "distance": [3],
-                   "round_period_us": [1.0],
-                   "algorithm_latency_us": [0.028], "shots": 1}]})
+    old_sweep_axis = write_config(
+        tmp_path,
+        {
+            "sweep": [
+                {
+                    "physical_error_probability": [0.001],
+                    "distance": [3],
+                    "round_period_us": [1.0],
+                    "algorithm_latency_us": [0.028],
+                    "shots": 1,
+                }
+            ]
+        },
+    )
     with pytest.raises(ValueError, match="decoder card"):
         load_experiment(old_sweep_axis)
 
-    fixed_distance_key = write_config(tmp_path, {
-        "sweep": [{"physical_error_probability": [0.001],
-                   "round_period_us": [1.0], "shots": 1}]})
+    fixed_distance_key = write_config(
+        tmp_path,
+        {
+            "sweep": [
+                {
+                    "physical_error_probability": [0.001],
+                    "round_period_us": [1.0],
+                    "shots": 1,
+                }
+            ]
+        },
+    )
     with pytest.raises(KeyError):
         load_experiment(fixed_distance_key)
 
 
 def test_engine_clock_must_name_a_clock_domain(tmp_path):
-    config_path = write_config(tmp_path, {
-        "weak_decoder": {**MINIMAL_CONFIG["weak_decoder"],
-                         "engine": {"clock": "sfq",
-                                    "fetch_cycles_per_round": 1,
-                                    "release_cycles_per_job": 1}}})
+    config_path = write_config(
+        tmp_path,
+        {
+            "weak_decoder": {
+                **MINIMAL_CONFIG["weak_decoder"],
+                "engine": {
+                    "clock": "sfq",
+                    "fetch_cycles_per_round": 1,
+                    "release_cycles_per_job": 1,
+                },
+            }
+        },
+    )
     with pytest.raises(ValueError, match="clock 'sfq' is not a clocks entry"):
         load_experiment(config_path)
 
 
 def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
-    """The functional gate: the loop with the weak unit's real MWPM reaches
-    the same prediction as whole-circuit PyMatching on the same events."""
-    config_path = write_config(tmp_path, {
-        "weak_decoder": {**MINIMAL_CONFIG["weak_decoder"],
-                         "kind": "pymatching"}})
+    # The functional gate: the loop with the weak unit's real MWPM reaches
+    # the same prediction as whole-circuit PyMatching on the same events.
+    config_path = write_config(
+        tmp_path,
+        {
+            "weak_decoder": {
+                **MINIMAL_CONFIG["weak_decoder"],
+                "kind": "pymatching",
+            }
+        },
+    )
     config = load_experiment(config_path)
     for seed in range(3):
-        measurement = measure_point_shot(config, physical_error_probability=0.005,
-                                   distance=3, round_period_us=1.0, seed=seed)
+        measurement = measure_point_shot(
+            config,
+            physical_error_probability=0.005,
+            distance=3,
+            round_period_us=1.0,
+            seed=seed,
+        )
         assert measurement.algorithm == "pymatching"
         assert measurement.windows > 0
         assert not measurement.direct_mismatch
 
 
 def test_strong_unit_runs_belief_matching(tmp_path):
-    config_path = write_config(tmp_path, {
-        "escalation": {"kind": "strong_only"},
-        **strong_unit("belief_matching")})
+    config_path = write_config(
+        tmp_path,
+        {
+            "escalation": {"kind": "strong_only"},
+            **strong_unit("belief_matching"),
+        },
+    )
     config = load_experiment(config_path)
-    measurement = measure_point_shot(config, physical_error_probability=0.001,
-                               distance=3, round_period_us=1.0, seed=0)
+    measurement = measure_point_shot(
+        config,
+        physical_error_probability=0.001,
+        distance=3,
+        round_period_us=1.0,
+        seed=0,
+    )
     assert measurement.algorithm == "belief_matching"
     assert measurement.windows > 0
     assert not measurement.logical_failure
@@ -202,11 +321,19 @@ def test_strong_unit_runs_belief_matching(tmp_path):
 
 def test_report_rows_carry_the_algorithm_column(tmp_path):
     from experiments.sweep_report import link_rows, summarize
+
     config_path = write_config(tmp_path, {})
     config = load_experiment(config_path)
-    measurements = [measure_point_shot(config, physical_error_probability=0.001,
-                                 distance=3, round_period_us=1.0, seed=seed)
-                    for seed in range(2)]
+    measurements = [
+        measure_point_shot(
+            config,
+            physical_error_probability=0.001,
+            distance=3,
+            round_period_us=1.0,
+            seed=seed,
+        )
+        for seed in range(2)
+    ]
     rows = summarize(measurements)
     assert len(rows) == 1
     assert rows[0]["algorithm"] == 0.028
@@ -215,28 +342,47 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
 
 
 def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
-    """"10d" is Toshio 2510.25222's memory-experiment convention: the shot
-    length follows the swept code distance."""
-    config_path = write_config(tmp_path, {
-        "workload": {**MINIMAL_CONFIG["workload"], "rounds_per_shot": "10d"},
-        "sweep": [{"physical_error_probability": [0.001], "distance": [3, 5],
-                   "round_period_us": [1.0], "shots": 1}]})
+    # "10d" is Toshio 2510.25222's memory-experiment convention: the shot
+    # length follows the swept code distance.
+    config_path = write_config(
+        tmp_path,
+        {
+            "workload": {
+                **MINIMAL_CONFIG["workload"],
+                "rounds_per_shot": "10d",
+            },
+            "sweep": [
+                {
+                    "physical_error_probability": [0.001],
+                    "distance": [3, 5],
+                    "round_period_us": [1.0],
+                    "shots": 1,
+                }
+            ],
+        },
+    )
     config = load_experiment(config_path)
     rounds_per_shot = config.settings.workload.rounds_per_shot
     assert rounds_per_shot.rounds_for(3) == 30
     assert rounds_per_shot.rounds_for(5) == 50
     assert str(rounds_per_shot) == "10d"
-    measurement = measure_point_shot(config, physical_error_probability=0.001,
-                               distance=5, round_period_us=1.0, seed=0)
+    measurement = measure_point_shot(
+        config,
+        physical_error_probability=0.001,
+        distance=5,
+        round_period_us=1.0,
+        seed=0,
+    )
     assert measurement.distance == 5
     assert measurement.windows > 5
 
 
 def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
-    """One tiny run end to end: a timestamped run dir with manifest.json,
-    the config copy, shots.csv, sweep.csv and links.csv."""
+    # One tiny run end to end: a timestamped run dir with manifest.json,
+    # the config copy, shots.csv, sweep.csv and links.csv.
     import csv
     import json
+
     from experiments.run import run_experiment
 
     config_path = write_config(tmp_path, {})
@@ -245,7 +391,10 @@ def test_a_run_writes_its_manifest_and_per_shot_records(tmp_path, monkeypatch):
 
     manifest = json.loads((run_dir / "manifest.json").read_text())
     assert manifest["versions"]["stim"]
-    assert manifest["resolved_config"]["settings"]["escalation"]["kind"] == "weak_baseline"
+    assert (
+        manifest["resolved_config"]["settings"]["escalation"]["kind"]
+        == "weak_baseline"
+    )
     assert manifest["started_utc"] and manifest["finished_utc"]
 
     with open(run_dir / "shots.csv") as handle:

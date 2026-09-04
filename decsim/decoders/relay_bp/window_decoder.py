@@ -12,7 +12,6 @@ diagnostic only and never becomes simulated time.
 """
 
 import dataclasses
-import hashlib
 import math
 import os
 import secrets
@@ -84,31 +83,25 @@ class RelayBpWindowDecoder(seeding._AtomicRunSeedConsumer):
         syndrome = _validated_syndrome(syndrome, detector_count)
         compiled = self._compiled_model(faults)
         if faults.check.shape[1] == 0:
-            return window_decode_results.empty_fault_model_outcome(
-                faults,
-                syndrome,
-                decoder_configuration_fingerprint=(
-                    compiled.configuration_fingerprint
-                ),
-            )
+            return window_decode_results.empty_fault_model_outcome(syndrome)
         if compiled.backend_construction_failed:
-            return _backend_error_outcome(compiled)
+            return _backend_error_outcome()
         try:
             detailed = compiled.backend.decode_detailed(syndrome)
             correction = _binary_vector(
                 detailed.decoding, expected_size=faults.check.shape[1]
             )
         except _WrongCorrectionArityError:
-            return _invalid_outcome(compiled, _Reason.CORRECTION_WRONG_ARITY)
+            return _invalid_outcome(_Reason.CORRECTION_WRONG_ARITY)
         except _NonbinaryCorrectionError:
-            return _invalid_outcome(compiled, _Reason.CORRECTION_NOT_BINARY)
+            return _invalid_outcome(_Reason.CORRECTION_NOT_BINARY)
         except Exception:
-            return _backend_error_outcome(compiled)
+            return _backend_error_outcome()
         try:
             evidence = _detailed_evidence(detailed, faults)
         except Exception:
-            return _backend_error_outcome(compiled)
-        return _outcome_of(compiled, faults, syndrome, correction, evidence)
+            return _backend_error_outcome()
+        return _outcome_of(faults, syndrome, correction, evidence)
 
     def _entropy_seed(self):
         return secrets.randbits(64)
@@ -141,28 +134,16 @@ class RelayBpWindowDecoder(seeding._AtomicRunSeedConsumer):
         seed = self._gamma_seed()
         column_count = check.shape[1]
         gamma_table = _gamma_table(self.profile, seed, column_count)
-        configuration_fingerprint = _configuration_fingerprint(
-            self.profile, seed, gamma_table
-        )
-        model_fingerprint = window_decode_results.fault_model_fingerprint(
-            faults
-        )
         if column_count == 0:
             return _CompiledRelayModel(
-                backend=None,
-                backend_construction_failed=False,
-                fault_model_fingerprint=model_fingerprint,
-                configuration_fingerprint=configuration_fingerprint,
+                backend=None, backend_construction_failed=False
             )
         backend = _construct_backend(
             self.profile, check, priors, gamma_table, seed
         )
         construction_failed = backend is None
         return _CompiledRelayModel(
-            backend=backend,
-            backend_construction_failed=construction_failed,
-            fault_model_fingerprint=model_fingerprint,
-            configuration_fingerprint=configuration_fingerprint,
+            backend=backend, backend_construction_failed=construction_failed
         )
 
     def _gamma_seed(self) -> int:
@@ -205,8 +186,6 @@ class _RelayProfile:
 class _CompiledRelayModel:
     backend: object
     backend_construction_failed: bool
-    fault_model_fingerprint: str
-    configuration_fingerprint: str
 
 
 @dataclasses.dataclass(frozen=True)
@@ -328,24 +307,6 @@ def _gamma_table(profile: _RelayProfile, seed: int, column_count: int):
     return numpy.ascontiguousarray(gamma_table)
 
 
-def _configuration_fingerprint(
-    profile: _RelayProfile, seed: int, gamma_table
-) -> str:
-    table_bytes = gamma_table.tobytes(order="C")
-    digest = hashlib.sha256(table_bytes)
-    gamma_table_sha256 = digest.hexdigest()
-    return window_decode_results.decoder_configuration_fingerprint(
-        {
-            "backend": "relay_bp.RelayDecoderF32",
-            "profile": profile,
-            "gamma_table_seed": seed,
-            "gamma_table_shape": tuple(gamma_table.shape),
-            "gamma_table_sha256": gamma_table_sha256,
-            "stopping_criterion": "nconv",
-        }
-    )
-
-
 def _construct_backend(
     profile: _RelayProfile, check, priors, gamma_table, seed: int
 ):
@@ -418,14 +379,7 @@ def _binary_vector(value, *, expected_size: int) -> tuple:
     is_bit = is_zero | is_one
     if not numpy.all(is_bit):
         raise _NonbinaryCorrectionError
-    return _bit_tuple(vector)
-
-
-def _bit_tuple(array) -> tuple:
-    bits = []
-    for bit in array:
-        bits.append(int(bit))
-    return tuple(bits)
+    return window_decode_results.bit_tuple(vector)
 
 
 def _float_tuple(values) -> tuple:
@@ -436,13 +390,9 @@ def _float_tuple(values) -> tuple:
 
 
 def _reconstruct(check, correction) -> tuple:
-    check_integers = check.astype(numpy.int64)
-    correction_integers = numpy.asarray(correction, dtype=numpy.int64)
-    product = check_integers @ correction_integers
-    product = numpy.asarray(product)
-    flat = product.ravel()
-    parity = flat % 2
-    return _bit_tuple(parity)
+    correction_array = numpy.asarray(correction)
+    parity = window_decode_results.parity_product(check, correction_array)
+    return window_decode_results.bit_tuple(parity)
 
 
 def _detailed_evidence(detailed, faults) -> _DetailedEvidence:
@@ -471,21 +421,16 @@ def _detailed_evidence(detailed, faults) -> _DetailedEvidence:
 
 
 def _outcome_of(
-    compiled: _CompiledRelayModel,
-    faults,
-    syndrome,
-    correction: tuple,
-    evidence: _DetailedEvidence,
+    faults, syndrome, correction: tuple, evidence: _DetailedEvidence
 ) -> window_decode_results.BackendDecodeOutcome:
     """The outcome of one answer: inconsistent, nonconverged or succeeded."""
     reconstructed = _reconstruct(faults.check, correction)
-    syndrome_bits = _bit_tuple(syndrome)
+    syndrome_bits = window_decode_results.bit_tuple(syndrome)
     is_inconsistent = evidence.decoded_detectors != reconstructed
     if evidence.succeeded and reconstructed != syndrome_bits:
         is_inconsistent = True
     if is_inconsistent:
         return _detailed_outcome(
-            compiled,
             correction,
             evidence,
             _Status.INVALID_CORRECTION,
@@ -493,23 +438,16 @@ def _outcome_of(
         )
     if not evidence.succeeded:
         return _detailed_outcome(
-            compiled,
             correction,
             evidence,
             _Status.NONCONVERGED,
             _Reason.NO_CONVERGED_RELAY_SOLUTION,
         )
-    return _detailed_outcome(
-        compiled, correction, evidence, _Status.SUCCEEDED, None
-    )
+    return _detailed_outcome(correction, evidence, _Status.SUCCEEDED, None)
 
 
 def _detailed_outcome(
-    compiled: _CompiledRelayModel,
-    correction: tuple,
-    evidence: _DetailedEvidence,
-    status,
-    reason,
+    correction: tuple, evidence: _DetailedEvidence, status, reason
 ) -> window_decode_results.BackendDecodeOutcome:
     return window_decode_results.BackendDecodeOutcome(
         status=status,
@@ -522,14 +460,10 @@ def _detailed_outcome(
         posterior_log_likelihood_ratios=(
             evidence.posterior_log_likelihood_ratios
         ),
-        fault_model_fingerprint=compiled.fault_model_fingerprint,
-        decoder_configuration_fingerprint=compiled.configuration_fingerprint,
     )
 
 
-def _invalid_outcome(
-    compiled: _CompiledRelayModel, reason
-) -> window_decode_results.BackendDecodeOutcome:
+def _invalid_outcome(reason) -> window_decode_results.BackendDecodeOutcome:
     return window_decode_results.BackendDecodeOutcome(
         status=_Status.INVALID_CORRECTION,
         failure_reason=reason,
@@ -539,14 +473,10 @@ def _invalid_outcome(
         iterations=None,
         iteration_limit=None,
         posterior_log_likelihood_ratios=None,
-        fault_model_fingerprint=compiled.fault_model_fingerprint,
-        decoder_configuration_fingerprint=compiled.configuration_fingerprint,
     )
 
 
-def _backend_error_outcome(
-    compiled: _CompiledRelayModel,
-) -> window_decode_results.BackendDecodeOutcome:
+def _backend_error_outcome() -> window_decode_results.BackendDecodeOutcome:
     return window_decode_results.BackendDecodeOutcome(
         status=_Status.BACKEND_ERROR,
         failure_reason=_Reason.UPSTREAM_EXCEPTION,
@@ -556,6 +486,4 @@ def _backend_error_outcome(
         iterations=None,
         iteration_limit=None,
         posterior_log_likelihood_ratios=None,
-        fault_model_fingerprint=compiled.fault_model_fingerprint,
-        decoder_configuration_fingerprint=compiled.configuration_fingerprint,
     )

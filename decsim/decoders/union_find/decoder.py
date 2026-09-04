@@ -6,8 +6,9 @@ gap (confidence/cluster.py) and is what the ASIC cycle model prices
 """
 
 import dataclasses
-import weakref
+from typing import Optional
 
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.union_find.window_decoder as window_decoder
 import decsim.decoders.window_decode_results as window_decode_results
 import decsim.detector_error_model.fault_model_contracts as fault_models
@@ -22,7 +23,7 @@ class UnionFindDecodedWindow:
     hard_evidence: window_decoder.UnionFindHardEvidence
 
 
-class UnionFindDecoder:
+class UnionFindDecoder(decoder_module.WindowDecoderBase):
     """Prior-weighted graphlike Union-Find hard decoder.
 
     Faults must be graphlike; detector hyperedges are rejected. Initial
@@ -35,29 +36,32 @@ class UnionFindDecoder:
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
+    fault_representation = fault_models.FaultRepresentation.GRAPHLIKE
 
-    def __init__(self, latency_model, weight_step=0.1) -> None:
-        self.latency_model = latency_model
+    def __init__(
+        self,
+        latency_model: Optional[decoder_module.DecoderBase] = None,
+        weight_step=0.1,
+    ) -> None:
+        decoder_module.WindowDecoderBase.__init__(self, latency_model)
         # absolute natural-log units represented by one weight tick
         self.weight_step = window_decoder.normalized_weight_step(weight_step)
-        self.graph_by_model: dict = {}
 
-    def run_seed_children(self) -> tuple:
-        """The latency model at its semantic decoder-child path."""
-        path = (message.RunSeedPathSegment("field", "latency_model"),)
-        child = message.RunSeedChild(path, self.latency_model)
-        return (child,)
+    def compile(self, faults, model=None) -> window_decoder.UnionFindGraph:
+        """The immutable weighted graph of one placed model."""
+        del model
+        return window_decoder.graph_from_model(
+            faults,
+            location="Union-Find window model",
+            weight_step=self.weight_step,
+        )
 
-    def latency(self, job: message.DecodeJob) -> int:
-        """Timing comes from the configured latency model."""
-        return self.latency_model.latency(job)
-
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
-        """Decode one job without constructing confidence."""
-        if job.dem is None:
-            return message.DecodeResult(job.op_id, job.window_id)
-        decoded = self.decode_with_growth_evidence(job)
-        return decoded.hard_result
+    def decode_window(self, backend, model, faults, syndrome) -> tuple:
+        """The hard correction; unexplained detectors mark it invalid."""
+        del model
+        del faults
+        evidence = window_decoder.decode_graph(backend, syndrome)
+        return evidence.selected_faults, _status_of(evidence)
 
     def decode_with_growth_evidence(
         self, job: message.DecodeJob
@@ -68,18 +72,12 @@ class UnionFindDecoder:
             raise ValueError(
                 "Union-Find growth evidence requires a window error model"
             )
-        faults = model.require_faults(
-            fault_models.FaultRepresentation.GRAPHLIKE
-        )
+        faults = model.require_faults(self.fault_representation)
         syndrome = window_decode_results.payload_syndrome(job)
         window_decode_results.check_syndrome_size(job, syndrome, faults)
-        graph = self.compile(faults, job.label)
+        graph = self.compiled_for(faults, model)
         hard_evidence = window_decoder.decode_graph(graph, syndrome)
-        decode_status = None
-        if hard_evidence.unmatched_detectors:
-            decode_status = (
-                window_decode_results.BackendDecodeStatus.INVALID_CORRECTION
-            )
+        decode_status = _status_of(hard_evidence)
         hard_result = window_decode_results.result_from_selected_faults(
             job,
             model,
@@ -89,28 +87,8 @@ class UnionFindDecoder:
         )
         return UnionFindDecodedWindow(hard_result, hard_evidence)
 
-    def compile(
-        self, faults, job_label: str = ""
-    ) -> window_decoder.UnionFindGraph:
-        """The immutable graph of one placed model, kept while it lives."""
-        model_identity = id(faults)
-        entry = self.graph_by_model.get(model_identity)
-        if entry is not None:
-            reference, graph = entry
-            if reference() is faults:
-                return graph
-        location = "Union-Find window model"
-        if job_label:
-            location = f"{job_label} Union-Find window model"
-        graph = window_decoder.graph_from_model(
-            faults, location=location, weight_step=self.weight_step
-        )
 
-        def discard_dead_model(reference) -> None:
-            current = self.graph_by_model.get(model_identity)
-            if current is not None and current[0] is reference:
-                del self.graph_by_model[model_identity]
-
-        reference = weakref.ref(faults, discard_dead_model)
-        self.graph_by_model[model_identity] = (reference, graph)
-        return graph
+def _status_of(evidence: window_decoder.UnionFindHardEvidence):
+    if evidence.unmatched_detectors:
+        return window_decode_results.BackendDecodeStatus.INVALID_CORRECTION
+    return None

@@ -1,28 +1,30 @@
 """The Tesseract adapter: the referee's decoder as a tier of its own.
 
-Physical fault mechanisms decoded by the official backend, priced by an
-injected latency model.
+Physical fault mechanisms decoded by the official backend; the window
+decoder module is the backend this row compiles.
 """
 
 from typing import Optional
 
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as window_decoder
 import decsim.decoders.window_decode_results as window_decode_results
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
 
-class TesseractDecoder:
-    """Decode physical fault mechanisms with injected simulated latency."""
+class TesseractDecoder(decoder_module.WindowDecoderBase):
+    """Decode physical fault mechanisms with the official Tesseract backend."""
 
     fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
+    fault_representation = fault_models.FaultRepresentation.PHYSICAL
 
     def __init__(
         self,
-        latency_model,
+        latency_model: Optional[decoder_module.DecoderBase] = None,
         configuration: Optional[window_decoder.TesseractDecoderConfig] = None,
     ) -> None:
-        self.latency_model = latency_model
+        decoder_module.WindowDecoderBase.__init__(self, latency_model)
         self.window_decoder = window_decoder.TesseractWindowDecoder(
             configuration
         )
@@ -36,26 +38,14 @@ class TesseractDecoder:
             message.RunSeedChild(decoder_path, self.window_decoder),
         )
 
-    def latency(self, job: message.DecodeJob) -> int:
-        """Only the configured simulated service time."""
-        return self.latency_model.latency(job)
+    def compile(self, faults, model):
+        """The window decoder, which compiles the backend per model itself."""
+        del faults
+        del model
+        return self.window_decoder
 
-    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
-        """The backend's correction, validated, committed best effort or not."""
-        model = job.dem
-        if model is None:
-            return message.DecodeResult(job.op_id, job.window_id)
-        physical_faults = model.require_faults(
-            fault_models.FaultRepresentation.PHYSICAL
-        )
-        syndrome = window_decode_results.payload_syndrome(job)
-        window_decode_results.check_syndrome_size(
-            job, syndrome, physical_faults
-        )
-        outcome = self.window_decoder.decode(model, syndrome)
-        window_decode_results.validate_backend_outcome(
-            outcome, model, physical_faults, syndrome
-        )
-        return window_decode_results.result_from_backend_outcome(
-            job, model, physical_faults, outcome
-        )
+    def decode_window(self, backend, model, faults, syndrome) -> tuple:
+        """One backend call; a produced correction is committed as it stands."""
+        del faults
+        outcome = backend.decode(model, syndrome)
+        return window_decode_results.selected_faults_of(outcome)

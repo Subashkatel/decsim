@@ -48,12 +48,12 @@ def test_warm_up_survives_boundaryless_components():
 def test_cache_entry_leaves_with_its_model():
     decoder = PyMatchingDecoder(PresetLatencyDecoder(0.0))
     faults = _placed([[1, 1, 0], [0, 1, 1]])
-    first = decoder.compile(faults)
-    assert decoder.compile(faults) is first
-    assert len(decoder.matching_by_model) == 1
+    first = decoder.compiled_for(faults, None)
+    assert decoder.compiled_for(faults, None) is first
+    assert len(decoder.compiled_by_model) == 1
     del faults
     gc.collect()
-    assert decoder.matching_by_model == {}
+    assert decoder.compiled_by_model == {}
 
 
 def test_parallel_fault_columns_combine_as_independent_errors():

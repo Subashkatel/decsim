@@ -100,31 +100,29 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         )
         syndrome_array = _checked_syndrome(syndrome, physical_faults)
         if physical_faults.check.shape[1] == 0:
-            return self._empty_model_outcome(
-                model, physical_faults, syndrome_array
+            return window_decode_results.empty_fault_model_outcome(
+                syndrome_array
             )
         try:
-            compiled = self._compiled_decoder(model, physical_faults)
+            backend_decoder = self._compiled_decoder(model, physical_faults)
         except _BackendConstructionError:
-            return self._construction_failed_outcome(model, physical_faults)
+            return _failed_outcome(
+                status=_Status.BACKEND_ERROR, reason=_Reason.UPSTREAM_EXCEPTION
+            )
         try:
             bits = syndrome_array.astype(bool, copy=False)
-            error_indices = compiled.backend_decoder.decode_to_errors(bits)
+            error_indices = backend_decoder.decode_to_errors(bits)
             selected_error_indices = tuple(error_indices)
-            low_confidence = bool(compiled.backend_decoder.low_confidence_flag)
+            low_confidence = bool(backend_decoder.low_confidence_flag)
         except Exception:
             return _failed_outcome(
-                status=_Status.BACKEND_ERROR,
-                reason=_Reason.UPSTREAM_EXCEPTION,
-                physical_faults=physical_faults,
-                configuration_fingerprint=compiled.configuration_fingerprint,
+                status=_Status.BACKEND_ERROR, reason=_Reason.UPSTREAM_EXCEPTION
             )
         return _outcome_of(
             selected_error_indices,
             low_confidence,
             physical_faults,
             syndrome_array,
-            compiled.configuration_fingerprint,
         )
 
     def _entropy_seed(self):
@@ -133,37 +131,6 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
     def _install_run_seed_state(self, prepared_state) -> None:
         self._effective_seed = prepared_state
         self.compiled_by_model.clear()
-
-    def _empty_model_outcome(
-        self, model, physical_faults, syndrome_array
-    ) -> window_decode_results.BackendDecodeOutcome:
-        detector_count = physical_faults.check.shape[0]
-        coordinates = _normalized_coordinates(model, detector_count)
-        if self.configuration.detector_order_method == "coordinate":
-            _validate_coordinate_order(coordinates)
-        configuration_fingerprint = self._configuration_fingerprint(
-            coordinates, self._effective_seed
-        )
-        return window_decode_results.empty_fault_model_outcome(
-            physical_faults,
-            syndrome_array,
-            decoder_configuration_fingerprint=configuration_fingerprint,
-        )
-
-    def _construction_failed_outcome(
-        self, model, physical_faults
-    ) -> window_decode_results.BackendDecodeOutcome:
-        detector_count = physical_faults.check.shape[0]
-        coordinates = _normalized_coordinates(model, detector_count)
-        configuration_fingerprint = self._configuration_fingerprint(
-            coordinates, self._effective_seed
-        )
-        return _failed_outcome(
-            status=_Status.BACKEND_ERROR,
-            reason=_Reason.UPSTREAM_EXCEPTION,
-            physical_faults=physical_faults,
-            configuration_fingerprint=configuration_fingerprint,
-        )
 
     def _resolved_detector_order_seed(self) -> int:
         with self._run_seed_lock:
@@ -193,21 +160,7 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
                 "one TesseractWindowDecoder cannot be shared across threads"
             )
 
-    def _configuration_fingerprint(self, coordinates, seed) -> str:
-        return window_decode_results.decoder_configuration_fingerprint(
-            {
-                "backend": "tesseract_decoder",
-                "configuration": self.configuration,
-                "resolved_detector_order_seed": seed,
-                "detector_coordinates": coordinates,
-                "merge_errors": False,
-                "detector_penalty": 0.0,
-                "create_visualization": False,
-                "sparsify_errors": False,
-            }
-        )
-
-    def _compiled_decoder(self, model, physical_faults) -> "_CompiledTesseract":
+    def _compiled_decoder(self, model, physical_faults):
         """The backend compiled for one model, kept while the model lives."""
         self._claim_worker()
         model_identity = id(model)
@@ -216,21 +169,14 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
             reference, compiled = entry
             if reference() is model:
                 return compiled
-        detector_error_model, coordinates = _build_detector_error_model(
+        detector_error_model, coordinates = detector_error_model_of(
             model, physical_faults
         )
         if self.configuration.detector_order_method == "coordinate":
             _validate_coordinate_order(coordinates)
         seed = self._resolved_detector_order_seed()
-        backend_decoder = _compile_backend(
+        compiled = _compile_backend(
             self.configuration, detector_error_model, seed
-        )
-        configuration_fingerprint = self._configuration_fingerprint(
-            coordinates, seed
-        )
-        compiled = _CompiledTesseract(
-            backend_decoder=backend_decoder,
-            configuration_fingerprint=configuration_fingerprint,
         )
 
         def discard_dead_model(reference) -> None:
@@ -241,12 +187,6 @@ class TesseractWindowDecoder(seeding._AtomicRunSeedConsumer):
         model_reference = weakref.ref(model, discard_dead_model)
         self.compiled_by_model[model_identity] = (model_reference, compiled)
         return compiled
-
-
-@dataclasses.dataclass(frozen=True)
-class _CompiledTesseract:
-    backend_decoder: object
-    configuration_fingerprint: str
 
 
 class _BackendConstructionError(RuntimeError):
@@ -420,7 +360,7 @@ def _validated_prior(fault_index: int, value) -> float:
     return probability
 
 
-def _build_detector_error_model(model, physical_faults) -> tuple:
+def detector_error_model_of(model, physical_faults) -> tuple:
     """(Stim detector error model, coordinates) of one physical view."""
     fault_identity.validate_placed_fault_matrices(
         physical_faults.check,
@@ -533,22 +473,6 @@ def _float_tuple(values) -> tuple:
     return tuple(numbers)
 
 
-def _bit_tuple(array) -> tuple:
-    bits = []
-    for bit in array:
-        bits.append(int(bit))
-    return tuple(bits)
-
-
-def _reconstructed_syndrome(check, correction):
-    check_integers = check.astype(numpy.int64)
-    correction_integers = correction.astype(numpy.int64)
-    product = check_integers @ correction_integers
-    product = numpy.asarray(product)
-    flat = product.ravel()
-    return flat % 2
-
-
 def _correction_from_error_indices(indices, fault_count: int) -> tuple:
     """(correction, None), or (None, why the indices are no correction)."""
     correction = numpy.zeros(fault_count, dtype=numpy.uint8)
@@ -571,7 +495,6 @@ def _outcome_of(
     low_confidence: bool,
     physical_faults,
     syndrome_array,
-    configuration_fingerprint: str,
 ) -> window_decode_results.BackendDecodeOutcome:
     """The outcome of one backend answer: its status and its correction."""
     fault_count = physical_faults.check.shape[1]
@@ -580,20 +503,17 @@ def _outcome_of(
     )
     if invalid_reason is not None:
         return _failed_outcome(
-            status=_Status.INVALID_CORRECTION,
-            reason=invalid_reason,
-            physical_faults=physical_faults,
-            configuration_fingerprint=configuration_fingerprint,
+            status=_Status.INVALID_CORRECTION, reason=invalid_reason
         )
-    reconstructed = _reconstructed_syndrome(physical_faults.check, correction)
-    correction_tuple = _bit_tuple(correction)
-    reconstructed_tuple = _bit_tuple(reconstructed)
+    reconstructed = window_decode_results.parity_product(
+        physical_faults.check, correction
+    )
+    correction_tuple = window_decode_results.bit_tuple(correction)
+    reconstructed_tuple = window_decode_results.bit_tuple(reconstructed)
     if low_confidence:
         return _failed_outcome(
             status=_Status.LOW_CONFIDENCE,
             reason=_Reason.SEARCH_LIMIT_EXHAUSTED,
-            physical_faults=physical_faults,
-            configuration_fingerprint=configuration_fingerprint,
             physical_correction=correction_tuple,
             reconstructed_syndrome=reconstructed_tuple,
         )
@@ -601,28 +521,9 @@ def _outcome_of(
         return _failed_outcome(
             status=_Status.INVALID_CORRECTION,
             reason=_Reason.CORRECTION_DOES_NOT_MATCH_SYNDROME,
-            physical_faults=physical_faults,
-            configuration_fingerprint=configuration_fingerprint,
             physical_correction=correction_tuple,
             reconstructed_syndrome=reconstructed_tuple,
         )
-    return _succeeded_outcome(
-        physical_faults,
-        correction_tuple,
-        reconstructed_tuple,
-        configuration_fingerprint,
-    )
-
-
-def _succeeded_outcome(
-    physical_faults,
-    correction_tuple: tuple,
-    reconstructed_tuple: tuple,
-    configuration_fingerprint: str,
-) -> window_decode_results.BackendDecodeOutcome:
-    model_fingerprint = window_decode_results.fault_model_fingerprint(
-        physical_faults
-    )
     return window_decode_results.BackendDecodeOutcome(
         status=_Status.SUCCEEDED,
         failure_reason=None,
@@ -632,8 +533,6 @@ def _succeeded_outcome(
         iterations=None,
         iteration_limit=None,
         posterior_log_likelihood_ratios=None,
-        fault_model_fingerprint=model_fingerprint,
-        decoder_configuration_fingerprint=configuration_fingerprint,
     )
 
 
@@ -641,14 +540,9 @@ def _failed_outcome(
     *,
     status: window_decode_results.BackendDecodeStatus,
     reason: window_decode_results.BackendFailureReason,
-    physical_faults,
-    configuration_fingerprint: str,
     physical_correction=None,
     reconstructed_syndrome=None,
 ) -> window_decode_results.BackendDecodeOutcome:
-    model_fingerprint = window_decode_results.fault_model_fingerprint(
-        physical_faults
-    )
     return window_decode_results.BackendDecodeOutcome(
         status=status,
         failure_reason=reason,
@@ -658,6 +552,4 @@ def _failed_outcome(
         iterations=None,
         iteration_limit=None,
         posterior_log_likelihood_ratios=None,
-        fault_model_fingerprint=model_fingerprint,
-        decoder_configuration_fingerprint=configuration_fingerprint,
     )

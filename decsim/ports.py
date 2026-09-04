@@ -124,11 +124,18 @@ class DecodeQueue(Protocol):
 class Decoder(Protocol):
     """One decoder: correctness and timing from one object.
 
-    Table rows: pymatching, belief_matching, or a number (a preset
-    latency on the MWPM path). The manager calls latency(job) once at
-    dispatch and decode(job) that many ticks later; latency never
-    changes the job.
+    Table rows: pymatching, unweighted_pymatching, belief_matching,
+    union_find, tesseract, relay_bp, bposd, or a number (a preset
+    latency on the MWPM path). sinter's abstract class with defaults
+    (decsim/decoders/decoder.py, DecoderBase) fills start, cancel,
+    occupancy and pipeline_depth from decode and latency, so a row
+    writes those two. The manager asks occupancy and pipeline_depth at
+    dispatch, calls start once the input has landed, and cancel when the
+    request is withdrawn; a decoder measured on the host clock answers
+    occupancy with None and start decides its own time.
     """
+
+    fault_model_requirement: Any
 
     def decode(self, job: message.DecodeJob) -> message.DecodeResult:
         """The window's correction and its logical observables."""
@@ -136,18 +143,22 @@ class Decoder(Protocol):
     def latency(self, job: message.DecodeJob) -> int:
         """The whole job's service time in ticks, known at dispatch."""
 
-
-@runtime_checkable
-class DecoderUnit(Protocol):
-    """A decoder that walks its own stages as engine events on its unit."""
-
-    def run(
+    def start(
         self,
         job: message.DecodeJob,
         engine,
         on_result: Callable[[Optional[message.DecodeResult]], None],
     ) -> None:
-        """Start the job on the unit; on_result runs once at its output."""
+        """Run the job on the unit; on_result runs once at its output."""
+
+    def cancel(self, job: message.DecodeJob) -> None:
+        """Stop a started job; on_result never runs for it."""
+
+    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+        """Ticks the unit's compute is held from the start; None if measured."""
+
+    def pipeline_depth(self, job: message.DecodeJob) -> int:
+        """Decodes that may be in flight on one unit; one is no pipeline."""
 
 
 @runtime_checkable

@@ -11,6 +11,11 @@ loop behaves identically because the committed answer never changes.
 import numpy
 import pytest
 from scipy.sparse import csr_matrix
+from test_decoder_units import write_config
+from test_switching_mode import (
+    measured_shot,
+    switching_config,
+)
 
 from decsim.confidence.complementary import (
     COMPLEMENTARY_GAP_SOURCE,
@@ -18,20 +23,13 @@ from decsim.confidence.complementary import (
     PairedGapEvaluation,
 )
 from decsim.confidence.decoder import ParallelGapDecoder, SoftOutputDecoder
+from decsim.decoders.decoder import DecoderBase
 from decsim.detector_error_model.fault_model_contracts import (
     GRAPHLIKE_FAULT_MODEL_REQUIRED,
 )
-from decsim.message import DecodeJob, DecodeResult, SoftOutput
-
 from decsim.machine import build_decoder_unit
+from decsim.message import DecodeJob, DecodeResult, SoftOutput
 from experiments.experiment_config import load_experiment
-
-from test_decoder_units import write_config
-from test_switching_mode import (
-    NEAR_THRESHOLD_P,
-    measured_shot,
-    switching_config,
-)
 
 PARITY_DISTANCE = 5
 PARITY_P = 0.008
@@ -41,17 +39,20 @@ PARITY_SEED = 11
 
 def surface_code_metric():
     import stim
+
     circuit = stim.Circuit.generated(
         "surface_code:rotated_memory_z",
         distance=PARITY_DISTANCE,
         rounds=PARITY_DISTANCE,
         after_clifford_depolarization=PARITY_P,
         before_measure_flip_probability=PARITY_P,
-        after_reset_flip_probability=PARITY_P)
+        after_reset_flip_probability=PARITY_P,
+    )
     model = circuit.detector_error_model(decompose_errors=True)
     sampler = circuit.compile_detector_sampler(seed=PARITY_SEED)
-    detection_events, _ = sampler.sample(PARITY_SHOTS,
-                                         separate_observables=True)
+    detection_events, _ = sampler.sample(
+        PARITY_SHOTS, separate_observables=True
+    )
     return ComplementaryGapMetric.from_dem(model), detection_events
 
 
@@ -60,27 +61,25 @@ def test_paired_evaluate_matches_serial_evaluate_shot_for_shot():
     for shot_events in detection_events:
         serial = metric.evaluate(shot_events)
         paired = metric.paired_evaluate(shot_events)
-        assert paired.soft_output.gap == pytest.approx(serial.gap,
-                                                       abs=1e-9)
-        assert paired.soft_output.w_min == pytest.approx(serial.w_min,
-                                                         abs=1e-9)
+        assert paired.soft_output.gap == pytest.approx(serial.gap, abs=1e-9)
+        assert paired.soft_output.w_min == pytest.approx(serial.w_min, abs=1e-9)
         assert len(paired.forced_solve_ns) == 2
         assert all(t > 0 for t in paired.forced_solve_ns)
 
 
 def test_the_forced_pair_reproduces_the_unconstrained_solve():
-    """min over the forced classes IS the plain decode: same minimum
-    weight, and the winning class is the plain correction's class
-    whenever the gap can break the tie."""
+    # Min over the forced classes IS the plain decode: same minimum
+    # weight, and the winning class is the plain correction's class
+    # whenever the gap can break the tie.
     metric, detection_events = surface_code_metric()
     for shot_events in detection_events:
         bits = numpy.asarray(shot_events, dtype=numpy.uint8).ravel()
-        correction, plain_weight = metric._base.decode(
-            bits, return_weight=True)
+        correction, plain_weight = metric._base.decode(bits, return_weight=True)
         plain_class = int(((metric.obs @ correction) % 2)[0])
         paired = metric.paired_evaluate(shot_events)
         assert paired.soft_output.w_min == pytest.approx(
-            float(plain_weight), abs=1e-9)
+            float(plain_weight), abs=1e-9
+        )
         if paired.soft_output.gap > 1e-9:
             assert paired.predicted_class == plain_class
 
@@ -91,35 +90,44 @@ class OneObservableModel:
     class _Faults:
         observables = csr_matrix(numpy.array([[1]], dtype=numpy.uint8))
 
-    def require_faults(self, representation):
+    def require_faults(self, _representation):
         return self._Faults()
 
 
-class StubWeakDecoder:
+class StubWeakDecoder(DecoderBase):
+    """A measured row that answers one prediction in no time at all."""
+
     fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
-    measures_wall_clock = True
 
     def __init__(self, prediction: int):
         self.prediction = prediction
-        self.last_decode_ns = 0
 
-    def latency(self, job) -> int:
+    def latency(self, _job) -> int:
         return 1
 
+    def occupancy(self, _job):
+        return None
+
     def decode(self, job) -> DecodeResult:
-        return DecodeResult(op_id=job.op_id, window_id=job.window_id,
-                            logical_observables=(self.prediction,))
+        return DecodeResult(
+            op_id=job.op_id,
+            window_id=job.window_id,
+            logical_observables=(self.prediction,),
+        )
+
+    def decode_timed(self, job):
+        return self.decode(job), 0
 
 
 class StubPairedMetric:
     def __init__(self, predicted_class: int, gap: float, solve_ns: tuple):
         self.evaluation = PairedGapEvaluation(
-            soft_output=SoftOutput(gap=gap,
-                                   source=COMPLEMENTARY_GAP_SOURCE),
+            soft_output=SoftOutput(gap=gap, source=COMPLEMENTARY_GAP_SOURCE),
             predicted_class=predicted_class,
-            forced_solve_ns=solve_ns)
+            forced_solve_ns=solve_ns,
+        )
 
-    def paired_evaluate(self, syndrome) -> PairedGapEvaluation:
+    def paired_evaluate(self, _syndrome) -> PairedGapEvaluation:
         return self.evaluation
 
 
@@ -130,36 +138,36 @@ class StubMetricFactory:
     def __init__(self, metric: StubPairedMetric):
         self.metric = metric
 
-    def from_window_model(self, model) -> StubPairedMetric:
+    def from_window_model(self, _model) -> StubPairedMetric:
         return self.metric
 
 
 def paired_job() -> DecodeJob:
-    job = DecodeJob(op_id=0, window_id=0, n_rounds=1,
-                    dem=OneObservableModel())
+    job = DecodeJob(op_id=0, window_id=0, n_rounds=1, dem=OneObservableModel())
     job.payloads = []
     return job
 
 
 def test_pair_timing_charges_the_slower_core_plus_the_join():
-    metric = StubPairedMetric(predicted_class=0, gap=4.0,
-                              solve_ns=(5_000_000, 3_000_000))
-    wrapper = ParallelGapDecoder(StubWeakDecoder(prediction=0),
-                                 StubMetricFactory(metric),
-                                 combine_ns=250)
-    result = wrapper.decode(paired_job())
-    assert wrapper.last_decode_ns == 5_000_000 + 250
+    metric = StubPairedMetric(
+        predicted_class=0, gap=4.0, solve_ns=(5_000_000, 3_000_000)
+    )
+    wrapper = ParallelGapDecoder(
+        StubWeakDecoder(prediction=0), StubMetricFactory(metric), combine_ns=250
+    )
+    result, elapsed_ns = wrapper.decode_timed(paired_job())
+    assert elapsed_ns == 5_000_000 + 250
     assert result.soft_output.gap == 4.0
 
 
 def test_the_committed_result_is_the_base_decoders_result():
-    """The pair supplies soft output only: correction and observables
-    stay the base decode's, whatever class the pair preferred (the pair
-    speaks about the whole window, the result about the owned slice)."""
-    metric = StubPairedMetric(predicted_class=1, gap=4.0,
-                              solve_ns=(1, 1))
-    wrapper = ParallelGapDecoder(StubWeakDecoder(prediction=0),
-                                 StubMetricFactory(metric))
+    # The pair supplies soft output only: correction and observables
+    # stay the base decode's, whatever class the pair preferred (the pair
+    # speaks about the whole window, the result about the owned slice).
+    metric = StubPairedMetric(predicted_class=1, gap=4.0, solve_ns=(1, 1))
+    wrapper = ParallelGapDecoder(
+        StubWeakDecoder(prediction=0), StubMetricFactory(metric)
+    )
     result = wrapper.decode(paired_job())
     assert result.logical_observables == (0,)
     assert result.soft_output.gap == 4.0
@@ -167,6 +175,7 @@ def test_the_committed_result_is_the_base_decoders_result():
 
 def pair_config(tmp_path, gap_threshold_db: float):
     import yaml
+
     path = switching_config(tmp_path, gap_threshold_db)
     raw = yaml.safe_load(path.read_text())
     raw["escalation"]["gap_computation"] = "parallel_pair"
@@ -188,7 +197,12 @@ def test_the_pair_closed_loop_matches_the_serial_closed_loop(tmp_path):
     for seed in range(4):
         serial_shot = measured_shot(serial, seed)
         paired_shot = measured_shot(paired, seed)
-        assert (paired_shot.logical_failure
-                == serial_shot.logical_failure)
-        assert (paired_shot.link_totals["weak_decoder_to_strong_decoder"]["transfers"]
-                == serial_shot.link_totals["weak_decoder_to_strong_decoder"]["transfers"])
+        assert paired_shot.logical_failure == serial_shot.logical_failure
+        assert (
+            paired_shot.link_totals["weak_decoder_to_strong_decoder"][
+                "transfers"
+            ]
+            == serial_shot.link_totals["weak_decoder_to_strong_decoder"][
+                "transfers"
+            ]
+        )

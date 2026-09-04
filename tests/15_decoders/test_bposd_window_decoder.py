@@ -3,7 +3,7 @@
 import numpy as np
 import stim
 
-from decsim.decoders.bposd.window_decoder import bposd_window_decoder
+from decsim.decoders.bposd.decoder import BPOSDDecoder
 from decsim.detector_error_model.fault_model_contracts import (
     PHYSICAL_FAULT_MODEL_REQUIRED,
     FaultRepresentation,
@@ -34,9 +34,11 @@ def test_osd_order_above_window_rank_does_not_overrun():
         fault_model_requirement=PHYSICAL_FAULT_MODEL_REQUIRED,
     )
     faults = model.require_faults(FaultRepresentation.PHYSICAL)
-    decode = bposd_window_decoder(max_iterations=5, osd_order=60)
+    decoder = BPOSDDecoder(max_iterations=5, osd_order=60)
+    backend = decoder.compile(faults, model)
     syndrome = np.zeros(faults.check.shape[0], dtype=np.uint8)
     syndrome[0] = 1
-    correction = np.asarray(decode(model, syndrome), dtype=np.uint8)
+    selected, _status = decoder.decode_window(backend, model, faults, syndrome)
+    correction = np.asarray(selected, dtype=np.uint8)
     assert correction.shape == (faults.check.shape[1],)
     assert np.array_equal((faults.check @ correction) % 2, syndrome)

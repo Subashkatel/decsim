@@ -8,34 +8,31 @@ models are built whole-circuit, with memory linear in circuit length
 (verified through d=9 x 1000 rounds).
 """
 
+from typing import Optional
+
 import numpy
 
+import decsim.decoders.decoder as decoder_module
 import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
 import decsim.decoders.window_decode_results as window_decode_results
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
 
-class TesseractCheckedDecoder:
-    """A decoder whose every result Tesseract re-decodes and checks."""
+class TesseractCheckedDecoder(decoder_module.DecoderBase):
+    """A decoder whose every result Tesseract re-decodes and checks.
 
-    def __init__(self, inner):
+    Timing is the inner decoder's in every respect; the referee's own
+    call is never charged.
+    """
+
+    def __init__(self, inner: decoder_module.DecoderBase):
         self.inner = inner
         self.referee = tesseract_window_decoder.TesseractWindowDecoder()
         # The referee reads the physical view, the tier the graphlike one.
         self.fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
         self.windows_checked = 0
         self.window_disagreements = 0
-
-    @property
-    def measures_wall_clock(self) -> bool:
-        """Whether the inner decoder prices its measured wall clock."""
-        return getattr(self.inner, "measures_wall_clock", False)
-
-    @property
-    def last_decode_ns(self):
-        """The inner decoder's last measured decode, in nanoseconds."""
-        return self.inner.last_decode_ns
 
     def run_seed_children(self) -> tuple:
         """The referee under its own path, the inner decoder's under inner."""
@@ -55,9 +52,32 @@ class TesseractCheckedDecoder:
         """The inner decoder's latency; the referee is never priced."""
         return self.inner.latency(job)
 
+    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
+        """The inner decoder's occupancy; None when it is measured."""
+        return self.inner.occupancy(job)
+
+    def pipeline_depth(self, job: message.DecodeJob) -> int:
+        """The inner decoder's pipeline depth."""
+        return self.inner.pipeline_depth(job)
+
+    def cancel(self, job: message.DecodeJob) -> None:
+        """Stop the inner decoder's job."""
+        self.inner.cancel(job)
+
     def decode(self, job: message.DecodeJob) -> message.DecodeResult:
         """The inner result, after the referee has checked it."""
         result = self.inner.decode(job)
+        return self._checked(job, result)
+
+    def decode_timed(self, job: message.DecodeJob) -> tuple:
+        """The inner decoder's measured call; the referee's is untimed."""
+        result, elapsed_ns = self.inner.decode_timed(job)
+        checked = self._checked(job, result)
+        return checked, elapsed_ns
+
+    def _checked(
+        self, job: message.DecodeJob, result: message.DecodeResult
+    ) -> message.DecodeResult:
         model = job.dem
         if model is None or result.logical_observables is None:
             return result

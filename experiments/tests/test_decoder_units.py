@@ -14,10 +14,21 @@ from pathlib import Path
 import pytest
 import yaml
 
+import decsim.collect as collect
 from experiments.experiment_config import load_experiment
 from experiments.measure_shot import measure_shot
 
 CONFIGS_DIR = Path(__file__).parent.parent / "configs"
+
+
+def measure_point_shot(config, *, physical_error_probability, distance,
+                       round_period_us, seed):
+    """One seeded shot at one sweep point, collected and measured."""
+    task = config.point_task(
+        physical_error_probability=physical_error_probability,
+        distance=distance, round_period_us=round_period_us, shots=seed + 1)
+    shot = collect.run_shot(task, seed)
+    return measure_shot(shot)
 
 # A complete runnable config, small enough for a functional test. Tests
 # override keys through the `overrides` dict (top-level replacement, the
@@ -167,7 +178,7 @@ def test_weak_unit_loop_matches_direct_pymatching(tmp_path):
                              "algorithm": "pymatching"}}})
     config = load_experiment(config_path)
     for seed in range(3):
-        measurement = measure_shot(config, physical_error_probability=0.005,
+        measurement = measure_point_shot(config, physical_error_probability=0.005,
                                    distance=3, round_period_us=1.0, seed=seed)
         assert measurement.algorithm == "pymatching"
         assert measurement.windows > 0
@@ -179,7 +190,7 @@ def test_strong_unit_runs_belief_matching(tmp_path):
         "decode_path": "strong_only",
         "decoder": strong_unit("belief_matching")})
     config = load_experiment(config_path)
-    measurement = measure_shot(config, physical_error_probability=0.001,
+    measurement = measure_point_shot(config, physical_error_probability=0.001,
                                distance=3, round_period_us=1.0, seed=0)
     assert measurement.algorithm == "belief_matching"
     assert measurement.windows > 0
@@ -190,7 +201,7 @@ def test_report_rows_carry_the_algorithm_column(tmp_path):
     from experiments.sweep_report import link_rows, summarize
     config_path = write_config(tmp_path, {})
     config = load_experiment(config_path)
-    measurements = [measure_shot(config, physical_error_probability=0.001,
+    measurements = [measure_point_shot(config, physical_error_probability=0.001,
                                  distance=3, round_period_us=1.0, seed=seed)
                     for seed in range(2)]
     rows = summarize(measurements)
@@ -212,7 +223,7 @@ def test_rounds_per_shot_scales_with_the_swept_distance(tmp_path):
     assert rounds_per_shot.rounds_for(3) == 30
     assert rounds_per_shot.rounds_for(5) == 50
     assert str(rounds_per_shot) == "10d"
-    measurement = measure_shot(config, physical_error_probability=0.001,
+    measurement = measure_point_shot(config, physical_error_probability=0.001,
                                distance=5, round_period_us=1.0, seed=0)
     assert measurement.distance == 5
     assert measurement.windows > 5

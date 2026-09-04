@@ -29,9 +29,10 @@ def resolve_gap_threshold_nats(config, *, physical_error_probability, distance):
 
 
 def online_threshold_calibrator(config, *, physical_error_probability, distance):
-    return config.online_calibrator(
+    task = config.point_task(
         physical_error_probability=physical_error_probability,
-        distance=distance)
+        distance=distance, round_period_us=1.0, shots=1)
+    return task.threshold_calibrator
 
 
 def source_config(tmp_path, switching_card: dict, shots: int = 1):

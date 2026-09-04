@@ -1,9 +1,9 @@
-"""One machine at one sweep point -> one shot's numbers.
+"""One collected shot -> one shot's numbers. Nothing is built here.
 
 A shot is one circuit through the whole reaction path. `measure_shot`
-builds the machine at the point, runs it and reads every latency point
-in POINTS off the run's own records: the link ledger, the window stamps,
-the decoder unit's stage records and the Pauli frame. The input and
+reads every latency point in POINTS off the run's own records: the link
+ledger, the window stamps, the decoder unit's stage records and the
+Pauli frame. The input and
 output transfers are named by role, not by wire, because the escalation
 kind picks the wire: weak_baseline moves windows on
 weak_buffer_to_weak_decoder and results on weak_decoder_to_frame,
@@ -13,15 +13,14 @@ strong_decoder_to_frame.
 
 import dataclasses
 import statistics
-import time
 
 import numpy
 import pymatching
 import stim
 
+import decsim.collect as collect
 import decsim.config as config_module
 import decsim.machine as machine_module
-import experiments.experiment_config as experiment_config
 
 # Latency points, in path order, in microseconds per window unless noted.
 POINTS = (
@@ -91,55 +90,39 @@ class ShotMeasurement:
     sim_wall_seconds: float
 
 
-def measure_shot(
-    config: experiment_config.ExperimentConfig,
-    *,
-    physical_error_probability: float,
-    distance: int,
-    round_period_us: float,
-    seed: int,
-    run_dir=None,
-    threshold_calibrator=None,
-) -> ShotMeasurement:
-    """Run one shot and read its numbers off the completed run.
+def measure_shot(shot: collect.Shot, run_dir=None) -> ShotMeasurement:
+    """Read one collected shot's numbers off its machine and result.
 
     run_dir receives the trace file when trace: file|both is on; None
-    writes nothing beyond the returned measurement. threshold_calibrator
-    is the sweep point's online controller (threshold_source online):
-    one instance across the point's shots.
+    writes nothing beyond the returned measurement.
     """
-    settings = config.point_settings(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-        round_period_us=round_period_us,
-        threshold_calibrator=threshold_calibrator,
-    )
-    wall_start = time.perf_counter()
-    machine = machine_module.Machine.build(settings, seed)
-    result = machine.run()
-    wall_end = time.perf_counter()
-    wall_seconds = wall_end - wall_start
-    if result.terminal_status != "complete":
-        raise RuntimeError(f"run did not complete: {result.terminal_status}")
+    settings = shot.task.settings
+    physical_error_probability = settings.workload.physical_error_probability
+    distance = settings.qpu.distance
+    round_period_us = settings.qpu.round_period_microseconds
     if run_dir is not None and settings.observation.writes_trace:
         label = _shot_label(
-            config, physical_error_probability, distance, round_period_us, seed
+            settings,
+            physical_error_probability,
+            distance,
+            round_period_us,
+            shot.seed,
         )
-        _write_trace(machine, run_dir, label)
+        _write_trace(shot.machine, run_dir, label)
     return _measurement(
-        config,
-        machine,
-        result,
+        settings,
+        shot.machine,
+        shot.result,
         physical_error_probability=physical_error_probability,
         distance=distance,
         round_period_us=round_period_us,
-        seed=seed,
-        wall_seconds=wall_seconds,
+        seed=shot.seed,
+        wall_seconds=shot.wall_seconds,
     )
 
 
 def _measurement(
-    config: experiment_config.ExperimentConfig,
+    settings: machine_module.MachineSettings,
     machine: machine_module.Machine,
     result: machine_module.RunResult,
     *,
@@ -150,7 +133,7 @@ def _measurement(
     wall_seconds: float,
 ) -> ShotMeasurement:
     """Read every number of one completed shot off its records."""
-    escalation_kind = config.settings.escalation.kind
+    escalation_kind = settings.escalation.kind
     samples = collect_samples(machine, result, escalation_kind)
     circuit = machine.operations[0].circuit
     reference_prediction = direct_prediction(machine, result, circuit)
@@ -158,13 +141,13 @@ def _measurement(
     truth = tuple(operation_result.observable_truth)
     loop_prediction = tuple(operation_result.logical_observables)
     decoded_windows = len(samples["service"])
-    rounds_per_shot = config.settings.workload.rounds_per_shot
+    rounds_per_shot = settings.workload.rounds_per_shot
     rounds_this_shot = rounds_per_shot.rounds_for(distance)
     span_us = _decoded_span_microseconds(machine)
     queue_depths = []
     for _tick, depth in machine.decoder_manager.queue_log:
         queue_depths.append(depth)
-    load = chain_load(samples, config, distance, round_period_us)
+    load = chain_load(samples, settings, distance, round_period_us)
     algorithm = machine.active_decoder.decoder
     windows_checked = getattr(algorithm, "windows_checked", 0)
     disagreements = getattr(algorithm, "window_disagreements", 0)
@@ -180,7 +163,7 @@ def _measurement(
         physical_error_probability=physical_error_probability,
         distance=distance,
         round_period_us=round_period_us,
-        algorithm=config.active_decoder.kind,
+        algorithm=active_decoder_kind(settings),
         seed=seed,
         windows=decoded_windows,
         logical_failure=is_logical_failure,
@@ -382,7 +365,7 @@ def direct_prediction(
 
 def chain_load(
     samples: dict,
-    config: experiment_config.ExperimentConfig,
+    settings: machine_module.MachineSettings,
     distance: int,
     round_period_us: float,
 ) -> float:
@@ -394,7 +377,7 @@ def chain_load(
     """
     service_us = _mean_or_zero(samples["service"])
     handoff_us = _mean_or_zero(samples["dd_per_window"])
-    commit_rounds = config.settings.windows.commit_rounds
+    commit_rounds = settings.windows.commit_rounds
     if commit_rounds is None:
         commit_rounds = distance
     inter_arrival_us = commit_rounds * round_period_us
@@ -458,14 +441,21 @@ def _maxes(samples: dict) -> dict:
     return maxes
 
 
+def active_decoder_kind(settings: machine_module.MachineSettings):
+    """The kind of the tier that decodes the plan's windows."""
+    tier = settings.escalation.decodes_on
+    tier_settings = getattr(settings, f"{tier}_decoder")
+    return tier_settings.kind
+
+
 def _shot_label(
-    config: experiment_config.ExperimentConfig,
+    settings: machine_module.MachineSettings,
     physical_error_probability: float,
     distance: int,
     round_period_us: float,
     seed: int,
 ) -> str:
-    algorithm = config.active_decoder.kind
+    algorithm = active_decoder_kind(settings)
     return (
         f"p{physical_error_probability:g}_d{distance}_algo{algorithm}"
         f"_round{round_period_us:g}us_seed{seed}"

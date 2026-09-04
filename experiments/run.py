@@ -1,15 +1,15 @@
 """Run one experiment: python -m experiments.run configs/<name>.yaml.
 
-The config is the experiment; this module only orchestrates. It runs every
-shot of every sweep point, summarizes one row per point, and writes
-sweep.csv, links.csv and the figures to experiments/results/<name>/.
-Rerunning the same config reproduces the same rows (seeds 0..shots-1 per
-point; only the wall-clock column varies).
+The config is the experiment; this module only orchestrates. It collects
+every shot of every sweep point (decsim.collect), summarizes one row per
+point, and writes sweep.csv, links.csv and the figures to
+experiments/results/<name>/. Rerunning the same config reproduces the
+same rows (seeds 0..shots-1 per point; only the wall-clock column
+varies).
 """
 
 import csv
 import datetime
-import itertools
 import json
 import math
 import os
@@ -24,6 +24,7 @@ import numpy
 import pymatching
 import stim
 
+import decsim.collect as collect
 import experiments.experiment_config as experiment_config
 import experiments.measure_shot as measure_shot
 import experiments.plots as plots
@@ -124,7 +125,7 @@ def write_manifest(
     Sampling is deterministic from (stim version, circuit, distance,
     rounds, p, seed), so the manifest plus seeds are the raw data.
     """
-    json_safe_config = experiment_config.as_json_value(config)
+    json_safe_config = collect.json_value(config)
     config_files = []
     for path in config.config_files:
         config_files.append(str(path))
@@ -151,29 +152,20 @@ def write_manifest(
 def run_sweep(
     config: experiment_config.ExperimentConfig, run_dir: Optional[Path] = None
 ) -> list:
-    """Every shot of every point of the config's sweep blocks.
+    """Every shot of every point of the config's sweep blocks, measured.
 
-    A point and seed named by more than one block runs once.
+    A point named by more than one block runs once; run_dir receives
+    the trace files and the online threshold records.
     """
-    measurements = {}
-    for block in config.sweep:
-        points = itertools.product(
-            block.physical_error_probabilities,
-            block.distances,
-            block.round_periods_microseconds,
-        )
-        for physical_error_probability, distance, round_period_us in points:
-            _measure_point(
-                config,
-                measurements,
-                run_dir,
-                physical_error_probability=physical_error_probability,
-                distance=distance,
-                round_period_us=round_period_us,
-                shots=block.shots,
-            )
-    ordered = measurements.values()
-    return list(ordered)
+    tasks = config.tasks()
+
+    def measure(shot: collect.Shot) -> measure_shot.ShotMeasurement:
+        return measure_shot.measure_shot(shot, run_dir)
+
+    def on_task_done(task: collect.Task) -> None:
+        _report_point_done(task, run_dir)
+
+    return collect.collect(tasks, measure, on_task_done)
 
 
 def run_experiment(config_path) -> tuple:
@@ -220,42 +212,20 @@ def main(argv) -> None:
     print(f"\nevery column: {run_dir}/sweep.csv")
 
 
-def _measure_point(
-    config: experiment_config.ExperimentConfig,
-    measurements: dict,
-    run_dir: Optional[Path],
-    *,
-    physical_error_probability: float,
-    distance: int,
-    round_period_us: float,
-    shots: int,
-) -> None:
-    """Every seed of one sweep point, sharing one online calibrator."""
-    threshold_calibrator = config.online_calibrator(
-        physical_error_probability=physical_error_probability,
-        distance=distance,
-    )
-    for seed in range(shots):
-        shot_key = (physical_error_probability, distance, round_period_us, seed)
-        if shot_key in measurements:
-            continue
-        measurements[shot_key] = measure_shot.measure_shot(
-            config,
-            distance=distance,
-            seed=seed,
-            physical_error_probability=physical_error_probability,
-            round_period_us=round_period_us,
-            run_dir=run_dir,
-            threshold_calibrator=threshold_calibrator,
-        )
+def _report_point_done(task: collect.Task, run_dir: Optional[Path]) -> None:
+    """The progress line, and the online threshold's record when it ran."""
+    point = task.metadata
+    physical_error_probability = point["physical_error_probability"]
+    distance = point["distance"]
+    round_period_us = point["round_period_us"]
     print(
         f"p {physical_error_probability}, d {distance}, "
-        f"round period {round_period_us} us: {shots} shots done",
+        f"round period {round_period_us} us: {task.shots} shots done",
         file=sys.stderr,
     )
-    if threshold_calibrator is not None:
+    if task.threshold_calibrator is not None:
         _write_online_threshold_record(
-            threshold_calibrator,
+            task.threshold_calibrator,
             run_dir,
             physical_error_probability=physical_error_probability,
             distance=distance,

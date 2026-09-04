@@ -1,76 +1,61 @@
-"""Runtime adapter for the official Tesseract decoder."""
+"""The Tesseract adapter: the referee's decoder as a tier of its own.
 
-from __future__ import annotations
+Physical fault mechanisms decoded by the official backend, priced by an
+injected latency model.
+"""
 
 from typing import Optional
 
-from ..window_decode_results import (
-    check_syndrome_size,
-    payload_syndrome,
-    result_from_backend_outcome,
-    validate_backend_outcome,
-)
-from ...detector_error_model.fault_model_contracts import (
-    FaultRepresentation,
-    PHYSICAL_FAULT_MODEL_REQUIRED,
-)
-from ...message import (
-    DecodeJob,
-    DecodeResult,
-    RunSeedChild,
-    RunSeedPathSegment,
-)
-from .window_decoder import (
-    TesseractDecoderConfig,
-    TesseractWindowDecoder,
-)
+import decsim.decoders.tesseract.window_decoder as window_decoder
+import decsim.decoders.window_decode_results as window_decode_results
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.message as message
 
 
 class TesseractDecoder:
     """Decode physical fault mechanisms with injected simulated latency."""
 
-    fault_model_requirement = PHYSICAL_FAULT_MODEL_REQUIRED
+    fault_model_requirement = fault_models.PHYSICAL_FAULT_MODEL_REQUIRED
 
     def __init__(
         self,
         latency_model,
-        configuration: Optional[TesseractDecoderConfig] = None,
+        configuration: Optional[window_decoder.TesseractDecoderConfig] = None,
     ) -> None:
         self.latency_model = latency_model
-        self.window_decoder = TesseractWindowDecoder(configuration)
-
-    def run_seed_children(self):
-        """Expose timing and detector-order seed owners by semantic role."""
-        return (
-            RunSeedChild(
-                (RunSeedPathSegment("field", "latency_model"),),
-                self.latency_model,
-            ),
-            RunSeedChild(
-                (RunSeedPathSegment("field", "window_decoder"),),
-                self.window_decoder,
-            ),
+        self.window_decoder = window_decoder.TesseractWindowDecoder(
+            configuration
         )
 
-    def latency(self, job: DecodeJob) -> int:
-        """Return only the configured simulated service time."""
+    def run_seed_children(self) -> tuple:
+        """The timing and detector-order seed owners by semantic role."""
+        latency_path = (message.RunSeedPathSegment("field", "latency_model"),)
+        decoder_path = (message.RunSeedPathSegment("field", "window_decoder"),)
+        return (
+            message.RunSeedChild(latency_path, self.latency_model),
+            message.RunSeedChild(decoder_path, self.window_decoder),
+        )
+
+    def latency(self, job: message.DecodeJob) -> int:
+        """Only the configured simulated service time."""
         return self.latency_model.latency(job)
 
-    def decode(self, job: DecodeJob) -> DecodeResult:
-        """Commit the backend's correction after validation, best effort or not."""
+    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+        """The backend's correction, validated, committed best effort or not."""
         model = job.dem
         if model is None:
-            return DecodeResult(job.op_id, job.window_id)
+            return message.DecodeResult(job.op_id, job.window_id)
         physical_faults = model.require_faults(
-            FaultRepresentation.PHYSICAL
+            fault_models.FaultRepresentation.PHYSICAL
         )
-        syndrome = payload_syndrome(job)
-        check_syndrome_size(job, syndrome, physical_faults)
+        syndrome = window_decode_results.payload_syndrome(job)
+        window_decode_results.check_syndrome_size(
+            job, syndrome, physical_faults
+        )
         outcome = self.window_decoder.decode(model, syndrome)
-        validate_backend_outcome(
-            outcome,
-            model,
-            physical_faults,
-            syndrome,
+        window_decode_results.validate_backend_outcome(
+            outcome, model, physical_faults, syndrome
         )
-        return result_from_backend_outcome(job, model, physical_faults, outcome)
+        return window_decode_results.result_from_backend_outcome(
+            job, model, physical_faults, outcome
+        )

@@ -10,7 +10,7 @@ models are built whole-circuit, with memory linear in circuit length
 
 import numpy
 
-import decsim.decoders.tesseract as tesseract
+import decsim.decoders.tesseract.window_decoder as tesseract_window_decoder
 import decsim.decoders.window_decode_results as window_decode_results
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
@@ -21,7 +21,7 @@ class TesseractCheckedDecoder:
 
     def __init__(self, inner):
         self.inner = inner
-        self.referee = tesseract.TesseractWindowDecoder()
+        self.referee = tesseract_window_decoder.TesseractWindowDecoder()
         # The referee reads the physical view, the tier the graphlike one.
         self.fault_model_requirement = fault_models.LINKED_FAULT_MODELS_REQUIRED
         self.windows_checked = 0

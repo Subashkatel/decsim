@@ -23,39 +23,48 @@ import decsim.message as message
 
 # rows 0..3 and 4..7 are two boundaryless 4-cycles, rows 8..11 a chain
 # with boundary edges at both ends
-CHECK = [
-    [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0],
-    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
-]
+CHECK = numpy.asarray(
+    [
+        [1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0],
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1],
+    ],
+    dtype=numpy.uint8,
+)
+DETECTOR_COUNT, FAULT_COUNT = CHECK.shape
+GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 
 
 def _model():
-    check = numpy.asarray(CHECK, dtype=numpy.uint8)
-    column_count = check.shape[1]
+    priors = numpy.full(FAULT_COUNT, 0.1)
+    observables = numpy.zeros((1, FAULT_COUNT), dtype=numpy.uint8)
+    owned = numpy.ones(FAULT_COUNT, dtype=bool)
     placed = fault_models.PlacedFaultModel(
-        representation=fault_models.FaultRepresentation.GRAPHLIKE,
-        check=check,
-        priors=numpy.full(column_count, 0.1),
-        observables=numpy.zeros((1, column_count), dtype=numpy.uint8),
-        owned=numpy.ones(column_count, dtype=bool),
-        source_fault_ids=tuple(range(column_count)),
+        representation=GRAPHLIKE,
+        check=CHECK,
+        priors=priors,
+        observables=observables,
+        owned=owned,
+        source_fault_ids=tuple(range(FAULT_COUNT)),
         boundary_flips={},
     )
-    rows = tuple(range(check.shape[0]))
+    rows = tuple(range(DETECTOR_COUNT))
+    defect_positions = {}
+    for row in rows:
+        defect_positions[row] = (1, row)
     return fault_models.WindowErrorModel(
         detector_ids=rows,
         detector_coordinates=None,
-        defect_positions={row: (1, row) for row in rows},
+        defect_positions=defect_positions,
         graphlike_faults=placed,
         physical_faults=None,
         physical_to_graphlike_detector_projection=None,
@@ -63,7 +72,10 @@ def _model():
 
 
 def _job(model, syndrome) -> message.DecodeJob:
-    bits = tuple(int(bit) for bit in syndrome)
+    bits = []
+    for bit in syndrome:
+        bits.append(int(bit))
+    bits = tuple(bits)
     payload = message.SyndromePayload(
         operation_id=1,
         patch_id=0,
@@ -85,48 +97,61 @@ def _job(model, syndrome) -> message.DecodeJob:
 
 
 def _referee():
-    check = scipy.sparse.csr_matrix(numpy.asarray(CHECK, dtype=numpy.uint8))
+    check = scipy.sparse.csr_matrix(CHECK)
     return LdpcUnionFind(check, uf_method="peeling")
+
+
+def _reproduces(correction, syndrome) -> bool:
+    reproduced = CHECK @ correction
+    reproduced = reproduced % 2
+    same = numpy.array_equal(reproduced, syndrome)
+    return bool(same)
+
+
+def _random_error(rng) -> numpy.ndarray:
+    bits = []
+    for _ in range(FAULT_COUNT):
+        draw = rng.random()
+        is_fault = draw < 0.2
+        bits.append(int(is_fault))
+    return numpy.array(bits, dtype=numpy.uint8)
 
 
 def test_both_decoders_reproduce_every_syndrome_an_error_produces():
     """A property test: 200 random errors, both corrections reproduce them."""
     model = _model()
-    check = numpy.asarray(CHECK, dtype=numpy.uint8)
     referee = _referee()
     row = union_find.UnionFindDecoder(weight_step=0.1)
     rng = random.Random(11)
     for _ in range(200):
-        error = numpy.array(
-            [int(rng.random() < 0.2) for _ in range(check.shape[1])],
-            dtype=numpy.uint8,
-        )
-        syndrome = (check @ error) % 2
-        ldpc_correction = numpy.asarray(
-            referee.decode(syndrome), dtype=numpy.uint8
-        )
-        assert numpy.array_equal((check @ ldpc_correction) % 2, syndrome)
-        decoded = row.decode_with_growth_evidence(_job(model, syndrome))
+        error = _random_error(rng)
+        syndrome = CHECK @ error
+        syndrome = syndrome % 2
+        ldpc_correction = referee.decode(syndrome)
+        ldpc_correction = numpy.asarray(ldpc_correction, dtype=numpy.uint8)
+        assert _reproduces(ldpc_correction, syndrome)
+        job = _job(model, syndrome)
+        decoded = row.decode_with_growth_evidence(job)
         assert decoded.hard_evidence.unmatched_detectors == ()
         decsim_correction = numpy.asarray(
             decoded.hard_evidence.selected_faults, dtype=numpy.uint8
         )
-        assert numpy.array_equal((check @ decsim_correction) % 2, syndrome)
+        assert _reproduces(decsim_correction, syndrome)
 
 
 def test_a_single_fault_is_named_by_both_decoders():
     model = _model()
-    check = numpy.asarray(CHECK, dtype=numpy.uint8)
     referee = _referee()
     row = union_find.UnionFindDecoder(weight_step=0.1)
-    for fault in range(check.shape[1]):
-        syndrome = check[:, fault]
-        ldpc_correction = numpy.asarray(
-            referee.decode(syndrome), dtype=numpy.uint8
-        )
-        decoded = row.decode_with_growth_evidence(_job(model, syndrome))
+    for fault in range(FAULT_COUNT):
+        syndrome = CHECK[:, fault]
+        ldpc_correction = referee.decode(syndrome)
+        ldpc_correction = numpy.asarray(ldpc_correction, dtype=numpy.uint8)
+        job = _job(model, syndrome)
+        decoded = row.decode_with_growth_evidence(job)
         decsim_correction = numpy.asarray(
             decoded.hard_evidence.selected_faults, dtype=numpy.uint8
         )
         assert decsim_correction.tolist() == ldpc_correction.tolist()
-        assert int(decsim_correction.sum()) == 1
+        selected_count = decsim_correction.sum()
+        assert int(selected_count) == 1

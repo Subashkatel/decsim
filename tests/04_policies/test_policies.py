@@ -5,7 +5,13 @@ import pytest
 from decsim.controller import policies
 from decsim.controller.idle_rounds import IdleRoundAccounting
 from decsim.message import RunSeedReservation, RunShape, SoftOutputSource
-from decsim.controller.policies import Eager, ExtendStream, Held, Ignore, SeparateDecodeJobs
+from decsim.controller.policies import (
+    Eager,
+    ExtendStream,
+    Held,
+    Ignore,
+    SeparateDecodeJobs,
+)
 from decsim.ports import IdlePolicy
 from decsim.windows.window_manager import BoundaryPolicy
 from decsim.controller.settings import IdlePolicySettings
@@ -14,8 +20,12 @@ from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
 from decsim.qpu.settings import QpuSettings
 from decsim.windows.settings import WindowSettings
-from decsim.windows.windowing_schemes import SlidingTerminalPolicy, SlidingWindowScheme
-from decsim.decoders.weak_strong_switching import Baseline, Switching
+from decsim.windows.windowing_schemes import (
+    SlidingTerminalPolicy,
+    SlidingWindowScheme,
+)
+from decsim.escalation.policies import Baseline, Switching
+from decsim.escalation.threshold_sources import FixedThreshold
 
 
 class ExternalBoundaryPolicy:
@@ -68,7 +78,9 @@ class WindowManagerProbe:
     def has_dynamic_stream(self, stream_id):
         return stream_id in self.live_streams
 
-    def enqueue_without_input(self, round_count, on_done, label, code, spatial_nodes):
+    def enqueue_without_input(
+        self, round_count, on_done, label, code, spatial_nodes
+    ):
         del on_done
         self.idle_demands.append(
             {
@@ -100,11 +112,15 @@ class StreamsProbe:
     def extend_live_stream(self, operation, patch):
         binding = self.bindings.get(operation.id)
         stream_id = None if binding is None else binding.stream_id
-        if stream_id is None or not self.window_manager.has_dynamic_stream(stream_id):
+        if stream_id is None or not self.window_manager.has_dynamic_stream(
+            stream_id
+        ):
             return False
         global_round = self.stream_next_round.get(stream_id, 0) + 1
         self.stream_next_round[stream_id] = global_round
-        self.qpu.emit_idle_stream_round(operation, stream_id, global_round, patch)
+        self.qpu.emit_idle_stream_round(
+            operation, stream_id, global_round, patch
+        )
         return True
 
 
@@ -159,8 +175,12 @@ def test_boundary_policies_decide_without_argument_validation():
     assert Eager().on_commit(unchecked_window, final=truthy_final) is True
     assert Held().on_commit(unchecked_window, final=False) is False
     assert Held().on_commit(unchecked_window, final=True) is True
-    assert Held().on_commit(unchecked_window, final=falsey_final) is falsey_final
-    assert Held().on_commit(unchecked_window, final=truthy_final) is truthy_final
+    assert (
+        Held().on_commit(unchecked_window, final=falsey_final) is falsey_final
+    )
+    assert (
+        Held().on_commit(unchecked_window, final=truthy_final) is truthy_final
+    )
 
 
 def test_policies_are_stateless():
@@ -196,22 +216,29 @@ def test_runspec_builds_fresh_policy_defaults():
     assert isinstance(first.idle_rounds.policy, SeparateDecodeJobs)
     assert isinstance(second.window_manager.courier.boundary_policy, Eager)
     assert isinstance(second.idle_rounds.policy, SeparateDecodeJobs)
-    assert first.window_manager.courier.boundary_policy is not second.window_manager.courier.boundary_policy
+    assert (
+        first.window_manager.courier.boundary_policy
+        is not second.window_manager.courier.boundary_policy
+    )
     assert first.idle_rounds.policy is not second.idle_rounds.policy
 
 
 def test_runspec_preserves_truthy_custom_policies_on_independent_axes():
     """RunSpec preserves truthy custom policies and wires the two axes independently."""
     boundary_policy = ExternalBoundaryPolicy()
-    boundary_run = Machine.build(MachineSettings(
-        windows=WindowSettings(boundary_policy=boundary_policy)))
+    boundary_run = Machine.build(
+        MachineSettings(windows=WindowSettings(boundary_policy=boundary_policy))
+    )
     boundary_run.run()
     idle_policy = ExternalIdlePolicy()
-    idle_run = Machine.build(MachineSettings(
-        idle_policy=IdlePolicySettings(policy=idle_policy)))
+    idle_run = Machine.build(
+        MachineSettings(idle_policy=IdlePolicySettings(policy=idle_policy))
+    )
     idle_run.run()
 
-    assert boundary_run.window_manager.courier.boundary_policy is boundary_policy
+    assert (
+        boundary_run.window_manager.courier.boundary_policy is boundary_policy
+    )
     assert isinstance(boundary_run.idle_rounds.policy, SeparateDecodeJobs)
     assert idle_run.idle_rounds.policy is idle_policy
     assert isinstance(idle_run.window_manager.courier.boundary_policy, Eager)
@@ -223,8 +250,9 @@ def test_policy_module_has_no_registry_or_string_selector():
     assert not hasattr(policies, "from_mode")
 
 
-def _run_shape(boundary_policy, *, is_double_window=False,
-               has_dynamic_streams=False):
+def _run_shape(
+    boundary_policy, *, is_double_window=False, has_dynamic_streams=False
+):
     scheme = SlidingWindowScheme(
         terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
     )
@@ -242,7 +270,7 @@ def _run_shape(boundary_policy, *, is_double_window=False,
 
 def test_switching_validates_builtin_boundary_contexts():
     """Switching rejects boundary policies that conflict with serial or double windows."""
-    switching = Switching(1.0, switching_source())
+    switching = Switching(FixedThreshold(1.0), switching_source())
     eager_serial = _run_shape(Eager())
     held_streams = _run_shape(Held(), has_dynamic_streams=True)
     held_double_window = _run_shape(Held(), is_double_window=True)
@@ -262,7 +290,9 @@ def test_switching_validates_builtin_boundary_contexts():
 
 def test_extend_stream_relays_idle_rounds_into_a_live_stream():
     """ExtendStream routes idle data into an existing live stream."""
-    controller, _, qpu, _ = make_controller(ExtendStream(), live_streams=("stream-a",))
+    controller, _, qpu, _ = make_controller(
+        ExtendStream(), live_streams=("stream-a",)
+    )
     operation = controller.operation_by_id[7]
     controller.streams.bindings[7] = SimpleNamespace(stream_id="stream-a")
 
@@ -275,7 +305,9 @@ def test_extend_stream_relays_idle_rounds_into_a_live_stream():
 
 def test_extend_stream_falls_back_without_a_live_stream():
     """ExtendStream falls back to memory rounds without creating or reopening a stream."""
-    unbound, _, unbound_qpu, _ = make_controller(ExtendStream(), live_streams=("stream-a",))
+    unbound, _, unbound_qpu, _ = make_controller(
+        ExtendStream(), live_streams=("stream-a",)
+    )
     unbound.emit_idle_round(7, "patch-a", 3)
 
     closed, _, closed_qpu, window_manager = make_controller(ExtendStream())
@@ -328,7 +360,11 @@ def test_separate_decode_jobs_charges_the_trailing_idle_region_when_the_patch_is
     controller.end_idle_period(operation, "patch-a")
     controller.end_idle_period(operation, "patch-a")
 
-    assert [demand["rounds"] for demand in window_manager.idle_demands] == [3, 3, 2]
+    assert [demand["rounds"] for demand in window_manager.idle_demands] == [
+        3,
+        3,
+        2,
+    ]
     assert window_manager.idle_demands[-1]["label"] == "mem(logical-cnot,r5)"
 
 
@@ -336,7 +372,9 @@ def test_an_external_idle_policy_relays_through_the_controller():
     """An external policy owns its relay; the controller offers memory rounds,
     live-stream extension and idle decode demand."""
     policy = ExternalIdlePolicy()
-    controller, _, qpu, window_manager = make_controller(policy, live_streams=("stream-a",))
+    controller, _, qpu, window_manager = make_controller(
+        policy, live_streams=("stream-a",)
+    )
     controller.streams.bindings[7] = SimpleNamespace(stream_id="stream-a")
 
     controller.emit_idle_round(7, "patch-a", 2)
@@ -391,18 +429,26 @@ def test_run_seed_binding_uses_distinct_policy_paths():
 
     boundary_policy = SeededBoundary()
     idle_policy = SeededIdle()
-    completed = Machine.build(MachineSettings(
-        windows=WindowSettings(boundary_policy=boundary_policy),
-        idle_policy=IdlePolicySettings(policy=idle_policy),
-    ), 23)
+    completed = Machine.build(
+        MachineSettings(
+            windows=WindowSettings(boundary_policy=boundary_policy),
+            idle_policy=IdlePolicySettings(policy=idle_policy),
+        ),
+        23,
+    )
     completed.run()
 
     assert completed.window_manager.courier.boundary_policy is boundary_policy
     assert completed.idle_rounds.policy is idle_policy
     assert [event[0] for event in events] == [
-        "reserve", "reserve", "commit", "commit"
+        "reserve",
+        "reserve",
+        "commit",
+        "commit",
     ]
-    reserved = {owner: seed for action, owner, seed in events if action == "reserve"}
+    reserved = {
+        owner: seed for action, owner, seed in events if action == "reserve"
+    }
     assert set(reserved) == {"boundary", "idle"}
     assert reserved["boundary"] != reserved["idle"]
 
@@ -411,7 +457,9 @@ def test_sliding_tail_follows_qldpc_rule():
     """The last window starts when fewer than W + F rounds remain and is
     never shorter than W (qLDPC SlidingWindowDecoder, sinter.py
     `while start < end - (W + s - 1)`)."""
-    from decsim.windows.windowing_schemes import _finite_forward_window_geometries
+    from decsim.windows.windowing_schemes import (
+        _finite_forward_window_geometries,
+    )
 
     def qldpc_windows(round_count, width, stride):
         start, windows = 0, []
@@ -423,8 +471,12 @@ def test_sliding_tail_follows_qldpc_rule():
 
     for round_count in (5, 13, 20, 30, 31, 32, 33):
         for commit, buffer in ((3, 6), (3, 3), (2, 4), (5, 5)):
-            ours = [(g.commit_lo, g.commit_hi, g.buffer_hi)
-                    for g in _finite_forward_window_geometries(round_count, commit, buffer)]
+            ours = [
+                (g.commit_lo, g.commit_hi, g.buffer_hi)
+                for g in _finite_forward_window_geometries(
+                    round_count, commit, buffer
+                )
+            ]
             assert ours == qldpc_windows(round_count, commit + buffer, commit)
     last = _finite_forward_window_geometries(31, 3, 6)[-1]
     assert (last.commit_lo, last.commit_hi) == (22, 31)
@@ -456,20 +508,40 @@ def _feedback_chain(idle_policy=None):
     from decsim.qpu.code_geometry import SurfaceCodeModel
     from decsim.qpu.round_policies import FixedRounds
 
-    ops = CircuitFrontend([
-        Operation(0, "T0", (0,), clifford=False, consumes_magic_state=False),
-        Operation(1, "T1", (0,), clifford=False, consumes_magic_state=False,
-                  blocked_by=0),
-    ]).build()
+    ops = CircuitFrontend(
+        [
+            Operation(
+                0, "T0", (0,), clifford=False, consumes_magic_state=False
+            ),
+            Operation(
+                1,
+                "T1",
+                (0,),
+                clifford=False,
+                consumes_magic_state=False,
+                blocked_by=0,
+            ),
+        ]
+    ).build()
     settings = MachineSettings(
-        workload=WorkloadSettings(operations=ops, rounds_policy=FixedRounds(3),
-                                  feedback_boundary_mode="trailing_buffer"),
-        qpu=QpuSettings(code=SurfaceCodeModel(distance=3),
-                        round_period_microseconds=1.0),
-        windows=WindowSettings(scheme=SlidingWindowScheme(
-            terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD)),
-        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(2.0), units=1),
-        idle_policy=IdlePolicySettings(policy=idle_policy))
+        workload=WorkloadSettings(
+            operations=ops,
+            rounds_policy=FixedRounds(3),
+            feedback_boundary_mode="trailing_buffer",
+        ),
+        qpu=QpuSettings(
+            code=SurfaceCodeModel(distance=3), round_period_microseconds=1.0
+        ),
+        windows=WindowSettings(
+            scheme=SlidingWindowScheme(
+                terminal_policy=SlidingTerminalPolicy.REGULAR_STRIDE_LOOKAHEAD
+            )
+        ),
+        weak_decoder=DecoderSettings(
+            decoder=PresetLatencyDecoder(2.0), units=1
+        ),
+        idle_policy=IdlePolicySettings(policy=idle_policy),
+    )
     machine = Machine.build(settings, 13)
     machine.run()
     return machine
@@ -481,7 +553,7 @@ def _idle_decode_labels(completed) -> set:
     for line in completed.engine.log_lines:
         start = line.find("mem(")
         if start != -1:
-            labels.add(line[start:line.index(")", start) + 1])
+            labels.add(line[start : line.index(")", start) + 1])
     return labels
 
 
@@ -498,8 +570,10 @@ def test_idle_rounds_cost_decode_jobs_by_default():
     assert _idle_decode_labels(charged), "the default charged no idle work"
     assert not _idle_decode_labels(optimistic)
     assert optimistic.idle_rounds.emitted_count > 0
-    assert (charged.idle_rounds.emitted_count
-            >= optimistic.idle_rounds.emitted_count)
+    assert (
+        charged.idle_rounds.emitted_count
+        >= optimistic.idle_rounds.emitted_count
+    )
 
 
 def test_memory_filled_trailing_buffer_is_flagged():
@@ -509,8 +583,11 @@ def test_memory_filled_trailing_buffer_is_flagged():
     approximation flag and the manager counts it."""
     completed = _feedback_chain()
 
-    filled_lines = [line for line in completed.engine.log_lines
-                    if "buffer filled by memory rounds" in line]
+    filled_lines = [
+        line
+        for line in completed.engine.log_lines
+        if "buffer filled by memory rounds" in line
+    ]
     assert len(filled_lines) >= 1
     # the log marks the approximation; the release itself stands
     for window in completed.window_manager.windows.values():
@@ -528,181 +605,27 @@ def test_single_operation_run_charges_no_idle_work():
     from decsim.qpu.code_geometry import SurfaceCodeModel
     from decsim.qpu.round_policies import FixedRounds
 
-    ops = CircuitFrontend([
-        Operation(0, "M", (0,), clifford=True, consumes_magic_state=False),
-    ]).build()
+    ops = CircuitFrontend(
+        [
+            Operation(0, "M", (0,), clifford=True, consumes_magic_state=False),
+        ]
+    ).build()
     settings = MachineSettings(
         workload=WorkloadSettings(operations=ops, rounds_policy=FixedRounds(6)),
-        qpu=QpuSettings(code=SurfaceCodeModel(distance=3),
-                        round_period_microseconds=1.0),
+        qpu=QpuSettings(
+            code=SurfaceCodeModel(distance=3), round_period_microseconds=1.0
+        ),
         windows=WindowSettings(scheme=SlidingWindowScheme()),
-        weak_decoder=DecoderSettings(decoder=PresetLatencyDecoder(2.0), units=1))
+        weak_decoder=DecoderSettings(
+            decoder=PresetLatencyDecoder(2.0), units=1
+        ),
+    )
     completed = Machine.build(settings, 13)
     completed.run()
 
     assert completed.idle_rounds.emitted_count == 0
-    assert not any("buffer filled by memory rounds" in line
-                   for line in completed.engine.log_lines)
+    assert not any(
+        "buffer filled by memory rounds" in line
+        for line in completed.engine.log_lines
+    )
     assert not _idle_decode_labels(completed)
-
-
-# ----------------------------------------------------- online threshold
-
-
-def make_online_controller(*, target=0.5, threshold=2.0, step=0.1,
-                           audit_rate=1.0, kept_bad_budget=0.5,
-                           max_escalation_rate=0.9):
-    from decsim.decoders.weak_strong_switching import (
-        AuditLane, EscalationRateTracker, OnlineThresholdController)
-    tracker = EscalationRateTracker(
-        target_escalation_rate=target, threshold=threshold, step=step)
-    return OnlineThresholdController(
-        tracker=tracker, audit=AuditLane(audit_rate=audit_rate),
-        kept_bad_budget=kept_bad_budget, adjust_factor=2.0,
-        min_escalation_rate=1e-5, max_escalation_rate=max_escalation_rate)
-
-
-def test_escalation_rate_tracker_pins_the_target_rate():
-    """The adaptive conformal recursion holds the escalation fraction at
-    the target on a stationary gap stream (arXiv:2106.00170)."""
-    import random
-
-    from decsim.decoders.weak_strong_switching import EscalationRateTracker
-
-    tracker = EscalationRateTracker(
-        target_escalation_rate=0.1, threshold=4.6, step=0.05)
-    gap_stream = random.Random(7)
-    for _ in range(20000):
-        tracker.observe(gap_stream.gauss(9.0, 3.0))
-
-    assert abs(tracker.escalation_rate() - 0.1) < 0.01
-    assert tracker.threshold > 0.0
-
-
-def test_audit_lane_estimate_is_inverse_propensity_weighted():
-    """Each audited bad outcome stands for 1/audit_rate kept windows."""
-    from decsim.decoders.weak_strong_switching import AuditLane
-
-    lane = AuditLane(audit_rate=0.5)
-    for _ in range(100):
-        lane.record_kept()
-    lane.record_audit(weak_was_bad=True)
-    lane.record_audit(weak_was_bad=True)
-    lane.record_audit(weak_was_bad=False)
-
-    assert lane.audited_count == 3
-    assert lane.audited_bad_count == 2
-    assert lane.kept_bad_rate(total_window_count=200) == (2 / 0.5) / 200
-
-
-def test_one_bad_audit_raises_the_target_and_a_clean_quota_relaxes_it():
-    """Raising is immediate (one weighted event blows the budget); a
-    relax needs the full rule-of-three clean quota."""
-    controller = make_online_controller(target=0.1, kept_bad_budget=0.5)
-    quota = controller.relax_audit_quota()          # ceil(3 / 0.5) = 6
-
-    controller.record_audit_outcome(weak_was_bad=True)
-    assert controller.tracker.target_escalation_rate == pytest.approx(0.2)
-    assert controller.raise_count == 1
-
-    for _ in range(quota - 1):
-        controller.record_audit_outcome(weak_was_bad=False)
-    assert controller.relax_count == 0              # quota not yet reached
-    controller.record_audit_outcome(weak_was_bad=False)
-    assert controller.relax_count == 1
-    assert controller.tracker.target_escalation_rate == pytest.approx(0.1)
-
-
-def test_the_raised_target_respects_the_backlog_cap():
-    """The Theorem 1 duty cap bounds the target whatever the audits say."""
-    controller = make_online_controller(
-        target=0.6, kept_bad_budget=0.5, max_escalation_rate=0.9)
-    controller.record_audit_outcome(weak_was_bad=True)
-    assert controller.tracker.target_escalation_rate == pytest.approx(0.9)
-
-
-def test_calibrator_audits_kept_windows_and_labels_on_the_strong_result():
-    """An audited window escalates, and the strong result's agreement
-    with the stored weak observables is the label."""
-    import random
-
-    from decsim.decoders.weak_strong_switching import OnlineGapCalibrator
-
-    calibrator = OnlineGapCalibrator(
-        make_online_controller(target=0.0, threshold=0.0, step=0.0),
-        random.Random(0))                            # audit_rate=1: always audit
-    result = SimpleNamespace(
-        soft_output=SimpleNamespace(gap=5.0), logical_observables=(1, 0))
-    job = SimpleNamespace(op_id=1, window_id=4)
-
-    kept = calibrator.decide_keep(result, job)
-    assert kept is False                             # audits escalate
-    assert calibrator.summary()["pending_audits"] == 1
-
-    clean_strong = SimpleNamespace(logical_observables=(1, 0))
-    calibrator.absorb_strong_result((1, 4), clean_strong)
-    assert calibrator.controller.raise_count == 0
-    assert calibrator.summary()["pending_audits"] == 0
-
-    kept = calibrator.decide_keep(result, SimpleNamespace(op_id=1, window_id=5))
-    revised_strong = SimpleNamespace(logical_observables=(0, 0))
-    calibrator.absorb_strong_result((1, 5), revised_strong)
-    assert calibrator.controller.raise_count == 1
-
-    # a strong result that answers no audit (an ordinary escalation) is
-    # ignored rather than mislabeled
-    calibrator.absorb_strong_result((1, 6), clean_strong)
-    assert calibrator.controller.audit.audited_count == 2
-
-
-def test_switching_refuses_a_second_threshold_owner_and_double_window():
-    """The calibrator owns the live threshold: a register alongside it,
-    run_both_at_once, or double_window are refused."""
-    import random
-
-    from decsim.decoders.weak_strong_switching import (
-        OnlineGapCalibrator, ThresholdRegister)
-
-    calibrator = OnlineGapCalibrator(
-        make_online_controller(), random.Random(0))
-    with pytest.raises(ValueError, match="two owners"):
-        Switching(1.0, switching_source(),
-                  threshold_register=ThresholdRegister(1.0, switching_source()),
-                  threshold_calibrator=calibrator)
-    with pytest.raises(ValueError, match="nothing to audit"):
-        Switching(1.0, switching_source(), run_both_at_once=True,
-                  threshold_calibrator=calibrator)
-    calibrated = Switching(1.0, switching_source(),
-                           threshold_calibrator=calibrator)
-    double_window_plan = _run_shape(Eager(), is_double_window=True)
-    with pytest.raises(ValueError, match="serial-only"):
-        calibrated.check_plan(double_window_plan)
-
-
-def test_switching_keep_decision_delegates_to_the_calibrator():
-    """With a calibrator configured, the keep decision is the
-    controller's (which learns from every call), not the fixed
-    threshold's."""
-    import random
-
-    from decsim.decoders.weak_strong_switching import OnlineGapCalibrator
-
-    calibrator = OnlineGapCalibrator(
-        make_online_controller(target=0.0, threshold=10.0, step=0.0,
-                               audit_rate=1e-12),
-        random.Random(0))
-    switching = Switching(1.0, switching_source(),
-                          threshold_calibrator=calibrator)
-    source = switching_source()
-    job = SimpleNamespace(op_id=1, window_id=1, code=None)
-
-    below = SimpleNamespace(
-        soft_output=SimpleNamespace(gap=5.0, source=source),
-        logical_observables=(0,))
-    above = SimpleNamespace(
-        soft_output=SimpleNamespace(gap=15.0, source=source),
-        logical_observables=(0,))
-    assert switching._keep_weak_outcome(below, job) is False
-    assert switching._keep_weak_outcome(above, job) is True
-    assert calibrator.controller.tracker.window_count == 2
-    assert switching._keep_weak_outcome(None, job) is False

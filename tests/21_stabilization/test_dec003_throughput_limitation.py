@@ -33,7 +33,7 @@ from decsim.decoders.settings import (
     EscalationSettings,
 )
 from decsim.decoders.staged_decoder import StagedDecoder, UnitTiming
-from decsim.decoders.weak_strong_switching import StrongOnly
+from decsim.escalation.policies import StrongOnly
 from decsim.frontends.settings import WorkloadSettings
 from decsim.machine import Machine, MachineSettings
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
@@ -259,7 +259,8 @@ def test_pipelined_escalation_route_refuses(fabric):
         SampledConfidenceDecoder,
         SwitchingRouter,
     )
-    from decsim.decoders.weak_strong_switching import Switching
+    from decsim.escalation.policies import Switching
+    from decsim.escalation.threshold_sources import FixedThreshold
     from decsim.windows.windowing_schemes import (
         SlidingTerminalPolicy,
         SlidingWindowScheme,
@@ -287,7 +288,7 @@ def test_pipelined_escalation_route_refuses(fabric):
             router=router, unit_pools={"default": 1, "strong": 1}
         ),
         escalation=EscalationSettings(
-            policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE)
+            policy=Switching(FixedThreshold(0.5), SAMPLED_CONFIDENCE_SOURCE)
         ),
         links=fabric["declared_profile"](
             controller_to_weak_buffer=True, controller_to_strong_buffer=True

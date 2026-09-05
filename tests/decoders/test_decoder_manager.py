@@ -13,7 +13,7 @@ import decsim.config as config
 import decsim.decoders.decoder as decoder_module
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
-import decsim.decoders.weak_strong_switching as weak_strong_switching
+import decsim.escalation.policies as escalation_policies
 import decsim.engine as engine_module
 import decsim.message as message
 from decsim.decoders.decoder_manager import DecoderManager
@@ -35,7 +35,7 @@ class FixedRow(decoder_module.DecoderBase):
 def _manager(engine, row):
     router = decoders.CodeRouter(row)
     scheduler = schedulers.FifoScheduler()
-    policy = weak_strong_switching.Baseline()
+    policy = escalation_policies.Baseline()
     return DecoderManager(
         engine,
         router=router,

@@ -32,7 +32,7 @@ def online_threshold_calibrator(config, *, physical_error_probability, distance)
     task = config.point_task(
         physical_error_probability=physical_error_probability,
         distance=distance, round_period_us=1.0, shots=1)
-    return task.threshold_calibrator
+    return task.online_threshold
 
 
 def source_config(tmp_path, switching_card: dict, shots: int = 1):

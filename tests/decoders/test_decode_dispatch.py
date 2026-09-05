@@ -6,7 +6,7 @@ displaces ready work (src/cpu/o3/inst_queue.hh, scheduleReadyInsts).
 
 import decsim.decoders.decoders as decoders
 import decsim.decoders.schedulers as schedulers
-import decsim.decoders.weak_strong_switching as weak_strong_switching
+import decsim.escalation.policies as escalation_policies
 import decsim.engine as engine_module
 import decsim.message as message
 from decsim.decoders.decoder_manager import DecoderManager
@@ -73,7 +73,7 @@ def test_a_blocked_job_never_displaces_a_startable_one():
     decoder = decoders.PresetLatencyDecoder(4.0)
     router = decoders.CodeRouter(decoder)
     scheduler = schedulers.FifoScheduler()
-    policy = weak_strong_switching.Baseline()
+    policy = escalation_policies.Baseline()
     manager = DecoderManager(
         engine,
         router=router,

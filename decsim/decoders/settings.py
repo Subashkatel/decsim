@@ -17,7 +17,7 @@ from typing import Any, Optional, Union
 
 import decsim.config as config
 import decsim.decoders.decoder_memory as decoder_memory_module
-import decsim.decoders.weak_strong_switching as weak_strong_switching
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.ports as ports
 
 THRESHOLD_SOURCES = ("fixed", "table", "online")
@@ -246,8 +246,9 @@ class EscalationSettings:
     gap_computation is where the two forced solves run (serial on one
     core, parallel_pair on two cores in the unit, split_pair on its own
     pool of gap_units). A Python-built policy is used as it is. The
-    threshold in nats and the calibrator are set per sweep point by the
-    front; base_directory resolves a relative threshold_table.
+    threshold in nats and the online threshold source are set per sweep
+    point by the front; base_directory resolves a relative
+    threshold_table.
     """
 
     kind: str = "weak_baseline"
@@ -261,9 +262,7 @@ class EscalationSettings:
     gap_units: int = 1
     policy: Optional[ports.EscalationPolicy] = None
     gap_threshold_nats: Optional[float] = None
-    threshold_calibrator: Optional[
-        weak_strong_switching.OnlineGapCalibrator
-    ] = None
+    online_threshold: Optional[threshold_sources.OnlineThreshold] = None
     base_directory: Optional[pathlib.Path] = None
 
     @classmethod
@@ -331,10 +330,10 @@ class EscalationSettings:
             f"{calibrated_points}"
         )
 
-    def online_calibrator(
+    def online_threshold_for(
         self, physical_error_probability: float, distance: int
-    ) -> Optional[weak_strong_switching.OnlineGapCalibrator]:
-        """One calibrator per sweep point (threshold_source online).
+    ) -> Optional[threshold_sources.OnlineThreshold]:
+        """One online threshold source per sweep point (source online).
 
         Shared by every shot of the point so the controller learns over
         the point's whole window stream; seeded by the point's identity,
@@ -346,24 +345,25 @@ class EscalationSettings:
             return None
         online = self.online
         step_nats = online.step_nats()
-        tracker = weak_strong_switching.EscalationRateTracker(
+        tracker = threshold_sources.EscalationRateTracker(
             target_escalation_rate=online.target_escalation_rate,
             threshold=self.gap_threshold_nats,
             step=step_nats,
         )
-        audit = weak_strong_switching.AuditLane(audit_rate=online.audit_rate)
-        controller = weak_strong_switching.OnlineThresholdController(
-            tracker=tracker,
-            audit=audit,
+        audit = threshold_sources.AuditLane(audit_rate=online.audit_rate)
+        adjustment = threshold_sources.TargetAdjustment(
             kept_bad_budget=online.kept_bad_budget,
             adjust_factor=online.adjust_factor,
             min_escalation_rate=online.min_escalation_rate,
             max_escalation_rate=online.max_escalation_rate,
         )
+        controller = threshold_sources.OnlineThresholdController(
+            tracker, audit, adjustment
+        )
         generator = random.Random(
             f"online-threshold d={distance} p={physical_error_probability}"
         )
-        return weak_strong_switching.OnlineGapCalibrator(controller, generator)
+        return threshold_sources.OnlineThreshold(controller, generator)
 
     def _table_path(self) -> pathlib.Path:
         table_path = pathlib.Path(self.threshold_table)

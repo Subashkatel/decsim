@@ -15,7 +15,8 @@ import decsim.controller.policies as boundary_policies
 import decsim.controller.settings as controller_settings
 import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
-import decsim.decoders.weak_strong_switching as weak_strong_switching
+import decsim.escalation.policies as escalation_policies
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.settings as workload_settings
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
@@ -78,8 +79,13 @@ def switching_machine(
     round_microseconds: float = 1.0,
     strong_buffer_microseconds: float = 7.0,
     record: bool = False,
+    escalation=None,
 ) -> machine_module.Machine:
-    """One d=3 memory operation, weak-primary switching on declared ticks."""
+    """One d=3 memory operation, weak-primary switching on declared ticks.
+
+    escalation replaces the Python-built Switching settings when given
+    (a table row under its own kind).
+    """
     probability = escalate_only(escalated_windows)
     weak_latency = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["weak"])
     weak = decoders.SampledConfidenceDecoder(
@@ -87,8 +93,9 @@ def switching_machine(
     )
     strong = decoders.PresetLatencyDecoder(DECLARED_MICROSECONDS["strong"])
     router = decoders.SwitchingRouter(weak=weak, strong=strong)
-    policy = weak_strong_switching.Switching(
-        0.5,
+    threshold = threshold_sources.FixedThreshold(0.5)
+    policy = escalation_policies.Switching(
+        threshold,
         decoders.SAMPLED_CONFIDENCE_SOURCE,
         run_both_at_once=run_both_at_once,
     )
@@ -111,9 +118,10 @@ def switching_machine(
     decoder_manager = decoder_settings.DecoderManagerSettings(
         router=router, unit_pools={"default": 1, "strong": 1}
     )
-    escalation = decoder_settings.EscalationSettings(
-        policy=policy, double_window=double_window
-    )
+    if escalation is None:
+        escalation = decoder_settings.EscalationSettings(
+            policy=policy, double_window=double_window
+        )
     links = declared_profile(strong_buffer_microseconds)
     controller = controller_settings.ControllerSettings(
         readout_to_bits_microseconds=DECLARED_MICROSECONDS["readout_to_bits"],

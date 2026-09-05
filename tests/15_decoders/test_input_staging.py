@@ -24,7 +24,7 @@ from decsim.decoders.settings import (
     DecoderSettings,
     EscalationSettings,
 )
-from decsim.decoders.weak_strong_switching import StrongOnly
+from decsim.escalation.policies import StrongOnly
 from decsim.frontends.settings import WorkloadSettings
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.machine import Machine, MachineSettings
@@ -186,7 +186,7 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
     from decsim.decoders.decoder_manager import DecoderManager
     from decsim.decoders.decoders import CodeRouter
     from decsim.decoders.schedulers import FifoScheduler
-    from decsim.decoders.weak_strong_switching import Baseline
+    from decsim.escalation.policies import Baseline
     from decsim.engine import Engine
     from decsim.message import (
         DecodeJob,

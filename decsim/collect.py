@@ -29,15 +29,15 @@ class Task:
     """One machine settings record to run `shots` seeds of.
 
     metadata is the json the caller wants to see beside every row (the
-    sweep point). threshold_calibrator is the point's online escalation
-    controller when the escalation asks for one, built once here and
+    sweep point). online_threshold is the point's online threshold
+    source when the escalation asks for one, built once here and
     installed on every shot's settings.
     """
 
     settings: machine_module.MachineSettings
     shots: int
     metadata: Mapping[str, Any]
-    threshold_calibrator: Optional[Any] = None
+    online_threshold: Optional[Any] = None
 
     @classmethod
     def at_point(
@@ -46,15 +46,15 @@ class Task:
         shots: int,
         metadata: Mapping[str, Any],
     ) -> "Task":
-        """The task, with the point's online calibrator when there is one."""
+        """The task, with the point's online threshold when there is one."""
         physical_error_probability = (
             settings.workload.physical_error_probability
         )
         distance = settings.qpu.distance
-        calibrator = settings.escalation.online_calibrator(
+        online_threshold = settings.escalation.online_threshold_for(
             physical_error_probability, distance
         )
-        return cls(settings, shots, metadata, calibrator)
+        return cls(settings, shots, metadata, online_threshold)
 
     def strong_id(self) -> str:
         """sha256 of the json text of the settings and the metadata."""
@@ -68,12 +68,11 @@ class Task:
         return digest.hexdigest()
 
     def shot_settings(self) -> machine_module.MachineSettings:
-        """The settings one shot runs: the point's calibrator installed."""
-        if self.threshold_calibrator is None:
+        """The settings one shot runs, with the point's online threshold."""
+        if self.online_threshold is None:
             return self.settings
         escalation = dataclasses.replace(
-            self.settings.escalation,
-            threshold_calibrator=self.threshold_calibrator,
+            self.settings.escalation, online_threshold=self.online_threshold
         )
         return dataclasses.replace(self.settings, escalation=escalation)
 

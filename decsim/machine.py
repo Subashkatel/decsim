@@ -61,10 +61,11 @@ import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.verify_windows as verify_windows
-import decsim.decoders.weak_strong_switching as weak_strong_switching
 import decsim.engine as engine_module
+import decsim.escalation.policies as escalation_policies
 import decsim.escalation.strong_redecode as strong_redecode_module
 import decsim.escalation.strong_window_shapes as strong_window_shapes
+import decsim.escalation.threshold_sources as threshold_sources
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
@@ -134,9 +135,9 @@ ROUND_STORES = {
     "round_store": round_store_module.RoundStore,
 }
 ESCALATIONS = {
-    "weak_baseline": weak_strong_switching.Baseline,
-    "strong_only": weak_strong_switching.StrongOnly,
-    "switching": weak_strong_switching.Switching,
+    "weak_baseline": escalation_policies.Baseline,
+    "strong_only": escalation_policies.StrongOnly,
+    "switching": escalation_policies.Switching,
 }
 WINDOWING_SCHEMES = {
     "sliding": windowing_schemes.SlidingWindowScheme,
@@ -717,13 +718,30 @@ def _escalation_policy(settings: decoder_settings.EscalationSettings):
     if settings.policy is not None:
         return settings.policy
     row = _row(ESCALATIONS, "escalation.kind", settings.kind)
-    if row is weak_strong_switching.Switching:
-        return weak_strong_switching.Switching(
-            settings.gap_threshold_nats,
-            complementary.COMPLEMENTARY_GAP_SOURCE,
-            threshold_calibrator=settings.threshold_calibrator,
+    if row is escalation_policies.Switching:
+        threshold = _threshold_source(settings)
+        return escalation_policies.Switching(
+            threshold, complementary.COMPLEMENTARY_GAP_SOURCE
         )
     return row()
+
+
+def _threshold_source(settings: decoder_settings.EscalationSettings):
+    """The sweep point's online source, or the fixed threshold.
+
+    The table source is resolved to a fixed threshold per sweep point by
+    the front (ExperimentConfig.point_settings), so a table run reaches
+    the root with its threshold in nats or not at all.
+    """
+    if settings.online_threshold is not None:
+        return settings.online_threshold
+    if settings.gap_threshold_nats is None:
+        raise ValueError(
+            "escalation.threshold_source table resolves the threshold per "
+            "sweep point in the front (ExperimentConfig.point_settings); "
+            "build the machine through it, or give gap_threshold_db"
+        )
+    return threshold_sources.FixedThreshold(settings.gap_threshold_nats)
 
 
 # ------------------------------------------------ the workload and plan

@@ -223,9 +223,9 @@ def _report_point_done(task: collect.Task, run_dir: Optional[Path]) -> None:
         f"round period {round_period_us} us: {task.shots} shots done",
         file=sys.stderr,
     )
-    if task.threshold_calibrator is not None:
+    if task.online_threshold is not None:
         _write_online_threshold_record(
-            task.threshold_calibrator,
+            task.online_threshold,
             run_dir,
             physical_error_probability=physical_error_probability,
             distance=distance,

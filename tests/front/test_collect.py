@@ -163,7 +163,7 @@ def test_every_shot_of_a_point_shares_the_tasks_calibrator(tmp_path):
         round_period_us=1.0,
         shots=2,
     )
-    assert task.threshold_calibrator is not None
+    assert task.online_threshold is not None
     shot_settings = task.shot_settings()
     escalation = shot_settings.escalation
-    assert escalation.threshold_calibrator is task.threshold_calibrator
+    assert escalation.online_threshold is task.online_threshold

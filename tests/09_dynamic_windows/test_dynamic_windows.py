@@ -15,7 +15,6 @@ class RecordingWindowManager:
     def __init__(self):
         self.rounds_arrived_by_operation = {}
         self.windows = {}
-        self.committed_windows = set()
         self.events = []
         self.fail_creation = False
         self.lifecycle = None
@@ -123,7 +122,6 @@ def test_real_manager_constructs_with_segment_delivery_state_in_its_owner():
         conditional_release=SimpleNamespace(),
         boundary_policy=SimpleNamespace(),
         window_interaction=SimpleNamespace(),
-        planning_view_by_operation_id={},
         fault_model_requirement_for=lambda _code_name: None,
         retain_strong_context=False,
         escalation_policy=SimpleNamespace(
@@ -435,7 +433,6 @@ def test_real_manager_links_overlapping_online_windows_by_temporal_dependency():
     manager = object.__new__(WindowManager)
     manager.window_interaction = SimpleNamespace(
         initial_boundary_state=lambda _window_info: "initial")
-    manager.committed_windows = set()
     manager.courier = BoundaryCourier(manager)
     manager.windows = {}
     manager.window_indices_by_operation = {"stream": []}
@@ -462,30 +459,23 @@ def test_committed_prefix_stops_at_gaps_and_absorbs_adjacent_overlaps():
     """Committed timing windows extend a contiguous prefix from round one and stop at gaps."""
     manager = RecordingWindowManager()
     manager.windows = {
-        ("stream", 0): SimpleNamespace(commit_lo=1, commit_hi=3),
-        ("stream", 1): SimpleNamespace(commit_lo=3, commit_hi=6),
-        ("stream", 2): SimpleNamespace(commit_lo=8, commit_hi=10),
-        ("other", 0): SimpleNamespace(commit_lo=1, commit_hi=99),
-    }
-    manager.committed_windows = {
-        ("stream", 2), ("other", 0), ("stream", 1), ("stream", 0)
+        ("stream", 0): SimpleNamespace(commit_lo=1, commit_hi=3, committed=True),
+        ("stream", 1): SimpleNamespace(commit_lo=3, commit_hi=6, committed=True),
+        ("stream", 2): SimpleNamespace(commit_lo=8, commit_hi=10, committed=True),
+        ("other", 0): SimpleNamespace(commit_lo=1, commit_hi=99, committed=True),
     }
     lifecycle = DynamicWindows(manager)
 
     assert lifecycle._committed_prefix_round_count("stream") == 6
-    manager.committed_windows.add(("stream", 99))
-    with pytest.raises(KeyError):
-        lifecycle._committed_prefix_round_count("stream")
 
 
 def test_committed_round_count_reads_the_exact_cache_without_manager_events():
     """The committed-prefix query exposes exact cache state without manager side effects."""
     manager = RecordingWindowManager()
     manager.windows = {
-        ("stream", 0): SimpleNamespace(commit_lo=1, commit_hi=3),
-        ("stream", 1): SimpleNamespace(commit_lo=4, commit_hi=6),
+        ("stream", 0): SimpleNamespace(commit_lo=1, commit_hi=3, committed=True),
+        ("stream", 1): SimpleNamespace(commit_lo=4, commit_hi=6, committed=False),
     }
-    manager.committed_windows = {("stream", 0)}
     lifecycle = DynamicWindows(manager)
     register(lifecycle)
 
@@ -493,9 +483,9 @@ def test_committed_round_count_reads_the_exact_cache_without_manager_events():
     assert lifecycle.committed_round_count("stream") == 0
     lifecycle.update_committed_round_count("stream")
     assert lifecycle.committed_round_count("stream") == 3
-    manager.committed_windows.add(("stream", 1))
+    manager.windows[("stream", 1)].committed = True
     lifecycle.update_committed_round_count("stream")
-    manager.committed_windows.remove(("stream", 1))
+    manager.windows[("stream", 1)].committed = False
     assert lifecycle.committed_round_count("stream") == 6
     expected_events = [
         ("release", "stream", 3),
@@ -511,17 +501,16 @@ def test_committed_prefix_updates_monotonically():
     """Ordinary commits advance the cache once and never lower it."""
     manager = RecordingWindowManager()
     manager.windows = {
-        ("stream", 0): SimpleNamespace(commit_lo=1, commit_hi=3),
-        ("stream", 1): SimpleNamespace(commit_lo=4, commit_hi=6),
+        ("stream", 0): SimpleNamespace(commit_lo=1, commit_hi=3, committed=True),
+        ("stream", 1): SimpleNamespace(commit_lo=4, commit_hi=6, committed=False),
     }
-    manager.committed_windows = {("stream", 0)}
     lifecycle = DynamicWindows(manager)
 
     lifecycle.update_committed_round_count("stream")
     lifecycle.update_committed_round_count("stream")
-    manager.committed_windows.add(("stream", 1))
+    manager.windows[("stream", 1)].committed = True
     lifecycle.update_committed_round_count("stream")
-    manager.committed_windows = {("stream", 0)}
+    manager.windows[("stream", 1)].committed = False
     lifecycle.update_committed_round_count("stream")
     assert manager.events == [
         ("release", "stream", 3),
@@ -534,9 +523,8 @@ def test_unsealed_streams_block_real_manager_workload_finality_until_seal():
     """Real manager finality remains blocked until every registered timing stream seals."""
     manager = object.__new__(WindowManager)
     manager._workload_complete_sent = False
-    manager.committed_windows = set()
+    manager.windows = {}
     manager.total_windows = 0
-    manager._pending_strong_windows = set()
     completions = []
     manager.on_workload_complete = lambda: completions.append("complete")
     manager.error_model_provider = None
@@ -641,7 +629,7 @@ def test_courier_ignores_a_stale_delivery_and_releases_the_edge_once():
     checks = []
     manager = SimpleNamespace(
         engine=engine, links=LinkFabric(logical_reference_profile(), engine),
-        windows={(1, 0): source, (1, 1): dependent}, absorbed_windows=set(),
+        windows={(1, 0): source, (1, 1): dependent},
         window_interaction=DefaultWindowInteraction(), model_by_window={},
         _operation_by_id={1: op}, rounds_for=lambda operation: 20, release_service=None,
         check_window=lambda key: checks.append((engine.now, key)),

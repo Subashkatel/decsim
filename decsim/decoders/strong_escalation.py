@@ -1025,9 +1025,7 @@ class StrongEscalation:
                                f"{'queued' if window.queued else 'committed'}")
         window.queued = True                  # keeps check_window() away
         window.committed = True
-        self.wm.committed_windows.add(key)
-        self.wm._committed_count_by_operation[key[0]] = self.wm._committed_count_by_operation.get(key[0], 0) + 1
-        self.wm.absorbed_windows.add(key)
+        window.is_absorbed = True
         if restart_key is not None:
             restart = self.wm.windows[restart_key]
             if key in restart.deps:

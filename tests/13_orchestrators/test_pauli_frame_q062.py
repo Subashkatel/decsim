@@ -339,7 +339,6 @@ def test_escalated_strong_final_folds_into_the_frame_and_gates_the_commit():
     )
     manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
     manager._operation_by_id = {4: SimpleNamespace(id=4, name="logical")}
-    manager._selected_request_keys = None
     finished = []
     manager._finish_strong_commit = (
         lambda completion, key, result, window, op: finished.append(key))
@@ -363,7 +362,6 @@ def test_frameless_strong_commit_finishes_directly():
     manager.pauli_frame = None
     manager.windows = {(4, 1): SimpleNamespace(op_id=4, k=1)}
     manager._operation_by_id = {4: SimpleNamespace(id=4, name="logical")}
-    manager._selected_request_keys = None
     finished = []
     manager._finish_strong_commit = (
         lambda completion, key, result, window, op: finished.append(key))

@@ -125,10 +125,10 @@ class BoundaryCourier:
         window_infos = self.window_manager._window_infos()
         interaction = self.window_manager.window_interaction
         selected = interaction.boundary_targets(window_info, window_infos)
-        absorbed = self.window_manager.absorbed_windows
         targets = []
         for dependent_key in selected:
-            if dependent_key in absorbed:
+            dependent = self.window_manager.windows[dependent_key]
+            if dependent.is_absorbed:
                 continue
             targets.append(dependent_key)
         return tuple(targets)

@@ -9,7 +9,7 @@ decode_shots_to_error); a withdrawn window is requested again fresh.
 import types
 
 import decsim.decoders.decoder_memory as decoder_memory
-import decsim.decoders.weak_strong_switching as weak_strong_switching
+import decsim.escalation.policies as escalation_policies
 import decsim.engine as engine_module
 import decsim.message as message
 import decsim.syndrome_buffer.round_store as round_store_module
@@ -108,7 +108,7 @@ class _Fixture:
             self.engine, self.planner, self.tracker, interaction, transfers
         )
         self.queue = _RecordingQueue()
-        policy = weak_strong_switching.Baseline()
+        policy = escalation_policies.Baseline()
         committer = types.SimpleNamespace(
             accept_result=_ignore_result, accept_strong_result=_ignore_result
         )

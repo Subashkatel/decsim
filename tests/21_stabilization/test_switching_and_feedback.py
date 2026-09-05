@@ -231,7 +231,8 @@ def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
         SampledConfidenceDecoder,
         SwitchingRouter,
     )
-    from decsim.decoders.weak_strong_switching import Switching
+    from decsim.escalation.policies import Switching
+    from decsim.escalation.threshold_sources import FixedThreshold
     from decsim.controller.policies import Held
     from decsim.pauli_frame.pauli_frame import PauliFrameConfig
     from decsim.qpu.round_policies import FixedRounds
@@ -270,7 +271,7 @@ def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
             bulk_strong=True,
         ),
         escalation=EscalationSettings(
-            policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE)
+            policy=Switching(FixedThreshold(0.5), SAMPLED_CONFIDENCE_SOURCE)
         ),
         links=fabric["declared_profile"](
             controller_to_weak_buffer=True, controller_to_strong_buffer=True

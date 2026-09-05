@@ -11,7 +11,7 @@ from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.decoders.minimum_weight_perfect_matching.decoder import (
     PyMatchingDecoder,
 )
-from decsim.decoders.weak_strong_switching import StrongOnly
+from decsim.escalation.policies import StrongOnly
 from decsim.links.link_profiles import logical_reference_profile
 from decsim.message import Operation
 from decsim.qpu.round_policies import FixedRounds

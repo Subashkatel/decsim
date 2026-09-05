@@ -19,7 +19,8 @@ from decsim.decoders.decoders import (SAMPLED_CONFIDENCE_SOURCE,
                                       PresetLatencyDecoder,
                                       SampledConfidenceDecoder,
                                       SwitchingRouter)
-from decsim.decoders.weak_strong_switching import Switching, StrongOnly
+from decsim.escalation.policies import Switching, StrongOnly
+from decsim.escalation.threshold_sources import FixedThreshold
 from decsim.controller.policies import Held
 from decsim.links.link_profiles import (logical_reference_profile,
                                         with_controller_to_weak_buffer_path,
@@ -163,7 +164,7 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
         escalation_probability, probability_for=probability_for)
     router = SwitchingRouter(weak=weak,
                              strong=PresetLatencyDecoder(DECLARED_US["strong"]))
-    policy = Switching(0.5, SAMPLED_CONFIDENCE_SOURCE,
+    policy = Switching(FixedThreshold(0.5), SAMPLED_CONFIDENCE_SOURCE,
                        run_both_at_once=run_both_at_once)
     settings = MachineSettings(
         workload=WorkloadSettings(
@@ -173,7 +174,7 @@ def switching_run(*, rounds=6, escalation_probability, ops=None,
         windows=WindowSettings(
             scheme=sliding_scheme(),
             # serial switching requires Held boundaries; double_window rejects
-            # them (weak_strong_switching.Switching.check_plan)
+            # them (escalation.policies.Switching.check_plan)
             boundary_policy=(None if double_window else Held())),
         decoder_manager=DecoderManagerSettings(
             router=router,

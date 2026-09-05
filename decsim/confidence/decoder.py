@@ -65,8 +65,6 @@ class SoftOutputDecoder(decoder_module.DecoderBase):
     untimed setup (graph build and warm-up).
     """
 
-    reports_soft_output = True
-
     def __init__(self, base: decoder_module.DecoderBase, signal) -> None:
         self.base = base
         self.signal = signal

@@ -141,8 +141,7 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         ValueError,
         match="weak_decoder.kind 'lookup_table' is not a row of its table; "
         r"the rows are \['belief_matching', 'bposd', 'pymatching', "
-        r"'relay_bp', 'tesseract', 'union_find', 'union_find_cluster_gap', "
-        r"'unweighted_pymatching'\]",
+        r"'relay_bp', 'tesseract', 'union_find', 'unweighted_pymatching'\]",
     ):
         collect.collect([unknown], measure_shot.measure_shot)
 

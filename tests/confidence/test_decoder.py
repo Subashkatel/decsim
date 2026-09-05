@@ -86,7 +86,6 @@ def test_the_wrapper_attaches_the_signals_soft_output_to_the_base_result():
     assert result.logical_observables == (1,)
     assert result.soft_output.gap == 3.5
     assert result.soft_output.source is SOURCE
-    assert wrapper.reports_soft_output is True
 
 
 def test_a_model_the_signal_cannot_measure_leaves_the_result_without_one():

@@ -146,8 +146,7 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         ValueError,
         match="weak_decoder.kind 'lookup_table' is not a row of its table; "
         r"the rows are \['belief_matching', 'bposd', 'pymatching', "
-        r"'relay_bp', 'tesseract', 'union_find', 'union_find_cluster_gap', "
-        r"'unweighted_pymatching'\]",
+        r"'relay_bp', 'tesseract', 'union_find', 'unweighted_pymatching'\]",
     ):
         machine_module.Machine.build(settings)
 
@@ -284,53 +283,57 @@ def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
     assert len(machine.engine.log_lines) == 19
 
 
-def test_the_cluster_gap_row_builds_from_the_table_reporting_its_own_gap():
-    """The row is the Union-Find decode with its cluster gap.
+TIER_ROWS = (
+    r"\['belief_matching', 'bposd', 'pymatching', 'relay_bp', 'tesseract', "
+    r"'union_find', 'unweighted_pymatching'\]"
+)
 
-    Staged like every named row, and left unwrapped.
+
+@pytest.mark.parametrize(
+    "escalation_kind, tier",
+    [
+        ("weak_baseline", "weak"),
+        ("strong_only", "strong"),
+        ("switching", "weak"),
+        ("switching", "strong"),
+    ],
+)
+def test_the_cluster_gap_is_not_a_tier_kind_under_any_escalation(
+    escalation_kind, tier
+):
+    """The cluster gap is the Python-built Decoder of the test above.
+
+    It reports its own soft output in decibels at its weight step, where
+    switching decides on the complementary gap in nats, and no tier
+    that does not switch reads a soft output at all; so it is not a row
+    of the tier table under any escalation kind.
     """
-    weak_decoder = decoder_settings.DecoderSettings(
+    tiers = {
+        "weak": decoder_settings.DecoderSettings(
+            kind="pymatching", engine_megahertz=100.0
+        ),
+        "strong": decoder_settings.DecoderSettings(
+            kind="belief_matching", engine_megahertz=100.0
+        ),
+    }
+    tiers[tier] = decoder_settings.DecoderSettings(
         kind="union_find_cluster_gap", engine_megahertz=100.0
     )
-    operation = message.Operation(
-        id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
+    escalation = decoder_settings.EscalationSettings(kind=escalation_kind)
+    if escalation_kind == "switching":
+        escalation = decoder_settings.EscalationSettings(
+            kind="switching", gap_threshold_nats=1.0
+        )
+    settings = machine_module.MachineSettings(
+        weak_decoder=tiers["weak"],
+        strong_decoder=tiers["strong"],
+        escalation=escalation,
     )
-    settings = _memory_on_stim_device(weak_decoder, (operation,))
-    unit = machine_module.build_decoder_unit(settings, "weak")
-    assert isinstance(unit, staged_decoder.StagedDecoder)
-    assert isinstance(unit.decoder, cluster.UnionFindClusterGapDecoder)
-    assert unit.decoder.reports_soft_output is True
-
-
-def test_a_row_reporting_its_own_soft_output_is_refused_under_switching():
-    """Switching decides on the complementary gap.
-
-    A weak row that reports another soft output is refused at build.
-    """
-    weak_decoder = decoder_settings.DecoderSettings(
-        kind="union_find_cluster_gap", engine_megahertz=100.0
+    sentence = (
+        f"{tier}_decoder.kind 'union_find_cluster_gap' is not a row of its "
+        "table; the rows are " + TIER_ROWS
     )
-    strong_decoder = decoder_settings.DecoderSettings(
-        kind="pymatching", engine_megahertz=100.0
-    )
-    escalation = decoder_settings.EscalationSettings(
-        kind="switching", gap_threshold_nats=1.0
-    )
-    operation = message.Operation(
-        id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
-    )
-    settings = _memory_on_stim_device(weak_decoder, (operation,))
-    settings = dataclasses.replace(
-        settings, strong_decoder=strong_decoder, escalation=escalation
-    )
-    with pytest.raises(
-        ValueError,
-        match="weak_decoder.kind 'union_find_cluster_gap' reports its own "
-        "soft output, and escalation switching decides on the "
-        "complementary gap; no escalation key selects another signal "
-        "yet, so run this row under weak_baseline or switch on a row "
-        "the signal wraps",
-    ):
+    with pytest.raises(ValueError, match=sentence):
         machine_module.Machine.build(settings, 0)
 
 

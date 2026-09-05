@@ -35,7 +35,6 @@ from typing import Any, Optional
 
 import stim
 
-import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.confidence.decoder as confidence_decoder
 import decsim.config as config
@@ -131,10 +130,6 @@ DECODERS = {
     "tesseract": tesseract.TesseractDecoder,
     "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
-    # the Union-Find decode reporting its own cluster gap (Meister et al.
-    # 2405.07433); it takes no confidence signal, so a switching run
-    # refuses it until a key selects the policy's signal
-    "union_find_cluster_gap": cluster.union_find_cluster_gap,
 }
 # The soft output a switching run's weak decoder reports, and the wrapper
 # that attaches it (escalation.gap_computation). No yaml key names the
@@ -648,7 +643,6 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     is_active = tier == settings.escalation.decodes_on
     is_switching = settings.escalation.kind == "switching"
     if is_active and is_switching:
-        _refuse_own_soft_output(algorithm, tier, tier_settings.kind)
         # a named row is measured on the host clock; a number is priced
         is_measured = isinstance(tier_settings.kind, str)
         algorithm = _gap_wrapped(algorithm, settings.escalation, is_measured)
@@ -1127,18 +1121,6 @@ def _gap_wrapped(
             "(use parallel_pair to change its cost sheet instead)"
         )
     return wrapper(algorithm, signal)
-
-
-def _refuse_own_soft_output(algorithm, tier: str, kind) -> None:
-    """A switching run decides on its signal, not on a row's own gap."""
-    if not algorithm.reports_soft_output:
-        return
-    raise ValueError(
-        f"{tier}_decoder.kind {kind!r} reports its own soft output, and "
-        "escalation switching decides on the complementary gap; no "
-        "escalation key selects another signal yet, so run this row "
-        "under weak_baseline or switch on a row the signal wraps"
-    )
 
 
 def _confidence_signal():

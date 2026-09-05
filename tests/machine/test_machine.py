@@ -146,7 +146,8 @@ def test_a_decoder_kind_off_the_table_is_refused_naming_the_rows():
         ValueError,
         match="weak_decoder.kind 'lookup_table' is not a row of its table; "
         r"the rows are \['belief_matching', 'bposd', 'pymatching', "
-        r"'relay_bp', 'tesseract', 'union_find', 'unweighted_pymatching'\]",
+        r"'relay_bp', 'tesseract', 'union_find', 'union_find_cluster_gap', "
+        r"'unweighted_pymatching'\]",
     ):
         machine_module.Machine.build(settings)
 
@@ -281,6 +282,56 @@ def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
     observables = result.operation_results[0].logical_observables
     assert observables == (0,)
     assert len(machine.engine.log_lines) == 19
+
+
+def test_the_cluster_gap_row_builds_from_the_table_reporting_its_own_gap():
+    """The row is the Union-Find decode with its cluster gap.
+
+    Staged like every named row, and left unwrapped.
+    """
+    weak_decoder = decoder_settings.DecoderSettings(
+        kind="union_find_cluster_gap", engine_megahertz=100.0
+    )
+    operation = message.Operation(
+        id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
+    )
+    settings = _memory_on_stim_device(weak_decoder, (operation,))
+    unit = machine_module.build_decoder_unit(settings, "weak")
+    assert isinstance(unit, staged_decoder.StagedDecoder)
+    assert isinstance(unit.decoder, cluster.UnionFindClusterGapDecoder)
+    assert unit.decoder.reports_soft_output is True
+
+
+def test_a_row_reporting_its_own_soft_output_is_refused_under_switching():
+    """Switching decides on the complementary gap.
+
+    A weak row that reports another soft output is refused at build.
+    """
+    weak_decoder = decoder_settings.DecoderSettings(
+        kind="union_find_cluster_gap", engine_megahertz=100.0
+    )
+    strong_decoder = decoder_settings.DecoderSettings(
+        kind="pymatching", engine_megahertz=100.0
+    )
+    escalation = decoder_settings.EscalationSettings(
+        kind="switching", gap_threshold_nats=1.0
+    )
+    operation = message.Operation(
+        id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
+    )
+    settings = _memory_on_stim_device(weak_decoder, (operation,))
+    settings = dataclasses.replace(
+        settings, strong_decoder=strong_decoder, escalation=escalation
+    )
+    with pytest.raises(
+        ValueError,
+        match="weak_decoder.kind 'union_find_cluster_gap' reports its own "
+        "soft output, and escalation switching decides on the "
+        "complementary gap; no escalation key selects another signal "
+        "yet, so run this row under weak_baseline or switch on a row "
+        "the signal wraps",
+    ):
+        machine_module.Machine.build(settings, 0)
 
 
 class CountingRoundStore(round_store_module.RoundStore):

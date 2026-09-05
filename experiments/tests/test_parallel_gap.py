@@ -131,14 +131,14 @@ class StubPairedMetric:
         return self.evaluation
 
 
-class StubMetricFactory:
+class StubSignal:
     source = COMPLEMENTARY_GAP_SOURCE
     fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
 
     def __init__(self, metric: StubPairedMetric):
         self.metric = metric
 
-    def from_window_model(self, _model) -> StubPairedMetric:
+    def metric_for(self, _model) -> StubPairedMetric:
         return self.metric
 
 
@@ -153,7 +153,7 @@ def test_pair_timing_charges_the_slower_core_plus_the_join():
         predicted_class=0, gap=4.0, solve_ns=(5_000_000, 3_000_000)
     )
     wrapper = ParallelGapDecoder(
-        StubWeakDecoder(prediction=0), StubMetricFactory(metric), combine_nanoseconds=250
+        StubWeakDecoder(prediction=0), StubSignal(metric), combine_nanoseconds=250
     )
     result, elapsed_ns = wrapper.decode_timed(paired_job())
     assert elapsed_ns == 5_000_000 + 250
@@ -166,7 +166,7 @@ def test_the_committed_result_is_the_base_decoders_result():
     # speaks about the whole window, the result about the owned slice).
     metric = StubPairedMetric(predicted_class=1, gap=4.0, solve_ns=(1, 1))
     wrapper = ParallelGapDecoder(
-        StubWeakDecoder(prediction=0), StubMetricFactory(metric)
+        StubWeakDecoder(prediction=0), StubSignal(metric)
     )
     result = wrapper.decode(paired_job())
     assert result.logical_observables == (0,)

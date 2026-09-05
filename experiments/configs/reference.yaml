@@ -202,7 +202,10 @@ strong_round_store:                # syndrome buffer 1, the strong-side store
 # the unused tier's section may be omitted.
 weak_decoder:                      # the lightweight tier: fast, higher LER
   kind: pymatching                 # pymatching | unweighted_pymatching |
-                                   # belief_matching | union_find | tesseract |
+                                   # belief_matching | union_find |
+                                   # union_find_cluster_gap (Union-Find
+                                   # reporting its own cluster gap; not
+                                   # under switching) | tesseract |
                                    # relay_bp | bposd: the real algorithm,
                                    # measured wall clock per window; or a
                                    # number: fixed core latency in us.

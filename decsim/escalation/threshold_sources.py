@@ -9,38 +9,16 @@ kept windows to learn whether the target is safe; it is one instance
 per sweep point, shared by every shot. The yaml's third source, table,
 is resolved by the front to a fixed threshold per sweep point
 (decoders/settings.py, threshold_nats_for), so at run time it is
-FixedThreshold. Thresholds and gaps are natural-log weight (nats), the
-unit the decoder compares in; the yaml converts the paper's decibels.
+FixedThreshold. Both rows fill the ThresholdSource port
+(decsim/ports.py). Thresholds and gaps are natural-log weight (nats),
+the unit the decoder compares in; the yaml converts the paper's
+decibels.
 """
 
 import dataclasses
 import math
-from typing import Protocol, runtime_checkable
 
 import decsim.message as message
-
-
-@runtime_checkable
-class ThresholdSource(Protocol):
-    """Where the keep decision's threshold comes from, as Switching sees it.
-
-    Rows: fixed, online. A source that audits by escalating (the online
-    row labels a kept window by re-decoding it on the strong tier) needs
-    one serial strong re-decode per window, so Switching refuses it
-    beside run_both_at_once and the double window.
-    """
-
-    audits_by_escalating: bool
-
-    def decide_keep(
-        self, job: message.DecodeJob, result: message.DecodeResult
-    ) -> bool:
-        """True keeps the weak result; the result carries its soft output."""
-
-    def learn_from_strong_result(
-        self, window_key: tuple, result: message.DecodeResult
-    ) -> None:
-        """The strong tier answered for the window; the source may learn."""
 
 
 class FixedThreshold:

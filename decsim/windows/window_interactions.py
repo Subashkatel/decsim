@@ -1,250 +1,262 @@
-"""Shipped decisions for relationships between decode windows."""
+"""The window interaction: how adjacent or replaced windows relate.
 
-from __future__ import annotations
+An interaction decides what boundary a window starts with, what boundary
+a result carries, which dependents receive it, how a delivery merges
+into the destination's state, how the state masks a landed round, and
+which strong region replaces an escalated window. It returns data and
+immutable decisions; the window side owns event ordering, retention,
+logical accounting and finality. The default interaction is decsim's
+defect-mask boundary (qLDPC net_error, cudaq-x syndrome_mods) and its
+double-window strong region.
+"""
 
-from dataclasses import replace
-from typing import Any, Mapping, Optional, Protocol, runtime_checkable
+import dataclasses
+from collections.abc import Mapping
+from typing import Any, Optional, Protocol, runtime_checkable
 
-from ..message import (
-    BoundaryUpdate,
-    DependencyResidual,
-    SeamFaultOwner,
-    StrongRegionPlan,
-)
+import decsim.message as message
 
 
 @runtime_checkable
 class WindowInteraction(Protocol):
-    """Decisions relating adjacent or replaced windows.
+    """Decisions relating adjacent or replaced windows."""
 
-    Implementations return data and immutable decisions; the window
-    manager owns event ordering, lifecycle, retention, logical accounting
-    and finality.
-    """
-
-    def initial_boundary_state(self, window: WindowInfo) -> Any:
+    def initial_boundary_state(self, window: message.WindowInfo) -> Any:
         """The boundary a window starts with."""
 
     def boundary_from_result(
-        self, result: Optional[DecodeResult], fallback: Any,
+        self, result: Optional[message.DecodeResult], fallback: Any
     ) -> Any:
         """The boundary a decode result carries, else the fallback."""
 
-    def boundaries_equal(self, left: Any, right: Any) -> bool:
-        """Whether two boundaries carry the same defects."""
-
     def boundary_targets(
-        self, source: WindowInfo, windows: Mapping[tuple, WindowInfo],
+        self,
+        source: message.WindowInfo,
+        windows: Mapping[tuple, message.WindowInfo],
     ) -> list:
         """The unstarted destinations among the source's declared edges."""
 
     def merge_boundary(
         self,
-        delivery: BoundaryDelivery,
-        destination: WindowInfo,
+        delivery: message.BoundaryDelivery,
+        destination: message.WindowInfo,
         current_state: Any,
-    ) -> BoundaryUpdate:
+    ) -> message.BoundaryUpdate:
         """The destination's boundary after this delivery."""
 
     def apply_boundary(
-        self, state: Any, window: WindowInfo, payload, round_key: int,
+        self, state: Any, window: message.WindowInfo, payload, round_key: int
     ):
-        """Fold one delivered boundary into the window's state."""
-
-    def invalidated_windows(
-        self, source_key: tuple, windows: Mapping[tuple, WindowInfo],
-    ) -> list:
-        """The replay roots; the runtime adds their dependent closure."""
+        """Fold one delivered boundary into a landed round of the window."""
 
     def plan_strong_region(
         self,
-        weak_window: WindowInfo,
-        later_windows: list[WindowInfo],
+        weak_window: message.WindowInfo,
+        later_windows: list,
         operation_round_count: int,
-    ) -> Optional[StrongRegionPlan]:
+    ) -> Optional[message.StrongRegionPlan]:
         """The strong window that replaces a weak window, or None."""
 
 
-class _DefectBoundaryState(dict):
-    """Combined defect masks plus each source's replaceable contribution."""
-
-    def __init__(self, combined=None, contributions=None):
-        super().__init__(combined or {})
-        self.contributions = dict(contributions or {})
-
-
 class DefaultWindowInteraction:
-    """Preserve decsim's defect-mask and double-window behavior.
+    """decsim's defect-mask boundary and double-window strong region.
 
-    The runtime applies the decisions returned by this object. The
-    implementation has no manager reference and cannot mutate lifecycle
-    state.
+    The boundary is a mask per (round, patch) or per round, XORed into
+    the landed rounds when the decode starts; a same-operation A/B
+    delivery is mapped by stable detector identity.
     """
 
-    def initial_boundary_state(self, window):
+    def initial_boundary_state(self, _window):
+        """An empty mask."""
         return _DefectBoundaryState()
 
     def boundary_from_result(self, result, fallback):
+        """The result's residual, its boundary defects, or the fallback."""
         if result is None:
             return fallback
-        if isinstance(result.boundary_data, DependencyResidual):
+        if isinstance(result.boundary_data, message.DependencyResidual):
             return result.boundary_data
-        if result.boundary_defects is not None or result.correction is not None:
+        if result.boundary_defects is not None:
+            return result.boundary_defects
+        if result.correction is not None:
             return result.boundary_defects
         return fallback
 
-    @staticmethod
-    def _canonical_boundary(boundary):
-        if isinstance(boundary, DependencyResidual):
-            boundary = boundary.defects
-        if not boundary:
-            return None
-        return {
-            key: tuple(int(bit) for bit in mask)
-            for key, mask in boundary.items()
-        }
-
-    def boundaries_equal(self, left, right):
-        return self._canonical_boundary(left) == self._canonical_boundary(right)
-
-    def boundary_targets(self, source, windows):
+    def boundary_targets(self, source, _windows):
+        """Every declared dependent of the source."""
         return list(source.dependents)
 
     def merge_boundary(self, delivery, destination, current_state):
+        """A current delivery replaces its source's contribution to the mask."""
         if not delivery.is_current:
-            return BoundaryUpdate(
+            return message.BoundaryUpdate(
                 state=current_state,
                 accepted=False,
                 release_dependency=False,
             )
         prior_contributions = getattr(current_state, "contributions", {})
         contributions = dict(prior_contributions)
-        contributions[delivery.source_key] = self._map_defects(
-            delivery, destination)
+        contributions[delivery.source_key] = _map_defects(delivery, destination)
         combined = {}
         for contribution in contributions.values():
             for key, mask in contribution.items():
-                combined[key] = self._xor_mask(combined.get(key), mask)
+                previous = combined.get(key)
+                combined[key] = _xor_mask(previous, mask)
         state = _DefectBoundaryState(combined, contributions)
-        return BoundaryUpdate(
+        release_dependency = not delivery.dependency_released
+        return message.BoundaryUpdate(
             state=state,
             accepted=True,
-            release_dependency=not delivery.dependency_released,
+            release_dependency=release_dependency,
         )
 
-    @staticmethod
-    def _map_defects(delivery, destination):
-        mapped = {}
-        payload = delivery.payload
-        if (
-            isinstance(payload, DependencyResidual)
-            and payload.detector_ids
-            and delivery.source_key[0] == destination.op_id
-            and destination.detector_positions is not None
-        ):
-            # Same-operation A/B delivery uses stable global detector identity.
-            # Intersecting with the destination model is the exact residual
-            # H_destination * committed_source_correction.
-            positions = destination.detector_positions
-            for detector_id in payload.detector_ids:
-                if detector_id not in positions:
-                    continue
-                round_index, position = positions[detector_id]
-                mask = mapped.setdefault(round_index, [])
-                if len(mask) <= position:
-                    mask.extend([0] * (position + 1 - len(mask)))
-                mask[position] ^= 1
-            return mapped
+    def apply_boundary(self, state, _window, payload, round_key):
+        """XOR the round's mask into the payload's bits.
 
-        defects = payload.defects if isinstance(
-            payload, DependencyResidual) else payload
-        if not defects:
-            return mapped
-        shift = 0
-        if delivery.source_key[0] != destination.op_id:
-            shift = -delivery.source_operation_round_count
-        for key, mask in defects.items():
-            round_index, patch = key if isinstance(key, tuple) else (key, None)
-            round_index += shift
-            if not destination.start_round <= round_index <= destination.buffer_hi:
-                continue
-            destination_key = (
-                (round_index, patch) if patch is not None else round_index
-            )
-            mapped[destination_key] = list(mask)
-        return mapped
-
-    def apply_boundary(self, state, window, payload, round_key):
+        A timing-only payload (no bits) takes the mask as its bits.
+        """
         state = state or {}
-        mask = state.get(
-            (round_key, payload.patch_id),
-            state.get(round_key),
-        )
+        patch_mask = state.get((round_key, payload.patch_id))
+        mask = patch_mask
+        if mask is None:
+            mask = state.get(round_key)
         if mask is None:
             return payload
-        bits = (
-            tuple(int(bit) for bit in mask)
-            if payload.bits is None
-            else tuple(self._xor_mask(payload.bits, mask))
-        )
-        return replace(payload, bits=bits)
-
-    def invalidated_windows(self, source_key, windows):
-        found = set()
-        stack = list(windows[source_key].dependents)
-        while stack:
-            key = stack.pop()
-            if key in found:
-                continue
-            found.add(key)
-            stack.extend(windows[key].dependents)
-        return sorted(found)
+        if payload.bits is None:
+            bits = tuple(int(bit) for bit in mask)
+        else:
+            masked = _xor_mask(payload.bits, mask)
+            bits = tuple(masked)
+        return dataclasses.replace(payload, bits=bits)
 
     def plan_strong_region(
-        self, weak_window, later_windows, operation_round_count,
+        self, weak_window, _later_windows, operation_round_count
     ):
+        """The forward strong window: commit plus two buffers, one restart.
+
+        The strong window commits from the weak window's commit start over
+        commit + 2 buffer rounds (clamped at the operation's end) and reads
+        one buffer of context on each side; a restart window past it
+        re-reads one buffer into the strong region, whose seam faults the
+        strong region owns.
+        """
         commit_round_count = weak_window.commit_hi - weak_window.commit_lo + 1
         buffer_round_count = weak_window.buffer_hi - weak_window.commit_hi
         strong_round_count = commit_round_count + 2 * buffer_round_count
         commit_lo = weak_window.commit_lo
-        commit_hi = min(
-            commit_lo + strong_round_count - 1,
-            operation_round_count,
-        )
-        trailing_rounds = max(
-            0, weak_window.buffer_hi - weak_window.commit_hi)
-        context_lo = max(1, commit_lo - trailing_rounds)
-        context_hi = min(
-            commit_hi + trailing_rounds,
-            operation_round_count,
-        )
-
+        strong_end = commit_lo + strong_round_count - 1
+        commit_hi = min(strong_end, operation_round_count)
+        trailing_span = weak_window.buffer_hi - weak_window.commit_hi
+        trailing_rounds = max(0, trailing_span)
+        context_start = commit_lo - trailing_rounds
+        context_lo = max(1, context_start)
+        context_end = commit_hi + trailing_rounds
+        context_hi = min(context_end, operation_round_count)
         has_restart = commit_hi < operation_round_count
-
-        return StrongRegionPlan(
+        restart_buffer_lo = None
+        restart_seam_fault_owner = None
+        if has_restart:
+            restart_start = commit_hi - buffer_round_count + 1
+            restart_buffer_lo = max(commit_lo, restart_start)
+            restart_seam_fault_owner = message.SeamFaultOwner.STRONG_REGION
+        return message.StrongRegionPlan(
             commit_lo=commit_lo,
             commit_hi=commit_hi,
             context_lo=context_lo,
             context_hi=context_hi,
-            restart_buffer_lo=(
-                max(commit_lo, commit_hi - buffer_round_count + 1)
-                if has_restart else None
-            ),
-            restart_seam_fault_owner=(
-                SeamFaultOwner.STRONG_REGION
-                if has_restart else None
-            ),
+            restart_buffer_lo=restart_buffer_lo,
+            restart_seam_fault_owner=restart_seam_fault_owner,
         )
 
-    @staticmethod
-    def _xor_mask(previous_mask, incoming_mask):
-        previous_bits = (
-            [int(bit) for bit in previous_mask]
-            if previous_mask is not None else []
-        )
-        incoming_bits = [int(bit) for bit in incoming_mask]
-        if len(previous_bits) < len(incoming_bits):
-            previous_bits += [0] * (len(incoming_bits) - len(previous_bits))
-        for index, bit in enumerate(incoming_bits):
-            previous_bits[index] ^= bit
-        return previous_bits
+
+class _DefectBoundaryState(dict):
+    """Combined defect masks plus each source's replaceable contribution."""
+
+    def __init__(self, combined=None, contributions=None):
+        if combined is None:
+            combined = {}
+        if contributions is None:
+            contributions = {}
+        dict.__init__(self, combined)
+        self.contributions = dict(contributions)
+
+
+def _map_defects(delivery: message.BoundaryDelivery, destination) -> dict:
+    """The delivery's defects in the destination's round coordinates."""
+    payload = delivery.payload
+    if _is_same_operation_residual(delivery, destination):
+        return _map_detector_identities(payload.detector_ids, destination)
+    defects = payload
+    if isinstance(payload, message.DependencyResidual):
+        defects = payload.defects
+    if not defects:
+        return {}
+    shift = 0
+    if delivery.source_key[0] != destination.op_id:
+        shift = -delivery.source_operation_round_count
+    return _map_shifted_defects(defects, shift, destination)
+
+
+def _is_same_operation_residual(delivery, destination) -> bool:
+    """A same-operation A/B delivery with stable global detector identity."""
+    payload = delivery.payload
+    if not isinstance(payload, message.DependencyResidual):
+        return False
+    if not payload.detector_ids:
+        return False
+    if delivery.source_key[0] != destination.op_id:
+        return False
+    return destination.detector_positions is not None
+
+
+def _map_detector_identities(detector_ids, destination) -> dict:
+    """Intersect the residual's detectors with the destination model.
+
+    That is the exact residual H_destination times the committed source
+    correction.
+    """
+    positions = destination.detector_positions
+    mapped = {}
+    for detector_id in detector_ids:
+        if detector_id not in positions:
+            continue
+        round_index, position = positions[detector_id]
+        mask = mapped.setdefault(round_index, [])
+        if len(mask) <= position:
+            padding = position + 1 - len(mask)
+            padding_bits = [0] * padding
+            mask.extend(padding_bits)
+        mask[position] ^= 1
+    return mapped
+
+
+def _map_shifted_defects(defects: dict, shift: int, destination) -> dict:
+    """Round-keyed defects moved by the shift and clipped to the window."""
+    mapped = {}
+    for key, mask in defects.items():
+        round_index = key
+        patch = None
+        if isinstance(key, tuple):
+            round_index, patch = key
+        round_index += shift
+        if not destination.start_round <= round_index <= destination.buffer_hi:
+            continue
+        destination_key = round_index
+        if patch is not None:
+            destination_key = (round_index, patch)
+        mapped[destination_key] = list(mask)
+    return mapped
+
+
+def _xor_mask(previous_mask, incoming_mask) -> list:
+    """The XOR of two masks, the shorter one padded with zeros."""
+    previous_bits = []
+    if previous_mask is not None:
+        previous_bits = [int(bit) for bit in previous_mask]
+    incoming_bits = [int(bit) for bit in incoming_mask]
+    if len(previous_bits) < len(incoming_bits):
+        padding = len(incoming_bits) - len(previous_bits)
+        previous_bits += [0] * padding
+    for index, bit in enumerate(incoming_bits):
+        previous_bits[index] ^= bit
+    return previous_bits

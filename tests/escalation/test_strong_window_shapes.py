@@ -8,13 +8,100 @@ absorbs the windows it covers, and is decoded once both of its
 boundaries are weak-determined: the restart window's commit, or the
 terminal data (Sec. III C, Fig. 12). A d=3 sliding window commits 3
 rounds and buffers 3, so r_strong is 9 rounds.
+
+The restart window's weak decode re-reads one buffer into the strong
+region from Buffer 0 (Sec. III C: the weak decoder resumes past the
+strong region once its rounds are stored), so the last absorbed
+window's commit rounds must still be stored when the plan lands, in a
+backlog regime where the absorbed windows' inputs are in flight or have
+already landed in a unit. The gate's switching card, priced on both
+tiers so the run is deterministic, is the regime the reviewer found.
 """
+
+import copy
+import dataclasses
+import pathlib
 
 import pytest
 
+import decsim.machine as machine_module
 import decsim.message as message
 import decsim.observe.run_views as run_views
 import tests.escalation.declared_fabric as fabric
+
+# The gate's switching card (validation/responsibility_audit_2026_08_30/
+# frozen_suite/switching_validation.yaml over weak_decoder_baseline.yaml),
+# section by section as the yaml reads.
+ONE_FRIDGE_CYCLE = {
+    "latency_cycles": 1,
+    "clock": "fridge",
+    "bits_per_cycle": None,
+}
+ONE_ROOM_CYCLE = {"latency_cycles": 1, "clock": "room", "bits_per_cycle": None}
+GATE_SWITCHING_CARD = {
+    "clocks": {"fridge": 250.0, "room": 250.0},
+    "qpu": {"kind": "stim_device"},
+    "controller": {
+        "clock": "fridge",
+        "readout_to_bits_cycles": 0,
+        "decision_to_pulse_cycles": 0,
+        "packing_cycles_per_round": 0,
+        "packing_rounds_in_flight": None,
+    },
+    "idle_policy": "separate_decode_jobs",
+    "links": {
+        "qpu_to_controller": ONE_FRIDGE_CYCLE,
+        "controller_to_weak_buffer": ONE_FRIDGE_CYCLE,
+        "controller_to_strong_buffer": ONE_ROOM_CYCLE,
+        "weak_buffer_to_weak_decoder": ONE_FRIDGE_CYCLE,
+        "weak_decoder_to_strong_decoder": ONE_ROOM_CYCLE,
+        "strong_buffer_to_strong_decoder": ONE_ROOM_CYCLE,
+        "decoder_to_decoder": ONE_FRIDGE_CYCLE,
+        "weak_decoder_to_frame": ONE_FRIDGE_CYCLE,
+        "strong_decoder_to_frame": ONE_ROOM_CYCLE,
+        "frame_to_controller": None,
+        "controller_to_qpu": None,
+    },
+    "round_store": {"rounds": None},
+    "strong_round_store": {"rounds": None},
+    "windows": {
+        "kind": "sliding",
+        "commit_rounds": None,
+        "buffer_rounds": None,
+    },
+    "weak_decoder": {
+        "kind": "pymatching",
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "fridge",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 10,
+        },
+    },
+    "strong_decoder": {
+        "kind": "belief_matching",
+        "units": 1,
+        "unit_memory_rounds": None,
+        "engine": {
+            "clock": "room",
+            "fetch_cycles_per_round": 1,
+            "release_cycles_per_job": 10,
+        },
+    },
+    "escalation": {"kind": "switching", "gap_threshold_db": 20.0},
+    "pauli_frame": {"clock": "fridge", "write_cycles": 1},
+    "workload": {
+        "kind": "memory_circuit",
+        "code_task": "surface_code:rotated_memory_z",
+        "rounds_per_shot": "10d",
+    },
+    "observation": {
+        "check_windows_with": "none",
+        "log_component_io": True,
+        "trace": "off",
+    },
+}
 
 
 def _strong_request_record(machine, window_id: int):
@@ -132,3 +219,183 @@ def test_a_second_escalation_of_one_window_is_refused():
     )
     with pytest.raises(RuntimeError, match="duplicate strong escalation"):
         shape.plan(again)
+
+
+# ---- the restart window's Buffer 0 claim under a backlog
+
+
+def _gate_double_window_machine(
+    commit_rounds: int,
+    buffer_rounds: int,
+    weak_microseconds: float,
+    strong_microseconds: float,
+    weak_units: int,
+) -> machine_module.Machine:
+    """The gate's switching card with double_window on, both tiers priced.
+
+    The gate's point: p 0.008, d 3, 1 us rounds, 30 rounds, seed 0. The
+    weak tier at 40 us per window against 3 us of rounds is the backlog
+    regime: every later window is requested, and staged as units free,
+    long before the escalated window's verdict.
+    """
+    sections = copy.deepcopy(GATE_SWITCHING_CARD)
+    sections["windows"]["commit_rounds"] = commit_rounds
+    sections["windows"]["buffer_rounds"] = buffer_rounds
+    sections["weak_decoder"]["kind"] = weak_microseconds
+    sections["weak_decoder"]["units"] = weak_units
+    sections["strong_decoder"]["kind"] = strong_microseconds
+    sections["escalation"]["double_window"] = True
+    base_directory = pathlib.Path(".")
+    settings = machine_module.MachineSettings.from_mapping(
+        sections, name="switching_validation", base_directory=base_directory
+    )
+    qpu = dataclasses.replace(
+        settings.qpu, distance=3, round_period_microseconds=1.0
+    )
+    workload = dataclasses.replace(
+        settings.workload, physical_error_probability=0.008
+    )
+    settings = dataclasses.replace(settings, qpu=qpu, workload=workload)
+    return machine_module.Machine.build(settings, 0)
+
+
+def _run_statuses(result) -> list:
+    statuses = []
+    for row in result.operation_results:
+        statuses.append((row.operation_id, row.result_status))
+    return statuses
+
+
+def _log_index(machine, needle: str) -> int:
+    lines = fabric.log_lines_containing(machine, needle)
+    assert lines, needle
+    return machine.engine.log_lines.index(lines[0])
+
+
+def _claim(machine, window_index: int):
+    store = machine.window_manager.retention.weak_store
+    claim = message.PotentialRestart((1, window_index))
+    if not store.has_hold(claim):
+        return None
+    return store.hold_round_identities(claim)
+
+
+def test_a_double_window_plan_claims_one_buffer_before_each_bounded_window():
+    """The plan's claims: a window's reads and one buffer before them.
+
+    The first window, and every window of an ordinary run, claims
+    nothing.
+    """
+    doubled = fabric.switching_machine(
+        rounds=15, escalated_windows=set(), double_window=True
+    )
+    # W1 commits 4-6 and reads to 9: one buffer before is 1-3
+    assert _claim(doubled, 1) == tuple((1, index) for index in range(1, 10))
+    # W4 commits 13-15 and reads to 18, clipped at the operation's end
+    assert _claim(doubled, 4) == tuple((1, index) for index in range(10, 16))
+    assert _claim(doubled, 0) is None
+    ordinary = fabric.switching_machine(rounds=15, escalated_windows=set())
+    for window_index in range(5):
+        assert _claim(ordinary, window_index) is None
+
+
+def test_the_restart_window_keeps_its_re_read_rounds_across_the_withdrawals():
+    """The reviewer's reproduction: commit 3, buffer 3, weak 40 us.
+
+    W3 escalates at 166 us with W4's input landed and W5's in flight;
+    the strong window 10-18 absorbs W4 and W5, and the restart W6
+    re-reads 16-18, W5's commit rounds, whose last Buffer 0 holder was
+    W5's request. The run used to die there with the retention
+    sentence; now W6's own claim carries the rounds across W5's
+    withdrawal and W6's stale request is withdrawn and rebuilt.
+    """
+    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 1)
+    result = machine.run()
+    assert _run_statuses(result) == [(1, "logical_observables")]
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 1), "weak"),
+        ((1, 2), "weak"),
+        ((1, 3), "strong"),
+        ((1, 9), "strong"),
+        ((1, 6), "strong"),
+    ]
+    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    assert (
+        "restart window (1, 6) re-sliced across strong window edge 18 "
+        "(reads rounds 16-24; crossing faults owned by strong_region)"
+    ) in resliced[0]
+    withdrawn_restart = _log_index(machine, "WITHDRAW memory W6")
+    assert withdrawn_restart < machine.engine.log_lines.index(resliced[0])
+    assert not machine.window_manager.strong_redecode.has_pending()
+
+
+def test_the_re_read_rounds_survive_with_commit_four_and_buffer_four():
+    """The reviewer's second shape: W2 escalates, W5 re-reads 17-20."""
+    machine = _gate_double_window_machine(4, 4, 40.0, 5.0, 1)
+    result = machine.run()
+    assert _run_statuses(result) == [(1, "logical_observables")]
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 1), "weak"),
+        ((1, 5), "strong"),
+        ((1, 2), "strong"),
+    ]
+    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    assert (
+        "restart window (1, 5) re-sliced across strong window edge 20 "
+        "(reads rounds 17-28; crossing faults owned by strong_region)"
+    ) in resliced[0]
+
+
+def test_the_re_read_rounds_survive_the_absorbed_inputs_landing_first():
+    """Two weak units: the absorbed W5 and the restart W6 land first.
+
+    Both inputs are in unit memory before W3's verdict. A landed
+    input's Buffer 0 request hold ends at the landing, so with one
+    holder the re-read rounds 16-18 and W6's own 19-21 would be gone
+    before the plan runs; W6's claim keeps them past both landings.
+    """
+    machine = _gate_double_window_machine(3, 3, 40.0, 5.0, 2)
+    result = machine.run()
+    landed_absorbed = _log_index(
+        machine, "memory W5 [commit 16-18] input landed"
+    )
+    landed_restart = _log_index(
+        machine, "memory W6 [commit 19-21] input landed"
+    )
+    escalated = _log_index(machine, "WITHDRAW memory W4")
+    assert landed_absorbed < escalated
+    assert landed_restart < escalated
+    assert _run_statuses(result) == [(1, "logical_observables")]
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 1), "weak"),
+        ((1, 2), "weak"),
+        ((1, 3), "strong"),
+        ((1, 9), "strong"),
+        ((1, 6), "strong"),
+    ]
+
+
+def test_the_forward_window_lands_in_the_declared_backlog_regime():
+    """1 us rounds against a 10 us weak decode: W1 escalates with W2 landed.
+
+    The stabilization suite pinned this run as a refusal (finding R3);
+    the refusal was the bug.
+    """
+    machine = fabric.switching_machine(
+        rounds=15, escalated_windows={1}, double_window=True
+    )
+    machine.run()
+    assert fabric.frame_tiers(machine) == [
+        ((1, 0), "weak"),
+        ((1, 4), "weak"),
+        ((1, 1), "strong"),
+    ]
+    resliced = fabric.log_lines_containing(machine, "re-sliced")
+    assert (
+        "restart window (1, 4) re-sliced across strong window edge 12"
+        in (resliced[0])
+    )
+    assert not machine.window_manager.strong_redecode.has_pending()

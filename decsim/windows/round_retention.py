@@ -6,7 +6,14 @@ same rounds plus one buffer of context on each side are held in the
 room-side store as a potential strong read (Skoric et al. 2209.08552:
 the buffer region is re-read by the next window). At admission the
 window's hold becomes the request's and is released once the input
-lands in the unit's memory. The stores hold slots and holders; which
+lands in the unit's memory. Under the double window a window that an
+earlier window bounds also keeps its reads and one buffer before them
+as a potential restart read (PotentialRestart, planned in
+frontends/planner.py), past its own request and landing: an earlier
+escalation may re-slice it as the restart window that re-reads one
+buffer into the strong region (Toshio et al. 2510.25222 Sec. III C).
+The read ends when the window before it commits, or when the window is
+re-sliced or absorbed. The stores hold slots and holders; which
 rounds a window needs is decided here, gem5's split between the cache
 that allocates a miss buffer and the queue that holds the entry
 (src/mem/cache/base.hh allocateMissBuffer).
@@ -91,7 +98,14 @@ class RoundRetention:
             self.strong_store.register_hold(potential, held)
 
     def replace_window_reads(self, key: tuple, window: message.Window) -> None:
-        """Move shrinking weak reads into strong retention before release."""
+        """Re-point the window's live holds at its reads.
+
+        The potential strong read moves first, so a shrinking weak read
+        stays in strong retention before its release. A re-sliced
+        restart window whose own hold already moved to its request
+        keeps its potential restart hold, which now names the rounds
+        the fresh request reads, the re-read range among them.
+        """
         weak = self.read_keys_for_bounds(
             window.op_id, window.start_round, window.buffer_hi, window
         )
@@ -102,7 +116,16 @@ class RoundRetention:
         ):
             held = weak + strong
             self.strong_store.replace_hold(potential, held)
-        self.weak_store.replace_hold(key, weak)
+        if self.weak_store.has_hold(key):
+            self.weak_store.replace_hold(key, weak)
+        restart = message.PotentialRestart(key)
+        if self.weak_store.has_hold(restart):
+            self.weak_store.replace_hold(restart, weak)
+
+    def release_restart_reads(self, key: tuple) -> None:
+        """No earlier escalation can re-slice the window: its claim ends."""
+        restart = message.PotentialRestart(key)
+        self.release_hold_if_live(restart)
 
     def reset_clipped_window_reads(self, window: message.Window) -> None:
         """After clipping a live tail, retain only the weak commit range."""

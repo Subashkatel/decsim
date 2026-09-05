@@ -341,7 +341,7 @@ def _plan_syndrome_buffering(
     for operation_id, indices in execution.op_windows.items():
         for index in indices:
             window = execution.windows[(operation_id, index)]
-            _hold_window(execution, operation_id, window, weak)
+            _hold_window(execution, operation_id, window, weak, double_window)
             _hold_strong_context(
                 execution,
                 operation_id,
@@ -366,13 +366,51 @@ def _plan_syndrome_buffering(
     )
 
 
-def _hold_window(execution, operation_id, window, weak: "_HoldSet") -> None:
-    """The weak decode reads the window from its start to its buffer."""
+def _hold_window(
+    execution, operation_id, window, weak: "_HoldSet", double_window: bool
+) -> None:
+    """The window's Buffer 0 holds: its weak read, its potential restart read.
+
+    The weak decode reads the window from its start to its buffer.
+    """
     key = (operation_id, window.k)
     round_keys = _read_keys(
         execution, operation_id, window.start_round, window.buffer_hi
     )
     weak.add(key, round_keys, round_keys)
+    _hold_restart_reads(execution, operation_id, window, weak, double_window)
+
+
+def _hold_restart_reads(
+    execution, operation_id, window, weak: "_HoldSet", double_window: bool
+) -> None:
+    """Under the double window, a bounded window keeps one buffer before it.
+
+    An escalation of an earlier window may re-slice this window as its
+    restart window, whose weak decode re-reads one buffer into the
+    strong region (Toshio 2510.25222 Sec. III C). The rounds stay in
+    Buffer 0 past this window's own request and landing, until the
+    window before it commits (round_retention.release_restart_reads).
+    """
+    if not double_window:
+        return
+    if not _has_same_operation_dependency(window, operation_id):
+        return
+    look_ahead = window.buffer_hi - window.commit_hi
+    buffer_rounds = max(0, look_ahead)
+    lower_start = window.commit_lo - buffer_rounds
+    lower = max(1, lower_start)
+    round_keys = _read_keys(execution, operation_id, lower, window.buffer_hi)
+    owner = message.PotentialRestart((operation_id, window.k))
+    weak.add(owner, round_keys, round_keys)
+
+
+def _has_same_operation_dependency(window, operation_id) -> bool:
+    """Whether an earlier window of the same operation bounds this one."""
+    for dependency in window.deps:
+        if dependency[0] == operation_id:
+            return True
+    return False
 
 
 def _hold_strong_context(

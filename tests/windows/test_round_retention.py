@@ -3,7 +3,12 @@
 A window holds [start_round, buffer_hi] plus the successor overflow
 (Skoric et al. 2209.08552: the buffer region is re-read by the next
 window); the hold moves to the request at admission and is released
-once the input lands; an unheld round is freed on arrival.
+once the input lands; an unheld round is freed on arrival. Under the
+double window a window's potential restart read (PotentialRestart,
+placed by the planner) keeps its reads and one buffer before them past
+the landing, follows a re-slice, and ends when the retention is told no
+earlier escalation can re-slice the window (Toshio 2510.25222 Sec. III
+C: the restart window re-reads one buffer into the strong region).
 """
 
 import types
@@ -116,3 +121,35 @@ def test_strong_context_is_one_buffer_on_each_side_of_the_commit():
     )
     bounds = round_retention.strong_context_bounds(window)
     assert bounds == (5, 7, 9, 11)
+
+
+def test_a_potential_restart_read_outlives_the_landing_and_follows_a_reslice():
+    store = _store()
+    retention = _retention(store, {1: 12}, {1: []})
+    window = message.Window(
+        op_id=1, k=1, commit_lo=4, commit_hi=6, buffer_hi=9, n_rounds=6
+    )
+    retention.register_window((1, 1), window)
+    claim = message.PotentialRestart((1, 1))
+    claimed = [(1, index) for index in range(1, 10)]
+    store.register_hold(claim, claimed)
+    for round_index in range(1, 10):
+        packet = _packet(1, round_index)
+        store.accept_packed_round(packet, publication_tick=round_index)
+    request_key = message.DecoderRequestKey(1, 1, message.DecoderTier.WEAK, 0)
+    job = message.DecodeJob(
+        op_id=1, window_id=1, n_rounds=6, request_key=request_key
+    )
+    retention.bind_input_hold(job, (1, 1))
+    job.input_hold()  # the input landed: the request's hold ends
+    assert not store.has_hold((1, 1))
+    assert store.retained_fragments((1, 4)) is not None
+    assert store.retained_fragments((1, 9)) is not None
+    # the re-slice: the window now reads one buffer into the strong region
+    window.buffer_lo = 1
+    retention.replace_window_reads((1, 1), window)
+    assert store.hold_round_identities(claim) == tuple(claimed)
+    retention.release_restart_reads((1, 1))
+    assert not store.has_hold(claim)
+    assert store.retained_fragments((1, 1)) is None
+    assert store.retained_fragments((1, 9)) is None

@@ -1,8 +1,10 @@
 """The decoder pools: their units, the free ones, the unit a job is offered.
 
 gem5's FUPool (src/cpu/o3/fu_pool.hh:64-75): the pool keeps the units and
-knows which are free; the issue logic decides what runs. A job is
-offered a free unit with a free slot first. When every unit computes, a
+knows which are free; the issue logic decides what runs. The router
+names the algorithm each job runs (a Decoder row, ports.py): by code, or
+by tier under switching (decoders.py). A job is offered a free unit
+with a free slot first. When every unit computes, a
 job with input to move is staged on the busy unit with room whose
 compute frees earliest: least work left (Harchol-Balter, Performance
 Modeling and Design of Computer Systems, 2013, Ch. 24; with known
@@ -25,12 +27,14 @@ class DecoderPool:
 
     def __init__(
         self,
+        router,
         unit_pools: dict,
         decoder_memory: Optional[
             decoder_memory_module.DecoderMemoryConfig
         ] = None,
     ) -> None:
         _check_unit_pools(unit_pools)
+        self.router = router
         self.units_by_pool: dict[str, list] = {}
         # the units whose compute is back in the pool, in return order
         self.free_by_pool: dict[str, list] = {}
@@ -48,11 +52,9 @@ class DecoderPool:
             self.units_by_pool[pool] = units
             self.free_by_pool[pool] = list(units)
 
-    def pool_for(self, job: message.DecodeJob) -> str:
-        """The pool a job queues in: its hint when a pool has that name."""
-        if job.hint in self.units_by_pool:
-            return job.hint
-        return DEFAULT_POOL
+    def decoder_for(self, job: message.DecodeJob):
+        """The decoder the job runs on, by the router's rule."""
+        return self.router.route(job)
 
     def units(self) -> list:
         """Every unit of every pool, pool by pool."""

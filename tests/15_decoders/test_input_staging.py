@@ -205,13 +205,13 @@ def _standalone_pool(units, transfer_us, compute_us, decoder=None):
         services=None,
     )
     compute_start = {}
-    original_begin = manager._begin_service
+    original_begin = manager.service.begin
 
     def recording_begin(job, gated=True):
         compute_start[job.label] = engine.now
         original_begin(job, gated)
 
-    manager._begin_service = recording_begin
+    manager.service.begin = recording_begin
 
     def submit(index, arrival_us):
         payload = RetainedSyndromeFragment(

@@ -242,17 +242,6 @@ def test_the_listener_hears_a_stored_round_once():
     assert listener.stored == [(1, 1)]
 
 
-def test_a_read_of_a_round_not_stored_is_refused():
-    the_store = store()
-    the_store.register_hold("window", [(1, 1), (1, 2)])
-    first = packet(1)
-    the_store.accept_packed_round(first, publication_tick=0)
-
-    the_store.require_stored([(1, 1)])
-    with pytest.raises(RuntimeError, match=r"round \(1, 2\) is not stored"):
-        the_store.require_stored([(1, 1), (1, 2)])
-
-
 def test_publication_is_stamped_at_delivery_for_a_priced_hop():
     the_store = store()
     the_store.register_hold("window", [(1, 1)])

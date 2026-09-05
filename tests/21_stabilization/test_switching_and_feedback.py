@@ -28,7 +28,7 @@ def test_unconfident_serial_escalates_every_window(fabric):
     records = completed.pauli_frame.snapshot().records
     assert [record.tier for record in records] == ["strong"] * 3
     assert completed.decoder_manager.strong_requests.counts.needed == 3
-    assert completed.window_manager.escalation.pending_escalations == {}
+    assert not completed.window_manager.strong_redecode.has_pending()
 
 
 def test_serial_escalation_timeline_is_exact(fabric):
@@ -133,7 +133,7 @@ def test_double_window_terminal_submits_exactly_once(fabric):
         ((1, 1), "weak"),
         ((1, 2), "strong"),
     ]
-    assert completed.window_manager.escalation.pending_escalations == {}
+    assert not completed.window_manager.strong_redecode.has_pending()
 
 
 def test_double_window_absorbs_covered_windows(fabric):
@@ -182,7 +182,7 @@ def test_double_window_far_boundary_waits_for_the_restart_commit(fabric):
         ((1, 4), "weak"),
         ((1, 1), "strong"),
     ]
-    assert completed.window_manager.escalation.pending_escalations == {}
+    assert not completed.window_manager.strong_redecode.has_pending()
 
 
 def test_decode_jobs_are_priced_for_the_rounds_they_read(fabric):
@@ -265,10 +265,12 @@ def test_bulk_strong_batches_queued_escalations_into_one_decode(fabric):
             boundary_policy=Held(),
         ),
         decoder_manager=DecoderManagerSettings(
-            router=router, unit_pools={"default": 4, "strong": 1}
+            router=router,
+            unit_pools={"default": 4, "strong": 1},
+            bulk_strong=True,
         ),
         escalation=EscalationSettings(
-            policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE, bulk_strong=True)
+            policy=Switching(0.5, SAMPLED_CONFIDENCE_SOURCE)
         ),
         links=fabric["declared_profile"](
             controller_to_weak_buffer=True, controller_to_strong_buffer=True

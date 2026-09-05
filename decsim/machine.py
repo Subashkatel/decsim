@@ -16,8 +16,8 @@ component after it is built. Where two components refer to each other
 the per-job callback law breaks the cycle (SimPy's callback on the
 event, simpy/core.py step()): the submitting side carries the return
 path with the job, so the decoder manager is built first and the
-window side takes it as its DecodeQueue; the escalation asks it to
-await and accept a strong selection over the same port. The
+window side takes it as its DecodeQueue; the strong redecode asks it
+to await and accept a strong selection over the same port. The
 controller's issuer carries the start callback with the issue, the
 QPU's completion receiver is the runtime's body_done, and the runtime
 tells the issuer what it knows at each release. The stores' callbacks
@@ -25,7 +25,7 @@ arrive by constructor: the held rounds are built first, each store
 retries them when a slot frees, and the strong writer tells the window
 manager what landed. The one stand-in is _LateWiring inside
 _window_manager, for the courier's and the committer's callbacks to the
-facade and the escalation built after them.
+facade and the strong redecode built after them.
 """
 
 import copy
@@ -58,12 +58,13 @@ import decsim.decoders.relay_belief_propagation.decoder as relay_belief_propagat
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
-import decsim.decoders.strong_escalation as strong_escalation
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.verify_windows as verify_windows
 import decsim.decoders.weak_strong_switching as weak_strong_switching
 import decsim.engine as engine_module
+import decsim.escalation.strong_redecode as strong_redecode_module
+import decsim.escalation.strong_window_shapes as strong_window_shapes
 import decsim.frontends.execution_runtime as execution_runtime_module
 import decsim.frontends.planner as planner
 import decsim.frontends.settings as workload_settings
@@ -419,14 +420,14 @@ class Machine:
         )
         pauli_frame = _pauli_frame(settings.pauli_frame, engine)
         # The decoder manager is built first, so the requester and the
-        # escalation take the decode queue by constructor and every job
-        # carries its return path.
+        # strong redecode take the decode queue by constructor and every
+        # job carries its return path.
         _check_strong_route(settings, pool.router)
         decode_records = decode_records_module.DecodeRecordLedger(
             is_enabled=observation.record_switching_windows
         )
         decoder_manager = _decoder_manager(
-            engine, escalation_policy, pool, links, decode_records
+            engine, settings, escalation_policy, pool, links, decode_records
         )
         window_manager = _window_manager(
             engine,
@@ -592,8 +593,9 @@ class Machine:
     def run(self) -> RunResult:
         """Run the engine to quiescence, check settlement, read the result."""
         self.engine.run()
-        pending = self.window_manager.escalation.pending_escalations
-        if pending:
+        strong_redecode = self.window_manager.strong_redecode
+        if strong_redecode is not None and strong_redecode.has_pending():
+            pending = strong_redecode.pending_work()
             raise RuntimeError(
                 f"the run ended with pending strong escalations: {pending}"
             )
@@ -766,6 +768,7 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
         boundary_policy=boundary_policy,
         operations=views,
         is_double_window=settings.escalation.double_window,
+        is_bulk_strong=settings.decoder_manager.bulk_strong,
         has_dynamic_streams=bool(dynamic_streams),
         has_static_decode_plan=has_static_decode_plan,
         has_frontend=has_frontend,
@@ -1252,9 +1255,13 @@ def _window_manager(
     )
     publisher = window_commits.CorrectionPublisher(transfers, pauli_frame)
     # the courier's landing callback reaches the facade and the
-    # committer's two hooks reach the escalation, both built after them;
-    # this stands in at wiring time
+    # committer's two hooks reach the strong redecode, both built after
+    # them; this stands in at wiring time, and a run that never
+    # escalates gives the committer no redecode at all
     late = _LateWiring()
+    committer_redecode = None
+    if escalation_policy.requires_strong_context:
+        committer_redecode = late
     courier = window_boundaries.BoundaryCourier(
         planner,
         transfers,
@@ -1263,13 +1270,20 @@ def _window_manager(
         late.accept_boundary,
     )
     committer = window_commits.WindowCommitter(
-        engine, planner, tracker, courier, publisher, late, results
+        engine,
+        planner,
+        tracker,
+        courier,
+        publisher,
+        committer_redecode,
+        results,
     )
     requester = decode_requests.DecodeRequester(
         tracker, retention, builder, decode_queue, escalation_policy, committer
     )
-    escalation = _escalation(
+    strong_redecode = _strong_redecode(
         escalation_policy,
+        settings.escalation,
         engine,
         planner,
         tracker,
@@ -1280,9 +1294,9 @@ def _window_manager(
         ledger,
         plan.window_interaction,
         decode_queue,
-        is_double_window=settings.escalation.double_window,
+        committer.accept_strong_result,
     )
-    late.escalation = escalation
+    late.strong_redecode = strong_redecode
     window_manager = window_manager_module.WindowManager(
         engine,
         planner=planner,
@@ -1291,7 +1305,7 @@ def _window_manager(
         requester=requester,
         courier=courier,
         results=results,
-        escalation=escalation,
+        strong_redecode=strong_redecode,
         window_interaction=plan.window_interaction,
         feedback_boundary_mode=settings.workload.feedback_boundary_mode,
     )
@@ -1299,8 +1313,9 @@ def _window_manager(
     return window_manager
 
 
-def _escalation(
+def _strong_redecode(
     escalation_policy,
+    escalation: decoder_settings.EscalationSettings,
     engine,
     planner,
     tracker,
@@ -1311,51 +1326,60 @@ def _escalation(
     ledger,
     interaction,
     decode_queue,
-    *,
-    is_double_window: bool,
+    on_strong_decoded,
 ):
-    """The window side of the strong tier, or nothing when never escalating."""
+    """The window side of the strong tier, or None when never escalating.
+
+    The strong window's shape is the forward window of Toshio Sec. III C
+    under double_window, the two-sided context of Sec. III A otherwise.
+    """
     if not escalation_policy.requires_strong_context:
-        return strong_escalation.NoStrongTier()
-    return strong_escalation.StrongEscalation(
-        engine,
-        planner,
-        tracker,
-        retention,
-        builder,
-        transfers,
-        requester,
-        ledger,
-        interaction,
-        decode_queue,
-        is_double_window=is_double_window,
+        return None
+    if escalation.double_window:
+        shape = strong_window_shapes.ForwardWindow(
+            engine,
+            planner,
+            tracker,
+            retention,
+            builder,
+            requester,
+            ledger,
+            interaction,
+        )
+    else:
+        shape = strong_window_shapes.ContextWindow(
+            engine, planner, tracker, retention, builder
+        )
+    return strong_redecode_module.StrongRedecode(
+        engine, shape, transfers, decode_queue, on_strong_decoded
     )
 
 
 class _LateWiring:
-    """The facade and the escalation, for the components built before them.
+    """The facade and the strong redecode, for the components built first.
 
     The courier tells the facade when a boundary landed; the committer
-    tells the escalation which weak result to escalate and when a weak
-    window committed.
+    tells the strong redecode which weak result to escalate and when a
+    weak window committed.
     """
 
     def __init__(self) -> None:
         self.window_manager = None
-        self.escalation = None
+        self.strong_redecode = None
 
     def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
         self.window_manager.accept_boundary(key, is_unblocked)
 
     def escalate(self, job: message.DecodeJob) -> None:
-        self.escalation.escalate(job)
+        self.strong_redecode.escalate(job)
 
-    def after_weak_commit(self, key: tuple) -> None:
-        self.escalation.after_weak_commit(key)
+    def submit_if_far_boundary_committed(self, key: tuple) -> None:
+        self.strong_redecode.submit_if_far_boundary_committed(key)
 
 
 def _decoder_manager(
     engine: engine_module.Engine,
+    settings: MachineSettings,
     escalation_policy,
     pool: _DecoderPool,
     links,
@@ -1367,7 +1391,7 @@ def _decoder_manager(
         router=pool.router,
         scheduler=pool.scheduler,
         unit_pools=pool.unit_pools,
-        bulk_strong=escalation_policy.bulk_strong,
+        bulk_strong=settings.decoder_manager.bulk_strong,
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
         records=decode_records,

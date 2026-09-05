@@ -199,6 +199,27 @@ class RoundRetention:
             _move_hold_to_input(store, previous_owner, owner, job)
         job.input_hold = functools.partial(store.release_hold, owner)
 
+    def hold_strong_input(self, job: message.DecodeJob) -> None:
+        """The strong job's context becomes its input hold in syndrome buffer 1.
+
+        The window's potential strong read or the request's pending
+        hold, whichever is live, moves to the input in flight; a job
+        with neither takes a fresh hold on its payload rounds. The
+        rounds stay stored until the input lands in the unit's memory.
+        """
+        strong_store = self.strong_store
+        in_flight = message.StrongInputInFlight(job.request_key)
+        potential = message.PotentialStrong(job.strong_decode_for)
+        pending = message.PendingStrong(job.request_key)
+        if strong_store.has_hold(potential):
+            self.transfer_hold(potential, in_flight, strong_store)
+        elif strong_store.has_hold(pending):
+            self.transfer_hold(pending, in_flight, strong_store)
+        else:
+            round_identities = round_identities_of(job.payloads)
+            strong_store.register_hold(in_flight, round_identities)
+        self.bind_input_hold(job, in_flight, strong_store)
+
     def require_retained(
         self, round_keys: list, purpose: str, store=None
     ) -> None:

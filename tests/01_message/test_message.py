@@ -489,16 +489,6 @@ def test_decode_result_supports_timing_only_and_richer_results():
     assert rich.boundary_data is boundary_data
 
 
-def test_strong_completion_accepts_matching_strong_identity():
-    """Strong completion accepts exact carriers with matching strong request identity."""
-    key = message.DecoderRequestKey(4, 2, message.DecoderTier.STRONG, 7)
-    result = message.DecodeResult(op_id=4, window_id=2)
-    completion = message.StrongDecodeCompletion(key, result)
-    assert completion.request_key is key
-    assert completion.result is result
-    assert_frozen(completion)
-
-
 def test_soft_output_does_not_enforce_weight_relationships():
     """Soft output accepts weights without enforcing a relationship to the gap."""
     output = message.SoftOutput(gap=10, source=object(), w_min=20, w_comp=-5)

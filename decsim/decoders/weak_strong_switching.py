@@ -6,7 +6,7 @@ decodes weak first and escalates a window whose confidence falls below
 the threshold (Toshio et al. 2510.25222 Sec. III A). A policy decides
 and is told (gem5's conditional predictor, src/cpu/pred/conditional.hh):
 it builds no job; the window side plans and submits the strong re-decode
-(strong_escalation.py) and the decoder manager owns the units,
+(decsim/escalation) and the decoder manager owns the units,
 hold-or-deliver and cancellation. The threshold is a fixed value, a
 per-code register, or the online calibrator that adapts it across a
 sweep point's shots.
@@ -341,10 +341,10 @@ class OnlineGapCalibrator:
 class EscalationPolicyBase:
     """The defaults a policy row inherits (sinter's Decoder shape).
 
-    A row declares primary_tier, requires_strong_context and
-    bulk_strong and answers verdict_for_weak_result; the rest has a
-    default here: every run shape is served, the primary tier alone
-    decodes a ready window, and nothing is learned from a strong result.
+    A row declares primary_tier and requires_strong_context and answers
+    verdict_for_weak_result; the rest has a default here: every run
+    shape is served, the primary tier alone decodes a ready window, and
+    nothing is learned from a strong result.
     """
 
     def check_plan(self, plan: message.RunShape) -> None:
@@ -366,7 +366,6 @@ class Baseline(EscalationPolicyBase):
     """Plain windowed decoding: every window once on the weak tier, kept."""
 
     requires_strong_context = False
-    bulk_strong = False
     primary_tier = message.DecoderTier.WEAK
 
     def verdict_for_weak_result(self, job, result) -> message.Verdict:
@@ -390,7 +389,6 @@ class StrongOnly(EscalationPolicyBase):
     """
 
     requires_strong_context = False
-    bulk_strong = False
     primary_tier = message.DecoderTier.STRONG
 
     def check_plan(self, plan: message.RunShape) -> None:
@@ -418,12 +416,12 @@ class Switching(EscalationPolicyBase):
     confidence (the paper's Step 1, Toshio et al. 2510.25222 Sec. III A);
     otherwise the strong re-decode starts at the verdict, after the
     weak_decoder_to_strong_decoder hop (the serial modification of the
-    same section), and bulk_strong batches queued serial redos
-    (timing-only). How the strong window is laid out is the run's shape
+    same section). How the strong window is laid out is the run's shape
     (escalation.double_window: the two-sided context, or the forward
-    window of Sec. III C), planned by the window side
-    (strong_escalation.py); check_plan holds the policy's knobs against
-    that shape once, at build.
+    window of Sec. III C, decsim/escalation/strong_window_shapes.py), and
+    whether queued re-decodes are batched is the decoder manager's
+    (bulk_strong); check_plan holds the policy's knobs against both once,
+    at build.
     """
 
     requires_strong_context = True
@@ -434,11 +432,9 @@ class Switching(EscalationPolicyBase):
         confidence_threshold: float,
         expected_source: message.SoftOutputSource,
         run_both_at_once: bool = False,
-        bulk_strong: bool = False,
         threshold_register: Optional[ThresholdRegister] = None,
         threshold_calibrator: Optional[OnlineGapCalibrator] = None,
     ) -> None:
-        _refuse_bulk_with_parallel(run_both_at_once, bulk_strong)
         _refuse_register_mismatch(
             confidence_threshold, expected_source, threshold_register
         )
@@ -451,7 +447,6 @@ class Switching(EscalationPolicyBase):
         self.threshold_register = threshold_register  # None: the scalar
         self.threshold_calibrator = threshold_calibrator
         self.run_both_at_once = run_both_at_once
-        self.bulk_strong = bulk_strong
 
     def run_seed_children(self) -> tuple:
         """The optional register that selects confidence thresholds."""
@@ -466,10 +461,15 @@ class Switching(EscalationPolicyBase):
     def check_plan(self, plan: message.RunShape) -> None:
         """Refuse a run shape the escalation cannot serve."""
         _refuse_flush_terminal(plan.scheme)
+        if plan.is_bulk_strong and self.run_both_at_once:
+            raise ValueError(
+                "bulk_strong is only meaningful in serial mode "
+                "(run_both_at_once=False)"
+            )
         if not plan.is_double_window:
             _refuse_eager_serial_boundaries(plan.boundary_policy)
             return
-        self._refuse_double_window_contradictions()
+        self._refuse_double_window_contradictions(plan)
         _refuse_double_window_scheme(plan.scheme, plan.boundary_policy)
         _refuse_double_window_run(plan)
 
@@ -537,15 +537,17 @@ class Switching(EscalationPolicyBase):
             )
         return self.threshold_calibrator.decide_keep(result, job)
 
-    def _refuse_double_window_contradictions(self) -> None:
-        """A forward strong window starts late; these knobs start it early."""
+    def _refuse_double_window_contradictions(
+        self, plan: message.RunShape
+    ) -> None:
+        """A forward strong window starts late and alone; these knobs do not."""
         if self.run_both_at_once:
             raise ValueError(
                 "double_window defers the strong start until the far weak "
                 "boundary exists; run_both_at_once starts it immediately "
                 "(the two policies contradict; pick one)"
             )
-        if self.bulk_strong:
+        if plan.is_bulk_strong:
             raise ValueError(
                 "double_window + bulk_strong is not supported: deferred "
                 "strong windows are submitted one per escalation"
@@ -557,14 +559,6 @@ class Switching(EscalationPolicyBase):
                 "committed observables, and a double-window strong "
                 "result owns a larger extent than the audited window"
             )
-
-
-def _refuse_bulk_with_parallel(run_both_at_once: bool, bulk_strong: bool):
-    if bulk_strong and run_both_at_once:
-        raise ValueError(
-            "bulk_strong is only meaningful in serial mode "
-            "(run_both_at_once=False)"
-        )
 
 
 def _refuse_register_mismatch(

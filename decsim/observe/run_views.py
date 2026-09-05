@@ -284,7 +284,9 @@ def truth_view(window_manager, device) -> TruthView:
 
 def strong_work_view(window_manager, decoder_manager) -> StrongWorkView:
     """Compose exact global strong work from its two lifecycle owners."""
-    pending = window_manager.escalation.pending_strong_work_snapshot()
+    pending = ()
+    if window_manager.strong_redecode is not None:
+        pending = window_manager.strong_redecode.pending_work()
     queue_memberships = {}
     for queued_job in decoder_manager.queue.jobs():
         identity = id(queued_job)

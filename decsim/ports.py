@@ -65,9 +65,6 @@ class RoundStore(Protocol):
     def release_round(self, round_key: tuple) -> None:
         """Free the round; its consumers are done with it."""
 
-    def require_stored(self, round_keys) -> None:
-        """Refuse a read of a round that has not landed here."""
-
 
 @runtime_checkable
 class StrongRoundStore(Protocol):
@@ -365,7 +362,7 @@ class EscalationPolicy(Protocol):
     window, learn_from_strong_result hears the strong tier's answer, and
     check_plan refuses a run the policy cannot serve, once, at build.
     The strong re-decode itself is the window side's
-    (decsim/decoders/strong_escalation.py).
+    (decsim/escalation/strong_redecode.py).
     """
 
     # The tier that decodes the plan's windows; every tier-dependent site
@@ -376,10 +373,6 @@ class EscalationPolicy(Protocol):
     # room-side store, one buffer of context on each side of every
     # window, and the strong tier's window side.
     requires_strong_context: bool
-    # Whether queued serial strong re-decodes are merged into one batch;
-    # a decoder manager knob that leaves the port for the decoder
-    # settings in the escalation slice's structural B.
-    bulk_strong: bool
 
     def check_plan(self, plan: message.RunShape) -> None:
         """Refuse, with a sentence, a run shape the policy cannot serve."""

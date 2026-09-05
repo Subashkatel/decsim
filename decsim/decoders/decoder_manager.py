@@ -247,7 +247,7 @@ class DecoderManager:
         if held is not None:
             self.outcomes.report_request(
                 held.request_job,
-                held.completion.result,
+                held.result,
                 message.RequestProcessingOutcome.STRONG_COMPLETED_DISCARDED,
                 held.decode_output_ticks,
             )

@@ -44,10 +44,13 @@ class LiveStrongRequest:
 
 @dataclasses.dataclass(frozen=True)
 class HeldStrongCompletion:
-    """A finished strong result, per request, with the tick its decode ended."""
+    """A finished strong result, per request, with the tick its decode ended.
+
+    The request job carries the request key the result answers.
+    """
 
     request_job: message.DecodeJob
-    completion: message.StrongDecodeCompletion
+    result: message.DecodeResult
     decode_output_ticks: int
 
 
@@ -227,7 +230,7 @@ class StrongRequests:
         held = self.held_by_window.get(key)
         if held is None:
             return None
-        if held.completion.request_key != request_key:
+        if held.request_job.request_key != request_key:
             return None
         return self.held_by_window.pop(key)
 
@@ -236,8 +239,7 @@ class StrongRequests:
 
         Otherwise it is held for the demand that is still coming.
         """
-        completion = held.completion
-        request_key = completion.request_key
+        request_key = held.request_job.request_key
         key = (request_key.operation_id, request_key.window_id)
         if self.waiting_result_by_window.get(key) == request_key:
             del self.waiting_result_by_window[key]
@@ -278,10 +280,7 @@ class StrongRequests:
                 is_merged = True
         if not is_merged:
             request = requests[0]
-            completion = message.StrongDecodeCompletion(
-                request.request_key, result
-            )
-            return (HeldStrongCompletion(request, completion, now),)
+            return (HeldStrongCompletion(request, result, now),)
         populated = _populated_accuracy_fields(result)
         if populated:
             listed = ", ".join(populated)
@@ -293,10 +292,7 @@ class StrongRequests:
         deliveries = []
         for key, request in zip(keys, requests):
             empty = message.DecodeResult(op_id=key[0], window_id=key[1])
-            completion = message.StrongDecodeCompletion(
-                request.request_key, empty
-            )
-            held = HeldStrongCompletion(request, completion, now)
+            held = HeldStrongCompletion(request, empty, now)
             deliveries.append(held)
         return tuple(deliveries)
 

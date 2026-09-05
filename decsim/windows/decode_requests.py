@@ -325,16 +325,17 @@ class DecodeRequester:
         self.escalation_policy = escalation_policy
         self.committer = committer
 
-    def request_ready_windows(self, windows, escalation) -> None:
+    def request_ready_windows(self, windows, strong_redecode) -> None:
         """Request each window that has its data, in the given order.
 
-        escalation is the strong tier's window side, which builds the
-        strong sibling when the policy decodes both tiers at once.
+        strong_redecode is the strong tier's window side, which builds
+        the strong sibling when the policy decodes both tiers at once;
+        None when the run never escalates.
         """
         for window in windows:
-            self.request_if_ready(window, escalation)
+            self.request_if_ready(window, strong_redecode)
 
-    def request_if_ready(self, window: message.Window, escalation) -> None:
+    def request_if_ready(self, window: message.Window, strong_redecode) -> None:
         """If the window has its data, submit it through the policy."""
         if window.queued or window.committed:
             return
@@ -351,15 +352,18 @@ class DecodeRequester:
             # input at the decoder when it arrives (qLDPC net_error /
             # cudaq-x syndrome_mods / LILLIPUT's state register)
             window.blocked_logged = True
-        self.request(window, operation, escalation)
+        self.request(window, operation, strong_redecode)
 
     def request(
-        self, window: message.Window, operation: message.Operation, escalation
+        self,
+        window: message.Window,
+        operation: message.Operation,
+        strong_redecode,
     ) -> None:
         """Build the primary job, ask the policy its tiers, enqueue each.
 
         The primary tier's job is the one built here; a strong tier the
-        policy names too gets its sibling from the escalation (the
+        policy names too gets its sibling from the strong redecode (the
         paper's Step 1, both decoders started on the same window).
         """
         store = self.retention.primary_store
@@ -372,9 +376,10 @@ class DecodeRequester:
         submissions = []
         for tier in tiers:
             if tier is primary_tier:
-                submissions.append(message.Submission(job))
+                primary = message.Submission(job)
+                submissions.append(primary)
             else:
-                sibling = escalation.parallel_strong_submission(job)
+                sibling = strong_redecode.parallel_strong_submission(job)
                 submissions.append(sibling)
         for submission in submissions:
             self._submit(submission, window.key)

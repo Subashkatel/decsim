@@ -11,14 +11,14 @@ committed rounds is the LogicalLedger's, and each operation's result is
 the OperationResults'; the facade receives rounds and wires them, the
 shape of gem5's cache (BaseCache owns its MSHR queue, write buffer and
 tags, each one job, and implements the ports: src/mem/cache/base.hh).
-The strong tier is StrongEscalation's (NoStrongTier when the policy
-never escalates), on the same components. One round reads as
-accept_window_input, requester.request_if_ready, job.on_decoded
+The strong tier is the StrongRedecode's (decsim/escalation), on the
+same components; a run that never escalates has none. One round reads
+as accept_window_input, requester.request_if_ready, job.on_decoded
 (committer.accept_result), results.deliver_if_final.
 
 Wide state recorded: ten attributes, the seven components a round
-crosses, the escalation the arrivals wake, the interaction that gives a
-new window its first boundary and the workload's feedback mode.
+crosses, the strong redecode the arrivals wake, the interaction that
+gives a new window its first boundary and the workload's feedback mode.
 """
 
 import dataclasses
@@ -94,7 +94,7 @@ class WindowManager:
         requester,
         courier,
         results,
-        escalation,
+        strong_redecode,
         window_interaction,
         feedback_boundary_mode: str = "trailing_buffer",
     ):
@@ -105,7 +105,8 @@ class WindowManager:
         self.requester = requester
         self.courier = courier
         self.results = results
-        self.escalation = escalation
+        # the strong tier's window side; None when the run never escalates
+        self.strong_redecode = strong_redecode
         self.window_interaction = window_interaction
         self.feedback_boundary_mode = feedback_boundary_mode
         for window in self.planner.windows_by_key.values():
@@ -258,7 +259,7 @@ class WindowManager:
             # Buffer 0 publication is the readiness authority for the weak lane
             self._count_arrival(operation, packet.round_index)
             self._update_stream(operation.id)
-            self.escalation.after_arrival(operation.id)
+            self._wake_strong_tier(operation.id)
             self._wake_windows(operation)
         # a round whose every consumer already resolved (an absorbed window's
         # tail, or every round of a strong-primary plan) frees its Buffer 0
@@ -303,7 +304,7 @@ class WindowManager:
         strong tier is primary.
         """
         self.tracker.note_room_round(operation_id, round_index)
-        self.escalation.after_arrival(operation_id)
+        self._wake_strong_tier(operation_id)
         if self.retention.primary_tier is not message.DecoderTier.STRONG:
             return
         operation = self.tracker.operation_by_id[operation_id]
@@ -323,6 +324,11 @@ class WindowManager:
             f"(op now has rounds 1..{arrived_now})",
         )
 
+    def _wake_strong_tier(self, operation_id) -> None:
+        """A round is stored: a terminal strong window may have its tail."""
+        if self.strong_redecode is not None:
+            self.strong_redecode.submit_if_terminal_data_complete(operation_id)
+
     def _wake_windows(self, operation: message.Operation) -> None:
         self.check_windows_for_operation(operation.id)
         for predecessor_id in operation.decoder_boundary_predecessors:
@@ -337,12 +343,12 @@ class WindowManager:
     def check_windows_for_operation(self, operation_id: int) -> None:
         """Request every complete window of the operation, in index order."""
         windows = self.planner.windows_of(operation_id)
-        self.requester.request_ready_windows(windows, self.escalation)
+        self.requester.request_ready_windows(windows, self.strong_redecode)
 
     def check_window(self, key: tuple) -> None:
         """Request the window if it has its data."""
         window = self.planner.windows_by_key[key]
-        self.requester.request_if_ready(window, self.escalation)
+        self.requester.request_if_ready(window, self.strong_redecode)
 
     def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
         """A boundary landed: wake the parked decode, or request the window."""

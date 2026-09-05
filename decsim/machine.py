@@ -55,6 +55,7 @@ import decsim.decoders.relay_belief_propagation.decoder as relay_belief_propagat
 import decsim.decoders.schedulers as schedulers
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
+import decsim.decoders.strong_escalation as strong_escalation
 import decsim.decoders.tesseract.decoder as tesseract
 import decsim.decoders.union_find.decoder as union_find
 import decsim.decoders.verify_windows as verify_windows
@@ -1247,56 +1248,97 @@ def _window_manager(
         on_workload_complete,
     )
     publisher = window_commits.CorrectionPublisher(transfers, pauli_frame)
-    # the courier's landing callback and the committer's escalation are
-    # the facade's; this stands in for it at wiring time (slice 7 builds
-    # the escalation on its own and retires the stand-in)
-    facade = _FacadeToCome()
+    # the courier's landing callback reaches the facade and the
+    # committer's weak-commit hook reaches the escalation, both built
+    # after them; this stands in at wiring time (slice 7 dissolves the
+    # escalation's services seam and with it the cycle)
+    late = _LateWiring()
     courier = window_boundaries.BoundaryCourier(
         planner,
         transfers,
         plan.window_interaction,
         plan.boundary_policy,
-        facade.accept_boundary,
+        late.accept_boundary,
     )
     committer = window_commits.WindowCommitter(
-        engine, planner, tracker, courier, publisher, facade, results
+        engine, planner, tracker, courier, publisher, late, results
     )
     requester = decode_requests.DecodeRequester(
         tracker, retention, builder, decode_queue, escalation_policy, committer
     )
+    escalation = _escalation(
+        escalation_policy,
+        engine,
+        planner,
+        tracker,
+        retention,
+        builder,
+        transfers,
+        requester,
+        ledger,
+        plan.window_interaction,
+    )
+    late.escalation = escalation
     window_manager = window_manager_module.WindowManager(
         engine,
         planner=planner,
         tracker=tracker,
         retention=retention,
-        transfers=transfers,
-        builder=builder,
         requester=requester,
         courier=courier,
         results=results,
+        escalation=escalation,
         window_interaction=plan.window_interaction,
         feedback_boundary_mode=settings.workload.feedback_boundary_mode,
     )
-    facade.window_manager = window_manager
+    late.window_manager = window_manager
     return window_manager
 
 
-class _FacadeToCome:
-    """The windows facade, for the two components built before it.
+def _escalation(
+    escalation_policy,
+    engine,
+    planner,
+    tracker,
+    retention,
+    builder,
+    transfers,
+    requester,
+    ledger,
+    interaction,
+):
+    """The window side of the strong tier, or nothing when never escalating."""
+    if not escalation_policy.requires_strong_context:
+        return strong_escalation.NoStrongTier()
+    return strong_escalation.StrongEscalation(
+        engine,
+        planner,
+        tracker,
+        retention,
+        builder,
+        transfers,
+        requester,
+        ledger,
+        interaction,
+    )
+
+
+class _LateWiring:
+    """The facade and the escalation, for the components built before them.
 
     The courier tells the facade when a boundary landed and the committer
-    tells the facade's escalation when a weak window committed; the
-    escalation is the facade's until slice 7 builds it on its own.
+    tells the escalation when a weak window committed.
     """
 
     def __init__(self) -> None:
         self.window_manager = None
+        self.escalation = None
 
     def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
         self.window_manager.accept_boundary(key, is_unblocked)
 
     def after_weak_commit(self, key: tuple) -> None:
-        self.window_manager.escalation.after_weak_commit(key)
+        self.escalation.after_weak_commit(key)
 
 
 def _decoder_manager(

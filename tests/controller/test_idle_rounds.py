@@ -10,6 +10,8 @@ on a live protected stream emits through the stream, not here.
 
 import types
 
+import pytest
+
 import decsim.controller.idle_rounds as idle_rounds_module
 import decsim.controller.policies as policies
 import decsim.message as message
@@ -87,6 +89,32 @@ def test_the_rounds_emitted_on_a_patch_are_claimed_once_by_the_operation():
         (8, "patch-b", 1),
         (7, "patch-a", 3),
     ]
+
+
+def test_a_claim_that_fails_on_a_later_patch_keeps_the_earlier_claims():
+    """A claim is not a transaction: a patch already claimed stays claimed.
+
+    An operation whose second patch identity is unhashable fails at that
+    patch; the four rounds of its first patch are already claimed and are
+    not restored, and the other patch's round is untouched.
+    """
+    ignore = policies.Ignore()
+    accounting, _qpu, _demand = accounting_with(ignore)
+    for round_index in (1, 2, 3, 4):
+        accounting.emit_idle_round(7, "patch-a", round_index)
+    accounting.emit_idle_round(8, "patch-b", 1)
+    malformed = message.Operation(
+        9, "malformed", ("q",), patches=("patch-a", [])
+    )
+
+    with pytest.raises(TypeError):
+        accounting.claim(malformed)
+
+    unclaimed_by_patch = {
+        patch: idle.unclaimed
+        for patch, idle in accounting.idle_by_patch.items()
+    }
+    assert unclaimed_by_patch == {"patch-a": 0, "patch-b": 1}
 
 
 def test_an_operation_without_patches_claims_by_its_qubits():

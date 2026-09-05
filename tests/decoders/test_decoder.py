@@ -15,6 +15,8 @@ import decsim.engine as engine_module
 import decsim.message as message
 from decsim.decoders.decoder_manager import DecoderManager
 
+MEASURED_NS = 2500
+
 
 class FixedRow(decoder_module.DecoderBase):
     """A priced row: three ticks, one fixed observable."""
@@ -44,7 +46,8 @@ class MeasuredRow(decoder_module.DecoderBase):
         return message.DecodeResult(job.op_id, job.window_id)
 
     def decode_timed(self, job):
-        return self.decode(job), 2500
+        result = self.decode(job)
+        return result, MEASURED_NS
 
 
 class EmptyWindowRow(decoder_module.WindowDecoderBase):
@@ -72,15 +75,19 @@ def _job(**fields) -> message.DecodeJob:
 def _started(row, job):
     engine = engine_module.Engine(verbose=False)
     delivered = []
-    row.start(
-        job, engine, lambda result: delivered.append((engine.now, result))
-    )
+
+    def on_result(result):
+        delivered.append((engine.now, result))
+
+    row.start(job, engine, on_result)
     engine.run()
     return delivered
 
 
 def test_start_delivers_the_result_after_latency_ticks():
-    delivered = _started(FixedRow(), _job())
+    job = _job()
+    row = FixedRow()
+    delivered = _started(row, job)
     assert len(delivered) == 1
     tick, result = delivered[0]
     assert tick == 3
@@ -90,16 +97,22 @@ def test_start_delivers_the_result_after_latency_ticks():
 def test_a_cancelled_job_delivers_none_after_its_time():
     job = _job()
     job.cancelled = True
-    assert _started(FixedRow(), job) == [(3, None)]
+    row = FixedRow()
+    delivered = _started(row, job)
+    assert delivered == [(3, None)]
 
 
 def test_a_job_without_a_window_delivers_none():
     job = _job(on_done=lambda: None)
-    assert _started(FixedRow(), job) == [(3, None)]
+    row = FixedRow()
+    delivered = _started(row, job)
+    assert delivered == [(3, None)]
 
 
 def test_a_measured_row_delivers_after_the_measured_ticks():
-    delivered = _started(MeasuredRow(), _job())
+    job = _job()
+    row = MeasuredRow()
+    delivered = _started(row, job)
     assert len(delivered) == 1
     tick, result = delivered[0]
     assert tick == config.microseconds_to_ticks(2.5)
@@ -107,52 +120,68 @@ def test_a_measured_row_delivers_after_the_measured_ticks():
 
 
 def test_occupancy_is_the_latency_of_a_priced_row():
-    assert FixedRow().occupancy(_job()) == 3
+    job = _job()
+    row = FixedRow()
+    assert row.occupancy(job) == 3
 
 
 def test_occupancy_is_none_for_a_measured_row():
-    assert MeasuredRow().occupancy(_job()) is None
-    assert EmptyWindowRow(latency_model=None).occupancy(_job()) is None
+    job = _job()
+    measured = MeasuredRow()
+    assert measured.occupancy(job) is None
+    window_row = EmptyWindowRow(latency_model=None)
+    assert window_row.occupancy(job) is None
 
 
 def test_a_window_row_without_a_latency_model_has_no_latency():
+    job = _job()
+    row = EmptyWindowRow(latency_model=None)
     with pytest.raises(NotImplementedError, match="measured on the host"):
-        EmptyWindowRow(latency_model=None).latency(_job())
+        row.latency(job)
 
 
 def test_pipeline_depth_is_one():
-    assert FixedRow().pipeline_depth(_job()) == 1
+    job = _job()
+    row = FixedRow()
+    assert row.pipeline_depth(job) == 1
 
 
 def test_cancel_on_a_plain_row_changes_nothing():
     row = FixedRow()
     job = _job()
     row.cancel(job)
-    assert _started(row, job)[0][1].logical_observables == (1,)
+    delivered = _started(row, job)
+    _tick, result = delivered[0]
+    assert result.logical_observables == (1,)
 
 
 def test_a_window_row_without_a_model_gives_the_empty_result():
-    row = EmptyWindowRow(latency_model=decoders.PresetLatencyDecoder(1.0))
-    result = row.decode(_job())
+    latency_model = decoders.PresetLatencyDecoder(1.0)
+    row = EmptyWindowRow(latency_model=latency_model)
+    job = _job()
+    result = row.decode(job)
     assert result.correction is None
     assert result.logical_observables is None
 
 
 def test_a_spent_job_is_refused_by_the_manager():
     engine = engine_module.Engine(verbose=False)
+    row = FixedRow()
+    router = decoders.CodeRouter(row)
+    scheduler = schedulers.FifoScheduler()
+    policy = weak_strong_switching.Baseline()
     manager = DecoderManager(
         engine,
-        router=decoders.CodeRouter(FixedRow()),
-        scheduler=schedulers.FifoScheduler(),
+        router=router,
+        scheduler=scheduler,
         num_units=1,
-        escalation_policy=weak_strong_switching.Baseline(),
+        escalation_policy=policy,
         services=None,
         on_window_decoded=lambda _job, _result: None,
         on_strong_window_decoded=None,
     )
-    job = _job(
-        request_key=message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
-    )
+    request_key = message.DecoderRequestKey(1, 0, message.DecoderTier.WEAK, 0)
+    job = _job(request_key=request_key)
     manager.enqueue(job)
     with pytest.raises(RuntimeError, match="submitted once"):
         manager.enqueue(job)

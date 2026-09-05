@@ -11,13 +11,14 @@ import numpy
 import pymatching
 import sinter
 
-import decsim.decoders.minimum_weight_perfect_matching.decoder as minimum_weight_perfect_matching
+import decsim.decoders.minimum_weight_perfect_matching.decoder as adapter
 import decsim.decoders.minimum_weight_perfect_matching.weights as weights
 import decsim.detector_error_model.fault_model_contracts as fault_models
 from tests.decoders import windows
 
 ROUNDS = 3
 SHOTS = 100
+GRAPHLIKE = fault_models.FaultRepresentation.GRAPHLIKE
 
 
 def _window_and_shots():
@@ -29,49 +30,59 @@ def _window_and_shots():
     return circuit, model, detection_events, observables
 
 
-def test_the_row_matches_pymatching_on_the_same_graph():
-    _, model, detection_events, _ = _window_and_shots()
-    faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
-    row = minimum_weight_perfect_matching.PyMatchingDecoder()
-    direct = pymatching.Matching.from_check_matrix(
-        faults.check.copy(),
-        weights=weights.matching_weights(faults.priors),
-        error_probabilities=weights.finite_priors(faults.priors),
+def _direct_matching(faults):
+    check = faults.check.copy()
+    edge_weights = weights.matching_weights(faults.priors)
+    error_probabilities = weights.finite_priors(faults.priors)
+    return pymatching.Matching.from_check_matrix(
+        check,
+        weights=edge_weights,
+        error_probabilities=error_probabilities,
         merge_strategy="independent",
     )
+
+
+def test_the_row_matches_pymatching_on_the_same_graph():
+    _, model, detection_events, _ = _window_and_shots()
+    faults = model.require_faults(GRAPHLIKE)
+    row = adapter.PyMatchingDecoder()
+    direct = _direct_matching(faults)
     for shot in detection_events:
         job = windows.job_for(model, shot)
         result = row.decode(job)
-        syndrome = numpy.asarray(shot)[list(model.detector_ids)]
-        expected = direct.decode(syndrome.astype(numpy.uint8))
+        syndrome = windows.row_syndrome(model, shot)
+        expected = direct.decode(syndrome)
         assert result.correction.tolist() == expected.tolist()
 
 
 def test_the_row_predicts_what_sinters_pymatching_row_predicts():
     circuit, model, detection_events, _ = _window_and_shots()
     dem = circuit.detector_error_model(decompose_errors=True)
-    compiled = sinter.BUILT_IN_DECODERS["pymatching"].compile_decoder_for_dem(
-        dem=dem
-    )
+    sinter_row = sinter.BUILT_IN_DECODERS["pymatching"]
+    compiled = sinter_row.compile_decoder_for_dem(dem=dem)
     packed = numpy.packbits(detection_events, axis=1, bitorder="little")
     predictions = compiled.decode_shots_bit_packed(
         bit_packed_detection_event_data=packed
     )
     predictions = numpy.unpackbits(predictions, axis=1, bitorder="little")
     whole = pymatching.Matching.from_detector_error_model(dem)
-    row = minimum_weight_perfect_matching.PyMatchingDecoder()
-    faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
+    row = adapter.PyMatchingDecoder()
+    faults = model.require_faults(GRAPHLIKE)
     matching = row.compiled_for(faults, model)
     ties = 0
     for shot, predicted in zip(detection_events, predictions):
-        result = row.decode(windows.job_for(model, shot))
-        if result.logical_observables == (int(predicted[0]),):
+        job = windows.job_for(model, shot)
+        result = row.decode(job)
+        prediction = int(predicted[0])
+        if result.logical_observables == (prediction,):
             continue
         # the two graphs may pick different minimum-weight matchings of
         # the same weight; that is a tie, not a disagreement
-        syndrome = numpy.asarray(shot)[list(model.detector_ids)]
+        syndrome = windows.row_syndrome(model, shot)
         _, row_weight = matching.decode(syndrome, return_weight=True)
         _, whole_weight = whole.decode(shot, return_weight=True)
-        assert abs(row_weight - whole_weight) < 1e-6
+        difference = row_weight - whole_weight
+        weight_gap = abs(difference)
+        assert weight_gap < 1e-6
         ties += 1
     assert ties < SHOTS / 10

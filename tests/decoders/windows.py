@@ -29,10 +29,17 @@ def whole_circuit_window(circuit: stim.Circuit, rounds: int, requirement):
     )
 
 
+def row_syndrome(model, shot):
+    """One shot's detection events in the window's row order, as uint8."""
+    rows = list(model.detector_ids)
+    events = numpy.asarray(shot)
+    return events[rows].astype(numpy.uint8)
+
+
 def job_for(model, shot, window_id: int = 0) -> message.DecodeJob:
     """A decode job carrying one shot's detection events in row order."""
-    rows = list(model.detector_ids)
-    bits = tuple(int(bit) for bit in numpy.asarray(shot)[rows])
+    syndrome = row_syndrome(model, shot)
+    bits = bit_tuple(syndrome)
     payload = message.SyndromePayload(
         operation_id=1,
         patch_id=0,
@@ -51,6 +58,13 @@ def job_for(model, shot, window_id: int = 0) -> message.DecodeJob:
         payloads=[payload],
         label=f"W{window_id}",
     )
+
+
+def bit_tuple(values) -> tuple:
+    bits = []
+    for value in values:
+        bits.append(int(value))
+    return tuple(bits)
 
 
 def sampled_shots(circuit: stim.Circuit, shots: int, seed: int):

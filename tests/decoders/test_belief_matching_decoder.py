@@ -20,6 +20,7 @@ from tests.decoders import windows
 
 ROUNDS = 3
 SHOTS = 100
+CLAMP = 1e-14
 
 
 def _reference_prediction(referee: BeliefMatching, syndrome):
@@ -29,12 +30,12 @@ def _reference_prediction(referee: BeliefMatching, syndrome):
     llrs = referee._bpd.log_prob_ratios
     hyperedge_posteriors = 1 / (1 + numpy.exp(llrs))
     edge_posteriors = matrices.hyperedge_to_edge_matrix @ hyperedge_posteriors
-    eps = 1e-14
-    edge_posteriors[edge_posteriors > 1 - eps] = 1 - eps
-    edge_posteriors[edge_posteriors < eps] = eps
+    edge_posteriors[edge_posteriors > 1 - CLAMP] = 1 - CLAMP
+    edge_posteriors[edge_posteriors < CLAMP] = CLAMP
+    edge_weights = -numpy.log(edge_posteriors)
     matching = pymatching.Matching.from_check_matrix(
         matrices.edge_check_matrix,
-        weights=-numpy.log(edge_posteriors),
+        weights=edge_weights,
         faults_matrix=matrices.edge_observables_matrix,
         use_virtual_boundary_node=True,
     )
@@ -56,7 +57,9 @@ def test_the_row_predicts_what_beliefmatchings_matching_branch_predicts():
     for index, shot in enumerate(detection_events):
         syndrome = numpy.asarray(shot, dtype=numpy.uint8)
         expected = _reference_prediction(referee, syndrome)
-        result = row.decode(windows.job_for(model, shot))
-        if result.logical_observables != (int(expected[0]),):
+        prediction = int(expected[0])
+        job = windows.job_for(model, shot)
+        result = row.decode(job)
+        if result.logical_observables != (prediction,):
             disagreements.append(index)
     assert disagreements == []

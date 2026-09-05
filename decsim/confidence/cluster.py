@@ -6,7 +6,12 @@ grew are quotiented into a graph whose shortest closed walk of odd
 logical parity is the gap, in the growth's half-tick units and reported
 in decibels. The hard decode is Delfosse and Nickerson 1709.06218
 (union_find/window_decoder.py); UnionFindClusterGapDecoder is a row of
-the Decoder port over it, beside the confidence wrappers (decoder.py).
+the Decoder port over it (union_find_cluster_gap in the root's table),
+beside the confidence wrappers (decoder.py). The gap reads the hard
+decode's intervals, not the syndrome, so it cannot be a ConfidenceSignal
+on the port: the row reports its own soft output, and a switching run
+on it needs a policy expecting its source, which no yaml key selects
+yet (the root pairs switching with the complementary gap).
 
 The exact likelihood-ratio reading of the gap holds only in the uniform
 repetition-code setting of Meister's Theorem 10; on a surface code it is
@@ -60,6 +65,7 @@ class UnionFindClusterGapDecoder(decoder_module.DecoderBase):
     """
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
+    reports_soft_output = True
 
     def __init__(self, base: union_find_decoder.UnionFindDecoder) -> None:
         if not isinstance(base, union_find_decoder.UnionFindDecoder):
@@ -112,6 +118,14 @@ class UnionFindClusterGapDecoder(decoder_module.DecoderBase):
             decoded_window.hard_result,
             decoded_window.backend_ns + gap_nanoseconds,
         )
+
+
+def union_find_cluster_gap(
+    latency_model: Optional[decoder_module.DecoderBase] = None,
+) -> UnionFindClusterGapDecoder:
+    """The table row: the hard Union-Find decode with its cluster gap."""
+    base = union_find_decoder.UnionFindDecoder(latency_model=latency_model)
+    return UnionFindClusterGapDecoder(base)
 
 
 def _require_one_logical_row(model) -> None:

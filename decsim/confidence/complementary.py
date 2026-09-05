@@ -5,12 +5,14 @@ lines 480-495 of tmp/papers/txt; the method of Gidney et al.
 2312.04522): the minimum-weight matching gives w_min and the decoded
 class, and the same graph with one virtual detector that pins the
 observable to the other class gives w_comp. A small gap is a decoder
-unsure of its class. The factory declares the source and builds one
-metric per window model for the confidence wrappers (decoder.py).
+unsure of its class. ComplementaryGap is the ConfidenceSignal row
+(decsim/ports.py): it declares the source and builds one metric per
+window model for the confidence wrappers (decoder.py).
 """
 
 import dataclasses
 import time
+from typing import Optional
 
 import numpy
 import pymatching
@@ -248,15 +250,31 @@ class PairedGapEvaluation:
 
 
 @dataclasses.dataclass(frozen=True)
-class ComplementaryGapMetricFactory:
-    """The stateless builder the wrappers hold: a source, a metric per model."""
+class ComplementaryGap:
+    """The signal row: the complementary gap, one metric per window model."""
 
     source = COMPLEMENTARY_GAP_SOURCE
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 
-    def from_window_model(self, model) -> ComplementaryGapMetric:
-        """The metric of one placed window model."""
+    def metric_for(self, model) -> Optional[ComplementaryGapMetric]:
+        """The metric of one placed window model.
+
+        None when the model has no single nonzero observable row: the
+        gap pins the observable to the other class, so it needs one.
+        """
+        if not _has_one_observable(model):
+            return None
         return ComplementaryGapMetric.from_window_model(model)
+
+
+def _has_one_observable(model) -> bool:
+    """Whether the model's one observable row is nonzero."""
+    faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
+    observables = faults.observables.toarray()
+    if observables.shape[0] != 1:
+        return False
+    has_nonzero_row = observables.any()
+    return bool(has_nonzero_row)
 
 
 def _indicator_column(length: int, indices) -> numpy.ndarray:

@@ -1,14 +1,17 @@
 """The confidence wrappers: a weak decoder that also reports its soft output.
 
-Each wrapper is a row of the Decoder port over a base decoder: the
-correction and the observables are the base's, and the result carries
-the configured metric's soft output. SoftOutputDecoder computes the gap
-serially on the same core; ParallelGapDecoder charges the two forced
-solves as two cores plus a join; SplitGapDecoder solves one forced class
-here while a GapHalfDecoder on its own unit solves the other, and the
-decoder manager's GapJoins builds the gap when both halves land (Toshio
-et al. 2510.25222 Sec. III A: the weak decoder computes its soft output
-during decoding).
+Each wrapper is a row of the Decoder port over a base decoder and a
+ConfidenceSignal (decsim/ports.py): the correction and the observables
+are the base's, and the result carries the signal's soft output. The
+root selects one by escalation.gap_computation: SoftOutputDecoder
+(serial) evaluates the signal on the same core; ParallelGapDecoder
+(parallel_pair) charges the signal's two forced solves as two cores
+plus a join; SplitGapDecoder (split_pair) solves one forced class here
+while a GapHalfDecoder on its own unit solves the other, and the decoder
+manager's GapJoins builds the gap when both halves land (Toshio et al.
+2510.25222 Sec. III A: the weak decoder computes its soft output during
+decoding). The pair and the split read the complementary gap's two
+forced-class solves, so they take that signal.
 """
 
 import time
@@ -19,13 +22,14 @@ import decsim.decoders.decoder as decoder_module
 import decsim.detector_error_model.fault_model_contracts as fault_models
 import decsim.message as message
 
-# the cache value meaning "this model was inspected and has no usable
-# observable"; distinct from a missing key, which means "not built yet"
-_NO_OBSERVABLE = object()
+# the cache value meaning "this model was inspected and the signal has
+# no metric for it"; distinct from a missing key, which means "not built
+# yet"
+_NO_METRIC = object()
 
 
-def cached_metric_for_model(cache: dict, metric_factory, model):
-    """One gap metric per window model, or None without an observable.
+def cached_metric_for_model(cache: dict, signal, model):
+    """The signal's metric for one window model, or None when it has none.
 
     Metric construction builds two matching graphs, which is setup work
     like the base decoder's own graph build (cached and pre-warmed in
@@ -38,50 +42,49 @@ def cached_metric_for_model(cache: dict, metric_factory, model):
         return None
     model_identity = id(model)
     cached = cache.get(model_identity)
-    if cached is _NO_OBSERVABLE:
+    if cached is _NO_METRIC:
         return None
     if cached is not None:
         return cached
-    metric = _NO_OBSERVABLE
-    if _has_one_observable(model):
-        metric = metric_factory.from_window_model(model)
+    metric = signal.metric_for(model)
+    if metric is None:
+        metric = _NO_METRIC
     cache[model_identity] = metric
     weakref.finalize(model, cache.pop, model_identity, None)
-    if metric is _NO_OBSERVABLE:
+    if metric is _NO_METRIC:
         return None
     return metric
 
 
 class SoftOutputDecoder(decoder_module.DecoderBase):
-    """The base decode with one configured metric's confidence attached.
+    """The base decode with one signal's confidence attached.
 
-    metric_factory declares source, fault_model_requirement and
-    from_window_model(model). Timing is the base decoder's; on the
-    measured path the soft output is part of the weak decoder's real
-    work, so the measured time is the base's own backend call plus the
-    timed gap solve, never the base's untimed setup (graph build and
-    warm-up).
+    Timing is the base decoder's; on the measured path the soft output
+    is part of the weak decoder's real work, so the measured time is the
+    base's own backend call plus the timed gap solve, never the base's
+    untimed setup (graph build and warm-up).
     """
 
-    def __init__(
-        self, base: decoder_module.DecoderBase, metric_factory
-    ) -> None:
+    reports_soft_output = True
+
+    def __init__(self, base: decoder_module.DecoderBase, signal) -> None:
         self.base = base
-        self.metric_factory = metric_factory
+        self.signal = signal
         self.fault_model_requirement = base.fault_model_requirement.joined(
-            metric_factory.fault_model_requirement
+            signal.fault_model_requirement
         )
         self._metrics_by_model_identity: dict = {}
 
     def run_seed_children(self) -> tuple:
-        """The base decoder and the configured metric factory."""
+        """The base decoder and the signal.
+
+        The signal's seed segment keeps the name the results carry.
+        """
         base_segment = message.RunSeedPathSegment("field", "base")
         base_child = message.RunSeedChild((base_segment,), self.base)
-        metric_segment = message.RunSeedPathSegment("field", "metric_cls")
-        metric_child = message.RunSeedChild(
-            (metric_segment,), self.metric_factory
-        )
-        return (base_child, metric_child)
+        signal_segment = message.RunSeedPathSegment("field", "metric_cls")
+        signal_child = message.RunSeedChild((signal_segment,), self.signal)
+        return (base_child, signal_child)
 
     def latency(self, job: message.DecodeJob) -> int:
         """The base decoder's timing; the soft output adds no latency."""
@@ -117,9 +120,9 @@ class SoftOutputDecoder(decoder_module.DecoderBase):
         return result, base_nanoseconds + evaluate_nanoseconds
 
     def _metric_for(self, model):
-        """This window model's cached metric, or None without an observable."""
+        """This window model's cached metric; None when the signal has none."""
         return cached_metric_for_model(
-            self._metrics_by_model_identity, self.metric_factory, model
+            self._metrics_by_model_identity, self.signal, model
         )
 
 
@@ -150,10 +153,10 @@ class ParallelGapDecoder(SoftOutputDecoder):
     def __init__(
         self,
         base: decoder_module.DecoderBase,
-        metric_factory,
+        signal,
         combine_nanoseconds: int = 0,
     ) -> None:
-        SoftOutputDecoder.__init__(self, base, metric_factory)
+        SoftOutputDecoder.__init__(self, base, signal)
         self.combine_nanoseconds = combine_nanoseconds
 
     def decode_timed(self, job: message.DecodeJob) -> tuple:
@@ -214,8 +217,8 @@ class GapHalfDecoder(decoder_module.DecoderBase):
 
     fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 
-    def __init__(self, metric_factory) -> None:
-        self.metric_factory = metric_factory
+    def __init__(self, signal) -> None:
+        self.signal = signal
         self._metrics_by_model_identity: dict = {}
 
     def latency(self, job: message.DecodeJob) -> int:
@@ -240,7 +243,7 @@ class GapHalfDecoder(decoder_module.DecoderBase):
         """The forced solve and its wall clock; nothing without a metric."""
         result = message.DecodeResult(job.op_id, job.window_id)
         metric = cached_metric_for_model(
-            self._metrics_by_model_identity, self.metric_factory, job.dem
+            self._metrics_by_model_identity, self.signal, job.dem
         )
         if metric is None:
             return result, 0
@@ -250,13 +253,3 @@ class GapHalfDecoder(decoder_module.DecoderBase):
         )
         result.gap_half_weight = weight
         return result, elapsed_nanoseconds
-
-
-def _has_one_observable(model) -> bool:
-    """Whether the model's one observable row is nonzero."""
-    faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
-    observables = faults.observables.toarray()
-    if observables.shape[0] != 1:
-        return False
-    has_nonzero_row = observables.any()
-    return bool(has_nonzero_row)

@@ -12,8 +12,8 @@ correction, the frame releases the controller, the controller instructs
 the QPU, and every hop between components rides a link.
 
 The pluggable parts (SyndromeSource, RoundStore, Decoder, Link,
-EscalationPolicy, WindowingScheme, IdlePolicy, Workload) have their
-abstract class here, sinter's Decoder shape
+EscalationPolicy, ThresholdSource, ConfidenceSignal, WindowingScheme,
+IdlePolicy, Workload) have their abstract class here, sinter's Decoder shape
 (sinter/_decoding/_decoding_decoder_class.py, one class with the methods
 a row of the table must offer), written as a Protocol because the
 implementations fill it without inheriting. Observation (metrics, the
@@ -184,17 +184,21 @@ class Decoder(Protocol):
     """One decoder: correctness and timing from one object.
 
     Table rows: pymatching, unweighted_pymatching, belief_matching,
-    union_find, tesseract, relay_bp, bposd, or a number (a preset
-    latency on the MWPM path). sinter's abstract class with defaults
-    (decsim/decoders/decoder.py, DecoderBase) fills start, cancel,
-    occupancy and pipeline_depth from decode and latency, so a row
+    union_find, union_find_cluster_gap, tesseract, relay_bp, bposd, or a
+    number (a preset latency on the MWPM path). sinter's abstract class
+    with defaults (decsim/decoders/decoder.py, DecoderBase) fills start,
+    cancel, occupancy and pipeline_depth from decode and latency, so a row
     writes those two. The manager asks occupancy and pipeline_depth at
     dispatch, calls start once the input has landed, and cancel when the
     request is withdrawn; a decoder measured on the host clock answers
-    occupancy with None and start decides its own time.
+    occupancy with None and start decides its own time. A row that
+    reports its own soft output (the Union-Find cluster gap, a sampled
+    confidence) says so, and the root wraps no confidence signal around
+    it.
     """
 
     fault_model_requirement: Any
+    reports_soft_output: bool
 
     def decode(self, job: message.DecodeJob) -> message.DecodeResult:
         """The window's correction and its logical observables."""
@@ -391,6 +395,63 @@ class EscalationPolicy(Protocol):
         self, window_key: tuple, result: message.DecodeResult
     ) -> None:
         """The strong tier answered for the window; a source may learn."""
+
+
+@runtime_checkable
+class ThresholdSource(Protocol):
+    """Where the switching policy's threshold comes from.
+
+    Table rows: fixed, online (decsim/escalation/threshold_sources.py);
+    the yaml's table source is resolved to fixed per sweep point by the
+    front. A source that audits by escalating (the online row labels a
+    kept window by re-decoding it on the strong tier) needs one serial
+    strong re-decode per window, so Switching refuses it beside
+    run_both_at_once and the double window.
+    """
+
+    audits_by_escalating: bool
+
+    def decide_keep(
+        self, job: message.DecodeJob, result: message.DecodeResult
+    ) -> bool:
+        """True keeps the weak result; the result carries its soft output."""
+
+    def learn_from_strong_result(
+        self, window_key: tuple, result: message.DecodeResult
+    ) -> None:
+        """The strong tier answered for the window; the source may learn."""
+
+
+@runtime_checkable
+class ConfidenceMetric(Protocol):
+    """One window model's confidence, as the wrappers evaluate it."""
+
+    def evaluate(self, syndrome) -> message.SoftOutput:
+        """The soft output of one syndrome (Toshio 2510.25222 Sec. III A)."""
+
+
+@runtime_checkable
+class ConfidenceSignal(Protocol):
+    """The soft output a weak decode reports, as its wrapper sees it.
+
+    Table row: complementary_gap (decsim/confidence/complementary.py).
+    source names the signal so the switching policy can refuse another
+    one's, fault_model_requirement is what a window model must offer,
+    and metric_for builds the metric of one window model, or None when
+    the model has nothing the signal can measure. The three wrappers
+    (decsim/confidence/decoder.py, by escalation.gap_computation: serial
+    on one core, parallel_pair on two, split_pair across two units)
+    attach a signal to a weak decoder. The Union-Find cluster gap reads
+    the hard decode's own intervals, not the syndrome, so it is a Decoder
+    row (union_find_cluster_gap) that reports its own soft output, beside
+    this port rather than on it.
+    """
+
+    source: message.SoftOutputSource
+    fault_model_requirement: Any
+
+    def metric_for(self, window_model) -> Optional[ConfidenceMetric]:
+        """The metric of one placed window model; None when it has none."""
 
 
 @runtime_checkable

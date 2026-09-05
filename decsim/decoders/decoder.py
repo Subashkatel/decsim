@@ -48,10 +48,12 @@ class DecoderBase(abc.ABC):
     instead: decode_timed runs now and the result is delivered after
     the measured ticks. cancel does nothing, occupancy is latency, and
     the pipeline depth is one: the unit holds compute for the whole
-    decode.
+    decode. A row that attaches its own soft output to the result says
+    so, and the root wraps no confidence signal around it.
     """
 
     fault_model_requirement = fault_models.NO_FAULT_MODEL_REQUIRED
+    reports_soft_output = False
 
     @abc.abstractmethod
     def decode(self, job: message.DecodeJob) -> message.DecodeResult:

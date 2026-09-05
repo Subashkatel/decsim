@@ -35,6 +35,7 @@ from typing import Any, Optional
 
 import stim
 
+import decsim.confidence.cluster as cluster
 import decsim.confidence.complementary as complementary
 import decsim.confidence.decoder as confidence_decoder
 import decsim.config as config
@@ -73,8 +74,8 @@ import decsim.links.fabric as fabric
 import decsim.links.link_profiles as link_profiles
 import decsim.links.settings as link_settings
 import decsim.message as message
-import decsim.observe.link_traffic as link_traffic
 import decsim.observe.decode_records as decode_records_module
+import decsim.observe.link_traffic as link_traffic
 import decsim.observe.metrics as metrics
 import decsim.observe.round_events as round_events_module
 import decsim.observe.round_store_occupancy as round_store_occupancy_module
@@ -130,6 +131,23 @@ DECODERS = {
     "tesseract": tesseract.TesseractDecoder,
     "relay_bp": relay_belief_propagation.RelayBeliefPropagationDecoder,
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
+    # the Union-Find decode reporting its own cluster gap (Meister et al.
+    # 2405.07433); it takes no confidence signal, so a switching run
+    # refuses it until a key selects the policy's signal
+    "union_find_cluster_gap": cluster.union_find_cluster_gap,
+}
+# The soft output a switching run's weak decoder reports, and the wrapper
+# that attaches it (escalation.gap_computation). No yaml key names the
+# signal yet; the root takes the one row, and the switching policy
+# expects its source.
+CONFIDENCE_SIGNALS = {
+    "complementary_gap": complementary.ComplementaryGap,
+}
+CONFIDENCE_SIGNAL_KIND = "complementary_gap"
+CONFIDENCE_WRAPPERS = {
+    "serial": confidence_decoder.SoftOutputDecoder,
+    "parallel_pair": confidence_decoder.ParallelGapDecoder,
+    "split_pair": confidence_decoder.SplitGapDecoder,
 }
 ROUND_STORES = {
     "round_store": round_store_module.RoundStore,
@@ -615,12 +633,11 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
     A named row decodes for real inside a StagedDecoder whose fetch and
     release stages are cycles of the tier's clock; a number is a fixed
     core latency on the MWPM path. The tier that decodes the plan's
-    windows carries the gap wrapper when the escalation switches
-    (SoftOutputDecoder, ParallelGapDecoder or SplitGapDecoder by
-    gap_computation) and the Tesseract referee when the observation
-    asks for it; the strong tier of a switching run is unwrapped (its
-    result is final). A Python-built decoder is returned as it is. None
-    when the tier names no decoder.
+    windows carries the confidence signal's wrapper when the escalation
+    switches (CONFIDENCE_WRAPPERS by gap_computation) and the Tesseract
+    referee when the observation asks for it; the strong tier of a
+    switching run is unwrapped (its result is final). A Python-built
+    decoder is returned as it is. None when the tier names no decoder.
     """
     tier_settings = getattr(settings, f"{tier}_decoder")
     if tier_settings.decoder is not None:
@@ -629,7 +646,9 @@ def build_decoder_unit(settings: MachineSettings, tier: str):
         return None
     algorithm = _algorithm(tier_settings.kind, tier)
     is_active = tier == settings.escalation.decodes_on
-    if is_active and settings.escalation.kind == "switching":
+    is_switching = settings.escalation.kind == "switching"
+    if is_active and is_switching:
+        _refuse_own_soft_output(algorithm, tier, tier_settings.kind)
         # a named row is measured on the host clock; a number is priced
         is_measured = isinstance(tier_settings.kind, str)
         algorithm = _gap_wrapped(algorithm, settings.escalation, is_measured)
@@ -720,9 +739,8 @@ def _escalation_policy(settings: decoder_settings.EscalationSettings):
     row = _row(ESCALATIONS, "escalation.kind", settings.kind)
     if row is escalation_policies.Switching:
         threshold = _threshold_source(settings)
-        return escalation_policies.Switching(
-            threshold, complementary.COMPLEMENTARY_GAP_SOURCE
-        )
+        signal = _confidence_signal()
+        return escalation_policies.Switching(threshold, signal.source)
     return row()
 
 
@@ -1089,21 +1107,42 @@ def _algorithm(kind, tier: str):
 def _gap_wrapped(
     algorithm, escalation: decoder_settings.EscalationSettings, is_measured
 ):
-    """The weak algorithm carrying its complementary gap, per computation."""
-    metric_factory = complementary.ComplementaryGapMetricFactory()
-    computation = escalation.gap_computation
-    if computation == "parallel_pair":
-        return confidence_decoder.ParallelGapDecoder(algorithm, metric_factory)
-    if computation == "split_pair":
-        if not is_measured:
-            raise ValueError(
-                "split_pair times two real forced-class solves on separate "
-                "units, so the weak tier needs a named wall-clock "
-                "algorithm; a priced card already models the whole unit "
-                "(use parallel_pair to change its cost sheet instead)"
-            )
-        return confidence_decoder.SplitGapDecoder(algorithm, metric_factory)
-    return confidence_decoder.SoftOutputDecoder(algorithm, metric_factory)
+    """The weak algorithm carrying the signal, in the computation's wrapper."""
+    signal = _confidence_signal()
+    wrapper = _row(
+        CONFIDENCE_WRAPPERS,
+        "escalation.gap_computation",
+        escalation.gap_computation,
+    )
+    is_split = wrapper is confidence_decoder.SplitGapDecoder
+    if is_split and not is_measured:
+        raise ValueError(
+            "split_pair times two real forced-class solves on separate "
+            "units, so the weak tier needs a named wall-clock "
+            "algorithm; a priced card already models the whole unit "
+            "(use parallel_pair to change its cost sheet instead)"
+        )
+    return wrapper(algorithm, signal)
+
+
+def _refuse_own_soft_output(algorithm, tier: str, kind) -> None:
+    """A switching run decides on its signal, not on a row's own gap."""
+    if not algorithm.reports_soft_output:
+        return
+    raise ValueError(
+        f"{tier}_decoder.kind {kind!r} reports its own soft output, and "
+        "escalation switching decides on the complementary gap; no "
+        "escalation key selects another signal yet, so run this row "
+        "under weak_baseline or switch on a row the signal wraps"
+    )
+
+
+def _confidence_signal():
+    """The signal row a switching run's weak decoder reports and decides on."""
+    row = _row(
+        CONFIDENCE_SIGNALS, "escalation.confidence", CONFIDENCE_SIGNAL_KIND
+    )
+    return row()
 
 
 def _gap_unit(settings: MachineSettings) -> staged_decoder.StagedDecoder:
@@ -1112,8 +1151,8 @@ def _gap_unit(settings: MachineSettings) -> staged_decoder.StagedDecoder:
     Staged over the weak tier's engine timing, since it reads the same
     rounds.
     """
-    metric_factory = complementary.ComplementaryGapMetricFactory()
-    half = confidence_decoder.GapHalfDecoder(metric_factory)
+    signal = _confidence_signal()
+    half = confidence_decoder.GapHalfDecoder(signal)
     return _staged_unit(settings.weak_decoder, half)
 
 

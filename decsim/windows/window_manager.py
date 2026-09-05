@@ -14,12 +14,11 @@ from enum import Enum, auto
 from types import MappingProxyType
 from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
-from ..message import (DecodeJob, DecodeResult, DecoderRequestKey, DecoderTier, LinkPath, LogicalContribution, Operation, RequestTransferRelation, StrongDecodeCompletion, SuccessorReadiness, SyndromeRoundPacket, TransferAttribution, Window, WindowInfo, WindowPlan, WindowProtocol, WindowReadiness, stable_identity_order_key)
+from ..message import (DecodeJob, DecodeResult, DecoderInputHold, DecoderRequestKey, DecoderTier, LinkPath, LogicalContribution, Operation, PendingStrong, PotentialStrong, RequestTransferRelation, StrongDecodeCompletion, SuccessorReadiness, SyndromeRoundPacket, TransferAttribution, Window, WindowInfo, WindowPlan, WindowProtocol, WindowReadiness, stable_identity_order_key)
 from ..decoders.decoder_memory import count_decoder_input_round_demand
 from ..decoders.strong_escalation import NoStrongTier, StrongEscalation
-from ..syndrome_buffer.syndrome_buffer import (DecoderInputHold, PendingStrong,
-                                               PotentialStrong, SyndromeBuffer)
-from ..syndrome_buffer.syndrome_buffer_1 import SyndromeBuffer1
+from ..syndrome_buffer.round_store import RoundStore
+from ..syndrome_buffer.settings import RoundStoreSettings
 from .dynamic_windows import DynamicWindows
 from .committed_rounds import LogicalLedger
 from .window_boundaries import BoundaryCourier, HeldBoundary
@@ -91,8 +90,8 @@ class WindowManager:
                  fault_model_requirement_for,
                  feedback_boundary_mode: str = "trailing_buffer",
                  error_model_provider=None, retain_strong_context: bool,
-                 syndrome_buffer: Optional[SyndromeBuffer] = None,
-                 syndrome_buffer_1: Optional[SyndromeBuffer1] = None,
+                 syndrome_buffer: Optional[RoundStore] = None,
+                 syndrome_buffer_1: Optional[RoundStore] = None,
                  pauli_frame=None,
                  capture_enabled: bool = False,
                  escalation_policy, submit_fn: Callable, check_strong_route: Callable,
@@ -135,17 +134,18 @@ class WindowManager:
                            if retain_strong_context else NoStrongTier())
         self.on_workload_complete = on_workload_complete
 
-        self.syndrome_buffer = syndrome_buffer if syndrome_buffer is not None else SyndromeBuffer()
+        if syndrome_buffer is None:
+            syndrome_buffer = RoundStore(RoundStoreSettings())
+        self.syndrome_buffer = syndrome_buffer
         uses_strong_store = (retain_strong_context
                              or self.primary_tier is DecoderTier.STRONG)
         if syndrome_buffer_1 is None and uses_strong_store:
-            syndrome_buffer_1 = SyndromeBuffer1(engine, links)
+            syndrome_buffer_1 = RoundStore(RoundStoreSettings())
         self.syndrome_buffer_1 = syndrome_buffer_1
-        if self.syndrome_buffer_1 is not None:
-            # the room-side store's arrival signal: always the terminal
-            # strong-window listener; the readiness authority too when the strong tier is
-            # primary (readiness listens to the store its lane reads)
-            self.syndrome_buffer_1.on_round_stored = self._on_room_round_stored
+        # the room-side store's stored-through round per operation, fed by
+        # the strong writer's on_round_stored: the strong tier's
+        # data-readiness gates read this, never Buffer 0's counter
+        self.strong_rounds_arrived: dict = {}
         self.lifecycle = DynamicWindows(self)
 
         self._ops: dict[int, Operation] = {}
@@ -294,7 +294,7 @@ class WindowManager:
             ),
         }
         strong_is_primary = self.primary_tier is DecoderTier.STRONG
-        capacity = self.syndrome_buffer.capacity
+        capacity = self.syndrome_buffer.settings.rounds
         minimum = () if strong_is_primary else buffering_plan.minimum_live_rounds
         if capacity is not None and capacity < len(minimum):
             raise ValueError(
@@ -302,7 +302,7 @@ class WindowManager:
                 f"got {capacity}"
             )
         if self.syndrome_buffer_1 is not None:
-            sb1_capacity = self.syndrome_buffer_1.capacity_rounds
+            sb1_capacity = self.syndrome_buffer_1.settings.rounds
             sb1_minimum = buffering_plan.sb1_minimum_live_rounds
             if strong_is_primary:
                 # the plan's window reads live on the room-side store
@@ -491,7 +491,7 @@ class WindowManager:
         """Reject a new consumer if any already-arrived input was released."""
         store = self.syndrome_buffer if store is None else store
         arrived = (self.rounds_arrived if store is self.syndrome_buffer
-                   else store.rounds_arrived)
+                   else self.strong_rounds_arrived)
         missing = [
             round_key for round_key in round_keys
             if (not store.has_operation(round_key[0])
@@ -653,14 +653,16 @@ class WindowManager:
         for predecessor_id in op.decoder_boundary_predecessors:
             self.check_windows_for_operation(predecessor_id)
 
-    def _on_room_round_stored(self, op_id) -> None:
+    def _on_room_round_stored(self, op_id, round_index: int) -> None:
         """Syndrome buffer 1 stored a round: wake the strong tier's
         listeners, and drive readiness when the strong tier is primary."""
+        stored_before = self.strong_rounds_arrived.get(op_id, 0)
+        self.strong_rounds_arrived[op_id] = max(stored_before, round_index)
         self.escalation.after_arrival(op_id)
         if self.primary_tier is not DecoderTier.STRONG:
             return
         op = self._ops[op_id]
-        stored_through = self.syndrome_buffer_1.rounds_arrived.get(op_id, 0)
+        stored_through = self.strong_rounds_arrived.get(op_id, 0)
         self._count_arrival(op, stored_through)
         self.lifecycle.maybe_update(op_id)
         self._wake_windows(op)

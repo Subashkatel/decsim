@@ -79,7 +79,7 @@ def test_parallel_confident_weak_cancels_every_strong(fabric):
     assert [record.tier for record in records] == ["weak"] * 3
     assert completed.decoder_manager.strong_cancelled == 3
     assert completed.decoder_manager.strong_needed == 0
-    completed.syndrome_buffer_1.check_settled()   # cancels released the holds
+    completed.strong_round_writer.check_settled()   # cancels released the holds
 
 
 def test_parallel_unconfident_weak_takes_every_strong(fabric):

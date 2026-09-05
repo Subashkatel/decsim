@@ -185,57 +185,6 @@ def test_unbounded_cwb_bandwidth_charges_propagation_only():
     assert second.total_delay_ticks == microseconds_to_ticks(0.10)
 
 
-def test_packing_reserves_cwb_exactly_once_and_publishes_at_arrival_before_retry():
-    engine = _Engine(now=1_000)
-    links, ledger = _fabric_and_ledger(
-        _wired_profile(latency_us=0.25, bandwidth=100.0), engine)
-    receiver = _Receiver([False, True])
-    publication = _PublicationSpy()
-    packet = SimpleNamespace(
-        operation_id=17,
-        round_index=4,
-        fragments=(
-            SimpleNamespace(patch_id=2, size_bits=120),
-            SimpleNamespace(patch_id=9, size_bits=180),
-        ),
-    )
-    slot = SimpleNamespace(
-        identity="ctx", round_key=(17, 4),
-        packet=packet,
-        packet_bits=300,
-        cwb_reserved=False,
-        cwb_delivered=False,
-        state=_PackingSlotState.PACKED_WAIT,
-    )
-    packing = object.__new__(SyndromePacking)
-    packing.round_events = []
-    packing.engine = engine
-    packing.links = links
-    packing.window_input_receiver = receiver
-    packing.syndrome_buffer = publication
-    slot.route = SimpleNamespace(kind=SyndromePacketRouteKind.WINDOW_INPUT)
-    packing._contexts = {"ctx": slot}
-    packing._route_queues = {SyndromePacketRouteKind.WINDOW_INPUT: ["ctx"]}
-
-    assert packing._transmit_window_input_round(slot) is True
-    assert receiver.received == []
-    assert publication.calls == []
-    assert len(engine.events) == 1
-
-    engine.run_next()
-    arrival_tick = 1_000 + microseconds_to_ticks(0.25) + microseconds_to_ticks(3.0)
-    assert engine.now == arrival_tick
-    assert receiver.received == [packet]
-    assert publication.calls == [((17, 4), arrival_tick)]
-    assert slot.state is _PackingSlotState.PACKED_WAIT
-    assert len(ledger.traffic_json_value()["transfers"]) == 1
-
-    assert packing._transmit_window_input_round(slot) is True
-    assert receiver.received == [packet, packet]
-    assert publication.calls == [((17, 4), arrival_tick)]
-    assert len(ledger.traffic_json_value()["transfers"]) == 1
-
-
 def test_unwired_legacy_packing_delivery_is_immediate_and_has_no_cwb_publication():
     engine = _Engine(now=321)
     links, ledger = _fabric_and_ledger(logical_reference_profile(), engine)
@@ -302,20 +251,18 @@ def test_rounds_pipeline_on_cwb_instead_of_stop_and_wait():
     assert all(gap == pytest.approx(0.02, abs=1e-3) for gap in gaps), gaps   # first gap adds serialization
 
 
-def _packing(*, assembly_slots=None, buffer_capacity=None, overflow=None):
+def _packing(*, assembly_slots=None, overflow=None):
     from decsim.controller.syndrome_packing import (PackingOverflowPolicy,
                                                     SyndromePackingPolicy)
-    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
     policy = SyndromePackingPolicy(
         overflow=overflow if overflow is not None
-        else PackingOverflowPolicy.FAIL_STOP)
+        else PackingOverflowPolicy.STALL)
     engine = _Engine()
     return SyndromePacking(
         engine, LinkFabric(logical_reference_profile(), engine), packing_ticks=0,
         packing_context_capacity=assembly_slots,
         window_input_receiver=_Receiver([True] * 8),
         feedback_memory_receiver=None,
-        syndrome_buffer=SyndromeBuffer(capacity=buffer_capacity),
         policy=policy)
 
 
@@ -352,12 +299,3 @@ def test_assembly_capacity_drop_round_drops_only_the_new_round():
                               WINDOW_INPUT_ROUTE)
     assert packing.syndrome_buffer.retained_fragments((1, 1)) is not None
     assert packing.syndrome_buffer.retained_fragments((1, 2)) is None
-
-
-def test_retention_refusal_reports_the_stores_capacity():
-    from decsim.controller.syndrome_packing import SyndromePackingOverflowError
-    from decsim.message import WINDOW_INPUT_ROUTE
-    packing = _packing(assembly_slots=None, buffer_capacity=1)
-    packing._receive_fragment(_fragment(1), 1, WINDOW_INPUT_ROUTE)
-    with pytest.raises(SyndromePackingOverflowError, match="capacity 1 is full"):
-        packing._receive_fragment(_fragment(2), 1, WINDOW_INPUT_ROUTE)

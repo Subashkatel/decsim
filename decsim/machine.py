@@ -17,6 +17,9 @@ methods) because the window manager, the decoder manager and the
 factory refer to each other; slices 5 and 6 retire them with the
 per-job callback law (SimPy's callback on the event, simpy/core.py
 step()): the submitting side carries the return path with the job.
+The stores' callbacks arrive by constructor: the held rounds are built
+first, each store retries them when a slot frees, and the strong
+writer tells the window manager what landed.
 """
 
 import copy
@@ -32,6 +35,7 @@ import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.policies as policies
+import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
 import decsim.controller.syndrome_packing as syndrome_packing_module
 import decsim.decoders.belief_matching.decoder as belief_matching
@@ -68,9 +72,9 @@ import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
 import decsim.seeding as seeding
+import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer_module
-import decsim.syndrome_buffer.syndrome_buffer_1 as syndrome_buffer_1_module
+import decsim.syndrome_buffer.strong_round_writer as strong_round_writer_module
 import decsim.windows.settings as window_settings
 import decsim.windows.window_interactions as window_interactions
 import decsim.windows.window_manager as window_manager_module
@@ -103,7 +107,7 @@ DECODERS = {
     "bposd": belief_propagation_osd.BeliefPropagationOsdDecoder,
 }
 ROUND_STORES = {
-    "round_store": syndrome_buffer_module.SyndromeBuffer,
+    "round_store": round_store_module.RoundStore,
 }
 ESCALATIONS = {
     "weak_baseline": weak_strong_switching.Baseline,
@@ -329,8 +333,9 @@ class Machine:
     links: fabric.LinkFabric
     traffic_ledger: link_traffic.TrafficLedger
     conditional_release: conditional_release_module.ConditionalRelease
-    syndrome_buffer: syndrome_buffer_module.SyndromeBuffer
-    syndrome_buffer_1: Optional[syndrome_buffer_1_module.SyndromeBuffer1]
+    round_store: round_store_module.RoundStore
+    strong_round_store: Optional[round_store_module.RoundStore]
+    strong_round_writer: Optional[strong_round_writer_module.StrongRoundWriter]
     pauli_frame: Optional[pauli_frame_module.PauliFrame]
     window_manager: window_manager_module.WindowManager
     syndrome_packing: syndrome_packing_module.SyndromePacking
@@ -368,9 +373,10 @@ class Machine:
         )
         traffic_ledger = link_traffic.TrafficLedger(settings.links)
         links = fabric.LinkFabric(settings.links, engine, traffic_ledger)
-        syndrome_buffer = _round_store(settings.round_store)
-        syndrome_buffer_1 = _strong_round_store(
-            settings.strong_round_store, escalation_policy, engine, links
+        held_rounds = round_writes.HeldRounds()
+        round_store = _round_store(settings.round_store, held_rounds)
+        strong_round_store = _strong_round_store(
+            settings.strong_round_store, escalation_policy, held_rounds
         )
         pauli_frame = _pauli_frame(settings.pauli_frame, engine)
         # The window manager, the decoder manager and the factory refer
@@ -384,8 +390,8 @@ class Machine:
             links=links,
             conditional_release=conditional_release,
             fault_model_requirement_for=pool.router.fault_model_requirement_for,
-            syndrome_buffer=syndrome_buffer,
-            syndrome_buffer_1=syndrome_buffer_1,
+            syndrome_buffer=round_store,
+            syndrome_buffer_1=strong_round_store,
             pauli_frame=pauli_frame,
             submit_fn=lambda job, send_input=None: decoder_manager.enqueue(
                 job, send_input
@@ -395,13 +401,17 @@ class Machine:
             ),
             on_workload_complete=lambda: factory.shutdown(),
         )
+        strong_round_writer = _strong_round_writer(
+            engine, links, strong_round_store, window_manager
+        )
         syndrome_packing = _syndrome_packing(
             engine,
             settings,
             links,
             window_manager,
-            syndrome_buffer,
-            syndrome_buffer_1,
+            round_store,
+            strong_round_writer,
+            held_rounds,
             plan.device,
         )
         decoder_manager = _decoder_manager(
@@ -471,7 +481,9 @@ class Machine:
             qpu=qpu,
             execution_runtime=execution_runtime,
             pauli_frame=pauli_frame,
-            memory_model=settings.round_store.memory_model,
+            # the retained-storage observer is gone; its seed path segment
+            # is a result (seeding hashes the segment names) and stays
+            memory_model=None,
             metrics=metric_bindings,
         )
         seeding.bind_run_seed(root_seed, seed_roots)
@@ -490,8 +502,9 @@ class Machine:
             links=links,
             traffic_ledger=traffic_ledger,
             conditional_release=conditional_release,
-            syndrome_buffer=syndrome_buffer,
-            syndrome_buffer_1=syndrome_buffer_1,
+            round_store=round_store,
+            strong_round_store=strong_round_store,
+            strong_round_writer=strong_round_writer,
             pauli_frame=pauli_frame,
             window_manager=window_manager,
             syndrome_packing=syndrome_packing,
@@ -515,8 +528,8 @@ class Machine:
             )
         self.decoder_manager.check_decode_work_settled()
         self.syndrome_packing.check_work_settled()
-        if self.syndrome_buffer_1 is not None:
-            self.syndrome_buffer_1.check_settled()
+        if self.strong_round_writer is not None:
+            self.strong_round_writer.check_settled()
         return _capture_result(self)
 
 
@@ -1037,27 +1050,45 @@ def _staged_unit(
 # --------------------------------------------------- the stores and frame
 
 
-def _round_store(settings: round_store_settings.RoundStoreSettings):
+def _round_store(
+    settings: round_store_settings.RoundStoreSettings,
+    held_rounds: round_writes.HeldRounds,
+):
+    """Buffer 0; a freed slot retries the rounds held for room."""
     row = _row(ROUND_STORES, "round_store.kind", settings.kind)
-    return row(capacity=settings.rounds, memory_model=settings.memory_model)
+    return row(settings, on_slot_freed=held_rounds.retry)
 
 
 def _strong_round_store(
     settings: round_store_settings.RoundStoreSettings,
     escalation_policy,
-    engine: engine_module.Engine,
-    links: fabric.LinkFabric,
+    held_rounds: round_writes.HeldRounds,
 ):
-    """Syndrome buffer 1, only when a tier reads from the room side."""
-    _row(ROUND_STORES, "strong_round_store.kind", settings.kind)
+    """The room-side store, only when a tier reads from the room side."""
+    row = _row(ROUND_STORES, "strong_round_store.kind", settings.kind)
     uses_strong_store = (
         escalation_policy.requires_strong_context
         or escalation_policy.primary_tier is message.DecoderTier.STRONG
     )
     if not uses_strong_store:
         return None
-    return syndrome_buffer_1_module.SyndromeBuffer1(
-        engine, links, capacity_rounds=settings.rounds
+    return row(settings, on_slot_freed=held_rounds.retry)
+
+
+def _strong_round_writer(
+    engine: engine_module.Engine,
+    links: fabric.LinkFabric,
+    strong_round_store,
+    window_manager,
+):
+    """The crossing into the room-side store; the window manager hears it."""
+    if strong_round_store is None:
+        return None
+    return strong_round_writer_module.StrongRoundWriter(
+        engine,
+        links,
+        strong_round_store,
+        on_round_stored=window_manager._on_room_round_stored,
     )
 
 
@@ -1134,8 +1165,9 @@ def _syndrome_packing(
     settings: MachineSettings,
     links,
     window_manager,
-    syndrome_buffer,
-    syndrome_buffer_1,
+    round_store,
+    strong_round_writer,
+    held_rounds,
     device,
 ) -> syndrome_packing_module.SyndromePacking:
     controller = settings.controller
@@ -1147,9 +1179,10 @@ def _syndrome_packing(
         packing_context_capacity=controller.packing_rounds_in_flight,
         window_input_receiver=window_manager,
         feedback_memory_receiver=window_manager,
-        syndrome_buffer=syndrome_buffer,
-        syndrome_buffer_1=syndrome_buffer_1,
+        syndrome_buffer=round_store,
+        syndrome_buffer_1=strong_round_writer,
         window_input_store=window_manager.primary_store,
+        held_rounds=held_rounds,
         policy=controller.packing_policy,
         detector_formation=device,
     )

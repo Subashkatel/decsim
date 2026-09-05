@@ -21,19 +21,9 @@ traffic ledger, the trace) reaches a component through callbacks it
 fires, never through a port, so every component runs with no observer.
 """
 
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Callable,
-    Optional,
-    Protocol,
-    runtime_checkable,
-)
+from typing import Any, Callable, Optional, Protocol, runtime_checkable
 
 import decsim.message as message
-
-if TYPE_CHECKING:
-    import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer
 
 # ------------------------------------------------ the QPU emits a readout
 
@@ -55,25 +45,39 @@ class ReadoutReceiver(Protocol):
 class RoundStore(Protocol):
     """The upstream round store (Buffer 0), as syndrome packing sees it.
 
-    Table row: round_store. A packed round is written once and kept
-    until every consumer releases it.
+    Table row: round_store. The writer asks has_room before every
+    write (gem5's queue answers isFull, then allocates); a packed round
+    is written once and kept until every consumer releases it. A store
+    never refuses a write: a round that finds no room waits upstream.
     """
+
+    def has_room(self) -> bool:
+        """Whether one more round fits now."""
 
     def accept_packed_round(
         self,
         packet: message.SyndromeRoundPacket,
         *,
         publication_tick: Optional[int],
-    ) -> "syndrome_buffer.FragmentAdmission":
-        """Give one finished round a slot; refused, not stored, when full."""
+    ) -> None:
+        """Keep one finished round; the writer asked has_room first."""
 
-    def release_round(self, round_identity: tuple) -> None:
-        """Free the round's slot; its consumers are done with it."""
+    def release_round(self, round_key: tuple) -> None:
+        """Free the round; its consumers are done with it."""
+
+    def require_stored(self, round_keys) -> None:
+        """Refuse a read of a round that has not landed here."""
 
 
 @runtime_checkable
 class StrongRoundStore(Protocol):
-    """The room-side store (syndrome buffer 1), as syndrome packing sees it."""
+    """The room-side store (syndrome buffer 1), as syndrome packing sees it.
+
+    The writer counts the rounds still crossing its link as room taken.
+    """
+
+    def has_room(self) -> bool:
+        """Whether one more write can land."""
 
     def write(
         self,
@@ -92,8 +96,8 @@ class StrongRoundStore(Protocol):
 class WindowInput(Protocol):
     """The window manager, as syndrome packing sees it."""
 
-    def accept_window_input(self, packet: message.SyndromeRoundPacket) -> bool:
-        """Publish one retained round to window readiness."""
+    def accept_window_input(self, packet: message.SyndromeRoundPacket) -> None:
+        """Publish one stored round to window readiness; never refused."""
 
 
 # ----------------------------------- the decoder manager schedules a decode

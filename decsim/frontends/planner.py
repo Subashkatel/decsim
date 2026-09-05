@@ -12,7 +12,6 @@ from typing import Callable, Optional
 
 import decsim.config as config
 import decsim.message as message
-import decsim.syndrome_buffer.syndrome_buffer as syndrome_buffer
 
 
 @dataclasses.dataclass(frozen=True)
@@ -398,7 +397,7 @@ def _hold_strong_context(
     lower = max(1, context_start)
     upper = commit_hi + buffer_rounds
     potential = _read_keys(execution, operation_id, lower, upper)
-    owner = syndrome_buffer.PotentialStrong((operation_id, window.k))
+    owner = message.PotentialStrong((operation_id, window.k))
     arrived = _arrived_by_buffer(potential, operation_id, window.buffer_hi)
     strong.add(owner, potential, arrived)
 

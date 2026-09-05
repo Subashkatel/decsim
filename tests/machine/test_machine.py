@@ -29,6 +29,7 @@ import decsim.qpu.round_policies as round_policies
 import decsim.qpu.settings as qpu_settings
 import decsim.qpu.stim_device as stim_device
 import decsim.qpu.syndrome_devices as syndrome_devices
+import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
 import experiments.experiment_config as experiment_config
 
@@ -281,3 +282,41 @@ def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
     observables = result.operation_results[0].logical_observables
     assert observables == (0,)
     assert len(machine.engine.log_lines) == 19
+
+
+class CountingRoundStore(round_store_module.RoundStore):
+    """A table row for the plug-in test: the store, counting its writes."""
+
+    def __init__(self, settings, *, on_slot_freed=None, listener=None):
+        round_store_module.RoundStore.__init__(
+            self, settings, on_slot_freed=on_slot_freed, listener=listener
+        )
+        self.stored_count = 0
+
+    def accept_packed_round(self, packet, *, publication_tick):
+        self.stored_count += 1
+        round_store_module.RoundStore.accept_packed_round(
+            self, packet, publication_tick=publication_tick
+        )
+
+
+def test_a_new_round_store_is_one_class_and_one_table_row():
+    """Gate point 1's settings run to completion on a store added as a row."""
+    config_path = CONFIGS / "weak_decoder_baseline.yaml"
+    experiment = experiment_config.load_experiment(config_path)
+    settings = experiment.point_settings(
+        physical_error_probability=0.003, distance=3, round_period_us=1.0
+    )
+    round_store = dataclasses.replace(settings.round_store, kind="counting")
+    settings = dataclasses.replace(settings, round_store=round_store)
+    machine_module.ROUND_STORES["counting"] = CountingRoundStore
+    try:
+        machine = machine_module.Machine.build(settings, 0)
+        result = machine.run()
+    finally:
+        del machine_module.ROUND_STORES["counting"]
+    assert result.terminal_status == "complete"
+    assert type(machine.round_store) is CountingRoundStore
+    fired = [line for line in machine.engine.log_lines if "fires round" in line]
+    assert machine.round_store.stored_count == len(fired)
+    assert fired

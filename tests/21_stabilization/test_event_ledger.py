@@ -207,20 +207,26 @@ def test_dropped_round_is_an_accounted_terminal_state():
     from decsim.engine import Engine
     from decsim.links.fabric import LinkFabric
     from decsim.links.link_profiles import logical_reference_profile
+    from decsim.controller.round_writes import HeldRounds
     from decsim.message import WINDOW_INPUT_ROUTE, QPUReadout
-    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
+    from decsim.syndrome_buffer.round_store import RoundStore
+    from decsim.syndrome_buffer.settings import RoundStoreSettings
 
     engine = Engine(verbose=False)
+    held_rounds = HeldRounds()
     packing = SyndromePacking(
         engine,
         LinkFabric(logical_reference_profile(), engine),
         packing_ticks=0,
         packing_context_capacity=None,
         window_input_receiver=SimpleNamespace(
-            accept_window_input=lambda _packet: True
+            accept_window_input=lambda _packet: None
         ),
         feedback_memory_receiver=None,
-        syndrome_buffer=SyndromeBuffer(capacity=1),
+        syndrome_buffer=RoundStore(
+            RoundStoreSettings(rounds=1), on_slot_freed=held_rounds.retry
+        ),
+        held_rounds=held_rounds,
         policy=SyndromePackingPolicy(overflow=PackingOverflowPolicy.DROP_ROUND),
     )
     for round_index in (1, 2):
@@ -233,7 +239,7 @@ def test_dropped_round_is_an_accounted_terminal_state():
 
     completed = SimpleNamespace(
         syndrome_packing=packing,
-        syndrome_buffer_1=None,
+        strong_round_writer=None,
         window_manager=SimpleNamespace(windows={}),
         pauli_frame=None,
         execution_runtime=SimpleNamespace(
@@ -270,7 +276,6 @@ def test_reassembly_context_drop_is_an_accounted_terminal_state():
     from decsim.links.fabric import LinkFabric
     from decsim.links.link_profiles import logical_reference_profile
     from decsim.message import WINDOW_INPUT_ROUTE, QPUReadout
-    from decsim.syndrome_buffer.syndrome_buffer import SyndromeBuffer
 
     engine = Engine(verbose=False)
     packing = SyndromePacking(
@@ -279,10 +284,9 @@ def test_reassembly_context_drop_is_an_accounted_terminal_state():
         packing_ticks=0,
         packing_context_capacity=1,
         window_input_receiver=SimpleNamespace(
-            accept_window_input=lambda _packet: True
+            accept_window_input=lambda _packet: None
         ),
         feedback_memory_receiver=None,
-        syndrome_buffer=SyndromeBuffer(capacity=None),
         policy=SyndromePackingPolicy(overflow=PackingOverflowPolicy.DROP_ROUND),
     )
     # Event insertion order makes round 1 occupy the context, round 2 lose
@@ -299,7 +303,7 @@ def test_reassembly_context_drop_is_an_accounted_terminal_state():
 
     completed = SimpleNamespace(
         syndrome_packing=packing,
-        syndrome_buffer_1=None,
+        strong_round_writer=None,
         window_manager=SimpleNamespace(windows={}),
         pauli_frame=None,
         execution_runtime=SimpleNamespace(

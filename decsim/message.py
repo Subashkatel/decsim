@@ -519,6 +519,44 @@ class DecoderRequestKey:
     run_sequence: int
 
 
+# ---- consumer hold tokens: who keeps rounds in a round store and why
+
+
+@dataclass(frozen=True)
+class PotentialStrong:
+    """A hold: a window's rounds, kept in case its weak result escalates."""
+
+    window_key: tuple
+
+
+@dataclass(frozen=True)
+class PendingStrong:
+    """A hold: rounds for an admitted, not yet served strong request."""
+
+    request_key: DecoderRequestKey
+
+
+@dataclass(frozen=True)
+class StrongInputInFlight:
+    """A hold: rounds in flight to a strong decoder."""
+
+    request_key: DecoderRequestKey
+
+
+@dataclass(frozen=True)
+class DecoderInputHold:
+    """A hold: a decode job's rounds until they land in unit memory."""
+
+    request_key: DecoderRequestKey
+
+
+@dataclass(frozen=True)
+class RephaseGuard:
+    """A hold: a rephased suffix's rounds while its strong request is live."""
+
+    request_key: DecoderRequestKey
+
+
 @dataclass(frozen=True)
 class DecoderServiceKey:
     """Identity of one decoder service (a batch of requests served together)."""

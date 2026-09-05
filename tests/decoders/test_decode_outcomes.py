@@ -13,51 +13,34 @@ import decsim.observe.decode_records as decode_records
 
 
 class _Policy:
-    """Keeps every weak result, or holds every one for the strong tier."""
+    """Answers every weak result with one verdict; remembers what it learns."""
 
-    def __init__(self, directive):
-        self.directive = directive
+    def __init__(self, verdict):
+        self.verdict = verdict
+        self.learned = []
 
-    def on_decode_outcome(self, outcome, services):
-        del outcome
-        del services
-        return message.OutcomeDirective(self.directive)
+    def verdict_for_weak_result(self, job, result):
+        del job
+        del result
+        return self.verdict
 
-
-class _Services:
-    """Delivers the selection at once."""
-
-    def prepare_strong_selection(
-        self,
-        weak_job,
-        strong_request_key,
-        serial_strong_job,
-        *,
-        deferred,
-        on_selection_delivered,
-    ):
-        del weak_job
-        del strong_request_key
-        del serial_strong_job
-        del deferred
-        on_selection_delivered()
+    def learn_from_strong_result(self, window_key, result):
+        self.learned.append((window_key, result))
 
 
-def _outcomes(directive, cancelled):
+def _outcomes(verdict, cancelled):
     engine = engine_module.Engine(verbose=False)
     requests = strong_requests_module.StrongRequests()
     records = decode_records.DecodeRecordLedger(is_enabled=False)
-    policy = _Policy(directive)
-    services = _Services()
+    policy = _Policy(verdict)
     outcomes = decode_outcomes.DecodeOutcomes(
         engine,
         policy,
-        services,
         requests,
         records,
         cancel_strong=cancelled.append,
     )
-    return outcomes, requests
+    return outcomes, requests, policy
 
 
 def _delivering_to(delivered):
@@ -78,7 +61,7 @@ def _weak_job(delivered):
 
 def test_a_kept_weak_result_cancels_the_live_strong_request():
     cancelled = []
-    outcomes, requests = _outcomes(message.Directive.FINALIZE, cancelled)
+    outcomes, requests, _policy = _outcomes(message.Verdict.KEEP, cancelled)
     delivered = []
     job = _weak_job(delivered)
     requests.admit(job, now=0)
@@ -89,32 +72,23 @@ def test_a_kept_weak_result_cancels_the_live_strong_request():
     assert delivered == [(job, result)]
 
 
-def test_a_weak_result_held_for_the_strong_tier_still_reaches_on_decoded():
+def test_an_escalated_weak_result_reaches_on_decoded_awaiting_the_strong():
     cancelled = []
-    outcomes, requests = _outcomes(message.Directive.AWAIT_STRONG, cancelled)
+    outcomes, requests, _policy = _outcomes(message.Verdict.ESCALATE, cancelled)
     delivered = []
     job = _weak_job(delivered)
     requests.admit(job, now=0)
-    strong_key = message.DecoderRequestKey(1, 0, message.DecoderTier.STRONG, 5)
-    strong_job = message.DecodeJob(
-        op_id=1,
-        window_id=0,
-        n_rounds=9,
-        strong_decode_for=(1, 0),
-        request_key=strong_key,
-    )
-    requests.admit_strong(strong_job, now=0)
     result = message.DecodeResult(1, 0)
     outcomes.conclude_weak(job, result)
     assert cancelled == []
     assert job.awaiting_strong_result is True
     assert delivered == [(job, result)]
-    assert requests.counts.needed == 1
+    assert (1, 0) not in requests.unresolved_weak_windows
 
 
-def test_a_strong_result_reaches_its_destination_once():
+def test_a_strong_result_teaches_the_policy_and_reaches_its_destination_once():
     cancelled = []
-    outcomes, requests = _outcomes(message.Directive.FINALIZE, cancelled)
+    outcomes, requests, policy = _outcomes(message.Verdict.KEEP, cancelled)
     delivered = []
     strong_key = message.DecoderRequestKey(1, 0, message.DecoderTier.STRONG, 5)
     on_decoded = _delivering_to(delivered)
@@ -132,5 +106,31 @@ def test_a_strong_result_reaches_its_destination_once():
     result = message.DecodeResult(1, 0, logical_observables=(1,))
     deliveries = requests.deliveries_for(strong_job, result, now=30)
     outcomes.conclude_strong(strong_job, result, deliveries)
+    assert delivered == [(strong_job, result)]
+    assert policy.learned == [((1, 0), result)]
+    assert requests.unsettled() == {}
+
+
+def test_a_selection_that_lands_after_the_strong_result_releases_it():
+    cancelled = []
+    outcomes, requests, _policy = _outcomes(message.Verdict.KEEP, cancelled)
+    delivered = []
+    strong_key = message.DecoderRequestKey(1, 0, message.DecoderTier.STRONG, 5)
+    on_decoded = _delivering_to(delivered)
+    strong_job = message.DecodeJob(
+        op_id=1,
+        window_id=0,
+        n_rounds=9,
+        strong_decode_for=(1, 0),
+        request_key=strong_key,
+        on_decoded=on_decoded,
+    )
+    requests.admit_strong(strong_job, now=0)
+    requests.begin_selection((1, 0), strong_key)
+    result = message.DecodeResult(1, 0, logical_observables=(1,))
+    deliveries = requests.deliveries_for(strong_job, result, now=30)
+    outcomes.conclude_strong(strong_job, result, deliveries)
+    assert delivered == []
+    outcomes.select_strong_result((1, 0), strong_key)
     assert delivered == [(strong_job, result)]
     assert requests.unsettled() == {}

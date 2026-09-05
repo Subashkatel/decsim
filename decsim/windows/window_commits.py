@@ -74,7 +74,8 @@ class WindowCommitter:
     Seven attributes: the engine stamps and logs, the planner and the
     tracker name the window and its operation, and the courier, the
     publisher, the escalation and the results are the four the commit
-    hands to.
+    hands to; the escalation hears an escalated result before its
+    provisional commit and every weak commit after it.
     """
 
     def __init__(
@@ -100,8 +101,10 @@ class WindowCommitter:
     ) -> None:
         """A primary decode finished: hand the boundary on, publish, commit.
 
-        A result the policy holds for a strong redo commits provisionally
-        now, its boundary leaving with the commit.
+        A result the policy escalated asks the strong tier for the
+        window first (its selection, and a serial strong job, leave
+        now), then commits provisionally, its boundary leaving with the
+        commit.
         """
         key = (job.op_id, job.window_id)
         window = self.planner.windows_by_key[key]
@@ -109,6 +112,7 @@ class WindowCommitter:
         operation = self.tracker.operation_by_id[job.op_id]
         is_final = not job.awaiting_strong_result
         if not is_final:
+            self.escalation.escalate(job)
             self.commit(window, operation, result, job.request_key, False)
             return
         self.courier.hand_on(window, operation, result, job.request_key, True)

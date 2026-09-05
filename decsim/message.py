@@ -778,25 +778,16 @@ class Submission:
     send_input: Optional[Callable[[Callable[[], None]], int]] = None
 
 
-class Directive(Enum):
-    """What the core should do with a decode outcome."""
+class Verdict(Enum):
+    """The escalation policy's answer to one weak result.
 
-    FINALIZE = auto()  # accept the weak result; cancel any parallel strong
-    AWAIT_STRONG = (
-        auto()
-    )  # hold the weak result; .extra may carry the strong redo
-    FINALIZE_STRONG = (
-        auto()
-    )  # a strong result landed; core applies hold-or-deliver
+    KEEP commits the weak result as final; ESCALATE commits it
+    provisionally and asks the strong tier to re-decode the window
+    (Toshio et al. 2510.25222 Sec. III A, steps 3 and 4).
+    """
 
-
-@dataclass
-class OutcomeDirective:
-    """An escalation policy's verdict on one decode outcome."""
-
-    directive: Directive
-    extra: Optional[Submission] = None
-    strong_request_key: Optional[DecoderRequestKey] = None
+    KEEP = auto()
+    ESCALATE = auto()
 
 
 @dataclass(frozen=True)
@@ -807,12 +798,24 @@ class StrongDecodeCompletion:
     result: DecodeResult
 
 
-@dataclass
-class DecodeOutcome:
-    """Joint decode outcome delivered to the escalation policy hook."""
+@dataclass(frozen=True)
+class RunShape:
+    """What a run is made of, as the root checks it before planning.
 
-    job: DecodeJob
-    result: DecodeResult
+    The escalation policy refuses a run it cannot serve from this
+    record, once, in Machine.build. is_double_window is the strong
+    window's shape (Toshio et al. 2510.25222 Sec. III C when true, the
+    two-sided context of Sec. III A otherwise); operations are the
+    workload's planning views.
+    """
+
+    scheme: Any
+    boundary_policy: Any
+    operations: tuple
+    is_double_window: bool
+    has_dynamic_streams: bool
+    has_static_decode_plan: bool
+    has_frontend: bool
 
 
 # -------------------------------------------------------------------- links

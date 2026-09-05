@@ -1,14 +1,15 @@
 """What a finished decode means and where its result goes.
 
 gem5's commit stage retires what executed (src/cpu/o3/commit.hh:286);
-here a weak result is put to the escalation policy, which keeps it or
-asks for the strong tier, and then reaches its destination through the
-job's own on_decoded (SimPy's callback on the event); a strong result
-becomes one completion per member request, delivered to each
-destination that waits for it now and held for one whose selection is
-still crossing the weak-to-strong link (StrongRequests). Every terminal
-outcome is reported to the record ledger. The escalation's services
-seam stays until slice 7 makes the policy a port that only decides.
+here a weak result is put to the escalation policy for its verdict,
+keep or escalate, and then reaches its destination through the job's
+own on_decoded (SimPy's callback on the event) with the verdict on the
+job, so the window side commits it as final or provisionally and asks
+the strong tier itself; a strong result teaches the policy and becomes
+one completion per member request, delivered to each destination that
+waits for it now and held for one whose selection is still crossing the
+weak-to-strong link (StrongRequests). Every terminal outcome is
+reported to the record ledger.
 """
 
 from typing import Callable, Optional
@@ -24,16 +25,12 @@ class DecodeOutcomes:
         self,
         engine,
         escalation_policy,
-        services,
         strong_requests: strong_requests_module.StrongRequests,
         records,
         cancel_strong: Callable[[tuple], None],
     ) -> None:
         self.engine = engine
         self.escalation_policy = escalation_policy
-        # the EscalationServices seam (the window manager's escalation),
-        # bound by the root after the window side is built (slice 7)
-        self.services = services
         self.strong_requests = strong_requests
         # the listener on the two terminal callbacks
         self.records = records
@@ -43,30 +40,25 @@ class DecodeOutcomes:
     def conclude_weak(
         self, job: message.DecodeJob, result: message.DecodeResult
     ) -> None:
-        """Decide and deliver a weak outcome.
+        """Put the weak result to the policy and deliver it with the verdict.
 
-        The policy keeps the result (a live strong request is cancelled)
-        or holds it for the strong tier (the selection is sent and the
-        strong result is awaited); either way the destination hears now
-        through job.on_decoded, with awaiting_strong_result set first.
+        A kept result cancels a live strong request; an escalated one
+        rides to its destination with awaiting_strong_result set, so the
+        window side asks the strong tier for the window and commits the
+        result provisionally.
         """
         key = (job.op_id, job.window_id)
-        outcome = message.DecodeOutcome(job, result)
-        directive = self.escalation_policy.on_decode_outcome(
-            outcome, self.services
-        )
+        verdict = self.escalation_policy.verdict_for_weak_result(job, result)
         self.strong_requests.resolve_weak(key)
-        awaiting = directive.directive is message.Directive.AWAIT_STRONG
-        if directive.directive is message.Directive.FINALIZE:
+        is_escalated = verdict is message.Verdict.ESCALATE
+        if not is_escalated:
             self.cancel_strong(key)  # no-op unless one is live/held
-        if awaiting:
-            self._await_strong_result(job, key, directive)
-        job.awaiting_strong_result = awaiting  # BEFORE the commit callback
+        job.awaiting_strong_result = is_escalated  # BEFORE the commit callback
         job.on_decoded(job, result)
         processing = (
             message.RequestProcessingOutcome.PRIMARY_FORWARDED_FOR_DELIVERY
         )
-        if awaiting:
+        if is_escalated:
             processing = message.RequestProcessingOutcome.WEAK_AWAITED_STRONG
         self.records.request_ended(job, result, processing, self.engine.now)
         self.records.service_ended(job, self.engine.now)
@@ -77,15 +69,15 @@ class DecodeOutcomes:
         result: message.DecodeResult,
         deliveries: tuple,
     ) -> None:
-        """The strong decode ended: tell the policy, deliver each completion.
+        """The strong decode ended: teach the policy, deliver each completion.
 
         deliveries are the per-request completions taken before the
         unit was freed; each reaches its destination now or is held.
         """
         self.strong_requests.finish_service(job)
-        outcome = message.DecodeOutcome(job, result)
-        # FINALIZE_STRONG
-        self.escalation_policy.on_decode_outcome(outcome, self.services)
+        self.escalation_policy.learn_from_strong_result(
+            job.strong_decode_for, result
+        )
         for held in deliveries:
             self.complete_strong(held)
         self.records.service_ended(job, self.engine.now)
@@ -108,6 +100,14 @@ class DecodeOutcomes:
             held.decode_output_ticks,
         )
 
+    def select_strong_result(
+        self, key: tuple, request_key: message.DecoderRequestKey
+    ) -> None:
+        """The selection landed: a held strong completion reaches its window."""
+        held = self.strong_requests.select(key, request_key)
+        if held is not None:
+            self.complete_strong(held)
+
     def report_request(
         self,
         job: message.DecodeJob,
@@ -121,37 +121,3 @@ class DecodeOutcomes:
     def report_service(self, job: message.DecodeJob) -> None:
         """A physical decode ended outside its conclusion: aborted."""
         self.records.service_ended(job, self.engine.now)
-
-    def _await_strong_result(
-        self,
-        job: message.DecodeJob,
-        key: tuple,
-        directive: message.OutcomeDirective,
-    ) -> None:
-        """Send the escalation; the strong result is selected on delivery."""
-        serial_job = None
-        if directive.extra is not None:
-            serial_job = directive.extra.job
-        strong_request_key = directive.strong_request_key
-        deferred = serial_job is None and strong_request_key is not None
-        if serial_job is None and not deferred:
-            (carrier,) = self.strong_requests.carriers_for(key)
-            strong_request_key = carrier.request_job.request_key
-        self.services.prepare_strong_selection(
-            job,
-            strong_request_key,
-            serial_job,
-            deferred=deferred,
-            on_selection_delivered=lambda: self._select_strong_result(
-                key, strong_request_key
-            ),
-        )
-        self.strong_requests.begin_selection(key, strong_request_key)
-
-    def _select_strong_result(
-        self, key: tuple, request_key: message.DecoderRequestKey
-    ) -> None:
-        """Make one strong completion eligible once the selection landed."""
-        held = self.strong_requests.select(key, request_key)
-        if held is not None:
-            self.complete_strong(held)

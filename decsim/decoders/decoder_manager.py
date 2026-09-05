@@ -8,7 +8,8 @@ split-gap sibling at service start, the StrongRequests say which
 destination waits for which strong result, and the DecodeOutcomes
 decide what a finished decode means and deliver it through the job's
 on_decoded. The facade implements the DecodeQueue port (admits, cancels,
-withdraws, releases, settles) and wires the six, the shape of gem5's
+withdraws, releases, awaits and accepts a strong selection, settles) and
+wires the six, the shape of gem5's
 cache (BaseCache owns its MSHR queue, write buffer and tags, each one
 job, and implements the ports: src/mem/cache/base.hh). One job reads as
 enqueue, dispatcher.run, service.dispatch_to, service.begin,
@@ -46,7 +47,6 @@ class DecoderManager:
             decoder_memory_module.DecoderMemoryConfig
         ] = None,
         escalation_policy,
-        services,
         link=None,
         records: Optional[decode_records.DecodeRecordLedger] = None,
     ):
@@ -88,7 +88,6 @@ class DecoderManager:
         self.outcomes = decode_outcomes.DecodeOutcomes(
             engine,
             escalation_policy,
-            services,
             self.strong_requests,
             records,
             cancel_strong=self.cancel_strong,
@@ -98,15 +97,6 @@ class DecoderManager:
     def pool(self) -> decoder_pool_module.DecoderPool:
         """The pool the dispatcher and the service share."""
         return self.service.pool
-
-    @property
-    def services(self):
-        """The escalation's services seam, on the outcomes (slice 7)."""
-        return self.outcomes.services
-
-    @services.setter
-    def services(self, services) -> None:
-        self.outcomes.services = services
 
     # ---------------------------------------------------------- admission
 
@@ -226,6 +216,22 @@ class DecoderManager:
         self.dispatcher.run()
 
     # ------------------------------------------------- the strong requests
+
+    def await_strong_result(
+        self, window_key: tuple, request_key: message.DecoderRequestKey
+    ) -> None:
+        """The window asked for this request's strong result.
+
+        Its selection is on the weak-to-strong link; the ledger holds
+        the result for the window until the selection lands.
+        """
+        self.strong_requests.begin_selection(window_key, request_key)
+
+    def accept_selection(
+        self, window_key: tuple, request_key: message.DecoderRequestKey
+    ) -> None:
+        """The selection landed: the request's result may reach the window."""
+        self.outcomes.select_strong_result(window_key, request_key)
 
     def cancel_strong(self, key: tuple) -> None:
         """Cancel an unneeded strong re-decode wherever it is.

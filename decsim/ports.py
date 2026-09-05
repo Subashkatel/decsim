@@ -164,6 +164,20 @@ class DecodeQueue(Protocol):
     def release_parked(self, window_key: tuple) -> None:
         """The window's last boundary arrived: start its parked decode."""
 
+    def await_strong_result(
+        self, window_key: tuple, request_key: message.DecoderRequestKey
+    ) -> None:
+        """The window asked for this request's strong result.
+
+        Its selection is on the weak-to-strong link; the result is held
+        for the window until accept_selection.
+        """
+
+    def accept_selection(
+        self, window_key: tuple, request_key: message.DecoderRequestKey
+    ) -> None:
+        """The selection landed: the request's result may reach the window."""
+
 
 # ------------------------------------------- the decoder returns a result
 
@@ -339,84 +353,51 @@ class Link(Protocol):
 
 
 @runtime_checkable
-class EscalationServices(Protocol):
-    """What the window manager offers an escalation policy."""
-
-    def make_strong_job(
-        self, weak_job: message.DecodeJob, label: str
-    ) -> message.Submission:
-        """The strong job re-decoding the weak job's window, with its send."""
-
-    def defer_strong_escalation(
-        self, weak_job: message.DecodeJob
-    ) -> message.DecoderRequestKey:
-        """Reserve a strong request for later, once its boundaries exist."""
-
-    def prepare_strong_selection(
-        self,
-        weak_job: message.DecodeJob,
-        strong_request_key: message.DecoderRequestKey,
-        serial_strong_job: Optional[message.DecodeJob],
-        *,
-        deferred: bool,
-        on_selection_delivered: Callable[[], None],
-    ) -> None:
-        """Send the escalation and call back when the strong side has it."""
-
-
-@runtime_checkable
 class EscalationPolicy(Protocol):
     """Whether and when a window is decoded again by the strong tier.
 
-    Table rows: weak_baseline, strong_only, switching. on_window_ready
-    says which jobs to submit when a window is ready; on_decode_outcome
-    says what to do with each outcome (accept, escalate, hold). For a
-    weak job, on_decode_outcome runs before the core's commit
-    bookkeeping, so its directive decides whether the result waits for a
-    strong redo.
+    Table rows: weak_baseline, strong_only, switching. The policy decides
+    and is told, the shape of gem5's conditional predictor
+    (src/cpu/pred/conditional.hh: lookup answers, update teaches, and
+    the unit acts on the answer): it builds no job and sends nothing.
+    tiers_for_ready_window says which tiers decode a complete window at
+    once, verdict_for_weak_result keeps a weak result or escalates its
+    window, learn_from_strong_result hears the strong tier's answer, and
+    check_plan refuses a run the policy cannot serve, once, at build.
+    The strong re-decode itself is the window side's
+    (decsim/decoders/strong_escalation.py).
     """
 
-    requires_strong_context: bool
-    bulk_strong: bool
-    double_window: bool
     # The tier that decodes the plan's windows; every tier-dependent site
     # (arrival authority, input store and link, request-key tier, output
     # link) follows from this one declaration.
     primary_tier: message.DecoderTier
+    # Whether the policy may escalate a window, so the run keeps the
+    # room-side store, one buffer of context on each side of every
+    # window, and the strong tier's window side.
+    requires_strong_context: bool
+    # Whether queued serial strong re-decodes are merged into one batch;
+    # a decoder manager knob that leaves the port for the decoder
+    # settings in the escalation slice's structural B.
+    bulk_strong: bool
 
-    def validate_declared_run(
-        self,
-        *,
-        scheme,
-        boundary_policy,
-        has_dynamic_streams: bool,
-        static_decode_plan_selected: bool,
-        has_frontend: bool,
+    def check_plan(self, plan: message.RunShape) -> None:
+        """Refuse, with a sentence, a run shape the policy cannot serve."""
+
+    def tiers_for_ready_window(
+        self, window: message.Window
+    ) -> tuple[message.DecoderTier, ...]:
+        """The tiers that decode the complete window now, primary first."""
+
+    def verdict_for_weak_result(
+        self, job: message.DecodeJob, result: message.DecodeResult
+    ) -> message.Verdict:
+        """Keep the weak result as final, or escalate its window."""
+
+    def learn_from_strong_result(
+        self, window_key: tuple, result: message.DecodeResult
     ) -> None:
-        """Refuse a run shape the policy does not support."""
-
-    def validate_operations(
-        self, operations: tuple[message.OperationPlanningView, ...]
-    ) -> None:
-        """Refuse a workload the policy does not support."""
-
-    def validate_code_geometry(
-        self, geometry: message.ResolvedCodeGeometry
-    ) -> None:
-        """Refuse a window geometry the policy does not support."""
-
-    def on_window_ready(
-        self,
-        window: message.Window,
-        weak_job: message.DecodeJob,
-        services: EscalationServices,
-    ) -> list[message.Submission]:
-        """The jobs to submit for a window whose data is complete."""
-
-    def on_decode_outcome(
-        self, outcome: message.DecodeOutcome, services: EscalationServices
-    ) -> message.OutcomeDirective:
-        """Accept, escalate or hold one decode outcome."""
+        """The strong tier answered for the window; a source may learn."""
 
 
 @runtime_checkable

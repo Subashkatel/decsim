@@ -45,7 +45,6 @@ def _manager(engine, units, scheduler=None):
         scheduler=scheduler,
         num_units=units,
         escalation_policy=None,
-        services=None,
     )
 
 

@@ -11,18 +11,21 @@ map each section's `kind` to the class that fills the port, sinter's
 made one dict per pluggable part. A new component is one class that
 fills its port in decsim/ports.py and one row here.
 
-Two components are still wired after construction (the QPU's
-receivers, the window manager's decode queue methods) because the
-window manager, the decoder manager and the factory refer to each
-other; slices 5 and 6 retire them with the per-job callback law
-(SimPy's callback on the event, simpy/core.py step()): the submitting
-side carries the return path with the job. The controller's runtime
-bind was retired by slice 4's structural C: the issuer carries the
-start callback with the issue, the QPU's completion receiver is the
-runtime's body_done, and the runtime tells the issuer what it knows at
-each release. The stores' callbacks arrive by constructor: the held
-rounds are built first, each store retries them when a slot frees, and
-the strong writer tells the window manager what landed.
+Every component is wired by constructor; nothing is bound to a
+component after it is built. Where two components refer to each other
+the per-job callback law breaks the cycle (SimPy's callback on the
+event, simpy/core.py step()): the submitting side carries the return
+path with the job, so the decoder manager is built first and the
+window side takes it as its DecodeQueue; the escalation asks it to
+await and accept a strong selection over the same port. The
+controller's issuer carries the start callback with the issue, the
+QPU's completion receiver is the runtime's body_done, and the runtime
+tells the issuer what it knows at each release. The stores' callbacks
+arrive by constructor: the held rounds are built first, each store
+retries them when a slot frees, and the strong writer tells the window
+manager what landed. The one stand-in is _LateWiring inside
+_window_manager, for the courier's and the committer's callbacks to the
+facade and the escalation built after them.
 """
 
 import copy
@@ -415,10 +418,9 @@ class Machine:
             settings.strong_round_store, escalation_policy, held_rounds
         )
         pauli_frame = _pauli_frame(settings.pauli_frame, engine)
-        # The decoder manager is built first, so the requester takes the
-        # decode queue by constructor and every job carries its return
-        # path. The services seam is the escalation the window manager
-        # builds until slice 7 dissolves it.
+        # The decoder manager is built first, so the requester and the
+        # escalation take the decode queue by constructor and every job
+        # carries its return path.
         _check_strong_route(settings, pool.router)
         decode_records = decode_records_module.DecodeRecordLedger(
             is_enabled=observation.record_switching_windows
@@ -440,7 +442,6 @@ class Machine:
             decode_queue=decoder_manager,
             on_workload_complete=lambda: factory.shutdown(),
         )
-        decoder_manager.services = window_manager.escalation
         strong_round_writer = _strong_round_writer(
             engine, links, strong_round_store, window_manager, round_events
         )
@@ -719,7 +720,6 @@ def _escalation_policy(settings: decoder_settings.EscalationSettings):
             settings.gap_threshold_nats,
             complementary.COMPLEMENTARY_GAP_SOURCE,
             threshold_calibrator=settings.threshold_calibrator,
-            double_window=settings.double_window,
         )
     return row()
 
@@ -761,14 +761,16 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
         raise ValueError("dynamic streams require SlidingWindowScheme")
     has_static_decode_plan = settings.workload.decode_operations is not None
     has_frontend = settings.workload.kind in ("surgery_ir", "qlx")
-    escalation_policy.validate_declared_run(
+    run_shape = message.RunShape(
         scheme=scheme,
         boundary_policy=boundary_policy,
+        operations=views,
+        is_double_window=settings.escalation.double_window,
         has_dynamic_streams=bool(dynamic_streams),
-        static_decode_plan_selected=has_static_decode_plan,
+        has_static_decode_plan=has_static_decode_plan,
         has_frontend=has_frontend,
     )
-    escalation_policy.validate_operations(views)
+    escalation_policy.check_plan(run_shape)
     planned_operations = _decode_plan_operations(
         operations,
         decode_operations,
@@ -787,10 +789,9 @@ def _plan(settings: MachineSettings, escalation_policy) -> _Plan:
         rounds_policy=rounds_policy,
         fallback_round_microseconds=settings.qpu.round_period_microseconds,
         retain_strong_context=escalation_policy.requires_strong_context,
-        double_window=escalation_policy.double_window,
+        double_window=settings.escalation.double_window,
         has_open_ended_dynamic_streams=bool(dynamic_streams),
     )
-    escalation_policy.validate_code_geometry(run_plan.code_geometry)
     resource_claims = {}
     for operation in operations:
         view = view_by_id[operation.id]
@@ -1251,9 +1252,8 @@ def _window_manager(
     )
     publisher = window_commits.CorrectionPublisher(transfers, pauli_frame)
     # the courier's landing callback reaches the facade and the
-    # committer's weak-commit hook reaches the escalation, both built
-    # after them; this stands in at wiring time (slice 7 dissolves the
-    # escalation's services seam and with it the cycle)
+    # committer's two hooks reach the escalation, both built after them;
+    # this stands in at wiring time
     late = _LateWiring()
     courier = window_boundaries.BoundaryCourier(
         planner,
@@ -1279,6 +1279,8 @@ def _window_manager(
         requester,
         ledger,
         plan.window_interaction,
+        decode_queue,
+        is_double_window=settings.escalation.double_window,
     )
     late.escalation = escalation
     window_manager = window_manager_module.WindowManager(
@@ -1308,6 +1310,9 @@ def _escalation(
     requester,
     ledger,
     interaction,
+    decode_queue,
+    *,
+    is_double_window: bool,
 ):
     """The window side of the strong tier, or nothing when never escalating."""
     if not escalation_policy.requires_strong_context:
@@ -1322,14 +1327,17 @@ def _escalation(
         requester,
         ledger,
         interaction,
+        decode_queue,
+        is_double_window=is_double_window,
     )
 
 
 class _LateWiring:
     """The facade and the escalation, for the components built before them.
 
-    The courier tells the facade when a boundary landed and the committer
-    tells the escalation when a weak window committed.
+    The courier tells the facade when a boundary landed; the committer
+    tells the escalation which weak result to escalate and when a weak
+    window committed.
     """
 
     def __init__(self) -> None:
@@ -1338,6 +1346,9 @@ class _LateWiring:
 
     def accept_boundary(self, key: tuple, is_unblocked: bool) -> None:
         self.window_manager.accept_boundary(key, is_unblocked)
+
+    def escalate(self, job: message.DecodeJob) -> None:
+        self.escalation.escalate(job)
 
     def after_weak_commit(self, key: tuple) -> None:
         self.escalation.after_weak_commit(key)
@@ -1359,7 +1370,6 @@ def _decoder_manager(
         bulk_strong=escalation_policy.bulk_strong,
         decoder_memory=pool.decoder_memory,
         escalation_policy=escalation_policy,
-        services=None,
         records=decode_records,
     )
 

@@ -80,7 +80,6 @@ def test_a_blocked_job_never_displaces_a_startable_one():
         scheduler=scheduler,
         num_units=1,
         escalation_policy=policy,
-        services=None,
     )
     dispatched = []
     original_dispatch_to = manager.service.dispatch_to

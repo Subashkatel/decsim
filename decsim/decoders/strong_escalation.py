@@ -7,16 +7,19 @@ scheme (Sec. III C, Fig. 12) that absorbs the windows it covers and
 restarts the weak chain past it; it holds the forward window's job until
 the restart window's weak commit or, at the operation's end, until every
 strong window round is stored, and it carries the strong result's
-selection to the decoder side. A run without the tier uses NoStrongTier.
-The decoder side, which destination waits for which strong result, is
-StrongRequests (strong_requests.py).
+selection to the decoder side over the DecodeQueue port. The committer
+calls escalate for a weak result the policy escalated; the requester
+asks parallel_strong_submission for a strong sibling started with the
+weak job. A run without the tier uses NoStrongTier. The decoder side,
+which destination waits for which strong result, is StrongRequests
+(strong_requests.py).
 
-Wide state recorded: StrongEscalation sets twelve attributes, the nine
-components it works on and its three tables (the pending escalations,
-the delivered selections, the landings waiting for one). Slice 7's
-structural commits dissolve it into StrongRedecode (design note
-docs/rewrite/notes/slice_07_escalation.md, section 3), so the width is
-recorded, not split.
+Wide state recorded: StrongEscalation sets fifteen attributes, the ten
+components it works on, the shape it plans and its four tables (the
+pending escalations, the parallel siblings, the delivered selections,
+the landings waiting for one). Slice 7's structural B dissolves it into
+StrongRedecode (design note docs/rewrite/notes/slice_07_escalation.md,
+section 3), so the width is recorded, not split.
 """
 
 import copy
@@ -64,7 +67,8 @@ class StrongEscalation:
     data), and how the strong result's selection reaches the decoder
     side. It works on the window components it is built with: the
     planner, the tracker, the retention, the request builder, the
-    transfers, the requester, the ledger and the interaction.
+    transfers, the requester, the ledger and the interaction, and on the
+    decoder manager through the DecodeQueue port.
     """
 
     def __init__(
@@ -78,6 +82,9 @@ class StrongEscalation:
         requester,
         ledger,
         interaction,
+        decode_queue,
+        *,
+        is_double_window: bool,
     ) -> None:
         self.engine = engine
         self.planner = planner
@@ -88,29 +95,74 @@ class StrongEscalation:
         self.requester = requester
         self.ledger = ledger
         self.interaction = interaction
+        self.decode_queue = decode_queue
+        # the forward window of Toshio Sec. III C, or the two-sided
+        # context of Sec. III A
+        self.is_double_window = is_double_window
         self._escalations = _EscalationRegistry()
+        # the strong sibling started with each weak job, by window, until
+        # the window's verdict is committed
+        self._parallel_request_keys: dict = {}
         # strong request keys whose selection has arrived over
         # weak_decoder_to_strong_decoder, and the strong inputs landed in
         # their unit that wait for one that has not
         self._delivered_selections: set = set()
         self._landing_after_selection: dict = {}
 
+    # ---- the two entries: a strong sibling at window ready, an escalation
+
+    def parallel_strong_submission(
+        self, weak_job: message.DecodeJob
+    ) -> message.Submission:
+        """The strong sibling started with the weak job (the paper's Step 1).
+
+        Its context is held and its send built now; the verdict selects
+        it or cancels it.
+        """
+        key = (weak_job.op_id, weak_job.window_id)
+        submission = self._context_submission(weak_job)
+        self._parallel_request_keys[key] = submission.job.request_key
+        return submission
+
+    def escalate(self, weak_job: message.DecodeJob) -> None:
+        """Ask the strong tier to re-decode the weak job's window.
+
+        The selection rides weak_decoder_to_strong_decoder and the
+        decoder side awaits the request's result. A strong sibling
+        started with the weak job is selected as it is; otherwise the
+        strong job is built now: the forward window, held until its far
+        boundary or its terminal data (Sec. III C), or the two-sided
+        context window, queued now behind its selection (Sec. III A).
+        """
+        key = (weak_job.op_id, weak_job.window_id)
+        sibling_request_key = self._parallel_request_keys.get(key)
+        if sibling_request_key is not None:
+            self._send_selection(weak_job, sibling_request_key)
+            self.decode_queue.await_strong_result(key, sibling_request_key)
+            return
+        if self.is_double_window:
+            strong_request_key = self._defer_forward_window(weak_job)
+            self._send_deferred_selection(weak_job, strong_request_key)
+            self.decode_queue.await_strong_result(key, strong_request_key)
+            return
+        submission = self._context_submission(weak_job)
+        strong_job = submission.job
+        selection_arrival_ticks = self._send_selection(
+            weak_job, strong_job.request_key
+        )
+        self._enqueue_reserved_strong(strong_job, selection_arrival_ticks)
+        self.decode_queue.await_strong_result(key, strong_job.request_key)
+
     # ---- the context window: built now, submitted now or after the selection
 
-    def make_strong_job(
-        self, weak_job: message.DecodeJob, label: str
+    def _context_submission(
+        self, weak_job: message.DecodeJob
     ) -> message.Submission:
-        """The strong job for a weak one, with its context held and its send.
-
-        A parallel policy enqueues it at once; a serial one hands its job
-        back through prepare_strong_selection once the selection is sent.
-        """
-        strong_job = self.make_strong_decode_job(weak_job, label)
+        """The two-sided context job, its context held and its send built."""
+        strong_job = self._context_job(weak_job)
         return self._strong_submission(strong_job, None)
 
-    def make_strong_decode_job(
-        self, weak_job: message.DecodeJob, label: str
-    ) -> message.DecodeJob:
+    def _context_job(self, weak_job: message.DecodeJob) -> message.DecodeJob:
         """Build the two-sided strong re-decode job for an escalated window.
 
         The job is priced for the context rounds that exist: a window at
@@ -140,7 +192,7 @@ class StrongEscalation:
             window_id=weak_job.window_id,
             n_rounds=payload_round_count,
             ready_time=self.engine.now,
-            label=label,
+            label=weak_job.strong_label,
             hint="strong",
             spatial_nodes=weak_job.spatial_nodes,
             code=weak_job.code,
@@ -156,7 +208,7 @@ class StrongEscalation:
 
     # ---- the forward window: planned now, submitted when its far side exists
 
-    def defer_strong_escalation(
+    def _defer_forward_window(
         self, weak_job: message.DecodeJob
     ) -> message.DecoderRequestKey:
         """Lay out the forward strong window; hold its job until it may start.
@@ -169,10 +221,6 @@ class StrongEscalation:
         """
         key = (weak_job.op_id, weak_job.window_id)
         self._refuse_second_escalation(key)
-        if weak_job.strong_label is None:
-            raise RuntimeError(
-                f"double-window escalation {key} needs a declared strong label"
-            )
         strong_request_key = self.builder.new_request_key(
             weak_job.op_id, weak_job.window_id, message.DecoderTier.STRONG
         )
@@ -259,43 +307,15 @@ class StrongEscalation:
                     guard, self.retention.strong_store
                 )
 
-    # ---- the selection: the decoder side asks for the strong result
-
-    def prepare_strong_selection(
-        self,
-        weak_job: message.DecodeJob,
-        strong_request_key: message.DecoderRequestKey,
-        serial_strong_job: Optional[message.DecodeJob],
-        *,
-        deferred: bool,
-        on_selection_delivered: Callable[[], None],
-    ) -> None:
-        """Send the selection; on_selection_delivered runs at its arrival."""
-        key = (weak_job.op_id, weak_job.window_id)
-        pending = self._escalations.peek_key(key)
-        if deferred:
-            self._send_deferred_selection(
-                weak_job, strong_request_key, pending, on_selection_delivered
-            )
-            return
-        if serial_strong_job is not None:
-            selection_arrival_ticks = self._send_selection(
-                weak_job, strong_request_key, on_selection_delivered
-            )
-            self._enqueue_reserved_strong(
-                serial_strong_job, selection_arrival_ticks
-            )
-            return
-        if pending is not None:
-            raise RuntimeError("deferred pending request needs an explicit key")
-        self._send_selection(
-            weak_job, strong_request_key, on_selection_delivered
-        )
-
     # ---- the hooks that submit a deferred job
 
     def after_weak_commit(self, key) -> None:
-        """A weak commit at a strong window's far boundary releases its job."""
+        """A weak commit at a strong window's far boundary releases its job.
+
+        The committed window's own verdict is in, so its strong sibling,
+        if it had one, is selected or cancelled by now and is forgotten.
+        """
+        self._parallel_request_keys.pop(key, None)
         pending = self._escalations.peek_far(key)
         if pending is not None:
             self._submit_far_strong(key, pending)
@@ -491,9 +511,15 @@ class StrongEscalation:
         self,
         weak_job: message.DecodeJob,
         strong_request_key: message.DecoderRequestKey,
-        on_selection_delivered: Callable[[], None],
     ) -> int:
-        """Send the escalation; returns the tick its arrival is expected."""
+        """Send the escalation; returns the tick its arrival is expected.
+
+        At the delivery the decoder side accepts the selection.
+        """
+        key = (weak_job.op_id, weak_job.window_id)
+        on_selection_delivered = functools.partial(
+            self.decode_queue.accept_selection, key, strong_request_key
+        )
         delivered = functools.partial(
             self._selection_delivered,
             strong_request_key,
@@ -524,12 +550,12 @@ class StrongEscalation:
         self,
         weak_job: message.DecodeJob,
         strong_request_key: message.DecoderRequestKey,
-        pending: "_PendingEscalation",
-        on_selection_delivered: Callable[[], None],
     ) -> None:
         """A forward window's selection; a terminal one may submit now."""
+        key = (weak_job.op_id, weak_job.window_id)
+        pending = self._escalations.peek_key(key)
         selection_arrival_ticks = self._send_selection(
-            weak_job, strong_request_key, on_selection_delivered
+            weak_job, strong_request_key
         )
         pending = self._escalations.update_selection_arrival(
             pending, selection_arrival_ticks

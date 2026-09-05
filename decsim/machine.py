@@ -35,9 +35,10 @@ import decsim.config as config
 import decsim.controller.controller as controller_module
 import decsim.controller.feedback_streams as feedback_streams
 import decsim.controller.policies as policies
+import decsim.controller.round_assembly as round_assembly
+import decsim.controller.round_transmission as round_transmission
 import decsim.controller.round_writes as round_writes
 import decsim.controller.settings as controller_settings
-import decsim.controller.syndrome_packing as syndrome_packing_module
 import decsim.decoders.belief_matching.decoder as belief_matching
 import decsim.decoders.belief_propagation_osd.decoder as belief_propagation_osd
 import decsim.decoders.decoder_manager as decoder_manager_module
@@ -62,6 +63,7 @@ import decsim.links.settings as link_settings
 import decsim.message as message
 import decsim.observe.link_traffic as link_traffic
 import decsim.observe.metrics as metrics
+import decsim.observe.round_events as round_events_module
 import decsim.observe.settings as observe_settings
 import decsim.pauli_frame.conditional_release as conditional_release_module
 import decsim.pauli_frame.pauli_frame as pauli_frame_module
@@ -338,7 +340,10 @@ class Machine:
     strong_round_writer: Optional[strong_round_writer_module.StrongRoundWriter]
     pauli_frame: Optional[pauli_frame_module.PauliFrame]
     window_manager: window_manager_module.WindowManager
-    syndrome_packing: syndrome_packing_module.SyndromePacking
+    assembler: round_assembly.RoundAssembler
+    round_writer: round_writes.RoundWriter
+    transmitter: round_transmission.RoundTransmitter
+    round_events: round_events_module.RoundEventRecorder
     decoder_manager: decoder_manager_module.DecoderManager
     active_decoder: Optional[Any]
     factory: Any
@@ -373,7 +378,10 @@ class Machine:
         )
         traffic_ledger = link_traffic.TrafficLedger(settings.links)
         links = fabric.LinkFabric(settings.links, engine, traffic_ledger)
-        held_rounds = round_writes.HeldRounds()
+        round_events = round_events_module.RoundEventRecorder(engine)
+        held_rounds = round_writes.HeldRounds(
+            settings.controller.packing_overflow, round_events
+        )
         round_store = _round_store(settings.round_store, held_rounds)
         strong_round_store = _strong_round_store(
             settings.strong_round_store, escalation_policy, held_rounds
@@ -402,17 +410,29 @@ class Machine:
             on_workload_complete=lambda: factory.shutdown(),
         )
         strong_round_writer = _strong_round_writer(
-            engine, links, strong_round_store, window_manager
+            engine, links, strong_round_store, window_manager, round_events
         )
-        syndrome_packing = _syndrome_packing(
-            engine,
-            settings,
-            links,
-            window_manager,
+        transmitter = round_transmission.RoundTransmitter(
+            engine, links, round_store, window_manager, round_events
+        )
+        publishes_from_strong_store = (
+            window_manager.primary_store is not round_store
+        )
+        round_writer = round_writes.RoundWriter(
             round_store,
             strong_round_writer,
-            held_rounds,
-            plan.device,
+            publishes_from_strong_store=publishes_from_strong_store,
+            held_rounds=held_rounds,
+            transmitter=transmitter,
+            recorder=round_events,
+        )
+        form_round = getattr(plan.device, "form_round", None)
+        assembler = round_assembly.RoundAssembler(
+            engine,
+            settings.controller,
+            form_round=form_round,
+            on_packed=round_writer.admit,
+            recorder=round_events,
         )
         decoder_manager = _decoder_manager(
             engine, settings, escalation_policy, pool, window_manager
@@ -442,7 +462,8 @@ class Machine:
             plan,
             qpu,
             window_manager,
-            syndrome_packing,
+            assembler,
+            round_events,
             links,
             streams,
         )
@@ -476,7 +497,10 @@ class Machine:
             window_interaction=plan.window_interaction,
             idle_policy=plan.idle_policy,
             conditional_release=conditional_release,
-            syndrome_packing=syndrome_packing,
+            # the packing stage is four components now; its seed path
+            # segment is a result (seeding hashes the segment names) and
+            # stays, as memory_model's does
+            syndrome_packing=None,
             controller=controller,
             qpu=qpu,
             execution_runtime=execution_runtime,
@@ -507,7 +531,10 @@ class Machine:
             strong_round_writer=strong_round_writer,
             pauli_frame=pauli_frame,
             window_manager=window_manager,
-            syndrome_packing=syndrome_packing,
+            assembler=assembler,
+            round_writer=round_writer,
+            transmitter=transmitter,
+            round_events=round_events,
             decoder_manager=decoder_manager,
             active_decoder=pool.active,
             factory=factory,
@@ -527,7 +554,9 @@ class Machine:
                 f"the run ended with pending strong escalations: {pending}"
             )
         self.decoder_manager.check_decode_work_settled()
-        self.syndrome_packing.check_work_settled()
+        self.assembler.check_settled()
+        self.round_writer.check_settled()
+        self.transmitter.check_settled()
         if self.strong_round_writer is not None:
             self.strong_round_writer.check_settled()
         return _capture_result(self)
@@ -1080,6 +1109,7 @@ def _strong_round_writer(
     links: fabric.LinkFabric,
     strong_round_store,
     window_manager,
+    round_events,
 ):
     """The crossing into the room-side store; the window manager hears it."""
     if strong_round_store is None:
@@ -1089,6 +1119,7 @@ def _strong_round_writer(
         links,
         strong_round_store,
         on_round_stored=window_manager._on_room_round_stored,
+        recorder=round_events,
     )
 
 
@@ -1157,34 +1188,6 @@ def _window_manager(
         submit_fn=submit_fn,
         check_strong_route=check_strong_route,
         on_workload_complete=on_workload_complete,
-    )
-
-
-def _syndrome_packing(
-    engine: engine_module.Engine,
-    settings: MachineSettings,
-    links,
-    window_manager,
-    round_store,
-    strong_round_writer,
-    held_rounds,
-    device,
-) -> syndrome_packing_module.SyndromePacking:
-    controller = settings.controller
-    packing_ticks = controller.packing_ticks()
-    return syndrome_packing_module.SyndromePacking(
-        engine,
-        links=links,
-        packing_ticks=packing_ticks,
-        packing_context_capacity=controller.packing_rounds_in_flight,
-        window_input_receiver=window_manager,
-        feedback_memory_receiver=window_manager,
-        syndrome_buffer=round_store,
-        syndrome_buffer_1=strong_round_writer,
-        window_input_store=window_manager.primary_store,
-        held_rounds=held_rounds,
-        policy=controller.packing_policy,
-        detector_formation=device,
     )
 
 
@@ -1271,7 +1274,8 @@ def _controller(
     plan: _Plan,
     qpu,
     window_manager,
-    syndrome_packing,
+    assembler,
+    round_events,
     links,
     streams,
 ) -> controller_module.Controller:
@@ -1283,7 +1287,8 @@ def _controller(
         engine,
         qpu=qpu,
         window_manager=window_manager,
-        syndrome_packing=syndrome_packing,
+        assembler=assembler,
+        recorder=round_events,
         measurement_signal_to_classical_bits_ticks=readout_to_bits_ticks,
         instruction_or_decision_to_analog_control_pulse_ticks=(
             decision_to_pulse_ticks

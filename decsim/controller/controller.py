@@ -1,8 +1,9 @@
-"""The controller between the QPU, syndrome packing and the Pauli frame.
+"""The controller between the QPU, the round assembler and the Pauli frame.
 
-QPU readouts become binary for syndrome packing, admitted operations
-become QPU commands, and the frame's decisions travel frame_to_controller
-and controller_to_qpu back to the QPU.
+QPU readouts cross qpu_to_controller and, after the readout delay,
+become fragments for the assembler; admitted operations become QPU
+commands; the frame's decisions travel frame_to_controller and
+controller_to_qpu back to the QPU.
 
 The QEC cycle itself is the QPU's; execution admission is the
 ExecutionRuntime's; stream bookkeeping and protected regions are
@@ -15,25 +16,12 @@ import types
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.observe.round_events as round_events
 import decsim.qpu.cycle_clock as cycle_clock
 
 
-@dataclasses.dataclass(frozen=True)
-class ControllerOutputEvent:
-    """One transition on the controller's digital-to-QPU path.
-
-    payload is the decision or QPU command itself, so a ledger can prove
-    that the data whose timing was modeled is the data the QPU received.
-    """
-
-    kind: str
-    tick: int
-    operation_id: object
-    payload: object
-
-
 class Controller:
-    """The controller between the QPU, the packing stage and the frame."""
+    """The controller between the QPU, the assembler and the frame."""
 
     def __init__(
         self,
@@ -41,7 +29,8 @@ class Controller:
         *,
         qpu,
         window_manager,
-        syndrome_packing=None,
+        assembler=None,
+        recorder=None,
         measurement_signal_to_classical_bits_ticks: int = 0,
         instruction_or_decision_to_analog_control_pulse_ticks: int = 0,
         links=None,
@@ -53,7 +42,10 @@ class Controller:
         self.engine = engine
         self.qpu = qpu
         self.window_manager = window_manager
-        self.syndrome_packing = syndrome_packing
+        self.assembler = assembler
+        if recorder is None:
+            recorder = round_events.NoRoundEvents()
+        self.recorder = recorder
         self.measurement_signal_to_classical_bits_ticks = (
             measurement_signal_to_classical_bits_ticks
         )
@@ -78,7 +70,6 @@ class Controller:
         # and the index of the latest one (it names the job)
         self._uncharged_idle_rounds_by_patch: dict = {}
         self._last_idle_round_index_by_patch: dict = {}
-        self.output_events: list[ControllerOutputEvent] = []
 
     def round_ticks_for(self, operation: message.Operation) -> int:
         """The resolved QEC cycle length of one operation, in ticks."""
@@ -126,10 +117,7 @@ class Controller:
         self._log_start(operation)
         command = self._command(operation)
         if operation.blocked_by is None:
-            event = ControllerOutputEvent(
-                "PRELOADED_COMMAND", self.engine.now, operation.id, command
-            )
-            self.output_events.append(event)
+            self.recorder.output("PRELOADED_COMMAND", operation.id, command)
             self._start_on_qpu(operation, command)
             return
         self._dispatch_dynamic_command(operation, command)
@@ -204,10 +192,7 @@ class Controller:
             deliver(payload)
 
         def output_ready():
-            event = ControllerOutputEvent(
-                event_kind, self.engine.now, operation_id, payload
-            )
-            self.output_events.append(event)
+            self.recorder.output(event_kind, operation_id, payload)
             if self.links is None:
                 deliver(payload)
                 return
@@ -348,22 +333,43 @@ class Controller:
     def accept_qpu_readout(
         self, readout: message.QPUReadout, route: message.SyndromePacketRoute
     ) -> None:
-        """One QPU readout becomes controller binary, handed to packing."""
-        bits = message.normalize_binary_bits(readout.bits)
-        payload = message.SyndromePayload(
-            operation_id=readout.operation_id,
-            patch_id=readout.patch_id,
-            round_index=readout.round_index,
-            bits=bits,
-            code=readout.code,
-            n_fragments=readout.n_fragments,
-            fragment_index=readout.fragment_index,
-            size_bits=readout.size_bits,
-        )
-        self.syndrome_packing.relay_qpu_readout(
-            payload,
+        """One readout crosses qpu_to_controller to the assembler.
+
+        The fragment reaches the assembler after the readout delay.
+        """
+        fragment = message.RetainedSyndromeFragment.from_readout(readout)
+        fragment_count = readout.n_fragments
+        self.recorder.record(
+            "EMITTED",
+            fragment.operation_id,
+            fragment.round_index,
             route,
-            processing_ticks=self.measurement_signal_to_classical_bits_ticks,
+            patch_id=fragment.patch_id,
+        )
+        attribution = message.TransferAttribution.for_round(
+            fragment.operation_id, (fragment.patch_id,), fragment.round_index
+        )
+        processing_ticks = self.measurement_signal_to_classical_bits_ticks
+
+        def receive():
+            self.assembler.add(fragment, fragment_count, route)
+
+        def at_controller(_transfer):
+            if processing_ticks == 0:
+                receive()
+                return
+            self.engine.schedule(
+                processing_ticks,
+                receive,
+                label="controller-binary-availability",
+            )
+
+        self.links.send(
+            message.LinkPath.QPU_TO_CONTROLLER,
+            readout.size_bits,
+            self.engine.now,
+            attribution,
+            at_controller,
         )
 
     def relay_instruction(
@@ -387,13 +393,9 @@ class Controller:
         )
 
         def at_controller(_transfer=None):
-            event = ControllerOutputEvent(
-                "DECISION_AVAILABLE",
-                self.engine.now,
-                decision.target_operation_id,
-                decision,
+            self.recorder.output(
+                "DECISION_AVAILABLE", decision.target_operation_id, decision
             )
-            self.output_events.append(event)
             if decision.releases_operation:
                 deliver(decision)
                 return

@@ -13,150 +13,13 @@ from decsim.machine import MachineSettings
 from decsim.qpu.settings import QpuSettings
 from decsim.observe.link_traffic import TrafficLedger
 from decsim.controller.controller import Controller
-from decsim.controller.syndrome_packing import SyndromePacking
 from decsim.decoders.decoders import PresetLatencyDecoder
 from decsim.engine import Engine
 from decsim.links.fabric import LinkFabric
-from decsim.message import (Decision, QPUReadout, RunOperationBody,
-                            SyndromePacketRoute, WINDOW_INPUT_ROUTE)
+from decsim.message import Decision, RunOperationBody
+from decsim.observe.round_events import RoundEventRecorder
 from decsim.pauli_frame.pauli_frame import PauliFrameConfig
 from decsim.qpu.round_policies import FixedRounds
-
-
-class _WindowInputReceiver:
-    def __init__(self):
-        self.packets = []
-
-    def accept_window_input(self, packet):
-        self.packets.append(packet)
-        return True
-
-
-def test_measurement_signal_path_preserves_classified_bits_and_exact_latency(fabric):
-    """QC transport plus the analog-readout/classification abstraction
-    produces the same bit values, neither early nor altered."""
-    engine = Engine(verbose=False)
-    receiver = _WindowInputReceiver()
-    settings = fabric["declared_profile"](controller_to_weak_buffer=False, controller_to_strong_buffer=False)
-    ledger = TrafficLedger(settings)
-    links = LinkFabric(settings, engine, ledger)
-    packing = SyndromePacking(
-        engine, links=links, packing_ticks=0, packing_context_capacity=None,
-        window_input_receiver=receiver, feedback_memory_receiver=None)
-    controller = Controller(
-        engine, qpu=None, window_manager=None, syndrome_packing=packing,
-        measurement_signal_to_classical_bits_ticks=microseconds_to_ticks(3), links=links,
-        resolved_operations=(), resolved_patches=(), idle_policy=None,
-        feedback_streams=None)
-
-    controller.accept_qpu_readout(
-        QPUReadout(7, "patch-a", 4, bits=[True, False, 1, 0], size_bits=4),
-        WINDOW_INPUT_ROUTE)
-    engine.run()
-
-    assert [(event.kind, event.tick) for event in packing.round_events[:3]] == [
-        ("EMITTED", 0),
-        ("BINARY_AVAILABLE", microseconds_to_ticks(2 + 3)),
-        ("PACKED", microseconds_to_ticks(2 + 3)),
-    ]
-    assert len(receiver.packets) == 1
-    assert receiver.packets[0].fragments[0].bits == (1, 0, 1, 0)
-    assert receiver.packets[0].fragments[0].size_bits == 4
-    qc_record = next(record for record in ledger.snapshot().transfers
-                     if record.path.value == "qpu_to_controller")
-    assert qc_record.transfer.payload_bits == 4
-
-
-def test_packing_charges_its_assembly_time_for_every_round(fabric):
-    """A completed round pays the controller's packet assembly time once,
-    whether it arrived in one fragment or several: the packetization and
-    framing work a real-time controller does per syndrome word (Caune et
-    al. 2410.05202 measure 250 to 370 FPGA cycles per decode for
-    packetization, bus transfer, result return and the conditional)."""
-    engine = Engine(verbose=False)
-    receiver = _WindowInputReceiver()
-    settings = fabric["declared_profile"](
-        controller_to_weak_buffer=False, controller_to_strong_buffer=False)
-    links = LinkFabric(settings, engine)
-    packing = SyndromePacking(
-        engine, links=links, packing_ticks=microseconds_to_ticks(1), packing_context_capacity=None,
-        window_input_receiver=receiver, feedback_memory_receiver=None)
-    controller = Controller(
-        engine, qpu=None, window_manager=None, syndrome_packing=packing,
-        measurement_signal_to_classical_bits_ticks=microseconds_to_ticks(3), links=links,
-        resolved_operations=(), resolved_patches=(), idle_policy=None,
-        feedback_streams=None)
-
-    controller.accept_qpu_readout(
-        QPUReadout(7, "patch-a", 4, bits=[1, 0, 1, 0], size_bits=4),
-        WINDOW_INPUT_ROUTE)
-    engine.run()
-
-    assert [(event.kind, event.tick) for event in packing.round_events[:3]] == [
-        ("EMITTED", 0),
-        ("BINARY_AVAILABLE", microseconds_to_ticks(2 + 3)),
-        ("PACKED", microseconds_to_ticks(2 + 3 + 1)),
-    ]
-    assert len(receiver.packets) == 1
-
-
-class _FeedbackMemoryReceiver:
-    def __init__(self):
-        self.source_operation_ids = []
-
-    def accept_feedback_memory_round(self, source_operation_id):
-        self.source_operation_ids.append(source_operation_id)
-
-
-def test_feedback_memory_rounds_pipeline_onto_wbd_without_a_landing_wait(
-        fabric):
-    """A feedback-memory round leaves the controller at its own completion
-    tick, not at the previous round's landing. No referent's sender waits
-    for a packet to land before sending the next: Yang et al. 2605.04892
-    and Google 2408.13687 stream every round to the decoder, Caune et al.
-    2410.05202 publish each classified result as it is produced, gem5's
-    dma_device.cc queues the next request behind the front of transmitList
-    and ns-3's point-to-point device starts the next packet at
-    TransmitComplete. Two rounds one QEC cycle apart on a 5 us WBD land one
-    cycle apart; a sender that waited would land them 5 us apart."""
-    engine = Engine(verbose=False)
-    receiver = _FeedbackMemoryReceiver()
-    settings = fabric["declared_profile"](
-        controller_to_weak_buffer=False, controller_to_strong_buffer=False)
-    links = LinkFabric(settings, engine)
-    packing = SyndromePacking(
-        engine, links=links, packing_ticks=0, packing_context_capacity=None,
-        window_input_receiver=None, feedback_memory_receiver=receiver)
-    controller = Controller(
-        engine, qpu=None, window_manager=None, syndrome_packing=packing,
-        measurement_signal_to_classical_bits_ticks=microseconds_to_ticks(3),
-        links=links, resolved_operations=(), resolved_patches=(),
-        idle_policy=None, feedback_streams=None)
-    route = SyndromePacketRoute.feedback_memory_round(7)
-
-    def readout(round_index):
-        controller.accept_qpu_readout(
-            QPUReadout(("idle", 7, "patch-a"), "patch-a", round_index,
-                       bits=[1], size_bits=1),
-            route)
-    engine.schedule(0, lambda: readout(1), label="round 1 readout")
-    engine.schedule(microseconds_to_ticks(1), lambda: readout(2),
-                    label="round 2 readout")
-    engine.run()
-
-    ticks_by_kind = {}
-    for event in packing.round_events:
-        ticks_by_kind.setdefault(event.kind, []).append(event.tick)
-    declared = fabric["DECLARED_US"]
-    qc_and_binary = declared["qpu_to_controller"] + declared["binary"]
-    wbd = declared["weak_buffer_to_weak_decoder"]
-    assert ticks_by_kind["PACKED"] == [
-        microseconds_to_ticks(qc_and_binary),
-        microseconds_to_ticks(qc_and_binary + 1)]
-    assert ticks_by_kind["FEEDBACK_MEMORY_DELIVERED"] == [
-        microseconds_to_ticks(qc_and_binary + wbd),
-        microseconds_to_ticks(qc_and_binary + 1 + wbd)]
-    assert receiver.source_operation_ids == [7, 7]
 
 
 def _feedback_run(fabric, *, controller_output_us):
@@ -221,7 +84,7 @@ def test_feedback_operation_command_traverses_controller_output_and_cq(fabric):
     assert isinstance(arrivals[0].command, RunOperationBody)
     assert arrivals[0].command.operation == runtime.operations[2]
 
-    output = [event for event in completed.controller.output_events
+    output = [event for event in completed.round_events.output_events
               if event.operation_id == 2]
     assert [(event.kind, event.tick) for event in output] == [
         ("DECISION_AVAILABLE", blocker_commit + microseconds_to_ticks(2)),
@@ -265,7 +128,7 @@ def test_preloaded_program_command_is_not_charged_as_online_feedback(fabric):
     assert root_arrival.tick == 0
     assert completed.execution_runtime.op_start_time[1] == 0
     assert any(event.kind == "PRELOADED_COMMAND" and event.operation_id == 1
-               for event in completed.controller.output_events)
+               for event in completed.round_events.output_events)
 
 
 def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
@@ -286,7 +149,7 @@ def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
     commit = next(record.committed_ticks
                   for record in completed.pauli_frame.snapshot().records)
 
-    output = [event for event in completed.controller.output_events
+    output = [event for event in completed.round_events.output_events
               if event.operation_id == 1 and event.kind != "PRELOADED_COMMAND"]
     assert [(event.kind, event.tick) for event in output] == [
         ("DECISION_AVAILABLE", commit + microseconds_to_ticks(2)),
@@ -300,8 +163,9 @@ def test_result_return_carries_the_same_decision_through_output_and_cq(fabric):
 def test_controller_output_without_a_link_still_pays_local_processing():
     engine = Engine(verbose=False)
     delivered = []
+    recorder = RoundEventRecorder(engine)
     controller = Controller(
-        engine, qpu=None, window_manager=None, syndrome_packing=None,
+        engine, qpu=None, window_manager=None, recorder=recorder,
         instruction_or_decision_to_analog_control_pulse_ticks=17,
         links=None, resolved_operations=(), resolved_patches=(),
         idle_policy=None, feedback_streams=None)
@@ -313,7 +177,7 @@ def test_controller_output_without_a_link_still_pays_local_processing():
     assert delivered == [decision]
     assert engine.now == 17
     assert [(event.kind, event.tick, event.payload)
-            for event in controller.output_events] == [
+            for event in recorder.output_events] == [
         ("DECISION_AVAILABLE", 0, decision),
         ("CONTROL_DECISION_ISSUED", 17, decision),
     ]

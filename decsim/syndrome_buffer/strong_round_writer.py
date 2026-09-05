@@ -12,6 +12,7 @@ landing; the store's holds and lifetime are RoundStore's.
 from typing import Callable, Optional
 
 import decsim.message as message
+import decsim.observe.round_events as round_events
 import decsim.syndrome_buffer.round_store as round_store_module
 
 
@@ -25,6 +26,7 @@ class StrongRoundWriter:
         store: round_store_module.RoundStore,
         *,
         on_round_stored: Optional[Callable] = None,
+        recorder=None,
     ) -> None:
         self.engine = engine
         self.link = link
@@ -32,8 +34,9 @@ class StrongRoundWriter:
         self.writes_in_flight = 0
         # hears (operation_id, round_index) once a round is stored
         self.on_round_stored = on_round_stored
-        # flight-recorder rows: (tick, operation_id, round_index) per store
-        self.stored_log: list = []
+        if recorder is None:
+            recorder = round_events.NoRoundEvents()
+        self.recorder = recorder
 
     def has_room(self) -> bool:
         """A write can land: capacity counts the rounds stored and in flight."""
@@ -77,9 +80,7 @@ class StrongRoundWriter:
         # a round whose every reader resolved while it crossed the link
         # is dropped at the door: nobody can ever read it
         self.store.release_round_if_unheld(round_key)
-        self.stored_log.append(
-            (self.engine.now, packet.operation_id, packet.round_index)
-        )
+        self.recorder.round_stored(packet.operation_id, packet.round_index)
         self.engine.log_io(
             "SyndromeBuffer1", lambda: self._received_text(packet)
         )

@@ -166,20 +166,6 @@ class QPUReadout:
     size_bits: Optional[int] = None
 
 
-@dataclass
-class SyndromePayload:
-    """One binary detector-data round accepted by the controller."""
-
-    operation_id: int                 # op whose stream this round belongs to
-    patch_id: int                     # patch that produced the round
-    round_index: int                  # 1-based round number within the op
-    bits: Optional[Any] = None        # raw measurement bits (None = timing-only run)
-    code: Optional[str] = None        # code name; drives CodeRouter routing
-    n_fragments: int = 1              # link-layer fragments the round arrives in
-    fragment_index: int = 0           # stable position within the complete round
-    size_bits: Optional[int] = None   # wire size, for bandwidth/packing models
-
-
 def normalize_binary_bits(bits: Any) -> Optional[tuple[int, ...]]:
     """Bits as a tuple of 0/1 ints; a list, tuple or NumPy bool array in."""
     if bits is None:
@@ -199,14 +185,16 @@ class RetainedSyndromeFragment:
     fragment_index: int
 
     @classmethod
-    def from_payload(cls, payload: SyndromePayload) -> "RetainedSyndromeFragment":
+    def from_readout(cls, readout: QPUReadout) -> "RetainedSyndromeFragment":
+        """The readout as controller binary: its bits normalized."""
+        bits = normalize_binary_bits(readout.bits)
         return cls(
-            operation_id=payload.operation_id,
-            patch_id=payload.patch_id,
-            round_index=payload.round_index,
-            bits=normalize_binary_bits(payload.bits),
-            size_bits=payload.size_bits,
-            fragment_index=payload.fragment_index,
+            operation_id=readout.operation_id,
+            patch_id=readout.patch_id,
+            round_index=readout.round_index,
+            bits=bits,
+            size_bits=readout.size_bits,
+            fragment_index=readout.fragment_index,
         )
 
 
@@ -232,6 +220,54 @@ class SyndromeRoundPacket:
                     defects.append(position)
                 position += 1
         return f"defects {{{', '.join(map(str, defects))}}}" if defects else "no defects"
+
+
+@dataclass(frozen=True)
+class PackedRound:
+    """A finished round as it leaves the assembler.
+
+    The packet, its route, and its size on the wire: the raw measurement
+    bits, before detection formation, which is what the links carry.
+    """
+
+    packet: SyndromeRoundPacket
+    route: SyndromePacketRoute
+    wire_bits: Optional[int]
+
+    @property
+    def round_key(self) -> tuple:
+        """(operation_id, round_index), the store's key."""
+        return (self.packet.operation_id, self.packet.round_index)
+
+
+@dataclass(frozen=True)
+class RoundEvent:
+    """One recorded transition of one syndrome round through the controller.
+
+    kind is one of EMITTED, BINARY_AVAILABLE, PACKED, STALLED, CWB_SENT,
+    PUBLISHED, DROPPED, FEEDBACK_MEMORY_DELIVERED.
+    """
+
+    kind: str
+    tick: int
+    operation_id: object
+    round_index: int
+    patch_id: object = None
+    route: str = ""
+
+
+@dataclass(frozen=True)
+class ControllerOutputEvent:
+    """One transition on the controller's digital-to-QPU path.
+
+    payload is the decision or QPU command itself, so a ledger can prove
+    that the data whose timing was modeled is the data the QPU received.
+    """
+
+    kind: str
+    tick: int
+    operation_id: object
+    payload: object
 
 # ------------------------------------------------------------------ windows
 
@@ -743,6 +779,30 @@ class TransferAttribution:
     relation: Optional[
         Union[RequestTransferRelation, BoundaryTransferRelation]
     ] = None
+
+    @classmethod
+    def for_round(
+        cls, operation_id, patch_ids: tuple, round_index: int
+    ) -> "TransferAttribution":
+        """One round of one operation, its patches in stable order."""
+        ordered_patch_ids = tuple(
+            sorted(patch_ids, key=stable_identity_order_key)
+        )
+        return cls(
+            operation_id=operation_id,
+            patch_ids=ordered_patch_ids,
+            window_id=None,
+            first_round=round_index,
+            last_round=round_index,
+        )
+
+    @classmethod
+    def for_packet(cls, packet: SyndromeRoundPacket) -> "TransferAttribution":
+        """The packed round's transfer: every patch of the round."""
+        patch_ids = tuple(fragment.patch_id for fragment in packet.fragments)
+        return cls.for_round(
+            packet.operation_id, patch_ids, packet.round_index
+        )
 
 
 class PayloadSelection(Enum):

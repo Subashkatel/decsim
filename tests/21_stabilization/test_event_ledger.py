@@ -191,62 +191,39 @@ def test_check_detects_a_disappeared_round():
         RunLedgerView(events=(orphan,)).check()
 
 
-def test_dropped_round_is_an_accounted_terminal_state():
-    # LINK-004 whole-run accounting including the drop path: with
-    # DROP_ROUND policy and a one-round Buffer 0 that nobody drains, the
-    # second round is dropped; the ledger records DROPPED as its terminal
-    # state and the conservation check passes because the loss is
-    # accounted, not silent.
+def _ledger_of(recorder):
     from types import SimpleNamespace
 
-    from decsim.controller.syndrome_packing import (
-        PackingOverflowPolicy,
-        SyndromePacking,
-        SyndromePackingPolicy,
-    )
-    from decsim.engine import Engine
-    from decsim.links.fabric import LinkFabric
-    from decsim.links.link_profiles import logical_reference_profile
-    from decsim.controller.round_writes import HeldRounds
-    from decsim.message import WINDOW_INPUT_ROUTE, QPUReadout
-    from decsim.syndrome_buffer.round_store import RoundStore
-    from decsim.syndrome_buffer.settings import RoundStoreSettings
-
-    engine = Engine(verbose=False)
-    held_rounds = HeldRounds()
-    packing = SyndromePacking(
-        engine,
-        LinkFabric(logical_reference_profile(), engine),
-        packing_ticks=0,
-        packing_context_capacity=None,
-        window_input_receiver=SimpleNamespace(
-            accept_window_input=lambda _packet: None
-        ),
-        feedback_memory_receiver=None,
-        syndrome_buffer=RoundStore(
-            RoundStoreSettings(rounds=1), on_slot_freed=held_rounds.retry
-        ),
-        held_rounds=held_rounds,
-        policy=SyndromePackingPolicy(overflow=PackingOverflowPolicy.DROP_ROUND),
-    )
-    for round_index in (1, 2):
-        packing.relay_qpu_readout(
-            QPUReadout(1, 0, round_index, size_bits=24),
-            WINDOW_INPUT_ROUTE,
-            processing_ticks=0,
-        )
-    engine.run()
-
     completed = SimpleNamespace(
-        syndrome_packing=packing,
-        strong_round_writer=None,
+        round_events=recorder,
         window_manager=SimpleNamespace(windows={}),
         pauli_frame=None,
         execution_runtime=SimpleNamespace(
             decode_release_time={}, operations={}
         ),
     )
-    ledger = event_ledger(completed)
+    return event_ledger(completed)
+
+
+def test_dropped_round_is_an_accounted_terminal_state():
+    # LINK-004 whole-run accounting including the drop path: a round the
+    # writer dropped for want of store room ends in DROPPED; the ledger
+    # records it as the terminal state and the conservation check passes
+    # because the loss is accounted, not silent.
+    from decsim.engine import Engine
+    from decsim.message import WINDOW_INPUT_ROUTE
+    from decsim.observe.round_events import RoundEventRecorder
+
+    engine = Engine(verbose=False)
+    recorder = RoundEventRecorder(engine)
+    recorder.record("EMITTED", 1, 1, WINDOW_INPUT_ROUTE, patch_id=0)
+    recorder.record("PACKED", 1, 1, WINDOW_INPUT_ROUTE)
+    recorder.record("PUBLISHED", 1, 1, WINDOW_INPUT_ROUTE)
+    recorder.record("EMITTED", 1, 2, WINDOW_INPUT_ROUTE, patch_id=0)
+    recorder.record("PACKED", 1, 2, WINDOW_INPUT_ROUTE)
+    recorder.round_dropped(1, 2, WINDOW_INPUT_ROUTE)
+
+    ledger = _ledger_of(recorder)
     ledger.check()
 
     terminals = {
@@ -255,62 +232,28 @@ def test_dropped_round_is_an_accounted_terminal_state():
         if event.status == "terminal"
     }
     assert terminals == {(1, "PUBLISHED"), (2, "DROPPED")}
-    assert packing.packing_drops == 1
+    assert recorder.packing_drops == 1
 
 
 def test_reassembly_context_drop_is_an_accounted_terminal_state():
     """LINK-004 applies before packing as well as at Buffer 0 admission.
 
-    Hold one fragmented round open in the controller's sole reassembly slot,
-    then deliver another round.  DROP_ROUND must leave a terminal ledger row
-    for the rejected round instead of changing only an internal counter.
+    A round refused a context in the assembler's workspace ends in
+    DROPPED with no PACKED row; the ledger still closes its chain.
     """
-    from types import SimpleNamespace
-
-    from decsim.controller.syndrome_packing import (
-        PackingOverflowPolicy,
-        SyndromePacking,
-        SyndromePackingPolicy,
-    )
     from decsim.engine import Engine
-    from decsim.links.fabric import LinkFabric
-    from decsim.links.link_profiles import logical_reference_profile
-    from decsim.message import WINDOW_INPUT_ROUTE, QPUReadout
+    from decsim.message import WINDOW_INPUT_ROUTE
+    from decsim.observe.round_events import RoundEventRecorder
 
     engine = Engine(verbose=False)
-    packing = SyndromePacking(
-        engine,
-        LinkFabric(logical_reference_profile(), engine),
-        packing_ticks=0,
-        packing_context_capacity=1,
-        window_input_receiver=SimpleNamespace(
-            accept_window_input=lambda _packet: None
-        ),
-        feedback_memory_receiver=None,
-        policy=SyndromePackingPolicy(overflow=PackingOverflowPolicy.DROP_ROUND),
-    )
-    # Event insertion order makes round 1 occupy the context, round 2 lose
-    # admission, and the final fragment then complete round 1.
-    for payload in (
-        QPUReadout(1, 0, 1, n_fragments=2, fragment_index=0, size_bits=12),
-        QPUReadout(1, 0, 2, size_bits=24),
-        QPUReadout(1, 0, 1, n_fragments=2, fragment_index=1, size_bits=12),
-    ):
-        packing.relay_qpu_readout(
-            payload, WINDOW_INPUT_ROUTE, processing_ticks=0
-        )
-    engine.run()
+    recorder = RoundEventRecorder(engine)
+    recorder.record("EMITTED", 1, 1, WINDOW_INPUT_ROUTE, patch_id=0)
+    recorder.record("EMITTED", 1, 2, WINDOW_INPUT_ROUTE, patch_id=0)
+    recorder.round_dropped(1, 2, WINDOW_INPUT_ROUTE, patch_id=0)
+    recorder.record("PACKED", 1, 1, WINDOW_INPUT_ROUTE)
+    recorder.record("PUBLISHED", 1, 1, WINDOW_INPUT_ROUTE)
 
-    completed = SimpleNamespace(
-        syndrome_packing=packing,
-        strong_round_writer=None,
-        window_manager=SimpleNamespace(windows={}),
-        pauli_frame=None,
-        execution_runtime=SimpleNamespace(
-            decode_release_time={}, operations={}
-        ),
-    )
-    ledger = event_ledger(completed)
+    ledger = _ledger_of(recorder)
     ledger.check()
 
     terminals = {
@@ -319,7 +262,7 @@ def test_reassembly_context_drop_is_an_accounted_terminal_state():
         if event.status == "terminal"
     }
     assert terminals == {(1, "PUBLISHED"), (2, "DROPPED")}
-    assert packing.packing_drops == 1
+    assert recorder.packing_drops == 1
 
 
 _SWEEP_MODES = (

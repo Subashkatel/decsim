@@ -22,10 +22,14 @@ import sys
 import pytest
 
 import decsim.controller.round_writes as round_writes
+import decsim.controller.settings as controller_settings
 import decsim.engine as engine_module
 import decsim.message as message
+import decsim.observe.round_events as round_events
 import decsim.syndrome_buffer.round_store as round_store_module
 import decsim.syndrome_buffer.settings as round_store_settings
+
+STALL = controller_settings.PackingOverflowPolicy.STALL
 
 CIW_SOURCE = pathlib.Path(
     "/scratch/gpfs/MARTONOSI/sk2415/qlx-qec-sandbox/tmp/resources/l5_buffers/Ciw"
@@ -42,6 +46,16 @@ def packet(round_index: int, operation_id=1) -> message.SyndromeRoundPacket:
         fragment_index=0,
     )
     return message.SyndromeRoundPacket(operation_id, round_index, (fragment,))
+
+
+def packed(round_index: int) -> message.PackedRound:
+    stored = packet(round_index)
+    return message.PackedRound(stored, message.WINDOW_INPUT_ROUTE, 2)
+
+
+def held_rounds() -> round_writes.HeldRounds:
+    no_events = round_events.NoRoundEvents()
+    return round_writes.HeldRounds(STALL, no_events)
 
 
 def store(rounds=None, on_slot_freed=None, listener=None):
@@ -82,25 +96,26 @@ def closed_form(arrivals, holds, capacity):
 def run_trace(arrivals, holds, capacity):
     """The trace through the store: enter ticks, in round order."""
     engine = engine_module.Engine(verbose=False)
-    held = round_writes.HeldRounds()
+    held = held_rounds()
     the_store = store(rounds=capacity, on_slot_freed=held.retry)
     enters = {}
 
-    def admit(round_index) -> bool:
+    def admit(round: message.PackedRound) -> bool:
         if not the_store.has_room():
             return False
-        stored = packet(round_index)
-        the_store.accept_packed_round(stored, publication_tick=engine.now)
+        the_store.accept_packed_round(round.packet, publication_tick=engine.now)
+        round_index = round.packet.round_index
         enters[round_index] = engine.now
         release_at = holds[round_index - 1]
-        release = functools.partial(the_store.release_round, (1, round_index))
+        release = functools.partial(the_store.release_round, round.round_key)
         engine.schedule(release_at, release)
         return True
 
     def arrive(round_index) -> None:
-        admitted = admit(round_index)
+        round = packed(round_index)
+        admitted = admit(round)
         if not admitted:
-            held.hold(round_index, admit)
+            held.refuse(round, admit)
 
     for round_index, arrival in enumerate(arrivals, start=1):
         engine.schedule(arrival, lambda index=round_index: arrive(index))
@@ -169,21 +184,23 @@ def test_a_full_store_answers_no_room_and_is_unchanged():
 
 
 def test_a_held_round_enters_when_a_slot_frees_in_completion_order():
-    held = round_writes.HeldRounds()
+    held = held_rounds()
     the_store = store(rounds=1, on_slot_freed=held.retry)
     entered = []
 
-    def admit(round_index) -> bool:
+    def admit(round: message.PackedRound) -> bool:
         if not the_store.has_room():
             return False
-        stored = packet(round_index)
-        the_store.accept_packed_round(stored, publication_tick=0)
-        entered.append(round_index)
+        the_store.accept_packed_round(round.packet, publication_tick=0)
+        entered.append(round.packet.round_index)
         return True
 
-    admit(1)
-    held.hold(2, admit)
-    held.hold(3, admit)
+    first = packed(1)
+    second = packed(2)
+    third = packed(3)
+    admit(first)
+    held.refuse(second, admit)
+    held.refuse(third, admit)
     the_store.release_round((1, 1))
     after_first_release = list(entered)
     the_store.release_round((1, 2))

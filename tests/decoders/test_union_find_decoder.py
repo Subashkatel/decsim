@@ -76,15 +76,13 @@ def _job(model, syndrome) -> message.DecodeJob:
     for bit in syndrome:
         bits.append(int(bit))
     bits = tuple(bits)
-    payload = message.SyndromePayload(
+    payload = message.RetainedSyndromeFragment(
         operation_id=1,
         patch_id=0,
         round_index=1,
         bits=bits,
-        code=None,
-        n_fragments=1,
-        fragment_index=0,
         size_bits=len(bits),
+        fragment_index=0,
     )
     return message.DecodeJob(
         op_id=1,

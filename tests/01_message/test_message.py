@@ -223,21 +223,6 @@ def test_qpu_readout_skips_identity_round_and_fragment_validation():
     assert_frozen(readout)
 
 
-def test_syndrome_payload_skips_fragment_validation_and_remains_mutable():
-    """Syndrome payload stores unchecked fragment metadata and remains mutable."""
-    payload = message.SyndromePayload(
-        operation_id=1,
-        patch_id=2,
-        round_index=0,
-        n_fragments=0,
-        fragment_index=-1,
-    )
-    payload.fragment_index = 4
-    assert payload.round_index == 0
-    assert payload.n_fragments == 0
-    assert payload.fragment_index == 4
-
-
 def test_binary_bits_normalize_none_lists_and_tuples():
     """Binary bit normalization converts supported Python forms to immutable integers."""
     assert message.normalize_binary_bits(None) is None
@@ -251,9 +236,9 @@ def test_binary_bits_normalize_one_dimensional_boolean_arrays():
     assert message.normalize_binary_bits(bits) == (1, 0, 1)
 
 
-def test_retained_fragment_normalizes_payload_bits():
-    """Retained fragments normalize payload bits while copying transport metadata."""
-    payload = message.SyndromePayload(
+def test_retained_fragment_normalizes_readout_bits():
+    """Retained fragments normalize readout bits while copying transport metadata."""
+    readout = message.QPUReadout(
         operation_id="operation",
         patch_id="patch",
         round_index=2,
@@ -262,7 +247,7 @@ def test_retained_fragment_normalizes_payload_bits():
         fragment_index=3,
         size_bits=2,
     )
-    fragment = message.RetainedSyndromeFragment.from_payload(payload)
+    fragment = message.RetainedSyndromeFragment.from_readout(readout)
     assert fragment.bits == (1, 0)
     assert fragment.operation_id == "operation"
     assert fragment.fragment_index == 3

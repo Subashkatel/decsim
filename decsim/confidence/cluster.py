@@ -5,8 +5,10 @@ from __future__ import annotations
 import heapq
 import itertools
 import math
+import time
 from fractions import Fraction
 
+from ..decoders.decoder import DecoderBase
 from ..decoders.union_find.decoder import UnionFindDecoder
 from ..decoders.union_find.window_decoder import (
     Closed,
@@ -53,12 +55,14 @@ def _quotient_cluster_gap(
             coordinates = (0, edge.length_half_ticks)
         else:
             coordinates = tuple(
-                sorted({
-                    0,
-                    interval.lower_tick,
-                    interval.upper_tick,
-                    edge.length_half_ticks,
-                })
+                sorted(
+                    {
+                        0,
+                        interval.lower_tick,
+                        interval.upper_tick,
+                        edge.length_half_ticks,
+                    }
+                )
             )
         path_nodes: list[object] = [edge.detector_a]
         path_nodes.extend(
@@ -143,8 +147,14 @@ def _cluster_gap(
     return _gap_half_ticks_to_decibels(gap_half_ticks, weight_step)
 
 
-class UnionFindClusterGapDecoder:
+class UnionFindClusterGapDecoder(DecoderBase):
     """Attach one-logical cluster-gap confidence to a hard Union-Find result.
+
+    A row of the Decoder port over its base: latency, occupancy,
+    pipeline depth and cancel are the base decoder's, as in the other
+    confidence wrappers (confidence/decoder.py); on the measured path the
+    unit's time is the base's growth-and-peeling call plus the timed gap
+    walk, never the base's untimed setup.
 
     SCOPE:
     - Confidence requires exactly one nonzero logical-observable row.
@@ -173,11 +183,28 @@ class UnionFindClusterGapDecoder:
         """Confidence adds no simulated service latency."""
         return self.base.latency(job)
 
+    def occupancy(self, job: DecodeJob) -> int | None:
+        """The base decoder's occupancy; None when it is measured."""
+        return self.base.occupancy(job)
+
+    def pipeline_depth(self, job: DecodeJob) -> int:
+        """The base decoder's pipeline depth."""
+        return self.base.pipeline_depth(job)
+
+    def cancel(self, job: DecodeJob) -> None:
+        """Stop the base decoder's job."""
+        self.base.cancel(job)
+
     def decode(self, job: DecodeJob) -> DecodeResult:
         """Decode once, compute cluster gap, then publish confidence."""
+        result, _elapsed_ns = self.decode_timed(job)
+        return result
+
+    def decode_timed(self, job: DecodeJob) -> tuple:
+        """(result with confidence, nanoseconds of the decode and the gap)."""
         model = job.dem
         if model is None:
-            return self.base.decode(job)
+            return self.base.decode_timed(job)
 
         import numpy as np
 
@@ -195,11 +222,12 @@ class UnionFindClusterGapDecoder:
             )
 
         decoded_window = self.base.decode_with_growth_evidence(job)
+        started_ns = time.perf_counter_ns()
+        gap = _cluster_gap(decoded_window.hard_evidence, self.base.weight_step)
+        finished_ns = time.perf_counter_ns()
+        source = union_find_cluster_gap_source(self.base.weight_step)
         decoded_window.hard_result.soft_output = SoftOutput(
-            gap=_cluster_gap(
-                decoded_window.hard_evidence,
-                self.base.weight_step,
-            ),
-            source=union_find_cluster_gap_source(self.base.weight_step),
+            gap=gap, source=source
         )
-        return decoded_window.hard_result
+        gap_ns = finished_ns - started_ns
+        return decoded_window.hard_result, decoded_window.backend_ns + gap_ns

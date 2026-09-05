@@ -13,8 +13,10 @@ import pathlib
 
 import pytest
 
+import decsim.confidence.cluster as cluster
 import decsim.config as config
 import decsim.decoders.decoder as decoder_module
+import decsim.decoders.decoders as decoders
 import decsim.decoders.settings as decoder_settings
 import decsim.decoders.staged_decoder as staged_decoder
 import decsim.decoders.union_find.decoder as union_find_decoder
@@ -185,6 +187,27 @@ def test_the_three_post_construction_binds_reach_their_components():
     assert machine.window_manager.withdraw_decode == manager.withdraw_window
 
 
+MEMORY_ROUNDS = 6
+MEMORY_CIRCUIT = workload_settings.memory_circuit(
+    "surface_code:rotated_memory_z", MEMORY_ROUNDS, 3, 0.003
+)
+
+
+def _memory_on_stim_device(
+    weak_decoder, operations
+) -> machine_module.MachineSettings:
+    """The operations as a six-round d=3 memory on the Stim device."""
+    rounds = round_policies.FixedRounds(MEMORY_ROUNDS)
+    workload = workload_settings.WorkloadSettings(
+        operations=operations, rounds_policy=rounds
+    )
+    device = stim_device.StimDevice()
+    qpu = qpu_settings.QpuSettings(distance=3, device=device)
+    return machine_module.MachineSettings(
+        workload=workload, qpu=qpu, weak_decoder=weak_decoder
+    )
+
+
 def _two_patch_memory(weak_decoder) -> machine_module.MachineSettings:
     """Two memory operations on two patches; the second starts at round 4.
 
@@ -192,29 +215,18 @@ def _two_patch_memory(weak_decoder) -> machine_module.MachineSettings:
     (separate_decode_jobs) charges that idle region as one load-only
     decode job, a job without a window model.
     """
-    circuit = workload_settings.memory_circuit(
-        "surface_code:rotated_memory_z", 6, 3, 0.003
-    )
     first = message.Operation(
-        id=1, name="mem0", qubits=(0,), patches=(0,), circuit=circuit
+        id=1, name="mem0", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
     )
     late = message.Operation(
         id=2,
         name="mem1",
         qubits=(1,),
         patches=(1,),
-        circuit=circuit,
+        circuit=MEMORY_CIRCUIT,
         scheduled_start_round=4,
     )
-    rounds = round_policies.FixedRounds(6)
-    workload = workload_settings.WorkloadSettings(
-        operations=(first, late), rounds_policy=rounds
-    )
-    device = stim_device.StimDevice()
-    qpu = qpu_settings.QpuSettings(distance=3, device=device)
-    return machine_module.MachineSettings(
-        workload=workload, qpu=qpu, weak_decoder=weak_decoder
-    )
+    return _memory_on_stim_device(weak_decoder, (first, late))
 
 
 def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
@@ -246,3 +258,26 @@ def test_a_load_only_job_on_a_measured_unit_holds_it_for_zero_algorithm_ticks():
     assert all(r.end_ticks > r.start_ticks for r in windows)
     idle_lines = [line for line in machine.engine.log_lines if "mem(" in line]
     assert any("algorithm mem(" in line for line in idle_lines)
+
+
+def test_the_cluster_gap_decoder_runs_as_a_python_built_tier():
+    """The cluster-gap wrapper is a row of the port.
+
+    The manager reads pipeline_depth at dispatch and occupancy at its
+    free-time prediction; a wrapper without them stopped the run at the
+    first window with AttributeError.
+    """
+    latency_model = decoders.PresetLatencyDecoder(1.0)
+    base = union_find_decoder.UnionFindDecoder(latency_model)
+    decoder = cluster.UnionFindClusterGapDecoder(base)
+    weak_decoder = decoder_settings.DecoderSettings(decoder=decoder)
+    operation = message.Operation(
+        id=1, name="memory", qubits=(0,), patches=(0,), circuit=MEMORY_CIRCUIT
+    )
+    settings = _memory_on_stim_device(weak_decoder, (operation,))
+    machine = machine_module.Machine.build(settings, 0)
+    result = machine.run()
+    assert result.terminal_status == "complete"
+    observables = result.operation_results[0].logical_observables
+    assert observables == (0,)
+    assert len(machine.engine.log_lines) == 19

@@ -6,6 +6,7 @@ gap (confidence/cluster.py) and is what the ASIC cycle model prices
 """
 
 import dataclasses
+import time
 from typing import Optional
 
 import decsim.decoders.decoder as decoder_module
@@ -17,10 +18,15 @@ import decsim.message as message
 
 @dataclasses.dataclass(frozen=True)
 class UnionFindDecodedWindow:
-    """One hard result paired with evidence from that exact decode call."""
+    """One hard result, evidence from that exact decode call, and its time.
+
+    backend_ns is the growth-and-peeling call alone on the host clock,
+    the same region WindowDecoderBase.decode_timed times.
+    """
 
     hard_result: message.DecodeResult
     hard_evidence: window_decoder.UnionFindHardEvidence
+    backend_ns: int
 
 
 class UnionFindDecoder(decoder_module.WindowDecoderBase):
@@ -66,7 +72,7 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
     def decode_with_growth_evidence(
         self, job: message.DecodeJob
     ) -> UnionFindDecodedWindow:
-        """One hard result and immutable evidence from the same call."""
+        """One hard result, immutable evidence and the timed backend call."""
         model = job.dem
         if model is None:
             raise ValueError(
@@ -76,7 +82,9 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
         syndrome = window_decode_results.payload_syndrome(job)
         window_decode_results.check_syndrome_size(job, syndrome, faults)
         graph = self.compiled_for(faults, model)
+        started_ns = time.perf_counter_ns()
         hard_evidence = window_decoder.decode_graph(graph, syndrome)
+        finished_ns = time.perf_counter_ns()
         decode_status = _status_of(hard_evidence)
         hard_result = window_decode_results.result_from_selected_faults(
             job,
@@ -85,7 +93,8 @@ class UnionFindDecoder(decoder_module.WindowDecoderBase):
             hard_evidence.selected_faults,
             decode_status=decode_status,
         )
-        return UnionFindDecodedWindow(hard_result, hard_evidence)
+        backend_ns = finished_ns - started_ns
+        return UnionFindDecodedWindow(hard_result, hard_evidence, backend_ns)
 
 
 def _status_of(evidence: window_decoder.UnionFindHardEvidence):

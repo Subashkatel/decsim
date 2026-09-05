@@ -1,233 +1,280 @@
-"""Cluster-gap confidence from one weighted Union-Find hard decode."""
+"""The cluster gap: the confidence of one weighted Union-Find window decode.
 
-from __future__ import annotations
+Meister et al. 2405.07433 Definition 9 and Algorithm 2 (the PDF under
+the sandbox tmp/papers): the weighted edge intervals the hard decode
+grew are quotiented into a graph whose shortest closed walk of odd
+logical parity is the gap, in the growth's half-tick units and reported
+in decibels. The hard decode is Delfosse and Nickerson 1709.06218
+(union_find/window_decoder.py); UnionFindClusterGapDecoder is a row of
+the Decoder port over it, beside the confidence wrappers (decoder.py).
+
+The exact likelihood-ratio reading of the gap holds only in the uniform
+repetition-code setting of Meister's Theorem 10; on a surface code it is
+a confidence, not a calibrated failure probability. The gap needs one
+nonzero logical-observable row, and thresholds are calibrated per
+weight step.
+"""
 
 import heapq
 import itertools
 import math
 import time
 from fractions import Fraction
+from typing import Optional, Union
 
-from ..decoders.decoder import DecoderBase
-from ..decoders.union_find.decoder import UnionFindDecoder
-from ..decoders.union_find.window_decoder import (
-    Closed,
-    Open,
-    UnionFindGraph,
-    UnionFindHardEvidence,
-    normalized_weight_step,
-)
-from ..detector_error_model.fault_model_contracts import (
-    GRAPHLIKE_FAULT_MODEL_REQUIRED,
-    FaultRepresentation,
-)
-from ..message import DecodeJob, DecodeResult, SoftOutput, SoftOutputSource
+import numpy
+
+import decsim.decoders.decoder as decoder_module
+import decsim.decoders.union_find.decoder as union_find_decoder
+import decsim.decoders.union_find.window_decoder as window_decoder
+import decsim.detector_error_model.fault_model_contracts as fault_models
+import decsim.message as message
+
+_BINARY64_LN_TEN = float.fromhex("0x1.26bb1bbb55516p+1")
 
 
-def union_find_cluster_gap_source(weight_step=0.1) -> SoftOutputSource:
-    """Identify cluster confidence at one absolute natural-log weight step."""
-    return SoftOutputSource(
+def union_find_cluster_gap_source(
+    weight_step: float = 0.1,
+) -> message.SoftOutputSource:
+    """The source of a cluster gap at one absolute natural-log weight step."""
+    normalized_step = window_decoder.normalized_weight_step(weight_step)
+    return message.SoftOutputSource(
         method="cluster_gap",
         cluster_origin="union_find_decoder",
         growth_schedule="weighted_global_fair",
         gap_units="decibels",
         correction="none",
-        weight_step_natural_log=normalized_weight_step(weight_step),
+        weight_step_natural_log=normalized_step,
         references=("cluster-gap method",),
     )
 
 
-def _quotient_cluster_gap(
-    graph: UnionFindGraph,
-    edge_intervals: tuple[Open | Closed, ...],
-) -> int | float:
-    """Return the shortest odd-logical quotient walk in integer half ticks."""
-    adjacency: dict[object, list[tuple[object, int, int]]] = {}
+class UnionFindClusterGapDecoder(decoder_module.DecoderBase):
+    """The hard Union-Find decode with its one-logical cluster gap attached.
 
-    def add_segment(left, right, weight: int, parity: int) -> None:
-        adjacency.setdefault(left, []).append((right, weight, parity))
-        adjacency.setdefault(right, []).append((left, weight, parity))
-
-    for edge_index, (edge, interval) in enumerate(
-        zip(graph.edges, edge_intervals)
-    ):
-        if isinstance(interval, Closed):
-            coordinates = (0, edge.length_half_ticks)
-        else:
-            coordinates = tuple(
-                sorted(
-                    {
-                        0,
-                        interval.lower_tick,
-                        interval.upper_tick,
-                        edge.length_half_ticks,
-                    }
-                )
-            )
-        path_nodes: list[object] = [edge.detector_a]
-        path_nodes.extend(
-            ("union_find_edge", edge_index, split_index)
-            for split_index in range(1, len(coordinates) - 1)
-        )
-        path_nodes.append(edge.detector_b)
-        for segment_index, (lower, upper) in enumerate(
-            zip(coordinates, coordinates[1:])
-        ):
-            covered = isinstance(interval, Closed) or (
-                upper <= interval.lower_tick or lower >= interval.upper_tick
-            )
-            add_segment(
-                path_nodes[segment_index],
-                path_nodes[segment_index + 1],
-                0 if covered else upper - lower,
-                edge.logical_observables[0] if segment_index == 0 else 0,
-            )
-
-    best = math.inf
-    sequence = itertools.count()
-    for reference_node in adjacency:
-        source_state = (reference_node, 0)
-        target_state = (reference_node, 1)
-        distances = {source_state: 0}
-        pending = [(0, next(sequence), source_state)]
-        while pending:
-            distance, _sequence_id, state = heapq.heappop(pending)
-            if distance != distances.get(state, math.inf):
-                continue
-            if distance >= best:
-                break
-            if state == target_state:
-                best = distance
-                break
-            graph_node, logical_parity = state
-            for neighbor, weight, edge_parity in adjacency.get(graph_node, ()):
-                neighbor_state = (
-                    neighbor,
-                    logical_parity ^ edge_parity,
-                )
-                candidate = distance + weight
-                if candidate < distances.get(neighbor_state, math.inf):
-                    distances[neighbor_state] = candidate
-                    heapq.heappush(
-                        pending,
-                        (candidate, next(sequence), neighbor_state),
-                    )
-    return best
-
-
-_BINARY64_LN_TEN = float.fromhex("0x1.26bb1bbb55516p+1")
-
-
-def _gap_half_ticks_to_decibels(
-    gap_half_ticks: int | float,
-    weight_step: float,
-) -> float:
-    if gap_half_ticks == math.inf:
-        return math.inf
-    exact_gap_db = (
-        Fraction(gap_half_ticks, 2)
-        * Fraction.from_float(weight_step)
-        * 10
-        / Fraction.from_float(_BINARY64_LN_TEN)
-    )
-    try:
-        return float(exact_gap_db)
-    except OverflowError:
-        return math.inf
-
-
-def _cluster_gap(
-    hard_evidence: UnionFindHardEvidence,
-    weight_step: float,
-) -> float:
-    gap_half_ticks = _quotient_cluster_gap(
-        hard_evidence.graph,
-        hard_evidence.edge_intervals,
-    )
-    return _gap_half_ticks_to_decibels(gap_half_ticks, weight_step)
-
-
-class UnionFindClusterGapDecoder(DecoderBase):
-    """Attach one-logical cluster-gap confidence to a hard Union-Find result.
-
-    A row of the Decoder port over its base: latency, occupancy,
-    pipeline depth and cancel are the base decoder's, as in the other
-    confidence wrappers (confidence/decoder.py); on the measured path the
+    Latency, occupancy, pipeline depth and cancel are the base decoder's,
+    as in the confidence wrappers (decoder.py); on the measured path the
     unit's time is the base's growth-and-peeling call plus the timed gap
-    walk, never the base's untimed setup.
-
-    SCOPE:
-    - Confidence requires exactly one nonzero logical-observable row.
-    - The public gap is in decibels; hard growth uses natural-log-odds lengths.
-    - The exact likelihood-ratio interpretation applies only to the uniform
-      repetition-code setting.
-    - Surface-code cluster gap is confidence, not a calibrated failure
-      probability or a general Union-Find likelihood bound.
-    - Confidence consumes immutable intervals from the same hard decode.
+    walk, never the base's untimed setup. The gap reads the immutable
+    intervals of the same hard decode.
     """
 
-    fault_model_requirement = GRAPHLIKE_FAULT_MODEL_REQUIRED
+    fault_model_requirement = fault_models.GRAPHLIKE_FAULT_MODEL_REQUIRED
 
-    def __init__(self, base: UnionFindDecoder) -> None:
-        if not isinstance(base, UnionFindDecoder):
+    def __init__(self, base: union_find_decoder.UnionFindDecoder) -> None:
+        if not isinstance(base, union_find_decoder.UnionFindDecoder):
             raise TypeError(
                 "UnionFindClusterGapDecoder requires a UnionFindDecoder base"
             )
         self.base = base
 
-    def run_seed_children(self):
-        """Keep confidence transparent to the hard decoder's seed paths."""
+    def run_seed_children(self) -> tuple:
+        """The hard decoder's seed paths; the gap draws nothing."""
         return self.base.run_seed_children()
 
-    def latency(self, job: DecodeJob) -> int:
-        """Confidence adds no simulated service latency."""
+    def latency(self, job: message.DecodeJob) -> int:
+        """The base decoder's timing; the gap adds no latency."""
         return self.base.latency(job)
 
-    def occupancy(self, job: DecodeJob) -> int | None:
+    def occupancy(self, job: message.DecodeJob) -> Optional[int]:
         """The base decoder's occupancy; None when it is measured."""
         return self.base.occupancy(job)
 
-    def pipeline_depth(self, job: DecodeJob) -> int:
+    def pipeline_depth(self, job: message.DecodeJob) -> int:
         """The base decoder's pipeline depth."""
         return self.base.pipeline_depth(job)
 
-    def cancel(self, job: DecodeJob) -> None:
+    def cancel(self, job: message.DecodeJob) -> None:
         """Stop the base decoder's job."""
         self.base.cancel(job)
 
-    def decode(self, job: DecodeJob) -> DecodeResult:
-        """Decode once, compute cluster gap, then publish confidence."""
-        result, _elapsed_ns = self.decode_timed(job)
+    def decode(self, job: message.DecodeJob) -> message.DecodeResult:
+        """Decode once, compute the cluster gap, attach the confidence."""
+        result, _elapsed_nanoseconds = self.decode_timed(job)
         return result
 
-    def decode_timed(self, job: DecodeJob) -> tuple:
-        """(result with confidence, nanoseconds of the decode and the gap)."""
+    def decode_timed(self, job: message.DecodeJob) -> tuple:
+        """(the result with its confidence, nanoseconds of decode and gap)."""
         model = job.dem
         if model is None:
             return self.base.decode_timed(job)
-
-        import numpy as np
-
-        faults = model.require_faults(FaultRepresentation.GRAPHLIKE)
-        observables = faults.observables.toarray()
-        if observables.shape[0] != 1:
-            raise ValueError(
-                "Union-Find cluster confidence requires exactly one logical "
-                f"observable, got {observables.shape[0]}"
-            )
-        if not np.any(observables[0]):
-            raise ValueError(
-                "Union-Find cluster confidence requires one nonzero logical "
-                "observable row"
-            )
-
+        _require_one_logical_row(model)
         decoded_window = self.base.decode_with_growth_evidence(job)
-        started_ns = time.perf_counter_ns()
+        started = time.perf_counter_ns()
         gap = _cluster_gap(decoded_window.hard_evidence, self.base.weight_step)
-        finished_ns = time.perf_counter_ns()
+        finished = time.perf_counter_ns()
         source = union_find_cluster_gap_source(self.base.weight_step)
-        decoded_window.hard_result.soft_output = SoftOutput(
+        decoded_window.hard_result.soft_output = message.SoftOutput(
             gap=gap, source=source
         )
-        gap_ns = finished_ns - started_ns
-        return decoded_window.hard_result, decoded_window.backend_ns + gap_ns
+        gap_nanoseconds = finished - started
+        return (
+            decoded_window.hard_result,
+            decoded_window.backend_ns + gap_nanoseconds,
+        )
+
+
+def _require_one_logical_row(model) -> None:
+    """The gap is defined for exactly one nonzero logical-observable row."""
+    faults = model.require_faults(fault_models.FaultRepresentation.GRAPHLIKE)
+    observables = faults.observables.toarray()
+    row_count = observables.shape[0]
+    if row_count != 1:
+        raise ValueError(
+            "Union-Find cluster confidence requires exactly one logical "
+            f"observable, got {row_count}"
+        )
+    if not numpy.any(observables[0]):
+        raise ValueError(
+            "Union-Find cluster confidence requires one nonzero logical "
+            "observable row"
+        )
+
+
+def _cluster_gap(
+    hard_evidence: window_decoder.UnionFindHardEvidence, weight_step: float
+) -> float:
+    gap_half_ticks = _quotient_cluster_gap(
+        hard_evidence.graph, hard_evidence.edge_intervals
+    )
+    return _gap_half_ticks_to_decibels(gap_half_ticks, weight_step)
+
+
+def _quotient_cluster_gap(
+    graph: window_decoder.UnionFindGraph, edge_intervals: tuple
+) -> Union[int, float]:
+    """The shortest odd-logical quotient walk, in integer half ticks.
+
+    Every edge becomes a path of segments split at its interval's
+    ticks; a segment the growth covered costs nothing, an uncovered one
+    its length, and the first segment carries the edge's logical
+    parity. The walk is Dijkstra over (node, parity) from each node
+    back to itself with parity one (Meister et al. Algorithm 2).
+    """
+    adjacency = {}
+    edges = zip(graph.edges, edge_intervals)
+    for edge_index, (edge, interval) in enumerate(edges):
+        _add_edge_segments(adjacency, edge_index, edge, interval)
+    shortest = math.inf
+    sequence = itertools.count()
+    for reference_node in adjacency:
+        shortest = _shortest_odd_walk_from(
+            adjacency, reference_node, shortest, sequence
+        )
+    return shortest
+
+
+def _add_edge_segments(
+    adjacency: dict, edge_index: int, edge, interval
+) -> None:
+    coordinates = _split_coordinates(edge, interval)
+    path_nodes = [edge.detector_a]
+    split_count = len(coordinates) - 1
+    for split_index in range(1, split_count):
+        path_nodes.append(("union_find_edge", edge_index, split_index))
+    path_nodes.append(edge.detector_b)
+    segments = zip(coordinates, coordinates[1:])
+    for segment_index, (lower, upper) in enumerate(segments):
+        weight = _segment_weight(interval, lower, upper)
+        parity = 0
+        if segment_index == 0:
+            parity = edge.logical_observables[0]
+        next_index = segment_index + 1
+        left = path_nodes[segment_index]
+        right = path_nodes[next_index]
+        _add_segment(adjacency, left, right, weight, parity)
+
+
+def _split_coordinates(edge, interval) -> tuple:
+    """The edge's tick coordinates where its segments meet, ascending."""
+    if isinstance(interval, window_decoder.Closed):
+        return (0, edge.length_half_ticks)
+    ticks = {
+        0,
+        interval.lower_tick,
+        interval.upper_tick,
+        edge.length_half_ticks,
+    }
+    ordered = sorted(ticks)
+    return tuple(ordered)
+
+
+def _segment_weight(interval, lower: int, upper: int) -> int:
+    """The segment's cost: zero where the growth covered it."""
+    if isinstance(interval, window_decoder.Closed):
+        return 0
+    if upper <= interval.lower_tick:
+        return 0
+    if lower >= interval.upper_tick:
+        return 0
+    return upper - lower
+
+
+def _add_segment(
+    adjacency: dict, left, right, weight: int, parity: int
+) -> None:
+    left_neighbors = adjacency.setdefault(left, [])
+    left_neighbors.append((right, weight, parity))
+    right_neighbors = adjacency.setdefault(right, [])
+    right_neighbors.append((left, weight, parity))
+
+
+def _shortest_odd_walk_from(
+    adjacency: dict, reference_node, shortest, sequence
+) -> Union[int, float]:
+    """The shortest closed odd walk from the node, if under `shortest`."""
+    source_state = (reference_node, 0)
+    target_state = (reference_node, 1)
+    distances = {source_state: 0}
+    first_order = next(sequence)
+    frontier = [(0, first_order, source_state)]
+    while frontier:
+        distance, _order, state = heapq.heappop(frontier)
+        if distance != distances.get(state, math.inf):
+            continue
+        if distance >= shortest:
+            return shortest
+        if state == target_state:
+            return distance
+        _relax_neighbors(
+            adjacency, state, distance, distances, frontier, sequence
+        )
+    return shortest
+
+
+def _relax_neighbors(
+    adjacency: dict,
+    state: tuple,
+    distance: int,
+    distances: dict,
+    frontier: list,
+    sequence,
+) -> None:
+    graph_node, logical_parity = state
+    for neighbor, weight, edge_parity in adjacency.get(graph_node, ()):
+        parity = logical_parity ^ edge_parity
+        neighbor_state = (neighbor, parity)
+        candidate = distance + weight
+        known = distances.get(neighbor_state, math.inf)
+        if candidate < known:
+            distances[neighbor_state] = candidate
+            order = next(sequence)
+            heapq.heappush(frontier, (candidate, order, neighbor_state))
+
+
+def _gap_half_ticks_to_decibels(
+    gap_half_ticks: Union[int, float], weight_step: float
+) -> float:
+    """Half ticks of the growth as decibels, exactly, then rounded once."""
+    if gap_half_ticks == math.inf:
+        return math.inf
+    half_ticks = Fraction(gap_half_ticks, 2)
+    step = Fraction.from_float(weight_step)
+    ln_ten = Fraction.from_float(_BINARY64_LN_TEN)
+    nats = half_ticks * step
+    scaled = nats * 10
+    exact_gap_decibels = scaled / ln_ten
+    try:
+        return float(exact_gap_decibels)
+    except OverflowError:
+        return math.inf
